@@ -165,9 +165,17 @@
     @apply shadow-lg shadow-orange-500/20;
     @apply disabled:opacity-50 disabled:pointer-events-none;
   }
+
+  .badge-pastel-success {
+    background-color: hsl(142.1 76.2% 90%);
+    color: hsl(142.1 76.2% 25%);
+    border-color: hsl(142.1 76.2% 85%);
+  }
+  
+  .badge-pastel-success:hover {
+    background-color: hsl(142.1 76.2% 85%);
+  }
 }
-
-
 
 @layer base {
   * {

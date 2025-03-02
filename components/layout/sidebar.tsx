@@ -11,6 +11,7 @@ import {
   Users,
   BarChart,
   Settings,
+  ShoppingBag,
 } from 'lucide-react';
 
 const navigation = [
@@ -28,6 +29,11 @@ const navigation = [
     name: 'Inventory', 
     href: '/inventory',
     icon: Package 
+  },
+  { 
+    name: 'Purchasing', 
+    href: '/purchasing',
+    icon: ShoppingBag 
   },
   { 
     name: 'Orders', 

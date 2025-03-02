@@ -8,7 +8,7 @@ import type { SupplierWithDetails, SupplierComponent } from '@/types/suppliers';
 import { Trash2, Plus, Edit, Check, X } from 'lucide-react';
 import ReactSelect from 'react-select';
 import { cn } from '@/lib/utils';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase } from '@/lib/supabase';
 
 type OptionType = {
   value: string;

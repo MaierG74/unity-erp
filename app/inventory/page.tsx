@@ -1,14 +1,14 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/auth-provider';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { format } from 'date-fns';
 import { cn } from "@/lib/utils";
 import Image from 'next/image';
-import { Plus, ImageOff, Pencil, Trash2 } from 'lucide-react';
+import { Plus, ImageOff, Pencil, Trash2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ComponentDialog } from '@/components/inventory/ComponentDialog';
 import {
@@ -24,6 +24,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { DataTable } from '../../components/ui/data-table';
 import { InventoryDetails } from "@/components/inventory/Details"
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { QueryError } from '@/components/ui/query-error';
+import { useToast } from "@/components/ui/toast";
 
 type Component = {
   component_id: number;
@@ -39,12 +42,12 @@ type Component = {
     unit_code: string;
     unit_name: string;
   } | null;
-  inventory: {
+  inventory: Array<{
     inventory_id: number;
     quantity_on_hand: number;
     location: string | null;
     reorder_level: number | null;
-  } | null;
+  }> | null;
   supplierComponents: {
     supplier_component_id: number;
     supplier_id: number;
@@ -76,9 +79,6 @@ const columns = [
 ]
 
 export default function InventoryPage() {
-  const [components, setComponents] = useState<Component[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [selectedComponent, setSelectedComponent] = useState<Component | null>(null);
   const [imageError, setImageError] = useState<{[key: string]: boolean}>({});
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -88,6 +88,97 @@ export default function InventoryPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  // Replace useEffect with useQuery for data fetching
+  const { data: components = [], isLoading, error: queryError } = useQuery({
+    queryKey: ['inventory', 'components'],
+    queryFn: async () => {
+      try {
+        const { data, error } = await supabase
+          .from('components')
+          .select(`
+            *,
+            category:component_categories (
+              cat_id,
+              categoryname
+            ),
+            unit:unitsofmeasure (
+              unit_id,
+              unit_code,
+              unit_name
+            ),
+            inventory:inventory (
+              inventory_id,
+              quantity_on_hand,
+              location,
+              reorder_level
+            ),
+            transactions:inventory_transactions (
+              transaction_id,
+              quantity,
+              transaction_type,
+              transaction_date
+            ),
+            supplierComponents:suppliercomponents (
+              supplier_component_id,
+              supplier_id,
+              supplier_code,
+              price,
+              supplier:suppliers (
+                name
+              )
+            )
+          `);
+
+        if (error) {
+          console.error('Supabase error:', error);
+          throw new Error(`Failed to fetch components: ${error.message}`);
+        }
+        
+        // Process inventory data to ensure numeric values
+        const processedData = data?.map(component => {
+          if (component.inventory && component.inventory.length > 0) {
+            // Ensure inventory array items have numeric values
+            return {
+              ...component,
+              inventory: component.inventory.map((inv: any) => ({
+                ...inv,
+                quantity_on_hand: inv.quantity_on_hand !== null && 
+                  inv.quantity_on_hand !== undefined ? 
+                  parseInt(inv.quantity_on_hand) : 0,
+                reorder_level: inv.reorder_level !== null && 
+                  inv.reorder_level !== undefined ? 
+                  parseInt(inv.reorder_level) : 0
+              }))
+            };
+          }
+          return component;
+        });
+        
+        return processedData || [];
+      } catch (e) {
+        console.error('Error fetching components:', e);
+        throw e;
+      }
+    },
+    retry: 2, // Retry failed queries up to 2 times
+    retryDelay: attemptIndex => Math.min(1000 * 2 ** attemptIndex, 30000), // Exponential backoff
+    staleTime: 10 * 1000, // Consider data stale after 10 seconds
+    refetchInterval: 30 * 1000, // Refetch data every 30 seconds
+    refetchOnWindowFocus: true, // Refetch when window regains focus
+  });
+
+  // Add back the effect to update selected component when components change
+  useEffect(() => {
+    if (selectedComponent && components.length > 0) {
+      const updatedComponent = components.find(c => c.component_id === selectedComponent.component_id);
+      if (updatedComponent) {
+        setSelectedComponent(updatedComponent);
+      }
+    }
+  }, [components, selectedComponent?.component_id]);
 
   // Get unique categories
   const categories = useMemo(() => {
@@ -125,79 +216,6 @@ export default function InventoryPage() {
     setCurrentPage(1);
   }, [filterText, selectedCategory, pageSize]);
 
-  useEffect(() => {
-    async function fetchComponents() {
-      try {
-        setLoading(true);
-        setError(null);
-
-        const { data, error } = await supabase
-          .from('components')
-          .select(`
-            *,
-            category:component_categories (
-              cat_id,
-              categoryname
-            ),
-            unit:unitsofmeasure (
-              unit_id,
-              unit_code,
-              unit_name
-            ),
-            inventory:inventory (
-              inventory_id,
-              quantity_on_hand,
-              location,
-              reorder_level
-            ),
-            transactions:inventory_transactions (
-              transaction_id,
-              quantity,
-              transaction_type,
-              transaction_date
-            ),
-            supplierComponents:suppliercomponents (
-              supplier_component_id,
-              supplier_id,
-              supplier_code,
-              price,
-              supplier:suppliers (
-                name
-              )
-            )
-          `);
-
-        if (error) throw error;
-        setComponents(data || []);
-        
-        // Update selected component if it exists in the new data
-        if (selectedComponent) {
-          const updatedComponent = data?.find(c => c.component_id === selectedComponent.component_id);
-          if (updatedComponent) {
-            setSelectedComponent(updatedComponent);
-          }
-        }
-      } catch (e) {
-        console.error('Error fetching components:', e);
-        setError(e instanceof Error ? e.message : 'An error occurred while fetching components');
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchComponents();
-  }, []);
-
-  // Add a separate effect to update the selected component when components change
-  useEffect(() => {
-    if (selectedComponent && components.length > 0) {
-      const updatedComponent = components.find(c => c.component_id === selectedComponent.component_id);
-      if (updatedComponent) {
-        setSelectedComponent(updatedComponent);
-      }
-    }
-  }, [components, selectedComponent?.component_id]);
-
   const getStockStatusColor = (quantity: number, reorderLevel: number | null) => {
     if (quantity <= 0) return "bg-destructive/10 border-destructive text-destructive";
     if (reorderLevel && quantity <= reorderLevel) return "bg-warning/10 border-warning text-warning";
@@ -208,9 +226,6 @@ export default function InventoryPage() {
     if (!selectedComponent) return;
 
     try {
-      setLoading(true);
-      setError(null);
-      
       // Delete in order of dependencies
       // 1. Delete inventory transactions
       const { error: transactionsError } = await supabase
@@ -244,19 +259,28 @@ export default function InventoryPage() {
 
       if (componentError) throw componentError;
 
-      // Update local state
-      setComponents(prev => prev.filter(c => c.component_id !== selectedComponent.component_id));
+      // Update by refreshing data instead of manipulating local state
+      refreshData();
       setSelectedComponent(null);
       setDeleteDialogOpen(false);
     } catch (e) {
       console.error('Error deleting component:', e);
-      setError(e instanceof Error ? e.message : 'An error occurred while deleting the component');
-    } finally {
-      setLoading(false);
+      alert('Error deleting component. Please try again.');
     }
   };
 
-  if (loading) {
+  // Function to manually refresh data
+  const refreshData = () => {
+    queryClient.invalidateQueries({ queryKey: ['inventory'] });
+    queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
+    toast({
+      title: "Data refreshed",
+      description: "The inventory data has been refreshed from the database.",
+      duration: 3000,
+    });
+  };
+
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-lg">Loading components...</div>
@@ -264,13 +288,13 @@ export default function InventoryPage() {
     );
   }
 
-  if (error) {
+  if (queryError) {
     return (
       <div className="p-4">
-        <div className="bg-destructive/10 border border-destructive text-destructive px-4 py-3 rounded relative" role="alert">
-          <strong className="font-bold">Error: </strong>
-          <span className="block sm:inline">{error}</span>
-        </div>
+        <QueryError 
+          error={queryError} 
+          queryKey={['inventory', 'components']} 
+        />
       </div>
     );
   }
@@ -279,15 +303,21 @@ export default function InventoryPage() {
     <div className="container mx-auto py-6">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Components</h1>
-        <Button
-          variant="outline"
-          onClick={() => {
-            setSelectedComponent(null)
-            setDialogOpen(true)
-          }}
-        >
-          Add Component
-        </Button>
+        <div className="flex space-x-2">
+          <Button onClick={refreshData} size="sm" variant="outline">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setSelectedComponent(null)
+              setDialogOpen(true)
+            }}
+          >
+            Add Component
+          </Button>
+        </div>
       </div>
 
       <div className="flex flex-row gap-4">
@@ -305,11 +335,17 @@ export default function InventoryPage() {
         <div className="w-[400px] shrink-0">
           <div className="sticky top-4">
             <InventoryDetails 
-              selectedItem={selectedComponent ? {
-                inventory_id: selectedComponent.inventory?.inventory_id || null,
-                quantity_on_hand: selectedComponent.inventory?.quantity_on_hand || 0,
-                location: selectedComponent.inventory?.location || "",
-                reorder_level: selectedComponent.inventory?.reorder_level || 0,
+              selectedItem={selectedComponent && selectedComponent.inventory && selectedComponent.inventory.length > 0 ? {
+                inventory_id: selectedComponent.inventory[0].inventory_id || null,
+                quantity_on_hand: selectedComponent.inventory[0].quantity_on_hand !== null && 
+                  selectedComponent.inventory[0].quantity_on_hand !== undefined 
+                  ? Number(selectedComponent.inventory[0].quantity_on_hand) 
+                  : 0,
+                location: selectedComponent.inventory[0].location || "",
+                reorder_level: selectedComponent.inventory[0].reorder_level !== null && 
+                  selectedComponent.inventory[0].reorder_level !== undefined 
+                  ? Number(selectedComponent.inventory[0].reorder_level) 
+                  : 0,
                 component: {
                   component_id: selectedComponent.component_id,
                   internal_code: selectedComponent.internal_code,
@@ -366,11 +402,17 @@ export default function InventoryPage() {
       <ComponentDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        selectedItem={selectedComponent ? {
-          inventory_id: selectedComponent.inventory?.inventory_id || null,
-          quantity_on_hand: selectedComponent.inventory?.quantity_on_hand || 0,
-          location: selectedComponent.inventory?.location || "",
-          reorder_level: selectedComponent.inventory?.reorder_level || 0,
+        selectedItem={selectedComponent && selectedComponent.inventory && selectedComponent.inventory.length > 0 ? {
+          inventory_id: selectedComponent.inventory[0].inventory_id || null,
+          quantity_on_hand: selectedComponent.inventory[0].quantity_on_hand !== null && 
+            selectedComponent.inventory[0].quantity_on_hand !== undefined 
+            ? Number(selectedComponent.inventory[0].quantity_on_hand) 
+            : 0,
+          location: selectedComponent.inventory[0].location || "",
+          reorder_level: selectedComponent.inventory[0].reorder_level !== null && 
+            selectedComponent.inventory[0].reorder_level !== undefined
+            ? Number(selectedComponent.inventory[0].reorder_level)
+            : 0,
           component: {
             component_id: selectedComponent.component_id,
             internal_code: selectedComponent.internal_code,

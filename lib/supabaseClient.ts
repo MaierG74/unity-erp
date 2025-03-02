@@ -1,19 +1,6 @@
-import { createClient } from '@supabase/supabase-js'
+// Import from the main Supabase client file to maintain consistency
+import { supabase } from './supabase'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Missing Supabase environment variables');
-  throw new Error('Missing Supabase environment variables');
-}
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-  },
-})
-
-// Export as default for compatibility with existing imports
+// Re-export for backwards compatibility
+export { supabase }
 export default supabase 

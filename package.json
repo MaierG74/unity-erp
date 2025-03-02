@@ -8,7 +8,12 @@
     "start": "next start",
     "lint": "next lint",
     "schema": "tsx scripts/get-schema.ts",
-    "seed": "tsx scripts/seed-test-data.ts"
+    "seed": "tsx scripts/seed-test-data.ts",
+    "init-purchasing": "tsx scripts/init-purchasing-data.ts",
+    "check-components": "tsx scripts/check-supplier-components.ts",
+    "create-supplier-components": "tsx scripts/create-supplier-components.ts",
+    "check-tables": "tsx scripts/check-tables.ts",
+    "create-db-function": "tsx scripts/create-db-function.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^4.1.0",
@@ -39,6 +44,7 @@
     "next-themes": "^0.4.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-error-boundary": "^5.0.0",
     "react-hook-form": "^7.54.2",
     "react-select": "^5.10.0",
     "tailwind-merge": "^3.0.2",

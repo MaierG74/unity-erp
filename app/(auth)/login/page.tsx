@@ -3,7 +3,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
-import { supabase } from '@/lib/supabaseClient'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import {
@@ -17,9 +17,9 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Loader2 } from 'lucide-react'
-import { useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import Link from 'next/link'
+import { supabase } from '@/lib/supabase'
 
 const loginSchema = z.object({
   email: z.string().email('Invalid email address'),

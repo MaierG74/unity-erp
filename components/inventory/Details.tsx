@@ -10,6 +10,9 @@ type InventoryDetailsProps = {
 }
 
 export function InventoryDetails({ selectedItem }: InventoryDetailsProps) {
+  // Simplified logging - keep only basic info
+  console.log('Rendering InventoryDetails for:', selectedItem?.component.internal_code);
+  
   if (!selectedItem) {
     return (
       <Card>
@@ -23,12 +26,25 @@ export function InventoryDetails({ selectedItem }: InventoryDetailsProps) {
     )
   }
 
-  const stockStatus = selectedItem.quantity_on_hand === 0 
+  // Ensure quantity_on_hand is a number and not NaN
+  const qtyOnHand = selectedItem.quantity_on_hand !== null && 
+                    selectedItem.quantity_on_hand !== undefined && 
+                    !isNaN(selectedItem.quantity_on_hand) 
+                    ? selectedItem.quantity_on_hand 
+                    : 0;
+                    
+  const reorderLevel = selectedItem.reorder_level !== null && 
+                       selectedItem.reorder_level !== undefined && 
+                       !isNaN(selectedItem.reorder_level)
+                       ? selectedItem.reorder_level 
+                       : 0;
+
+  const stockStatus = qtyOnHand === 0 
     ? "Out of Stock"
-    : selectedItem.quantity_on_hand <= selectedItem.reorder_level
+    : qtyOnHand <= reorderLevel
     ? "Low Stock"
     : "In Stock"
-
+    
   const stockStatusColor = {
     "Out of Stock": "destructive",
     "Low Stock": "warning",
@@ -53,7 +69,10 @@ export function InventoryDetails({ selectedItem }: InventoryDetailsProps) {
           </Avatar>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant={stockStatusColor}>{stockStatus}</Badge>
+          <Badge variant={stockStatus === "In Stock" ? undefined : stockStatusColor} 
+                 className={stockStatus === "In Stock" ? "badge-pastel-success" : ""}>
+            {stockStatus}
+          </Badge>
           <Badge variant="outline">{selectedItem.component.category.categoryname}</Badge>
         </div>
       </CardHeader>
@@ -61,11 +80,11 @@ export function InventoryDetails({ selectedItem }: InventoryDetailsProps) {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <p className="text-sm font-medium">Quantity on Hand</p>
-            <p className="text-2xl font-bold">{selectedItem.quantity_on_hand}</p>
+            <p className="text-2xl font-bold" data-testid="quantity-on-hand">{qtyOnHand}</p>
           </div>
           <div>
             <p className="text-sm font-medium">Reorder Level</p>
-            <p className="text-2xl font-bold">{selectedItem.reorder_level}</p>
+            <p className="text-2xl font-bold">{reorderLevel}</p>
           </div>
         </div>
 
