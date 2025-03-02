@@ -1,0 +1,134 @@
+Table: suppliers
+- supplier_id (PK)
+- name
+- contact_info
+
+Table: suppliercomponents
+- supplier_component_id (PK)
+- component_id (FK -> components.component_id)
+- supplier_id (FK -> suppliers.supplier_id)
+- supplier_code (NOT NULL)
+- price (numeric(10,2))
+- lead_time (integer)
+- min_order_quantity (integer)
+- description (text)
+
+Table: components
+- component_id (PK)
+- internal_code (UNIQUE)
+- description (text)
+- unit_id (FK -> unitsofmeasure.unit_id)
+- category_id (FK -> component_categories.cat_id)
+- image_url (text)
+
+Table: component_categories
+- cat_id (PK)
+- categoryname (UNIQUE)
+
+Table: unitsofmeasure
+- unit_id (PK)
+- unit_code (UNIQUE)
+- unit_name
+
+Table: products
+- product_id (PK)
+- internal_code (UNIQUE)
+- name (text)
+- description (text)
+
+Table: billofmaterials
+- bom_id (PK)
+- product_id (FK -> products.product_id)
+- component_id (FK -> components.component_id)
+- quantity_required (integer)
+
+Table: billoflabour
+- bol_id (PK)
+- product_id (FK -> products.product_id)
+- job_id (FK -> jobs.job_id)
+- time_required (numeric(5,2))
+
+Table: jobs
+- job_id (PK)
+- name (text)
+- description (text)
+- cost_per_unit_time (numeric(10,2))
+- category_id (FK -> job_categories.category_id)
+
+Table: job_categories
+- category_id (PK)
+- name (UNIQUE)
+
+Table: customers
+- id (PK)
+- created_at (timestamp with time zone)
+- name (text)
+- contact (text)
+- email (UNIQUE)
+- telephone (UNIQUE)
+
+Table: orders
+- order_id (PK)
+- customer_id (FK -> customers.id)
+- order_date (timestamp without time zone)
+- total_amount (numeric)
+- status_id (FK -> order_statuses.status_id)
+- order_number (text)
+- created_at (timestamp without time zone)
+- updated_at (timestamp without time zone)
+- delivery_date (date)
+
+Table: order_statuses
+- status_id (PK)
+- status_name (UNIQUE)
+
+Table: order_details
+- order_detail_id (PK)
+- order_id (FK -> orders.order_id)
+- product_id (FK -> products.product_id)
+- quantity (integer)
+- unit_price (numeric)
+
+Table: inventory
+- inventory_id (PK)
+- component_id (FK -> components.component_id)
+- quantity_on_hand (integer)
+- location (text)
+- reorder_level (integer)
+
+Table: inventory_transactions
+- transaction_id (PK)
+- component_id (FK -> components.component_id)
+- quantity (integer)
+- transaction_type (character varying(10))
+- transaction_date (timestamp without time zone)
+- order_id (FK -> orders.order_id)
+
+Table: supplier_order_statuses
+- status_id (PK)
+- status_name (UNIQUE)
+
+Table: supplier_orders
+- order_id (PK)
+- supplier_component_id (FK -> suppliercomponents.supplier_component_id)
+- order_quantity (integer)
+- order_date (timestamp without time zone)
+- status_id (FK -> supplier_order_statuses.status_id)
+- total_received (integer)
+
+Table: supplier_pricelists
+- pricelist_id (PK)
+- supplier_id (FK -> suppliers.supplier_id)
+- file_name (text)
+- display_name (text)
+- file_url (text)
+- file_type (text)
+- uploaded_at (timestamp with time zone)
+
+Table: product_categories
+- product_cat_id (PK)
+- categoryname (UNIQUE)
+
+Table: product_category_assignments
+- product_id (PK, FK -> products.product_id)
+- product_cat_id (PK, FK -> product_categories.product_cat_id)
