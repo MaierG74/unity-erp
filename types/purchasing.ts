@@ -24,9 +24,26 @@ export type SupplierOrder = {
   order_id: number;
   supplier_component_id: number;
   order_quantity: number;
-  order_date: string;
+  order_date: string | null;
   status_id: number;
   total_received: number;
+  purchase_order_id: number | null;
+  q_number: string | null;
+  component: {
+    internal_code: string;
+    description: string | null;
+  };
+  supplier: {
+    name: string;
+  };
+  status: {
+    status_name: string;
+  };
+  supplier_component: {
+    supplier_code: string;
+    price: number;
+    component_id: number;
+  };
 };
 
 export type SupplierOrderReceipt = {
@@ -35,6 +52,32 @@ export type SupplierOrderReceipt = {
   transaction_id: number;
   quantity_received: number;
   receipt_date: string;
+};
+
+export type PurchaseOrder = {
+  purchase_order_id: number;
+  q_number: string | null;
+  order_date: string;
+  status_id: number;
+  notes: string | null;
+  created_by: string | null;
+  approved_by: string | null;
+  created_at: string;
+  approved_at: string | null;
+  status: {
+    status_name: string;
+  };
+  supplier_orders?: SupplierOrder[];
+};
+
+export type PurchaseOrderFormData = {
+  order_date: string;
+  notes: string;
+  items: {
+    component_id: number;
+    supplier_component_id: number;
+    quantity: number;
+  }[];
 };
 
 export type InventoryTransaction = {

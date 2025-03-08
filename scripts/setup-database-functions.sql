@@ -56,6 +56,10 @@ BEGIN
     INSERT INTO supplier_order_statuses (status_name) VALUES ('In Progress');
   END IF;
   
+  IF NOT EXISTS (SELECT 1 FROM supplier_order_statuses WHERE status_name = 'Partially Delivered') THEN
+    INSERT INTO supplier_order_statuses (status_name) VALUES ('Partially Delivered');
+  END IF;
+  
   IF NOT EXISTS (SELECT 1 FROM supplier_order_statuses WHERE status_name = 'Completed') THEN
     INSERT INTO supplier_order_statuses (status_name) VALUES ('Completed');
   END IF;
@@ -64,4 +68,62 @@ BEGIN
     INSERT INTO supplier_order_statuses (status_name) VALUES ('Cancelled');
   END IF;
 END
-$$; 
+$$;
+
+-- Create purchase_orders table for Q-number tracking
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'purchase_orders') THEN
+        CREATE TABLE public.purchase_orders (
+            purchase_order_id SERIAL PRIMARY KEY,
+            q_number TEXT,
+            order_date TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            status_id INTEGER,
+            notes TEXT,
+            created_by UUID REFERENCES auth.users(id),
+            approved_by UUID REFERENCES auth.users(id),
+            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            approved_at TIMESTAMP WITHOUT TIME ZONE,
+            CONSTRAINT purchase_orders_q_number_key UNIQUE (q_number),
+            CONSTRAINT purchase_orders_status_id_fkey FOREIGN KEY (status_id) 
+                REFERENCES public.supplier_order_statuses(status_id)
+        );
+        
+        RAISE NOTICE 'Created purchase_orders table';
+    ELSE
+        RAISE NOTICE 'purchase_orders table already exists';
+    END IF;
+END$$;
+
+-- Create purchase order statuses if they don't exist
+DO $$
+BEGIN
+    -- Check and insert 'Draft' status
+    IF NOT EXISTS (SELECT 1 FROM supplier_order_statuses WHERE status_name = 'Draft') THEN
+        INSERT INTO supplier_order_statuses (status_name) VALUES ('Draft');
+        RAISE NOTICE 'Added Draft status';
+    END IF;
+    
+    -- Check and insert 'Pending Approval' status
+    IF NOT EXISTS (SELECT 1 FROM supplier_order_statuses WHERE status_name = 'Pending Approval') THEN
+        INSERT INTO supplier_order_statuses (status_name) VALUES ('Pending Approval');
+        RAISE NOTICE 'Added Pending Approval status';
+    END IF;
+END$$;
+
+-- Add purchase_order_id column to supplier_orders if it doesn't exist
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_schema = 'public' 
+                   AND table_name = 'supplier_orders' 
+                   AND column_name = 'purchase_order_id') THEN
+        
+        ALTER TABLE public.supplier_orders 
+        ADD COLUMN purchase_order_id INTEGER REFERENCES public.purchase_orders(purchase_order_id);
+        
+        RAISE NOTICE 'Added purchase_order_id column to supplier_orders';
+    ELSE
+        RAISE NOTICE 'purchase_order_id column already exists in supplier_orders';
+    END IF;
+END$$; 

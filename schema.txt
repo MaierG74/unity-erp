@@ -56,6 +56,7 @@ CREATE TABLE public.inventory (
   quantity_on_hand integer NULL,
   location text NULL,
   reorder_level integer NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT inventory_pkey PRIMARY KEY (inventory_id),
   CONSTRAINT inventory_component_id_fkey FOREIGN KEY (component_id) REFERENCES public.components(component_id)
 );
@@ -67,6 +68,7 @@ CREATE TABLE public.inventory_transactions (
   transaction_type_id integer NULL,
   transaction_date timestamp without time zone NULL DEFAULT CURRENT_TIMESTAMP,
   order_id integer NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT inventory_transactions_pkey PRIMARY KEY (transaction_id),
   CONSTRAINT inventory_transactions_component_id_fkey FOREIGN KEY (component_id) REFERENCES public.components(component_id),
   CONSTRAINT inventory_transactions_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(order_id),
@@ -125,8 +127,8 @@ CREATE TABLE public.orders (
   total_amount numeric NULL,
   status_id integer NULL,
   order_number text NULL,
-  created_at timestamp without time zone NULL DEFAULT now(),
-  updated_at timestamp without time zone NULL DEFAULT now(),
+  created_at timestamp without time zone NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamp without time zone NULL DEFAULT CURRENT_TIMESTAMP,
   delivery_date date NULL,
   CONSTRAINT orders_pkey PRIMARY KEY (order_id),
   CONSTRAINT orders_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id),
@@ -195,12 +197,13 @@ CREATE TABLE public.supplier_order_statuses (
 );
 
 CREATE TABLE public.supplier_orders (
-  order_id serial NOT NULL,
+  order_id bigint primary key generated always as identity,
   supplier_component_id integer NULL,
   order_quantity integer NULL,
-  order_date timestamp without time zone NULL DEFAULT CURRENT_TIMESTAMP,
+  order_date timestamp with time zone NULL DEFAULT CURRENT_TIMESTAMP,
   status_id integer NULL,
   total_received integer NULL DEFAULT 0,
+  supplier_id integer REFERENCES public.suppliers(supplier_id),
   CONSTRAINT supplier_orders_pkey PRIMARY KEY (order_id),
   CONSTRAINT supplier_orders_status_id_fkey FOREIGN KEY (status_id) REFERENCES public.supplier_order_statuses(status_id),
   CONSTRAINT supplier_orders_supplier_component_id_fkey FOREIGN KEY (supplier_component_id) REFERENCES public.suppliercomponents(supplier_component_id)
@@ -243,6 +246,22 @@ CREATE TABLE public.suppliers (
 CREATE TABLE public.transaction_types (
   transaction_type_id bigint primary key generated always as identity,
   type_name character varying(20) NOT NULL UNIQUE
+);
+
+CREATE TABLE public.purchase_orders (
+  purchase_order_id bigint primary key generated always as identity,
+  q_number TEXT,
+  order_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  status_id INTEGER,
+  notes TEXT,
+  created_by UUID REFERENCES auth.users(id),
+  approved_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  approved_at TIMESTAMP WITH TIME ZONE,
+  supplier_id integer REFERENCES public.suppliers(supplier_id),
+  CONSTRAINT purchase_orders_q_number_key UNIQUE (q_number),
+  CONSTRAINT purchase_orders_status_id_fkey FOREIGN KEY (status_id) 
+      REFERENCES public.supplier_order_statuses(status_id)
 );
 
 CREATE TABLE public.unitsofmeasure (

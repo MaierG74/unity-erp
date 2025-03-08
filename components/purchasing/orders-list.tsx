@@ -58,9 +58,12 @@ function StatusBadge({ status }: { status: string }) {
     case 'in progress':
       variant = 'default';
       break;
+    case 'partially delivered':
+      // Use a custom style for partially delivered
+      return <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-200">{status}</Badge>;
     case 'completed':
-      variant = 'outline';
-      break;
+      // Use a custom style for completed
+      return <Badge className="bg-green-100 text-green-800 hover:bg-green-200">{status}</Badge>;
     case 'cancelled':
       variant = 'destructive';
       break;
@@ -84,6 +87,7 @@ export function PurchasingOrdersList() {
     { value: 'all', label: 'All Statuses' },
     { value: 'Open', label: 'Open' },
     { value: 'In Progress', label: 'In Progress' },
+    { value: 'Partially Delivered', label: 'Partially Delivered' },
     { value: 'Completed', label: 'Completed' },
     { value: 'Cancelled', label: 'Cancelled' },
   ];
