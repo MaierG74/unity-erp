@@ -18,39 +18,63 @@ type OrderDetailPageProps = {
 };
 
 // Fetch a single order with all related data
-async function fetchOrderDetails(orderId: number): Promise<Order> {
-  const { data, error } = await supabase
-    .from('orders')
-    .select(`
-      *,
-      status:order_statuses(status_id, status_name),
-      customer:customers(*)
-    `)
-    .eq('order_id', orderId)
-    .single();
+async function fetchOrderDetails(orderId: number): Promise<Order | null> {
+  try {
+    const { data, error } = await supabase
+      .from('orders')
+      .select(`
+        *,
+        status:order_statuses(status_id, status_name),
+        customer:customers(*)
+      `)
+      .eq('order_id', orderId)
+      .single();
 
-  if (error) {
-    console.error('Error fetching order details:', error);
-    throw new Error('Failed to fetch order details');
+    if (error) {
+      console.error('Error fetching order details:', error);
+      throw new Error('Failed to fetch order details');
+    }
+
+    if (!data) return null;
+
+    // Transform the data to ensure proper structure
+    return {
+      ...data,
+      // Ensure status is properly structured
+      status: data.status && data.status.length > 0 
+        ? { 
+            status_id: data.status[0]?.status_id || 0,
+            status_name: data.status[0]?.status_name || 'Unknown'
+          }
+        : { status_id: 0, status_name: 'Unknown' },
+      // Ensure total_amount is a number
+      total_amount: data.total_amount ? Number(data.total_amount) : null
+    };
+  } catch (error) {
+    console.error('Error in fetchOrderDetails:', error);
+    return null;
   }
-
-  return data as Order;
 }
 
 // Fetch order attachments
 async function fetchOrderAttachments(orderId: number): Promise<OrderAttachment[]> {
-  const { data, error } = await supabase
-    .from('order_attachments')
-    .select('*')
-    .eq('order_id', orderId)
-    .order('uploaded_at', { ascending: false });
+  try {
+    const { data, error } = await supabase
+      .from('order_attachments')
+      .select('*')
+      .eq('order_id', orderId)
+      .order('uploaded_at', { ascending: false });
 
-  if (error) {
-    console.error('Error fetching order attachments:', error);
-    throw new Error('Failed to fetch order attachments');
+    if (error) {
+      console.error('Error fetching order attachments:', error);
+      throw new Error('Failed to fetch order attachments');
+    }
+
+    return data || [];
+  } catch (error) {
+    console.error('Error in fetchOrderAttachments:', error);
+    return [];
   }
-
-  return data as OrderAttachment[];
 }
 
 // Status Badge component

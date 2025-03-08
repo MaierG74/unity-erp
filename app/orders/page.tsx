@@ -16,48 +16,78 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { PlusCircle } from 'lucide-react';
 
 // Fetch orders with status and customer information
 async function fetchOrders(statusFilter?: string): Promise<Order[]> {
-  let query = supabase
-    .from('orders')
-    .select(`
-      *,
-      status:order_statuses(status_id, status_name),
-      customer:customers(*)
-    `)
-    .order('created_at', { ascending: false });
+  try {
+    let query = supabase
+      .from('orders')
+      .select(`
+        *,
+        status:order_statuses(status_id, status_name),
+        customer:customers(*)
+      `)
+      .order('created_at', { ascending: false });
 
-  // Apply status filter if provided
-  if (statusFilter && statusFilter !== 'all') {
-    query = query.eq('status.status_name', statusFilter);
+    // Apply status filter if provided
+    if (statusFilter && statusFilter !== 'all') {
+      // Use a join condition instead of direct equality on nested object
+      const { data: statusData } = await supabase
+        .from('order_statuses')
+        .select('status_id')
+        .eq('status_name', statusFilter)
+        .single();
+      
+      if (statusData?.status_id) {
+        query = query.eq('status_id', statusData.status_id);
+      }
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error fetching orders:', error);
+      throw new Error('Failed to fetch orders');
+    }
+
+    // Transform the data to ensure proper structure
+    return (data || []).map(order => ({
+      ...order,
+      // Ensure status is properly structured
+      status: order.status && order.status.length > 0 
+        ? { 
+            status_id: order.status[0]?.status_id || 0,
+            status_name: order.status[0]?.status_name || 'Unknown'
+          }
+        : { status_id: 0, status_name: 'Unknown' },
+      // Ensure total_amount is a number
+      total_amount: order.total_amount ? Number(order.total_amount) : null
+    }));
+  } catch (error) {
+    console.error('Error in fetchOrders:', error);
+    return [];
   }
-
-  const { data, error } = await query;
-
-  if (error) {
-    console.error('Error fetching orders:', error);
-    throw new Error('Failed to fetch orders');
-  }
-
-  return data as Order[];
 }
 
 // Fetch all order statuses
 async function fetchOrderStatuses(): Promise<OrderStatus[]> {
-  const { data, error } = await supabase
-    .from('order_statuses')
-    .select('*');
+  try {
+    const { data, error } = await supabase
+      .from('order_statuses')
+      .select('*');
 
-  if (error) {
-    console.error('Error fetching order statuses:', error);
-    throw new Error('Failed to fetch order statuses');
+    if (error) {
+      console.error('Error fetching order statuses:', error);
+      throw new Error('Failed to fetch order statuses');
+    }
+
+    return data || [];
+  } catch (error) {
+    console.error('Error in fetchOrderStatuses:', error);
+    return [];
   }
-
-  return data as OrderStatus[];
 }
 
 // Status Badge component
@@ -88,13 +118,13 @@ export default function OrdersPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   
   // Fetch order statuses for filter dropdown
-  const { data: statuses } = useQuery({
+  const { data: statuses = [] } = useQuery({
     queryKey: ['orderStatuses'],
     queryFn: fetchOrderStatuses,
   });
 
   // Fetch orders with optional filter
-  const { data: orders, isLoading, error } = useQuery({
+  const { data: orders = [], isLoading, error } = useQuery({
     queryKey: ['orders', statusFilter],
     queryFn: () => fetchOrders(statusFilter),
   });
@@ -164,7 +194,7 @@ export default function OrdersPage() {
                     </TableCell>
                     <TableCell>{order.customer?.name || 'N/A'}</TableCell>
                     <TableCell>
-                      {format(new Date(order.created_at), 'MMM d, yyyy')}
+                      {order.created_at ? format(new Date(order.created_at), 'MMM d, yyyy') : 'N/A'}
                     </TableCell>
                     <TableCell>
                       {order.delivery_date 
@@ -172,8 +202,8 @@ export default function OrdersPage() {
                         : 'Not set'}
                     </TableCell>
                     <TableCell>
-                      {order.total_amount
-                        ? `$${order.total_amount.toFixed(2)}`
+                      {order.total_amount !== null && order.total_amount !== undefined
+                        ? `$${Number(order.total_amount).toFixed(2)}`
                         : 'N/A'}
                     </TableCell>
                     <TableCell>
