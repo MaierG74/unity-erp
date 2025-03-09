@@ -3,9 +3,43 @@
 import { useAuth } from '../auth-provider';
 import { Navbar } from './navbar';
 import { Sidebar } from './sidebar';
+import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase';
 
 export function RootLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
+  const [forceShowSidebar, setForceShowSidebar] = useState(false);
+  
+  // Check for authentication and set force sidebar if needed
+  useEffect(() => {
+    // Log authentication state for debugging
+    console.log('Authentication state:', { user, loading });
+    
+    // If there's no user after loading is complete, check auth directly
+    if (!loading && !user) {
+      checkDirectAuth();
+    }
+  }, [user, loading]);
+  
+  // Direct auth check as a backup
+  const checkDirectAuth = async () => {
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (data.session) {
+        console.log('Direct auth check found session:', data.session);
+        setForceShowSidebar(true);
+      } else {
+        // Use localStorage as a last resort (for development/debugging)
+        const debugMode = localStorage.getItem('debug-show-sidebar') === 'true';
+        if (debugMode) {
+          console.log('Debug mode enabled - showing sidebar');
+          setForceShowSidebar(true);
+        }
+      }
+    } catch (err) {
+      console.error('Error checking direct auth:', err);
+    }
+  };
 
   if (loading) {
     return (
@@ -23,11 +57,14 @@ export function RootLayout({ children }: { children: React.ReactNode }) {
     );
   }
 
+  // Show sidebar if user is authenticated OR if force sidebar is set
+  const shouldShowSidebar = !!user || forceShowSidebar;
+
   return (
     <div className="min-h-screen">
       <Navbar />
-      {user && <Sidebar />}
-      <main className={`pt-16 ${user ? 'pl-64' : ''}`}>
+      {shouldShowSidebar && <Sidebar />}
+      <main className={`pt-16 ${shouldShowSidebar ? 'pl-64' : ''}`}>
         <div className="container py-8">
           {children}
         </div>

@@ -1,17 +1,17 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { RootLayout as AppRootLayout } from "@/components/layout/root-layout";
 import { ThemeProvider } from "@/components/theme-provider";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
+  variable: "--font-sans",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-mono",
   subsets: ["latin"],
 });
 
@@ -28,9 +28,11 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  console.log("Root layout rendering");
+  
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-background`}>
+    <html lang="en" className="dark" suppressHydrationWarning>
+      <body className={`${inter.variable} ${jetbrainsMono.variable} antialiased min-h-screen bg-background`}>
         <ThemeProvider
           attribute="class"
           defaultTheme="dark"
@@ -38,9 +40,7 @@ export default function RootLayout({
           storageKey="unity-theme"
         >
           <Providers>
-            <AppRootLayout>
-              {children}
-            </AppRootLayout>
+            <AppRootLayout>{children}</AppRootLayout>
           </Providers>
         </ThemeProvider>
       </body>

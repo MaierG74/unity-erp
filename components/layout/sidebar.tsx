@@ -12,6 +12,7 @@ import {
   BarChart,
   Settings,
   ShoppingBag,
+  UserCog,
 } from 'lucide-react';
 
 const navigation = [
@@ -44,6 +45,11 @@ const navigation = [
     name: 'Customers', 
     href: '/customers',
     icon: Users 
+  },
+  { 
+    name: 'Staff', 
+    href: '/staff',
+    icon: UserCog 
   },
   { 
     name: 'Reports', 

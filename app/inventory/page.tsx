@@ -275,7 +275,9 @@ export default function InventoryPage() {
     queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
     toast({
       title: "Data refreshed",
-      description: "The inventory data has been refreshed from the database.",
+      children: (
+        <p>The inventory data has been refreshed from the database.</p>
+      ),
       duration: 3000,
     });
   };
@@ -336,32 +338,34 @@ export default function InventoryPage() {
           <div className="sticky top-4">
             <InventoryDetails 
               selectedItem={selectedComponent && selectedComponent.inventory && selectedComponent.inventory.length > 0 ? {
-                inventory_id: selectedComponent.inventory[0].inventory_id || null,
-                quantity_on_hand: selectedComponent.inventory[0].quantity_on_hand !== null && 
-                  selectedComponent.inventory[0].quantity_on_hand !== undefined 
-                  ? Number(selectedComponent.inventory[0].quantity_on_hand) 
+                inventory_id: selectedComponent.inventory[0]?.inventory_id || null,
+                quantity_on_hand: selectedComponent.inventory[0]?.quantity_on_hand !== null && 
+                  selectedComponent.inventory[0]?.quantity_on_hand !== undefined 
+                  ? Number(selectedComponent.inventory[0]?.quantity_on_hand) 
                   : 0,
-                location: selectedComponent.inventory[0].location || "",
-                reorder_level: selectedComponent.inventory[0].reorder_level !== null && 
-                  selectedComponent.inventory[0].reorder_level !== undefined 
-                  ? Number(selectedComponent.inventory[0].reorder_level) 
+                location: selectedComponent.inventory[0]?.location || "",
+                reorder_level: selectedComponent.inventory[0]?.reorder_level !== null && 
+                  selectedComponent.inventory[0]?.reorder_level !== undefined 
+                  ? Number(selectedComponent.inventory[0]?.reorder_level) 
                   : 0,
                 component: {
-                  component_id: selectedComponent.component_id,
-                  internal_code: selectedComponent.internal_code,
+                  component_id: selectedComponent.component_id || 0,
+                  internal_code: selectedComponent.internal_code || "",
                   description: selectedComponent.description || "",
                   image_url: selectedComponent.image_url,
                   category: selectedComponent.category || { cat_id: 0, categoryname: "Uncategorized" },
                   unit: selectedComponent.unit || { unit_id: 0, unit_name: "N/A" }
                 },
-                supplierComponents: selectedComponent.supplierComponents?.map(sc => ({
-                  supplier_id: sc.supplier_id,
-                  supplier_code: sc.supplier_code,
-                  price: sc.price,
-                  supplier: {
-                    name: sc.supplier?.name || "Unknown Supplier"
-                  }
-                })) || []
+                supplierComponents: Array.isArray(selectedComponent.supplierComponents) 
+                  ? selectedComponent.supplierComponents.map(sc => ({
+                      supplier_id: sc?.supplier_id || 0,
+                      supplier_code: sc?.supplier_code || "",
+                      price: sc?.price || 0,
+                      supplier: {
+                        name: sc?.supplier?.name || "Unknown Supplier"
+                      }
+                    }))
+                  : []
               } : undefined}
             />
             

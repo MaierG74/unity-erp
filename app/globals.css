@@ -2,122 +2,51 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer base {
-  :root {
-    /* Base colors - Dark mode first */
-    --background: 0 0% 100%; /* black */
-    --foreground: 0 0% 3.9%; /* zinc-50 */
+/* Base colors - ensure they're explicitly defined */
+:root {
+  --background: 0 0% 100%;
+  --foreground: 0 0% 3.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 3.9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 3.9%;
+  --primary: 24 95% 53%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 45 93% 47%;
+  --secondary-foreground: 0 0% 3.9%;
+  --muted: 0 0% 96.1%;
+  --muted-foreground: 0 0% 45.1%;
+  --accent: 24 95% 53%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 5.9% 90%;
+  --input: 240 5.9% 90%;
+  --ring: 24 95% 53%;
+  --radius: 0.5rem;
+}
 
-    /* Card and surface colors */
-    --card: 0 0% 100%; /* black */
-    --card-foreground: 0 0% 3.9%; /* zinc-50 */
-    --popover: 0 0% 100%; /* black */
-    --popover-foreground: 0 0% 3.9%; /* zinc-50 */
-
-    /* Primary colors - Using orange */
-    --primary: 0 0% 9%; /* orange-500 */
-    --primary-foreground: 0 0% 98%; /* white */
-
-    /* Secondary colors - Using yellow */
-    --secondary: 0 0% 96.1%; /* yellow-500 */
-    --secondary-foreground: 0 0% 9%; /* black */
-
-    /* Muted colors */
-    --muted: 0 0% 96.1%; /* zinc-800 */
-    --muted-foreground: 0 0% 45.1%; /* zinc-400 */
-
-    /* Accent colors - Using lighter orange */
-    --accent: 0 0% 96.1%; /* orange-500 */
-    --accent-foreground: 0 0% 9%; /* white */
-
-    /* Status colors */
-    --destructive: 0 84.2% 60.2%; /* red-500 */
-    --destructive-foreground: 0 0% 98%; /* zinc-50 */
-    --success: 142.1 76.2% 36.3%; /* emerald-600 */
-    --success-foreground: 0 0% 98%; /* zinc-50 */
-    --warning: 45 93% 47%; /* yellow-500 */
-    --warning-foreground: 240 10% 3.9%; /* black */
-
-    /* Utility colors */
-    --border: 0 0% 89.8%; /* zinc-800 */
-    --input: 0 0% 89.8%; /* zinc-800 */
-    --ring: 0 0% 3.9%; /* orange-500 */
-
-    /* Border radius */
-    --radius: 0.5rem;
-    --chart-1: 12 76% 61%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
-  }
-
-  .light {
-    /* Base colors */
-    --background: 0 0% 98%; /* zinc-50 */
-    --foreground: 240 10% 3.9%; /* black */
-
-    /* Card and surface colors */
-    --card: 0 0% 100%; /* white */
-    --card-foreground: 240 10% 3.9%; /* black */
-    --popover: 0 0% 100%; /* white */
-    --popover-foreground: 240 10% 3.9%; /* black */
-
-    /* Primary colors - Using orange */
-    --primary: 24 95% 53%; /* orange-500 */
-    --primary-foreground: 0 0% 100%; /* white */
-
-    /* Secondary colors - Using yellow */
-    --secondary: 45 93% 47%; /* yellow-500 */
-    --secondary-foreground: 240 10% 3.9%; /* black */
-
-    /* Muted colors */
-    --muted: 240 4.8% 95.9%; /* zinc-100 */
-    --muted-foreground: 240 3.8% 46.1%; /* zinc-500 */
-
-    /* Accent colors */
-    --accent: 24 95% 53%; /* orange-500 */
-    --accent-foreground: 0 0% 100%; /* white */
-
-    /* Status colors */
-    --destructive: 0 84.2% 60.2%; /* red-500 */
-    --destructive-foreground: 0 0% 98%; /* zinc-50 */
-    --success: 142.1 76.2% 36.3%; /* emerald-600 */
-    --success-foreground: 0 0% 98%; /* zinc-50 */
-    --warning: 45 93% 47%; /* yellow-500 */
-    --warning-foreground: 240 10% 3.9%; /* black */
-
-    /* Utility colors */
-    --border: 240 5.9% 90%; /* zinc-200 */
-    --input: 240 5.9% 90%; /* zinc-200 */
-    --ring: 24 95% 53%; /* orange-500 */
-  }
-  .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
-  }
+/* Dark mode class - explicitly defined */
+.dark {
+  --background: 0 0% 3.9%;
+  --foreground: 0 0% 98%;
+  --card: 0 0% 3.9%;
+  --card-foreground: 0 0% 98%;
+  --popover: 0 0% 3.9%;
+  --popover-foreground: 0 0% 98%;
+  --primary: 0 0% 98%;
+  --primary-foreground: 0 0% 9%;
+  --secondary: 0 0% 14.9%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 0 0% 14.9%;
+  --muted-foreground: 0 0% 63.9%;
+  --accent: 0 0% 14.9%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 0 0% 14.9%;
+  --input: 0 0% 14.9%;
+  --ring: 0 0% 83.1%;
 }
 
 @layer base {
@@ -126,62 +55,36 @@
   }
   body {
     @apply bg-background text-foreground;
-    background-image: 
-      radial-gradient(at 100% 100%, hsla(24, 95%, 53%, 0.05) 0px, transparent 50%),
-      radial-gradient(at 0% 0%, hsla(45, 93%, 47%, 0.05) 0px, transparent 50%);
+  }
+  h1 {
+    @apply text-2xl font-bold;
+  }
+  h2 {
+    @apply text-xl font-semibold;
+  }
+  h3 {
+    @apply text-lg font-medium;
   }
 }
 
 @layer components {
   .card {
-    @apply rounded-lg border bg-card p-6 shadow-lg shadow-black/5 dark:shadow-orange-500/5;
-    background-image: 
-      linear-gradient(to bottom right, rgba(255, 255, 255, 0.01), transparent);
-  }
-
-  .sidebar-link {
-    @apply flex items-center rounded-lg px-3 py-2 text-sm font-medium gap-3 transition-all;
-    @apply hover:bg-accent/10 dark:hover:bg-accent/5;
-    @apply active:scale-95;
-  }
-
-  .sidebar-link.active {
-    @apply bg-primary/10 text-primary dark:bg-primary/20;
-    @apply hover:bg-primary/20 dark:hover:bg-primary/30;
-    text-shadow: 0 0 20px hsla(24, 95%, 53%, 0.2);
-  }
-
-  .input-field {
-    @apply rounded-lg border border-input bg-background px-3 py-2;
-    @apply focus:outline-none focus:ring-2 focus:ring-ring focus:border-input;
-    @apply shadow-sm dark:shadow-orange-500/5;
-    @apply hover:border-orange-500/20 transition-colors;
-  }
-
-  .button-primary {
-    @apply bg-primary text-primary-foreground px-4 py-2 rounded-lg;
-    @apply hover:bg-primary/90 transition-colors;
-    @apply active:scale-95 transition-transform;
-    @apply shadow-lg shadow-orange-500/20;
-    @apply disabled:opacity-50 disabled:pointer-events-none;
-  }
-
-  .badge-pastel-success {
-    background-color: hsl(142.1 76.2% 90%);
-    color: hsl(142.1 76.2% 25%);
-    border-color: hsl(142.1 76.2% 85%);
+    @apply rounded-lg border bg-card p-6 text-card-foreground shadow;
   }
   
-  .badge-pastel-success:hover {
-    background-color: hsl(142.1 76.2% 85%);
+  .sidebar-link {
+    @apply flex items-center rounded-lg px-3 py-2 text-sm font-medium gap-3 transition-colors hover:bg-accent/10 active:scale-95;
   }
-}
-
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
+  
+  .sidebar-link.active {
+    @apply bg-primary/10 text-primary hover:bg-primary/20;
   }
-  body {
-    @apply bg-background text-foreground;
+  
+  .input-field {
+    @apply rounded-lg border border-input bg-background px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring focus:border-input;
+  }
+  
+  .button-primary {
+    @apply bg-primary text-primary-foreground px-4 py-2 rounded-lg hover:bg-primary/90 transition-colors active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
   }
 }
