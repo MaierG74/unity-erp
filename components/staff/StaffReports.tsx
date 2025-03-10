@@ -23,7 +23,6 @@ import {
   FormDescription,
   FormField,
   FormItem,
-  FormLabel as UIFormLabel,
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
@@ -45,33 +44,47 @@ import {
   TableRow 
 } from '@/components/ui/table';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Label } from '@/components/ui/label';
 
 // Types
 type Staff = {
   staff_id: number;
   first_name: string;
   last_name: string;
-  job_description: string | null;
-  is_active: boolean;
   current_staff: boolean;
-  hourly_rate: number;
+  hourly_rate: number | null;
 };
 
 type StaffHours = {
+  id: number;
   staff_id: number;
   date_worked: string;
   hours_worked: number;
-  start_time: string;
-  end_time: string;
-  break_duration: number;
-  hours_id: number;
-  lunch_break_taken: boolean;
-  morning_break_taken: boolean;
-  afternoon_break_taken: boolean;
-  is_holiday: boolean;
   regular_hours: number;
   overtime_hours: number;
-  notes: string | null;
+  break_time: number;
+};
+
+type PayrollReport = {
+  staff_id: number;
+  name: string;
+  hourly_rate: number;
+  regular_hours: number;
+  overtime_hours: number;
+  total_hours: number;
+  regular_earnings: number;
+  overtime_earnings: number;
+  total_earnings: number;
+};
+
+type AttendanceReport = {
+  staff_id: number;
+  name: string;
+  days_present: number;
+  days_absent: number;
+  days_late: number;
+  total_hours: number;
+  attendance_rate: string;
 };
 
 // Function to export data to CSV
@@ -103,20 +116,21 @@ const exportToCSV = (data: any[], filename: string) => {
   document.body.removeChild(link);
 };
 
-// Create a safer FormLabel component
-const FormLabel = ({ children, ...props }: React.ComponentProps<typeof UIFormLabel>) => {
-  return <UIFormLabel {...props}>{children}</UIFormLabel>;
-};
-
 export function StaffReports() {
   const [activeTab, setActiveTab] = useState<string>('payroll');
   const [reportType, setReportType] = useState<string>('weekly');
-  const [startDate, setStartDate] = useState<Date | undefined>(startOfWeek(new Date(), { weekStartsOn: 6 })); // Start on Saturday
-  const [endDate, setEndDate] = useState<Date | undefined>(endOfWeek(subDays(new Date(), 7), { weekStartsOn: 6 })); // End on Friday
+  
+  // Calculate the current pay week (Saturday to Friday)
+  const today = new Date();
+  const currentWeekStart = startOfWeek(today, { weekStartsOn: 6 }); // Start on Saturday
+  const currentWeekEnd = endOfWeek(today, { weekStartsOn: 6 }); // End on Friday
+  
+  const [startDate, setStartDate] = useState<Date | undefined>(currentWeekStart);
+  const [endDate, setEndDate] = useState<Date | undefined>(currentWeekEnd);
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedStaffType, setSelectedStaffType] = useState<string>('active');
   const [selectedStaffId, setSelectedStaffId] = useState<number | null>(null);
-  const [reportData, setReportData] = useState<any[] | null>(null);
+  const [reportData, setReportData] = useState<PayrollReport[] | AttendanceReport[] | null>(null);
   
   // Fetch staff data
   const { data: staffData = [], isLoading: isLoadingStaff } = useQuery({
@@ -166,7 +180,7 @@ export function StaffReports() {
   });
   
   // Generate Payroll Report
-  const generatePayrollReport = () => {
+  const generatePayrollReport = (): PayrollReport[] => {
     if (!startDate || !endDate || !filteredStaff.length || !hoursData.length) return [];
     
     const report = filteredStaff
@@ -203,17 +217,16 @@ export function StaffReports() {
           total_earnings: totalEarnings
         };
       });
-      
+    
     return report;
   };
   
-  // Generate Absence Report
-  const generateAbsenceReport = () => {
+  // Generate Attendance Report
+  const generateAttendanceReport = (): AttendanceReport[] => {
     if (!startDate || !endDate || !filteredStaff.length) return [];
     
-    // Calculate the date range as an array of dates
-    const dateRange = eachDayOfInterval({ start: startDate, end: endDate });
-    const totalWorkingDays = dateRange.length;
+    // Calculate the total number of working days in the date range
+    const totalDays = differenceInDays(endDate, startDate) + 1;
     
     const report = filteredStaff
       .filter(staff => {
@@ -227,54 +240,61 @@ export function StaffReports() {
         // Get hours for this staff member
         const staffHours = hoursData.filter(h => h.staff_id === staff.staff_id);
         
-        // Get unique dates the staff member worked
-        const datesWorked = new Set(staffHours.map(h => h.date_worked));
+        // Calculate days present (days with hours > 0)
+        const daysPresent = new Set(staffHours.map(h => h.date_worked)).size;
         
-        // Calculate days present and absent
-        const daysPresent = datesWorked.size;
-        const daysAbsent = totalWorkingDays - daysPresent;
-        const attendanceRate = (daysPresent / totalWorkingDays) * 100;
+        // Calculate days absent
+        const daysAbsent = totalDays - daysPresent;
+        
+        // Calculate days late (placeholder - would need actual late data)
+        const daysLate = 0;
+        
+        // Calculate total hours
+        const totalHours = staffHours.reduce((sum, record) => sum + (record.hours_worked || 0), 0);
+        
+        // Calculate attendance rate
+        const attendanceRate = ((daysPresent / totalDays) * 100).toFixed(1) + '%';
         
         return {
           staff_id: staff.staff_id,
           name: `${staff.first_name} ${staff.last_name}`,
-          total_working_days: totalWorkingDays,
           days_present: daysPresent,
           days_absent: daysAbsent,
-          attendance_rate: attendanceRate.toFixed(2) + '%'
+          days_late: daysLate,
+          total_hours: totalHours,
+          attendance_rate: attendanceRate
         };
       });
-      
+    
     return report;
   };
   
-  // Generate report based on active tab
-  const generateReport = () => {
+  // Handle generate report
+  const handleGenerateReport = () => {
     setIsGenerating(true);
+    setReportData(null);
     
-    try {
+    // Simulate API call delay
+    setTimeout(() => {
       if (activeTab === 'payroll') {
         const payrollData = generatePayrollReport();
         setReportData(payrollData);
       } else if (activeTab === 'absence') {
-        const absenceData = generateAbsenceReport();
+        const absenceData = generateAttendanceReport();
         setReportData(absenceData);
       } else {
-        setReportData(null);
+        // Other report types would go here
+        setReportData([]);
       }
-    } catch (error) {
-      console.error('Error generating report:', error);
-      setReportData(null);
-    } finally {
       setIsGenerating(false);
-    }
+    }, 1000);
   };
   
-  // Export current report to CSV
+  // Export report data
   const exportReport = () => {
     if (!reportData) return;
     
-    const filename = `${activeTab}_report_${format(new Date(), 'yyyy-MM-dd')}.csv`;
+    const filename = `${activeTab}-report-${format(startDate || new Date(), 'yyyy-MM-dd')}-to-${format(endDate || new Date(), 'yyyy-MM-dd')}`;
     exportToCSV(reportData, filename);
   };
   
@@ -305,7 +325,7 @@ export function StaffReports() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {/* Date Range */}
                 <div className="space-y-2">
-                  <FormLabel>Report Period</FormLabel>
+                  <Label>Report Period</Label>
                   <Select value={reportType} onValueChange={setReportType}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select period" />
@@ -321,7 +341,7 @@ export function StaffReports() {
                 
                 {/* Start Date */}
                 <div className="space-y-2">
-                  <FormLabel>Start Date</FormLabel>
+                  <Label>Start Date</Label>
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button
@@ -348,7 +368,7 @@ export function StaffReports() {
                 
                 {/* End Date */}
                 <div className="space-y-2">
-                  <FormLabel>End Date</FormLabel>
+                  <Label>End Date</Label>
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button
@@ -377,7 +397,7 @@ export function StaffReports() {
               {/* Staff Selection */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <FormLabel>Staff Type</FormLabel>
+                  <Label>Staff Type</Label>
                   <Select value={selectedStaffType} onValueChange={setSelectedStaffType}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select staff type" />
@@ -391,16 +411,16 @@ export function StaffReports() {
                 </div>
                 
                 <div className="space-y-2">
-                  <FormLabel>Staff Member (Optional)</FormLabel>
+                  <Label>Staff Member (Optional)</Label>
                   <Select 
-                    value={selectedStaffId ? String(selectedStaffId) : ""} 
-                    onValueChange={(value) => setSelectedStaffId(value ? parseInt(value) : null)}
+                    value={selectedStaffId ? String(selectedStaffId) : "all"} 
+                    onValueChange={(value) => setSelectedStaffId(value === "all" ? null : parseInt(value))}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="All Staff" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All Staff</SelectItem>
+                      <SelectItem value="all">All Staff</SelectItem>
                       {filteredStaff.map((staff) => (
                         <SelectItem key={staff.staff_id} value={String(staff.staff_id)}>
                           {staff.first_name} {staff.last_name}
@@ -413,7 +433,7 @@ export function StaffReports() {
               
               {/* Generate Button */}
               <div className="flex justify-end">
-                <Button onClick={generateReport} disabled={isGenerating}>
+                <Button onClick={handleGenerateReport} disabled={isGenerating}>
                   {isGenerating ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -429,59 +449,33 @@ export function StaffReports() {
               </div>
               
               {/* Report Results */}
-              {reportData && reportData.length > 0 && (
+              {activeTab === 'payroll' && reportData && reportData.length > 0 && (
                 <>
-                  {/* Simple Summary instead of Chart */}
-                  <div className="border rounded-md p-4 bg-card">
-                    <h3 className="text-lg font-medium mb-4">Payroll Summary</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div className="border rounded-md p-4 bg-blue-50 dark:bg-blue-950">
-                        <p className="text-sm text-muted-foreground">Total Regular Hours</p>
-                        <p className="text-2xl font-bold">
-                          {reportData.reduce((sum, item) => sum + item.regular_hours, 0).toFixed(2)}
-                        </p>
-                      </div>
-                      <div className="border rounded-md p-4 bg-green-50 dark:bg-green-950">
-                        <p className="text-sm text-muted-foreground">Total Overtime Hours</p>
-                        <p className="text-2xl font-bold">
-                          {reportData.reduce((sum, item) => sum + item.overtime_hours, 0).toFixed(2)}
-                        </p>
-                      </div>
-                      <div className="border rounded-md p-4 bg-amber-50 dark:bg-amber-950">
-                        <p className="text-sm text-muted-foreground">Total Earnings</p>
-                        <p className="text-2xl font-bold">
-                          ${reportData.reduce((sum, item) => sum + item.total_earnings, 0).toFixed(2)}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* Data Table */}
-                  <div className="border rounded-md overflow-x-auto">
+                  <div className="overflow-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
                           <TableHead>Staff Name</TableHead>
-                          <TableHead className="text-right">Hourly Rate</TableHead>
-                          <TableHead className="text-right">Regular Hours</TableHead>
-                          <TableHead className="text-right">Overtime Hours</TableHead>
-                          <TableHead className="text-right">Total Hours</TableHead>
-                          <TableHead className="text-right">Regular Earnings</TableHead>
-                          <TableHead className="text-right">Overtime Earnings</TableHead>
-                          <TableHead className="text-right">Total Earnings</TableHead>
+                          <TableHead>Hourly Rate</TableHead>
+                          <TableHead>Regular Hrs</TableHead>
+                          <TableHead>Overtime Hrs</TableHead>
+                          <TableHead>Regular Pay</TableHead>
+                          <TableHead>Overtime Pay</TableHead>
+                          <TableHead className="text-right">Total Pay</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {reportData.map((row: any, index) => (
-                          <TableRow key={index}>
-                            <TableCell>{row.name}</TableCell>
-                            <TableCell className="text-right">${row.hourly_rate.toFixed(2)}</TableCell>
-                            <TableCell className="text-right">{row.regular_hours.toFixed(2)}</TableCell>
-                            <TableCell className="text-right">{row.overtime_hours.toFixed(2)}</TableCell>
-                            <TableCell className="text-right">{row.total_hours.toFixed(2)}</TableCell>
-                            <TableCell className="text-right">${row.regular_earnings.toFixed(2)}</TableCell>
-                            <TableCell className="text-right">${row.overtime_earnings.toFixed(2)}</TableCell>
-                            <TableCell className="font-medium text-right">${row.total_earnings.toFixed(2)}</TableCell>
+                        {(reportData as PayrollReport[]).map((row) => (
+                          <TableRow key={row.staff_id}>
+                            <TableCell className="font-medium">{row.name}</TableCell>
+                            <TableCell>R{row.hourly_rate.toFixed(2)}</TableCell>
+                            <TableCell>{row.regular_hours.toFixed(1)}</TableCell>
+                            <TableCell>{row.overtime_hours.toFixed(1)}</TableCell>
+                            <TableCell>R{row.regular_earnings.toFixed(2)}</TableCell>
+                            <TableCell>R{row.overtime_earnings.toFixed(2)}</TableCell>
+                            <TableCell className="text-right font-semibold">
+                              R{row.total_earnings.toFixed(2)}
+                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -526,7 +520,7 @@ export function StaffReports() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {/* Date Range */}
                 <div className="space-y-2">
-                  <FormLabel>Report Period</FormLabel>
+                  <Label>Report Period</Label>
                   <Select value={reportType} onValueChange={setReportType}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select period" />
@@ -542,7 +536,7 @@ export function StaffReports() {
                 
                 {/* Start Date */}
                 <div className="space-y-2">
-                  <FormLabel>Start Date</FormLabel>
+                  <Label>Start Date</Label>
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button
@@ -569,7 +563,7 @@ export function StaffReports() {
                 
                 {/* End Date */}
                 <div className="space-y-2">
-                  <FormLabel>End Date</FormLabel>
+                  <Label>End Date</Label>
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button
@@ -598,7 +592,7 @@ export function StaffReports() {
               {/* Staff Selection */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <FormLabel>Staff Type</FormLabel>
+                  <Label>Staff Type</Label>
                   <Select value={selectedStaffType} onValueChange={setSelectedStaffType}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select staff type" />
@@ -612,16 +606,16 @@ export function StaffReports() {
                 </div>
                 
                 <div className="space-y-2">
-                  <FormLabel>Staff Member (Optional)</FormLabel>
+                  <Label>Staff Member (Optional)</Label>
                   <Select 
-                    value={selectedStaffId ? String(selectedStaffId) : ""} 
-                    onValueChange={(value) => setSelectedStaffId(value ? parseInt(value) : null)}
+                    value={selectedStaffId ? String(selectedStaffId) : "all"} 
+                    onValueChange={(value) => setSelectedStaffId(value === "all" ? null : parseInt(value))}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="All Staff" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All Staff</SelectItem>
+                      <SelectItem value="all">All Staff</SelectItem>
                       {filteredStaff.map((staff) => (
                         <SelectItem key={staff.staff_id} value={String(staff.staff_id)}>
                           {staff.first_name} {staff.last_name}
@@ -634,7 +628,7 @@ export function StaffReports() {
               
               {/* Generate Button */}
               <div className="flex justify-end">
-                <Button onClick={generateReport} disabled={isGenerating}>
+                <Button onClick={handleGenerateReport} disabled={isGenerating}>
                   {isGenerating ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -650,52 +644,32 @@ export function StaffReports() {
               </div>
               
               {/* Report Results */}
-              {reportData && reportData.length > 0 && (
+              {activeTab === 'absence' && reportData && reportData.length > 0 && (
                 <>
-                  {/* Simple Summary instead of Chart */}
-                  <div className="border rounded-md p-4 bg-card">
-                    <h3 className="text-lg font-medium mb-4">Attendance Summary</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div className="border rounded-md p-4 bg-green-50 dark:bg-green-950">
-                        <p className="text-sm text-muted-foreground">Total Present Days</p>
-                        <p className="text-2xl font-bold">
-                          {reportData.reduce((sum, item) => sum + item.days_present, 0)}
-                        </p>
-                      </div>
-                      <div className="border rounded-md p-4 bg-red-50 dark:bg-red-950">
-                        <p className="text-sm text-muted-foreground">Total Absent Days</p>
-                        <p className="text-2xl font-bold">
-                          {reportData.reduce((sum, item) => sum + item.days_absent, 0)}
-                        </p>
-                      </div>
-                      <div className="border rounded-md p-4 bg-blue-50 dark:bg-blue-950">
-                        <p className="text-sm text-muted-foreground">Average Attendance Rate</p>
-                        <p className="text-2xl font-bold">
-                          {(reportData.reduce((sum, item) => sum + parseFloat(item.attendance_rate), 0) / reportData.length).toFixed(2)}%
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* Data Table */}
-                  <div className="border rounded-md overflow-x-auto">
+                  <div className="overflow-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
                           <TableHead>Staff Name</TableHead>
-                          <TableHead className="text-right">Working Days</TableHead>
-                          <TableHead className="text-right">Days Present</TableHead>
-                          <TableHead className="text-right">Days Absent</TableHead>
+                          <TableHead>Days Present</TableHead>
+                          <TableHead>Days Absent</TableHead>
+                          <TableHead>Days Late</TableHead>
+                          <TableHead>Total Hours</TableHead>
                           <TableHead className="text-right">Attendance Rate</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {reportData.map((row: any, index) => (
-                          <TableRow key={index}>
-                            <TableCell>{row.name}</TableCell>
-                            <TableCell className="text-right">{row.total_working_days}</TableCell>
-                            <TableCell className="text-right">{row.days_present}</TableCell>
-                            <TableCell className="text-right">{row.days_absent}</TableCell>
+                        {(reportData as AttendanceReport[]).map((row) => (
+                          <TableRow key={row.staff_id}>
+                            <TableCell className="font-medium">{row.name}</TableCell>
+                            <TableCell>{row.days_present}</TableCell>
+                            <TableCell 
+                              className={`font-medium ${row.days_absent > 3 ? 'text-destructive' : ''}`}
+                            >
+                              {row.days_absent}
+                            </TableCell>
+                            <TableCell>{row.days_late}</TableCell>
+                            <TableCell>{row.total_hours.toFixed(1)}</TableCell>
                             <TableCell 
                               className={`text-right font-medium ${
                                 parseFloat(row.attendance_rate) < 70 ? 'text-destructive' :
