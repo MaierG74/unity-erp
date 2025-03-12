@@ -43,13 +43,15 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Switch } from '@/components/ui/switch';
 import { 
   CalendarIcon, 
   ChevronLeft, 
   ChevronRight, 
   Download, 
   Printer,
-  Loader2
+  Loader2,
+  Columns
 } from 'lucide-react';
 import React from 'react';
 
@@ -108,6 +110,7 @@ export function WeeklySummary() {
   const [selectedWeek, setSelectedWeek] = useState<Date>(new Date());
   const [summaryData, setSummaryData] = useState<WeeklySummaryRow[]>([]);
   const [isExporting, setIsExporting] = useState(false);
+  const [compactView, setCompactView] = useState(false);
   const { toast } = useToast();
 
   // Calculate week range (start on Saturday)
@@ -358,6 +361,17 @@ export function WeeklySummary() {
             </CardDescription>
           </div>
           <div className="flex items-center space-x-2">
+            <div className="flex items-center mr-4 space-x-2">
+              <Switch 
+                id="compact-view" 
+                checked={compactView} 
+                onCheckedChange={setCompactView}
+              />
+              <label htmlFor="compact-view" className="text-sm cursor-pointer flex items-center">
+                <Columns className="h-4 w-4 mr-1" />
+                Compact View
+              </label>
+            </div>
             <Button variant="outline" size="icon" onClick={goToPreviousWeek}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
@@ -371,43 +385,63 @@ export function WeeklySummary() {
         </div>
       </CardHeader>
       <CardContent>
-        <div className="rounded-md border print:border-none overflow-x-auto">
+        <div className="rounded-md border print:border-none overflow-x-auto max-w-[calc(100vw-3rem)] relative">
+          <div className="sticky left-0 z-10 bg-background shadow-sm">
+            {/* Shadow indicator for horizontal scroll */}
+            <div className="absolute right-0 top-0 bottom-0 w-4 bg-gradient-to-r from-transparent to-black/5 pointer-events-none"></div>
+          </div>
           <Table className="min-w-max">
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[200px]">Staff Member</TableHead>
-                <TableHead className="w-[150px]">Job</TableHead>
-                {daysOfWeek.map(day => (
-                  <TableHead 
-                    key={format(day, 'yyyy-MM-dd')}
-                    className={`w-[80px] text-center ${(isSaturday(day) || isSunday(day)) ? 'bg-muted' : ''}`}
-                  >
-                    <div>{format(day, 'EEE')}</div>
-                    <div className="text-xs">{format(day, 'dd/MM')}</div>
-                  </TableHead>
-                ))}
-                <TableHead className="w-[100px] text-center">Regular</TableHead>
-                <TableHead className="w-[100px] text-center">D/Time</TableHead>
-                <TableHead className="w-[100px] text-center">Overtime</TableHead>
-                <TableHead className="w-[100px] text-center">Total</TableHead>
+                <TableHead className="w-[180px] sticky left-0 z-10 bg-background">Staff Member</TableHead>
+                {!compactView && <TableHead className="w-[120px]">Job</TableHead>}
+                {daysOfWeek.map(day => {
+                  // In compact view, only show weekend days and current day
+                  const isWeekend = isSaturday(day) || isSunday(day);
+                  const isToday = format(day, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd');
+                  
+                  if (compactView && !isWeekend && !isToday) {
+                    return null;
+                  }
+                  
+                  return (
+                    <TableHead 
+                      key={format(day, 'yyyy-MM-dd')}
+                      className={`w-[60px] text-center ${isWeekend ? 'bg-muted' : ''} ${isToday ? 'bg-primary/10' : ''}`}
+                    >
+                      <div>{format(day, 'EEE')}</div>
+                      <div className="text-xs">{format(day, 'dd/MM')}</div>
+                    </TableHead>
+                  );
+                })}
+                <TableHead className="w-[80px] text-center">Regular</TableHead>
+                <TableHead className="w-[80px] text-center">D/Time</TableHead>
+                {!compactView && <TableHead className="w-[80px] text-center">Overtime</TableHead>}
+                <TableHead className="w-[80px] text-center">Total</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {summaryData.map((row) => (
                 <TableRow key={row.staff_id}>
-                  <TableCell className="font-medium">{row.staff_name}</TableCell>
-                  <TableCell>{row.job_description || 'N/A'}</TableCell>
+                  <TableCell className="font-medium sticky left-0 z-10 bg-background">{row.staff_name}</TableCell>
+                  {!compactView && <TableCell>{row.job_description || 'N/A'}</TableCell>}
                   
                   {daysOfWeek.map(day => {
                     const dateStr = format(day, 'yyyy-MM-dd');
                     const dayData = row.dailyHours[dateStr];
                     const isWeekend = dayData?.isWeekend;
                     const isHoliday = dayData?.isHoliday;
+                    const isToday = dateStr === format(new Date(), 'yyyy-MM-dd');
+                    
+                    // Skip non-weekend, non-today days in compact view
+                    if (compactView && !isWeekend && !isToday) {
+                      return null;
+                    }
                     
                     return (
                       <TableCell 
                         key={dateStr} 
-                        className={`text-center ${isWeekend ? 'bg-muted' : ''} ${isHoliday ? 'bg-muted-foreground/10' : ''} ${dayData?.isSunday ? 'text-red-500 font-semibold' : ''}`}
+                        className={`text-center ${isWeekend ? 'bg-muted' : ''} ${isHoliday ? 'bg-muted-foreground/10' : ''} ${dayData?.isSunday ? 'text-red-500 font-semibold' : ''} ${isToday ? 'bg-primary/10' : ''}`}
                       >
                         {dayData?.hours > 0 ? dayData.hours : '-'}
                       </TableCell>
@@ -416,14 +450,14 @@ export function WeeklySummary() {
                   
                   <TableCell className="text-center">{row.totalRegularHours > 0 ? row.totalRegularHours : '-'}</TableCell>
                   <TableCell className="text-center text-red-500 font-semibold">{row.totalDoubleTimeHours > 0 ? row.totalDoubleTimeHours : '-'}</TableCell>
-                  <TableCell className="text-center">{row.totalOvertimeHours > 0 ? row.totalOvertimeHours : '-'}</TableCell>
+                  {!compactView && <TableCell className="text-center">{row.totalOvertimeHours > 0 ? row.totalOvertimeHours : '-'}</TableCell>}
                   <TableCell className="text-center font-bold">{row.totalHours > 0 ? row.totalHours : '-'}</TableCell>
                 </TableRow>
               ))}
               
               {/* Daily totals row */}
               <TableRow className="bg-muted/50">
-                <TableCell colSpan={2} className="font-bold">Daily Totals</TableCell>
+                <TableCell colSpan={compactView ? 1 : 2} className="font-bold sticky left-0 z-10 bg-muted/50">Daily Totals</TableCell>
                 
                 {daysOfWeek.map(day => {
                   const dateStr = format(day, 'yyyy-MM-dd');
@@ -432,11 +466,17 @@ export function WeeklySummary() {
                   const holiday = publicHolidays?.find(h => h.holiday_date === dateStr);
                   const isHoliday = !!holiday;
                   const isSun = isSunday(day);
+                  const isToday = dateStr === format(new Date(), 'yyyy-MM-dd');
+                  
+                  // Skip non-weekend, non-today days in compact view
+                  if (compactView && !isWeekend && !isToday) {
+                    return null;
+                  }
                   
                   return (
                     <TableCell 
                       key={`total-${dateStr}`} 
-                      className={`text-center font-bold ${isWeekend ? 'bg-muted' : ''} ${isHoliday ? 'bg-muted-foreground/10' : ''} ${isSun ? 'text-red-500' : ''}`}
+                      className={`text-center font-bold ${isWeekend ? 'bg-muted' : ''} ${isHoliday ? 'bg-muted-foreground/10' : ''} ${isSun ? 'text-red-500' : ''} ${isToday ? 'bg-primary/10' : ''}`}
                     >
                       {dailyTotal > 0 ? dailyTotal : '-'}
                     </TableCell>
@@ -449,9 +489,9 @@ export function WeeklySummary() {
                 <TableCell className="text-center font-bold text-red-500">
                   {summaryData.reduce((total, row) => total + row.totalDoubleTimeHours, 0)}
                 </TableCell>
-                <TableCell className="text-center font-bold">
+                {!compactView && <TableCell className="text-center font-bold">
                   {summaryData.reduce((total, row) => total + row.totalOvertimeHours, 0)}
-                </TableCell>
+                </TableCell>}
                 <TableCell className="text-center font-bold">
                   {summaryData.reduce((total, row) => total + row.totalHours, 0)}
                 </TableCell>
