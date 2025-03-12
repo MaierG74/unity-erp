@@ -8,7 +8,7 @@ import { ArrowLeft, DollarSign, Calculator, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { format, startOfWeek, endOfWeek, addDays, addWeeks, subWeeks, parseISO } from 'date-fns';
+import { format, startOfWeek, endOfWeek, addDays, addWeeks, subWeeks, parseISO, isSunday } from 'date-fns';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -145,15 +145,49 @@ export default function PayrollPage() {
       // Calculate total hours worked
       const totalHours = hoursData?.reduce((sum, hour) => sum + parseFloat(hour.hours_worked), 0) || 0;
       
-      // Calculate regular and overtime hours
+      // Separate regular, overtime, and doubletime hours
       const weeklyHours = staffData.weekly_hours || 40;
-      const regularHours = Math.min(totalHours, weeklyHours);
-      const overtimeHours = Math.max(0, totalHours - weeklyHours);
+      
+      // Extract regular, overtime, and doubletime hours from the data
+      let regularHours = 0;
+      let overtimeHours = 0;
+      let doubletimeHours = 0;
+      
+      // Process each day's hours
+      hoursData?.forEach(day => {
+        if (day.is_holiday || isSunday(new Date(day.date_worked))) {
+          // Sunday or holiday hours are doubletime
+          doubletimeHours += day.hours_worked;
+        } else {
+          // Regular day hours
+          regularHours += day.hours_worked;
+          
+          // Add any explicitly marked overtime
+          if (day.overtime_hours) {
+            if (day.overtime_rate === 2.0) {
+              doubletimeHours += day.overtime_hours;
+            } else {
+              overtimeHours += day.overtime_hours;
+            }
+          }
+        }
+      });
+      
+      // Check if regular hours exceed weekly limit and convert excess to overtime
+      if (regularHours > weeklyHours) {
+        const excessHours = regularHours - weeklyHours;
+        overtimeHours += excessHours;
+        regularHours = weeklyHours;
+      }
       
       // Calculate hourly wage
       const hourlyRate = staffData.hourly_rate;
       const overtimeRate = hourlyRate * 1.5; // Overtime at 1.5x
-      const hourlyWageTotal = (regularHours * hourlyRate) + (overtimeHours * overtimeRate);
+      const doubletimeRate = hourlyRate * 2.0; // Doubletime at 2.0x
+      const hourlyWageTotal = 
+        (regularHours * hourlyRate) + 
+        (overtimeHours * overtimeRate) + 
+        (doubletimeHours * doubletimeRate);
       
       // Calculate piece work total
       const pieceWorkTotal = jobCardItems?.reduce((sum, item) => {
@@ -183,6 +217,7 @@ export default function PayrollPage() {
           .update({
             regular_hours: regularHours,
             overtime_hours: overtimeHours,
+            doubletime_hours: doubletimeHours,
             hourly_wage_total: hourlyWageTotal,
             piece_work_total: pieceWorkTotal,
             final_payment: finalPayment,
@@ -205,6 +240,7 @@ export default function PayrollPage() {
               week_end_date: weekEnd.toISOString().split('T')[0],
               regular_hours: regularHours,
               overtime_hours: overtimeHours,
+              doubletime_hours: doubletimeHours,
               hourly_wage_total: hourlyWageTotal,
               piece_work_total: pieceWorkTotal,
               final_payment: finalPayment,
@@ -366,7 +402,8 @@ export default function PayrollPage() {
                 <TableRow>
                   <TableHead>Week</TableHead>
                   <TableHead>Regular Hours</TableHead>
-                  <TableHead>Overtime Hours</TableHead>
+                  <TableHead>Overtime (1.5x)</TableHead>
+                  <TableHead>Doubletime (2x)</TableHead>
                   <TableHead>Hourly Total</TableHead>
                   <TableHead>Piece Work Total</TableHead>
                   <TableHead>Final Payment</TableHead>
@@ -382,6 +419,7 @@ export default function PayrollPage() {
                     </TableCell>
                     <TableCell>{payroll.regular_hours}</TableCell>
                     <TableCell>{payroll.overtime_hours}</TableCell>
+                    <TableCell>{payroll.doubletime_hours || 0}</TableCell>
                     <TableCell>${payroll.hourly_wage_total.toFixed(2)}</TableCell>
                     <TableCell>${payroll.piece_work_total.toFixed(2)}</TableCell>
                     <TableCell className="font-bold">${payroll.final_payment.toFixed(2)}</TableCell>
@@ -453,10 +491,14 @@ export default function PayrollPage() {
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <div>Regular Hours:</div>
                     <div className="font-medium">{payrollDetails.regular_hours}</div>
-                    <div>Overtime Hours:</div>
+                    <div>Overtime Hours (1.5x):</div>
                     <div className="font-medium">{payrollDetails.overtime_hours}</div>
+                    <div>Doubletime Hours (2x):</div>
+                    <div className="font-medium">{payrollDetails.doubletime_hours || 0}</div>
                     <div>Total Hours:</div>
-                    <div className="font-medium">{(payrollDetails.regular_hours + payrollDetails.overtime_hours).toFixed(2)}</div>
+                    <div className="font-medium">
+                      {(payrollDetails.regular_hours + payrollDetails.overtime_hours + (payrollDetails.doubletime_hours || 0)).toFixed(2)}
+                    </div>
                     <div>Hourly Rate:</div>
                     <div className="font-medium">${payrollDetails.hourly_rate?.toFixed(2) || 'N/A'}</div>
                   </div>
