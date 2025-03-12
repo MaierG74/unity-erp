@@ -32,6 +32,9 @@ export const SparklesCore = (props: ParticlesProps) => {
     className,
     background = "#0d47a1",
     particleColor = "#ffffff",
+    particleDensity = 50,
+    minSize = 0.6,
+    maxSize = 1.4
   } = props;
   const [init, setInit] = useState(false);
   const controls = useAnimation();
@@ -69,12 +72,15 @@ export const SparklesCore = (props: ParticlesProps) => {
 
   // Generate static sparkles
   const sparkles = [];
-  for (let i = 0; i < 50; i++) {
-    const size = Math.random() * 3 + 1;
+  const numSparkles = particleDensity || 50;
+  
+  for (let i = 0; i < numSparkles; i++) {
+    const sizeRange = maxSize - minSize;
+    const size = (Math.random() * sizeRange + minSize) * 2;
     const top = Math.random() * 100;
     const left = Math.random() * 100;
-    const animationDuration = Math.random() * 3 + 1;
-    const delay = Math.random() * 2;
+    const animationDuration = Math.random() * 2 + 1;
+    const delay = Math.random() * 1;
     
     sparkles.push(
       <div

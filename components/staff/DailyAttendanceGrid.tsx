@@ -40,16 +40,17 @@ import {
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { 
-  CalendarIcon, 
-  Clock, 
-  Save, 
   AlertCircle, 
-  CheckCircle2, 
+  CalendarIcon, 
+  ChevronDown,
+  ChevronUp,
   Coffee, 
-  Loader2 
+  Loader2, 
+  Save 
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Textarea } from '@/components/ui/textarea';
 
 // Types
 type Staff = {
@@ -141,6 +142,8 @@ export function DailyAttendanceGrid() {
   const [holidayName, setHolidayName] = useState('');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [sortField, setSortField] = useState<string>('staff_name');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -194,7 +197,37 @@ export function DailyAttendanceGrid() {
       // Filter out records where present is false (absent staff)
       const recordsToSave = records.filter(record => record.hours_worked > 0);
       
+      // Get the date string for the selected date
+      const dateStr = format(selectedDate, 'yyyy-MM-dd');
+      
+      // If no records to save, we need to check if there are existing records to delete
       if (recordsToSave.length === 0) {
+        // Get all existing records for this date
+        const { data: existingRecords, error: fetchError } = await supabase
+          .from('staff_hours')
+          .select('hours_id')
+          .eq('date_worked', dateStr);
+        
+        if (fetchError) {
+          console.error('Error fetching existing records:', fetchError);
+          throw fetchError;
+        }
+        
+        // If there are existing records, delete them
+        if (existingRecords && existingRecords.length > 0) {
+          const { error: deleteError } = await supabase
+            .from('staff_hours')
+            .delete()
+            .eq('date_worked', dateStr);
+          
+          if (deleteError) {
+            console.error('Error deleting records:', deleteError);
+            throw deleteError;
+          }
+          
+          console.log(`Deleted ${existingRecords.length} records for ${dateStr}`);
+        }
+        
         setIsSaving(false);
         return;
       }
@@ -409,6 +442,7 @@ export function DailyAttendanceGrid() {
             return {
               ...record,
               present,
+              isEditing: true, // Automatically enable editing when marked present
               start_time: startTime,
               end_time: endTime,
               morning_break_taken: morningBreak,
@@ -420,6 +454,7 @@ export function DailyAttendanceGrid() {
             return {
               ...record,
               present,
+              isEditing: false, // Disable editing when not present
               hours_worked: 0
             };
           }
@@ -638,21 +673,6 @@ export function DailyAttendanceGrid() {
     );
   };
 
-  // Toggle editing mode for a record
-  const toggleEditing = (staffId: number) => {
-    setAttendanceRecords(prev => 
-      prev.map(record => {
-        if (record.staff_id === staffId) {
-          return {
-            ...record,
-            isEditing: !record.isEditing,
-          };
-        }
-        return record;
-      })
-    );
-  };
-
   // Mark all staff as present with default values
   const markAllPresent = () => {
     const defaults = getDefaultTimes(selectedDate);
@@ -715,8 +735,30 @@ export function DailyAttendanceGrid() {
     // Show saving indicator
     setIsSaving(true);
     
-    console.log('Records prepared for saving:', JSON.stringify(recordsToSave, null, 2));
-    saveHoursMutation.mutate(recordsToSave);
+    // If no staff are present, show a confirmation dialog
+    if (recordsToSave.length === 0) {
+      const hasExistingRecords = attendanceRecords.some(record => record.hours_id);
+      
+      if (hasExistingRecords) {
+        if (window.confirm('No staff are marked as present. This will remove all attendance records for this date. Continue?')) {
+          console.log('Proceeding with deletion of all records for this date');
+          saveHoursMutation.mutate([]);
+        } else {
+          setIsSaving(false);
+        }
+      } else {
+        // No existing records, nothing to delete
+        toast({
+          title: 'No changes',
+          children: <p>No staff are marked as present and no existing records found.</p>,
+        });
+        setIsSaving(false);
+      }
+    } else {
+      // Normal save with records
+      console.log('Records prepared for saving:', JSON.stringify(recordsToSave, null, 2));
+      saveHoursMutation.mutate(recordsToSave);
+    }
   };
 
   // Increment time by 5 minutes
@@ -887,6 +929,58 @@ export function DailyAttendanceGrid() {
     );
   };
 
+  // Sort function for attendance records
+  const sortRecords = (records: AttendanceRecord[]): AttendanceRecord[] => {
+    return [...records].sort((a, b) => {
+      let valueA, valueB;
+      
+      // Get the values to compare based on the sort field
+      switch (sortField) {
+        case 'staff_name':
+          valueA = a.staff_name;
+          valueB = b.staff_name;
+          break;
+        case 'job_description':
+          valueA = a.job_description || '';
+          valueB = b.job_description || '';
+          break;
+        case 'hours_worked':
+          valueA = a.hours_worked;
+          valueB = b.hours_worked;
+          break;
+        default:
+          valueA = a.staff_name;
+          valueB = b.staff_name;
+      }
+      
+      // Compare the values based on their type
+      if (typeof valueA === 'string' && typeof valueB === 'string') {
+        const comparison = valueA.localeCompare(valueB);
+        return sortDirection === 'asc' ? comparison : -comparison;
+      } else {
+        // For numbers or other types
+        if (valueA < valueB) return sortDirection === 'asc' ? -1 : 1;
+        if (valueA > valueB) return sortDirection === 'asc' ? 1 : -1;
+        return 0;
+      }
+    });
+  };
+  
+  // Handle sort click
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      // If already sorting by this field, toggle direction
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      // If sorting by a new field, set it and default to ascending
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+  
+  // Get sorted records
+  const sortedRecords = sortRecords(attendanceRecords);
+
   // Loading state
   if (isLoadingStaff || isLoadingHours) {
     return (
@@ -959,18 +1053,53 @@ export function DailyAttendanceGrid() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[50px]">Present</TableHead>
-                <TableHead>Staff Member</TableHead>
-                <TableHead>Job</TableHead>
-                <TableHead className="w-[100px]">Hours</TableHead>
+                <TableHead 
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleSort('staff_name')}
+                >
+                  <div className="flex items-center">
+                    Staff Member
+                    {sortField === 'staff_name' && (
+                      sortDirection === 'asc' ? 
+                        <ChevronUp className="ml-1 h-4 w-4" /> : 
+                        <ChevronDown className="ml-1 h-4 w-4" />
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead 
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleSort('job_description')}
+                >
+                  <div className="flex items-center">
+                    Job
+                    {sortField === 'job_description' && (
+                      sortDirection === 'asc' ? 
+                        <ChevronUp className="ml-1 h-4 w-4" /> : 
+                        <ChevronDown className="ml-1 h-4 w-4" />
+                    )}
+                  </div>
+                </TableHead>
+                <TableHead 
+                  className="w-[100px] cursor-pointer hover:bg-muted/50"
+                  onClick={() => handleSort('hours_worked')}
+                >
+                  <div className="flex items-center">
+                    Hours
+                    {sortField === 'hours_worked' && (
+                      sortDirection === 'asc' ? 
+                        <ChevronUp className="ml-1 h-4 w-4" /> : 
+                        <ChevronDown className="ml-1 h-4 w-4" />
+                    )}
+                  </div>
+                </TableHead>
                 <TableHead className="w-[120px]">Start Time</TableHead>
                 <TableHead className="w-[120px]">End Time</TableHead>
                 <TableHead className="w-[180px]">Breaks</TableHead>
-                <TableHead className="w-[200px]">Notes</TableHead>
-                <TableHead className="w-[80px]">Actions</TableHead>
+                <TableHead className="w-[280px]">Notes</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {attendanceRecords.map((record) => (
+              {sortedRecords.map((record) => (
                 <TableRow key={record.staff_id}>
                   <TableCell>
                     <Checkbox 
@@ -981,21 +1110,16 @@ export function DailyAttendanceGrid() {
                   <TableCell className="font-medium">{record.staff_name}</TableCell>
                   <TableCell>{record.job_description || 'N/A'}</TableCell>
                   <TableCell>
-                    {record.isEditing ? (
-                      <span className="font-medium">{record.hours_worked}</span>
-                    ) : (
-                      <span>{record.hours_worked}</span>
-                    )}
+                    <span className={record.present ? "font-medium" : ""}>{record.hours_worked}</span>
                   </TableCell>
                   <TableCell>
-                    {record.isEditing ? (
+                    {record.present ? (
                       <div className="flex items-center space-x-1">
                         <Button 
                           variant="outline" 
                           size="icon"
                           className="h-8 w-8"
                           onClick={() => decrementStartTime(record.staff_id)}
-                          disabled={!record.present}
                         >
                           <span className="sr-only">Decrement start time</span>
                           <span>-</span>
@@ -1005,14 +1129,12 @@ export function DailyAttendanceGrid() {
                           value={record.start_time || ''} 
                           onChange={(e) => handleStartTimeChange(record.staff_id, e.target.value)}
                           className="w-24"
-                          disabled={!record.present}
                         />
                         <Button 
                           variant="outline" 
                           size="icon"
                           className="h-8 w-8"
                           onClick={() => incrementStartTime(record.staff_id)}
-                          disabled={!record.present}
                         >
                           <span className="sr-only">Increment start time</span>
                           <span>+</span>
@@ -1023,14 +1145,13 @@ export function DailyAttendanceGrid() {
                     )}
                   </TableCell>
                   <TableCell>
-                    {record.isEditing ? (
+                    {record.present ? (
                       <div className="flex items-center space-x-1">
                         <Button 
                           variant="outline" 
                           size="icon"
                           className="h-8 w-8"
                           onClick={() => decrementEndTime(record.staff_id)}
-                          disabled={!record.present}
                         >
                           <span className="sr-only">Decrement end time</span>
                           <span>-</span>
@@ -1040,14 +1161,12 @@ export function DailyAttendanceGrid() {
                           value={record.end_time || ''} 
                           onChange={(e) => handleFinishTimeChange(record.staff_id, e.target.value)}
                           className="w-24"
-                          disabled={!record.present}
                         />
                         <Button 
                           variant="outline" 
                           size="icon"
                           className="h-8 w-8"
                           onClick={() => incrementEndTime(record.staff_id)}
-                          disabled={!record.present}
                         >
                           <span className="sr-only">Increment end time</span>
                           <span>+</span>
@@ -1058,53 +1177,68 @@ export function DailyAttendanceGrid() {
                     )}
                   </TableCell>
                   <TableCell>
-                    <div className="flex space-x-2">
-                      <div className="flex items-center space-x-1" title="Lunch Break">
-                        <Coffee className="h-4 w-4" />
+                    <div className="flex items-center space-x-2">
+                      <div className="flex items-center space-x-1">
                         <Checkbox 
+                          id={`lunch-${record.staff_id}`}
                           checked={record.lunch_break_taken} 
                           onCheckedChange={() => toggleLunchBreak(record.staff_id)}
                           disabled={!record.present}
                         />
+                        <label 
+                          htmlFor={`lunch-${record.staff_id}`}
+                          className={cn(
+                            "text-sm",
+                            !record.present && "text-muted-foreground"
+                          )}
+                        >
+                          Lunch
+                        </label>
                       </div>
-                      <div className="flex items-center space-x-1" title="Morning Break">
-                        <span className="text-xs">AM</span>
+                      <div className="flex items-center space-x-1">
                         <Checkbox 
+                          id={`morning-${record.staff_id}`}
                           checked={record.morning_break_taken} 
                           onCheckedChange={() => toggleMorningBreak(record.staff_id)}
                           disabled={!record.present}
                         />
+                        <label 
+                          htmlFor={`morning-${record.staff_id}`}
+                          className={cn(
+                            "text-sm",
+                            !record.present && "text-muted-foreground"
+                          )}
+                        >
+                          AM
+                        </label>
                       </div>
-                      <div className="flex items-center space-x-1" title="Afternoon Break">
-                        <span className="text-xs">PM</span>
+                      <div className="flex items-center space-x-1">
                         <Checkbox 
+                          id={`afternoon-${record.staff_id}`}
                           checked={record.afternoon_break_taken} 
                           onCheckedChange={() => toggleAfternoonBreak(record.staff_id)}
                           disabled={!record.present}
                         />
+                        <label 
+                          htmlFor={`afternoon-${record.staff_id}`}
+                          className={cn(
+                            "text-sm",
+                            !record.present && "text-muted-foreground"
+                          )}
+                        >
+                          PM
+                        </label>
                       </div>
                     </div>
                   </TableCell>
                   <TableCell>
-                    {record.isEditing ? (
-                      <Input 
-                        value={record.notes || ''} 
-                        onChange={(e) => updateNotes(record.staff_id, e.target.value)}
-                        placeholder="Add notes..."
-                      />
-                    ) : (
-                      <span className="text-sm text-muted-foreground">{record.notes || '-'}</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      onClick={() => toggleEditing(record.staff_id)}
+                    <Textarea 
+                      value={record.notes || ''} 
+                      onChange={(e) => updateNotes(record.staff_id, e.target.value)}
+                      placeholder="Add notes..."
+                      className="min-h-[60px] resize-none"
                       disabled={!record.present}
-                    >
-                      {record.isEditing ? 'Done' : 'Edit'}
-                    </Button>
+                    />
                   </TableCell>
                 </TableRow>
               ))}
@@ -1130,7 +1264,7 @@ export function DailyAttendanceGrid() {
           </Button>
           <Button 
             onClick={saveAttendance}
-            disabled={isSaving || attendanceRecords.filter(r => r.present).length === 0}
+            disabled={isSaving}
           >
             {isSaving ? (
               <>
