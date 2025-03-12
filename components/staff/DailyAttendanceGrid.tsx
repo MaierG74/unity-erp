@@ -302,10 +302,18 @@ export function DailyAttendanceGrid() {
       // Refresh data
       queryClient.invalidateQueries({ queryKey: ['staff_hours'] });
       
-      // Show success notification
+      // Show success notification with more details
       toast({
-        title: 'Success',
-        children: <p>Attendance records saved successfully</p>,
+        title: 'Attendance Saved',
+        children: (
+          <div className="flex flex-col">
+            <p className="font-medium">Attendance records have been successfully updated.</p>
+            <p className="text-sm mt-1">Date: {format(selectedDate, 'EEEE, MMMM d, yyyy')}</p>
+            <p className="text-sm">Staff present: {attendanceRecords.filter(r => r.present).length}</p>
+          </div>
+        ),
+        variant: 'default',
+        className: 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800',
       });
     },
     onError: (error: any) => {
@@ -1265,11 +1273,33 @@ export function DailyAttendanceGrid() {
           <Button 
             onClick={saveAttendance}
             disabled={isSaving}
+            className={cn(
+              lastSaved && Date.now() - lastSaved.getTime() < 3000 ? 
+              "bg-green-600 hover:bg-green-700 transition-colors" : ""
+            )}
           >
             {isSaving ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Saving...
+                Saving Attendance...
+              </>
+            ) : lastSaved && Date.now() - lastSaved.getTime() < 3000 ? (
+              <>
+                <svg 
+                  xmlns="http://www.w3.org/2000/svg" 
+                  className="mr-2 h-4 w-4 animate-pulse" 
+                  fill="none" 
+                  viewBox="0 0 24 24" 
+                  stroke="currentColor"
+                >
+                  <path 
+                    strokeLinecap="round" 
+                    strokeLinejoin="round" 
+                    strokeWidth={2} 
+                    d="M5 13l4 4L19 7" 
+                  />
+                </svg>
+                Saved Successfully
               </>
             ) : (
               <>
