@@ -67,6 +67,20 @@
   }
 }
 
+/* Ensure content properly blurs when scrolling behind the header */
+nav.fixed {
+  @apply backdrop-blur-md z-50;
+}
+
+/* Fix for table rows not blurring properly */
+table {
+  @apply isolate;
+}
+
+tr {
+  @apply backdrop-blur-[inherit];
+}
+
 @layer components {
   .card {
     @apply rounded-lg border bg-card p-6 text-card-foreground shadow;

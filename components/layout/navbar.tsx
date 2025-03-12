@@ -9,7 +9,7 @@ export function Navbar() {
   const { user } = useAuth();
 
   return (
-    <nav className="fixed top-0 left-0 right-0 h-16 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <nav className="fixed top-0 left-0 right-0 h-16 border-b bg-background/95 backdrop-blur-md supports-[backdrop-filter]:bg-background/60 z-50">
       <div className="container flex h-full items-center justify-between">
         <Link href="/" className="flex items-center space-x-2">
           <span className="text-xl font-bold">Unity ERP</span>
