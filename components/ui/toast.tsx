@@ -10,7 +10,7 @@ const ToastContainer = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("fixed top-0 right-0 z-[100] w-full p-4 md:max-w-[420px]", className)}
+    className={cn("fixed bottom-0 right-0 z-[100] w-full p-4 md:max-w-[420px]", className)}
     {...props}
   />
 ))
@@ -25,7 +25,7 @@ const toastVariants = cva(
         destructive:
           "destructive group border-destructive bg-destructive text-destructive-foreground",
         success:
-          "border border-green-500 bg-green-500 text-white",
+          "border-2 border-green-500 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100 dark:border-green-700",
       },
     },
     defaultVariants: {
@@ -103,7 +103,7 @@ const ToastViewport = React.forwardRef<
   <ol
     ref={ref}
     className={cn(
-      "fixed top-0 right-0 z-[100] m-0 flex max-h-screen w-full flex-col-reverse p-4 sm:top-auto sm:bottom-0 sm:right-0 sm:flex-col md:max-w-[420px]",
+      "fixed bottom-0 right-0 z-[100] m-0 flex max-h-screen w-full flex-col p-4 sm:bottom-0 sm:right-0 sm:flex-col md:max-w-[420px]",
       className
     )}
     {...props}

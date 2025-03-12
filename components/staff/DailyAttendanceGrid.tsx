@@ -312,8 +312,8 @@ export function DailyAttendanceGrid() {
             <p className="text-sm">Staff present: {attendanceRecords.filter(r => r.present).length}</p>
           </div>
         ),
-        variant: 'default',
-        className: 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800',
+        variant: 'success',
+        duration: 6000, // Show for 6 seconds
       });
     },
     onError: (error: any) => {
@@ -1275,19 +1275,21 @@ export function DailyAttendanceGrid() {
             disabled={isSaving}
             className={cn(
               lastSaved && Date.now() - lastSaved.getTime() < 3000 ? 
-              "bg-green-600 hover:bg-green-700 transition-colors" : ""
+              "bg-green-600 hover:bg-green-700 transition-colors" : "",
+              isSaving ? "bg-blue-600 hover:bg-blue-700" : ""
             )}
+            size="lg"
           >
             {isSaving ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Saving Attendance...
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                <span className="animate-pulse">Saving Attendance...</span>
               </>
-            ) : lastSaved && Date.now() - lastSaved.getTime() < 3000 ? (
+            ) : lastSaved && Date.now() - lastSaved.getTime() < 5000 ? (
               <>
                 <svg 
                   xmlns="http://www.w3.org/2000/svg" 
-                  className="mr-2 h-4 w-4 animate-pulse" 
+                  className="mr-2 h-5 w-5 animate-bounce" 
                   fill="none" 
                   viewBox="0 0 24 24" 
                   stroke="currentColor"
@@ -1303,7 +1305,7 @@ export function DailyAttendanceGrid() {
               </>
             ) : (
               <>
-                <Save className="mr-2 h-4 w-4" />
+                <Save className="mr-2 h-5 w-5" />
                 Save Attendance
               </>
             )}
