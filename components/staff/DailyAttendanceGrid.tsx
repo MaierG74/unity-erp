@@ -299,7 +299,7 @@ export function DailyAttendanceGrid() {
       setIsSaving(false);
       setLastSaved(new Date());
       
-      // Refresh data
+      // Refresh data - invalidate all staff_hours related queries with a single call
       queryClient.invalidateQueries({ queryKey: ['staff_hours'] });
       
       // Show success notification with more details

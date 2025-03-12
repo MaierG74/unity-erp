@@ -153,7 +153,7 @@ export function WeeklySummary() {
 
   // Fetch hours for the selected week
   const { data: weeklyHours = [], isLoading: isLoadingHours } = useQuery({
-    queryKey: ['staff_hours_weekly', format(weekStart, 'yyyy-MM-dd'), format(weekEnd, 'yyyy-MM-dd')],
+    queryKey: ['staff_hours', 'weekly', format(weekStart, 'yyyy-MM-dd'), format(weekEnd, 'yyyy-MM-dd')],
     queryFn: async () => {
       const startDateStr = format(weekStart, 'yyyy-MM-dd');
       const endDateStr = format(weekEnd, 'yyyy-MM-dd');
