@@ -20,7 +20,13 @@ export const useAuth = () => {
 };
 
 // Route groups (in parentheses) are ignored in the URL, so we use the actual URL paths
-const publicRoutes = ['/login', '/forgot-password', '/reset-password', '/bypass'];
+const publicRoutes = ['/login', '/forgot-password', '/reset-password', '/bypass', '/bypass/orders'];
+
+// Development bypass routes - these routes will be accessible without authentication in development mode
+const devBypassRoutes = ['/orders', '/orders/new', '/orders/[orderId]'];
+
+// Check if we're in development mode
+const isDevelopment = process.env.NODE_ENV === 'development';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -64,8 +70,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Prevent redirect loops by only redirecting once per component mount
     if (hasRedirected.current) return;
 
+    // Check if the current path is in the development bypass routes
+    const isDevBypassRoute = isDevelopment && devBypassRoutes.some(route => {
+      // Handle dynamic routes by replacing [param] with a regex pattern
+      const routePattern = route.replace(/\[.*?\]/g, '[^/]+');
+      const regex = new RegExp(`^${routePattern}$`);
+      return regex.test(pathname);
+    });
+
     // Route groups are stripped from the URL, so we use the actual paths
-    if (!user && !publicRoutes.includes(pathname)) {
+    if (!user && !publicRoutes.includes(pathname) && !isDevBypassRoute) {
       hasRedirected.current = true;
       console.log('Redirecting to login from', pathname);
       router.push('/login');
