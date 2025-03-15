@@ -28,7 +28,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { format, startOfWeek, endOfWeek, subDays, addDays, differenceInDays, eachDayOfInterval } from 'date-fns';
+import { format, startOfWeek, endOfWeek, subDays, addDays, differenceInDays, eachDayOfInterval, isSunday } from 'date-fns';
 import { CalendarIcon, Download, Loader2, Printer, DollarSign, ClipboardList, UserX, BarChart4 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -62,7 +62,9 @@ type StaffHours = {
   hours_worked: number;
   regular_hours: number;
   overtime_hours: number;
+  overtime_rate: number;
   break_time: number;
+  is_holiday: boolean;
 };
 
 type PayrollReport = {
@@ -71,9 +73,11 @@ type PayrollReport = {
   hourly_rate: number;
   regular_hours: number;
   overtime_hours: number;
+  doubletime_hours: number;
   total_hours: number;
   regular_earnings: number;
   overtime_earnings: number;
+  doubletime_earnings: number;
   total_earnings: number;
 };
 
@@ -114,6 +118,43 @@ const exportToCSV = (data: any[], filename: string) => {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+};
+
+const PayrollTable = ({ data }: { data: PayrollReport[] }) => {
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Name</TableHead>
+          <TableHead>Rate</TableHead>
+          <TableHead>Regular Hrs</TableHead>
+          <TableHead>Overtime Hrs</TableHead>
+          <TableHead>Double Time Hrs</TableHead>
+          <TableHead>Regular Pay</TableHead>
+          <TableHead>Overtime Pay</TableHead>
+          <TableHead>Double Time Pay</TableHead>
+          <TableHead className="text-right">Total Pay</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {data.map((row, i) => (
+          <TableRow key={i}>
+            <TableCell>{row.name}</TableCell>
+            <TableCell>R{row.hourly_rate.toFixed(2)}</TableCell>
+            <TableCell>{row.regular_hours.toFixed(1)}</TableCell>
+            <TableCell>{row.overtime_hours.toFixed(1)}</TableCell>
+            <TableCell>{row.doubletime_hours.toFixed(1)}</TableCell>
+            <TableCell>R{row.regular_earnings.toFixed(2)}</TableCell>
+            <TableCell>R{row.overtime_earnings.toFixed(2)}</TableCell>
+            <TableCell>R{row.doubletime_earnings.toFixed(2)}</TableCell>
+            <TableCell className="text-right font-semibold">
+              R{row.total_earnings.toFixed(2)}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
 };
 
 export function StaffReports() {
@@ -196,24 +237,73 @@ export function StaffReports() {
         const staffHours = hoursData.filter(h => h.staff_id === staff.staff_id);
         
         // Calculate totals
-        const totalRegularHours = staffHours.reduce((sum, record) => sum + (record.regular_hours || 0), 0);
-        const totalOvertimeHours = staffHours.reduce((sum, record) => sum + (record.overtime_hours || 0), 0);
-        const totalHoursWorked = staffHours.reduce((sum, record) => sum + (record.hours_worked || 0), 0);
+        let totalRegularHours = 0;
+        let totalOvertimeHours = 0;
+        let totalDoubleTimeHours = 0;
+        let weeklyRegularHours = 0;
+        
+        // First pass: Calculate total regular hours for the week (excluding Sundays and holidays)
+        staffHours.forEach(record => {
+          if (!record.is_holiday && !isSunday(new Date(record.date_worked))) {
+            weeklyRegularHours += record.hours_worked || 0;
+          }
+        });
+        
+        // Second pass: Distribute hours
+        staffHours.forEach(record => {
+          const hoursForDay = record.hours_worked || 0;
+          
+          if (record.is_holiday || isSunday(new Date(record.date_worked))) {
+            // All hours on holidays and Sundays are double time
+            totalDoubleTimeHours += hoursForDay;
+          } else {
+            // For regular days
+            if (totalRegularHours < 44) {
+              // How many more regular hours can we add before hitting 44?
+              const remainingRegularHours = 44 - totalRegularHours;
+              
+              if (hoursForDay <= remainingRegularHours) {
+                // All hours go to regular
+                totalRegularHours += hoursForDay;
+              } else {
+                // Split between regular and overtime
+                totalRegularHours += remainingRegularHours;
+                totalOvertimeHours += hoursForDay - remainingRegularHours;
+              }
+            } else {
+              // Already at 44 regular hours, everything goes to overtime
+              totalOvertimeHours += hoursForDay;
+            }
+            
+            // Add any explicitly marked overtime
+            if (record.overtime_hours > 0) {
+              if (record.overtime_rate === 2.0) {
+                totalDoubleTimeHours += record.overtime_hours;
+              } else {
+                totalOvertimeHours += record.overtime_hours;
+              }
+            }
+          }
+        });
         
         // Calculate earnings
-        const regularEarnings = totalRegularHours * (staff.hourly_rate || 0);
-        const overtimeEarnings = totalOvertimeHours * (staff.hourly_rate ? staff.hourly_rate * 1.5 : 0);
-        const totalEarnings = regularEarnings + overtimeEarnings;
+        const hourlyRate = staff.hourly_rate || 0;
+        const regularEarnings = totalRegularHours * hourlyRate;
+        const overtimeEarnings = totalOvertimeHours * (hourlyRate * 1.5); // Overtime at 1.5x
+        const doubletimeEarnings = totalDoubleTimeHours * (hourlyRate * 2.0); // Double time at 2.0x
+        const totalEarnings = regularEarnings + overtimeEarnings + doubletimeEarnings;
         
         return {
           staff_id: staff.staff_id,
           name: `${staff.first_name} ${staff.last_name}`,
-          hourly_rate: staff.hourly_rate || 0,
+          hourly_rate: hourlyRate,
           regular_hours: totalRegularHours,
           overtime_hours: totalOvertimeHours,
-          total_hours: totalHoursWorked,
+          doubletime_hours: totalDoubleTimeHours,
+          total_hours: totalRegularHours + totalOvertimeHours + totalDoubleTimeHours,
           regular_earnings: regularEarnings,
           overtime_earnings: overtimeEarnings,
+          doubletime_earnings: doubletimeEarnings,
           total_earnings: totalEarnings
         };
       });
@@ -452,34 +542,7 @@ export function StaffReports() {
               {activeTab === 'payroll' && reportData && reportData.length > 0 && (
                 <>
                   <div className="overflow-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Staff Name</TableHead>
-                          <TableHead>Hourly Rate</TableHead>
-                          <TableHead>Regular Hrs</TableHead>
-                          <TableHead>Overtime Hrs</TableHead>
-                          <TableHead>Regular Pay</TableHead>
-                          <TableHead>Overtime Pay</TableHead>
-                          <TableHead className="text-right">Total Pay</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {(reportData as PayrollReport[]).map((row) => (
-                          <TableRow key={row.staff_id}>
-                            <TableCell className="font-medium">{row.name}</TableCell>
-                            <TableCell>R{row.hourly_rate.toFixed(2)}</TableCell>
-                            <TableCell>{row.regular_hours.toFixed(1)}</TableCell>
-                            <TableCell>{row.overtime_hours.toFixed(1)}</TableCell>
-                            <TableCell>R{row.regular_earnings.toFixed(2)}</TableCell>
-                            <TableCell>R{row.overtime_earnings.toFixed(2)}</TableCell>
-                            <TableCell className="text-right font-semibold">
-                              R{row.total_earnings.toFixed(2)}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                    <PayrollTable data={reportData as PayrollReport[]} />
                   </div>
                   
                   {/* Export Actions */}
