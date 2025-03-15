@@ -2,13 +2,14 @@
 
 import { useAuth } from '../auth-provider';
 import { Navbar } from './navbar';
-import { Sidebar } from './sidebar';
+import { Sidebar, useSidebar } from './sidebar';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
 export function RootLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const [forceShowSidebar, setForceShowSidebar] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   
   // Check for authentication and set force sidebar if needed
   useEffect(() => {
@@ -19,6 +20,20 @@ export function RootLayout({ children }: { children: React.ReactNode }) {
     if (!loading && !user) {
       checkDirectAuth();
     }
+    
+    // Check if the screen is mobile size
+    const checkIfMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    
+    // Initial check
+    checkIfMobile();
+    
+    // Add event listener for window resize
+    window.addEventListener('resize', checkIfMobile);
+    
+    // Cleanup
+    return () => window.removeEventListener('resize', checkIfMobile);
   }, [user, loading]);
   
   // Direct auth check as a backup
@@ -60,12 +75,36 @@ export function RootLayout({ children }: { children: React.ReactNode }) {
   // Show sidebar if user is authenticated OR if force sidebar is set
   const shouldShowSidebar = !!user || forceShowSidebar;
 
-  return (
-    <div className="min-h-screen">
+  return shouldShowSidebar ? (
+    <div className="flex h-screen w-screen bg-background overflow-hidden">
+      <Sidebar />
+      <Content>{children}</Content>
+    </div>
+  ) : (
+    <div className="flex h-screen flex-col bg-background">
       <Navbar />
-      {shouldShowSidebar && <Sidebar />}
-      <main className={`pt-16 ${shouldShowSidebar ? 'pl-64' : ''}`}>
-        <div className="container py-8">
+      <main className="flex-1 w-full pt-16 overflow-auto">
+        <div className="container mx-auto p-4 md:p-6">
+          {children}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// Content component with navbar
+function Content({ children }: { children: React.ReactNode }) {
+  const { collapsed } = useSidebar();
+  
+  return (
+    <div className="flex flex-col flex-1 h-full overflow-hidden transition-all duration-200 ease-in-out"
+      style={{ 
+        width: collapsed ? 'calc(100% - 64px)' : 'calc(100% - 256px)'
+      }}
+    >
+      <Navbar />
+      <main className="flex-1 overflow-auto pt-16">
+        <div className="container mx-auto p-4 md:p-6">
           {children}
         </div>
       </main>
