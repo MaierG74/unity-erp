@@ -62,6 +62,7 @@ type StaffHours = {
   hours_worked: number;
   regular_hours: number;
   overtime_hours: number;
+  overtime_rate: number;
   break_time: number;
   is_holiday: boolean;
 };
@@ -239,22 +240,57 @@ export function StaffReports() {
         let totalRegularHours = 0;
         let totalOvertimeHours = 0;
         let totalDoubleTimeHours = 0;
+        let weeklyRegularHours = 0;
         
+        // First pass: Calculate total regular hours for the week (excluding Sundays and holidays)
         staffHours.forEach(record => {
-          const isDoubleTime = record.is_holiday || isSunday(new Date(record.date_worked));
-          if (isDoubleTime) {
-            totalDoubleTimeHours += record.hours_worked || 0;
+          if (!record.is_holiday && !isSunday(new Date(record.date_worked))) {
+            weeklyRegularHours += record.hours_worked || 0;
+          }
+        });
+        
+        // Second pass: Distribute hours
+        staffHours.forEach(record => {
+          const hoursForDay = record.hours_worked || 0;
+          
+          if (record.is_holiday || isSunday(new Date(record.date_worked))) {
+            // All hours on holidays and Sundays are double time
+            totalDoubleTimeHours += hoursForDay;
           } else {
-            totalRegularHours += record.regular_hours || 0;
-            totalOvertimeHours += record.overtime_hours || 0;
+            // For regular days
+            if (totalRegularHours < 44) {
+              // How many more regular hours can we add before hitting 44?
+              const remainingRegularHours = 44 - totalRegularHours;
+              
+              if (hoursForDay <= remainingRegularHours) {
+                // All hours go to regular
+                totalRegularHours += hoursForDay;
+              } else {
+                // Split between regular and overtime
+                totalRegularHours += remainingRegularHours;
+                totalOvertimeHours += hoursForDay - remainingRegularHours;
+              }
+            } else {
+              // Already at 44 regular hours, everything goes to overtime
+              totalOvertimeHours += hoursForDay;
+            }
+            
+            // Add any explicitly marked overtime
+            if (record.overtime_hours > 0) {
+              if (record.overtime_rate === 2.0) {
+                totalDoubleTimeHours += record.overtime_hours;
+              } else {
+                totalOvertimeHours += record.overtime_hours;
+              }
+            }
           }
         });
         
         // Calculate earnings
         const hourlyRate = staff.hourly_rate || 0;
         const regularEarnings = totalRegularHours * hourlyRate;
-        const overtimeEarnings = totalOvertimeHours * (hourlyRate * 1.5);
-        const doubletimeEarnings = totalDoubleTimeHours * (hourlyRate * 2.0);
+        const overtimeEarnings = totalOvertimeHours * (hourlyRate * 1.5); // Overtime at 1.5x
+        const doubletimeEarnings = totalDoubleTimeHours * (hourlyRate * 2.0); // Double time at 2.0x
         const totalEarnings = regularEarnings + overtimeEarnings + doubletimeEarnings;
         
         return {
