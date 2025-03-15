@@ -7,11 +7,13 @@ import { format } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { Order, OrderAttachment, OrderStatus } from '@/types/orders';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
-import { ArrowLeft, File, Download, Paperclip } from 'lucide-react';
+import { ArrowLeft, File, Download, Paperclip, Package, Layers, Wrench, Cog, Search, PaintBucket } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 
 type OrderDetailPageProps = {
   params: {
@@ -186,9 +188,72 @@ function FileIcon({ fileName }: { fileName: string }) {
   return getFileIcon();
 }
 
+// Add new interface for sections
+interface OrderSection {
+  name: string;
+  icon: React.ReactNode;
+  color: string;
+}
+
+// Update sections to include powdercoating
+const sections: { [key: string]: OrderSection } = {
+  chair: {
+    name: 'Chair',
+    icon: <Package className="h-4 w-4" />,
+    color: 'bg-gray-100 text-gray-800',
+  },
+  wood: {
+    name: 'Wood',
+    icon: <Layers className="h-4 w-4" />,
+    color: 'bg-gray-100 text-gray-800',
+  },
+  steel: {
+    name: 'Steel',
+    icon: <Wrench className="h-4 w-4" />,
+    color: 'bg-gray-100 text-gray-800',
+  },
+  mechanical: {
+    name: 'Mechanical',
+    icon: <Cog className="h-4 w-4" />,
+    color: 'bg-gray-100 text-gray-800',
+  },
+  powdercoating: {
+    name: 'Powdercoating',
+    icon: <PaintBucket className="h-4 w-4" />,
+    color: 'bg-gray-100 text-gray-800',
+  },
+};
+
+// Update determineProductSections to include powdercoating
+function determineProductSections(product: any): string[] {
+  const sections: string[] = [];
+  
+  if (product?.name?.toLowerCase().includes('chair') || 
+      product?.description?.toLowerCase().includes('upholstery')) {
+    sections.push('chair');
+  }
+  if (product?.description?.toLowerCase().includes('wood')) {
+    sections.push('wood');
+  }
+  if (product?.description?.toLowerCase().includes('steel')) {
+    sections.push('steel');
+  }
+  if (product?.description?.toLowerCase().includes('mechanical')) {
+    sections.push('mechanical');
+  }
+  if (product?.description?.toLowerCase().includes('powder') || 
+      product?.description?.toLowerCase().includes('coating')) {
+    sections.push('powdercoating');
+  }
+  
+  return sections;
+}
+
 export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   const orderId = parseInt(params.orderId, 10);
   const [activeTab, setActiveTab] = useState<string>('details');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeSection, setActiveSection] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -239,6 +304,37 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     },
   });
 
+  // Enhanced filter function to include section filtering
+  const filterOrderDetails = (details: any[]) => {
+    if (!details) return [];
+    
+    let filteredDetails = [...details];
+    
+    // Apply section filter if active
+    if (activeSection) {
+      filteredDetails = filteredDetails.filter(detail => 
+        determineProductSections(detail.product).includes(activeSection)
+      );
+    }
+    
+    // Apply search query filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filteredDetails = filteredDetails.filter(detail => 
+        detail.product?.name?.toLowerCase().includes(query) ||
+        detail.product?.description?.toLowerCase().includes(query) ||
+        detail.order_detail_id.toString().includes(query)
+      );
+    }
+    
+    return filteredDetails;
+  };
+
+  // Function to handle section filter clicks
+  const handleSectionFilter = (section: string | null) => {
+    setActiveSection(section);
+  };
+
   if (orderLoading) {
     return <div className="p-8 text-center">Loading order details...</div>;
   }
@@ -253,159 +349,236 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-2">
-        <Link href="/orders">
-          <Button variant="ghost" size="icon" className="h-8 w-8">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
-        <h1 className="text-3xl font-bold tracking-tight">
-          {order?.order_number || `Order #${orderId}`}
-        </h1>
-        <StatusBadge status={order?.status?.status_name || 'Unknown'} />
-      </div>
-
       <div className="flex items-center justify-between">
-        <Tabs defaultValue="details" value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList>
-            <TabsTrigger value="details">Order Details</TabsTrigger>
-            <TabsTrigger value="attachments">
-              Attachments
-              {attachments && attachments.length > 0 && (
-                <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-medium text-primary-foreground">
-                  {attachments.length}
-                </span>
-              )}
-            </TabsTrigger>
-          </TabsList>
-
-          {/* Status Update Section */}
-          <div className="ml-auto">
-            <div className="flex items-center gap-2">
-              <span className="text-sm">Status:</span>
-              <Select
-                value={order?.status_id?.toString()}
-                onValueChange={(value) => {
-                  updateStatusMutation.mutate({ statusId: parseInt(value, 10) });
-                }}
-                disabled={updateStatusMutation.isPending}
-              >
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Select status" />
-                </SelectTrigger>
-                <SelectContent>
-                  {statuses.map((status) => (
-                    <SelectItem key={status.status_id} value={status.status_id.toString()}>
-                      {status.status_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+        <div className="flex items-center gap-2">
+          <Link href="/orders">
+            <Button variant="ghost" size="icon" className="h-8 w-8">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          </Link>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">
+              {order?.order_number || `Order #${orderId}`}
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Created on {order?.created_at && format(new Date(order.created_at), 'MMMM d, yyyy')}
+            </p>
           </div>
-        </Tabs>
+        </div>
+        <div className="flex items-center gap-4">
+          <StatusBadge status={order?.status?.status_name || 'Unknown'} />
+          {order?.delivery_date && (
+            <Badge variant="outline" className="ml-2">
+              Delivery: {format(new Date(order.delivery_date), 'MMM d, yyyy')}
+            </Badge>
+          )}
+        </div>
       </div>
 
-      <TabsContent value="details" className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Order Information</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="grid grid-cols-2 gap-1">
-                <span className="text-sm font-medium">Order Number:</span>
-                <span className="text-sm">{order?.order_number || `#${orderId}`}</span>
-                
-                <span className="text-sm font-medium">Created Date:</span>
-                <span className="text-sm">
-                  {order?.created_at && format(new Date(order.created_at), 'MMM d, yyyy')}
-                </span>
-                
-                <span className="text-sm font-medium">Delivery Date:</span>
-                <span className="text-sm">
-                  {order?.delivery_date 
-                    ? format(new Date(order.delivery_date), 'MMM d, yyyy')
-                    : 'Not set'}
-                </span>
-                
-                <span className="text-sm font-medium">Total Amount:</span>
-                <span className="text-sm">
-                  {order?.total_amount
-                    ? `$${order.total_amount.toFixed(2)}`
-                    : 'Not set'}
-                </span>
-                
-                <span className="text-sm font-medium">Status:</span>
-                <span className="text-sm">
-                  <StatusBadge status={order?.status?.status_name || 'Unknown'} />
-                </span>
-              </div>
-            </CardContent>
-          </Card>
+      {/* Section Filter Pills */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        <Button
+          variant={activeSection === null ? "secondary" : "outline"}
+          size="sm"
+          onClick={() => handleSectionFilter(null)}
+          className="rounded-full"
+        >
+          All Orders
+        </Button>
+        <Button
+          variant={activeSection === 'chair' ? "secondary" : "outline"}
+          size="sm"
+          onClick={() => handleSectionFilter('chair')}
+          className="rounded-full"
+        >
+          <Package className="h-4 w-4 mr-2" />
+          Chairs Section
+        </Button>
+        <Button
+          variant={activeSection === 'wood' ? "secondary" : "outline"}
+          size="sm"
+          onClick={() => handleSectionFilter('wood')}
+          className="rounded-full"
+        >
+          <Layers className="h-4 w-4 mr-2" />
+          Wood Section
+        </Button>
+        <Button
+          variant={activeSection === 'steel' ? "secondary" : "outline"}
+          size="sm"
+          onClick={() => handleSectionFilter('steel')}
+          className="rounded-full"
+        >
+          <Wrench className="h-4 w-4 mr-2" />
+          Steel Section
+        </Button>
+        <Button
+          variant={activeSection === 'powdercoating' ? "secondary" : "outline"}
+          size="sm"
+          onClick={() => handleSectionFilter('powdercoating')}
+          className="rounded-full"
+        >
+          <PaintBucket className="h-4 w-4 mr-2" />
+          Powdercoating Section
+        </Button>
+      </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Customer Information</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {order?.customer ? (
-                <div className="grid grid-cols-2 gap-1">
-                  <span className="text-sm font-medium">Name:</span>
-                  <span className="text-sm">{order.customer.name}</span>
-                  
-                  <span className="text-sm font-medium">Contact:</span>
-                  <span className="text-sm">{order.customer.contact || 'N/A'}</span>
-                  
-                  <span className="text-sm font-medium">Email:</span>
-                  <span className="text-sm">{order.customer.email || 'N/A'}</span>
-                  
-                  <span className="text-sm font-medium">Telephone:</span>
-                  <span className="text-sm">{order.customer.telephone || 'N/A'}</span>
-                </div>
-              ) : (
-                <div className="text-sm text-muted-foreground">
-                  No customer information available
-                </div>
-              )}
-            </CardContent>
-          </Card>
+      {/* Search Bar */}
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+          <Input
+            type="text"
+            placeholder="Search by product name, description, or order ID..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+          />
         </div>
+      </div>
 
-        {/* Order Line Items Section */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Order Line Items</CardTitle>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Customer Information */}
+        <Card className="md:col-span-1">
+          <CardHeader>
+            <CardTitle className="text-lg">Customer Information</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {order?.customer ? (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Name</p>
+                  <p className="text-base">{order.customer.name}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Contact</p>
+                  <p className="text-base">{order.customer.contact || 'N/A'}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Email</p>
+                  <p className="text-base">{order.customer.email || 'N/A'}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Telephone</p>
+                  <p className="text-base">{order.customer.telephone || 'N/A'}</p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No customer information available
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Order Sections */}
+        <Card className="md:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-lg">Order Sections</CardTitle>
+            <CardDescription>
+              Manufacturing sections involved in this order
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {order?.details && order.details.length > 0 ? (
+              <div className="space-y-6">
+                {/* Sections Summary */}
+                <div className="flex flex-wrap gap-2">
+                  {Array.from(new Set(
+                    filterOrderDetails(order.details).flatMap(detail => 
+                      determineProductSections(detail.product)
+                    )
+                  )).map(sectionKey => {
+                    const section = sections[sectionKey];
+                    return section ? (
+                      <div
+                        key={sectionKey}
+                        className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-gray-100"
+                      >
+                        {section.icon}
+                        <span className="ml-2">{section.name}</span>
+                      </div>
+                    ) : null;
+                  })}
+                </div>
+
+                {/* Detailed Section Breakdown */}
+                <div className="border rounded-lg divide-y">
+                  {filterOrderDetails(order.details).map((detail) => {
+                    const productSections = determineProductSections(detail.product);
+                    return (
+                      <div key={detail.order_detail_id} className="p-4">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <h4 className="font-medium">
+                              {detail.product?.name || `Product #${detail.product_id}`}
+                            </h4>
+                            <p className="text-sm text-muted-foreground mt-1">
+                              {detail.product?.description || 'No description'}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {productSections.map(sectionKey => {
+                              const section = sections[sectionKey];
+                              return section ? (
+                                <div
+                                  key={sectionKey}
+                                  className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-gray-100"
+                                >
+                                  {section.icon}
+                                  <span className="ml-1">{section.name}</span>
+                                </div>
+                              ) : null;
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No products in this order
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Order Line Items */}
+        <Card className="md:col-span-3">
+          <CardHeader>
+            <CardTitle className="text-lg">Order Line Items</CardTitle>
           </CardHeader>
           <CardContent>
             {order?.details && order.details.length > 0 ? (
               <div className="overflow-x-auto">
-                <table className="w-full table-auto">
+                <table className="w-full">
                   <thead>
                     <tr className="border-b">
-                      <th className="px-4 py-2 text-left font-medium text-sm">Product</th>
-                      <th className="px-4 py-2 text-left font-medium text-sm">Description</th>
-                      <th className="px-4 py-2 text-right font-medium text-sm">Quantity</th>
-                      <th className="px-4 py-2 text-right font-medium text-sm">Unit Price</th>
-                      <th className="px-4 py-2 text-right font-medium text-sm">Total</th>
+                      <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Product</th>
+                      <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Description</th>
+                      <th className="px-4 py-3 text-right text-sm font-medium text-muted-foreground">Quantity</th>
+                      <th className="px-4 py-3 text-right text-sm font-medium text-muted-foreground">Unit Price</th>
+                      <th className="px-4 py-3 text-right text-sm font-medium text-muted-foreground">Total</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {order.details.map((detail) => (
-                      <tr key={detail.order_detail_id} className="border-b">
-                        <td className="px-4 py-3 text-sm">
+                  <tbody className="divide-y">
+                    {filterOrderDetails(order.details).map((detail) => (
+                      <tr key={detail.order_detail_id}>
+                        <td className="px-4 py-4 text-sm">
                           {detail.product?.name || `Product #${detail.product_id}`}
                         </td>
-                        <td className="px-4 py-3 text-sm">
+                        <td className="px-4 py-4 text-sm text-muted-foreground">
                           {detail.product?.description || 'No description'}
                         </td>
-                        <td className="px-4 py-3 text-sm text-right">
+                        <td className="px-4 py-4 text-sm text-right">
                           {detail.quantity}
                         </td>
-                        <td className="px-4 py-3 text-sm text-right">
+                        <td className="px-4 py-4 text-sm text-right">
                           ${parseFloat(detail.unit_price.toString()).toFixed(2)}
                         </td>
-                        <td className="px-4 py-3 text-sm text-right">
+                        <td className="px-4 py-4 text-sm text-right font-medium">
                           ${(detail.quantity * parseFloat(detail.unit_price.toString())).toFixed(2)}
                         </td>
                       </tr>
@@ -413,82 +586,66 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                   </tbody>
                   <tfoot>
                     <tr className="border-t">
-                      <td colSpan={4} className="px-4 py-3 text-sm text-right font-medium">
-                        Total:
+                      <td colSpan={4} className="px-4 py-4 text-sm text-right font-medium">
+                        Total Amount:
                       </td>
-                      <td className="px-4 py-3 text-sm text-right font-medium">
+                      <td className="px-4 py-4 text-sm text-right font-medium">
                         ${order.total_amount !== null 
                           ? parseFloat(order.total_amount.toString()).toFixed(2)
-                          : order.details.reduce(
+                          : filterOrderDetails(order.details).reduce(
                               (sum, detail) => sum + (detail.quantity * parseFloat(detail.unit_price.toString())),
                               0
                             ).toFixed(2)
-                      }
-                    </td>
+                        }
+                      </td>
                     </tr>
                   </tfoot>
                 </table>
               </div>
             ) : (
-              <div className="py-12 text-center">
-                <p className="text-muted-foreground">No items have been added to this order.</p>
-              </div>
+              <p className="text-sm text-muted-foreground">
+                No line items in this order
+              </p>
             )}
           </CardContent>
         </Card>
-      </TabsContent>
 
-      <TabsContent value="attachments" className="space-y-6">
-        <div className="flex justify-end">
-          <Button variant="outline" onClick={() => setActiveTab('details')}>
-            <Paperclip className="h-4 w-4 mr-2" />
-            Add Attachment
-          </Button>
-        </div>
-
-        {attachmentsLoading ? (
-          <div className="p-8 text-center">Loading attachments...</div>
-        ) : attachmentsError ? (
-          <div className="p-8 text-center text-destructive">
-            Error loading attachments. Please try again.
-          </div>
-        ) : attachments && attachments.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {attachments.map((attachment) => (
-              <Card key={attachment.id} className="flex flex-col h-full">
-                <CardContent className="flex flex-col items-center p-6">
-                  <FileIcon fileName={attachment.file_name} />
-                  <h3 className="mt-4 font-medium text-center line-clamp-2">
-                    {attachment.file_name}
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {format(new Date(attachment.uploaded_at), 'MMM d, yyyy')}
-                  </p>
-                  <div className="mt-auto pt-4">
+        {/* Attachments Section */}
+        {attachments && attachments.length > 0 && (
+          <Card className="md:col-span-3">
+            <CardHeader>
+              <CardTitle className="text-lg">Attachments</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {attachments.map((attachment) => (
+                  <div
+                    key={attachment.id}
+                    className="flex flex-col items-center p-4 border rounded-lg hover:bg-accent/50 transition-colors"
+                  >
+                    <FileIcon fileName={attachment.file_name} />
+                    <h3 className="mt-3 text-sm font-medium text-center line-clamp-1">
+                      {attachment.file_name}
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {format(new Date(attachment.uploaded_at), 'MMM d, yyyy')}
+                    </p>
                     <a 
                       href={attachment.file_url} 
                       target="_blank" 
                       rel="noopener noreferrer"
-                      className="inline-flex items-center text-sm text-primary hover:underline"
+                      className="mt-3 inline-flex items-center text-xs text-primary hover:underline"
                     >
-                      <Download className="h-4 w-4 mr-1" />
+                      <Download className="h-3 w-3 mr-1" />
                       Download
                     </a>
                   </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        ) : (
-          <div className="p-12 text-center border rounded-lg">
-            <Paperclip className="h-8 w-8 mx-auto text-muted-foreground" />
-            <h3 className="mt-4 text-lg font-medium">No attachments</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              There are no files attached to this order yet.
-            </p>
-          </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
         )}
-      </TabsContent>
+      </div>
     </div>
   );
 } 

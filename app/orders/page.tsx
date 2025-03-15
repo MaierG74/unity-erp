@@ -18,7 +18,8 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { PlusCircle, Search } from 'lucide-react';
+import { PlusCircle, Search, Package, Layers, Wrench, PaintBucket } from 'lucide-react';
+import { motion } from 'framer-motion';
 
 // Fetch orders with status and customer information
 async function fetchOrders(statusFilter?: string, searchQuery?: string): Promise<Order[]> {
@@ -147,10 +148,33 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+// Add function to determine product sections
+function determineProductSections(product: any): string[] {
+  const sections: string[] = [];
+  
+  if (product?.name?.toLowerCase().includes('chair') || 
+      product?.description?.toLowerCase().includes('upholstery')) {
+    sections.push('chair');
+  }
+  if (product?.description?.toLowerCase().includes('wood')) {
+    sections.push('wood');
+  }
+  if (product?.description?.toLowerCase().includes('steel')) {
+    sections.push('steel');
+  }
+  if (product?.description?.toLowerCase().includes('powder') || 
+      product?.description?.toLowerCase().includes('coating')) {
+    sections.push('powdercoating');
+  }
+  
+  return sections;
+}
+
 export default function OrdersPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [debouncedSearch, setDebouncedSearch] = useState<string>('');
+  const [activeSection, setActiveSection] = useState<string | null>(null);
   
   // Handle search input change with debounce
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -175,22 +199,119 @@ export default function OrdersPage() {
     queryFn: () => fetchOrders(statusFilter, debouncedSearch),
   });
 
+  // Function to handle section filter clicks
+  const handleSectionFilter = (section: string | null) => {
+    setActiveSection(section);
+  };
+
+  // Filter orders based on section
+  const filteredOrders = orders.filter(order => {
+    if (!activeSection) return true;
+    
+    // Check if any product in the order belongs to the selected section
+    return order.details?.some(detail => 
+      determineProductSections(detail.product).includes(activeSection)
+    );
+  });
+
   return (
-    <div className="space-y-6 w-full max-w-full">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold tracking-tight">Orders</h1>
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5 }}
+      className="space-y-8 w-full max-w-full p-6"
+    >
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
+        <div className="space-y-1">
+          <h1 className="text-4xl font-bold tracking-tight">
+            Orders
+          </h1>
+          <p className="text-muted-foreground">
+            Manage and track all your manufacturing orders
+          </p>
+        </div>
         <Link href="/orders/new">
-          <Button>
+          <Button className="bg-[#F26B3A] hover:bg-[#E25A29] text-white transition-all duration-200 shadow-lg hover:shadow-xl">
             <PlusCircle className="h-4 w-4 mr-2" />
             New Order
           </Button>
         </Link>
       </div>
 
-      <div className="space-y-4">
-        <div className="p-4 border rounded-md bg-card">
+      {/* Section Filter Pills */}
+      <div className="flex flex-wrap gap-3 mb-6">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.2 }}
+          className="flex flex-wrap gap-2"
+        >
+          <Button
+            variant={activeSection === null ? "outline" : "outline"}
+            size="sm"
+            onClick={() => handleSectionFilter(null)}
+            className={`rounded-full shadow-sm hover:shadow transition-all duration-200 ${
+              activeSection === null ? 'bg-[#F26B3A] text-white hover:bg-[#E25A29]' : ''
+            }`}
+          >
+            All Orders
+          </Button>
+          <Button
+            variant={activeSection === 'chair' ? "outline" : "outline"}
+            size="sm"
+            onClick={() => handleSectionFilter('chair')}
+            className={`rounded-full shadow-sm hover:shadow transition-all duration-200 ${
+              activeSection === 'chair' ? 'bg-[#F26B3A] text-white hover:bg-[#E25A29]' : ''
+            }`}
+          >
+            <Package className="h-4 w-4 mr-2" />
+            Chairs Section
+          </Button>
+          <Button
+            variant={activeSection === 'wood' ? "outline" : "outline"}
+            size="sm"
+            onClick={() => handleSectionFilter('wood')}
+            className={`rounded-full shadow-sm hover:shadow transition-all duration-200 ${
+              activeSection === 'wood' ? 'bg-[#F26B3A] text-white hover:bg-[#E25A29]' : ''
+            }`}
+          >
+            <Layers className="h-4 w-4 mr-2" />
+            Wood Section
+          </Button>
+          <Button
+            variant={activeSection === 'steel' ? "outline" : "outline"}
+            size="sm"
+            onClick={() => handleSectionFilter('steel')}
+            className={`rounded-full shadow-sm hover:shadow transition-all duration-200 ${
+              activeSection === 'steel' ? 'bg-[#F26B3A] text-white hover:bg-[#E25A29]' : ''
+            }`}
+          >
+            <Wrench className="h-4 w-4 mr-2" />
+            Steel Section
+          </Button>
+          <Button
+            variant={activeSection === 'powdercoating' ? "outline" : "outline"}
+            size="sm"
+            onClick={() => handleSectionFilter('powdercoating')}
+            className={`rounded-full shadow-sm hover:shadow transition-all duration-200 ${
+              activeSection === 'powdercoating' ? 'bg-[#F26B3A] text-white hover:bg-[#E25A29]' : ''
+            }`}
+          >
+            <PaintBucket className="h-4 w-4 mr-2" />
+            Powdercoating Section
+          </Button>
+        </motion.div>
+      </div>
+
+      <div className="space-y-6">
+        <motion.div 
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.2 }}
+          className="p-6 border rounded-xl bg-card/50 backdrop-blur-sm shadow-sm"
+        >
           <div className="flex flex-col md:flex-row md:items-center gap-4">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
               <Label htmlFor="status-filter" className="text-sm font-medium">
                 Filter by Status:
               </Label>
@@ -219,77 +340,93 @@ export default function OrdersPage() {
                   placeholder="Search orders by number or customer name"
                   value={searchQuery}
                   onChange={handleSearchChange}
-                  className="pl-10 w-full"
+                  className="pl-10 w-full transition-all duration-200 focus:ring-2 focus:ring-[#F26B3A]/20"
                 />
               </div>
             </div>
           </div>
-        </div>
+        </motion.div>
 
-        {isLoading ? (
-          <div className="p-8 text-center border rounded-md">Loading orders...</div>
-        ) : error ? (
-          <div className="p-8 text-center text-destructive border rounded-md">
-            Error loading orders. Please try again.
-          </div>
-        ) : orders && orders.length > 0 ? (
-          <div className="overflow-hidden border rounded-md">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Order #</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead>Delivery Date</TableHead>
-                    <TableHead>Total Amount</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {orders.map((order) => (
-                    <TableRow key={order.order_id}>
-                      <TableCell className="font-medium">
-                        {order.order_number || `#${order.order_id}`}
-                      </TableCell>
-                      <TableCell>{order.customer?.name || 'N/A'}</TableCell>
-                      <TableCell>
-                        {order.created_at ? format(new Date(order.created_at), 'MMM d, yyyy') : 'N/A'}
-                      </TableCell>
-                      <TableCell>
-                        {order.delivery_date 
-                          ? format(new Date(order.delivery_date), 'MMM d, yyyy')
-                          : 'Not set'}
-                      </TableCell>
-                      <TableCell>
-                        {order.total_amount !== null && order.total_amount !== undefined
-                          ? `$${Number(order.total_amount).toFixed(2)}`
-                          : 'N/A'}
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={order.status?.status_name || 'Unknown'} />
-                      </TableCell>
-                      <TableCell>
-                        <Link
-                          href={`/orders/${order.order_id}`}
-                          className="text-primary hover:underline text-sm flex items-center"
-                        >
-                          View Details
-                        </Link>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.3 }}
+        >
+          {isLoading ? (
+            <div className="p-12 text-center border rounded-xl bg-card/50 backdrop-blur-sm">
+              <div className="animate-pulse space-y-3">
+                <div className="h-4 bg-muted rounded w-48 mx-auto"></div>
+                <div className="h-3 bg-muted rounded w-32 mx-auto"></div>
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="p-8 text-center border rounded-md">
-            No orders found. Create a new order to get started.
-          </div>
-        )}
+          ) : error ? (
+            <div className="p-12 text-center text-destructive border rounded-xl bg-destructive/5">
+              <p className="font-medium">Error loading orders</p>
+              <p className="text-sm text-muted-foreground mt-1">Please try again later</p>
+            </div>
+          ) : filteredOrders && filteredOrders.length > 0 ? (
+            <div className="overflow-hidden border rounded-xl bg-card/50 backdrop-blur-sm shadow-sm">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      <TableHead className="font-semibold">Order #</TableHead>
+                      <TableHead className="font-semibold">Customer</TableHead>
+                      <TableHead className="font-semibold">Created</TableHead>
+                      <TableHead className="font-semibold">Delivery Date</TableHead>
+                      <TableHead className="font-semibold">Total Amount</TableHead>
+                      <TableHead className="font-semibold">Status</TableHead>
+                      <TableHead className="font-semibold"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredOrders.map((order) => (
+                      <TableRow 
+                        key={order.order_id}
+                        className="hover:bg-muted/50 transition-colors duration-200"
+                      >
+                        <TableCell className="font-medium">
+                          {order.order_number || `#${order.order_id}`}
+                        </TableCell>
+                        <TableCell>{order.customer?.name || 'N/A'}</TableCell>
+                        <TableCell>
+                          {order.created_at ? format(new Date(order.created_at), 'MMM d, yyyy') : 'N/A'}
+                        </TableCell>
+                        <TableCell>
+                          {order.delivery_date 
+                            ? format(new Date(order.delivery_date), 'MMM d, yyyy')
+                            : 'Not set'}
+                        </TableCell>
+                        <TableCell>
+                          {order.total_amount !== null && order.total_amount !== undefined
+                            ? `$${Number(order.total_amount).toFixed(2)}`
+                            : 'N/A'}
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge status={order.status?.status_name || 'Unknown'} />
+                        </TableCell>
+                        <TableCell>
+                          <Link
+                            href={`/orders/${order.order_id}`}
+                            className="text-[#F26B3A] hover:text-[#E25A29] hover:underline text-sm flex items-center transition-colors duration-200"
+                          >
+                            View Details
+                          </Link>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          ) : (
+            <div className="p-12 text-center border rounded-xl bg-card/50 backdrop-blur-sm">
+              <p className="text-muted-foreground">No orders found</p>
+              <p className="text-sm text-muted-foreground mt-1">Create a new order to get started</p>
+            </div>
+          )}
+        </motion.div>
       </div>
-    </div>
+    </motion.div>
   );
 } 
