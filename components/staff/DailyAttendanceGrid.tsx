@@ -989,6 +989,21 @@ export function DailyAttendanceGrid() {
   // Get sorted records
   const sortedRecords = sortRecords(attendanceRecords);
 
+  // Handle overtime hours change
+  const handleOvertimeChange = (staffId: number, hours: number) => {
+    setAttendanceRecords(prev => 
+      prev.map(record => {
+        if (record.staff_id === staffId) {
+          return {
+            ...record,
+            overtime_hours: hours
+          };
+        }
+        return record;
+      })
+    );
+  };
+
   // Loading state
   if (isLoadingStaff || isLoadingHours) {
     return (
@@ -1102,6 +1117,7 @@ export function DailyAttendanceGrid() {
                 </TableHead>
                 <TableHead className="w-[120px]">Start Time</TableHead>
                 <TableHead className="w-[120px]">End Time</TableHead>
+                <TableHead className="w-[120px]">Overtime</TableHead>
                 <TableHead className="w-[180px]">Breaks</TableHead>
                 <TableHead className="w-[280px]">Notes</TableHead>
               </TableRow>
@@ -1182,6 +1198,25 @@ export function DailyAttendanceGrid() {
                       </div>
                     ) : (
                       <span>{record.end_time || 'N/A'}</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {record.present ? (
+                      <div className="flex items-center space-x-1">
+                        <Input 
+                          type="number" 
+                          value={record.overtime_hours || 0} 
+                          onChange={(e) => handleOvertimeChange(record.staff_id, parseFloat(e.target.value) || 0)}
+                          className="w-24"
+                          min="0"
+                          step="0.5"
+                        />
+                        <div className="text-xs text-muted-foreground ml-1">
+                          {record.is_holiday ? "2.0x" : "1.5x"}
+                        </div>
+                      </div>
+                    ) : (
+                      <span>{record.overtime_hours || 0}</span>
                     )}
                   </TableCell>
                   <TableCell>
