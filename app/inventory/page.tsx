@@ -26,7 +26,7 @@ import { DataTable } from '../../components/ui/data-table';
 import { InventoryDetails } from "@/components/inventory/Details"
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { QueryError } from '@/components/ui/query-error';
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/use-toast";
 
 type Component = {
   component_id: number;
@@ -275,10 +275,7 @@ export default function InventoryPage() {
     queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
     toast({
       title: "Data refreshed",
-      children: (
-        <p>The inventory data has been refreshed from the database.</p>
-      ),
-      duration: 3000,
+      description: "The inventory data has been refreshed from the database."
     });
   };
 

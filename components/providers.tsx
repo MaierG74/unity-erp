@@ -5,7 +5,7 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useState, type ReactNode } from 'react';
 import { AuthProvider } from './auth-provider';
 import { ResetQueryErrorBoundary } from './reset-query-error-boundary';
-import { ToastProvider } from './ui/toast';
+import { ToastProvider } from './ui/use-toast';
 
 export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(

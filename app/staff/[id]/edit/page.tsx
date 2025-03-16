@@ -27,7 +27,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
-import { useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/use-toast';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 const staffFormSchema = z.object({
@@ -100,15 +100,15 @@ export default function EditStaffPage() {
       queryClient.invalidateQueries({ queryKey: ['staff'] });
       toast({
         title: 'Success',
-        children: <p>Staff member updated successfully</p>,
+        description: `Staff member ${staff?.first_name} ${staff?.last_name} has been updated.`,
       });
       router.push('/staff');
     },
-    onError: (error: any) => {
+    onError: (error) => {
       console.error('Error updating staff:', error);
       toast({
         title: 'Error',
-        children: <p>Failed to update staff member: {error.message}</p>,
+        description: 'Failed to update staff member. Please try again.',
         variant: 'destructive',
       });
     },
