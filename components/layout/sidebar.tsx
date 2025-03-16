@@ -17,6 +17,7 @@ import {
   ChevronRight,
   Menu,
   X,
+  Box,
 } from 'lucide-react';
 import { useState, useEffect, createContext, useContext } from 'react';
 import { Button } from '@/components/ui/button';
@@ -31,6 +32,11 @@ const navigation = [
     name: 'Suppliers', 
     href: '/suppliers',
     icon: Truck 
+  },
+  { 
+    name: 'Products', 
+    href: '/products',
+    icon: Box 
   },
   { 
     name: 'Inventory', 

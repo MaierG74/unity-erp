@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/use-toast';
 import { format, parseISO, isToday, isSunday } from 'date-fns';
 import { 
   Table, 
@@ -305,14 +305,7 @@ export function DailyAttendanceGrid() {
       // Show success notification with more details
       toast({
         title: 'Attendance Saved',
-        children: (
-          <div className="flex flex-col">
-            <p className="font-medium">Attendance records have been successfully updated.</p>
-            <p className="text-sm mt-1">Date: {format(selectedDate, 'EEEE, MMMM d, yyyy')}</p>
-            <p className="text-sm">Staff present: {attendanceRecords.filter(r => r.present).length}</p>
-          </div>
-        ),
-        variant: 'success',
+        description: `Records updated for ${format(selectedDate, 'EEEE, MMMM d, yyyy')}. Staff present: ${attendanceRecords.filter(r => r.present).length}`,
         duration: 6000, // Show for 6 seconds
       });
     },
@@ -323,7 +316,7 @@ export function DailyAttendanceGrid() {
       console.error('Error saving attendance records:', error);
       toast({
         title: 'Error',
-        children: <p>Failed to save attendance records: {error.message}</p>,
+        description: `Failed to save attendance records: ${error.message}`,
         variant: 'destructive',
       });
     },
@@ -758,7 +751,7 @@ export function DailyAttendanceGrid() {
         // No existing records, nothing to delete
         toast({
           title: 'No changes',
-          children: <p>No staff are marked as present and no existing records found.</p>,
+          description: 'No staff are marked as present and no existing records found.',
         });
         setIsSaving(false);
       }

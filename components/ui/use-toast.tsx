@@ -1,82 +1,73 @@
+"use client"
+
 // This is a simplified version of the shadcn/ui toast component
 // Adapted from: https://ui.shadcn.com/docs/components/toast
 
-import { useState, useEffect, createContext, useContext } from "react";
+import * as React from "react"
 import { 
   Toast, 
   ToastClose, 
   ToastDescription, 
-  ToastContainer, 
+  ToastProvider as ToastPrimitiveProvider, 
   ToastTitle, 
-  ToastViewport 
-} from "./toast";
+  ToastViewport,
+  type ToastProps as PrimitiveToastProps
+} from "./toast"
 
-type ToastProps = {
-  id: string;
-  title?: string;
-  description?: string;
-  action?: React.ReactNode;
-  variant?: "default" | "destructive" | "success";
-  duration?: number;
-};
-
-type ToastActionElement = React.ReactElement<typeof Toast>;
+interface ToastProps {
+  id: string
+  title?: string
+  description?: string
+  action?: React.ReactNode
+  variant?: "default" | "destructive"
+  duration?: number
+}
 
 type ToastContextType = {
-  toasts: ToastProps[];
-  addToast: (props: Omit<ToastProps, "id">) => void;
-  removeToast: (id: string) => void;
-};
+  toasts: ToastProps[]
+  addToast: (props: Omit<ToastProps, "id">) => void
+  removeToast: (id: string) => void
+}
 
-const ToastContext = createContext<ToastContextType | null>(null);
+const ToastContext = React.createContext<ToastContextType | null>(null)
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
-  const [toasts, setToasts] = useState<ToastProps[]>([]);
+  const [toasts, setToasts] = React.useState<ToastProps[]>([])
 
-  const addToast = (props: Omit<ToastProps, "id">) => {
-    const id = Math.random().toString(36).substring(2, 9);
-    setToasts((prev) => [...prev, { id, ...props }]);
+  const addToast = React.useCallback((props: Omit<ToastProps, "id">) => {
+    const id = Math.random().toString(36).substring(2, 9)
+    setToasts((prev) => [...prev, { id, ...props }])
     
-    // Auto-dismiss after 5 seconds
-    setTimeout(() => {
-      removeToast(id);
-    }, props.duration || 5000);
-  };
+    if (props.duration !== 0) {
+      setTimeout(() => {
+        removeToast(id)
+      }, props.duration || 5000)
+    }
+  }, [])
 
-  const removeToast = (id: string) => {
-    setToasts((prev) => prev.filter((toast) => toast.id !== id));
-  };
+  const removeToast = React.useCallback((id: string) => {
+    setToasts((prev) => prev.filter((toast) => toast.id !== id))
+  }, [])
 
   return (
     <ToastContext.Provider value={{ toasts, addToast, removeToast }}>
       {children}
-      <ToastContainer>
-        {toasts.map(({ id, title, description, action, variant }) => (
-          <Toast key={id} variant={variant}>
-            <div className="grid gap-1">
-              {title && <ToastTitle>{title}</ToastTitle>}
-              {description && <ToastDescription>{description}</ToastDescription>}
-            </div>
-            {action}
-            <ToastClose onClick={() => removeToast(id)} />
-          </Toast>
-        ))}
-        <ToastViewport />
-      </ToastContainer>
     </ToastContext.Provider>
-  );
+  )
 }
 
 export function useToast() {
-  const context = useContext(ToastContext);
+  const context = React.useContext(ToastContext)
   
   if (!context) {
-    throw new Error("useToast must be used within a ToastProvider");
+    throw new Error("useToast must be used within a ToastProvider")
   }
   
   return { 
     toast: context.addToast,
     dismiss: context.removeToast,
     toasts: context.toasts
-  };
-} 
+  }
+}
+
+export type { ToastProps } 

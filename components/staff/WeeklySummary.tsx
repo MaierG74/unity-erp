@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useQuery } from '@tanstack/react-query';
-import { useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/use-toast';
 import { 
   format, 
   startOfWeek, 
@@ -314,13 +314,13 @@ export function WeeklySummary() {
       
       toast({
         title: 'Export Successful',
-        children: <p>Weekly summary has been exported to CSV</p>,
+        description: 'Weekly summary has been exported to CSV',
       });
     } catch (error) {
       console.error('Error exporting to CSV:', error);
       toast({
-        title: 'Export Failed',
-        children: <p>Failed to export weekly summary</p>,
+        title: 'Error',
+        description: 'Failed to export data. Please try again.',
         variant: 'destructive',
       });
     } finally {
