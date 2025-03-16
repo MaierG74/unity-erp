@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { format } from 'date-fns';
 import { supabase } from '@/lib/supabase';
@@ -18,8 +18,16 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { PlusCircle, Search, Package, Layers, Wrench, PaintBucket } from 'lucide-react';
+import { PlusCircle, Search, Package, Layers, Wrench, PaintBucket, Paperclip, Upload, FileText, ImageIcon, Eye, Download, FileUp, Check } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { 
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 
 // Fetch orders with status and customer information
 async function fetchOrders(statusFilter?: string, searchQuery?: string): Promise<Order[]> {
@@ -29,13 +37,16 @@ async function fetchOrders(statusFilter?: string, searchQuery?: string): Promise
       .select(`
         *,
         status:order_statuses(status_id, status_name),
-        customer:customers(*)
+        customer:customers(*),
+        details:order_details(
+          *,
+          product:products(*)
+        )
       `)
       .order('created_at', { ascending: false });
 
     // Apply status filter if provided
     if (statusFilter && statusFilter !== 'all') {
-      // Use a join condition instead of direct equality on nested object
       const { data: statusData } = await supabase
         .from('order_statuses')
         .select('status_id')
@@ -48,34 +59,36 @@ async function fetchOrders(statusFilter?: string, searchQuery?: string): Promise
     }
 
     // Apply search filter if provided
-    if (searchQuery) {
-      // First, get customers that match the search query
+    if (searchQuery && searchQuery.trim() !== '') {
+      const searchTerm = searchQuery.trim().toLowerCase();
+      
+      // Get customers that match the search query
       const { data: customers } = await supabase
         .from('customers')
         .select('id')
-        .ilike('name', `%${searchQuery}%`);
-
-      // Get customer IDs for the filter
+        .ilike('name', `%${searchTerm}%`);
+      
       const customerIds = customers?.map(c => c.id) || [];
 
-      // Get order numbers that match the search query
-      const { data: orderNumbers } = await supabase
-        .from('orders')
-        .select('order_id')
-        .or(`order_number.ilike.%${searchQuery}%, order_id.eq.${!isNaN(parseInt(searchQuery)) ? parseInt(searchQuery) : 0}`);
+      // Build the filter conditions
+      const conditions = [];
 
-      // Get order IDs for the filter
-      const orderIds = orderNumbers?.map(o => o.order_id) || [];
+      // Add customer filter if we found matching customers
+      if (customerIds.length > 0) {
+        conditions.push(`customer_id.in.(${customerIds.join(',')})`);
+      }
 
-      // Apply the combined filter if we have any matches
-      if (customerIds.length > 0 || orderIds.length > 0) {
-        query = query.or(
-          `${customerIds.length > 0 ? `customer_id.in.(${customerIds.join(',')})` : ''},` +
-          `${orderIds.length > 0 ? `order_id.in.(${orderIds.join(',')})` : ''}`
-        );
-      } else if (searchQuery.trim() !== '') {
-        // If no matches but search query provided, return no results
-        return [];
+      // Add order number filter
+      conditions.push(`order_number.ilike.%${searchTerm}%`);
+
+      // Add order ID filter if the search term is a number
+      if (!isNaN(parseInt(searchTerm))) {
+        conditions.push(`order_id.eq.${parseInt(searchTerm)}`);
+      }
+
+      // Combine all conditions with OR
+      if (conditions.length > 0) {
+        query = query.or(conditions.join(','));
       }
     }
 
@@ -89,15 +102,14 @@ async function fetchOrders(statusFilter?: string, searchQuery?: string): Promise
     // Transform the data to ensure proper structure
     return (data || []).map(order => ({
       ...order,
-      // Ensure status is properly structured
       status: order.status && order.status.length > 0 
         ? { 
             status_id: order.status[0]?.status_id || 0,
             status_name: order.status[0]?.status_name || 'Unknown'
           }
         : { status_id: 0, status_name: 'Unknown' },
-      // Ensure total_amount is a number
-      total_amount: order.total_amount ? Number(order.total_amount) : null
+      total_amount: order.total_amount ? Number(order.total_amount) : null,
+      details: order.details || []
     }));
   } catch (error) {
     console.error('Error in fetchOrders:', error);
@@ -168,6 +180,354 @@ function determineProductSections(product: any): string[] {
   }
   
   return sections;
+}
+
+// Function to list files in QButton bucket for a customer
+async function listCustomerFiles(customerId: string | number) {
+  if (!customerId) return [];
+  
+  try {
+    const { data, error } = await supabase
+      .storage
+      .from('qbutton')
+      .list(`Orders/Customer/${customerId}`);
+
+    if (error) {
+      console.error('Error listing files:', error);
+      return [];
+    }
+
+    return data || [];
+  } catch (error) {
+    console.error('Error in listCustomerFiles:', error);
+    return [];
+  }
+}
+
+// Function to fetch attachments from order_attachments table
+async function fetchOrderAttachments(orderId: number) {
+  if (!orderId) return [];
+  
+  try {
+    const { data, error } = await supabase
+      .from('order_attachments')
+      .select('*')
+      .eq('order_id', orderId)
+      .order('uploaded_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching attachments:', error);
+      throw new Error('Failed to fetch attachments');
+    }
+
+    return data || [];
+  } catch (error) {
+    console.error('Error in fetchOrderAttachments:', error);
+    return [];
+  }
+}
+
+// File icon based on extension
+function FileIcon({ fileName }: { fileName: string }) {
+  const extension = fileName.split('.').pop()?.toLowerCase() || '';
+  
+  // Choose icon based on file extension
+  const getFileIcon = () => {
+    switch (extension) {
+      case 'pdf':
+        return <FileText className="h-5 w-5 text-red-500" />;
+      case 'jpg':
+      case 'jpeg':
+      case 'png':
+      case 'gif':
+        return <ImageIcon className="h-5 w-5 text-blue-500" />;
+      case 'doc':
+      case 'docx':
+        return <FileText className="h-5 w-5 text-blue-700" />;
+      case 'xls':
+      case 'xlsx':
+        return <FileText className="h-5 w-5 text-green-600" />;
+      default:
+        return <FileText className="h-5 w-5 text-gray-400" />;
+    }
+  };
+
+  return getFileIcon();
+}
+
+// Helper function to open PDF files directly in the browser
+function openPdfInBrowser(url: string) {
+  // Create an iframe to open the PDF
+  const iframe = document.createElement('iframe');
+  iframe.style.display = 'none';
+  document.body.appendChild(iframe);
+  
+  // Set the source to the PDF URL
+  iframe.src = url;
+  
+  // Clean up after navigating
+  iframe.onload = () => {
+    document.body.removeChild(iframe);
+  };
+}
+
+// Attachment Preview Modal Component
+function AttachmentPreviewModal({ 
+  isOpen, 
+  onClose, 
+  attachments,
+  orderNumber 
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  attachments: any[];
+  orderNumber: string;
+}) {
+  // This approach exactly matches the suppliers implementation
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-[800px]">
+        <DialogHeader>
+          <DialogTitle>Order {orderNumber} - Attachments</DialogTitle>
+        </DialogHeader>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+          {attachments.map((attachment) => (
+            <div
+              key={attachment.id}
+              className="p-4 border rounded-lg bg-card hover:bg-muted/50 transition-colors group"
+            >
+              <a
+                href={attachment.file_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-start gap-3"
+              >
+                <div className="bg-primary/10 p-2 rounded-lg">
+                  <FileText className="h-5 w-5 text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-medium truncate">{attachment.file_name}</h4>
+                  <p className="text-sm text-muted-foreground">
+                    {new Date(attachment.uploaded_at).toLocaleDateString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground uppercase">
+                    {attachment.file_type || attachment.file_name.split('.').pop()?.toUpperCase()}
+                  </p>
+                </div>
+              </a>
+            </div>
+          ))}
+        </div>
+
+        {attachments.length === 0 && (
+          <div className="text-center p-8 border rounded-lg bg-muted/10">
+            <p className="text-muted-foreground">No attachments available.</p>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Upload Attachments Dialog Component
+function UploadAttachmentDialog({ order, onSuccess }: { order: Order, onSuccess: () => void }): JSX.Element {
+  const [isUploading, setIsUploading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [displayName, setDisplayName] = useState('');
+
+  // Handle file selection
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setSelectedFile(file);
+    
+    if (!displayName) {
+      // Use file name without extension as default display name
+      setDisplayName(file.name.split('.').slice(0, -1).join('.'));
+    }
+  };
+
+  // Handle file upload
+  const handleUpload = async () => {
+    if (!selectedFile || !order.order_id) return;
+
+    setIsUploading(true);
+    try {
+      // Generate a unique filename with timestamp and random string
+      const timestamp = new Date().getTime();
+      const randomStr = Math.random().toString(36).substring(2, 10);
+      const fileExt = selectedFile.name.split('.').pop();
+      const fileName = `${order.order_number || order.order_id}_${timestamp}_${randomStr}.${fileExt}`;
+      const filePath = `Orders/Customer/${order.customer?.id}/${fileName}`;
+      
+      // Options including content type
+      const fileOptions = {
+        cacheControl: '3600',
+        contentType: selectedFile.type || undefined,
+        upsert: false
+      };
+      
+      // Upload file to storage with proper content type
+      const { error: uploadError } = await supabase.storage
+        .from('qbutton')
+        .upload(filePath, selectedFile, fileOptions);
+
+      if (uploadError) throw uploadError;
+
+      // Get the public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('qbutton')
+        .getPublicUrl(filePath);
+
+      // Create record in order_attachments table
+      const { error: dbError } = await supabase
+        .from('order_attachments')
+        .insert({
+          order_id: order.order_id,
+          file_name: displayName || selectedFile.name,
+          file_url: publicUrl,
+          uploaded_at: new Date().toISOString(),
+          file_type: fileExt
+        });
+
+      if (dbError) {
+        // If database insert fails, delete the uploaded file
+        await supabase.storage
+          .from('qbutton')
+          .remove([filePath]);
+        throw dbError;
+      }
+
+      // Reset fields and notify parent
+      setSelectedFile(null);
+      setDisplayName('');
+      onSuccess();
+      
+      // Reset the file input
+      const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+      if (fileInput) fileInput.value = '';
+    } catch (error) {
+      console.error('Error uploading file:', error);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  return (
+    <div className="p-4 border rounded-lg bg-card">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+        <input
+          type="text"
+          placeholder="Display name"
+          value={displayName}
+          onChange={(e) => setDisplayName(e.target.value)}
+          className="flex-1 px-3 py-2 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring focus:border-input"
+        />
+        <input
+          type="file"
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
+          onChange={handleFileChange}
+          className="hidden"
+          id="attachment-upload"
+        />
+        <label
+          htmlFor="attachment-upload"
+          className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg hover:bg-primary/90 transition-colors cursor-pointer"
+        >
+          <FileUp className="h-4 w-4" />
+          Choose File
+        </label>
+        <button
+          onClick={handleUpload}
+          disabled={isUploading || !selectedFile}
+          className="inline-flex items-center gap-2 bg-[#F26B3A] text-white px-4 py-2 rounded-lg hover:bg-[#E25A29] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <Upload className="h-4 w-4" />
+          {isUploading ? 'Uploading...' : 'Upload'}
+        </button>
+      </div>
+      {selectedFile && (
+        <div className="mt-2 text-sm text-muted-foreground flex items-center gap-2">
+          <Check className="h-4 w-4 text-green-500" />
+          <span>Selected: {selectedFile.name}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Order Attachments Component for the table cell
+function OrderAttachments({ order }: { order: Order }): JSX.Element {
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
+  const queryClient = useQueryClient();
+
+  // Fetch attachments from the database
+  const { data: attachments = [] } = useQuery({
+    queryKey: ['orderAttachments', order.order_id],
+    queryFn: () => fetchOrderAttachments(order.order_id),
+    enabled: !!order.order_id,
+  });
+
+  const handleUploadSuccess = () => {
+    setIsUploadDialogOpen(false);
+    queryClient.invalidateQueries({ queryKey: ['orderAttachments', order.order_id] });
+  };
+
+  return (
+    <>
+      <td className="p-4 text-center">
+        {attachments.length > 0 ? (
+          <button
+            onClick={() => setSelectedOrder(order)}
+            className="inline-flex items-center gap-1 text-primary hover:text-primary/90"
+          >
+            <FileText className="h-4 w-4" />
+            <span className="text-sm">{attachments.length}</span>
+          </button>
+        ) : (
+          <span className="text-muted-foreground text-sm">None</span>
+        )}
+        <button
+          onClick={() => setIsUploadDialogOpen(true)}
+          className="text-primary hover:text-primary/90 ml-2"
+          title="Upload attachment"
+        >
+          <Upload className="h-4 w-4" />
+        </button>
+      </td>
+
+      {/* Attachment Preview Modal */}
+      {selectedOrder && (
+        <AttachmentPreviewModal
+          isOpen={!!selectedOrder}
+          onClose={() => setSelectedOrder(null)}
+          attachments={attachments}
+          orderNumber={selectedOrder.order_number || `#${selectedOrder.order_id}`}
+        />
+      )}
+
+      {/* Upload Dialog */}
+      {isUploadDialogOpen && (
+        <Dialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}>
+          <DialogContent className="sm:max-w-[600px]">
+            <DialogHeader>
+              <DialogTitle>Upload Attachment</DialogTitle>
+              <DialogDescription>
+                Upload an attachment for order {order.order_number || `#${order.order_id}`}
+              </DialogDescription>
+            </DialogHeader>
+            <UploadAttachmentDialog 
+              order={order} 
+              onSuccess={handleUploadSuccess} 
+            />
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
+  );
 }
 
 export default function OrdersPage() {
@@ -376,6 +736,7 @@ export default function OrdersPage() {
                       <TableHead className="font-semibold">Delivery Date</TableHead>
                       <TableHead className="font-semibold">Total Amount</TableHead>
                       <TableHead className="font-semibold">Status</TableHead>
+                      <TableHead className="font-semibold text-center">Attachments</TableHead>
                       <TableHead className="font-semibold"></TableHead>
                     </TableRow>
                   </TableHeader>
@@ -405,6 +766,7 @@ export default function OrdersPage() {
                         <TableCell>
                           <StatusBadge status={order.status?.status_name || 'Unknown'} />
                         </TableCell>
+                        <OrderAttachments order={order} />
                         <TableCell>
                           <Link
                             href={`/orders/${order.order_id}`}
