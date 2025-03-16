@@ -42,6 +42,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import ReactSelect from "react-select"
+import { useToast } from "@/components/ui/use-toast"
 
 type OptionType = {
   value: string
@@ -60,6 +61,9 @@ const formSchema = z.object({
     supplier_code: z.string().min(1, "Supplier code is required"),
     price: z.string().min(1, "Price is required"),
   })).optional(),
+  quantity_on_hand: z.string().optional(),
+  location: z.string().optional(),
+  reorder_level: z.string().optional(),
 })
 
 type ComponentDialogProps = {
@@ -101,6 +105,9 @@ function useComponentForm(selectedItem: ComponentDialogProps['selectedItem']) {
         supplier_code: sc.supplier_code,
         price: sc.price.toString(),
       })) || [],
+      quantity_on_hand: selectedItem?.quantity_on_hand?.toString() || "",
+      location: selectedItem?.location || "",
+      reorder_level: selectedItem?.reorder_level?.toString() || "",
     },
   })
 
@@ -116,6 +123,9 @@ function useComponentForm(selectedItem: ComponentDialogProps['selectedItem']) {
           supplier_code: sc.supplier_code,
           price: sc.price.toString(),
         })) || [],
+        quantity_on_hand: selectedItem.quantity_on_hand?.toString() || "",
+        location: selectedItem.location || "",
+        reorder_level: selectedItem.reorder_level?.toString() || "",
       })
     } else {
       form.reset({
@@ -124,6 +134,9 @@ function useComponentForm(selectedItem: ComponentDialogProps['selectedItem']) {
         unit_id: undefined,
         category_id: undefined,
         supplierComponents: [],
+        quantity_on_hand: "",
+        location: "",
+        reorder_level: "",
       })
     }
   }, [selectedItem])
@@ -137,6 +150,7 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
   const queryClient = useQueryClient()
   const form = useComponentForm(selectedItem)
   const storageBucket = 'QButton';
+  const { toast } = useToast();
 
   const { data: units = [] } = useQuery({
     queryKey: ["units"],
@@ -271,6 +285,12 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
   const mutation = useMutation({
     mutationFn: async ({ values, shouldClose = true }: { values: z.infer<typeof formSchema>, shouldClose?: boolean }) => {
       try {
+        console.log('🔍 Starting component update/create process', { 
+          isUpdate: !!selectedItem,
+          componentId: selectedItem?.component.component_id,
+          values 
+        });
+        
         let image_url = selectedItem?.component.image_url
 
         // Handle image deletion
@@ -380,7 +400,13 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
             }
           } catch (error) {
             console.error('Error uploading image:', error)
-            throw error
+            toast({
+              title: "Image Upload Failed",
+              description: "The component was updated but the image could not be uploaded. Please try again.",
+              variant: "destructive"
+            });
+            // Continue with the update without the image
+            image_url = selectedItem?.component.image_url || null;
           } finally {
             setIsUploading(false)
           }
@@ -396,143 +422,346 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
           category_id: parseInt(values.category_id),
           image_url,
         }
+        
+        console.log('📝 Component data to save:', componentData);
 
         if (selectedItem) {
           // Update existing component
-          const { error } = await supabase
+          console.log('🔄 Updating existing component ID:', selectedItem.component.component_id);
+          const { data: updateData, error } = await supabase
             .from('components')
             .update(componentData)
             .eq('component_id', selectedItem.component.component_id)
-          if (error) throw error
+            .select();
+            
+            console.log('🔄 Component update result:', { data: updateData, error });
+            
+            if (error) {
+              console.error('❌ Component update failed:', error);
+              throw error;
+            }
 
-          // Update supplier components
-          if (values.supplierComponents) {
-            // First delete all existing supplier components for this component
-            const { error: deleteError } = await supabase
-              .from('suppliercomponents')
-              .delete()
-              .eq('component_id', selectedItem.component.component_id)
+            // Update or create inventory record
+            if (selectedItem.inventory_id) {
+              // Update existing inventory record
+              console.log('🔄 Updating inventory record ID:', selectedItem.inventory_id);
+              const { data: invData, error: inventoryError } = await supabase
+                .from('inventory')
+                .update({
+                  quantity_on_hand: parseInt(values.quantity_on_hand?.toString() || '0'),
+                  location: values.location || null,
+                  reorder_level: parseInt(values.reorder_level?.toString() || '0')
+                })
+                .eq('inventory_id', selectedItem.inventory_id)
+                .select();
+              
+              console.log('🔄 Inventory update result:', { data: invData, error: inventoryError });
+              
+              if (inventoryError) {
+                console.error('❌ Inventory update failed:', inventoryError);
+                throw inventoryError;
+              }
+            } else {
+              // Create new inventory record
+              console.log('➕ Creating new inventory record for component ID:', selectedItem.component.component_id);
+              const { data: invData, error: inventoryError } = await supabase
+                .from('inventory')
+                .insert({
+                  component_id: selectedItem.component.component_id,
+                  quantity_on_hand: parseInt(values.quantity_on_hand?.toString() || '0'),
+                  location: values.location || null,
+                  reorder_level: parseInt(values.reorder_level?.toString() || '0')
+                })
+                .select();
+              
+              console.log('➕ Inventory creation result:', { data: invData, error: inventoryError });
+              
+              if (inventoryError) {
+                console.error('❌ Inventory creation failed:', inventoryError);
+                throw inventoryError;
+              }
+            }
 
-            if (deleteError) throw deleteError
+            // Update supplier components
+            if (values.supplierComponents) {
+              // First delete all existing supplier components for this component
+              console.log('🗑️ Deleting existing supplier components for component ID:', selectedItem.component.component_id);
+              const { data: deleteData, error: deleteError } = await supabase
+                .from('suppliercomponents')
+                .delete()
+                .eq('component_id', selectedItem.component.component_id)
+                .select();
+              
+              console.log('🗑️ Supplier components deletion result:', { data: deleteData, error: deleteError });
 
-            // Then insert the new supplier components
-            if (values.supplierComponents.length > 0) {
-              const { error: insertError } = await supabase
+              if (deleteError) {
+                console.error('❌ Supplier components deletion failed:', deleteError);
+                throw deleteError;
+              }
+
+              // Then insert the new supplier components
+              if (values.supplierComponents.length > 0) {
+                const supplierComponentsData = values.supplierComponents.map(sc => ({
+                  component_id: selectedItem.component.component_id,
+                  supplier_id: parseInt(sc.supplier_id),
+                  supplier_code: sc.supplier_code,
+                  price: parseFloat(sc.price),
+                }));
+                
+                console.log('➕ Inserting new supplier components:', supplierComponentsData);
+                
+                const { data: insertData, error: insertError } = await supabase
+                  .from('suppliercomponents')
+                  .insert(supplierComponentsData)
+                  .select();
+                
+                console.log('➕ Supplier components insertion result:', { data: insertData, error: insertError });
+
+                if (insertError) {
+                  console.error('❌ Supplier components insertion failed:', insertError);
+                  throw insertError;
+                }
+              }
+            }
+          } else {
+            // Create new component
+            const { data: newComponent, error } = await supabase
+              .from('components')
+              .insert(componentData)
+              .select()
+              .single()
+            if (error) throw error
+
+            // Insert supplier components
+            if (values.supplierComponents?.length) {
+              const { error: supplierError } = await supabase
                 .from('suppliercomponents')
                 .insert(
                   values.supplierComponents.map(sc => ({
-                    component_id: selectedItem.component.component_id,
+                    component_id: newComponent.component_id,
                     supplier_id: parseInt(sc.supplier_id),
                     supplier_code: sc.supplier_code,
                     price: parseFloat(sc.price),
                   }))
                 )
-
-              if (insertError) throw insertError
+              if (supplierError) throw supplierError
             }
+            
+            // Create inventory record for the new component
+            const { error: inventoryError } = await supabase
+              .from('inventory')
+              .insert({
+                component_id: newComponent.component_id,
+                quantity_on_hand: parseInt(values.quantity_on_hand?.toString() || '0'),
+                location: values.location || null,
+                reorder_level: parseInt(values.reorder_level?.toString() || '0')
+              })
+            
+            if (inventoryError) throw inventoryError
           }
+
+          console.log('✅ Component update/create process completed successfully');
+          // Return success to trigger onSuccess callback
+          return { success: true, shouldClose }
+        } catch (error) {
+          console.error('❌ Mutation error:', error)
+          throw error
+        }
+      },
+      onSuccess: async (result) => {
+        try {
+          // Log success for debugging
+          console.log('✅ Update successful, refreshing data...');
+          
+          // Verify data in Supabase if we're updating
+          if (selectedItem) {
+            console.log('🔍 Verifying data in Supabase after update');
+            const verificationResult = await verifyDataInSupabase(selectedItem.component.component_id);
+            console.log('🔍 Verification result:', verificationResult);
+          }
+          
+          // Invalidate all relevant queries to force a refetch
+          await queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
+          
+          // Show success toast
+          toast({
+            title: selectedItem ? "Component Updated" : "Component Added",
+            description: selectedItem 
+              ? `${form.getValues().internal_code} has been successfully updated.` 
+              : `${form.getValues().internal_code} has been added to inventory.`
+          });
+          
+          // Force a complete refetch instead of trying to update the cache
+          console.log('🔄 Forcing refetch of inventory components data');
+          await queryClient.refetchQueries({ queryKey: ['inventory', 'components'] });
+          
+          // Only close dialog if shouldClose is true
+          if (result.shouldClose) {
+            console.log('🚪 Closing dialog and resetting form');
+            onOpenChange(false);
+            form.reset();
+          }
+        } catch (error) {
+          console.error('❌ Error in onSuccess callback:', error);
+          toast({
+            title: "Warning",
+            description: "Component was updated but the UI may not reflect all changes. Please refresh the page.",
+            variant: "destructive"
+          });
+        }
+      },
+      onError: (error) => {
+        console.error('❌ Mutation error:', error);
+        
+        // Check for unique constraint violation on internal_code
+        const errorMessage = error?.message || '';
+        if (errorMessage.includes('duplicate key value') && errorMessage.includes('components_internal_code_key')) {
+          toast({
+            title: "Duplicate Code Error",
+            description: `The code "${form.getValues().internal_code}" is already in use. Please use a unique code.`,
+            variant: "destructive"
+          });
         } else {
-          // Create new component
-          const { data: newComponent, error } = await supabase
-            .from('components')
-            .insert(componentData)
-            .select()
-            .single()
-          if (error) throw error
-
-          // Insert supplier components
-          if (values.supplierComponents?.length) {
-            const { error: supplierError } = await supabase
-              .from('suppliercomponents')
-              .insert(
-                values.supplierComponents.map(sc => ({
-                  component_id: newComponent.component_id,
-                  supplier_id: parseInt(sc.supplier_id),
-                  supplier_code: sc.supplier_code,
-                  price: parseFloat(sc.price),
-                }))
-              )
-            if (supplierError) throw supplierError
-          }
+          // Show generic error toast
+          toast({
+            title: "Error",
+            description: `Failed to ${selectedItem ? 'update' : 'add'} component. ${errorMessage}`,
+            variant: "destructive"
+          });
         }
-
-        // Return success to trigger onSuccess callback
-        return { success: true, shouldClose }
-      } catch (error) {
-        console.error('Mutation error:', error)
-        throw error
       }
-    },
-    onSuccess: async (result) => {
-      // Invalidate all relevant queries to force a refetch
-      await queryClient.invalidateQueries({ queryKey: ['inventory'] })
+    })
+
+  // Add a function to check Supabase permissions
+  const checkSupabasePermissions = async () => {
+    console.log('🔍 Checking Supabase permissions and connectivity');
+    
+    try {
+      // Check authentication status
+      const { data: session, error: authError } = await supabase.auth.getSession();
       
-      // If we're editing an existing component, refetch it to update the details view
-      if (selectedItem) {
-        const { data } = await supabase
+      if (authError) {
+        console.error('❌ Authentication error:', authError);
+        return { success: false, error: authError };
+      }
+      
+      console.log('✅ Authentication status:', session);
+      
+      // Try a simple read operation
+      const { data: readData, error: readError } = await supabase
+        .from('components')
+        .select('component_id')
+        .limit(1);
+      
+      if (readError) {
+        console.error('❌ Read permission error:', readError);
+        return { success: false, error: readError };
+      }
+      
+      console.log('✅ Read permission check passed');
+      
+      // Try a simple write operation (that we'll roll back)
+      // Create a temporary record
+      const tempCode = `TEMP_${Date.now()}`;
+      const { data: writeData, error: writeError } = await supabase
+        .from('components')
+        .insert({
+          internal_code: tempCode,
+          description: 'Temporary component for permission check',
+          unit_id: 1,
+          category_id: 1
+        })
+        .select();
+      
+      if (writeError) {
+        console.error('❌ Write permission error:', writeError);
+        return { success: false, error: writeError };
+      }
+      
+      console.log('✅ Write permission check passed');
+      
+      // Delete the temporary record
+      if (writeData && writeData.length > 0) {
+        const { error: deleteError } = await supabase
           .from('components')
-          .select(`
-            *,
-            category:component_categories (
-              cat_id,
-              categoryname
-            ),
-            unit:unitsofmeasure (
-              unit_id,
-              unit_code,
-              unit_name
-            ),
-            inventory:inventory (
-              inventory_id,
-              quantity_on_hand,
-              location,
-              reorder_level
-            ),
-            transactions:inventory_transactions (
-              transaction_id,
-              quantity,
-              transaction_type,
-              transaction_date
-            ),
-            supplierComponents:suppliercomponents (
-              supplier_component_id,
-              supplier_id,
-              supplier_code,
-              price,
-              supplier:suppliers (
-                name
-              )
-            )
-          `)
-          .eq('component_id', selectedItem.component.component_id)
-          .single()
-
-        if (data) {
-          queryClient.setQueryData(['inventory'], (oldData: any) => {
-            if (Array.isArray(oldData)) {
-              return oldData.map(item => 
-                item.component_id === data.component_id ? data : item
-              )
-            }
-            return oldData
-          })
+          .delete()
+          .eq('internal_code', tempCode);
+        
+        if (deleteError) {
+          console.error('❌ Delete permission error:', deleteError);
+        } else {
+          console.log('✅ Delete permission check passed');
         }
       }
       
-      // Only close dialog if shouldClose is true
-      if (result.shouldClose) {
-        onOpenChange(false)
-        form.reset()
-      }
-    },
-    onError: (error) => {
-      console.error('Mutation error:', error)
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Error checking permissions:', error);
+      return { success: false, error };
     }
-  })
+  };
 
+  // Add a button to check permissions
+  useEffect(() => {
+    if (open) {
+      // Check permissions when dialog opens
+      checkSupabasePermissions().then(result => {
+        console.log('🔍 Permission check result:', result);
+      });
+    }
+  }, [open]);
+
+  // Modify the onSubmit function to include more error handling
   const onSubmit = (values: z.infer<typeof formSchema>) => {
     console.log('Submitting form with values:', values)
     
+    // Check if we're updating and the internal code has changed
+    if (selectedItem && values.internal_code !== selectedItem.component.internal_code) {
+      // Check if the new code already exists
+      checkInternalCodeExists(values.internal_code).then(exists => {
+        if (exists) {
+          toast({
+            title: "Duplicate Code Error",
+            description: `The code "${values.internal_code}" is already in use. Please use a unique code.`,
+            variant: "destructive"
+          });
+        } else {
+          proceedWithSubmit(values);
+        }
+      });
+    } else {
+      proceedWithSubmit(values);
+    }
+  }
+  
+  // Function to check if an internal code already exists
+  const checkInternalCodeExists = async (code: string): Promise<boolean> => {
+    try {
+      const { data, error } = await supabase
+        .from('components')
+        .select('component_id')
+        .eq('internal_code', code);
+      
+      if (error) {
+        console.error('Error checking internal code:', error);
+        return false;
+      }
+      
+      // If we're editing, exclude the current component
+      if (selectedItem) {
+        return data.some(item => item.component_id !== selectedItem.component.component_id);
+      }
+      
+      // For new components, any existing code is a duplicate
+      return data.length > 0;
+    } catch (error) {
+      console.error('Error checking internal code:', error);
+      return false;
+    }
+  }
+  
+  // Function to proceed with form submission
+  const proceedWithSubmit = (values: z.infer<typeof formSchema>) => {
     // Log image information for debugging
     if (values.image) {
       console.log('Image file being submitted:', {
@@ -546,7 +775,67 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
       console.log('No image change during submission');
     }
     
+    // Check network connectivity
+    fetch('https://api.supabase.io', { method: 'HEAD' })
+      .then(() => console.log('✅ Network connectivity check passed'))
+      .catch(error => console.error('❌ Network connectivity issue:', error));
+    
     mutation.mutate({ values, shouldClose: true })
+  }
+
+  // Function to verify data in Supabase
+  const verifyDataInSupabase = async (componentId: number) => {
+    console.log('🔍 Verifying data in Supabase for component ID:', componentId);
+    
+    try {
+      // Fetch component data
+      const { data: componentData, error: componentError } = await supabase
+        .from('components')
+        .select('*')
+        .eq('component_id', componentId)
+        .single();
+      
+      if (componentError) {
+        console.error('❌ Failed to verify component data:', componentError);
+        return;
+      }
+      
+      console.log('✅ Component data in Supabase:', componentData);
+      
+      // Fetch inventory data
+      const { data: inventoryData, error: inventoryError } = await supabase
+        .from('inventory')
+        .select('*')
+        .eq('component_id', componentId);
+      
+      if (inventoryError) {
+        console.error('❌ Failed to verify inventory data:', inventoryError);
+        return;
+      }
+      
+      console.log('✅ Inventory data in Supabase:', inventoryData);
+      
+      // Fetch supplier components
+      const { data: supplierComponentsData, error: supplierComponentsError } = await supabase
+        .from('suppliercomponents')
+        .select('*')
+        .eq('component_id', componentId);
+      
+      if (supplierComponentsError) {
+        console.error('❌ Failed to verify supplier components data:', supplierComponentsError);
+        return;
+      }
+      
+      console.log('✅ Supplier components data in Supabase:', supplierComponentsData);
+      
+      return {
+        component: componentData,
+        inventory: inventoryData,
+        supplierComponents: supplierComponentsData
+      };
+    } catch (error) {
+      console.error('❌ Error verifying data in Supabase:', error);
+    }
   }
 
   // Add debugging for form values
@@ -797,39 +1086,76 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
               <FormField
                 control={form.control}
                 name="category_id"
-                render={({ field }) => {
-                  console.log('Category field render:', {
-                    value: field.value,
-                    type: typeof field.value,
-                    categories: categories
-                  });
-                  return (
-                    <FormItem>
-                      <FormLabel>Category</FormLabel>
-                      <Select 
-                        onValueChange={field.onChange} 
-                        value={field.value || ""}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select category" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {categories.map((category) => (
-                            <SelectItem
-                              key={category.cat_id}
-                              value={category.cat_id.toString()}
-                            >
-                              {category.categoryname}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  );
-                }}
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Category</FormLabel>
+                    <Select 
+                      onValueChange={field.onChange} 
+                      value={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select category" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {categories.map((category) => (
+                          <SelectItem
+                            key={category.cat_id}
+                            value={category.cat_id.toString()}
+                          >
+                            {category.categoryname}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <FormField
+                control={form.control}
+                name="quantity_on_hand"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Quantity on Hand</FormLabel>
+                    <FormControl>
+                      <Input {...field} type="number" min="0" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="reorder_level"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Reorder Level</FormLabel>
+                    <FormControl>
+                      <Input {...field} type="number" min="0" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="location"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Location</FormLabel>
+                    <FormControl>
+                      <Input {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
             </div>
 
@@ -1042,7 +1368,10 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
               </Button>
               <Button type="submit" disabled={mutation.isPending || isUploading}>
                 {mutation.isPending || isUploading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    {selectedItem ? 'Updating...' : 'Adding...'}
+                  </>
                 ) : selectedItem ? (
                   'Update Component'
                 ) : (

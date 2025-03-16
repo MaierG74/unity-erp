@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { format } from 'date-fns';
 import { cn } from "@/lib/utils";
 import Image from 'next/image';
-import { Plus, ImageOff, Pencil, Trash2, RefreshCw } from 'lucide-react';
+import { Plus, ImageOff, Pencil, Trash2, RefreshCw, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ComponentDialog } from '@/components/inventory/ComponentDialog';
 import {
@@ -175,7 +175,10 @@ export default function InventoryPage() {
     if (selectedComponent && components.length > 0) {
       const updatedComponent = components.find(c => c.component_id === selectedComponent.component_id);
       if (updatedComponent) {
+        console.log('Updating selected component with new data:', updatedComponent);
         setSelectedComponent(updatedComponent);
+      } else {
+        console.log('Selected component not found in updated data');
       }
     }
   }, [components, selectedComponent?.component_id]);
@@ -279,6 +282,211 @@ export default function InventoryPage() {
     });
   };
 
+  // Function to manually refresh the selected component
+  const refreshSelectedComponent = async () => {
+    if (!selectedComponent) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('components')
+        .select(`
+          *,
+          category:component_categories (
+            cat_id,
+            categoryname
+          ),
+          unit:unitsofmeasure (
+            unit_id,
+            unit_code,
+            unit_name
+          ),
+          inventory:inventory (
+            inventory_id,
+            quantity_on_hand,
+            location,
+            reorder_level
+          ),
+          transactions:inventory_transactions (
+            transaction_id,
+            quantity,
+            transaction_type,
+            transaction_date
+          ),
+          supplierComponents:suppliercomponents (
+            supplier_component_id,
+            supplier_id,
+            supplier_code,
+            price,
+            supplier:suppliers (
+              name
+            )
+          )
+        `)
+        .eq('component_id', selectedComponent.component_id)
+        .single();
+      
+      if (error) throw error;
+      
+      if (data) {
+        console.log('Manually refreshed component data:', data);
+        setSelectedComponent(data);
+        toast({
+          title: "Component refreshed",
+          description: `${data.internal_code} data has been refreshed.`
+        });
+      }
+    } catch (error) {
+      console.error('Error refreshing component:', error);
+      toast({
+        title: "Refresh failed",
+        description: "Could not refresh component data. Please try again.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  // Function to verify UI data against Supabase data
+  const verifyUIDataAgainstSupabase = async () => {
+    if (!selectedComponent) return;
+    
+    try {
+      console.log('🔍 Verifying UI data against Supabase data');
+      console.log('🔍 Current UI component data:', selectedComponent);
+      
+      // Fetch the latest data from Supabase
+      const { data, error } = await supabase
+        .from('components')
+        .select(`
+          *,
+          category:component_categories (
+            cat_id,
+            categoryname
+          ),
+          unit:unitsofmeasure (
+            unit_id,
+            unit_code,
+            unit_name
+          ),
+          inventory:inventory (
+            inventory_id,
+            quantity_on_hand,
+            location,
+            reorder_level
+          ),
+          supplierComponents:suppliercomponents (
+            supplier_component_id,
+            supplier_id,
+            supplier_code,
+            price,
+            supplier:suppliers (
+              name
+            )
+          )
+        `)
+        .eq('component_id', selectedComponent.component_id)
+        .single();
+      
+      if (error) {
+        console.error('❌ Failed to fetch Supabase data for comparison:', error);
+        return;
+      }
+      
+      console.log('✅ Supabase component data:', data);
+      
+      // Compare key fields
+      const uiData = {
+        internal_code: selectedComponent.internal_code,
+        description: selectedComponent.description,
+        image_url: selectedComponent.image_url,
+        category: selectedComponent.category?.categoryname,
+        inventory: selectedComponent.inventory?.[0] ? {
+          quantity_on_hand: selectedComponent.inventory[0].quantity_on_hand,
+          location: selectedComponent.inventory[0].location,
+          reorder_level: selectedComponent.inventory[0].reorder_level
+        } : null,
+        supplierComponents: selectedComponent.supplierComponents?.length || 0
+      };
+      
+      const supabaseData = {
+        internal_code: data.internal_code,
+        description: data.description,
+        image_url: data.image_url,
+        category: data.category?.categoryname,
+        inventory: data.inventory?.[0] ? {
+          quantity_on_hand: data.inventory[0].quantity_on_hand,
+          location: data.inventory[0].location,
+          reorder_level: data.inventory[0].reorder_level
+        } : null,
+        supplierComponents: data.supplierComponents?.length || 0
+      };
+      
+      console.log('🔍 UI data summary:', uiData);
+      console.log('🔍 Supabase data summary:', supabaseData);
+      
+      // Check for differences
+      const differences = [];
+      
+      if (uiData.internal_code !== supabaseData.internal_code) {
+        differences.push(`Internal code: UI="${uiData.internal_code}" vs DB="${supabaseData.internal_code}"`);
+      }
+      
+      if (uiData.description !== supabaseData.description) {
+        differences.push(`Description: UI="${uiData.description}" vs DB="${supabaseData.description}"`);
+      }
+      
+      if (uiData.image_url !== supabaseData.image_url) {
+        differences.push(`Image URL: UI="${uiData.image_url}" vs DB="${supabaseData.image_url}"`);
+      }
+      
+      if (uiData.category !== supabaseData.category) {
+        differences.push(`Category: UI="${uiData.category}" vs DB="${supabaseData.category}"`);
+      }
+      
+      // Compare inventory data if both exist
+      if (uiData.inventory && supabaseData.inventory) {
+        if (uiData.inventory.quantity_on_hand !== supabaseData.inventory.quantity_on_hand) {
+          differences.push(`Quantity: UI=${uiData.inventory.quantity_on_hand} vs DB=${supabaseData.inventory.quantity_on_hand}`);
+        }
+        
+        if (uiData.inventory.location !== supabaseData.inventory.location) {
+          differences.push(`Location: UI="${uiData.inventory.location}" vs DB="${supabaseData.inventory.location}"`);
+        }
+        
+        if (uiData.inventory.reorder_level !== supabaseData.inventory.reorder_level) {
+          differences.push(`Reorder level: UI=${uiData.inventory.reorder_level} vs DB=${supabaseData.inventory.reorder_level}`);
+        }
+      } else if (uiData.inventory || supabaseData.inventory) {
+        differences.push('Inventory data exists in one source but not the other');
+      }
+      
+      if (uiData.supplierComponents !== supabaseData.supplierComponents) {
+        differences.push(`Supplier components count: UI=${uiData.supplierComponents} vs DB=${supabaseData.supplierComponents}`);
+      }
+      
+      if (differences.length > 0) {
+        console.log('❌ Differences found between UI and Supabase data:');
+        differences.forEach(diff => console.log(`  - ${diff}`));
+        
+        toast({
+          title: "Data inconsistency detected",
+          description: "The UI is not showing the latest data from the database. Click refresh to update.",
+          variant: "destructive"
+        });
+      } else {
+        console.log('✅ UI data matches Supabase data');
+        
+        toast({
+          title: "Data verification",
+          description: "UI data matches database data."
+        });
+      }
+      
+      return { uiData, supabaseData, differences };
+    } catch (error) {
+      console.error('❌ Error verifying UI data against Supabase:', error);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -377,7 +585,24 @@ export default function InventoryPage() {
                 <Button
                   variant="outline"
                   size="icon"
+                  onClick={verifyUIDataAgainstSupabase}
+                  title="Verify Data"
+                >
+                  <Check className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={refreshSelectedComponent}
+                  title="Refresh"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
                   onClick={() => setDialogOpen(true)}
+                  title="Edit"
                 >
                   <Pencil className="h-4 w-4" />
                 </Button>
