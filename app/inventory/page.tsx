@@ -334,14 +334,20 @@ export default function InventoryPage() {
         <div className="w-[400px] shrink-0">
           <div className="sticky top-4">
             <InventoryDetails 
-              selectedItem={selectedComponent && selectedComponent.inventory && selectedComponent.inventory.length > 0 ? {
-                inventory_id: selectedComponent.inventory[0]?.inventory_id || null,
-                quantity_on_hand: selectedComponent.inventory[0]?.quantity_on_hand !== null && 
+              selectedItem={selectedComponent ? {
+                inventory_id: selectedComponent.inventory && selectedComponent.inventory.length > 0 
+                  ? selectedComponent.inventory[0]?.inventory_id || null 
+                  : null,
+                quantity_on_hand: selectedComponent.inventory && selectedComponent.inventory.length > 0 && 
+                  selectedComponent.inventory[0]?.quantity_on_hand !== null && 
                   selectedComponent.inventory[0]?.quantity_on_hand !== undefined 
                   ? Number(selectedComponent.inventory[0]?.quantity_on_hand) 
                   : 0,
-                location: selectedComponent.inventory[0]?.location || "",
-                reorder_level: selectedComponent.inventory[0]?.reorder_level !== null && 
+                location: selectedComponent.inventory && selectedComponent.inventory.length > 0 
+                  ? selectedComponent.inventory[0]?.location || "" 
+                  : "",
+                reorder_level: selectedComponent.inventory && selectedComponent.inventory.length > 0 && 
+                  selectedComponent.inventory[0]?.reorder_level !== null && 
                   selectedComponent.inventory[0]?.reorder_level !== undefined 
                   ? Number(selectedComponent.inventory[0]?.reorder_level) 
                   : 0,
@@ -403,16 +409,22 @@ export default function InventoryPage() {
       <ComponentDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        selectedItem={selectedComponent && selectedComponent.inventory && selectedComponent.inventory.length > 0 ? {
-          inventory_id: selectedComponent.inventory[0].inventory_id || null,
-          quantity_on_hand: selectedComponent.inventory[0].quantity_on_hand !== null && 
-            selectedComponent.inventory[0].quantity_on_hand !== undefined 
-            ? Number(selectedComponent.inventory[0].quantity_on_hand) 
+        selectedItem={selectedComponent ? {
+          inventory_id: selectedComponent.inventory && selectedComponent.inventory.length > 0 
+            ? selectedComponent.inventory[0]?.inventory_id || null 
+            : null,
+          quantity_on_hand: selectedComponent.inventory && selectedComponent.inventory.length > 0 && 
+            selectedComponent.inventory[0]?.quantity_on_hand !== null && 
+            selectedComponent.inventory[0]?.quantity_on_hand !== undefined 
+            ? Number(selectedComponent.inventory[0]?.quantity_on_hand) 
             : 0,
-          location: selectedComponent.inventory[0].location || "",
-          reorder_level: selectedComponent.inventory[0].reorder_level !== null && 
-            selectedComponent.inventory[0].reorder_level !== undefined
-            ? Number(selectedComponent.inventory[0].reorder_level)
+          location: selectedComponent.inventory && selectedComponent.inventory.length > 0 
+            ? selectedComponent.inventory[0]?.location || "" 
+            : "",
+          reorder_level: selectedComponent.inventory && selectedComponent.inventory.length > 0 && 
+            selectedComponent.inventory[0]?.reorder_level !== null && 
+            selectedComponent.inventory[0]?.reorder_level !== undefined
+            ? Number(selectedComponent.inventory[0]?.reorder_level)
             : 0,
           component: {
             component_id: selectedComponent.component_id,

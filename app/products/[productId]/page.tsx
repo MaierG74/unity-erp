@@ -18,6 +18,8 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { ImageGallery } from '@/components/products/image-gallery';
 import { CategoryDialog } from '@/components/products/category-dialog';
+import { ProductBOM } from '@/components/products/product-bom';
+import { ProductBOL } from '@/components/products/product-bol';
 import { useToast } from '@/components/ui/use-toast';
 
 interface ProductDetailPageProps {
@@ -170,6 +172,8 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="images">Images</TabsTrigger>
           <TabsTrigger value="categories">Categories</TabsTrigger>
+          <TabsTrigger value="bom">Bill of Materials</TabsTrigger>
+          <TabsTrigger value="bol">Bill of Labor</TabsTrigger>
         </TabsList>
         
         <TabsContent value="details" className="space-y-4">
@@ -332,6 +336,14 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+        
+        <TabsContent value="bom" className="space-y-4">
+          <ProductBOM productId={product.product_id} />
+        </TabsContent>
+        
+        <TabsContent value="bol" className="space-y-4">
+          <ProductBOL productId={product.product_id} />
         </TabsContent>
       </Tabs>
     </div>
