@@ -18,6 +18,7 @@ import {
   Menu,
   X,
   Box,
+  Hammer,
 } from 'lucide-react';
 import { useState, useEffect, createContext, useContext } from 'react';
 import { Button } from '@/components/ui/button';
@@ -42,6 +43,11 @@ const navigation = [
     name: 'Inventory', 
     href: '/inventory',
     icon: Package 
+  },
+  { 
+    name: 'Labor', 
+    href: '/labor',
+    icon: Hammer 
   },
   { 
     name: 'Purchasing', 

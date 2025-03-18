@@ -120,22 +120,32 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
   const [activeTab, setActiveTab] = useState('details');
   const { toast } = useToast();
 
+  console.log('ProductDetailPage mounted, productId:', productId);
+
   // Fetch product
   const { data: product, isLoading, error, refetch } = useQuery({
     queryKey: ['product', productId],
-    queryFn: () => fetchProduct(productId),
+    queryFn: async () => {
+      console.log('Fetching product data for ID:', productId);
+      const result = await fetchProduct(productId);
+      console.log('Product data fetched:', result);
+      return result;
+    },
   });
 
   // Handle back button
   const handleBack = () => {
+    console.log('Back button clicked');
     router.push('/products');
   };
 
   if (isLoading) {
+    console.log('Product detail page is loading...');
     return <div className="p-8 text-center">Loading product details...</div>;
   }
 
   if (error || !product) {
+    console.error('Error loading product:', error);
     return (
       <div className="p-8 text-center text-destructive">
         Error loading product details. The product may not exist.

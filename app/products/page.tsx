@@ -30,6 +30,7 @@ import { Search, Plus, Package } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 // Types for our data
 interface Product {
@@ -222,6 +223,8 @@ export default function ProductsPage() {
 
   // Navigate to product detail page
   const handleViewProduct = (productId: number) => {
+    console.log('View Full Details clicked for product ID:', productId);
+    console.log('Router push to:', `/products/${productId}`);
     router.push(`/products/${productId}`);
   };
 
@@ -353,13 +356,11 @@ export default function ProductsPage() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="text-xl">Product Details</CardTitle>
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => handleViewProduct(selectedProduct.product_id)}
-                >
-                  View Full Details
-                </Button>
+                <Link href={`/products/${selectedProduct.product_id}`} passHref>
+                  <Button variant="outline" size="sm">
+                    View Full Details
+                  </Button>
+                </Link>
               </CardHeader>
               <CardContent>
                 <div className="flex justify-center mb-4">
