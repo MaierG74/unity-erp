@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useForm } from 'react-hook-form';
@@ -36,10 +36,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from '@/components/ui/command';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Plus, Trash2, Edit, Save, X } from 'lucide-react';
+import { Plus, Trash2, Edit, Save, X, Search } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
+import { cn } from '@/lib/utils';
+import { useDebounce } from '@/hooks/use-debounce';
 
 // Define types
 interface Component {
@@ -48,19 +64,44 @@ interface Component {
   description: string | null;
 }
 
+interface Supplier {
+  supplier_id: number;
+  name: string;
+}
+
+interface SupplierComponent {
+  supplier_component_id: number;
+  component_id: number;
+  supplier_id: number;
+  price: number;
+  supplier: Supplier;
+}
+
 // Our normalized BOM item type for use in the component
 interface BOMItem {
   bom_id: number;
   product_id: number;
   component_id: number;
   quantity_required: number;
+  supplier_component_id: number | null;
   component: Component;
+  supplierComponent?: {
+    supplier_component_id: number;
+    component_id: number;
+    supplier_id: number;
+    price: number;
+    supplier: {
+      supplier_id: number;
+      name: string;
+    };
+  };
 }
 
 // Form schema for adding/editing BOM items
 const bomItemSchema = z.object({
   component_id: z.string().min(1, 'Component is required'),
   quantity_required: z.coerce.number().min(1, 'Quantity must be at least 1'),
+  supplier_component_id: z.string().optional(),
 });
 
 type BOMItemFormValues = z.infer<typeof bomItemSchema>;
@@ -71,6 +112,9 @@ interface ProductBOMProps {
 
 export function ProductBOM({ productId }: ProductBOMProps) {
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [componentSearch, setComponentSearch] = useState('');
+  const [selectedComponentId, setSelectedComponentId] = useState<string | null>(null);
+  const debouncedComponentSearch = useDebounce(componentSearch, 300);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   
@@ -80,14 +124,47 @@ export function ProductBOM({ productId }: ProductBOMProps) {
     defaultValues: {
       component_id: '',
       quantity_required: 1,
+      supplier_component_id: '',
     },
   });
+
+  // Watch the component_id to fetch suppliers when it changes
+  const watchedComponentId = form.watch('component_id');
   
+  // Add state to track if supplier feature is available
+  const [supplierFeatureAvailable, setSupplierFeatureAvailable] = useState(false);
+
+  // Check if supplier_component_id column exists
+  useEffect(() => {
+    const checkSupplierFeature = async () => {
+      try {
+        // Try to query a BOM item with supplier_component_id
+        const { data, error } = await supabase
+          .from('billofmaterials')
+          .select('supplier_component_id')
+          .limit(1);
+          
+        if (error) {
+          console.error('Error checking supplier feature:', error);
+          setSupplierFeatureAvailable(false);
+        } else {
+          setSupplierFeatureAvailable(true);
+          console.log('Supplier feature is available');
+        }
+      } catch (err) {
+        console.error('Error checking supplier feature:', err);
+        setSupplierFeatureAvailable(false);
+      }
+    };
+    
+    checkSupplierFeature();
+  }, []);
+
   // Fetch BOM items for this product
   const { data: bomItems = [], isLoading: bomLoading } = useQuery({
-    queryKey: ['productBOM', productId],
+    queryKey: ['productBOM', productId, supplierFeatureAvailable],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from('billofmaterials')
         .select(`
           bom_id,
@@ -99,19 +176,50 @@ export function ProductBOM({ productId }: ProductBOMProps) {
             internal_code,
             description
           )
-        `)
-        .eq('product_id', productId);
+        `);
+
+      // Add supplier_component_id and join with suppliercomponents only if the feature is available
+      if (supplierFeatureAvailable) {
+        query = supabase
+          .from('billofmaterials')
+          .select(`
+            bom_id,
+            product_id,
+            component_id,
+            quantity_required,
+            supplier_component_id,
+            components (
+              component_id,
+              internal_code,
+              description
+            ),
+            supplierComponent:suppliercomponents (
+              supplier_component_id,
+              component_id,
+              supplier_id,
+              price,
+              supplier:suppliers (
+                supplier_id,
+                name
+              )
+            )
+          `);
+      }
+        
+      const { data, error } = await query.eq('product_id', productId);
         
       if (error) throw error;
       
       // Transform the response to match our BOMItem interface
-      return (data || []).map((item: any) => ({
+      return data.map((item: any) => ({
         bom_id: item.bom_id,
         product_id: item.product_id,
         component_id: item.component_id,
         quantity_required: item.quantity_required,
-        component: item.components
-      })) as BOMItem[];
+        supplier_component_id: item.supplier_component_id || null,
+        component: item.components,
+        supplierComponent: item.supplierComponent || undefined
+      }));
     },
   });
   
@@ -127,17 +235,66 @@ export function ProductBOM({ productId }: ProductBOMProps) {
       return data as Component[];
     },
   });
+
+  // Fetch suppliers for the selected component
+  const { data: supplierComponents = [], isLoading: suppliersLoading } = useQuery({
+    queryKey: ['supplierComponents', watchedComponentId],
+    queryFn: async () => {
+      if (!watchedComponentId) return [];
+      
+      const { data, error } = await supabase
+        .from('suppliercomponents')
+        .select(`
+          supplier_component_id,
+          component_id,
+          supplier_id,
+          price,
+          lead_time,
+          min_order_quantity,
+          supplier:suppliers (
+            supplier_id,
+            name
+          )
+        `)
+        .eq('component_id', parseInt(watchedComponentId));
+        
+      if (error) throw error;
+      
+      return data as unknown as SupplierComponent[];
+    },
+    enabled: !!watchedComponentId, // Only run query when a component is selected
+  });
+
+  // Filter components based on search
+  const filteredComponents = useCallback(() => {
+    if (!debouncedComponentSearch) return components;
+    
+    return components.filter(
+      component => 
+        component.internal_code.toLowerCase().includes(debouncedComponentSearch.toLowerCase()) || 
+        (component.description && 
+          component.description.toLowerCase().includes(debouncedComponentSearch.toLowerCase()))
+    );
+  }, [components, debouncedComponentSearch]);
   
   // Add BOM item mutation
   const addBOMItem = useMutation({
     mutationFn: async (values: BOMItemFormValues) => {
+      // Build the insert object
+      const insertData: any = {
+        product_id: productId,
+        component_id: parseInt(values.component_id),
+        quantity_required: values.quantity_required,
+      };
+      
+      // Only include supplier_component_id if the feature is available and a value is provided
+      if (supplierFeatureAvailable && values.supplier_component_id) {
+        insertData.supplier_component_id = parseInt(values.supplier_component_id);
+      }
+      
       const { data, error } = await supabase
         .from('billofmaterials')
-        .insert({
-          product_id: productId,
-          component_id: parseInt(values.component_id),
-          quantity_required: values.quantity_required,
-        })
+        .insert(insertData)
         .select();
         
       if (error) throw error;
@@ -145,7 +302,12 @@ export function ProductBOM({ productId }: ProductBOMProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['productBOM', productId] });
-      form.reset();
+      form.reset({
+        component_id: '',
+        quantity_required: 1,
+        supplier_component_id: '',
+      });
+      setComponentSearch('');  // Reset search term
       toast({
         title: 'Success',
         description: 'Component added to BOM',
@@ -164,12 +326,20 @@ export function ProductBOM({ productId }: ProductBOMProps) {
   // Update BOM item mutation
   const updateBOMItem = useMutation({
     mutationFn: async (values: BOMItemFormValues & { bom_id: number }) => {
+      // Build the update object
+      const updateData: any = {
+        component_id: parseInt(values.component_id),
+        quantity_required: values.quantity_required,
+      };
+      
+      // Only include supplier_component_id if the feature is available and a value is provided
+      if (supplierFeatureAvailable && values.supplier_component_id) {
+        updateData.supplier_component_id = parseInt(values.supplier_component_id);
+      }
+      
       const { data, error } = await supabase
         .from('billofmaterials')
-        .update({
-          component_id: parseInt(values.component_id),
-          quantity_required: values.quantity_required,
-        })
+        .update(updateData)
         .eq('bom_id', values.bom_id)
         .select();
         
@@ -231,6 +401,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
     setEditingId(item.bom_id);
     form.setValue('component_id', item.component_id.toString());
     form.setValue('quantity_required', item.quantity_required);
+    form.setValue('supplier_component_id', item.supplier_component_id?.toString() || '');
   };
   
   // Cancel editing
@@ -248,6 +419,14 @@ export function ProductBOM({ productId }: ProductBOMProps) {
     });
   };
   
+  // Show total cost of all components in the BOM
+  const totalBOMCost = bomItems.reduce((total, item) => {
+    if (item.supplierComponent) {
+      return total + (parseFloat(item.supplierComponent.price.toString()) * item.quantity_required);
+    }
+    return total;
+  }, 0);
+
   return (
     <div className="space-y-6">
       <Card>
@@ -258,6 +437,12 @@ export function ProductBOM({ productId }: ProductBOMProps) {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {supplierFeatureAvailable && (
+            <div className="mb-4 text-right">
+              <span className="text-sm font-medium">Total Component Cost: </span>
+              <span className="text-lg font-bold">${totalBOMCost.toFixed(2)}</span>
+            </div>
+          )}
           {bomLoading ? (
             <div className="text-center py-4">Loading BOM data...</div>
           ) : (
@@ -267,17 +452,26 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Component Code</TableHead>
+                      <TableHead>Component</TableHead>
                       <TableHead>Description</TableHead>
+                      {supplierFeatureAvailable && (
+                        <>
+                          <TableHead>Supplier</TableHead>
+                          <TableHead>Price</TableHead>
+                        </>
+                      )}
                       <TableHead>Quantity</TableHead>
-                      <TableHead className="w-[100px]">Actions</TableHead>
+                      {supplierFeatureAvailable && (
+                        <TableHead>Total</TableHead>
+                      )}
+                      <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {bomItems.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={4} className="text-center py-4">
-                          No components added to this product yet
+                        <TableCell colSpan={supplierFeatureAvailable ? 7 : 4} className="text-center py-4">
+                          No components added yet
                         </TableCell>
                       </TableRow>
                     ) : (
@@ -285,53 +479,115 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                         <TableRow key={item.bom_id}>
                           {editingId === item.bom_id ? (
                             <>
-                              <TableCell>
-                                <Select
-                                  value={form.watch('component_id')}
-                                  onValueChange={(value) => form.setValue('component_id', value)}
-                                >
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Select component" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {components.map((component) => (
-                                      <SelectItem
-                                        key={component.component_id}
-                                        value={component.component_id.toString()}
-                                      >
-                                        {component.internal_code} - {component.description}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                                {form.formState.errors.component_id && (
-                                  <p className="text-sm text-destructive mt-1">
-                                    {form.formState.errors.component_id.message}
-                                  </p>
-                                )}
-                              </TableCell>
-                              <TableCell>
-                                {/* Description will be shown based on selected component */}
-                                {components.find(
-                                  (c) => c.component_id.toString() === form.watch('component_id')
-                                )?.description || ''}
-                              </TableCell>
-                              <TableCell>
-                                <Input
-                                  type="number"
-                                  min="1"
-                                  value={form.watch('quantity_required')}
-                                  onChange={(e) =>
-                                    form.setValue('quantity_required', parseInt(e.target.value))
-                                  }
-                                  className="w-20"
+                              <TableCell colSpan={2}>
+                                <FormField
+                                  control={form.control}
+                                  name="component_id"
+                                  render={({ field }) => (
+                                    <Select
+                                      onValueChange={(value) => {
+                                        field.onChange(value);
+                                        // Reset supplier when component changes
+                                        if (supplierFeatureAvailable) {
+                                          form.setValue('supplier_component_id', '');
+                                        }
+                                      }}
+                                      value={field.value}
+                                    >
+                                      <SelectTrigger>
+                                        <SelectValue placeholder="Select component" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {components.map((component) => (
+                                          <SelectItem 
+                                            key={component.component_id} 
+                                            value={component.component_id.toString()}
+                                          >
+                                            {component.internal_code} - {component.description}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  )}
                                 />
-                                {form.formState.errors.quantity_required && (
-                                  <p className="text-sm text-destructive mt-1">
-                                    {form.formState.errors.quantity_required.message}
-                                  </p>
-                                )}
                               </TableCell>
+                              {supplierFeatureAvailable && (
+                                <>
+                                  <TableCell>
+                                    <FormField
+                                      control={form.control}
+                                      name="supplier_component_id"
+                                      render={({ field }) => (
+                                        <Select
+                                          onValueChange={field.onChange}
+                                          value={field.value}
+                                          disabled={!form.getValues().component_id}
+                                        >
+                                          <SelectTrigger>
+                                            <SelectValue placeholder="Select supplier" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {suppliersLoading ? (
+                                              <div className="p-2 text-center">Loading suppliers...</div>
+                                            ) : supplierComponents.length === 0 ? (
+                                              <div className="p-2 text-center">No suppliers found</div>
+                                            ) : (
+                                              supplierComponents.map((sc) => (
+                                                <SelectItem 
+                                                  key={sc.supplier_component_id} 
+                                                  value={sc.supplier_component_id.toString()}
+                                                >
+                                                  {sc.supplier?.name || 'Unknown'} - ${parseFloat(sc.price.toString()).toFixed(2)}
+                                                </SelectItem>
+                                              ))
+                                            )}
+                                          </SelectContent>
+                                        </Select>
+                                      )}
+                                    />
+                                  </TableCell>
+                                  <TableCell>
+                                    {/* Price is shown based on the selected supplier */}
+                                    {form.getValues().supplier_component_id && 
+                                      '$' + parseFloat(
+                                        supplierComponents.find(sc => 
+                                          sc.supplier_component_id.toString() === form.getValues().supplier_component_id
+                                        )?.price.toString() || '0'
+                                      ).toFixed(2)
+                                    }
+                                  </TableCell>
+                                </>
+                              )}
+                              <TableCell>
+                                <FormField
+                                  control={form.control}
+                                  name="quantity_required"
+                                  render={({ field }) => (
+                                    <Input
+                                      type="number"
+                                      min="1"
+                                      className="w-20"
+                                      {...field}
+                                    />
+                                  )}
+                                />
+                              </TableCell>
+                              {supplierFeatureAvailable && (
+                                <TableCell>
+                                  {/* Total cost calculation */}
+                                  {(form.getValues().supplier_component_id && form.getValues().quantity_required) ? 
+                                    '$' + (
+                                      parseFloat(
+                                        supplierComponents.find(sc => 
+                                          sc.supplier_component_id.toString() === form.getValues().supplier_component_id
+                                        )?.price.toString() || '0'
+                                      ) * 
+                                      form.getValues().quantity_required
+                                    ).toFixed(2) : 
+                                    ''
+                                  }
+                                </TableCell>
+                              )}
                               <TableCell>
                                 <div className="flex items-center gap-2">
                                   <Button
@@ -355,7 +611,21 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                             <>
                               <TableCell>{item.component.internal_code}</TableCell>
                               <TableCell>{item.component.description}</TableCell>
+                              {supplierFeatureAvailable && (
+                                <>
+                                  <TableCell>{item.supplierComponent?.supplier?.name || 'Not specified'}</TableCell>
+                                  <TableCell>{item.supplierComponent ? `$${parseFloat(item.supplierComponent.price.toString()).toFixed(2)}` : '-'}</TableCell>
+                                </>
+                              )}
                               <TableCell>{item.quantity_required}</TableCell>
+                              {supplierFeatureAvailable && (
+                                <TableCell>
+                                  {item.supplierComponent 
+                                    ? `$${(parseFloat(item.supplierComponent.price.toString()) * item.quantity_required).toFixed(2)}` 
+                                    : '-'
+                                  }
+                                </TableCell>
+                              )}
                               <TableCell>
                                 <div className="flex items-center gap-2">
                                   <Button
@@ -403,9 +673,14 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                               <FormItem>
                                 <FormLabel>Component</FormLabel>
                                 <Select
-                                  onValueChange={field.onChange}
+                                  onValueChange={(value) => {
+                                    console.log('Component selected:', value);
+                                    field.onChange(value);
+                                    setTimeout(() => {
+                                      setComponentSearch('');
+                                    }, 300);
+                                  }}
                                   value={field.value}
-                                  disabled={componentsLoading}
                                 >
                                   <FormControl>
                                     <SelectTrigger>
@@ -413,14 +688,37 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                                     </SelectTrigger>
                                   </FormControl>
                                   <SelectContent>
-                                    {components.map((component) => (
+                                    {filteredComponents().map((component) => (
                                       <SelectItem
                                         key={component.component_id}
                                         value={component.component_id.toString()}
                                       >
-                                        {component.internal_code} - {component.description}
+                                        <span className="font-medium">{component.internal_code}</span>
+                                        {component.description && (
+                                          <span className="ml-2 text-xs text-muted-foreground">
+                                            - {component.description}
+                                          </span>
+                                        )}
                                       </SelectItem>
                                     ))}
+                                    
+                                    {filteredComponents().length === 0 && (
+                                      <div className="p-2 text-center text-sm text-muted-foreground">
+                                        No matching components
+                                      </div>
+                                    )}
+                                    
+                                    <div className="p-2 border-t">
+                                      <p className="text-xs text-muted-foreground mb-2">
+                                        Search by component code or description
+                                      </p>
+                                      <Input
+                                        placeholder="Search components..."
+                                        value={componentSearch}
+                                        onChange={(e) => setComponentSearch(e.target.value)}
+                                        className="mb-1"
+                                      />
+                                    </div>
                                   </SelectContent>
                                 </Select>
                                 <FormMessage />
@@ -445,6 +743,44 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                               </FormItem>
                             )}
                           />
+
+                          {supplierFeatureAvailable && (
+                            <FormField
+                              control={form.control}
+                              name="supplier_component_id"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>Supplier</FormLabel>
+                                  <FormControl>
+                                    <Select
+                                      onValueChange={(value) => {
+                                        console.log('Supplier selected:', value);
+                                        field.onChange(value);
+                                      }}
+                                      value={field.value}
+                                    >
+                                      <FormControl>
+                                        <SelectTrigger>
+                                          <SelectValue placeholder="Select supplier" />
+                                        </SelectTrigger>
+                                      </FormControl>
+                                      <SelectContent>
+                                        {supplierComponents.map((supplierComponent) => (
+                                          <SelectItem
+                                            key={supplierComponent.supplier_component_id}
+                                            value={supplierComponent.supplier_component_id.toString()}
+                                          >
+                                            <span className="font-medium">{supplierComponent.supplier?.name}</span>
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                          )}
                         </div>
 
                         <div className="flex justify-end">
