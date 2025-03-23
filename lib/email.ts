@@ -65,10 +65,10 @@ To: ${supplierName}
 
 ORDER ITEMS:
 ${supplierOrders.map(item => 
-  `- ${item.supplier_component.supplier_code} | ${item.supplier_component.component.internal_code} | ${item.supplier_component.component.description} | Qty: ${item.order_quantity} | Price: £${item.supplier_component.price.toFixed(2)}`
+  `- ${item.supplier_component.supplier_code} | ${item.supplier_component.component.internal_code} | ${item.supplier_component.component.description} | Qty: ${item.order_quantity} | Price: R${item.supplier_component.price.toFixed(2)}`
 ).join('\n')}
 
-TOTAL: £${totalAmount.toFixed(2)}
+TOTAL: R${totalAmount.toFixed(2)}
 `;
 
   if (notes) {

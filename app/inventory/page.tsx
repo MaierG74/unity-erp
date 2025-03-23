@@ -27,6 +27,8 @@ import { InventoryDetails } from "@/components/inventory/Details"
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { QueryError } from '@/components/ui/query-error';
 import { useToast } from "@/components/ui/use-toast";
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 type Component = {
   component_id: number;
@@ -64,18 +66,47 @@ const columns = [
   {
     accessorKey: 'internal_code',
     header: 'Code',
+    editable: true
   },
   {
     accessorKey: 'description',
     header: 'Description',
-    cell: (row: Component) => row.description || '-'
+    cell: (row: Component) => row.description || '-',
+    editable: true
   },
   {
     accessorKey: 'category.categoryname',
     header: 'Category',
     cell: (row: Component) => row.category?.categoryname || 'Uncategorized',
-    enableFiltering: true
+    enableFiltering: true,
+    editable: true
   },
+  {
+    accessorKey: 'inventory.0.quantity_on_hand',
+    header: 'Stock',
+    cell: (row: Component) => {
+      const quantity = row.inventory?.[0]?.quantity_on_hand || 0;
+      const reorderLevel = row.inventory?.[0]?.reorder_level || 0;
+      const isLowStock = quantity <= reorderLevel && quantity > 0;
+      const isOutOfStock = quantity <= 0;
+      
+      return (
+        <span className={cn(
+          isOutOfStock && "text-destructive",
+          isLowStock && "text-amber-500"
+        )}>
+          {quantity}
+        </span>
+      );
+    },
+    editable: true
+  },
+  {
+    accessorKey: 'inventory.0.reorder_level',
+    header: 'Reorder Level',
+    cell: (row: Component) => row.inventory?.[0]?.reorder_level || 0,
+    editable: true
+  }
 ]
 
 export default function InventoryPage() {
@@ -84,7 +115,10 @@ export default function InventoryPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [filterText, setFilterText] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [selectedCategory, setSelectedCategory] = useState<string>('_all');
+  const [selectedSupplier, setSelectedSupplier] = useState<string>('_all');
+  const [categorySearch, setCategorySearch] = useState('');
+  const [supplierSearch, setSupplierSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const { user } = useAuth();
@@ -186,8 +220,22 @@ export default function InventoryPage() {
   // Get unique categories
   const categories = useMemo(() => {
     const uniqueCategories = Array.from(new Set(components.map(c => c.category?.categoryname || 'Uncategorized')));
-    return ['all', ...uniqueCategories].sort();
+    return ['_all', ...uniqueCategories].sort();
   }, [components]);
+
+  // Get unique suppliers
+  const { data: suppliers = [] } = useQuery({
+    queryKey: ['suppliers'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('suppliers')
+        .select('supplier_id, name')
+        .order('name');
+      
+      if (error) throw error;
+      return data;
+    }
+  });
 
   // Filter, sort, and paginate components
   const { paginatedComponents, totalPages } = useMemo(() => {
@@ -197,9 +245,16 @@ export default function InventoryPage() {
           component.internal_code?.toLowerCase().includes(filterText.toLowerCase()) ||
           component.description?.toLowerCase().includes(filterText.toLowerCase())
         );
-        const matchesCategory = selectedCategory === 'all' || 
+        const matchesCategory = selectedCategory === '_all' || 
           (component.category?.categoryname || 'Uncategorized') === selectedCategory;
-        return matchesFilter && matchesCategory;
+          
+        // Add supplier filtering
+        const matchesSupplier = selectedSupplier === '_all' || 
+          component.supplierComponents?.some(sc => 
+            sc.supplier?.name === selectedSupplier
+          );
+          
+        return matchesFilter && matchesCategory && matchesSupplier;
       })
       .sort((a, b) => {
         if (a.internal_code && !b.internal_code) return -1;
@@ -212,12 +267,28 @@ export default function InventoryPage() {
     const paginatedComponents = filtered.slice(start, start + pageSize);
 
     return { paginatedComponents, totalPages };
-  }, [components, filterText, selectedCategory, currentPage, pageSize]);
+  }, [components, filterText, selectedCategory, selectedSupplier, currentPage, pageSize]);
 
   // Reset to first page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [filterText, selectedCategory, pageSize]);
+  }, [filterText, selectedCategory, selectedSupplier, pageSize]);
+
+  // Filter categories based on search
+  const filteredCategories = useMemo(() => {
+    if (!categorySearch) return categories.filter(c => c !== '_all');
+    return categories
+      .filter(c => c !== '_all')
+      .filter(c => c.toLowerCase().includes(categorySearch.toLowerCase()));
+  }, [categories, categorySearch]);
+
+  // Filter suppliers based on search
+  const filteredSuppliers = useMemo(() => {
+    if (!supplierSearch) return suppliers;
+    return suppliers.filter(s => 
+      s.name.toLowerCase().includes(supplierSearch.toLowerCase())
+    );
+  }, [suppliers, supplierSearch]);
 
   const getStockStatusColor = (quantity: number, reorderLevel: number | null) => {
     if (quantity <= 0) return "bg-destructive/10 border-destructive text-destructive";
@@ -527,14 +598,109 @@ export default function InventoryPage() {
         </div>
       </div>
 
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div>
+          <label className="text-sm font-medium mb-1 block">Search</label>
+          <Input 
+            placeholder="Search by code or description..." 
+            value={filterText}
+            onChange={e => setFilterText(e.target.value)}
+          />
+        </div>
+        
+        <div>
+          <label className="text-sm font-medium mb-1 block">Category</label>
+          <Select 
+            value={selectedCategory} 
+            onValueChange={(value) => {
+              setSelectedCategory(value);
+              // Reset search when selecting a category
+              setCategorySearch('');
+            }}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Select category" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_all">All Categories</SelectItem>
+              
+              <div className="p-2 border-t border-b">
+                <Input
+                  placeholder="Search categories..."
+                  value={categorySearch}
+                  onChange={(e) => setCategorySearch(e.target.value)}
+                  className="mb-1"
+                />
+              </div>
+              
+              {filteredCategories.length > 0 ? (
+                filteredCategories.map(category => (
+                  <SelectItem key={category} value={category}>
+                    {category}
+                  </SelectItem>
+                ))
+              ) : (
+                <div className="p-2 text-center text-sm text-muted-foreground">
+                  No matching categories
+                </div>
+              )}
+            </SelectContent>
+          </Select>
+        </div>
+        
+        <div>
+          <label className="text-sm font-medium mb-1 block">Supplier</label>
+          <Select 
+            value={selectedSupplier} 
+            onValueChange={(value) => {
+              setSelectedSupplier(value);
+              // Reset search when selecting a supplier
+              setSupplierSearch('');
+            }}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Select supplier" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_all">All Suppliers</SelectItem>
+              
+              <div className="p-2 border-t border-b">
+                <Input
+                  placeholder="Search suppliers..."
+                  value={supplierSearch}
+                  onChange={(e) => setSupplierSearch(e.target.value)}
+                  className="mb-1"
+                />
+              </div>
+              
+              {filteredSuppliers.length > 0 ? (
+                filteredSuppliers.map(supplier => (
+                  <SelectItem key={supplier.supplier_id} value={supplier.name}>
+                    {supplier.name}
+                  </SelectItem>
+                ))
+              ) : (
+                <div className="p-2 text-center text-sm text-muted-foreground">
+                  No matching suppliers
+                </div>
+              )}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
       <div className="flex flex-row gap-4">
         {/* Left side - Component list */}
         <div className="flex-1 overflow-auto">
           <DataTable
             columns={columns}
-            data={components}
-            onRowClick={setSelectedComponent}
+            data={paginatedComponents}
+            onRowClick={(component) => {
+              console.log("Setting selected component:", component);
+              setSelectedComponent(component);
+            }}
             selectedId={selectedComponent?.component_id}
+            hideFilters={true}
           />
         </div>
 

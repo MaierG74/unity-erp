@@ -139,7 +139,7 @@ export default function PurchaseOrderEmail({
                     <Text className="text-right">{item.order_quantity}</Text>
                   </Column>
                   <Column className="w-1/6 p-2">
-                    <Text className="text-right">£{item.supplier_component.price.toFixed(2)}</Text>
+                    <Text className="text-right">R{item.supplier_component.price.toFixed(2)}</Text>
                   </Column>
                 </Row>
               ))}
@@ -150,7 +150,7 @@ export default function PurchaseOrderEmail({
                   <Text className="font-bold">Total:</Text>
                 </Column>
                 <Column className="w-1/6 text-right p-2">
-                  <Text className="font-bold">£{totalAmount.toFixed(2)}</Text>
+                  <Text className="font-bold">R{totalAmount.toFixed(2)}</Text>
                 </Column>
               </Row>
             </Section>

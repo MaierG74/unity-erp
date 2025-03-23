@@ -237,7 +237,7 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
                     <td className="p-4 text-right">
                       <div className="inline-flex items-center gap-1">
                         <span>R</span>
-                        <span>{component.price.toFixed(2)}</span>
+                        <span>{component.price !== null && component.price !== undefined ? component.price.toFixed(2) : '0.00'}</span>
                       </div>
                     </td>
                     <td className="p-4 text-right">{component.lead_time || '-'}</td>
