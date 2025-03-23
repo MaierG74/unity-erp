@@ -56,6 +56,7 @@ import { Plus, Trash2, Edit, Save, X, Search } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import { useDebounce } from '@/hooks/use-debounce';
+import React from 'react';
 
 // Define types
 interface Component {
@@ -100,7 +101,10 @@ interface BOMItem {
 // Form schema for adding/editing BOM items
 const bomItemSchema = z.object({
   component_id: z.string().min(1, 'Component is required'),
-  quantity_required: z.coerce.number().min(1, 'Quantity must be at least 1'),
+  // Allow any positive decimal
+  quantity_required: z.coerce
+    .number()
+    .positive('Quantity must be greater than 0'),
   supplier_component_id: z.string().optional(),
 });
 
@@ -113,8 +117,9 @@ interface ProductBOMProps {
 export function ProductBOM({ productId }: ProductBOMProps) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [componentSearch, setComponentSearch] = useState('');
+  const [supplierSearch, setSupplierSearch] = useState('');
   const [selectedComponentId, setSelectedComponentId] = useState<string | null>(null);
-  const debouncedComponentSearch = useDebounce(componentSearch, 300);
+  const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   
@@ -164,6 +169,8 @@ export function ProductBOM({ productId }: ProductBOMProps) {
   const { data: bomItems = [], isLoading: bomLoading } = useQuery({
     queryKey: ['productBOM', productId, supplierFeatureAvailable],
     queryFn: async () => {
+      console.log('Fetching BOM items for product ID:', productId);
+      
       let query = supabase
         .from('billofmaterials')
         .select(`
@@ -208,7 +215,12 @@ export function ProductBOM({ productId }: ProductBOMProps) {
         
       const { data, error } = await query.eq('product_id', productId);
         
-      if (error) throw error;
+      if (error) {
+        console.error('Error fetching BOM items:', error);
+        throw error;
+      }
+      
+      console.log('Fetched BOM items:', data);
       
       // Transform the response to match our BOMItem interface
       return data.map((item: any) => ({
@@ -265,86 +277,156 @@ export function ProductBOM({ productId }: ProductBOMProps) {
     enabled: !!watchedComponentId, // Only run query when a component is selected
   });
 
-  // Filter components based on search
-  const filteredComponents = useCallback(() => {
-    if (!debouncedComponentSearch) return components;
+  // Completely remove all filtering logic and use a simple approach
+  const getFilteredComponents = () => {
+    if (!components || components.length === 0) return [];
+    if (!componentSearch) return components;
     
-    return components.filter(
-      component => 
-        component.internal_code.toLowerCase().includes(debouncedComponentSearch.toLowerCase()) || 
-        (component.description && 
-          component.description.toLowerCase().includes(debouncedComponentSearch.toLowerCase()))
-    );
-  }, [components, debouncedComponentSearch]);
+    console.log("Filtering components with search term:", componentSearch);
+    
+    const normalizedSearch = componentSearch.toLowerCase().trim();
+    const filtered = components.filter(component => {
+      if (!component) return false;
+      
+      const codeText = (component.internal_code || '').toLowerCase();
+      const descText = (component.description || '').toLowerCase();
+      
+      return codeText.includes(normalizedSearch) || descText.includes(normalizedSearch);
+    });
+    
+    console.log(`Found ${filtered.length} components matching '${componentSearch}'`);
+    return filtered;
+  };
   
+  const getFilteredSupplierComponents = () => {
+    if (!supplierComponents || supplierComponents.length === 0) return [];
+    if (!supplierSearch) return supplierComponents;
+    
+    console.log("Filtering suppliers with search term:", supplierSearch);
+    
+    const normalizedSearch = supplierSearch.toLowerCase().trim();
+    const filtered = supplierComponents.filter(sc => {
+      if (!sc) return false;
+      
+      const supplierName = (sc?.supplier?.name || '').toLowerCase();
+      
+      return supplierName.includes(normalizedSearch);
+    });
+    
+    console.log(`Found ${filtered.length} suppliers matching '${supplierSearch}'`);
+    return filtered;
+  };
+  
+  // Get filtered lists directly when rendering
+  const filteredComponents = getFilteredComponents();
+  const filteredSuppliers = getFilteredSupplierComponents();
+
   // Add BOM item mutation
   const addBOMItem = useMutation({
     mutationFn: async (values: BOMItemFormValues) => {
-      // Build the insert object
-      const insertData: any = {
-        product_id: productId,
-        component_id: parseInt(values.component_id),
-        quantity_required: values.quantity_required,
-      };
-      
-      // Only include supplier_component_id if the feature is available and a value is provided
-      if (supplierFeatureAvailable && values.supplier_component_id) {
-        insertData.supplier_component_id = parseInt(values.supplier_component_id);
-      }
-      
-      const { data, error } = await supabase
-        .from('billofmaterials')
-        .insert(insertData)
-        .select();
+      try {
+        // Build the insert object
+        const insertData: any = {
+          product_id: productId,
+          component_id: parseInt(values.component_id),
+          // Store quantity as a decimal
+          quantity_required: Number(values.quantity_required),
+        };
         
-      if (error) throw error;
-      return data;
+        // Only include supplier_component_id if the feature is available and a value is provided
+        if (supplierFeatureAvailable && values.supplier_component_id) {
+          insertData.supplier_component_id = parseInt(values.supplier_component_id);
+        }
+        
+        console.log('Adding BOM item with data:', insertData);
+        
+        const { data, error } = await supabase
+          .from('billofmaterials')
+          .insert(insertData)
+          .select();
+          
+        if (error) {
+          console.error('Supabase error:', error);
+          throw new Error(`Database error: ${error.message}`);
+        }
+        
+        console.log('Successfully added BOM item:', data);
+        return data;
+      } catch (error: any) {
+        console.error('Error in mutation:', error);
+        throw error;
+      }
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      console.log('BOM item added successfully, invalidating queries', data);
       queryClient.invalidateQueries({ queryKey: ['productBOM', productId] });
       form.reset({
         component_id: '',
         quantity_required: 1,
         supplier_component_id: '',
       });
-      setComponentSearch('');  // Reset search term
+      handleComponentSearchChange('');  // Reset search term
+      handleSupplierSearchChange('');  // Reset supplier search term
       toast({
         title: 'Success',
         description: 'Component added to BOM',
       });
     },
     onError: (error) => {
+      console.error('Error adding BOM item:', error);
+      
+      // Create a more user-friendly error message
+      let errorMessage = 'Failed to add component to BOM';
+      
+      if (error.message && error.message.includes('invalid input syntax')) {
+        errorMessage = 'The quantity must be a whole number. Please adjust your input.';
+      } else if (error.message) {
+        errorMessage = `${errorMessage}: ${error.message}`;
+      }
+      
       toast({
         title: 'Error',
-        description: 'Failed to add component to BOM',
+        description: errorMessage,
         variant: 'destructive',
       });
-      console.error('Error adding BOM item:', error);
     },
   });
   
   // Update BOM item mutation
   const updateBOMItem = useMutation({
     mutationFn: async (values: BOMItemFormValues & { bom_id: number }) => {
-      // Build the update object
-      const updateData: any = {
-        component_id: parseInt(values.component_id),
-        quantity_required: values.quantity_required,
-      };
-      
-      // Only include supplier_component_id if the feature is available and a value is provided
-      if (supplierFeatureAvailable && values.supplier_component_id) {
-        updateData.supplier_component_id = parseInt(values.supplier_component_id);
-      }
-      
-      const { data, error } = await supabase
-        .from('billofmaterials')
-        .update(updateData)
-        .eq('bom_id', values.bom_id)
-        .select();
+      try {
+        // Build the update object
+        const updateData: any = {
+          component_id: parseInt(values.component_id),
+          // Store quantity as a decimal
+          quantity_required: Number(values.quantity_required),
+        };
         
-      if (error) throw error;
-      return data;
+        // Only include supplier_component_id if the feature is available and a value is provided
+        if (supplierFeatureAvailable && values.supplier_component_id) {
+          updateData.supplier_component_id = parseInt(values.supplier_component_id);
+        }
+        
+        console.log('Updating BOM item with data:', updateData);
+        
+        const { data, error } = await supabase
+          .from('billofmaterials')
+          .update(updateData)
+          .eq('bom_id', values.bom_id)
+          .select();
+          
+        if (error) {
+          console.error('Supabase error:', error);
+          throw new Error(`Database error: ${error.message}`);
+        }
+        
+        console.log('Successfully updated BOM item:', data);
+        return data;
+      } catch (error: any) {
+        console.error('Error in update mutation:', error);
+        throw error;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['productBOM', productId] });
@@ -393,6 +475,33 @@ export function ProductBOM({ productId }: ProductBOMProps) {
   
   // Handle form submission for adding new BOM item
   const onSubmit = (values: BOMItemFormValues) => {
+    console.log('Form submitted with values:', values);
+    console.log('Current product ID:', productId);
+    
+    // Validate component_id is a valid number
+    if (!values.component_id || isNaN(parseInt(values.component_id))) {
+      console.error('Invalid component_id:', values.component_id);
+      toast({
+        title: 'Validation Error',
+        description: 'Please select a valid component',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    // Extra validation for supplier if the feature is available
+    if (supplierFeatureAvailable && values.supplier_component_id) {
+      if (isNaN(parseInt(values.supplier_component_id))) {
+        console.error('Invalid supplier_component_id:', values.supplier_component_id);
+        toast({
+          title: 'Validation Error',
+          description: 'Please select a valid supplier',
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
+    
     addBOMItem.mutate(values);
   };
   
@@ -407,6 +516,9 @@ export function ProductBOM({ productId }: ProductBOMProps) {
   // Cancel editing
   const cancelEditing = () => {
     setEditingId(null);
+    setSelectedComponentId(null);
+    handleComponentSearchChange('');
+    handleSupplierSearchChange('');
     form.reset();
   };
   
@@ -427,6 +539,47 @@ export function ProductBOM({ productId }: ProductBOMProps) {
     return total;
   }, 0);
 
+  // Add wrapper functions to track state changes
+  const handleComponentSearchChange = (value: string) => {
+    console.log("Component search changed to:", value);
+    setComponentSearch(value);
+  };
+
+  const handleSupplierSearchChange = (value: string) => {
+    console.log("Supplier search changed to:", value);
+    setSupplierSearch(value);
+    // Show the dropdown when searching
+    if (value.length > 0) {
+      setShowSupplierDropdown(true);
+    }
+  };
+
+  // Add refs to the supplier dropdown containers
+  const supplierDropdownRef = React.useRef<HTMLDivElement>(null);
+  const formSupplierDropdownRef = React.useRef<HTMLDivElement>(null);
+
+  // Add a click outside handler
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      const clickedOutsideTableDropdown = supplierDropdownRef.current && 
+                                          !supplierDropdownRef.current.contains(event.target as Node);
+      const clickedOutsideFormDropdown = formSupplierDropdownRef.current && 
+                                          !formSupplierDropdownRef.current.contains(event.target as Node);
+      
+      // If clicked outside both dropdowns, hide them
+      if (clickedOutsideTableDropdown && clickedOutsideFormDropdown) {
+        setShowSupplierDropdown(false);
+      }
+    }
+
+    // Bind the event listener
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      // Unbind the event listener on clean up
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [supplierDropdownRef, formSupplierDropdownRef]);
+
   return (
     <div className="space-y-6">
       <Card>
@@ -440,7 +593,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
           {supplierFeatureAvailable && (
             <div className="mb-4 text-right">
               <span className="text-sm font-medium">Total Component Cost: </span>
-              <span className="text-lg font-bold">${totalBOMCost.toFixed(2)}</span>
+              <span className="text-lg font-bold">R{totalBOMCost.toFixed(2)}</span>
             </div>
           )}
           {bomLoading ? (
@@ -484,30 +637,73 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                                   control={form.control}
                                   name="component_id"
                                   render={({ field }) => (
-                                    <Select
-                                      onValueChange={(value) => {
-                                        field.onChange(value);
-                                        // Reset supplier when component changes
-                                        if (supplierFeatureAvailable) {
-                                          form.setValue('supplier_component_id', '');
-                                        }
-                                      }}
-                                      value={field.value}
-                                    >
-                                      <SelectTrigger>
-                                        <SelectValue placeholder="Select component" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {components.map((component) => (
-                                          <SelectItem 
-                                            key={component.component_id} 
-                                            value={component.component_id.toString()}
+                                    <Popover>
+                                      <PopoverTrigger asChild>
+                                        <FormControl>
+                                          <Button
+                                            variant="outline"
+                                            role="combobox"
+                                            className={cn(
+                                              "w-full justify-between",
+                                              !field.value && "text-muted-foreground"
+                                            )}
                                           >
-                                            {component.internal_code} - {component.description}
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
+                                            {field.value
+                                              ? components.find(
+                                                  (component) => component?.component_id?.toString() === field.value
+                                                )?.internal_code || "Select component"
+                                              : "Select component"}
+                                            <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                          </Button>
+                                        </FormControl>
+                                      </PopoverTrigger>
+                                      <PopoverContent className="w-[400px] p-0">
+                                        <Command>
+                                          <CommandInput
+                                            placeholder="Search components..."
+                                            className="h-9"
+                                            onValueChange={handleComponentSearchChange}
+                                            value={componentSearch}
+                                          />
+                                          <CommandList>
+                                            <CommandEmpty>No components found</CommandEmpty>
+                                            <CommandGroup>
+                                              {filteredComponents.map((component) => (
+                                                <div
+                                                  key={component.component_id}
+                                                  className="px-2 py-1.5 text-sm rounded-sm cursor-pointer hover:bg-accent hover:text-accent-foreground aria-selected:bg-accent aria-selected:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+                                                  onClick={() => {
+                                                    form.setValue("component_id", component.component_id.toString());
+                                                    handleComponentSearchChange("");
+                                                    handleSupplierSearchChange("");
+                                                    // Reset supplier when component changes
+                                                    if (supplierFeatureAvailable) {
+                                                      form.setValue('supplier_component_id', '');
+                                                    }
+                                                    // Close the popover
+                                                    const popoverElement = document.querySelector('[data-state="open"][role="dialog"]');
+                                                    if (popoverElement) {
+                                                      (popoverElement as HTMLElement).click();
+                                                    }
+                                                  }}
+                                                >
+                                                  <div className="flex flex-col w-full cursor-pointer">
+                                                    <div className="flex items-center">
+                                                      <span className="font-medium">{component.internal_code || 'No code'}</span>
+                                                    </div>
+                                                    {component.description && (
+                                                      <span className="text-xs text-muted-foreground">
+                                                        {component.description}
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                </div>
+                                              ))}
+                                            </CommandGroup>
+                                          </CommandList>
+                                        </Command>
+                                      </PopoverContent>
+                                    </Popover>
                                   )}
                                 />
                               </TableCell>
@@ -518,38 +714,84 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                                       control={form.control}
                                       name="supplier_component_id"
                                       render={({ field }) => (
-                                        <Select
-                                          onValueChange={field.onChange}
-                                          value={field.value}
-                                          disabled={!form.getValues().component_id}
-                                        >
-                                          <SelectTrigger>
-                                            <SelectValue placeholder="Select supplier" />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            {suppliersLoading ? (
-                                              <div className="p-2 text-center">Loading suppliers...</div>
-                                            ) : supplierComponents.length === 0 ? (
-                                              <div className="p-2 text-center">No suppliers found</div>
-                                            ) : (
-                                              supplierComponents.map((sc) => (
-                                                <SelectItem 
-                                                  key={sc.supplier_component_id} 
-                                                  value={sc.supplier_component_id.toString()}
-                                                >
-                                                  {sc.supplier?.name || 'Unknown'} - ${parseFloat(sc.price.toString()).toFixed(2)}
-                                                </SelectItem>
-                                              ))
+                                        <FormItem>
+                                          <FormLabel>Supplier</FormLabel>
+                                          
+                                          {/* Use the same approach as the inline supplier selection */}
+                                          <div className="relative" ref={formSupplierDropdownRef}>
+                                            <Input 
+                                              placeholder="Search suppliers..." 
+                                              value={supplierSearch} 
+                                              onChange={(e) => handleSupplierSearchChange(e.target.value)}
+                                              className="mb-1 focus-visible:ring-1"
+                                              disabled={!form.getValues().component_id || suppliersLoading}
+                                              onFocus={() => setShowSupplierDropdown(true)}
+                                            />
+                                            {form.getValues().component_id && showSupplierDropdown && (
+                                              <div className="absolute z-10 w-full bg-background border rounded-md mt-1 max-h-[300px] overflow-y-auto" data-supplier-dropdown>
+                                                {supplierSearch && getFilteredSupplierComponents().length === 0 ? (
+                                                  <div className="px-2 py-4 text-sm text-center text-muted-foreground">No suppliers found</div>
+                                                ) : (
+                                                  <div>
+                                                    <div className="p-2 text-xs text-muted-foreground font-semibold border-b">
+                                                      Suppliers (sorted by lowest price first)
+                                                    </div>
+                                                    {getFilteredSupplierComponents()
+                                                      .sort((a, b) => {
+                                                        const priceA = parseFloat(a?.price?.toString() || '0');
+                                                        const priceB = parseFloat(b?.price?.toString() || '0');
+                                                        return priceA - priceB;
+                                                      })
+                                                      .map((sc) => (
+                                                        <div
+                                                          key={sc.supplier_component_id}
+                                                          className="px-2 py-1.5 text-sm rounded-sm cursor-pointer hover:bg-accent hover:text-accent-foreground"
+                                                          onClick={() => {
+                                                            form.setValue("supplier_component_id", sc.supplier_component_id.toString());
+                                                            handleSupplierSearchChange("");
+                                                            setShowSupplierDropdown(false);
+                                                          }}
+                                                        >
+                                                          <div className="flex justify-between w-full cursor-pointer">
+                                                            <span>{sc?.supplier?.name || "Unknown"}</span>
+                                                            <span className="font-medium">R{parseFloat(sc?.price?.toString() || '0').toFixed(2)}</span>
+                                                          </div>
+                                                        </div>
+                                                      ))
+                                                    }
+                                                  </div>
+                                                )}
+                                              </div>
                                             )}
-                                          </SelectContent>
-                                        </Select>
+                                            <div className="mt-2">
+                                              {field.value && (
+                                                <div className="text-sm p-2.5 border rounded-md bg-accent/10">
+                                                  <div className="flex justify-between items-center">
+                                                    <span>
+                                                      <span className="text-muted-foreground mr-1">Selected:</span> 
+                                                      <span className="font-medium">
+                                                        {supplierComponents.find(sc => sc.supplier_component_id.toString() === field.value)?.supplier?.name || 'Unknown'}
+                                                      </span>
+                                                    </span>
+                                                    <span className="font-medium text-primary">
+                                                      R{parseFloat(
+                                                        supplierComponents.find(sc => sc.supplier_component_id.toString() === field.value)?.price?.toString() || '0'
+                                                      ).toFixed(2)}
+                                                    </span>
+                                                  </div>
+                                                </div>
+                                              )}
+                                            </div>
+                                          </div>
+                                          <FormMessage />
+                                        </FormItem>
                                       )}
                                     />
                                   </TableCell>
                                   <TableCell>
                                     {/* Price is shown based on the selected supplier */}
                                     {form.getValues().supplier_component_id && 
-                                      '$' + parseFloat(
+                                      'R' + parseFloat(
                                         supplierComponents.find(sc => 
                                           sc.supplier_component_id.toString() === form.getValues().supplier_component_id
                                         )?.price.toString() || '0'
@@ -563,20 +805,29 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                                   control={form.control}
                                   name="quantity_required"
                                   render={({ field }) => (
-                                    <Input
-                                      type="number"
-                                      min="1"
-                                      className="w-20"
-                                      {...field}
-                                    />
+                                    <FormControl>
+                                      <Input
+                                        type="number"
+                                        min="0.1"
+                                        step="0.1"
+                                        className="w-20"
+                                        placeholder="e.g., 1.7"
+                                        title="Enter quantity (decimals allowed)"
+                                        {...field}
+                                      />
+                                    </FormControl>
                                   )}
                                 />
+                                <FormMessage />
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Decimal values allowed (e.g., 1.5, 2.75)
+                                </p>
                               </TableCell>
                               {supplierFeatureAvailable && (
                                 <TableCell>
                                   {/* Total cost calculation */}
                                   {(form.getValues().supplier_component_id && form.getValues().quantity_required) ? 
-                                    '$' + (
+                                    'R' + (
                                       parseFloat(
                                         supplierComponents.find(sc => 
                                           sc.supplier_component_id.toString() === form.getValues().supplier_component_id
@@ -614,14 +865,14 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                               {supplierFeatureAvailable && (
                                 <>
                                   <TableCell>{item.supplierComponent?.supplier?.name || 'Not specified'}</TableCell>
-                                  <TableCell>{item.supplierComponent ? `$${parseFloat(item.supplierComponent.price.toString()).toFixed(2)}` : '-'}</TableCell>
+                                  <TableCell>{item.supplierComponent ? `R${parseFloat(item.supplierComponent.price.toString()).toFixed(2)}` : '-'}</TableCell>
                                 </>
                               )}
-                              <TableCell>{item.quantity_required}</TableCell>
+                              <TableCell>{Number(item.quantity_required).toFixed(2)}</TableCell>
                               {supplierFeatureAvailable && (
                                 <TableCell>
                                   {item.supplierComponent 
-                                    ? `$${(parseFloat(item.supplierComponent.price.toString()) * item.quantity_required).toFixed(2)}` 
+                                    ? `R${(parseFloat(item.supplierComponent.price.toString()) * item.quantity_required).toFixed(2)}` 
                                     : '-'
                                   }
                                 </TableCell>
@@ -655,72 +906,77 @@ export function ProductBOM({ productId }: ProductBOMProps) {
 
               {/* Add New BOM Item Form */}
               {editingId === null && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-md">Add Component</CardTitle>
+                <Card className="bg-card/50">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-md font-medium">Add Component</CardTitle>
                   </CardHeader>
                   <CardContent>
                     <Form {...form}>
                       <form
                         onSubmit={form.handleSubmit(onSubmit)}
-                        className="space-y-4"
+                        className="space-y-6"
                       >
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
                           <FormField
                             control={form.control}
                             name="component_id"
                             render={({ field }) => (
-                              <FormItem>
+                              <FormItem className="flex flex-col md:col-span-8">
                                 <FormLabel>Component</FormLabel>
-                                <Select
-                                  onValueChange={(value) => {
-                                    console.log('Component selected:', value);
-                                    field.onChange(value);
-                                    setTimeout(() => {
-                                      setComponentSearch('');
-                                    }, 300);
-                                  }}
-                                  value={field.value}
-                                >
-                                  <FormControl>
-                                    <SelectTrigger>
-                                      <SelectValue placeholder="Select component" />
-                                    </SelectTrigger>
-                                  </FormControl>
-                                  <SelectContent>
-                                    {filteredComponents().map((component) => (
-                                      <SelectItem
-                                        key={component.component_id}
-                                        value={component.component_id.toString()}
-                                      >
-                                        <span className="font-medium">{component.internal_code}</span>
-                                        {component.description && (
-                                          <span className="ml-2 text-xs text-muted-foreground">
-                                            - {component.description}
-                                          </span>
-                                        )}
-                                      </SelectItem>
-                                    ))}
-                                    
-                                    {filteredComponents().length === 0 && (
-                                      <div className="p-2 text-center text-sm text-muted-foreground">
-                                        No matching components
+                                
+                                {/* Simplified approach to component selection */}
+                                <div className="relative">
+                                  <Input 
+                                    placeholder="Search components..." 
+                                    value={componentSearch} 
+                                    onChange={(e) => handleComponentSearchChange(e.target.value)}
+                                    className="mb-1 focus-visible:ring-1"
+                                  />
+                                  {componentSearch && (
+                                    <div className="absolute z-10 w-full bg-background border rounded-md mt-1 max-h-[300px] overflow-y-auto">
+                                      {getFilteredComponents().length === 0 ? (
+                                        <div className="px-2 py-4 text-sm text-center text-muted-foreground">No components found</div>
+                                      ) : (
+                                        getFilteredComponents().map((component) => (
+                                          <div
+                                            key={component.component_id}
+                                            className="px-2 py-1.5 text-sm rounded-sm cursor-pointer hover:bg-accent hover:text-accent-foreground"
+                                            onClick={() => {
+                                              form.setValue("component_id", component.component_id.toString());
+                                              handleComponentSearchChange("");
+                                              handleSupplierSearchChange("");
+                                              // Reset supplier when component changes
+                                              if (supplierFeatureAvailable) {
+                                                form.setValue('supplier_component_id', '');
+                                              }
+                                            }}
+                                          >
+                                            <div className="flex flex-col w-full cursor-pointer">
+                                              <div className="flex items-center">
+                                                <span className="font-medium">{component.internal_code || 'No code'}</span>
+                                              </div>
+                                              {component.description && (
+                                                <span className="text-xs text-muted-foreground">
+                                                  {component.description}
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        ))
+                                      )}
+                                    </div>
+                                  )}
+                                  <div className="mt-2">
+                                    {field.value && (
+                                      <div className="text-sm p-2.5 border rounded-md bg-accent/10 flex items-center">
+                                        <span className="text-muted-foreground mr-1">Selected:</span> 
+                                        <span className="font-medium ml-1">
+                                          {components.find(c => c.component_id.toString() === field.value)?.internal_code || 'Unknown'}
+                                        </span>
                                       </div>
                                     )}
-                                    
-                                    <div className="p-2 border-t">
-                                      <p className="text-xs text-muted-foreground mb-2">
-                                        Search by component code or description
-                                      </p>
-                                      <Input
-                                        placeholder="Search components..."
-                                        value={componentSearch}
-                                        onChange={(e) => setComponentSearch(e.target.value)}
-                                        className="mb-1"
-                                      />
-                                    </div>
-                                  </SelectContent>
-                                </Select>
+                                  </div>
+                                </div>
                                 <FormMessage />
                               </FormItem>
                             )}
@@ -730,16 +986,23 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                             control={form.control}
                             name="quantity_required"
                             render={({ field }) => (
-                              <FormItem>
+                              <FormItem className="md:col-span-4">
                                 <FormLabel>Quantity</FormLabel>
                                 <FormControl>
                                   <Input
                                     type="number"
-                                    min="1"
+                                    min="0.1"
+                                    step="0.1"
+                                    className="w-20"
+                                    placeholder="e.g., 1.7"
+                                    title="Enter quantity (decimals allowed)"
                                     {...field}
                                   />
                                 </FormControl>
                                 <FormMessage />
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Decimal values allowed (e.g., 1.5, 2.75)
+                                </p>
                               </FormItem>
                             )}
                           />
@@ -749,33 +1012,75 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                               control={form.control}
                               name="supplier_component_id"
                               render={({ field }) => (
-                                <FormItem>
+                                <FormItem className="md:col-span-12">
                                   <FormLabel>Supplier</FormLabel>
-                                  <FormControl>
-                                    <Select
-                                      onValueChange={(value) => {
-                                        console.log('Supplier selected:', value);
-                                        field.onChange(value);
-                                      }}
-                                      value={field.value}
-                                    >
-                                      <FormControl>
-                                        <SelectTrigger>
-                                          <SelectValue placeholder="Select supplier" />
-                                        </SelectTrigger>
-                                      </FormControl>
-                                      <SelectContent>
-                                        {supplierComponents.map((supplierComponent) => (
-                                          <SelectItem
-                                            key={supplierComponent.supplier_component_id}
-                                            value={supplierComponent.supplier_component_id.toString()}
-                                          >
-                                            <span className="font-medium">{supplierComponent.supplier?.name}</span>
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  </FormControl>
+                                  
+                                  {/* Use the same approach as the inline supplier selection */}
+                                  <div className="relative" ref={formSupplierDropdownRef}>
+                                    <Input 
+                                      placeholder="Search suppliers..." 
+                                      value={supplierSearch} 
+                                      onChange={(e) => handleSupplierSearchChange(e.target.value)}
+                                      className="mb-1 focus-visible:ring-1"
+                                      disabled={!form.getValues().component_id || suppliersLoading}
+                                      onFocus={() => setShowSupplierDropdown(true)}
+                                    />
+                                    {form.getValues().component_id && showSupplierDropdown && (
+                                      <div className="absolute z-10 w-full bg-background border rounded-md mt-1 max-h-[300px] overflow-y-auto" data-supplier-dropdown>
+                                        {supplierSearch && getFilteredSupplierComponents().length === 0 ? (
+                                          <div className="px-2 py-4 text-sm text-center text-muted-foreground">No suppliers found</div>
+                                        ) : (
+                                          <div>
+                                            <div className="p-2 text-xs text-muted-foreground font-semibold border-b">
+                                              Suppliers (sorted by lowest price first)
+                                            </div>
+                                            {getFilteredSupplierComponents()
+                                              .sort((a, b) => {
+                                                const priceA = parseFloat(a?.price?.toString() || '0');
+                                                const priceB = parseFloat(b?.price?.toString() || '0');
+                                                return priceA - priceB;
+                                              })
+                                              .map((sc) => (
+                                                <div
+                                                  key={sc.supplier_component_id}
+                                                  className="px-2 py-1.5 text-sm rounded-sm cursor-pointer hover:bg-accent hover:text-accent-foreground"
+                                                  onClick={() => {
+                                                    form.setValue("supplier_component_id", sc.supplier_component_id.toString());
+                                                    handleSupplierSearchChange("");
+                                                    setShowSupplierDropdown(false);
+                                                  }}
+                                                >
+                                                  <div className="flex justify-between w-full cursor-pointer">
+                                                    <span>{sc?.supplier?.name || "Unknown"}</span>
+                                                    <span className="font-medium">R{parseFloat(sc?.price?.toString() || '0').toFixed(2)}</span>
+                                                  </div>
+                                                </div>
+                                              ))
+                                            }
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                    <div className="mt-2">
+                                      {field.value && (
+                                        <div className="text-sm p-2.5 border rounded-md bg-accent/10">
+                                          <div className="flex justify-between items-center">
+                                            <span>
+                                              <span className="text-muted-foreground mr-1">Selected:</span> 
+                                              <span className="font-medium">
+                                                {supplierComponents.find(sc => sc.supplier_component_id.toString() === field.value)?.supplier?.name || 'Unknown'}
+                                              </span>
+                                            </span>
+                                            <span className="font-medium text-primary">
+                                              R{parseFloat(
+                                                supplierComponents.find(sc => sc.supplier_component_id.toString() === field.value)?.price?.toString() || '0'
+                                              ).toFixed(2)}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
                                   <FormMessage />
                                 </FormItem>
                               )}
@@ -783,9 +1088,63 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                           )}
                         </div>
 
-                        <div className="flex justify-end">
+                        {/* Summary section showing cost information */}
+                        {form.watch('component_id') && supplierFeatureAvailable && (
+                          <div className="mt-4 p-4 border rounded-md bg-muted/20">
+                            <h4 className="text-sm font-semibold mb-3 text-primary">Selection Summary</h4>
+                            <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                              <div className="text-muted-foreground font-medium">Component:</div>
+                              <div>
+                                {components.find(c => c?.component_id?.toString() === form.watch('component_id'))?.internal_code || 'Not selected'} 
+                              </div>
+                              
+                              <div className="text-muted-foreground font-medium">Supplier:</div>
+                              <div>
+                                {form.watch('supplier_component_id') 
+                                  ? supplierComponents.find(sc => 
+                                      sc?.supplier_component_id?.toString() === form.watch('supplier_component_id')
+                                    )?.supplier?.name || 'Not selected'
+                                  : 'Not selected'
+                                }
+                              </div>
+                              
+                              <div className="text-muted-foreground font-medium">Unit Price:</div>
+                              <div className="font-medium">
+                                {form.watch('supplier_component_id')
+                                  ? 'R' + parseFloat(
+                                      supplierComponents.find(sc => 
+                                        sc?.supplier_component_id?.toString() === form.watch('supplier_component_id')
+                                      )?.price?.toString() || '0'
+                                    ).toFixed(2)
+                                  : '-'
+                                }
+                              </div>
+                              
+                              <div className="text-muted-foreground font-medium">Quantity:</div>
+                              <div>{form.watch('quantity_required') || 1}</div>
+                              
+                              <div className="text-muted-foreground font-medium">Total Cost:</div>
+                              <div className="font-semibold">
+                                {(form.watch('supplier_component_id') && form.watch('quantity_required')) 
+                                  ? 'R' + (
+                                    parseFloat(
+                                      supplierComponents.find(sc => 
+                                        sc?.supplier_component_id?.toString() === form.watch('supplier_component_id')
+                                      )?.price?.toString() || '0'
+                                    ) * 
+                                    (form.watch('quantity_required') || 0)
+                                  ).toFixed(2)
+                                  : '-'
+                                }
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex justify-end pt-2">
                           <Button
                             type="submit"
+                            className="px-6"
                             disabled={addBOMItem.isPending}
                           >
                             {addBOMItem.isPending ? (

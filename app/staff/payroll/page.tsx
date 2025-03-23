@@ -420,9 +420,9 @@ export default function PayrollPage() {
                     <TableCell>{payroll.regular_hours}</TableCell>
                     <TableCell>{payroll.overtime_hours}</TableCell>
                     <TableCell>{payroll.doubletime_hours || 0}</TableCell>
-                    <TableCell>${payroll.hourly_wage_total.toFixed(2)}</TableCell>
-                    <TableCell>${payroll.piece_work_total.toFixed(2)}</TableCell>
-                    <TableCell className="font-bold">${payroll.final_payment.toFixed(2)}</TableCell>
+                    <TableCell>R{payroll.hourly_wage_total.toFixed(2)}</TableCell>
+                    <TableCell>R{payroll.piece_work_total.toFixed(2)}</TableCell>
+                    <TableCell className="font-bold">R{payroll.final_payment.toFixed(2)}</TableCell>
                     <TableCell>{getStatusBadge(payroll.status)}</TableCell>
                     <TableCell>
                       <div className="flex space-x-2">
@@ -500,7 +500,7 @@ export default function PayrollPage() {
                       {(payrollDetails.regular_hours + payrollDetails.overtime_hours + (payrollDetails.doubletime_hours || 0)).toFixed(2)}
                     </div>
                     <div>Hourly Rate:</div>
-                    <div className="font-medium">${payrollDetails.hourly_rate?.toFixed(2) || 'N/A'}</div>
+                    <div className="font-medium">R{payrollDetails.hourly_rate?.toFixed(2) || 'N/A'}</div>
                   </div>
                 </div>
                 
@@ -508,11 +508,11 @@ export default function PayrollPage() {
                   <h3 className="font-medium">Payment Summary</h3>
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <div>Hourly Wage Total:</div>
-                    <div className="font-medium">${payrollDetails.hourly_wage_total.toFixed(2)}</div>
+                    <div className="font-medium">R{payrollDetails.hourly_wage_total.toFixed(2)}</div>
                     <div>Piece Work Total:</div>
-                    <div className="font-medium">${payrollDetails.piece_work_total.toFixed(2)}</div>
+                    <div className="font-medium">R{payrollDetails.piece_work_total.toFixed(2)}</div>
                     <div>Final Payment:</div>
-                    <div className="font-bold">${payrollDetails.final_payment.toFixed(2)}</div>
+                    <div className="font-bold">R{payrollDetails.final_payment.toFixed(2)}</div>
                     <div>Payment Method:</div>
                     <div className="font-medium">
                       {payrollDetails.hourly_wage_total >= payrollDetails.piece_work_total ? 'Hourly Wage' : 'Piece Work'}

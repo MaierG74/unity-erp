@@ -1059,7 +1059,7 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                       <FormLabel>Unit</FormLabel>
                       <Select 
                         onValueChange={field.onChange} 
-                        value={field.value || ""}
+                        value={field.value || "_none"}
                       >
                         <FormControl>
                           <SelectTrigger>
@@ -1067,6 +1067,7 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
+                          <SelectItem value="_none">Select unit</SelectItem>
                           {units.map((unit) => (
                             <SelectItem
                               key={unit.unit_id}
@@ -1091,7 +1092,7 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                     <FormLabel>Category</FormLabel>
                     <Select 
                       onValueChange={field.onChange} 
-                      value={field.value}
+                      value={field.value || "_none"}
                     >
                       <FormControl>
                         <SelectTrigger>
@@ -1099,6 +1100,7 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
+                        <SelectItem value="_none">None</SelectItem>
                         {categories.map((category) => (
                           <SelectItem
                             key={category.cat_id}
@@ -1211,6 +1213,9 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                             field.onChange(suppliers[0].supplier_id.toString());
                           }
                           
+                          // Ensure we have a valid value for the Select component
+                          const safeValue = field.value || "_none";
+                          
                           console.log(`Supplier ${index} field render:`, {
                             value: field.value,
                             type: typeof field.value,
@@ -1230,7 +1235,7 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                                   form.setValue(`supplierComponents.${index}.supplier_code`, "");
                                   form.setValue(`supplierComponents.${index}.price`, "");
                                 }} 
-                                value={field.value || ""}
+                                value={safeValue}
                               >
                                 <FormControl>
                                   <SelectTrigger>
@@ -1238,6 +1243,7 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                                   </SelectTrigger>
                                 </FormControl>
                                 <SelectContent>
+                                  <SelectItem value="_none">Select a supplier</SelectItem>
                                   {suppliers.map((supplier) => (
                                     <SelectItem
                                       key={supplier.supplier_id}
