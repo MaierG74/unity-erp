@@ -760,7 +760,7 @@ export default function OrdersPage() {
                         </TableCell>
                         <TableCell>
                           {order.total_amount !== null && order.total_amount !== undefined
-                            ? `$${Number(order.total_amount).toFixed(2)}`
+                            ? `R ${Number(order.total_amount).toFixed(2)}`
                             : 'N/A'}
                         </TableCell>
                         <TableCell>
