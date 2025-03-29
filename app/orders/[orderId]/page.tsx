@@ -2213,6 +2213,9 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   } = useQuery({
     queryKey: ['orderComponentRequirements', orderId],
     queryFn: () => fetchOrderComponentRequirements(orderId),
+    onSuccess: (data) => {
+      console.log('Component requirements loaded:', JSON.stringify(data, null, 2));
+    }
   });
 
   // Calculate totals from component requirements
@@ -2534,7 +2537,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                   <div className="space-y-4">
                     {componentRequirements.map((productReq: any, index: number) => {
                       const hasShortfall = productReq.components && productReq.components.some((c: any) => c.shortfall > 0);
-                      const productId = productReq.product?.product_id || `product-${index}`;
+                      const productId = productReq.product_id || `product-${index}`;
                       const isExpanded = !!expandedRows[productId];
                       
                       return (
@@ -2545,7 +2548,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                           >
                             <div>
                               <h4 className="font-medium flex items-center">
-                                {productReq.product?.name || 'Unknown Product'} 
+                                {productReq.product_name || 'Unknown Product'} 
                                 {hasShortfall && (
                                   <Badge variant="destructive" className="ml-2">Shortfall</Badge>
                                 )}
@@ -2553,7 +2556,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                               <p className="text-sm text-muted-foreground">
                                 Order quantity: {productReq.order_quantity || 0} × {productReq.components?.length || 0} component types
                               </p>
-                  </div>
+                            </div>
                             <div>
                               {isExpanded ? (
                                 <ChevronDown className="h-4 w-4" />
