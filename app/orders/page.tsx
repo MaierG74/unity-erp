@@ -19,7 +19,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { PlusCircle, Search, Package, Layers, Wrench, PaintBucket, Paperclip, Upload, FileText, ImageIcon, Eye, Download, FileUp, Check } from 'lucide-react';
-import { motion } from 'framer-motion';
+// Import the advanced AttachmentPreviewModal component
+import { AttachmentPreviewModal } from '@/components/ui/attachment-preview-modal';
+// Import the FileIcon component for use in the advanced modal
+import { FileIcon } from '@/components/ui/file-icon';
+// Import the PdfThumbnailClient component for PDF previews
+import { PdfThumbnailClient } from '@/components/ui/pdf-thumbnail-client';
+// Temporarily comment out framer-motion import
+// import { motion } from 'framer-motion';
 import { 
   Dialog,
   DialogContent,
@@ -228,7 +235,7 @@ async function fetchOrderAttachments(orderId: number) {
 }
 
 // File icon based on extension
-function FileIcon({ fileName }: { fileName: string }) {
+function getFileIconByType({ fileName }: { fileName: string }) {
   const extension = fileName.split('.').pop()?.toLowerCase() || '';
   
   // Choose icon based on file extension
@@ -269,65 +276,6 @@ function openPdfInBrowser(url: string) {
   iframe.onload = () => {
     document.body.removeChild(iframe);
   };
-}
-
-// Attachment Preview Modal Component
-function AttachmentPreviewModal({ 
-  isOpen, 
-  onClose, 
-  attachments,
-  orderNumber 
-}: { 
-  isOpen: boolean; 
-  onClose: () => void; 
-  attachments: any[];
-  orderNumber: string;
-}) {
-  // This approach exactly matches the suppliers implementation
-  return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[800px]">
-        <DialogHeader>
-          <DialogTitle>Order {orderNumber} - Attachments</DialogTitle>
-        </DialogHeader>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-          {attachments.map((attachment) => (
-            <div
-              key={attachment.id}
-              className="p-4 border rounded-lg bg-card hover:bg-muted/50 transition-colors group"
-            >
-              <a
-                href={attachment.file_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-start gap-3"
-              >
-                <div className="bg-primary/10 p-2 rounded-lg">
-                  <FileText className="h-5 w-5 text-primary" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h4 className="font-medium truncate">{attachment.file_name}</h4>
-                  <p className="text-sm text-muted-foreground">
-                    {new Date(attachment.uploaded_at).toLocaleDateString()}
-                  </p>
-                  <p className="text-xs text-muted-foreground uppercase">
-                    {attachment.file_type || attachment.file_name.split('.').pop()?.toUpperCase()}
-                  </p>
-                </div>
-              </a>
-            </div>
-          ))}
-        </div>
-
-        {attachments.length === 0 && (
-          <div className="text-center p-8 border rounded-lg bg-muted/10">
-            <p className="text-muted-foreground">No attachments available.</p>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
 }
 
 // Upload Attachments Dialog Component
@@ -575,12 +523,7 @@ export default function OrdersPage() {
   });
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className="space-y-8 w-full max-w-full p-6"
-    >
+    <div className="space-y-8 w-full max-w-full p-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
         <div className="space-y-1">
           <h1 className="text-4xl font-bold tracking-tight">
@@ -600,12 +543,7 @@ export default function OrdersPage() {
 
       {/* Section Filter Pills */}
       <div className="flex flex-wrap gap-3 mb-6">
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.2 }}
-          className="flex flex-wrap gap-2"
-        >
+        <div className="flex flex-wrap gap-2">
           <Button
             variant={activeSection === null ? "outline" : "outline"}
             size="sm"
@@ -660,16 +598,11 @@ export default function OrdersPage() {
             <PaintBucket className="h-4 w-4 mr-2" />
             Powdercoating Section
           </Button>
-        </motion.div>
+        </div>
       </div>
 
       <div className="space-y-6">
-        <motion.div 
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.2 }}
-          className="p-6 border rounded-xl bg-card/50 backdrop-blur-sm shadow-sm"
-        >
+        <div className="p-6 border rounded-xl bg-card/50 backdrop-blur-sm shadow-sm">
           <div className="flex flex-col md:flex-row md:items-center gap-4">
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
               <Label htmlFor="status-filter" className="text-sm font-medium">
@@ -705,13 +638,9 @@ export default function OrdersPage() {
               </div>
             </div>
           </div>
-        </motion.div>
+        </div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.3 }}
-        >
+        <div>
           {isLoading ? (
             <div className="p-12 text-center border rounded-xl bg-card/50 backdrop-blur-sm">
               <div className="animate-pulse space-y-3">
@@ -787,8 +716,8 @@ export default function OrdersPage() {
               <p className="text-sm text-muted-foreground mt-1">Create a new order to get started</p>
             </div>
           )}
-        </motion.div>
+        </div>
       </div>
-    </motion.div>
+    </div>
   );
 } 
