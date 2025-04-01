@@ -2509,7 +2509,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
             </Alert>
           ) : (
             <>
-              <div className="flex justify-between items-center">
+              <div className="flex justify-between items-center mb-3">
                 <h2 className="text-xl font-semibold tracking-tight">
                   Component Requirements
                 </h2>
@@ -2518,21 +2518,27 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                   Order Components
                 </Button>
               </div>
-              <Card>
+              <Card className="shadow-sm border border-muted/40 overflow-hidden">
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
-                    <CardTitle>Component Requirements</CardTitle>
-                    {totals.totalShortfall > 0 && (
-                      <Badge variant="outline" className="bg-red-50 text-red-700 hover:bg-red-50">
-                        {totals.totalShortfall} components with shortfall
-                      </Badge>
-                    )}
+                    <CardTitle>Components needed for this order</CardTitle>
+                    <div className="flex items-center gap-2">
+                      {totals.totalShortfall > 0 ? (
+                        <Badge variant="destructive" className="bg-red-100 text-red-700 hover:bg-red-100">
+                          {totals.totalShortfall} components with shortfall
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="bg-green-100 text-green-700 hover:bg-green-100">
+                          All components available
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                   <CardDescription>
-                    Components needed to fulfill this order
+                    {componentRequirements.length} products with {totals.totalComponents || 0} component requirements
                   </CardDescription>
-            </CardHeader>
-            <CardContent>
+                </CardHeader>
+                <CardContent>
                   {/* Display component requirements here */}
                   <div className="space-y-4">
                     {componentRequirements.map((productReq: any, index: number) => {
@@ -2541,9 +2547,12 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                       const isExpanded = !!expandedRows[productId];
                       
                       return (
-                        <div key={productReq.order_detail_id || index} className="border rounded-lg overflow-hidden">
+                        <div key={productReq.order_detail_id || index} className="border rounded-lg overflow-hidden shadow-sm hover:shadow transition-all duration-200">
                           <div 
-                            className={`p-4 flex justify-between items-center cursor-pointer ${hasShortfall ? 'bg-red-50' : ''}`}
+                            className={cn(
+                              "p-4 flex justify-between items-center cursor-pointer",
+                              hasShortfall ? 'bg-red-50' : 'bg-white'
+                            )}
                             onClick={() => toggleRowExpansion(productId)}
                           >
                             <div>
@@ -2557,21 +2566,23 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                                 Order quantity: {productReq.order_quantity || 0} × {productReq.components?.length || 0} component types
                               </p>
                             </div>
-                            <div>
-                              {isExpanded ? (
-                                <ChevronDown className="h-4 w-4" />
-                              ) : (
-                                <ChevronRight className="h-4 w-4" />
-                              )}
+                            <div className="flex items-center">
+                              <Button variant="ghost" size="sm" className="ml-2">
+                                {isExpanded ? (
+                                  <ChevronDown className="h-4 w-4" />
+                                ) : (
+                                  <ChevronRight className="h-4 w-4" />
+                                )}
+                              </Button>
                             </div>
                           </div>
                           
                           {/* Expanded view with component details */}
                           {isExpanded && productReq.components && productReq.components.length > 0 && (
-                            <div className="bg-muted/30 p-4 border-t">
+                            <div className="bg-muted/30 p-4 border-t animate-in fade-in duration-300">
                               <div className="overflow-x-auto">
                                 <Table>
-                                  <TableHeader>
+                                  <TableHeader className="bg-muted/50">
                                     <TableRow>
                                       <TableHead>Component</TableHead>
                                       <TableHead className="text-right">Required</TableHead>
@@ -2579,18 +2590,23 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                                       <TableHead className="text-right">On Order</TableHead>
                                       <TableHead className="text-right">Apparent Shortfall</TableHead>
                                       <TableHead className="text-right">Real Shortfall</TableHead>
-                                      <TableHead></TableHead>
                                     </TableRow>
                                   </TableHeader>
                                   <TableBody>
                                     {productReq.components.map((component: any, compIndex: number) => (
-                                      <TableRow key={component.component_id || `comp-${compIndex}`}>
+                                      <TableRow 
+                                        key={component.component_id || `comp-${compIndex}`}
+                                        className={cn(
+                                          compIndex % 2 === 0 ? "bg-white" : "bg-muted/20",
+                                          "hover:bg-muted/30 transition-all duration-200 ease-in-out"
+                                        )}
+                                      >
                                         <TableCell>
                                           <div className="font-medium">{component.internal_code || 'Unknown'}</div>
                                           <div className="text-sm text-muted-foreground">{component.description || 'No description'}</div>
                                         </TableCell>
-                                        <TableCell className="text-right">{component.quantity_required || 0}</TableCell>
-                                        <TableCell className="text-right">{component.quantity_in_stock || 0}</TableCell>
+                                        <TableCell className="text-right font-medium">{component.quantity_required || 0}</TableCell>
+                                        <TableCell className="text-right font-medium">{component.quantity_in_stock || 0}</TableCell>
                                         <TableCell className="text-right">
                                           {component.quantity_on_order > 0 ? (
                                             <span className="text-blue-600 font-medium">{component.quantity_on_order}</span>
@@ -2599,42 +2615,40 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                                           )}
                                         </TableCell>
                                         <TableCell className="text-right">
-                                          {component.apparent_shortfall > 0 ? (
-                                            <span className={
-                                              component.real_shortfall > 0 
-                                                ? "text-red-600 font-medium" 
-                                                : "text-amber-600 font-medium"
-                                            }>
-                                              {component.apparent_shortfall}
-                                            </span>
-                                          ) : (
-                                            <span className="text-green-600 font-medium">0</span>
-                                          )}
+                                          <span className={cn(
+                                            component.apparent_shortfall > 0 
+                                              ? "text-orange-600" 
+                                              : "text-green-600",
+                                            "font-medium"
+                                          )}>
+                                            {component.apparent_shortfall || 0}
+                                          </span>
                                         </TableCell>
                                         <TableCell className="text-right">
-                                          {component.real_shortfall > 0 ? (
-                                            <span className="text-red-600 font-medium">{component.real_shortfall}</span>
+                                          {component.apparent_shortfall > 0 && component.real_shortfall === 0 ? (
+                                            <Popover>
+                                              <PopoverTrigger>
+                                                <div className="cursor-help inline-flex items-center">
+                                                  <span className="text-green-600 font-medium">{component.real_shortfall || 0}</span>
+                                                  <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
+                                                </div>
+                                              </PopoverTrigger>
+                                              <PopoverContent className="p-0">
+                                                <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
+                                                  <p className="text-sm">This apparent shortfall is covered by existing supplier orders.</p>
+                                                </div>
+                                              </PopoverContent>
+                                            </Popover>
                                           ) : (
-                                            <span className="text-green-600 font-medium">0</span>
+                                            <span className={cn(
+                                              component.real_shortfall > 0 
+                                                ? "text-red-600" 
+                                                : "text-green-600",
+                                              "font-medium"
+                                            )}>
+                                              {component.real_shortfall || 0}
+                                            </span>
                                           )}
-                                          {component.apparent_shortfall > 0 && component.real_shortfall === 0 && (
-                                            <div className="text-xs text-amber-600">
-                                              (Covered by orders)
-                                            </div>
-                                          )}
-                                        </TableCell>
-                                        <TableCell>
-                                          <Button 
-                                            variant="ghost" 
-                                            size="sm" 
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              console.log("Component details:", component);
-                                            }}
-                                          >
-                                            <Terminal className="h-4 w-4 mr-1" />
-                                            Log Details
-                                          </Button>
                                         </TableCell>
                                       </TableRow>
                                     ))}
