@@ -1,0 +1,7 @@
+# TODOs for Unity ERP
+
+- [AttendanceTimeline.tsx] Lock segments after payroll is finalized.
+  Suggestion: Add an `is_locked` or `payroll_finalized` flag to the DB and set `editable = !segment.is_locked` in the UI.
+  (See code comment in AttendanceTimeline.tsx for details.)
+
+# Add new TODOs here as you find them in the codebase.

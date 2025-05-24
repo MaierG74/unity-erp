@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
@@ -46,11 +46,26 @@ import {
   ChevronUp,
   Coffee, 
   Loader2, 
+  Plus,
+  RefreshCw,
   Save 
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Textarea } from '@/components/ui/textarea';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+
+// Import our custom AttendanceTimeline component
+import { AttendanceTimeline } from './AttendanceTimeline';
+// Debug: Will log props passed to AttendanceTimeline below when rendering.
+
+// Import our utility functions
+import { 
+  processClockEventsIntoSegments, 
+  generateDailySummary, 
+  addManualClockEvent,
+  processAllClockEvents
+} from '@/lib/utils/attendance';
 
 // Types
 type Staff = {
@@ -136,6 +151,7 @@ const getDefaultTimes = (date: Date) => {
 };
 
 export function DailyAttendanceGrid() {
+  const queryClient = useQueryClient();
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [isHoliday, setIsHoliday] = useState(false);
@@ -144,8 +160,17 @@ export function DailyAttendanceGrid() {
   const [isSaving, setIsSaving] = useState(false);
   const [sortField, setSortField] = useState<string>('staff_name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [viewMode, setViewMode] = useState<'legacy' | 'timeline'>('timeline');
   const { toast } = useToast();
-  const queryClient = useQueryClient();
+
+  // Invalidate time_segments cache after edit/delete
+  // Invalidate all relevant queries after editing/deleting a clock event to force UI refresh
+  const handleSegmentsChanged = useCallback(() => {
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    queryClient.invalidateQueries({ queryKey: ['time_clock_events', dateStr] });
+    queryClient.invalidateQueries({ queryKey: ['time_segments', dateStr] });
+    queryClient.invalidateQueries({ queryKey: ['time_daily_summary', dateStr] });
+  }, [queryClient, selectedDate]);
 
   // Fetch active staff
   const { data: activeStaff = [], isLoading: isLoadingStaff } = useQuery({
@@ -159,9 +184,11 @@ export function DailyAttendanceGrid() {
         .order('last_name', { ascending: true });
 
       if (error) throw error;
+      console.log('SEGMENT_DEBUG', { timeSegments: data });
       return data || [];
     },
   });
+  console.log('STAFF QUERY:', activeStaff);
 
   // Fetch public holidays
   const { data: publicHolidays = [] } = useQuery({
@@ -172,25 +199,256 @@ export function DailyAttendanceGrid() {
         .select('*');
 
       if (error) throw error;
+      console.log('SEGMENT_DEBUG', { timeSegments: data });
       return data || [];
     },
   });
 
   // Fetch existing hours records for the selected date
-  const { data: existingHours = [], isLoading: isLoadingHours } = useQuery({
-    queryKey: ['staff_hours', format(selectedDate, 'yyyy-MM-dd')],
+  // Removed staff_hours fetching. All hour calculations now use dailySummaries (from time_daily_summary).
+  
+  // Fetch clock events for the selected date
+  const { data: clockEvents = [], isLoading: isLoadingClockEvents } = useQuery({
+    queryKey: ['time_clock_events', format(selectedDate, 'yyyy-MM-dd')],
     queryFn: async () => {
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
+      
+      // Create start and end of day in local timezone
+      const startOfDay = new Date(dateStr + 'T00:00:00');
+      const endOfDay = new Date(dateStr + 'T23:59:59');
+      
+      // Convert to ISO strings for the query
+      const startIso = startOfDay.toISOString();
+      const endIso = endOfDay.toISOString();
+      
       const { data, error } = await supabase
-        .from('staff_hours')
+        .from('time_clock_events')
         .select('*')
+        .gte('event_time', startIso)
+        .lte('event_time', endIso)
+        .order('event_time', { ascending: true });
+
+      if (error) throw error;
+      console.log('Clock events for', dateStr, ':', data);
+      return data || [];
+    },
+  });
+  
+  // Fetch time segments for the selected date
+  const { data: timeSegments = [], isLoading: isLoadingSegments } = useQuery({
+    queryKey: ['time_segments', format(selectedDate, 'yyyy-MM-dd')],
+    queryFn: async () => {
+      // Dynamically compute UTC range for the selected local day
+      const localMidnight = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 0, 0, 0, 0);
+      const nextLocalMidnight = new Date(localMidnight);
+      nextLocalMidnight.setDate(localMidnight.getDate() + 1);
+      const utcStart = localMidnight.toISOString();
+      const utcEnd = nextLocalMidnight.toISOString();
+      console.log('SEGMENT_DEBUG_QUERY', { utcStart, utcEnd });
+      const dateStr = format(selectedDate, 'yyyy-MM-dd');
+      const { data, error } = await supabase
+        .from('time_segments')
+        .select('id,staff_id,date_worked,start_time,end_time')
         .eq('date_worked', dateStr);
 
       if (error) throw error;
+      console.log('SEGMENT_DEBUG', { dateStr, timeSegments: data });
+      return data || [];
+
+    },
+  });
+
+  
+  // Diagnostic: Try fetching only staff_id and date_worked
+  const { data: dailySummariesMinimal = [], error: minimalError } = useQuery({
+    queryKey: ['time_daily_summary_minimal', format(selectedDate, 'yyyy-MM-dd')],
+    queryFn: async () => {
+      const dateStr = format(selectedDate, 'yyyy-MM-dd');
+      const { data, error } = await supabase
+        .from('time_daily_summary')
+        .select('staff_id,date_worked')
+        .eq('date_worked', dateStr);
+      if (error) throw error;
+      console.log('SUMMARY_DEBUG_MINIMAL', { dailySummariesMinimal: data });
       return data || [];
     },
   });
 
+  // Diagnostic: Try fetching all rows without a filter
+  const { data: dailySummariesAll = [], error: allError } = useQuery({
+    queryKey: ['time_daily_summary_all'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('time_daily_summary')
+        .select('staff_id,date_worked')
+        .limit(5);
+      if (error) throw error;
+      console.log('SUMMARY_DEBUG_ALL', { dailySummariesAll: data });
+      return data || [];
+    },
+  });
+
+  // Original query (for reference, still active)
+  const { data: dailySummaries = [], isLoading: isLoadingSummaries } = useQuery({
+    queryKey: ['time_daily_summary', format(selectedDate, 'yyyy-MM-dd')],
+    queryFn: async () => {
+      const dateStr = format(selectedDate, 'yyyy-MM-dd');
+      console.log('SUMMARY_DEBUG_QUERY', { dateStr });
+      const { data, error } = await supabase
+        .from('time_daily_summary')
+        .select('*')
+        .eq('date_worked', dateStr);
+      if (error) throw error;
+      console.log('SUMMARY_DEBUG', { dailySummaries: data });
+      return data || [];
+    },
+  });
+  
+  console.log('LOADING FLAGS', {
+    isLoadingStaff,
+    isLoadingClockEvents,
+    isLoadingSegments,
+    isLoadingSummaries,
+  });
+  const isLoading = isLoadingStaff || isLoadingClockEvents || isLoadingSegments || isLoadingSummaries;
+  
+  // Track if we've already processed events for this date to prevent loops
+  const [processedDates, setProcessedDates] = useState<Record<string, boolean>>({});
+  
+  // Automatically process clock events when clock events are loaded but no daily summaries exist
+  useEffect(() => {
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    
+    const autoProcessClockEvents = async () => {
+      // Only process if we have clock events but no daily summaries or segments
+      // AND we haven't already processed this date
+      if (clockEvents.length > 0 && 
+          (!dailySummaries || dailySummaries.length === 0 || 
+           !timeSegments || timeSegments.length === 0) && 
+          !processedDates[dateStr]) {
+        
+        console.log('Auto-processing clock events because we have events but no summaries or segments');
+        
+        // Mark this date as processed to prevent loops
+        setProcessedDates(prev => ({ ...prev, [dateStr]: true }));
+        
+        // Process the clock events
+        await processClockEventsData();
+      }
+    };
+    
+    // Only run when all data is loaded and not already processing
+    if (!isLoadingClockEvents && !isLoadingSummaries && !isLoadingSegments && !isSaving) {
+      autoProcessClockEvents();
+    }
+  }, [clockEvents, dailySummaries, timeSegments, isLoadingClockEvents, isLoadingSummaries, isLoadingSegments, selectedDate, processedDates, isSaving]);
+
+  // Function to handle manual clock events
+  const handleManualClockEvent = async (staffId: number, eventType: string, time: string, breakType: string | null = null) => {
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    
+    setIsSaving(true);
+    
+    try {
+      // Use our utility function to add the manual clock event
+      const result = await addManualClockEvent(
+        staffId,
+        eventType as any,
+        dateStr,
+        time,
+        breakType as any,
+        'Added via Daily Attendance page'
+      );
+      
+      if (result.success) {
+        // Refresh data
+        queryClient.invalidateQueries({ queryKey: ['time_clock_events', dateStr] });
+        queryClient.invalidateQueries({ queryKey: ['time_segments', dateStr] });
+        queryClient.invalidateQueries({ queryKey: ['time_daily_summary', dateStr] });
+        
+        toast({
+          title: 'Event Added',
+          description: `${eventType.replace('_', ' ')} event added for ${time}`,
+        });
+      } else {
+        toast({
+          title: 'Error',
+          description: `Failed to add event: ${result.error?.message || 'Unknown error'}`,
+          variant: 'destructive',
+        });
+      }
+    } catch (error: any) {
+      console.error('Error adding manual clock event:', error);
+      toast({
+        title: 'Error',
+        description: `Failed to add event: ${error.message || 'Unknown error'}`,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+  
+  // Process clock events into segments and generate daily summary
+  const processClockEventsData = async () => {
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    setIsSaving(true);
+    
+    try {
+      // Process clock events into segments
+      await processClockEventsIntoSegments(dateStr);
+      
+      // Generate daily summary
+      await generateDailySummary(dateStr);
+      
+      // Refresh data
+      queryClient.invalidateQueries({ queryKey: ['time_segments', dateStr] });
+      queryClient.invalidateQueries({ queryKey: ['time_daily_summary', dateStr] });
+      
+      toast({
+        title: 'Success',
+        description: 'Clock events processed successfully',
+      });
+    } catch (error: any) {
+      console.error('Error processing clock events:', error);
+      toast({
+        title: 'Error',
+        description: `Failed to process clock events: ${error.message || 'Unknown error'}`,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+  
+  // Function to fix time segments
+  const fixTimeSegments = async () => {
+    try {
+      setIsSaving(true);
+      await processAllClockEvents();
+      
+      // Refresh the data by invalidating all queries
+      queryClient.invalidateQueries({ queryKey: ['staff'] });
+      queryClient.invalidateQueries({ queryKey: ['time_segments'] });
+      queryClient.invalidateQueries({ queryKey: ['time_daily_summary'] });
+      queryClient.invalidateQueries({ queryKey: ['time_clock_events'] });
+      
+      toast({
+        title: 'Success',
+        description: 'Time segments have been fixed successfully!',
+      });
+    } catch (error: any) {
+      console.error('Error fixing time segments:', error);
+      toast({
+        title: 'Error',
+        description: 'Error fixing time segments. Please check the console for details.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+  
   // Save hours mutation
   const saveHoursMutation = useMutation({
     mutationFn: async (records: StaffHours[]) => {
@@ -338,7 +596,7 @@ export function DailyAttendanceGrid() {
     // Create attendance records for each staff member
     const records = activeStaff.map(staff => {
       // Check if there's an existing record for this staff member on this date
-      const existingRecord = existingHours.find(h => h.staff_id === staff.staff_id);
+      const existingRecord = dailySummaries.find(h => h.staff_id === staff.staff_id);
 
       if (existingRecord) {
         // Use existing record data
@@ -376,11 +634,20 @@ export function DailyAttendanceGrid() {
       }
     });
 
-    setAttendanceRecords(records);
-    
+    // Only update attendanceRecords if changed (shallow compare)
+    setAttendanceRecords(prev => {
+      const same = prev.length === records.length && prev.every((rec, i) => {
+        const newRec = records[i];
+        return Object.keys(rec).every(key => rec[key] === newRec[key]);
+      });
+      if (!same) {
+        return records;
+      }
+      return prev;
+    });
     // Reset last saved timestamp when changing date
     setLastSaved(null);
-  }, [activeStaff, existingHours, selectedDate, publicHolidays]);
+  }, [activeStaff, dailySummaries, selectedDate, publicHolidays]);
 
   // Calculate hours worked based on start and finish times
   const calculateHoursWorked = (startTime: string, endTime: string, 
@@ -998,7 +1265,8 @@ export function DailyAttendanceGrid() {
   };
 
   // Loading state
-  if (isLoadingStaff || isLoadingHours) {
+  // Check if any data is loading
+  if (isLoading) {
     return (
       <div className="flex justify-center items-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -1023,6 +1291,16 @@ export function DailyAttendanceGrid() {
                 </Badge>
               )}
             </div>
+          </div>
+          
+          {/* View mode tabs */}
+          <div className="mr-4">
+            <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as 'legacy' | 'timeline')}>
+              <TabsList>
+                <TabsTrigger value="legacy">Legacy View</TabsTrigger>
+                <TabsTrigger value="timeline">Timeline View</TabsTrigger>
+              </TabsList>
+            </Tabs>
           </div>
           <div className="flex items-center space-x-2">
             <Popover>
@@ -1064,8 +1342,84 @@ export function DailyAttendanceGrid() {
         )}
       </CardHeader>
       <CardContent>
-        <div className="rounded-md border">
-          <Table>
+        {/* Action buttons */}
+        <div className="flex justify-between mb-4">
+          <div>
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={processClockEventsData}
+              disabled={isSaving}
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Process Clock Events
+                </>
+              )}
+            </Button>
+            
+            <Button 
+              variant="outline" 
+              size="sm"
+              className="ml-2"
+              onClick={fixTimeSegments}
+              disabled={isSaving}
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Fixing...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Fix Time Segments
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+        
+        {/* View content based on selected view mode */}
+        {viewMode === 'timeline' ? (
+          <div className="space-y-4">
+            {sortedRecords.map((record) => {
+              const staffSegments = timeSegments.filter(seg => seg.staff_id === record.staff_id);
+              const staffSummaries = dailySummaries.filter(ds => ds.staff_id === record.staff_id);
+              // Debug: Log what will be passed to AttendanceTimeline
+              console.log('[DailyAttendanceGrid -> AttendanceTimeline]', {
+                staffId: record.staff_id,
+                staffName: record.staff_name,
+                segments: staffSegments,
+                dailySummaries: staffSummaries
+              });
+              return (
+                <AttendanceTimeline
+                  onSegmentsChanged={handleSegmentsChanged}
+                  key={record.staff_id}
+                  staffId={record.staff_id}
+                  staffName={record.staff_name}
+                  jobDescription={record.job_description}
+                  present={record.present}
+                  date={selectedDate}
+                  clockEvents={clockEvents}
+                  segments={staffSegments}
+                  dailySummaries={staffSummaries}
+                  onTogglePresence={togglePresence}
+                  onAddManualEvent={handleManualClockEvent}
+                />
+              );
+            })}
+          </div>
+        ) : (
+          <div className="rounded-md border">
+            <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[50px]">Present</TableHead>
@@ -1281,6 +1635,7 @@ export function DailyAttendanceGrid() {
             </TableBody>
           </Table>
         </div>
+        )}
       </CardContent>
       <CardFooter className="flex justify-between">
         <div>

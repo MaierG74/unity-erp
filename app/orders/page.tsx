@@ -18,8 +18,15 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { PlusCircle, Search, Package, Layers, Wrench, PaintBucket, Paperclip, Upload, FileText, ImageIcon, Eye, Download, FileUp, Check } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { PlusCircle, Search, Package, Layers, Wrench, PaintBucket, Paperclip, Upload, FileText, ImageIcon, Eye, Download, FileUp, Check, RefreshCw } from 'lucide-react';
+// Import the advanced AttachmentPreviewModal component
+import { AttachmentPreviewModal } from '@/components/ui/attachment-preview-modal';
+// Import the FileIcon component for use in the advanced modal
+import { FileIcon } from '@/components/ui/file-icon';
+// Import the PdfThumbnailClient component for PDF previews
+import { PdfThumbnailClient } from '@/components/ui/pdf-thumbnail-client';
+// Temporarily comment out framer-motion import
+// import { motion } from 'framer-motion';
 import { 
   Dialog,
   DialogContent,
@@ -228,7 +235,7 @@ async function fetchOrderAttachments(orderId: number) {
 }
 
 // File icon based on extension
-function FileIcon({ fileName }: { fileName: string }) {
+function getFileIconByType({ fileName }: { fileName: string }) {
   const extension = fileName.split('.').pop()?.toLowerCase() || '';
   
   // Choose icon based on file extension
@@ -269,65 +276,6 @@ function openPdfInBrowser(url: string) {
   iframe.onload = () => {
     document.body.removeChild(iframe);
   };
-}
-
-// Attachment Preview Modal Component
-function AttachmentPreviewModal({ 
-  isOpen, 
-  onClose, 
-  attachments,
-  orderNumber 
-}: { 
-  isOpen: boolean; 
-  onClose: () => void; 
-  attachments: any[];
-  orderNumber: string;
-}) {
-  // This approach exactly matches the suppliers implementation
-  return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[800px]">
-        <DialogHeader>
-          <DialogTitle>Order {orderNumber} - Attachments</DialogTitle>
-        </DialogHeader>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-          {attachments.map((attachment) => (
-            <div
-              key={attachment.id}
-              className="p-4 border rounded-lg bg-card hover:bg-muted/50 transition-colors group"
-            >
-              <a
-                href={attachment.file_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-start gap-3"
-              >
-                <div className="bg-primary/10 p-2 rounded-lg">
-                  <FileText className="h-5 w-5 text-primary" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h4 className="font-medium truncate">{attachment.file_name}</h4>
-                  <p className="text-sm text-muted-foreground">
-                    {new Date(attachment.uploaded_at).toLocaleDateString()}
-                  </p>
-                  <p className="text-xs text-muted-foreground uppercase">
-                    {attachment.file_type || attachment.file_name.split('.').pop()?.toUpperCase()}
-                  </p>
-                </div>
-              </a>
-            </div>
-          ))}
-        </div>
-
-        {attachments.length === 0 && (
-          <div className="text-center p-8 border rounded-lg bg-muted/10">
-            <p className="text-muted-foreground">No attachments available.</p>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
 }
 
 // Upload Attachments Dialog Component
@@ -458,6 +406,210 @@ function UploadAttachmentDialog({ order, onSuccess }: { order: Order, onSuccess:
   );
 }
 
+// Custom AttachmentDialog component that provides a visible refresh button
+function AttachmentModalWithRefresh({ 
+  isOpen, 
+  onClose, 
+  attachments, 
+  orderNumber 
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  attachments: any[]; 
+  orderNumber: string 
+}) {
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  const handleRefresh = () => {
+    console.log("Refresh button clicked");
+    setRefreshKey(prev => prev + 1);
+    setIsRefreshing(true);
+    setTimeout(() => setIsRefreshing(false), 1000);
+  };
+  
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-[900px]">
+        <DialogHeader className="relative">
+          <div className="flex items-center justify-between">
+            <DialogTitle>Order {orderNumber} - Attachments</DialogTitle>
+            
+            {/* Clearly visible refresh button */}
+            <button
+              onClick={handleRefresh}
+              className="bg-primary text-white px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors hover:bg-primary/90 shadow-sm"
+              title="Refresh thumbnails"
+            >
+              <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span className="text-sm">Refresh</span>
+            </button>
+          </div>
+          
+          {isRefreshing && (
+            <div className="absolute top-full left-0 right-0 flex justify-center">
+              <div className="mt-2 bg-black/70 text-white text-xs py-1 px-2 rounded">
+                Refreshing thumbnails...
+              </div>
+            </div>
+          )}
+        </DialogHeader>
+        
+        <div className="max-h-[80vh] overflow-y-auto mt-6">
+          {/* Re-render the attachment modal on each refresh */}
+          <div key={`attachment-content-${refreshKey}`}>
+            {attachments.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {attachments.map((attachment, index) => {
+                  // Skip rendering for invalid attachments
+                  if (!attachment || !attachment.file_name || !attachment.file_url) {
+                    return null;
+                  }
+                  
+                  // Generate a stable key
+                  const key = `${attachment.attachment_id || attachment.id || `attachment-${index}`}-${refreshKey}`;
+                  
+                  // Determine file type
+                  const fileExt = attachment.file_name.split('.').pop()?.toLowerCase() || '';
+                  const isPdf = fileExt === 'pdf';
+                  const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(fileExt);
+                  
+                  return (
+                    <div
+                      key={key}
+                      className="p-4 border rounded-lg bg-card hover:bg-muted/50 transition-colors group"
+                    >
+                      <div>
+                        {isPdf ? (
+                          <div className="mb-3 aspect-[3/4] border rounded overflow-hidden bg-muted/30 flex items-center justify-center relative">
+                            <PdfThumbnailClient 
+                              key={`pdf-${key}`}
+                              url={attachment.file_url} 
+                              width={240} 
+                              height={320}
+                              className="w-full h-full" 
+                            />
+                            <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/50 to-transparent p-2">
+                              <p className="text-xs text-white truncate">{attachment.file_name}</p>
+                            </div>
+                          </div>
+                        ) : isImage ? (
+                          <div className="mb-3 aspect-[3/4] border rounded overflow-hidden bg-white flex items-center justify-center relative">
+                            {/* Simple, reliable image thumbnail */}
+                            <div className="w-full h-full flex items-center justify-center p-3">
+                              <div className="relative w-full h-full flex items-center justify-center">
+                                {/* Loading indicator */}
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                  <div className="h-5 w-5 border-t-2 border-primary rounded-full animate-spin" />
+                                </div>
+                                
+                                {/* Actual image */}
+                                <img 
+                                  key={`img-${key}`}
+                                  src={attachment.file_url}
+                                  alt={attachment.file_name}
+                                  className="max-w-full max-h-full object-contain z-10"
+                                  style={{ 
+                                    backgroundColor: 'white',
+                                    maxHeight: '100%'
+                                  }}
+                                  onLoad={(e) => {
+                                    console.log(`Image thumbnail loaded: ${attachment.file_name}`);
+                                    // Hide the loading spinner
+                                    const target = e.currentTarget;
+                                    const container = target.closest('.relative');
+                                    const spinner = container?.querySelector('.animate-spin')?.parentElement;
+                                    if (spinner) {
+                                      spinner.style.display = 'none';
+                                    }
+                                  }}
+                                  onError={(e) => {
+                                    console.warn(`Error loading image thumbnail: ${attachment.file_name}`, attachment.file_url);
+                                    // Show fallback
+                                    const target = e.currentTarget;
+                                    target.style.display = 'none';
+                                    const container = target.closest('.relative');
+                                    if (container) {
+                                      // Hide the spinner
+                                      const spinner = container.querySelector('.animate-spin')?.parentElement;
+                                      if (spinner) {
+                                        spinner.style.display = 'none';
+                                      }
+                                      
+                                      // Show file icon instead
+                                      const fallback = document.createElement('div');
+                                      fallback.className = 'flex items-center justify-center h-full w-full';
+                                      fallback.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-primary"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+                                      container.appendChild(fallback);
+                                    }
+                                  }}
+                                />
+                              </div>
+                            </div>
+                            
+                            {/* Image label */}
+                            <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/60 to-transparent p-2 z-20">
+                              <p className="text-xs text-white truncate">{attachment.file_name}</p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="mb-3 aspect-[3/4] border rounded overflow-hidden bg-muted/30 flex items-center justify-center relative">
+                            <FileIcon 
+                              fileName={attachment.file_name}
+                              size={48}
+                            />
+                            <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/50 to-transparent p-2">
+                              <p className="text-xs text-white truncate">{attachment.file_name}</p>
+                            </div>
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-medium truncate">{attachment.file_name}</h4>
+                          <p className="text-sm text-muted-foreground">
+                            {attachment.uploaded_at ? new Date(attachment.uploaded_at).toLocaleDateString() : 'Unknown date'}
+                          </p>
+                          <p className="text-xs text-muted-foreground uppercase">
+                            {attachment.file_type || fileExt.toUpperCase() || 'UNKNOWN'}
+                          </p>
+                        </div>
+                        
+                        {/* Actions */}
+                        <div className="mt-3 flex gap-2">
+                          <a 
+                            href={attachment.file_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs flex items-center gap-1 text-primary hover:underline"
+                          >
+                            <Eye className="h-3 w-3" />
+                            Preview
+                          </a>
+                          <a 
+                            href={attachment.file_url}
+                            download={attachment.file_name}
+                            className="text-xs flex items-center gap-1 text-primary hover:underline"
+                          >
+                            <Download className="h-3 w-3" />
+                            Download
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-10 px-6 border rounded-lg bg-muted/10">
+                <p className="text-muted-foreground">No attachments available for this order.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // Order Attachments Component for the table cell
 function OrderAttachments({ order }: { order: Order }): JSX.Element {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -499,9 +651,9 @@ function OrderAttachments({ order }: { order: Order }): JSX.Element {
         </button>
       </td>
 
-      {/* Attachment Preview Modal */}
+      {/* Use the custom wrapper component instead of AttachmentPreviewModal directly */}
       {selectedOrder && (
-        <AttachmentPreviewModal
+        <AttachmentModalWithRefresh
           isOpen={!!selectedOrder}
           onClose={() => setSelectedOrder(null)}
           attachments={attachments}
@@ -575,12 +727,7 @@ export default function OrdersPage() {
   });
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className="space-y-8 w-full max-w-full p-6"
-    >
+    <div className="space-y-8 w-full max-w-full p-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
         <div className="space-y-1">
           <h1 className="text-4xl font-bold tracking-tight">
@@ -600,12 +747,7 @@ export default function OrdersPage() {
 
       {/* Section Filter Pills */}
       <div className="flex flex-wrap gap-3 mb-6">
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.2 }}
-          className="flex flex-wrap gap-2"
-        >
+        <div className="flex flex-wrap gap-2">
           <Button
             variant={activeSection === null ? "outline" : "outline"}
             size="sm"
@@ -660,16 +802,11 @@ export default function OrdersPage() {
             <PaintBucket className="h-4 w-4 mr-2" />
             Powdercoating Section
           </Button>
-        </motion.div>
+        </div>
       </div>
 
       <div className="space-y-6">
-        <motion.div 
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.2 }}
-          className="p-6 border rounded-xl bg-card/50 backdrop-blur-sm shadow-sm"
-        >
+        <div className="p-6 border rounded-xl bg-card/50 backdrop-blur-sm shadow-sm">
           <div className="flex flex-col md:flex-row md:items-center gap-4">
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
               <Label htmlFor="status-filter" className="text-sm font-medium">
@@ -705,13 +842,9 @@ export default function OrdersPage() {
               </div>
             </div>
           </div>
-        </motion.div>
+        </div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.3 }}
-        >
+        <div>
           {isLoading ? (
             <div className="p-12 text-center border rounded-xl bg-card/50 backdrop-blur-sm">
               <div className="animate-pulse space-y-3">
@@ -787,8 +920,8 @@ export default function OrdersPage() {
               <p className="text-sm text-muted-foreground mt-1">Create a new order to get started</p>
             </div>
           )}
-        </motion.div>
+        </div>
       </div>
-    </motion.div>
+    </div>
   );
 } 

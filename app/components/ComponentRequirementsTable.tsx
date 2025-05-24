@@ -1,13 +1,13 @@
-import { Info, ChevronRight } from 'lucide-react';
+import { Info, ArrowDown, ChevronDown } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Button } from '@/components/ui/button';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { type ComponentRequirement } from '@/types/components';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 function RequirementTooltip({ breakdown }: { breakdown: { order_id: number; quantity: number; order_date: string; status: string; }[] }) {
   return (
-    <div className="p-2 max-w-sm">
+    <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
       <p className="font-semibold mb-2">Order Breakdown:</p>
       <ul className="space-y-1">
         {breakdown.map((order) => (
@@ -26,7 +26,7 @@ function RequirementTooltip({ breakdown }: { breakdown: { order_id: number; quan
 
 function OnOrderTooltip({ breakdown }: { breakdown: { supplier_order_id: number; supplier_name: string; quantity: number; received: number; status: string; order_date: string; }[] }) {
   return (
-    <div className="p-2 max-w-sm">
+    <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
       <p className="font-semibold mb-2">Supplier Orders:</p>
       <ul className="space-y-2">
         {breakdown.map((order) => (
@@ -50,86 +50,125 @@ function OnOrderTooltip({ breakdown }: { breakdown: { supplier_order_id: number;
   );
 }
 
-export function ComponentRequirementsTable({ requirements }: { requirements: ComponentRequirement[] }) {
+function CoveredByOrdersTooltip() {
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Component</TableHead>
-          <TableHead className="text-right">Required</TableHead>
-          <TableHead className="text-right">In Stock</TableHead>
-          <TableHead className="text-right">On Order</TableHead>
-          <TableHead className="text-right">Apparent Shortfall</TableHead>
-          <TableHead className="text-right">Real Shortfall</TableHead>
-          <TableHead></TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {requirements.map((req) => (
-          <TableRow key={req.component_id}>
-            <TableCell>
-              <div>
-                <p className="font-medium">{req.internal_code}</p>
-                <p className="text-sm text-muted-foreground">{req.description}</p>
-              </div>
-            </TableCell>
-            <TableCell className="text-right">
-              <Popover>
-                <PopoverTrigger>
-                  <div className="cursor-help inline-flex items-center">
-                    {req.total_required}
-                    <Info className="h-4 w-4 ml-1 text-muted-foreground" />
-                  </div>
-                </PopoverTrigger>
-                <PopoverContent>
-                  <RequirementTooltip breakdown={req.order_breakdown} />
-                </PopoverContent>
-              </Popover>
-            </TableCell>
-            <TableCell className="text-right">{req.in_stock}</TableCell>
-            <TableCell className="text-right">
-              {req.on_order > 0 ? (
-                <Popover>
-                  <PopoverTrigger>
-                    <div className="cursor-help inline-flex items-center">
-                      {req.on_order}
-                      <Info className="h-4 w-4 ml-1 text-muted-foreground" />
-                    </div>
-                  </PopoverTrigger>
-                  <PopoverContent>
-                    <OnOrderTooltip breakdown={req.on_order_breakdown} />
-                  </PopoverContent>
-                </Popover>
-              ) : (
-                req.on_order
-              )}
-            </TableCell>
-            <TableCell className="text-right">
-              <span className={cn(
-                req.apparent_shortfall > 0 ? "text-orange-600" : "text-green-600"
-              )}>
-                {req.apparent_shortfall}
-              </span>
-            </TableCell>
-            <TableCell className="text-right">
-              <span className={cn(
-                req.real_shortfall > 0 ? "text-red-600" : "text-green-600",
-                "font-medium"
-              )}>
-                {req.real_shortfall}
-                {req.real_shortfall === 0 && req.apparent_shortfall > 0 && (
-                  <span className="text-xs text-muted-foreground ml-1">(Covered by orders)</span>
+    <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
+      <p className="text-sm">This apparent shortfall is covered by existing supplier orders.</p>
+    </div>
+  );
+}
+
+export function ComponentRequirementsTable({ requirements }: { requirements: ComponentRequirement[] }) {
+  // Count total components and those with shortfalls
+  const totalComponents = requirements.length;
+  const componentsWithShortfalls = requirements.filter(req => req.real_shortfall > 0).length;
+
+  return (
+    <Card className="shadow-sm border border-muted/40 overflow-hidden">
+      <CardHeader className="pb-2">
+        <div className="flex justify-between items-center">
+          <CardTitle>Component Requirements</CardTitle>
+          <div className="text-sm text-muted-foreground">
+            {totalComponents} component types {componentsWithShortfalls > 0 && 
+              <span className="text-red-500">({componentsWithShortfalls} with shortfalls)</span>
+            }
+          </div>
+        </div>
+        <p className="text-sm text-muted-foreground">Components needed to fulfill this order</p>
+      </CardHeader>
+      <CardContent>
+        <Table className="border rounded-md">
+          <TableHeader className="bg-muted/50">
+            <TableRow>
+              <TableHead>Component</TableHead>
+              <TableHead className="text-right">Required</TableHead>
+              <TableHead className="text-right">In Stock</TableHead>
+              <TableHead className="text-right">On Order</TableHead>
+              <TableHead className="text-right">Apparent Shortfall</TableHead>
+              <TableHead className="text-right">Real Shortfall</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {requirements.map((req, index) => (
+              <TableRow 
+                key={req.component_id}
+                className={cn(
+                  index % 2 === 0 ? "bg-white" : "bg-muted/20",
+                  "hover:bg-muted/30 transition-all duration-200 ease-in-out"
                 )}
-              </span>
-            </TableCell>
-            <TableCell>
-              <Button variant="ghost" size="sm">
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+              >
+                <TableCell>
+                  <div>
+                    <p className="font-medium">{req.internal_code}</p>
+                    <p className="text-sm text-muted-foreground">{req.description}</p>
+                  </div>
+                </TableCell>
+                <TableCell className="text-right">
+                  <Popover>
+                    <PopoverTrigger>
+                      <div className="cursor-help inline-flex items-center">
+                        {req.total_required}
+                        <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
+                      </div>
+                    </PopoverTrigger>
+                    <PopoverContent className="p-0">
+                      <RequirementTooltip breakdown={req.order_breakdown} />
+                    </PopoverContent>
+                  </Popover>
+                </TableCell>
+                <TableCell className="text-right font-medium">{req.in_stock}</TableCell>
+                <TableCell className="text-right">
+                  {req.on_order > 0 ? (
+                    <Popover>
+                      <PopoverTrigger>
+                        <div className="cursor-help inline-flex items-center">
+                          {req.on_order}
+                          <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
+                        </div>
+                      </PopoverTrigger>
+                      <PopoverContent className="p-0">
+                        <OnOrderTooltip breakdown={req.on_order_breakdown} />
+                      </PopoverContent>
+                    </Popover>
+                  ) : (
+                    req.on_order
+                  )}
+                </TableCell>
+                <TableCell className="text-right">
+                  <span className={cn(
+                    req.apparent_shortfall > 0 ? "text-orange-600" : "text-green-600",
+                    "font-medium"
+                  )}>
+                    {req.apparent_shortfall}
+                  </span>
+                </TableCell>
+                <TableCell className="text-right">
+                  {req.real_shortfall === 0 && req.apparent_shortfall > 0 ? (
+                    <Popover>
+                      <PopoverTrigger>
+                        <div className="cursor-help inline-flex items-center">
+                          <span className="text-green-600 font-medium">{req.real_shortfall}</span>
+                          <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
+                        </div>
+                      </PopoverTrigger>
+                      <PopoverContent className="p-0">
+                        <CoveredByOrdersTooltip />
+                      </PopoverContent>
+                    </Popover>
+                  ) : (
+                    <span className={cn(
+                      req.real_shortfall > 0 ? "text-red-600" : "text-green-600",
+                      "font-medium"
+                    )}>
+                      {req.real_shortfall}
+                    </span>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   );
 } 
