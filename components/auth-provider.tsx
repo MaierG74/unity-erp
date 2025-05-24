@@ -20,7 +20,7 @@ export const useAuth = () => {
 };
 
 // Route groups (in parentheses) are ignored in the URL, so we use the actual URL paths
-const publicRoutes = ['/login', '/forgot-password', '/reset-password', '/bypass', '/bypass/orders'];
+const publicRoutes = ['/login', '/forgot-password', '/reset-password', '/bypass', '/bypass/orders', '/'];
 
 // Development bypass routes - these routes will be accessible without authentication in development mode
 const devBypassRoutes = ['/orders', '/orders/new', '/orders/[orderId]'];
@@ -36,8 +36,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const hasRedirected = useRef(false);
 
   useEffect(() => {
+    console.log('AuthProvider mounting, current pathname:', pathname);
+    
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
+      console.log('Auth session loaded:', session ? 'User authenticated' : 'No user session');
       setUser(session?.user ?? null);
       setLoading(false);
     }).catch(err => {
@@ -47,6 +50,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Set a timeout to prevent endless loading
     const timeoutId = setTimeout(() => {
+      console.log('Auth loading timeout reached');
       setLoading(false);
     }, 5000);
 
@@ -54,6 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      console.log('Auth state changed:', _event, session ? 'User authenticated' : 'No user session');
       setUser(session?.user ?? null);
       setLoading(false);
     });
@@ -65,6 +70,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    console.log('Auth state effect triggered:', { 
+      loading, 
+      user: user ? 'User authenticated' : 'No user', 
+      pathname,
+      hasRedirected: hasRedirected.current
+    });
+    
     if (loading) return;
     
     // Prevent redirect loops by only redirecting once per component mount
@@ -76,6 +88,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const routePattern = route.replace(/\[.*?\]/g, '[^/]+');
       const regex = new RegExp(`^${routePattern}$`);
       return regex.test(pathname);
+    });
+    
+    console.log('Redirect check:', { 
+      isPublicRoute: publicRoutes.includes(pathname),
+      isDevBypassRoute,
+      shouldRedirectToLogin: !user && !publicRoutes.includes(pathname) && !isDevBypassRoute,
+      shouldRedirectToDashboard: user && publicRoutes.includes(pathname)
     });
 
     // Route groups are stripped from the URL, so we use the actual paths

@@ -35,6 +35,7 @@ export default function RootLayout({
           storageKey="unity-theme"
         >
           <Providers>
+
             <AppRootLayout>{children}</AppRootLayout>
           </Providers>
           <Toaster />

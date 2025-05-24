@@ -33,6 +33,11 @@ export interface ComponentRequirement {
   on_order_breakdown: SupplierOrderBreakdown[];
   apparent_shortfall: number;
   real_shortfall: number;
+  // Global requirements data across all orders
+  total_required_all_orders: number;
+  order_count: number;
+  global_apparent_shortfall: number;
+  global_real_shortfall: number;
   supplier_options: Array<{
     supplier: SupplierInfo;
     price: number;

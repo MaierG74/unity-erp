@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { ArrowLeft, File, Download, Paperclip, Package, Layers, Wrench, Cog, Search, PaintBucket, PlusCircle, Check, Plus, Loader2, AlertCircle, ShoppingCart, ChevronDown, CheckCircle, Trash, FilePlus, Terminal, ChevronRight, Info, ShoppingBag } from 'lucide-react';
+import { ArrowLeft, File, Download, Paperclip, Package, Layers, Wrench, Cog, Search, PaintBucket, PlusCircle, Check, Plus, Loader2, AlertCircle, ShoppingCart, ChevronDown, CheckCircle, Trash, FilePlus, Terminal, ChevronRight, Info, ShoppingBag, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
@@ -120,6 +120,27 @@ async function fetchOrderComponentRequirements(orderId: number): Promise<Product
   try {
     console.log(`[DEBUG] Fetching component requirements for order ${orderId}`);
     
+    // First get all components across all orders to ensure we have global totals
+    const { data: globalComponents, error: globalError } = await supabase.rpc(
+      'get_all_component_requirements'
+    );
+    
+    if (globalError) {
+      console.error(`[ERROR] Error fetching global component requirements:`, globalError);
+      // Continue anyway with null/empty data
+    }
+    
+    // Create a map of component IDs to their global requirements
+    const globalRequirementsMap = globalComponents ?
+      globalComponents.reduce((map: Record<number, any>, item: any) => {
+        if (item && item.component_id) {
+          map[item.component_id] = item;
+        }
+        return map;
+      }, {}) : {};
+      
+    console.log(`[DEBUG] Retrieved global requirements for ${Object.keys(globalRequirementsMap).length} components`);
+    
     // Get the order details with products
     const { data: orderDetails, error: orderError } = await supabase
       .from('order_details')
@@ -148,18 +169,22 @@ async function fetchOrderComponentRequirements(orderId: number): Promise<Product
       return [];
     }
     
-    // Use our new function to get component status for this order
+    // Use the detailed component status function that includes global requirements
     const { data: componentStatus, error: statusError } = await supabase.rpc(
-      'get_order_component_status',
+      'get_detailed_component_status',
       { p_order_id: orderId }
     );
     
     if (statusError) {
-      console.error(`[ERROR] Error fetching component status:`, statusError);
+      console.error(`[ERROR] Error fetching detailed component status:`, statusError);
       // Don't throw here, just continue with null/empty data
     }
     
     console.log(`[DEBUG] Retrieved component status for ${componentStatus?.length || 0} components`);
+    // Log a sample of the data to debug the issue
+    if (componentStatus && componentStatus.length > 0) {
+      console.log(`[DEBUG] Sample component data:`, JSON.stringify(componentStatus[0], null, 2));
+    }
     
     // Create a map of component IDs to their status - safely handle null/undefined
     const componentStatusMap = componentStatus ?
@@ -280,6 +305,30 @@ async function fetchOrderComponentRequirements(orderId: number): Promise<Product
               supplierOptions.reduce((lowest, current) => {
                 return (current.price < lowest.price) ? current : lowest;
               }, supplierOptions[0]) : null;
+              
+            // Get global requirements for this component
+            const globalRequirements = globalRequirementsMap[componentId];
+            
+            // Add the global requirement fields from detailed component status and global requirements
+            const totalRequiredAllOrders = globalRequirements ? 
+              globalRequirements.total_required : 
+              (status ? status.total_required : requiredQuantity);
+                
+            const orderCount = globalRequirements ? 
+              globalRequirements.order_count : 
+              (status ? status.order_count : 1);
+                
+            const globalApparentShortfall = globalRequirements ? 
+              globalRequirements.global_apparent_shortfall : 
+              (status ? status.global_apparent_shortfall : apparentShortfall);
+                
+            const globalRealShortfall = globalRequirements ? 
+              globalRequirements.global_real_shortfall : 
+              (status ? status.global_real_shortfall : realShortfall);
+                
+            const orderBreakdown = globalRequirements ? 
+              globalRequirements.order_breakdown || [] : 
+              (status ? status.order_breakdown || [] : []);
             
             return {
               component_id: componentId,
@@ -293,7 +342,13 @@ async function fetchOrderComponentRequirements(orderId: number): Promise<Product
               is_covered_by_orders: isCovered,
               history: orderHistoryMap[componentId] || [],
               supplier_options: supplierOptions,
-              selected_supplier: selectedSupplier
+              selected_supplier: selectedSupplier,
+              // Add global requirement fields
+              total_required_all_orders: totalRequiredAllOrders,
+              order_count: orderCount,
+              global_apparent_shortfall: globalApparentShortfall,
+              global_real_shortfall: globalRealShortfall,
+              order_breakdown: orderBreakdown
             } as ComponentRequirement;
           }).filter(Boolean) as ComponentRequirement[];
           
@@ -345,7 +400,12 @@ async function fetchComponentSuppliers(orderId: number) {
           description: comp.description,
           shortfall: comp.real_shortfall,
           quantity_required: comp.quantity_required,
-          quantity_on_order: comp.quantity_on_order
+          quantity_on_order: comp.quantity_on_order,
+          // Add global requirement data
+          total_required_all_orders: comp.total_required_all_orders,
+          order_count: comp.order_count,
+          global_apparent_shortfall: comp.global_apparent_shortfall,
+          global_real_shortfall: comp.global_real_shortfall
         }))
     );
     
@@ -413,9 +473,6 @@ async function fetchComponentSuppliers(orderId: number) {
         }
       }
       
-      // No need to separately get emails and phone anymore
-      // The supplier_details view handles this
-      
       // Add valid supplier components to our list
       const validSupplierComponents = data.filter(d => 
         d.supplier && d.supplier_component_id && d.price !== null
@@ -431,7 +488,22 @@ async function fetchComponentSuppliers(orderId: number) {
         },
         shortfall: comp.shortfall,
         quantity_required: comp.quantity_required,
-        quantity_on_order: comp.quantity_on_order
+        quantity_on_order: comp.quantity_on_order,
+        // Add global requirement data
+        total_required_all_orders: comp.total_required_all_orders,
+        order_count: comp.order_count,
+        global_apparent_shortfall: comp.global_apparent_shortfall,
+        global_real_shortfall: comp.global_real_shortfall,
+        selectedSupplier: {
+          supplier: sc.supplier,
+          price: sc.price,
+          supplier_component_id: sc.supplier_component_id
+        },
+        supplierOptions: [{
+          supplier: sc.supplier,
+          price: sc.price,
+          supplier_component_id: sc.supplier_component_id
+        }]
       }));
       
       allSupplierComponents = [...allSupplierComponents, ...supplierComponentsWithInfo];
@@ -482,6 +554,11 @@ async function fetchComponentSuppliers(orderId: number) {
             shortfall: sc.shortfall,
             quantity_required: sc.quantity_required,
             quantity_on_order: sc.quantity_on_order,
+            // Add global requirement fields
+            total_required_all_orders: sc.total_required_all_orders,
+            order_count: sc.order_count,
+            global_apparent_shortfall: sc.global_apparent_shortfall,
+            global_real_shortfall: sc.global_real_shortfall,
             selectedSupplier: {
               supplier: sc.supplier,
               price: sc.price,
@@ -503,6 +580,11 @@ async function fetchComponentSuppliers(orderId: number) {
             shortfall: sc.shortfall,
             quantity_required: sc.quantity_required,
             quantity_on_order: sc.quantity_on_order,
+            // Add global requirement fields
+            total_required_all_orders: sc.total_required_all_orders,
+            order_count: sc.order_count,
+            global_apparent_shortfall: sc.global_apparent_shortfall,
+            global_real_shortfall: sc.global_real_shortfall,
             selectedSupplier: {
               supplier: sc.supplier,
               price: sc.price,
@@ -545,6 +627,11 @@ type SupplierInfo = {
 type SupplierComponent = {
   component: any;
   shortfall: number;
+  // Add global requirement fields
+  total_required_all_orders?: number;
+  order_count?: number;
+  global_apparent_shortfall?: number;
+  global_real_shortfall?: number;
   selectedSupplier: { 
     supplier_component_id: number;
     supplier: SupplierInfo; 
@@ -967,12 +1054,34 @@ const OrderComponentsDialog = ({
                             <TableCell>
                               <div className="font-medium">
                                 {component.component.internal_code}
+                                {component.total_required_all_orders > component.shortfall && (
+                                  <span className="ml-2 inline-flex items-center text-xs font-medium text-blue-500">
+                                    <Users className="h-3 w-3 mr-1" />
+                                    <span className="sr-only">Required in multiple orders</span>
+                                  </span>
+                                )}
                               </div>
                               <div className="text-sm text-muted-foreground">
                                 {component.component.description}
                               </div>
+                              {component.total_required_all_orders > component.shortfall && (
+                                <div className="text-xs text-blue-600 mt-1">
+                                  Total needed across all orders: {component.total_required_all_orders} 
+                                  <span className="mx-1">•</span>
+                                  Global shortfall: {component.global_real_shortfall}
+                                </div>
+                              )}
                             </TableCell>
-                            <TableCell>{component.shortfall}</TableCell>
+                            <TableCell>
+                              <span className={component.shortfall > 0 ? "text-red-600 font-medium" : ""}>
+                                {component.shortfall}
+                              </span>
+                              {component.global_real_shortfall > component.shortfall && (
+                                <div className="text-xs text-amber-600">
+                                  +{component.global_real_shortfall - component.shortfall} in other orders
+                                </div>
+                              )}
+                            </TableCell>
                             <TableCell>
                               <Input
                                 type="number"
@@ -1971,7 +2080,7 @@ function RequirementTooltip({ breakdown }: { breakdown: OrderBreakdown[] }) {
     <div className="p-2 max-w-sm">
       <p className="font-semibold mb-2">Order Breakdown:</p>
       <ul className="space-y-1">
-        {breakdown.map((order) => (
+        {breakdown?.map((order) => (
           <li key={order.order_id} className="text-sm">
             Order #{order.order_id}: {order.quantity} units ({order.status})
             <br />
@@ -1990,7 +2099,7 @@ function OnOrderTooltip({ breakdown }: { breakdown: SupplierOrderBreakdown[] }) 
     <div className="p-2 max-w-sm">
       <p className="font-semibold mb-2">Supplier Orders:</p>
       <ul className="space-y-2">
-        {breakdown.map((order) => (
+        {breakdown?.map((order) => (
           <li key={order.supplier_order_id} className="text-sm">
             <div className="flex justify-between">
               <span>PO #{order.supplier_order_id}</span>
@@ -2015,20 +2124,33 @@ function OnOrderTooltip({ breakdown }: { breakdown: SupplierOrderBreakdown[] }) 
 function ComponentRequirementsTable({ requirements }: { requirements: ComponentRequirement[] }) {
   return (
     <Table>
-      <TableHeader>
+      <TableHeader className="bg-muted/50">
         <TableRow>
           <TableHead>Component</TableHead>
           <TableHead className="text-right">Required</TableHead>
+          <TableHead className="text-right whitespace-nowrap">
+            Total Across Orders
+            <span className="sr-only">(Total required across all orders)</span>
+          </TableHead>
           <TableHead className="text-right">In Stock</TableHead>
           <TableHead className="text-right">On Order</TableHead>
           <TableHead className="text-right">Apparent Shortfall</TableHead>
           <TableHead className="text-right">Real Shortfall</TableHead>
-          <TableHead></TableHead>
+          <TableHead className="text-right whitespace-nowrap">
+            Global Shortfall
+            <span className="sr-only">(Total shortfall across all orders)</span>
+          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {requirements.map((req) => (
-          <TableRow key={req.component_id}>
+        {requirements?.map((req, index) => (
+          <TableRow 
+            key={req.component_id}
+            className={cn(
+              index % 2 === 0 ? "bg-white" : "bg-muted/20",
+              "hover:bg-muted/30 transition-all duration-200 ease-in-out"
+            )}
+          >
             <TableCell>
               <div>
                 <p className="font-medium">{req.internal_code}</p>
@@ -2040,26 +2162,62 @@ function ComponentRequirementsTable({ requirements }: { requirements: ComponentR
                 <PopoverTrigger>
                   <div className="cursor-help inline-flex items-center">
                     {req.total_required}
-                    <Info className="h-4 w-4 ml-1 text-muted-foreground" />
+                    <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
                   </div>
                 </PopoverTrigger>
-                <PopoverContent>
-                  <RequirementTooltip breakdown={req.order_breakdown} />
+                <PopoverContent className="p-0">
+                  <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
+                    <RequirementTooltip breakdown={req.order_breakdown || []} />
+                  </div>
                 </PopoverContent>
               </Popover>
             </TableCell>
-            <TableCell className="text-right">{req.in_stock}</TableCell>
+            <TableCell className="text-right">
+              <Popover>
+                <PopoverTrigger>
+                  <div className="cursor-help inline-flex items-center">
+                    <span className={cn(
+                      req.total_required_all_orders > req.total_required 
+                        ? "text-blue-600" 
+                        : "",
+                      "font-medium"
+                    )}>
+                      {req.total_required_all_orders || 0}
+                    </span>
+                    {req.order_count > 1 && (
+                      <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
+                    )}
+                  </div>
+                </PopoverTrigger>
+                <PopoverContent className="p-0">
+                  <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
+                    <p className="text-sm font-medium mb-2">Required across {req.order_count} orders:</p>
+                    <div className="space-y-1 text-sm">
+                      {(req.order_breakdown || [])?.map((order: any) => (
+                        <div key={order.order_id} className="flex justify-between">
+                          <span>Order #{order.order_id}:</span>
+                          <span>{order.quantity} units</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </TableCell>
+            <TableCell className="text-right font-medium">{req.in_stock}</TableCell>
             <TableCell className="text-right">
               {req.on_order > 0 ? (
                 <Popover>
                   <PopoverTrigger>
                     <div className="cursor-help inline-flex items-center">
                       {req.on_order}
-                      <Info className="h-4 w-4 ml-1 text-muted-foreground" />
+                      <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
                     </div>
                   </PopoverTrigger>
-                  <PopoverContent>
-                    <OnOrderTooltip breakdown={req.on_order_breakdown} />
+                  <PopoverContent className="p-0">
+                    <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
+                      <OnOrderTooltip breakdown={req.on_order_breakdown || []} />
+                    </div>
                   </PopoverContent>
                 </Popover>
               ) : (
@@ -2068,26 +2226,54 @@ function ComponentRequirementsTable({ requirements }: { requirements: ComponentR
             </TableCell>
             <TableCell className="text-right">
               <span className={cn(
-                req.apparent_shortfall > 0 ? "text-orange-600" : "text-green-600"
+                req.apparent_shortfall > 0 
+                  ? "text-orange-600" 
+                  : "text-green-600",
+                "font-medium"
               )}>
                 {req.apparent_shortfall}
               </span>
             </TableCell>
             <TableCell className="text-right">
+              {req.apparent_shortfall > 0 && req.real_shortfall === 0 ? (
+                <Popover>
+                  <PopoverTrigger>
+                    <div className="cursor-help inline-flex items-center">
+                      <span className="text-green-600 font-medium">{req.real_shortfall}</span>
+                      <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
+                    </div>
+                  </PopoverTrigger>
+                  <PopoverContent className="p-0">
+                    <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
+                      <p className="text-sm">This apparent shortfall is covered by existing supplier orders.</p>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              ) : (
+                <span className={cn(
+                  req.real_shortfall > 0 
+                    ? "text-red-600" 
+                    : "text-green-600",
+                  "font-medium"
+                )}>
+                  {req.real_shortfall}
+                </span>
+              )}
+            </TableCell>
+            <TableCell className="text-right">
               <span className={cn(
-                req.real_shortfall > 0 ? "text-red-600" : "text-green-600",
+                req.global_real_shortfall > 0 
+                  ? "text-red-600" 
+                  : req.global_apparent_shortfall > 0 
+                    ? "text-amber-600" 
+                    : "text-green-600",
                 "font-medium"
               )}>
-                {req.real_shortfall}
-                {req.real_shortfall === 0 && req.apparent_shortfall > 0 && (
-                  <span className="text-xs text-muted-foreground ml-1">(Covered by orders)</span>
-                )}
+                {req.global_real_shortfall || 0}
               </span>
-            </TableCell>
-            <TableCell>
-              <Button variant="ghost" size="sm">
-                <ChevronRight className="h-4 w-4" />
-              </Button>
+              {req.global_apparent_shortfall > 0 && req.global_real_shortfall === 0 && (
+                <span className="text-xs text-muted-foreground ml-1">(Covered)</span>
+              )}
             </TableCell>
           </TableRow>
         ))}
@@ -2108,13 +2294,18 @@ async function fetchComponentRequirements(orderId: number): Promise<ComponentReq
     component_id: item.component_id,
     internal_code: item.internal_code,
     description: item.description,
-    total_required: item.total_required,
-    order_breakdown: item.order_breakdown || [],
+    total_required: item.order_required,
     in_stock: item.in_stock,
     on_order: item.on_order,
-    on_order_breakdown: item.on_order_breakdown || [],
     apparent_shortfall: item.apparent_shortfall,
     real_shortfall: item.real_shortfall,
+    // Add the new global requirement fields
+    total_required_all_orders: item.total_required,
+    order_count: item.order_count,
+    global_apparent_shortfall: item.global_apparent_shortfall,
+    global_real_shortfall: item.global_real_shortfall,
+    order_breakdown: item.order_breakdown || [],
+    on_order_breakdown: item.on_order_breakdown || [],
     supplier_options: item.supplier_options?.map((opt: any) => ({
       supplier: {
         supplier_id: opt.supplier.supplier_id,
@@ -2499,7 +2690,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
         <TabsContent value="components" className="space-y-6">
           {/* Debug information card removed */}
           
-          {componentRequirements.length === 0 ? (
+          {!componentRequirements || componentRequirements.length === 0 ? (
             <Alert className="bg-muted">
               <Terminal className="h-4 w-4" />
               <AlertTitle>No components to display</AlertTitle>
@@ -2509,166 +2700,280 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
             </Alert>
           ) : (
             <>
-              <div className="flex justify-between items-center mb-3">
-                <h2 className="text-xl font-semibold tracking-tight">
-                  Component Requirements
-                </h2>
-                <Button onClick={() => setOrderComponentsOpen(true)} size="sm">
-                  <ShoppingCart className="mr-2 h-4 w-4" />
-                  Order Components
-                </Button>
-              </div>
-              <Card className="shadow-sm border border-muted/40 overflow-hidden">
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <CardTitle>Components needed for this order</CardTitle>
-                    <div className="flex items-center gap-2">
-                      {totals.totalShortfall > 0 ? (
-                        <Badge variant="destructive" className="bg-red-100 text-red-700 hover:bg-red-100">
-                          {totals.totalShortfall} components with shortfall
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="bg-green-100 text-green-700 hover:bg-green-100">
-                          All components available
-                        </Badge>
-                      )}
+              {/* Calculate component totals and global requirements */}
+              {(() => {
+                // Initialize totals object
+                const totals = {
+                  totalComponents: 0,
+                  totalShortfall: 0,
+                  totalGlobalShortfall: 0,
+                  multiOrderComponents: 0
+                };
+                
+                // Calculate totals from all components
+                componentRequirements?.forEach(prodReq => {
+                  if (!prodReq?.components) return;
+                  
+                  prodReq.components?.forEach(comp => {
+                    totals.totalComponents++;
+                    
+                    if (comp.real_shortfall > 0) {
+                      totals.totalShortfall++;
+                    }
+                    
+                    if (comp.global_real_shortfall > 0) {
+                      totals.totalGlobalShortfall++;
+                    }
+                    
+                    if (comp.order_count > 1) {
+                      totals.multiOrderComponents++;
+                    }
+                  });
+                });
+                
+                return (
+                  <>
+                    <div className="flex justify-between items-center mb-3">
+                      <h2 className="text-xl font-semibold tracking-tight">
+                        Component Requirements
+                      </h2>
+                      <Button onClick={() => setOrderComponentsOpen(true)} size="sm">
+                        <ShoppingCart className="mr-2 h-4 w-4" />
+                        Order Components
+                      </Button>
                     </div>
-                  </div>
-                  <CardDescription>
-                    {componentRequirements.length} products with {totals.totalComponents || 0} component requirements
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {/* Display component requirements here */}
-                  <div className="space-y-4">
-                    {componentRequirements.map((productReq: any, index: number) => {
-                      const hasShortfall = productReq.components && productReq.components.some((c: any) => c.shortfall > 0);
-                      const productId = productReq.product_id || `product-${index}`;
-                      const isExpanded = !!expandedRows[productId];
-                      
-                      return (
-                        <div key={productReq.order_detail_id || index} className="border rounded-lg overflow-hidden shadow-sm hover:shadow transition-all duration-200">
-                          <div 
-                            className={cn(
-                              "p-4 flex justify-between items-center cursor-pointer",
-                              hasShortfall ? 'bg-red-50' : 'bg-white'
+                    <Card className="shadow-sm border border-muted/40 overflow-hidden">
+                      <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between">
+                          <CardTitle>Components needed for this order</CardTitle>
+                          <div className="flex items-center gap-2">
+                            {totals.totalShortfall > 0 ? (
+                              <Badge variant="destructive" className="bg-red-100 text-red-700 hover:bg-red-100">
+                                {totals.totalShortfall} components with shortfall
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="bg-green-100 text-green-700 hover:bg-green-100">
+                                All components available
+                              </Badge>
                             )}
-                            onClick={() => toggleRowExpansion(productId)}
-                          >
-                            <div>
-                              <h4 className="font-medium flex items-center">
-                                {productReq.product_name || 'Unknown Product'} 
-                                {hasShortfall && (
-                                  <Badge variant="destructive" className="ml-2">Shortfall</Badge>
-                                )}
-                              </h4>
-                              <p className="text-sm text-muted-foreground">
-                                Order quantity: {productReq.order_quantity || 0} × {productReq.components?.length || 0} component types
-                              </p>
-                            </div>
-                            <div className="flex items-center">
-                              <Button variant="ghost" size="sm" className="ml-2">
-                                {isExpanded ? (
-                                  <ChevronDown className="h-4 w-4" />
-                                ) : (
-                                  <ChevronRight className="h-4 w-4" />
-                                )}
-                              </Button>
-                            </div>
+                            
+                            {/* Global requirements summary */}
+                            {totals.totalGlobalShortfall > 0 && (
+                              <Badge variant="outline" className="bg-amber-100 text-amber-800 hover:bg-amber-100">
+                                {totals.totalGlobalShortfall} global shortfalls
+                              </Badge>
+                            )}
                           </div>
-                          
-                          {/* Expanded view with component details */}
-                          {isExpanded && productReq.components && productReq.components.length > 0 && (
-                            <div className="bg-muted/30 p-4 border-t animate-in fade-in duration-300">
-                              <div className="overflow-x-auto">
-                                <Table>
-                                  <TableHeader className="bg-muted/50">
-                                    <TableRow>
-                                      <TableHead>Component</TableHead>
-                                      <TableHead className="text-right">Required</TableHead>
-                                      <TableHead className="text-right">In Stock</TableHead>
-                                      <TableHead className="text-right">On Order</TableHead>
-                                      <TableHead className="text-right">Apparent Shortfall</TableHead>
-                                      <TableHead className="text-right">Real Shortfall</TableHead>
-                                    </TableRow>
-                                  </TableHeader>
-                                  <TableBody>
-                                    {productReq.components.map((component: any, compIndex: number) => (
-                                      <TableRow 
-                                        key={component.component_id || `comp-${compIndex}`}
-                                        className={cn(
-                                          compIndex % 2 === 0 ? "bg-white" : "bg-muted/20",
-                                          "hover:bg-muted/30 transition-all duration-200 ease-in-out"
-                                        )}
-                                      >
-                                        <TableCell>
-                                          <div className="font-medium">{component.internal_code || 'Unknown'}</div>
-                                          <div className="text-sm text-muted-foreground">{component.description || 'No description'}</div>
-                                        </TableCell>
-                                        <TableCell className="text-right font-medium">{component.quantity_required || 0}</TableCell>
-                                        <TableCell className="text-right font-medium">{component.quantity_in_stock || 0}</TableCell>
-                                        <TableCell className="text-right">
-                                          {component.quantity_on_order > 0 ? (
-                                            <span className="text-blue-600 font-medium">{component.quantity_on_order}</span>
-                                          ) : (
-                                            component.quantity_on_order || 0
-                                          )}
-                                        </TableCell>
-                                        <TableCell className="text-right">
-                                          <span className={cn(
-                                            component.apparent_shortfall > 0 
-                                              ? "text-orange-600" 
-                                              : "text-green-600",
-                                            "font-medium"
-                                          )}>
-                                            {component.apparent_shortfall || 0}
-                                          </span>
-                                        </TableCell>
-                                        <TableCell className="text-right">
-                                          {component.apparent_shortfall > 0 && component.real_shortfall === 0 ? (
-                                            <Popover>
-                                              <PopoverTrigger>
-                                                <div className="cursor-help inline-flex items-center">
-                                                  <span className="text-green-600 font-medium">{component.real_shortfall || 0}</span>
-                                                  <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
-                                                </div>
-                                              </PopoverTrigger>
-                                              <PopoverContent className="p-0">
-                                                <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
-                                                  <p className="text-sm">This apparent shortfall is covered by existing supplier orders.</p>
-                                                </div>
-                                              </PopoverContent>
-                                            </Popover>
-                                          ) : (
-                                            <span className={cn(
-                                              component.real_shortfall > 0 
-                                                ? "text-red-600" 
-                                                : "text-green-600",
-                                              "font-medium"
-                                            )}>
-                                              {component.real_shortfall || 0}
-                                            </span>
-                                          )}
-                                        </TableCell>
-                                      </TableRow>
-                                    ))}
-                                  </TableBody>
-                                </Table>
-                              </div>
-                            </div>
-                          )}
                         </div>
-                      );
-                    })}
-              </div>
-            </CardContent>
-          </Card>
-              <OrderComponentsDialog 
-                orderId={orderId.toString()} 
-                open={orderComponentsOpen} 
-                onOpenChange={setOrderComponentsOpen} 
-                onCreated={() => refetchComponentRequirements()}
-              />
+                        <CardDescription>
+                          {componentRequirements.length} products with {totals.totalComponents || 0} component requirements
+                          {totals.multiOrderComponents > 0 && (
+                            <span className="ml-1">
+                              (<span className="text-blue-600 font-medium">{totals.multiOrderComponents}</span> components needed across multiple orders)
+                            </span>
+                          )}
+                        </CardDescription>
+                        
+                        {/* Add global requirements alert if there are components with high global demand */}
+                        {totals.multiOrderComponents > 0 && (
+                          <div className="mt-2 text-xs p-2 bg-blue-50 text-blue-700 rounded-md flex items-start">
+                            <Info className="h-4 w-4 mr-2 mt-0.5 flex-shrink-0" />
+                            <span>
+                              Some components are required by multiple orders. "Total Across Orders" shows the total quantity 
+                              needed for all open orders, and "Global Shortfall" indicates potential shortages across all orders.
+                            </span>
+                          </div>
+                        )}
+                      </CardHeader>
+                      <CardContent>
+                        {/* Display component requirements here */}
+                        <div className="space-y-4">
+                          {componentRequirements?.map((productReq: any, index: number) => {
+                            const hasShortfall = productReq?.components && productReq.components?.some((c: any) => c.shortfall > 0);
+                            const productId = productReq.product_id || `product-${index}`;
+                            const isExpanded = !!expandedRows[productId];
+                            
+                            return (
+                              <div key={productReq.order_detail_id || index} className="border rounded-lg overflow-hidden shadow-sm hover:shadow transition-all duration-200">
+                                <div 
+                                  className={cn(
+                                    "p-4 flex justify-between items-center cursor-pointer",
+                                    hasShortfall ? 'bg-red-50' : 'bg-white'
+                                  )}
+                                  onClick={() => toggleRowExpansion(productId)}
+                                >
+                                  <div>
+                                    <h4 className="font-medium flex items-center">
+                                      {productReq.product_name || 'Unknown Product'} 
+                                      {hasShortfall && (
+                                        <Badge variant="destructive" className="ml-2">Shortfall</Badge>
+                                      )}
+                                    </h4>
+                                    <p className="text-sm text-muted-foreground">
+                                      Order quantity: {productReq.order_quantity || 0} × {productReq.components?.length || 0} component types
+                                    </p>
+                                  </div>
+                                  <div className="flex items-center">
+                                    <Button variant="ghost" size="sm" className="ml-2">
+                                      {isExpanded ? (
+                                        <ChevronDown className="h-4 w-4" />
+                                      ) : (
+                                        <ChevronRight className="h-4 w-4" />
+                                      )}
+                                    </Button>
+                                  </div>
+                                </div>
+                                
+                                {/* Expanded view with component details */}
+                                {isExpanded && productReq.components && productReq.components.length > 0 && (
+                                  <div className="bg-muted/30 p-4 border-t animate-in fade-in duration-300">
+                                    <div className="overflow-x-auto">
+                                      <Table>
+                                        <TableHeader className="bg-muted/50">
+                                          <TableRow>
+                                            <TableHead>Component</TableHead>
+                                            <TableHead className="text-right">Required</TableHead>
+                                            <TableHead className="text-right whitespace-nowrap">
+                                              Total Across Orders
+                                              <span className="sr-only">(Total required across all orders)</span>
+                                            </TableHead>
+                                            <TableHead className="text-right">In Stock</TableHead>
+                                            <TableHead className="text-right">On Order</TableHead>
+                                            <TableHead className="text-right">Apparent Shortfall</TableHead>
+                                            <TableHead className="text-right">Real Shortfall</TableHead>
+                                            <TableHead className="text-right whitespace-nowrap">
+                                              Global Shortfall
+                                              <span className="sr-only">(Total shortfall across all orders)</span>
+                                            </TableHead>
+                                          </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                          {productReq.components?.map((component: any, compIndex: number) => (
+                                            <TableRow 
+                                              key={component.component_id || `comp-${compIndex}`}
+                                              className={cn(
+                                                compIndex % 2 === 0 ? "bg-white" : "bg-muted/20",
+                                                "hover:bg-muted/30 transition-all duration-200 ease-in-out"
+                                              )}
+                                            >
+                                              <TableCell>
+                                                <div className="font-medium">{component.internal_code || 'Unknown'}</div>
+                                                <div className="text-sm text-muted-foreground">{component.description || 'No description'}</div>
+                                              </TableCell>
+                                              <TableCell className="text-right font-medium">{component.quantity_required || 0}</TableCell>
+                                              <TableCell className="text-right">
+                                                <Popover>
+                                                  <PopoverTrigger>
+                                                    <div className="cursor-help inline-flex items-center">
+                                                      <span className={cn(
+                                                        component.total_required_all_orders > component.quantity_required 
+                                                          ? "text-blue-600" 
+                                                          : "",
+                                                        "font-medium"
+                                                      )}>
+                                                        {component.total_required_all_orders || 0}
+                                                      </span>
+                                                      {component.order_count > 1 && (
+                                                        <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
+                                                      )}
+                                                    </div>
+                                                  </PopoverTrigger>
+                                                  <PopoverContent className="p-0">
+                                                    <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
+                                                      <p className="text-sm font-medium mb-2">Required across {component.order_count} orders:</p>
+                                                      <div className="space-y-1 text-sm">
+                                                        {(component.order_breakdown || [])?.map((order: any) => (
+                                                          <div key={order.order_id} className="flex justify-between">
+                                                            <span>Order #{order.order_id}:</span>
+                                                            <span>{order.quantity} units</span>
+                                                          </div>
+                                                        ))}
+                                                      </div>
+                                                    </div>
+                                                  </PopoverContent>
+                                                </Popover>
+                                              </TableCell>
+                                              <TableCell className="text-right font-medium">{component.quantity_in_stock || 0}</TableCell>
+                                              <TableCell className="text-right">
+                                                {component.quantity_on_order > 0 ? (
+                                                  <span className="text-blue-600 font-medium">{component.quantity_on_order}</span>
+                                                ) : (
+                                                  component.quantity_on_order || 0
+                                                )}
+                                              </TableCell>
+                                              <TableCell className="text-right">
+                                                <span className={cn(
+                                                  component.apparent_shortfall > 0 
+                                                    ? "text-orange-600" 
+                                                    : "text-green-600",
+                                                  "font-medium"
+                                                )}>
+                                                  {component.apparent_shortfall || 0}
+                                                </span>
+                                              </TableCell>
+                                              <TableCell className="text-right">
+                                                {component.apparent_shortfall > 0 && component.real_shortfall === 0 ? (
+                                                  <Popover>
+                                                    <PopoverTrigger>
+                                                      <div className="cursor-help inline-flex items-center">
+                                                        <span className="text-green-600 font-medium">{component.real_shortfall || 0}</span>
+                                                        <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
+                                                      </div>
+                                                    </PopoverTrigger>
+                                                    <PopoverContent className="p-0">
+                                                      <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
+                                                        <p className="text-sm">This apparent shortfall is covered by existing supplier orders.</p>
+                                                      </div>
+                                                    </PopoverContent>
+                                                  </Popover>
+                                                ) : (
+                                                  <span className={cn(
+                                                    component.real_shortfall > 0 
+                                                      ? "text-red-600" 
+                                                      : "text-green-600",
+                                                    "font-medium"
+                                                  )}>
+                                                    {component.real_shortfall || 0}
+                                                  </span>
+                                                )}
+                                              </TableCell>
+                                              <TableCell className="text-right">
+                                                <span className={cn(
+                                                  component.global_real_shortfall > 0 
+                                                    ? "text-red-600" 
+                                                    : component.global_apparent_shortfall > 0 
+                                                      ? "text-amber-600" 
+                                                      : "text-green-600",
+                                                  "font-medium"
+                                                )}>
+                                                  {component.global_real_shortfall || 0}
+                                                </span>
+                                                {component.global_apparent_shortfall > 0 && component.global_real_shortfall === 0 && (
+                                                  <span className="text-xs text-muted-foreground ml-1">(Covered)</span>
+                                                )}
+                                              </TableCell>
+                                            </TableRow>
+                                          ))}
+                                        </TableBody>
+                                      </Table>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </CardContent>
+                    </Card>
+                    <OrderComponentsDialog 
+                      orderId={orderId.toString()} 
+                      open={orderComponentsOpen} 
+                      onOpenChange={setOrderComponentsOpen} 
+                      onCreated={() => refetchComponentRequirements()}
+                    />
+                  </>
+                );
+              })()}
             </>
           )}
         </TabsContent>
