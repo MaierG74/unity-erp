@@ -53,15 +53,14 @@ export default function HomePage() {
             
             <div className="flex justify-center">
               {!loading && !user ? (
-                <Link href="/login">
-                  <Button 
-                    variant="default" 
-                    size="lg" 
-                    className="px-8 py-6 text-lg bg-[#F26B3A] hover:bg-[#E25A29] text-white"
-                  >
-                    Login
-                  </Button>
-                </Link>
+                <Button 
+                  variant="default" 
+                  size="lg" 
+                  className="px-8 py-6 text-lg bg-[#F26B3A] hover:bg-[#E25A29] text-white"
+                  onClick={() => router.push('/login')}
+                >
+                  Login
+                </Button>
               ) : !loading && user ? (
                 <Link href="/dashboard">
                   <Button 

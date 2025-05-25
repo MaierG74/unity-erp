@@ -1,13 +1,12 @@
 import type { Metadata } from "next";
-import { GeistSans } from 'geist/font/sans';
-import { GeistMono } from 'geist/font/mono';
 import "./globals.css";
+import { Inter } from "next/font/google";
 import { Providers } from "@/components/providers";
 import { RootLayout as AppRootLayout } from "@/components/layout/root-layout";
 import { ThemeProvider } from "@/components/theme-provider";
-import { Inter } from "next/font/google";
 import { Toaster } from "@/components/ui/toaster";
 
+// Use only the Inter font which is already working
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
@@ -23,10 +22,10 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  console.log("Root layout rendering");
+  console.log("Root layout rendering with simplified structure");
   
   return (
-    <html lang="en" className={`dark ${GeistSans.variable} ${GeistMono.variable} ${inter.className}`} suppressHydrationWarning>
+    <html lang="en" className={`dark ${inter.className}`} suppressHydrationWarning>
       <body className="antialiased min-h-screen bg-background">
         <ThemeProvider
           attribute="class"
@@ -35,7 +34,6 @@ export default function RootLayout({
           storageKey="unity-theme"
         >
           <Providers>
-
             <AppRootLayout>{children}</AppRootLayout>
           </Providers>
           <Toaster />

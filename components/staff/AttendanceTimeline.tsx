@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { processClockEventsIntoSegments, generateDailySummary } from '@/lib/utils/attendance';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/use-toast';
@@ -7,6 +7,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogClose
+} from '@/components/ui/dialog';
 import { ChevronDown, ChevronUp, Plus, User } from 'lucide-react';
 
 interface ClockEvent {
@@ -84,10 +93,26 @@ export function AttendanceTimeline({
   const [eventType, setEventType] = useState<string>('');
   const [eventTime, setEventTime] = useState('');
   const [breakType, setBreakType] = useState<string | null>(null);
+  
+  // Time edit dialog states
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<ClockEvent | null>(null);
+  const [editHour, setEditHour] = useState('');
+  const [editMinute, setEditMinute] = useState('');
+  const [timeError, setTimeError] = useState<string | null>(null);
 
   // Convert staffId to number for comparison since database uses number type
   const numericStaffId = Number(staffId);
   const staffEvents = clockEvents.filter(event => Number(event.staff_id) === numericStaffId);
+
+  // Detect missing clock-out: if last event is clock_in and no subsequent clock_out
+  let missingClockOut = false;
+  if (staffEvents.length > 0) {
+    const lastEvent = staffEvents[staffEvents.length - 1];
+    if (lastEvent.event_type === 'clock_in') {
+      missingClockOut = true;
+    }
+  }
   const staffSegments = segments.filter(segment => Number(segment.staff_id) === numericStaffId);
 
   // Debug: Log incoming props and filtered data
@@ -173,27 +198,51 @@ export function AttendanceTimeline({
     return result;
   }, [staffSegments, staffEvents]);
 
-  // Handle editing an event
-  const handleEdit = async (event: ClockEvent) => {
-    console.log('[handleEdit] Initial clockEvents prop:', clockEvents);
-    console.log('[handleEdit] Event to edit:', event);
+  // Open the edit dialog for an event
+  const openEditDialog = (event: ClockEvent) => {
+    const eventDate = new Date(event.event_time);
+    setEditingEvent(event);
+    setEditHour(format(eventDate, 'HH'));
+    setEditMinute(format(eventDate, 'mm'));
+    setTimeError(null);
+    setIsEditDialogOpen(true);
+  };
+
+  // Validate and process the edited time
+  const handleEditSubmit = async () => {
+    if (!editingEvent) return;
+    
+    // Validate inputs
+    const hour = parseInt(editHour, 10);
+    const minute = parseInt(editMinute, 10);
+    
+    if (isNaN(hour) || hour < 0 || hour > 23) {
+      setTimeError('Hour must be between 0 and 23');
+      return;
+    }
+    
+    if (isNaN(minute) || minute < 0 || minute > 59) {
+      setTimeError('Minute must be between 0 and 59');
+      return;
+    }
+    
+    setTimeError(null);
+    setIsEditDialogOpen(false);
+    
     try {
-      const newTime = prompt('Edit time (HH:mm):', format(new Date(event.event_time), 'HH:mm'));
-      if (!newTime) return;
+      console.log('[handleEdit] Initial clockEvents prop:', clockEvents);
+      console.log('[handleEdit] Event to edit:', editingEvent);
 
       // Get the original date
-      const originalDate = new Date(event.event_time);
-      
-      // Parse the new time
-      const [hours, minutes] = newTime.split(':').map(Number);
+      const originalDate = new Date(editingEvent.event_time);
       
       // Create a new date with original date but new time
       const newDate = new Date(originalDate);
-      newDate.setHours(hours);
-      newDate.setMinutes(minutes);
+      newDate.setHours(hour);
+      newDate.setMinutes(minute);
       
       console.log('Updating event time:', {
-        id: event.id,
+        id: editingEvent.id,
         oldTime: originalDate.toISOString(),
         newTime: newDate.toISOString()
       });
@@ -202,7 +251,7 @@ export function AttendanceTimeline({
       const { data: supabaseUpdateData, error: supabaseUpdateError } = await supabase
         .from('time_clock_events')
         .update({ event_time: newDate.toISOString() })
-        .eq('id', event.id)
+        .eq('id', editingEvent.id)
         .select(); // Add .select() to get the updated row(s)
 
       console.log('[handleEdit] Supabase update result:', { supabaseUpdateData, supabaseUpdateError });
@@ -412,6 +461,12 @@ export function AttendanceTimeline({
               ) : (
                 <span className="inline-block px-2 py-1 text-xs font-semibold rounded bg-gray-600 text-gray-300">Absent</span>
               )}
+              {missingClockOut && (
+                <span className="ml-2 inline-flex items-center px-2 py-1 text-xs font-semibold rounded bg-yellow-600 text-white animate-pulse">
+                  <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  Missing clock-out
+                </span>
+              )}
             </div>
             <div>
               <div className="text-xs text-gray-400">Total</div>
@@ -443,20 +498,22 @@ export function AttendanceTimeline({
             {showSegments && (
               <div className="mt-4 space-y-4">
                 {/* Clock Events Section */}
-                {staffEvents.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium text-gray-400">Clock Events</h4>
                   <div className="space-y-2">
-                    <h4 className="text-sm font-medium text-gray-400">Clock Events</h4>
-                    <div className="space-y-2">
-                      {staffEvents.map((event) => (
-                        <div
-                          key={event.id}
-                          className="flex items-center justify-between p-3 bg-gray-700 rounded-lg"
-                        >
-                          <div className="flex items-center space-x-3">
-                            <div className={`w-3 h-3 rounded-full ${getEventColor(event.event_type)}`} />
+                    {staffEvents.map((event) => (
+                      <div 
+                        key={event.id} 
+                        className="p-3 bg-gray-800 rounded-lg group"
+                      >
+                        <div className="flex justify-between items-start">
+                          <div className="flex items-start space-x-3">
+                            <div className={`mt-1 w-3 h-3 rounded-full ${getEventColor(event.event_type)}`} />
                             <div>
-                              <div className="text-sm font-medium text-white">
-                                {format(new Date(event.event_time), 'h:mm a')} - {event.event_type.replace('_', ' ')}
+                              <div className="flex items-center">
+                                <span className="text-sm font-medium text-white">
+                                  {event.event_type === 'clock_in' ? 'clock in' : 'clock out'} - {format(new Date(event.event_time), 'HH:mm')}
+                                </span>
                               </div>
                               <div className="text-xs text-gray-400">
                                 {getVerificationMethod(event.verification_method)}
@@ -464,60 +521,57 @@ export function AttendanceTimeline({
                               </div>
                             </div>
                           </div>
-                          <div className="flex space-x-2">
+                          {/* Edit/Delete buttons for clock events */}
+                          <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button
-                              onClick={() => handleEdit(event)}
-                              className="text-xs px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 transition"
-                            >
-                              Edit
-                            </button>
+                              className={`text-xs px-2 py-1 bg-yellow-600 rounded hover:bg-yellow-500 text-black ${event._loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                              disabled={!!event._loading}
+                              onClick={() => openEditDialog(event)}
+                            >Edit</button>
                             <button
+                              className={`text-xs px-2 py-1 bg-red-600 rounded hover:bg-red-500 text-white ${event._loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                              disabled={!!event._loading}
                               onClick={() => handleDelete(event)}
-                              className="text-xs px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 transition"
-                            >
-                              Delete
-                            </button>
+                            >Delete</button>
                           </div>
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    ))}
                   </div>
-                )}
-                
+                </div>
+
                 {/* Work Segments Section */}
-                {staffSegments.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium text-gray-400">Work Segments</h4>
                   <div className="space-y-2">
-                    <h4 className="text-sm font-medium text-gray-400">Work Segments</h4>
-                    <div className="space-y-2">
-                      {staffSegments.map((segment, index) => (
-                        <div
-                          key={`${segment.staff_id}-${segment.start_time}-${index}`}
-                          className="flex items-center justify-between p-3 bg-gray-800 rounded-lg"
-                        >
-                          <div className="flex items-center space-x-3">
-                            <div
-                              className={`w-3 h-3 rounded-full ${
-                                segment.segment_type === 'work' ? 'bg-green-500' : 'bg-yellow-500'
-                              }`}
-                            />
-                            <div>
-                              <div className="text-sm font-medium text-white">
-                                {format(new Date(segment.start_time), 'h:mm a')} - {format(new Date(segment.end_time), 'h:mm a')}
-                              </div>
-                              <div className="text-xs text-gray-400">
-                                {segment.segment_type === 'work' ? 'Work' : 'Break'}
-                                {segment.break_type && ` (${segment.break_type})`}
-                              </div>
+                    {staffSegments.map((segment, index) => (
+                      <div
+                        key={`${segment.staff_id}-${segment.start_time}-${index}`}
+                        className="flex items-center justify-between p-3 bg-gray-800 rounded-lg"
+                      >
+                        <div className="flex items-center space-x-3">
+                          <div
+                            className={`w-3 h-3 rounded-full ${
+                              segment.segment_type === 'work' ? 'bg-green-500' : 'bg-yellow-500'
+                            }`}
+                          />
+                          <div>
+                            <div className="text-sm font-medium text-white">
+                              {format(new Date(segment.start_time), 'h:mm a')} - {format(new Date(segment.end_time), 'h:mm a')}
+                            </div>
+                            <div className="text-xs text-gray-400">
+                              {segment.segment_type === 'work' ? 'Work' : 'Break'}
+                              {segment.break_type && ` (${segment.break_type})`}
                             </div>
                           </div>
-                          <div className="text-sm text-white">
-                            {Math.round((new Date(segment.end_time).getTime() - new Date(segment.start_time).getTime()) / (1000 * 60))} min
-                          </div>
                         </div>
-                      ))}
-                    </div>
+                        <div className="text-sm text-white">
+                          {Math.round((new Date(segment.end_time).getTime() - new Date(segment.start_time).getTime()) / (1000 * 60))} min
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                )}
+                </div>
                 
                 {staffEvents.length === 0 && staffSegments.length === 0 && (
                   <div className="text-center text-gray-400 py-4">
@@ -598,6 +652,77 @@ export function AttendanceTimeline({
           </Button>
         </div>
       )}
+      
+      {/* Custom Time Edit Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="bg-gray-800 border-gray-700 text-white">
+          <DialogHeader>
+            <DialogTitle className="text-white">Edit time (24-hour format)</DialogTitle>
+            <DialogDescription className="text-gray-400">
+              Enter the new time for this clock event.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="grid grid-cols-2 gap-4 py-4">
+            <div className="space-y-2">
+              <label htmlFor="hour" className="text-sm font-medium text-gray-300">Hour (0-23)</label>
+              <Input
+                id="hour"
+                type="number"
+                min="0"
+                max="23"
+                value={editHour}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  // Only allow 0-23
+                  if (val === '' || (parseInt(val) >= 0 && parseInt(val) <= 23)) {
+                    setEditHour(val);
+                    setTimeError(null);
+                  }
+                }}
+                className="bg-gray-700 border-gray-600 text-white"
+              />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="minute" className="text-sm font-medium text-gray-300">Minute (0-59)</label>
+              <Input
+                id="minute"
+                type="number"
+                min="0"
+                max="59"
+                value={editMinute}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  // Only allow 0-59
+                  if (val === '' || (parseInt(val) >= 0 && parseInt(val) <= 59)) {
+                    setEditMinute(val);
+                    setTimeError(null);
+                  }
+                }}
+                className="bg-gray-700 border-gray-600 text-white"
+              />
+            </div>
+          </div>
+          
+          {timeError && (
+            <div className="text-red-500 text-sm mb-4">{timeError}</div>
+          )}
+          
+          <DialogFooter className="flex justify-end space-x-2">
+            <DialogClose asChild>
+              <Button variant="outline" className="border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white">
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button 
+              onClick={handleEditSubmit}
+              className="bg-[#F26B3A] hover:bg-[#E25A29] text-white"
+            >
+              OK
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

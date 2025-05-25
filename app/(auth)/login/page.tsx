@@ -42,16 +42,26 @@ export default function LoginPage() {
 
   const onSubmit = async (data: LoginForm) => {
     try {
+      console.log('Login attempt with:', { email: data.email })
       setError(null)
-      const { error: authError } = await supabase.auth.signInWithPassword({
+      
+      // Add a small delay to ensure UI feedback
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      console.log('Calling Supabase auth.signInWithPassword')
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: data.email,
         password: data.password,
       })
       
+      console.log('Auth response:', { success: !!authData.user, error: authError?.message })
+      
       if (authError) throw authError
+      
+      console.log('Login successful, redirecting to dashboard')
       router.push('/dashboard')
     } catch (error: any) {
-      console.error('Error:', error)
+      console.error('Login error:', error)
       setError(error?.message || 'Failed to sign in')
     }
   }
@@ -100,8 +110,9 @@ export default function LoginPage() {
           <CardFooter className="flex flex-col gap-4">
             <Button 
               type="submit" 
-              className="w-full" 
+              className="w-full bg-[#F26B3A] hover:bg-[#E25A29] text-white" 
               disabled={isSubmitting}
+              onClick={handleSubmit(onSubmit)}
             >
               {isSubmitting ? (
                 <>
