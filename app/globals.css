@@ -1,0 +1,104 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base colors - ensure they're explicitly defined */
+:root {
+  --background: 0 0% 100%;
+  --foreground: 0 0% 3.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 3.9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 3.9%;
+  --primary: 24 95% 53%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 45 93% 47%;
+  --secondary-foreground: 0 0% 3.9%;
+  --muted: 0 0% 96.1%;
+  --muted-foreground: 0 0% 45.1%;
+  --accent: 24 95% 53%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 5.9% 90%;
+  --input: 240 5.9% 90%;
+  --ring: 24 95% 53%;
+  --radius: 0.5rem;
+}
+
+/* Dark mode class - explicitly defined */
+.dark {
+  --background: 0 0% 3.9%;
+  --foreground: 0 0% 98%;
+  --card: 0 0% 3.9%;
+  --card-foreground: 0 0% 98%;
+  --popover: 0 0% 3.9%;
+  --popover-foreground: 0 0% 98%;
+  --primary: 0 0% 98%;
+  --primary-foreground: 0 0% 9%;
+  --secondary: 0 0% 14.9%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 0 0% 14.9%;
+  --muted-foreground: 0 0% 63.9%;
+  --accent: 0 0% 14.9%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 0 0% 14.9%;
+  --input: 0 0% 14.9%;
+  --ring: 0 0% 83.1%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  h1 {
+    @apply text-2xl font-bold;
+  }
+  h2 {
+    @apply text-xl font-semibold;
+  }
+  h3 {
+    @apply text-lg font-medium;
+  }
+}
+
+/* Ensure content properly blurs when scrolling behind the header */
+nav.fixed {
+  @apply backdrop-blur-md z-50;
+}
+
+/* Fix for table rows not blurring properly */
+table {
+  @apply isolate;
+}
+
+tr {
+  @apply backdrop-blur-[inherit];
+}
+
+@layer components {
+  .card {
+    @apply rounded-lg border bg-card p-6 text-card-foreground shadow;
+  }
+  
+  .sidebar-link {
+    @apply flex items-center rounded-lg px-3 py-2 text-sm font-medium gap-3 transition-colors hover:bg-accent/10 active:scale-95;
+  }
+  
+  .sidebar-link.active {
+    @apply bg-primary/10 text-primary hover:bg-primary/20;
+  }
+  
+  .input-field {
+    @apply rounded-lg border border-input bg-background px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring focus:border-input;
+  }
+  
+  .button-primary {
+    @apply bg-primary text-primary-foreground px-4 py-2 rounded-lg hover:bg-primary/90 transition-colors active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
+  }
+}

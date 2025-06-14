@@ -1,0 +1,32 @@
+# Attendance System Simplification Plan
+
+This document summarizes the plan to refactor the Unity ERP attendance system to a simpler, more robust model.
+
+## Objective
+
+Simplify the attendance tracking to use only two event types: `clock_in` and `clock_out`. This will eliminate the need for employees or managers to specify the type of break (e.g., 'lunch', 'tea'), making the system more intuitive and less error-prone.
+
+## Investigation Findings
+
+An investigation of the codebase revealed two conflicting systems for managing breaks:
+
+1.  **`AttendanceTimeline.tsx` (Modern System):**
+    *   Relies on an event-based model where users manually create `break_start` and `break_end` events.
+    *   Allows users to label breaks with a specific type, such as 'lunch'.
+
+2.  **`DailyAttendanceGrid.tsx` (Legacy System):**
+    *   Uses a summary-based model with a `lunch_break_taken` checkbox.
+    *   Contains a critical business rule: **If an employee does *not* take a lunch break, they receive an additional 30 minutes of paid time.**
+
+## Key Challenge & Decision Point
+
+The primary challenge is to unify these two conflicting systems and decide how to handle the "paid lunch" rule from the legacy system.
+
+### Decision Required:
+
+How should the "paid lunch" rule be handled in the new, simplified system?
+
+*   **Option 1: Keep the Rule.** We can implement logic to automatically detect the main break of the day (e.g., the first break longer than 20 minutes) and treat it as the "lunch break" for payroll purposes, preserving the 30-minute bonus.
+*   **Option 2: Discard the Rule.** We can remove this logic entirely. In the new system, employees would only be paid for the time they are clocked in. This is the simplest and most direct approach.
+
+Once this decision is made, development can proceed to refactor the backend and UI components into a single, cohesive system.

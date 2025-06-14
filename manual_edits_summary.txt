@@ -1,0 +1,27 @@
+### Attendance Timeline Manual Edit - Work Summary
+
+This document summarizes the work done to fix issues with manual clock event editing in the Attendance Timeline.
+
+1.  **Objective:** To ensure manual additions, edits, and deletions of clock events correctly trigger data refreshes and lead to accurate calculation of worked hours.
+
+2.  **Initial Problem:**
+    *   Manually added events were sometimes being recorded with the wrong type (e.g., a 'clock_in' was treated as a 'break_start').
+    *   This caused the backend to generate incorrect work/break segments, resulting in inaccurate total worked hours.
+    *   The UI did not always refresh automatically after an event was added.
+
+3.  **Changes Implemented in `AttendanceTimeline.tsx`:**
+    *   **Add Event Dialog:**
+        *   The form now defaults the event type to `'clock_in'` to reduce user error.
+        *   Added help text to clearly explain the difference between "Clock In/Out" (for work) and "Break Start/End" (for breaks).
+        *   The form state is now reset automatically after adding an event or closing the dialog, preventing stale data from being used for the next entry.
+    *   **Data Refresh:**
+        *   Confirmed the `onSegmentsChanged` callback is triggered after a manual event is added.
+        *   This callback invalidates the relevant data caches in React Query (`time_clock_events`, `time_segments`, `time_daily_summary`), forcing the application to fetch the latest data from the database and update the UI.
+
+4.  **Remaining Issue:**
+    *   Despite the fixes, the system is still misinterpreting `clock_in` and `clock_out` events. As seen in the latest screenshot, these events are generating a "Break" segment instead of a "Work" segment, and the total hours are incorrect. The event display text "(work break)" also suggests a potential data or display issue.
+
+5.  **Next Steps:**
+    *   Investigate why `clock_in`/`clock_out` events are being processed as breaks.
+    *   Examine the data being saved to the `time_clock_events` table during a manual entry.
+    *   Review the UI code that displays the event description to see if it's a formatting bug.

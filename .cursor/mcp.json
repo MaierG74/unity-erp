@@ -1,0 +1,15 @@
+{
+    "mcpServers": {
+      "supabase": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://postgres.ttlyfhkrsjjrzxiagzpb:ke6tOTxvv45TRNVp@aws-0-eu-central-1.pooler.supabase.com:5432/postgres"]
+      },
+      "sequential-thinking": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-sequential-thinking"
+        ]
+      }
+    }
+  }

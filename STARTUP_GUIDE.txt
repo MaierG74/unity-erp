@@ -1,0 +1,15 @@
+# How to Start the Unity ERP App (with Troubleshooting)
+
+1. If starting for the first time or after dependency changes, clean up the environment:
+   - Clear npm cache: npm cache clean --force
+   - Remove node_modules directory: rm -rf node_modules
+   - Remove package-lock.json: rm package-lock.json
+2. Install dependencies (with verbose output for troubleshooting):
+   - npm install --verbose
+3. If you see 'Cannot find module react', install React explicitly:
+   - npm install react react-dom
+4. Start the development server:
+   - npm run dev
+5. Open http://localhost:3000 in your browser.
+
+This process ensures a clean environment and resolves common issues with missing dependencies or stuck installs.
