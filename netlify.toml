@@ -1,0 +1,13 @@
+# Netlify configuration for Unity ERP
+[build]
+  command = "npm install --legacy-peer-deps && npm run build"
+  publish = ".next"
+
+[build.environment]
+  NEXT_PUBLIC_SUPABASE_URL = "https://ttlyfhkrsjjrzxiagzpb.supabase.co"
+  NPM_FLAGS = "--legacy-peer-deps"
+  AIRTABLE_BASE_ID = "appvo56E8jfULCVEN"
+
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

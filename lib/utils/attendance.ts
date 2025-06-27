@@ -128,6 +128,87 @@ export const processClockEventsIntoSegments = async (dateStr: string): Promise<v
           processedOutEvents.add(clockOutEvent.id);
         } else {
           console.log(`[DEBUG] No matching clock-in found for clock-out event ${clockOutEvent.id} at ${clockOutEvent.event_time}.`);
+
+          // --- Overnight shift handling ---
+          // Try to find an unmatched clock-in from the previous day
+          const prevDate = new Date(dateStr);
+          prevDate.setDate(prevDate.getDate() - 1);
+          const prevDateStr = prevDate.toISOString().split('T')[0];
+
+          // Query for unmatched clock-ins from the previous day
+          const { data: prevClockIns, error: prevError } = await supabase
+            .from('time_clock_events')
+            .select('*')
+            .eq('staff_id', staffId)
+            .eq('event_type', 'clock_in')
+            .gte('event_time', `${prevDateStr}T00:00:00.000Z`)
+            .lt('event_time', `${prevDateStr}T23:59:59.999Z`);
+
+          if (prevError) {
+            console.error(`[DEBUG] Error fetching previous day's clock-ins for staff ${staffId}:`, prevError);
+          } else if (prevClockIns && prevClockIns.length > 0) {
+            // Find an unmatched clock-in (not already processed)
+            const unmatchedPrevClockIn = prevClockIns.find(
+              (e: any) => !processedInEvents.has(e.id)
+            );
+            if (unmatchedPrevClockIn) {
+              // Split at midnight
+              // Local midnight based on the local timezone
+const [year, month, day] = dateStr.split('-').map(Number);
+const midnight = new Date(year, month - 1, day);
+              const prevEnd = new Date(midnight.getTime() - 1); // 23:59:59.999 of previous day
+              const outTime = new Date(clockOutEvent.event_time);
+
+              // Segment 1: previous day (clock-in to midnight)
+              const seg1Start = unmatchedPrevClockIn.event_time;
+              const seg1End = midnight.toISOString();
+              const seg1Mins = calculateDurationMinutes(seg1Start, seg1End);
+              const { error: seg1Error } = await supabase
+                .from('time_segments')
+                .insert({
+                  staff_id: staffId,
+                  date_worked: prevDateStr,
+                  clock_in_event_id: unmatchedPrevClockIn.id,
+                  clock_out_event_id: null, // No clock-out event for split
+                  start_time: seg1Start,
+                  end_time: seg1End,
+                  segment_type: 'work',
+                  break_type: null,
+                  duration_minutes: seg1Mins,
+                });
+              if (seg1Error) {
+                console.error(`[DEBUG] Error creating overnight segment for previous day:`, seg1Error);
+              } else {
+                console.log(`[DEBUG] Created overnight segment for prev day: ${seg1Start} to ${seg1End} (${seg1Mins} mins)`);
+              }
+
+              // Segment 2: current day (midnight to clock-out)
+              const seg2Start = seg1End;
+              const seg2End = clockOutEvent.event_time;
+              const seg2Mins = calculateDurationMinutes(seg2Start, seg2End);
+              const { error: seg2Error } = await supabase
+                .from('time_segments')
+                .insert({
+                  staff_id: staffId,
+                  date_worked: dateStr,
+                  clock_in_event_id: null, // No clock-in event for split
+                  clock_out_event_id: clockOutEvent.id,
+                  start_time: seg2Start,
+                  end_time: seg2End,
+                  segment_type: 'work',
+                  break_type: null,
+                  duration_minutes: seg2Mins,
+                });
+              if (seg2Error) {
+                console.error(`[DEBUG] Error creating overnight segment for current day:`, seg2Error);
+              } else {
+                console.log(`[DEBUG] Created overnight segment for current day: ${seg2Start} to ${seg2End} (${seg2Mins} mins)`);
+              }
+              // Mark both as processed
+              processedInEvents.add(unmatchedPrevClockIn.id);
+              processedOutEvents.add(clockOutEvent.id);
+            }
+          }
         }
       }
 
@@ -384,6 +465,33 @@ export const generateDailySummary = async (dateStr: string): Promise<void> => {
       
       // Determine if the day is complete (has both clock in and out)
       const isComplete = !!lastClockOut;
+
+      // Calculate regular, overtime, and double-time based on weekday
+      const dayOfWeek = new Date(dateStr).getDay(); // 0=Sunday
+      let regularMinutes: number;
+      let otMinutes: number;
+      let dtMinutes: number;
+      if (dayOfWeek === 0) {
+        // Sunday: all work is double-time
+        regularMinutes = 0;
+        otMinutes = 0;
+        dtMinutes = totalWorkMinutes;
+      } else {
+        const regularThreshold = 9 * 60; // 9 hours
+        regularMinutes = Math.min(totalWorkMinutes, regularThreshold);
+        otMinutes = Math.max(totalWorkMinutes - regularMinutes, 0);
+        dtMinutes = 0; // double-time for holidays/future
+      }
+      
+      const { data: staffData, error: staffError } = await supabase
+        .from('staff')
+        .select('hourly_rate')
+        .eq('staff_id', staffId)
+        .single();
+      const rate = staffData && !staffError ? parseFloat(staffData.hourly_rate.toString()) : 0;
+      const wageCents = Math.round(
+        ((regularMinutes / 60) * rate + (otMinutes / 60) * rate * 1.5 + (dtMinutes / 60) * rate * 2) * 100
+      );
       
       // Create or update the summary
       if (existingSummary) {
@@ -397,6 +505,10 @@ export const generateDailySummary = async (dateStr: string): Promise<void> => {
             total_break_minutes: totalBreakMinutes,
             lunch_break_minutes: lunchBreakMinutes,
             other_breaks_minutes: otherBreakMinutes,
+            regular_minutes: regularMinutes,
+            dt_minutes: dtMinutes,
+            ot_minutes: otMinutes,
+            wage_cents: wageCents,
             is_complete: isComplete,
             updated_at: new Date().toISOString()
           })
@@ -418,6 +530,10 @@ export const generateDailySummary = async (dateStr: string): Promise<void> => {
             total_break_minutes: totalBreakMinutes,
             lunch_break_minutes: lunchBreakMinutes,
             other_breaks_minutes: otherBreakMinutes,
+            regular_minutes: regularMinutes,
+            dt_minutes: dtMinutes,
+            ot_minutes: otMinutes,
+            wage_cents: wageCents,
             is_complete: isComplete,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
@@ -461,8 +577,10 @@ export const addManualClockEvent = async (
     
     // Use direct SQL query to insert the event without triggering the trigger
     // This avoids the "more than one row returned by a subquery" error
-    const { data: insertedEvent, error: insertError } = await supabase.rpc(
-      'manual_insert_clock_event',
+    // Attempt to insert via RPC, fallback to direct insert
+    let eventInserted = false;
+    const { data: insertedEvent, error: rpcError } = await supabase.rpc(
+      'add_manual_clock_event',
       {
         p_id: eventId,
         p_staff_id: staffId,
@@ -472,12 +590,10 @@ export const addManualClockEvent = async (
         p_notes: notesValue
       }
     );
-    
-    // Fallback to direct insert if RPC fails
-    if (insertError) {
-      console.log('RPC failed, trying direct insert:', insertError);
-      
-      // Insert directly with a special flag to avoid trigger processing
+    if (!rpcError) {
+      eventInserted = true;
+    } else {
+      console.log('RPC failed, trying direct insert:', rpcError);
       const { data: directInsert, error: directError } = await supabase
         .from('time_clock_events')
         .insert({
@@ -492,16 +608,15 @@ export const addManualClockEvent = async (
           updated_at: new Date().toISOString()
         })
         .select();
-        
       if (directError) {
         console.error('Direct insert also failed:', directError);
         return { success: false, error: directError };
       }
+      eventInserted = true;
     }
-    
-    if (insertError) {
-      console.error('Error inserting clock event:', insertError);
-      return { success: false, error: insertError };
+    if (!eventInserted) {
+      console.error('Error inserting clock event via RPC:', rpcError);
+      return { success: false, error: rpcError };
     }
     
     // Step 2: Process segments manually
