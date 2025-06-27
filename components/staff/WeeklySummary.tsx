@@ -151,19 +151,17 @@ export function WeeklySummary() {
     },
   });
 
-  // Fetch hours for the selected week
-  const { data: weeklyHours = [], isLoading: isLoadingHours } = useQuery({
-    queryKey: ['staff_hours', 'weekly', format(weekStart, 'yyyy-MM-dd'), format(weekEnd, 'yyyy-MM-dd')],
+  // Fetch daily summaries for the selected week
+  const { data: weeklySummaries = [], isLoading: isLoadingSummaries } = useQuery({
+    queryKey: ['time_daily_summary', 'weekly', format(weekStart, 'yyyy-MM-dd'), format(weekEnd, 'yyyy-MM-dd')],
     queryFn: async () => {
       const startDateStr = format(weekStart, 'yyyy-MM-dd');
       const endDateStr = format(weekEnd, 'yyyy-MM-dd');
-      
       const { data, error } = await supabase
-        .from('staff_hours')
-        .select('*')
+        .from('time_daily_summary')
+        .select('staff_id, date_worked, regular_minutes, ot_minutes, dt_minutes')
         .gte('date_worked', startDateStr)
         .lte('date_worked', endDateStr);
-
       if (error) throw error;
       return data || [];
     },
@@ -171,95 +169,44 @@ export function WeeklySummary() {
 
   // Process data for weekly summary
   useEffect(() => {
-    // Skip if data isn't loaded yet
-    if (!activeStaff || activeStaff.length === 0) {
-      return;
-    }
-
-    // Create a stable reference to the days of week
-    const currentDaysOfWeek = [...daysOfWeek];
-    
-    // Process hours data into summary format
-    const processedSummary = activeStaff.map(staff => {
-      // Find hours records for this staff member
-      const staffHours = weeklyHours?.filter(h => h.staff_id === staff.staff_id) || [];
-      
-      // Initialize hours tracking objects
+    if (!activeStaff || activeStaff.length === 0) return;
+    const processed = activeStaff.map(staff => {
+      const staffSummaries = weeklySummaries.filter(s => s.staff_id === staff.staff_id);
       const dailyHours: { [date: string]: { hours: number; isHoliday: boolean; isWeekend: boolean; isSunday: boolean } } = {};
-      let totalRegularHours = 0;
-      let totalDoubleTimeHours = 0; // Combined Sunday and Holiday hours
-      let totalOvertimeHours = 0;
-      let weeklyTotalHours = 0;
-      
-      // Process each day of the week
-      currentDaysOfWeek.forEach(day => {
+      let totalRegular = 0, totalDouble = 0, totalOvertime = 0;
+      daysOfWeek.forEach(day => {
         const dateStr = format(day, 'yyyy-MM-dd');
+        const summary = staffSummaries.find(s => s.date_worked === dateStr);
+        const regMin = summary?.regular_minutes || 0;
+        const otMin = summary?.ot_minutes || 0;
+        const dtMin = summary?.dt_minutes || 0;
+        const regH = Math.round((regMin / 60) * 100) / 100;
+        const otH = Math.round((otMin / 60) * 100) / 100;
+        const dtH = Math.round((dtMin / 60) * 100) / 100;
+        const totalH = Math.round(((regMin + otMin + dtMin) / 60) * 100) / 100;
+        totalRegular += regH;
+        totalDouble += dtH;
+        totalOvertime += otH;
         const isSat = isSaturday(day);
         const isSun = isSunday(day);
-        const isWeekend = isSat || isSun;
-        const holiday = publicHolidays?.find(h => h.holiday_date === dateStr);
-        const isHoliday = !!holiday;
-        
-        // Find hours for this day
-        const dayHours = staffHours.find(h => h.date_worked === dateStr);
-        const hoursWorked = dayHours?.hours_worked || 0;
-        
-        // Store hours data for this day
-        dailyHours[dateStr] = {
-          hours: hoursWorked,
-          isHoliday,
-          isWeekend,
-          isSunday: isSun
-        };
-        
-        // Add to weekly total
-        weeklyTotalHours += hoursWorked;
-        
-        // Categorize hours based on day type
-        if (hoursWorked > 0) {
-          if (isHoliday || isSun) {
-            // Double time hours (Sundays and public holidays)
-            totalDoubleTimeHours += hoursWorked;
-          } else {
-            // Regular weekday hours (including Saturday)
-            totalRegularHours += hoursWorked;
-          }
-          
-          // Add any explicitly marked overtime hours
-          if (dayHours?.overtime_hours) {
-            totalOvertimeHours += dayHours.overtime_hours;
-          }
-        }
+        const isHoliday = !!publicHolidays.find(h => h.holiday_date === dateStr);
+        dailyHours[dateStr] = { hours: totalH, isHoliday, isWeekend: isSat || isSun, isSunday: isSun };
       });
-      
-      // Calculate overtime for hours exceeding 44 in a week
-      // Note: We don't count double time hours toward the 44-hour limit since they're already at higher rates
-      if (totalRegularHours > 44) {
-        const overtimeFromRegularHours = totalRegularHours - 44;
-        totalOvertimeHours += overtimeFromRegularHours;
-        totalRegularHours = 44; // Cap regular hours at 44
-      }
-      
-      // Calculate total hours (includes all categories)
-      const totalHours = totalRegularHours + totalDoubleTimeHours + totalOvertimeHours;
-      
-      // Return the processed summary row
       return {
         staff_id: staff.staff_id,
         staff_name: `${staff.first_name} ${staff.last_name}`,
         job_description: staff.job_description,
         dailyHours,
-        totalRegularHours,
-        totalDoubleTimeHours,
-        totalOvertimeHours,
-        totalHours
+        totalRegularHours: Math.round(totalRegular * 100) / 100,
+        totalDoubleTimeHours: Math.round(totalDouble * 100) / 100,
+        totalOvertimeHours: Math.round(totalOvertime * 100) / 100,
+        totalHours: Math.round((totalRegular + totalDouble + totalOvertime) * 100) / 100,
       };
     });
-    
-    // Only update state if the data has actually changed
-    setSummaryData(processedSummary);
-    
-  }, [activeStaff, weeklyHours, publicHolidays, daysOfWeek]);
+    setSummaryData(processed);
+  }, [activeStaff, weeklySummaries, publicHolidays, daysOfWeek]);
+
+
 
   // Navigate to previous week
   const goToPreviousWeek = React.useCallback(() => {
@@ -340,7 +287,7 @@ export function WeeklySummary() {
   }, [summaryData]);
 
   // Loading state
-  if (isLoadingStaff || isLoadingHours) {
+  if (isLoadingStaff || isLoadingSummaries) {
     return (
       <div className="flex justify-center items-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />

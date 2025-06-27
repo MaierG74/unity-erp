@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { processClockEventsIntoSegments, generateDailySummary } from '@/lib/utils/attendance';
@@ -110,7 +110,7 @@ const getDefaultTimes = (date: Date) => {
       return {
         startTime: '07:00',
         endTime: '17:00',
-        hoursWorked: 10, // 7am to 5pm
+        hoursWorked: 9.5, // 7am to 5pm minus 30min tea breaks
         morningBreak: true,
         afternoonBreak: true
       };
@@ -125,6 +125,8 @@ export function DailyAttendanceGrid() {
   const [holidayName, setHolidayName] = useState('');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  
   const [sortField, setSortField] = useState<string>('staff_name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [viewMode, setViewMode] = useState<'legacy' | 'timeline'>('timeline');
@@ -215,7 +217,7 @@ export function DailyAttendanceGrid() {
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
       const { data, error } = await supabase
         .from('time_segments')
-        .select('*')
+        .select('staff_id,start_time,end_time,break_type,segment_type')
         .eq('date_worked', dateStr);
 
       if (error) throw error;
@@ -225,35 +227,9 @@ export function DailyAttendanceGrid() {
     },
   });
 
-  
-  // Diagnostic: Try fetching only staff_id and date_worked
-  const { data: dailySummariesMinimal = [], error: minimalError } = useQuery({
-    queryKey: ['time_daily_summary_minimal', format(selectedDate, 'yyyy-MM-dd')],
-    queryFn: async () => {
-      const dateStr = format(selectedDate, 'yyyy-MM-dd');
-      const { data, error } = await supabase
-        .from('time_daily_summary')
-        .select('staff_id,date_worked')
-        .eq('date_worked', dateStr);
-      if (error) throw error;
-      // console.log('SUMMARY_DEBUG_MINIMAL', { dailySummariesMinimal: data });
-      return data || [];
-    },
-  });
 
-  // Diagnostic: Try fetching all rows without a filter
-  const { data: dailySummariesAll = [], error: allError } = useQuery({
-    queryKey: ['time_daily_summary_all'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('time_daily_summary')
-        .select('staff_id,date_worked')
-        .limit(5);
-      if (error) throw error;
-      // console.log('SUMMARY_DEBUG_ALL', { dailySummariesAll: data });
-      return data || [];
-    },
-  });
+
+
 
   // Original query (for reference, still active)
   const { data: dailySummaries = [], isLoading: isLoadingSummaries } = useQuery({
@@ -299,13 +275,12 @@ export function DailyAttendanceGrid() {
       if (result.success) {
         // Refresh data
         queryClient.invalidateQueries({ queryKey: ['time_clock_events', dateStr] });
-        queryClient.invalidateQueries({ queryKey: ['time_segments', dateStr] });
-        queryClient.invalidateQueries({ queryKey: ['time_daily_summary', dateStr] });
         
         toast({
           title: 'Event Added',
-          description: `${eventType.replace('_', ' ')} event added for ${time}`,
+          description: `${eventType.replace('_', ' ')} event added for ${time}`
         });
+        void fixTimeSegments();
       } else {
         toast({
           title: 'Error',
@@ -363,24 +338,19 @@ export function DailyAttendanceGrid() {
       setIsSaving(true);
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
       console.log(`[FRONTEND] Fixing time segments for date: ${dateStr}`);
-      
+
       // Process clock events for the selected date
       await processClockEventsData();
-      
-      // Refresh the data by invalidating all queries with the specific date
-      const dateKey = format(selectedDate, 'yyyy-MM-dd');
+
+      // Invalidate only time segments and daily summary for this date
+      const dateKey = dateStr;
       console.log(`[FRONTEND] Invalidating queries for date: ${dateKey}`);
-      
-      // Invalidate queries with the specific date key
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['staff'] }),
         queryClient.invalidateQueries({ queryKey: ['time_segments', dateKey] }),
         queryClient.invalidateQueries({ queryKey: ['time_daily_summary', dateKey] }),
-        queryClient.invalidateQueries({ queryKey: ['time_clock_events', dateKey] })
       ]);
-      
       console.log('[FRONTEND] Time segments fixed and queries invalidated');
-      
+
       toast({
         title: 'Success',
         description: 'Time segments have been fixed successfully!',
@@ -396,14 +366,41 @@ export function DailyAttendanceGrid() {
       setIsSaving(false);
     }
   };
+
+
   
   // Automatically fix time segments when clock events exist but segments are missing
   useEffect(() => {
     if (!isSaving && !isLoadingSegments && clockEvents.length > 0 && timeSegments.length === 0) {
       console.log('[AUTO] Detected missing time segments, running fixTimeSegments');
-      fixTimeSegments();
+      // Auto-fix detected, reprocess segments
+        fixTimeSegments();
     }
   }, [selectedDate, isSaving, isLoadingSegments, clockEvents.length, timeSegments.length]);
+
+  // Real-time subscription for clock events and segments
+  useEffect(() => {
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    const channel = supabase
+      .channel(`time-events-${dateStr}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'time_clock_events' }, (payload) => {
+        const eventDate = payload.new.event_time.split('T')[0];
+        if (eventDate === dateStr) {
+          void fixTimeSegments();
+        }
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'time_clock_events' }, (payload) => {
+        const eventDate = payload.new.event_time.split('T')[0];
+        if (eventDate === dateStr) {
+          void fixTimeSegments();
+        }
+      })
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [selectedDate, queryClient]);
 
   // Save hours mutation
   const saveHoursMutation = useMutation({
@@ -630,7 +627,7 @@ export function DailyAttendanceGrid() {
     // Adjust for breaks
     if (morningBreak) totalMinutes -= 15; // 15 min morning break (unpaid)
     if (afternoonBreak) totalMinutes -= 15; // 15 min afternoon break (unpaid)
-    if (!lunchBreak) totalMinutes += 30; // Add 30 min if lunch break NOT taken (extra work)
+    // lunch break is paid; no deduction
     
     // Convert back to hours (rounded to 2 decimal places)
     return Math.max(0, parseFloat((totalMinutes / 60).toFixed(2)));
@@ -1205,7 +1202,7 @@ export function DailyAttendanceGrid() {
   };
   
   // Get sorted records
-  const sortedRecords = sortRecords(attendanceRecords);
+  const sortedRecords = useMemo(() => sortRecords(attendanceRecords), [attendanceRecords]);
 
   // Handle overtime hours change
   const handleOvertimeChange = (staffId: number, hours: number) => {
@@ -1373,7 +1370,7 @@ export function DailyAttendanceGrid() {
           </div>
         ) : (
           <div className="rounded-md border">
-            <Table>
+              <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[50px]">Present</TableHead>

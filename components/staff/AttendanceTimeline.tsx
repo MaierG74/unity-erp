@@ -56,7 +56,7 @@ export function AttendanceTimeline({
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [deletingEvent, setDeletingEvent] = useState<ClockEvent | null>(null);
 
-  const staffEvents = clockEvents.filter(event => event.staff_id === staffId);
+  const staffEvents = useMemo(() => clockEvents.filter(event => event.staff_id === staffId), [clockEvents, staffId]);
 
   // Detect missing clock-out: if last event is clock_in and no subsequent clock_out
   let missingClockOut = false;
@@ -66,7 +66,14 @@ export function AttendanceTimeline({
       missingClockOut = true;
     }
   }
-  const staffSegments = segments.filter(segment => segment.staff_id === staffId);
+  const staffSegments = useMemo(() => segments.filter(segment => segment.staff_id === staffId), [segments, staffId]);
+  // Only include segments with positive duration
+  const validSegments = useMemo(
+    () => staffSegments
+      .filter(s => new Date(s.end_time).getTime() > new Date(s.start_time).getTime())
+      .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()),
+    [staffSegments]
+  );
 
   // Debug: Log incoming props and filtered data
   // // console.log('[AttendanceTimeline] staffId:', staffId, 'type:', typeof staffId, 'numericStaffId:', numericStaffId); // Removed due to numericStaffId being undefined
@@ -432,7 +439,7 @@ export function AttendanceTimeline({
                 <div className="space-y-2">
                   <h4 className="text-sm font-medium text-gray-400">Work Segments</h4>
                   <div className="space-y-2">
-                    {staffSegments.map((segment, index) => (
+                    {validSegments.map((segment, index) => (
                       <div
                         key={`${segment.staff_id}-${segment.start_time}-${index}`}
                         className="flex items-center justify-between p-3 bg-gray-800 rounded-lg"

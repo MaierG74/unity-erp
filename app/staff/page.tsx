@@ -7,7 +7,7 @@ import { PlusCircle, Users, ClipboardList, Clock, DollarSign } from 'lucide-reac
 import Link from 'next/link';
 import { useAuth } from '@/components/auth-provider';
 import { useRouter } from 'next/navigation';
-import { StaffList } from '@/components/staff/StaffList';
+import { StaffTable } from '@/components/staff/StaffTable';
 import { Suspense } from 'react';
 
 export default function StaffPage() {
@@ -65,7 +65,7 @@ export default function StaffPage() {
             </div>
             <div className="p-4">
               <Suspense fallback={<div>Loading staff data...</div>}>
-                <StaffList />
+                <StaffTable />
               </Suspense>
             </div>
           </div>

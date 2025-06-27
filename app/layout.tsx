@@ -3,7 +3,7 @@ import "./globals.css";
 import { Inter } from "next/font/google";
 import { Providers } from "@/components/providers";
 import { RootLayout as AppRootLayout } from "@/components/layout/root-layout";
-import { ThemeProvider } from "@/components/theme-provider";
+import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from "@/components/ui/toaster";
 
 // Use only the Inter font which is already working

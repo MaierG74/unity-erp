@@ -1,0 +1,11 @@
+# Netlify configuration for Unity ERP
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NEXT_PUBLIC_SUPABASE_URL = "https://ttlyfhkrsjjrzxiagzpb.supabase.co"
+
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

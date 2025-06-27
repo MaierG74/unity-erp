@@ -42,86 +42,86 @@ export default function CustomersPage() {
   );
   
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold">Customers</h1>
-        <Button asChild>
+    <div className="space-y-8 card bg-card shadow-lg dark:shadow-none">
+      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
+        <h1 className="text-4xl font-extrabold tracking-tight text-foreground">Customers</h1>
+        <Button asChild className="button-primary flex gap-2 items-center">
           <Link href="/customers/new">
-            <PlusIcon className="mr-2 h-4 w-4" />
+            <PlusIcon className="h-5 w-5" />
             Add Customer
           </Link>
         </Button>
       </div>
-      
-      <div className="relative">
-        <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+
+      <div className="relative mt-2">
+        <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
         <Input
           placeholder="Search customers..."
-          className="pl-10"
+          className="pl-12 input-field bg-background text-foreground"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
       </div>
       
       {isLoading ? (
-        <div className="flex justify-center py-8">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div className="flex justify-center items-center py-12">
+          <span className="text-muted-foreground animate-pulse text-lg">Loading...</span>
         </div>
       ) : error ? (
-        <div className="bg-red-50 text-red-500 p-4 rounded-md">
-          Error loading customers. Please try again.
+        <div className="flex justify-center items-center py-12">
+          <span className="text-destructive text-lg">Error loading customers.</span>
         </div>
       ) : (
-        <div className="rounded-md border">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+        <div className="overflow-x-auto rounded-xl shadow-lg border border-border bg-card mt-8 dark:shadow-none">
+          <table className="min-w-full divide-y divide-border bg-background dark:bg-card">
+            <thead className="bg-muted dark:bg-muted/20">
               <tr>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th scope="col" className="px-6 py-3 text-left text-xs font-bold text-muted-foreground uppercase tracking-wider">
                   Name
                 </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th scope="col" className="px-6 py-3 text-left text-xs font-bold text-muted-foreground uppercase tracking-wider">
                   Contact
                 </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th scope="col" className="px-6 py-3 text-left text-xs font-bold text-muted-foreground uppercase tracking-wider">
                   Email
                 </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th scope="col" className="px-6 py-3 text-left text-xs font-bold text-muted-foreground uppercase tracking-wider">
                   Telephone
                 </th>
-                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th scope="col" className="px-6 py-3 text-right text-xs font-bold text-muted-foreground uppercase tracking-wider">
                   Actions
                 </th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
+            <tbody className="divide-y divide-border">
               {filteredCustomers.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-4 text-center text-sm text-gray-500">
+                  <td colSpan={5} className="px-6 py-8 text-center text-base text-muted-foreground">
                     {searchQuery ? 'No customers found matching your search.' : 'No customers found. Add your first customer!'}
                   </td>
                 </tr>
               ) : (
                 filteredCustomers.map((customer) => (
-                  <tr key={customer.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                  <tr key={customer.id} className="hover:bg-accent/10 dark:hover:bg-accent/30 transition-colors">
+                    <td className="px-6 py-4 whitespace-nowrap text-base font-semibold text-foreground">
                       <Link href={`/customers/${customer.id}`} className="hover:underline">
                         {customer.name || 'N/A'}
                       </Link>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-6 py-4 whitespace-nowrap text-base text-muted-foreground">
                       {customer.contact || 'N/A'}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-6 py-4 whitespace-nowrap text-base text-muted-foreground">
                       {customer.email || 'N/A'}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-6 py-4 whitespace-nowrap text-base text-muted-foreground">
                       {customer.telephone || 'N/A'}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <Link href={`/customers/${customer.id}`} className="text-blue-600 hover:text-blue-900 mr-4">
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-base font-medium flex gap-2 justify-end">
+                      <Link href={`/customers/${customer.id}`} className="button-primary px-3 py-1 text-xs font-semibold">
                         View
                       </Link>
-                      <Link href={`/customers/${customer.id}/edit`} className="text-indigo-600 hover:text-indigo-900">
+                      <Link href={`/customers/${customer.id}/edit`} className="button-primary bg-secondary text-secondary-foreground px-3 py-1 text-xs font-semibold">
                         Edit
                       </Link>
                     </td>

@@ -1,0 +1,25 @@
+Here are some suggestions for improving the `unity-erp` project:
+
+### 1. Security: Environment Variable Management
+- **Issue:** Direct access to `process.env.VARIABLE!` can lead to runtime errors if variables are missing.
+- **Suggestion:** Implement robust environment variable validation using Zod at application startup to ensure all required variables are present and correctly formatted.
+
+### 2. Database Management and Security
+- **Issue:** Manual or script-based database management and direct use of `SUPABASE_SERVICE_ROLE_KEY` pose risks.
+- **Suggestion:** Adopt a dedicated migration tool (e.g., Drizzle Kit, Prisma Migrate) for structured schema management. For sensitive operations, use Supabase Edge Functions or database functions (`SECURITY DEFINER`) to encapsulate logic and avoid exposing the service role key.
+
+### 3. State Management and Data Fetching
+- **Observation:** Uses `@tanstack/react-query` for data fetching, but lacks a global state management library for client-side state.
+- **Suggestion:** Consider a lightweight state management library like Zustand or Jotai for managing UI state or complex form data, integrating well with React.
+
+### 4. Code Quality and Consistency
+- **Observation:** Uses ESLint.
+- **Suggestion:** Enhance ESLint with stricter rules (e.g., `eslint-plugin-react-hooks`, `eslint-plugin-import`). Integrate Prettier for consistent code formatting. Use Husky to set up pre-commit hooks to enforce linting and formatting before commits.
+
+### 5. API and Type Safety
+- **Observation:** Standard Next.js API routes.
+- **Suggestion:** Explore tRPC for building fully type-safe APIs. This allows sharing types between frontend and backend, improving developer experience and reducing bugs.
+
+### 6. Component Library and UI
+- **Observation:** Uses `shadcn-ui` and Radix UI components.
+- **Suggestion:** Organize components by separating `shadcn-ui` components (e.g., in `components/ui`) from custom application-specific components (e.g., in `components/common` or `components/features`).

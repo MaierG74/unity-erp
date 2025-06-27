@@ -4,16 +4,16 @@ import { Resend } from 'resend';
 import { createClient } from '@supabase/supabase-js';
 import PurchaseOrderEmail from '@/emails/purchase-order-email';
 
-// Initialize Resend with API key
-const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Initialize Supabase client
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-);
 
 export async function POST(request: Request) {
+  // Initialize Supabase client lazily to ensure env vars exist at runtime
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+  // Initialize Resend lazily
+  const resend = new Resend(process.env.RESEND_API_KEY!);
   try {
     const { purchaseOrderId } = await request.json();
 

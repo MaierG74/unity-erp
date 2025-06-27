@@ -161,14 +161,6 @@ export function Sidebar() {
 
   return (
     <SidebarContext.Provider value={{ collapsed, setCollapsed: handleSetCollapsed }}>
-      {/* Mobile overlay when sidebar is expanded */}
-      {isMobile && !collapsed && (
-        <div 
-          className="fixed inset-0 bg-black/50 z-40"
-          onClick={() => handleSetCollapsed(true)}
-          aria-hidden="true"
-        />
-      )}
       
       <aside 
         className="h-screen border-r bg-background z-30 flex flex-shrink-0 flex-col transition-all duration-200 ease-in-out"
