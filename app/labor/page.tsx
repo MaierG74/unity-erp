@@ -1,7 +1,7 @@
 import { Metadata } from 'next';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { JobCategoriesManager } from '@/components/labor/job-categories-manager';
-import { JobsManager } from '@/components/labor/jobs-manager';
+import { JobCategoriesManager } from '@/components/features/labor/job-categories-manager';
+import { JobsManager } from '@/components/features/labor/jobs-manager';
 
 export const metadata: Metadata = {
   title: 'Labor Management',

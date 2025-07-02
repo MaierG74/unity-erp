@@ -20,7 +20,7 @@ export const useAuth = () => {
 };
 
 // Route groups (in parentheses) are ignored in the URL, so we use the actual URL paths
-const publicRoutes = ['/login', '/forgot-password', '/reset-password', '/bypass', '/bypass/orders', '/'];
+const publicRoutes = ['/login', '/forgot-password', '/reset-password', '/bypass', '/bypass/orders', '/', '/staff'];
 
 // Development bypass routes - these routes will be accessible without authentication in development mode
 const devBypassRoutes = ['/orders', '/orders/new', '/orders/[orderId]'];
@@ -70,39 +70,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    console.log('Auth state effect triggered:', { 
-      loading, 
-      user: user ? 'User authenticated' : 'No user', 
+    console.log('Auth state effect triggered:', {
+      loading,
+      user: user ? 'User authenticated' : 'No user',
       pathname,
       hasRedirected: hasRedirected.current
     });
-    
+
     if (loading) return;
-    
-    // Prevent redirect loops by only redirecting once per component mount
     if (hasRedirected.current) return;
 
-    // Check if the current path is in the development bypass routes
     const isDevBypassRoute = isDevelopment && devBypassRoutes.some(route => {
-      // Handle dynamic routes by replacing [param] with a regex pattern
       const routePattern = route.replace(/\[.*?\]/g, '[^/]+');
-      const regex = new RegExp(`^${routePattern}$`);
-      return regex.test(pathname);
+      return new RegExp(`^${routePattern}$`).test(pathname);
     });
-    
-    console.log('Redirect check:', { 
-      isPublicRoute: publicRoutes.includes(pathname),
-      isDevBypassRoute,
-      shouldRedirectToLogin: !user && !publicRoutes.includes(pathname) && !isDevBypassRoute,
-      shouldRedirectToDashboard: user && publicRoutes.includes(pathname)
-    });
+    const isPublicRoute = publicRoutes.includes(pathname) || pathname.startsWith('/staff');
 
-    // Route groups are stripped from the URL, so we use the actual paths
-    if (!user && !publicRoutes.includes(pathname) && !isDevBypassRoute) {
+    if (!user && !isPublicRoute && !isDevBypassRoute) {
       hasRedirected.current = true;
       console.log('Redirecting to login from', pathname);
       router.push('/login');
-    } else if (user && publicRoutes.includes(pathname)) {
+    } else if (user && isPublicRoute) {
       hasRedirected.current = true;
       console.log('Redirecting to dashboard from', pathname);
       router.push('/dashboard');

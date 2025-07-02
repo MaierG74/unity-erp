@@ -3,7 +3,7 @@
 import { SparklesCore } from "@/components/ui/sparkles";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { useAuth } from "@/components/auth-provider";
+import { useAuth } from "@/components/common/auth-provider";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 

@@ -16,10 +16,10 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeft, Package, Edit, Plus, Trash2, Save, X } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { ImageGallery } from '@/components/products/image-gallery';
-import { CategoryDialog } from '@/components/products/category-dialog';
-import { ProductBOM } from '@/components/products/product-bom';
-import { ProductBOL } from '@/components/products/product-bol';
+import { ImageGallery } from '@/components/features/products/image-gallery';
+import { CategoryDialog } from '@/components/features/products/category-dialog';
+import { ProductBOM } from '@/components/features/products/product-bom';
+import { ProductBOL } from '@/components/features/products/product-bol';
 import { useToast } from '@/components/ui/use-toast';
 
 interface ProductDetailPageProps {
@@ -358,4 +358,4 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
       </Tabs>
     </div>
   );
-} 
+}

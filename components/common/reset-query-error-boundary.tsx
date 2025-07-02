@@ -2,7 +2,7 @@
 
 import { QueryErrorResetBoundary } from '@tanstack/react-query';
 import { ErrorBoundary, FallbackProps } from 'react-error-boundary';
-import { QueryError } from './ui/query-error';
+import { QueryError } from '@/components/ui/query-error';
 
 interface ResetQueryErrorBoundaryProps {
   children: React.ReactNode;

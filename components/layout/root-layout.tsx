@@ -1,6 +1,6 @@
 'use client';
 
-import { useAuth } from '../auth-provider';
+import { useAuth } from '@/components/common/auth-provider';
 import { Navbar } from './navbar';
 import { Sidebar, useSidebar } from './sidebar';
 import { useEffect, useState } from 'react';

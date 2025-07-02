@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
-import { NewPurchaseOrderForm } from '@/components/purchasing/new-purchase-order-form';
+import { NewPurchaseOrderForm } from '@/components/features/purchasing/new-purchase-order-form';
 
 export const metadata = {
   title: 'New Purchase Order | Unity ERP',

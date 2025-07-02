@@ -1,13 +1,13 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { DataGrid } from '@/components/inventory/DataGrid'
-import { InventoryFilters } from '@/components/inventory/Filters'
+import { DataGrid } from '@/components/features/inventory/DataGrid'
+import { InventoryFilters } from '@/components/features/inventory/Filters'
 import { Button } from '@/components/ui/button'
 import { useQueryClient } from '@tanstack/react-query'
-import { ComponentDialog } from '@/components/inventory/ComponentDialog'
-import { InventoryDetails } from '@/components/inventory/Details'
-import { TransactionHistory } from '@/components/inventory/TransactionHistory'
+import { ComponentDialog } from '@/components/features/inventory/ComponentDialog'
+import { InventoryDetails } from '@/components/features/inventory/Details'
+import { TransactionHistory } from '@/components/features/inventory/TransactionHistory'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { InventoryItem } from '@/types/inventory'
 
@@ -87,4 +87,4 @@ export function InventoryClient() {
       )}
     </div>
   )
-} 
+}

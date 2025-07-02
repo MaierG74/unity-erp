@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
-import { useAuth } from '@/components/auth-provider';
+import { useAuth } from '@/components/common/auth-provider';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { format } from 'date-fns';
@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import Image from 'next/image';
 import { Plus, ImageOff, Pencil, Trash2, RefreshCw, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { ComponentDialog } from '@/components/inventory/ComponentDialog';
+import { ComponentDialog } from '@/components/features/inventory/ComponentDialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,7 +23,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { DataTable } from '../../components/ui/data-table';
-import { InventoryDetails } from "@/components/inventory/Details"
+import { InventoryDetails } from "@/components/features/inventory/Details"
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { QueryError } from '@/components/ui/query-error';
 import { useToast } from "@/components/ui/use-toast";
@@ -837,4 +837,4 @@ export default function InventoryPage() {
       />
     </div>
   );
-} 
+}
