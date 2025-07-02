@@ -3,6 +3,7 @@
 import { useAuth } from '@/components/common/auth-provider';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
+import { useRouter } from 'next/navigation';
 import { ThemeToggle } from '@/components/common/theme-toggle';
 import { Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -11,6 +12,7 @@ import { useEffect, useState } from 'react';
 
 export function Navbar() {
   const { user } = useAuth();
+  const router = useRouter();
   const { collapsed, setCollapsed } = useSidebar();
   const [isMobile, setIsMobile] = useState(false);
 
@@ -56,7 +58,10 @@ export function Navbar() {
                 {user.email}
               </span>
               <button
-                onClick={() => supabase.auth.signOut()}
+                onClick={async () => {
+                  await supabase.auth.signOut();
+                  router.push('/login');
+                }}
                 className="text-sm text-muted-foreground hover:text-foreground"
               >
                 Sign out
