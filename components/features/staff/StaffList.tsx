@@ -8,7 +8,7 @@ import { Edit, Trash2, Eye } from 'lucide-react';
 import Link from 'next/link';
 import { useToast } from '@/components/ui/use-toast';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { StaffViewModal } from './StaffViewModal';
 import { DeleteConfirmDialog } from './DeleteConfirmDialog';
 
@@ -39,6 +39,8 @@ export function StaffList() {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [deleteStaff, setDeleteStaff] = useState<Staff | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  // Facial registration state
+  const [registeredStaffIds, setRegisteredStaffIds] = useState<number[]>([]);
 
   // Fetch staff data using React Query
   const { data: staff = [], isLoading, error } = useQuery({
@@ -104,6 +106,19 @@ export function StaffList() {
     }
   };
 
+  // Fetch facial registration IDs
+  useEffect(() => {
+    const fetchRegisteredStatus = async () => {
+      const { data, error } = await supabase.rpc('get_facial_profiles_for_active_staff');
+      if (error) {
+        console.error('Error fetching facial profiles:', error);
+        return;
+      }
+      setRegisteredStaffIds(data.map((p: any) => p.staff_id));
+    };
+    fetchRegisteredStatus();
+  }, []);
+
   if (isLoading) {
     return <div className="text-center py-8">Loading staff data...</div>;
   }
@@ -139,6 +154,7 @@ export function StaffList() {
             <TableHead>Job Description</TableHead>
             <TableHead>Phone</TableHead>
             <TableHead>Email</TableHead>
+              <TableHead>Face Reg</TableHead>
             <TableHead>Hourly Rate</TableHead>
             <TableHead>Status</TableHead>
             <TableHead className="text-right">Actions</TableHead>
@@ -154,6 +170,13 @@ export function StaffList() {
               <TableCell>{staffMember.phone || 'N/A'}</TableCell>
               <TableCell>{staffMember.email || 'N/A'}</TableCell>
               <TableCell>R{Number(staffMember.hourly_rate).toFixed(2)}</TableCell>
+               <TableCell>
+                 {registeredStaffIds.includes(staffMember.staff_id) ? (
+                   <Badge variant="secondary">Registered</Badge>
+                 ) : (
+                   <Badge variant="outline">Unregistered</Badge>
+                 )}
+               </TableCell>
               <TableCell>
                 {staffMember.is_active ? (
                   <Badge variant="success">Active</Badge>

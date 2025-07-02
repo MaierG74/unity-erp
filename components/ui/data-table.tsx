@@ -19,8 +19,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { ChevronDown, ChevronUp } from 'lucide-react'
-import { EditableCell } from '@/components/inventory/EditableCell'
-import { CategoryCell } from '@/components/inventory/CategoryCell'
+import { EditableCell } from '@/components/features/inventory/EditableCell'
+import { CategoryCell } from '@/components/features/inventory/CategoryCell'
 import { useUpdateComponent } from '@/hooks/use-update-component'
 import { useChangeCategory } from '@/hooks/use-change-category'
 import { useUpdateInventory } from '@/hooks/use-update-inventory'

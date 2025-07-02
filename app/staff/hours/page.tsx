@@ -5,9 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ArrowLeft, Clock, Calendar as CalendarIcon, BarChart } from 'lucide-react';
 import Link from 'next/link';
-import { DailyAttendanceGrid } from '@/components/staff/DailyAttendanceGrid';
-import { WeeklySummary } from '@/components/staff/WeeklySummary';
-import { StaffReports } from '@/components/staff/StaffReports';
+import { DailyAttendanceGrid } from '@/components/features/staff/DailyAttendanceGrid';
+import { WeeklySummary } from '@/components/features/staff/WeeklySummary';
+import { StaffReports } from '@/components/features/staff/StaffReports';
 
 export default function HoursTrackingPage() {
   const [activeTab, setActiveTab] = useState('daily');
@@ -54,4 +54,4 @@ export default function HoursTrackingPage() {
       </Tabs>
     </div>
   );
-} 
+}

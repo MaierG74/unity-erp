@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { NewOrderForm } from '@/components/purchasing/new-order-form';
+import { NewOrderForm } from '@/components/features/purchasing/new-order-form';
 import { ArrowLeft } from 'lucide-react';
 
 export const metadata = {

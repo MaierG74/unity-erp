@@ -1,6 +1,6 @@
 'use client';
 
-import { SupplierForm } from '@/components/suppliers/supplier-form';
+import { SupplierForm } from '@/components/features/suppliers/supplier-form';
 import { createSupplier } from '@/lib/api/suppliers';
 import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
@@ -33,4 +33,4 @@ export default function NewSupplierPage() {
       </div>
     </div>
   );
-} 
+}

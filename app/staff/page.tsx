@@ -5,9 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PlusCircle, Users, ClipboardList, Clock, DollarSign } from 'lucide-react';
 import Link from 'next/link';
-import { useAuth } from '@/components/auth-provider';
+import { useAuth } from '@/components/common/auth-provider';
 import { useRouter } from 'next/navigation';
-import { StaffTable } from '@/components/staff/StaffTable';
+import { StaffTable } from '@/components/features/staff/StaffTable';
 import { Suspense } from 'react';
 
 export default function StaffPage() {

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { processClockEventsIntoSegments, generateDailySummary } from '@/lib/utils/attendance';
-import type { StaffHours } from '@/components/staff/StaffReports';
+import type { StaffHours } from '@/components/features/staff/StaffReports';
 import { useToast } from '@/components/ui/use-toast';
 import { format, parseISO, isToday, isSunday } from 'date-fns';
 import { 
@@ -58,7 +58,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 // Import our custom AttendanceTimeline component
-import { AttendanceTimeline } from './AttendanceTimeline';
+import { AttendanceTimeline } from '@/components/features/staff/AttendanceTimeline';
 
 // Import centralized types
 import { 
@@ -1648,4 +1648,4 @@ export function DailyAttendanceGrid() {
       </CardFooter>
     </Card>
   );
-} 
+}

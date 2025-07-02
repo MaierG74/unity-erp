@@ -2,10 +2,10 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getSupplier, updateSupplier } from '@/lib/api/suppliers';
-import { SupplierForm } from '@/components/suppliers/supplier-form';
-import { SupplierEmails } from '@/components/suppliers/supplier-emails';
-import { SupplierComponents } from '@/components/suppliers/supplier-components';
-import { SupplierPricelists } from '@/components/suppliers/supplier-pricelists';
+import { SupplierForm } from '@/components/features/suppliers/supplier-form';
+import { SupplierEmails } from '@/components/features/suppliers/supplier-emails';
+import { SupplierComponents } from '@/components/features/suppliers/supplier-components';
+import { SupplierPricelists } from '@/components/features/suppliers/supplier-pricelists';
 import { useParams, useRouter } from 'next/navigation';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -82,4 +82,4 @@ export default function SupplierDetailPage() {
       </Tabs>
     </div>
   );
-} 
+}

@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
-import { MultiOrderForm } from '@/components/purchasing/multi-order-form';
+import { MultiOrderForm } from '@/components/features/purchasing/multi-order-form';
 
 export const metadata = {
   title: 'Multi-Component Purchase Order | Unity ERP',

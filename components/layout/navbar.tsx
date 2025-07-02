@@ -1,9 +1,9 @@
 'use client';
 
-import { useAuth } from '../auth-provider';
+import { useAuth } from '@/components/common/auth-provider';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
-import { ThemeToggle } from '../theme-toggle';
+import { ThemeToggle } from '@/components/common/theme-toggle';
 import { Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useSidebar } from './sidebar';

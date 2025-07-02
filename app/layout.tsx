@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Inter } from "next/font/google";
-import { Providers } from "@/components/providers";
+import { Providers } from "@/components/common/providers";
 import { RootLayout as AppRootLayout } from "@/components/layout/root-layout";
-import { ThemeProvider } from '@/components/theme-provider';
+import { ThemeProvider } from '@/components/common/theme-provider';
 import { Toaster } from "@/components/ui/toaster";
 
 // Use only the Inter font which is already working

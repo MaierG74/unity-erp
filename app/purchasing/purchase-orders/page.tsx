@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
-import { PurchaseOrdersList } from '@/components/purchasing/purchase-orders-list';
+import { PurchaseOrdersList } from '@/components/features/purchasing/purchase-orders-list';
 import { PlusCircle, ArrowLeft, Search, CalendarIcon, X, ExternalLink, FilterX } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';

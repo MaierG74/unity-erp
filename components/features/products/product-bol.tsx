@@ -40,7 +40,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Plus, Trash2, Edit, Save, X, Search } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
-import { CreateJobModal } from '@/components/labor/create-job-modal';
+import { CreateJobModal } from '@/components/features/labor/create-job-modal';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from '@/lib/utils';

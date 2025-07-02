@@ -1,4 +1,4 @@
-import { SupplierList } from '@/components/suppliers/supplier-list';
+import { SupplierList } from '@/components/features/suppliers/supplier-list';
 
 export default function SuppliersPage() {
   return (
