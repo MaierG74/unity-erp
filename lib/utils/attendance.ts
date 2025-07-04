@@ -507,7 +507,7 @@ export const generateDailySummary = async (dateStr: string): Promise<void> => {
             other_breaks_minutes: otherBreakMinutes,
             regular_minutes: regularMinutes,
             dt_minutes: dtMinutes,
-            ot_minutes: otMinutes,
+            ot_minutes: 0,
             wage_cents: wageCents,
             is_complete: isComplete,
             updated_at: new Date().toISOString()
@@ -532,7 +532,7 @@ export const generateDailySummary = async (dateStr: string): Promise<void> => {
             other_breaks_minutes: otherBreakMinutes,
             regular_minutes: regularMinutes,
             dt_minutes: dtMinutes,
-            ot_minutes: otMinutes,
+            ot_minutes: 0,
             wage_cents: wageCents,
             is_complete: isComplete,
             created_at: new Date().toISOString(),

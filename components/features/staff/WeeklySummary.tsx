@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
 import { 
   format, 
@@ -51,7 +51,8 @@ import {
   Download, 
   Printer,
   Loader2,
-  Columns
+  Columns,
+  RefreshCw
 } from 'lucide-react';
 import React from 'react';
 
@@ -107,6 +108,7 @@ type WeeklySummaryRow = {
 };
 
 export function WeeklySummary() {
+  const queryClient = useQueryClient();
   const [selectedWeek, setSelectedWeek] = useState<Date>(new Date());
   const [summaryData, setSummaryData] = useState<WeeklySummaryRow[]>([]);
   const [isExporting, setIsExporting] = useState(false);
@@ -159,7 +161,7 @@ export function WeeklySummary() {
       const endDateStr = format(weekEnd, 'yyyy-MM-dd');
       const { data, error } = await supabase
         .from('time_daily_summary')
-        .select('staff_id, date_worked, regular_minutes, ot_minutes, dt_minutes')
+        .select('staff_id, date_worked, total_work_minutes, dt_minutes')
         .gte('date_worked', startDateStr)
         .lte('date_worked', endDateStr);
       if (error) throw error;
@@ -172,38 +174,43 @@ export function WeeklySummary() {
     if (!activeStaff || activeStaff.length === 0) return;
     const processed = activeStaff.map(staff => {
       const staffSummaries = weeklySummaries.filter(s => s.staff_id === staff.staff_id);
-      const dailyHours: { [date: string]: { hours: number; isHoliday: boolean; isWeekend: boolean; isSunday: boolean } } = {};
-      let totalRegular = 0, totalDouble = 0, totalOvertime = 0;
+      const dailyHours: Record<string, { hours: number; isHoliday: boolean; isWeekend: boolean; isSunday: boolean }> = {};
+      let weekWorkMin = 0, weekDoubleMin = 0;
       daysOfWeek.forEach(day => {
         const dateStr = format(day, 'yyyy-MM-dd');
         const summary = staffSummaries.find(s => s.date_worked === dateStr);
-        const regMin = summary?.regular_minutes || 0;
-        const otMin = summary?.ot_minutes || 0;
+        const workMin = summary?.total_work_minutes || 0;
         const dtMin = summary?.dt_minutes || 0;
-        const regH = Math.round((regMin / 60) * 100) / 100;
-        const otH = Math.round((otMin / 60) * 100) / 100;
-        const dtH = Math.round((dtMin / 60) * 100) / 100;
-        const totalH = Math.round(((regMin + otMin + dtMin) / 60) * 100) / 100;
-        totalRegular += regH;
-        totalDouble += dtH;
-        totalOvertime += otH;
         const isSat = isSaturday(day);
         const isSun = isSunday(day);
         const isHoliday = !!publicHolidays.find(h => h.holiday_date === dateStr);
-        dailyHours[dateStr] = { hours: totalH, isHoliday, isWeekend: isSat || isSun, isSunday: isSun };
+        dailyHours[dateStr] = { hours: Math.round((workMin / 60) * 100) / 100, isHoliday, isWeekend: isSat || isSun, isSunday: isSun };
+        if (isSun) {
+          weekDoubleMin += workMin;
+        } else {
+          weekWorkMin += workMin;
+        }
       });
+      const thresholdMin = 44 * 60;
+      const regMin = Math.min(weekWorkMin, thresholdMin);
+      const otMin = Math.max(weekWorkMin - thresholdMin, 0);
+      const regH = Math.round((regMin / 60) * 100) / 100;
+      const otH = Math.round((otMin / 60) * 100) / 100;
+      const dtH = Math.round((weekDoubleMin / 60) * 100) / 100;
+      const totalH = Math.round(((weekWorkMin + weekDoubleMin) / 60) * 100) / 100;
       return {
         staff_id: staff.staff_id,
         staff_name: `${staff.first_name} ${staff.last_name}`,
         job_description: staff.job_description,
         dailyHours,
-        totalRegularHours: Math.round(totalRegular * 100) / 100,
-        totalDoubleTimeHours: Math.round(totalDouble * 100) / 100,
-        totalOvertimeHours: Math.round(totalOvertime * 100) / 100,
-        totalHours: Math.round((totalRegular + totalDouble + totalOvertime) * 100) / 100,
+        totalRegularHours: regH,
+        totalDoubleTimeHours: dtH,
+        totalOvertimeHours: otH,
+        totalHours: totalH,
       };
     });
     setSummaryData(processed);
+
   }, [activeStaff, weeklySummaries, publicHolidays, daysOfWeek]);
 
 
@@ -327,6 +334,14 @@ export function WeeklySummary() {
             <Button variant="outline" size="icon" onClick={goToNextWeek}>
               <ChevronRight className="h-4 w-4" />
             </Button>
+            <Button 
+              variant="outline" 
+              size="icon" 
+              onClick={() => queryClient.invalidateQueries({ queryKey: ['time_daily_summary', 'weekly', format(weekStart, 'yyyy-MM-dd'), format(weekEnd, 'yyyy-MM-dd')] })}
+              aria-label="Refresh data"
+            >
+              <RefreshCw className="h-4 w-4" />
+            </Button>
           </div>
         </div>
       </CardHeader>
@@ -336,7 +351,7 @@ export function WeeklySummary() {
             {/* Shadow indicator for horizontal scroll */}
             <div className="absolute right-0 top-0 bottom-0 w-4 bg-gradient-to-r from-transparent to-black/5 pointer-events-none"></div>
           </div>
-          <Table className="min-w-max">
+          <Table className="w-full table-fixed">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[180px] sticky left-0 z-10 bg-background">Staff Member</TableHead>
