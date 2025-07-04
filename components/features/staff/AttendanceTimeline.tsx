@@ -141,8 +141,9 @@ export function AttendanceTimeline({
     
     // console.log('Total minutes calculated:', totalMinutes);
     
-    const regularMinutes = Math.min(totalMinutes, 8 * 60); // 8 hours in minutes
-    const overtimeMinutes = Math.max(0, totalMinutes - 8 * 60);
+    // Daily view no longer shows per-day overtime. All worked minutes are regular; weekly summary handles OT.
+    const regularMinutes = totalMinutes;
+    const overtimeMinutes = 0;
 
     const firstEvent = staffEvents[0];
     const verificationMethod = firstEvent?.verification_method || 'manual';
