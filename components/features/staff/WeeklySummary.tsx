@@ -115,9 +115,9 @@ export function WeeklySummary() {
   const [compactView, setCompactView] = useState(false);
   const { toast } = useToast();
 
-  // Calculate week range (start on Saturday)
-  const weekStart = React.useMemo(() => startOfWeek(selectedWeek, { weekStartsOn: 6 }), [selectedWeek]); // Start on Saturday
-  const weekEnd = React.useMemo(() => endOfWeek(selectedWeek, { weekStartsOn: 6 }), [selectedWeek]); // End on Friday
+  // Calculate week range (start on Friday)
+  const weekStart = React.useMemo(() => startOfWeek(selectedWeek, { weekStartsOn: 5 }), [selectedWeek]); // Start on Friday
+  const weekEnd = React.useMemo(() => endOfWeek(selectedWeek, { weekStartsOn: 5 }), [selectedWeek]); // End on Thursday
   
   // Memoize the days of week calculation to prevent infinite updates
   const daysOfWeek = React.useMemo(() => {
@@ -161,7 +161,7 @@ export function WeeklySummary() {
       const endDateStr = format(weekEnd, 'yyyy-MM-dd');
       const { data, error } = await supabase
         .from('time_daily_summary')
-        .select('staff_id, date_worked, total_work_minutes, dt_minutes')
+        .select('staff_id, date_worked, total_hours_worked, dt_minutes')
         .gte('date_worked', startDateStr)
         .lte('date_worked', endDateStr);
       if (error) throw error;
@@ -179,7 +179,7 @@ export function WeeklySummary() {
       daysOfWeek.forEach(day => {
         const dateStr = format(day, 'yyyy-MM-dd');
         const summary = staffSummaries.find(s => s.date_worked === dateStr);
-        const workMin = summary?.total_work_minutes || 0;
+        const workMin = summary ? Math.round((summary.total_hours_worked || 0) * 60) : 0;
         const dtMin = summary?.dt_minutes || 0;
         const isSat = isSaturday(day);
         const isSun = isSunday(day);
@@ -439,22 +439,22 @@ export function WeeklySummary() {
                       key={`total-${dateStr}`} 
                       className={`text-center font-bold ${isWeekend ? 'bg-muted' : ''} ${isHoliday ? 'bg-muted-foreground/10' : ''} ${isSun ? 'text-red-500' : ''} ${isToday ? 'bg-primary/10' : ''}`}
                     >
-                      {dailyTotal > 0 ? dailyTotal : '-'}
+                      {dailyTotal > 0 ? dailyTotal.toFixed(2) : '-'}
                     </TableCell>
                   );
                 })}
                 
                 <TableCell className="text-center font-bold">
-                  {summaryData.reduce((total, row) => total + row.totalRegularHours, 0)}
+                  {summaryData.reduce((total, row) => total + row.totalRegularHours, 0).toFixed(2)}
                 </TableCell>
                 <TableCell className="text-center font-bold text-red-500">
-                  {summaryData.reduce((total, row) => total + row.totalDoubleTimeHours, 0)}
+                  {summaryData.reduce((total, row) => total + row.totalDoubleTimeHours, 0).toFixed(2)}
                 </TableCell>
                 {!compactView && <TableCell className="text-center font-bold">
-                  {summaryData.reduce((total, row) => total + row.totalOvertimeHours, 0)}
+                  {summaryData.reduce((total, row) => total + row.totalOvertimeHours, 0).toFixed(2)}
                 </TableCell>}
                 <TableCell className="text-center font-bold">
-                  {summaryData.reduce((total, row) => total + row.totalHours, 0)}
+                  {summaryData.reduce((total, row) => total + row.totalHours, 0).toFixed(2)}
                 </TableCell>
               </TableRow>
             </TableBody>

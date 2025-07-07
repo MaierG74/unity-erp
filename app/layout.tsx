@@ -7,7 +7,7 @@ import { ThemeProvider } from '@/components/common/theme-provider';
 import { Toaster } from "@/components/ui/toaster";
 
 // Use only the Inter font which is already working
-const inter = Inter({ subsets: ["latin"] });
+const inter = Inter({ subsets: ["latin"], preload: false });
 
 export const metadata: Metadata = {
   title: "Unity ERP",
