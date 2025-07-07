@@ -1364,6 +1364,7 @@ export function DailyAttendanceGrid() {
                   segments={staffSegments}
                   onAddManualEvent={handleManualClockEvent}
                   onSegmentsChanged={handleSegmentsChanged}
+                   summary={staffSummaries[0] ?? null}
                 />
               );
             })}
@@ -1432,7 +1433,7 @@ export function DailyAttendanceGrid() {
                   <TableCell className="font-medium">{record.staff_name}</TableCell>
                   <TableCell>{record.job_description || 'N/A'}</TableCell>
                   <TableCell>
-                    <span className={record.present ? "font-medium" : ""}>{record.hours_worked}</span>
+                    <span className={record.present ? "font-medium" : ""}>{record.hours_worked.toFixed(2)}</span>
                   </TableCell>
                   <TableCell>
                     {record.present ? (

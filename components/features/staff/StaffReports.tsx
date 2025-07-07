@@ -167,10 +167,10 @@ export function StaffReports() {
   const [activeTab, setActiveTab] = useState<string>('payroll');
   const [reportType, setReportType] = useState<string>('weekly');
   
-  // Calculate the current pay week (Saturday to Friday)
+  // Calculate the current pay week (Friday to Thursday)
   const today = new Date();
-  const currentWeekStart = startOfWeek(today, { weekStartsOn: 6 }); // Start on Saturday
-  const currentWeekEnd = endOfWeek(today, { weekStartsOn: 6 }); // End on Friday
+  const currentWeekStart = startOfWeek(today, { weekStartsOn: 5 }) // Start on Friday
+  const currentWeekEnd = endOfWeek(today, { weekStartsOn: 5 }) // End on Thursday
   
   const [startDate, setStartDate] = useState<Date | undefined>(currentWeekStart);
   const [endDate, setEndDate] = useState<Date | undefined>(currentWeekEnd);

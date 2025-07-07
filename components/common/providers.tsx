@@ -3,8 +3,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useState, type ReactNode } from 'react';
-import { AuthProvider } from './auth-provider';
 import { ResetQueryErrorBoundary } from './reset-query-error-boundary';
+import { AuthProvider } from './auth-provider';
 import { ToastProvider } from '@/components/ui/use-toast';
 
 export function Providers({ children }: { children: ReactNode }) {
@@ -25,13 +25,13 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <ResetQueryErrorBoundary>
-          <ToastProvider>
-            {children}
-          </ToastProvider>
-        </ResetQueryErrorBoundary>
+            <ResetQueryErrorBoundary>
+        <ToastProvider>
+          {children}
+        </ToastProvider>
+      </ResetQueryErrorBoundary>
+            <ReactQueryDevtools initialIsOpen={false} />
       </AuthProvider>
-      <ReactQueryDevtools initialIsOpen={false} />
     </QueryClientProvider>
   );
-} 
+}

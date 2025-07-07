@@ -17,6 +17,8 @@ import {
 import { ChevronDown, ChevronUp, Edit3, Trash2, Plus, User } from 'lucide-react';
 import { ClockEvent, TimeSegment } from '@/lib/types/attendance';
 
+import { DailySummary } from '@/lib/types/attendance';
+
 interface AttendanceTimelineProps {
   staffId: number;
   staffName: string;
@@ -25,6 +27,7 @@ interface AttendanceTimelineProps {
   segments: TimeSegment[];
   onAddManualEvent: (staffId: number, eventType: string, time: string, breakType?: string | null) => void;
   onSegmentsChanged: () => void;
+  summary?: DailySummary | null;
 };
 
 export function AttendanceTimeline({ 
@@ -35,6 +38,7 @@ export function AttendanceTimeline({
   segments,
   onAddManualEvent,
   onSegmentsChanged,
+  summary,
 }: AttendanceTimelineProps) {
   const { toast } = useToast();
 
@@ -110,6 +114,20 @@ export function AttendanceTimeline({
 
   // Calculate display hours
   const displayHours = useMemo(() => {
+    // If a precomputed daily summary is provided, use it so totals reflect unpaid-break deductions
+    if (summary) {
+      const totalHours = Number(summary.total_hours_worked);
+      const unpaid = summary.unpaid_break_minutes ?? 0;
+      return {
+        total_hours: totalHours,
+        regular_hours: totalHours, // daily OT suppressed
+        overtime_hours: 0,
+        unpaid_break_minutes: unpaid,
+        verification_method: 'summary',
+      } as any;
+    }
+
+    // fallback to client-side segment calculation
     // console.log('Calculating hours from staffSegments:', staffSegments);
     
     // Calculate total minutes from start_time and end_time
@@ -156,8 +174,8 @@ export function AttendanceTimeline({
     };
     
     // console.log('Final hours calculation:', result);
-    return result;
-  }, [staffSegments, staffEvents]);
+    return result; // from segment calculation
+  }, [staffSegments, staffEvents, summary]);
 
   // Open the edit dialog for an event
   const openEditDialog = (event: ClockEvent) => {
@@ -359,7 +377,12 @@ export function AttendanceTimeline({
             </div>
             <div>
               <div className="text-xs text-gray-400">Total</div>
-              <div className="text-xl text-white">{displayHours.total_hours.toFixed(2)}</div>
+              <div className="text-xl text-white flex items-center space-x-1">
+                <span>{displayHours.total_hours.toFixed(2)}</span>
+                {('unpaid_break_minutes' in displayHours && displayHours.unpaid_break_minutes > 0) && (
+                  <span className="text-xs text-gray-400">(-{(displayHours.unpaid_break_minutes/60).toFixed(1)}h tea)</span>
+                )}
+              </div>
             </div>
             <div>
               <div className="text-xs text-gray-400">Regular</div>
