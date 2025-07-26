@@ -13,23 +13,28 @@ export const calculateDurationMinutes = (startTime: string, endTime: string): nu
 /**
  * Process clock events into time segments for a specific date
  */
-export const processClockEventsIntoSegments = async (dateStr: string): Promise<void> => {
+export const processClockEventsIntoSegments = async (dateStr: string, staffId?: number): Promise<void> => {
   console.log(`[DEBUG] Starting processClockEventsIntoSegments for date: ${dateStr}`);
   try {
     // Get all clock events for the date
     console.log(`[DEBUG] Fetching clock events for date: ${dateStr}`);
+    let staffFilter = staffId ? `.eq('staff_id', staffId)` : '';
     const utcDateStart = new Date(`${dateStr}T00:00:00.000Z`).toISOString();
     const tempDate = new Date(`${dateStr}T00:00:00.000Z`);
     tempDate.setUTCDate(tempDate.getUTCDate() + 1); // Move to the next day
     const utcNextDayStart = tempDate.toISOString(); // This is the exclusive end boundary
 
     console.log(`[DEBUG] Querying 'time_clock_events' for UTC Range: >= ${utcDateStart} and < ${utcNextDayStart}`);
-    const { data: clockEvents, error: eventsError } = await supabase
+    let clockEventsQuery = supabase
       .from('time_clock_events')
       .select('*')
       .gte('event_time', utcDateStart)
       .lt('event_time', utcNextDayStart)
       .order('event_time', { ascending: true });
+    if (staffId) {
+      clockEventsQuery = clockEventsQuery.eq('staff_id', staffId);
+    }
+    const { data: clockEvents, error: eventsError } = await clockEventsQuery;
 
     if (eventsError) {
       console.error('[DEBUG] Error fetching clock events:', eventsError);
@@ -379,7 +384,7 @@ export const processAllClockEvents = async (): Promise<void> => {
  * Generate daily summary from time segments for a specific date
  * This aggregates all segments into a daily summary record
  */
-export const generateDailySummary = async (dateStr: string): Promise<void> => {
+export const generateDailySummary = async (dateStr: string, staffId?: number): Promise<void> => {
   try {
     // Fetch all segments for the date
     const { data: segments, error: segmentsError } = await supabase
@@ -507,10 +512,11 @@ export const generateDailySummary = async (dateStr: string): Promise<void> => {
             other_breaks_minutes: otherBreakMinutes,
             regular_minutes: regularMinutes,
             dt_minutes: dtMinutes,
-            ot_minutes: 0,
+            ot_minutes: otMinutes,
             wage_cents: wageCents,
             is_complete: isComplete,
-            updated_at: new Date().toISOString()
+            updated_at: new Date().toISOString(),
+            total_hours_worked: totalWorkHours
           })
           .eq('id', existingSummary.id);
           
@@ -580,9 +586,8 @@ export const addManualClockEvent = async (
     // Attempt to insert via RPC, fallback to direct insert
     let eventInserted = false;
     const { data: insertedEvent, error: rpcError } = await supabase.rpc(
-      'add_manual_clock_event',
+      'add_manual_clock_event_v2',
       {
-        p_id: eventId,
         p_staff_id: staffId,
         p_event_time: eventTime.toISOString(),
         p_event_type: eventType,

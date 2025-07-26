@@ -49,4 +49,6 @@ export interface Order {
   customer?: Customer;
   details?: OrderDetail[];
   attachments?: OrderAttachment[];
+  /** Linked quote */
+  quote?: { id: string; quote_number: string; };
 } 

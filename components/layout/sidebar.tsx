@@ -19,6 +19,7 @@ import {
   X,
   Box,
   Hammer,
+  FileText,
 } from 'lucide-react';
 import { useState, useEffect, createContext, useContext } from 'react';
 import { Button } from '@/components/ui/button';
@@ -58,6 +59,11 @@ const navigation = [
     name: 'Orders', 
     href: '/orders',
     icon: ShoppingCart 
+  },
+  { 
+    name: 'Quotes', 
+    href: '/quotes',
+    icon: FileText 
   },
   { 
     name: 'Customers', 

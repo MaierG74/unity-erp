@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Card, 
   CardContent, 
@@ -35,6 +35,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { useReactToPrint } from 'react-to-print';
 import { 
   Table, 
   TableBody, 
@@ -55,22 +56,11 @@ type Staff = {
   hourly_rate: number | null;
 };
 
-export type StaffHours = {
-  id: number;
+export type DailySummary = {
   staff_id: number;
   date_worked: string;
-  hours_worked: number;
-  regular_hours: number;
-  overtime_hours: number;
-  overtime_rate: number;
-  break_time: number; // in hours
-  is_holiday: boolean;
-  start_time?: string; // HH:mm
-  end_time?: string; // HH:mm
-  lunch_break_taken?: boolean;
-  morning_break_taken?: boolean;
-  afternoon_break_taken?: boolean;
-  notes?: string;
+  total_hours_worked: number; // total worked including DT
+  dt_minutes: number; // double-time minutes (Sundays/holidays)
 };
 
 type PayrollReport = {
@@ -163,6 +153,35 @@ const PayrollTable = ({ data }: { data: PayrollReport[] }) => {
   );
 };
 
+// Simplified Hours Table (Total, Normal, Overtime) used for summary view and print export
+const HoursTable = ({ data }: { data: PayrollReport[] }) => {
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Name</TableHead>
+          <TableHead>Total Hours</TableHead>
+          <TableHead>Normal Hours</TableHead>
+          <TableHead>Overtime Hours</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {data.map((row, i) => {
+          const overtimeTotal = row.overtime_hours + row.doubletime_hours;
+          return (
+            <TableRow key={i}>
+              <TableCell className="font-medium">{row.name}</TableCell>
+              <TableCell>{row.total_hours.toFixed(1)}</TableCell>
+              <TableCell>{row.regular_hours.toFixed(1)}</TableCell>
+              <TableCell>{overtimeTotal.toFixed(1)}</TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
+  );
+};
+
 export function StaffReports() {
   const [activeTab, setActiveTab] = useState<string>('payroll');
   const [reportType, setReportType] = useState<string>('weekly');
@@ -178,6 +197,15 @@ export function StaffReports() {
   const [selectedStaffType, setSelectedStaffType] = useState<string>('active');
   const [selectedStaffId, setSelectedStaffId] = useState<number | null>(null);
   const [reportData, setReportData] = useState<PayrollReport[] | AttendanceReport[] | null>(null);
+
+  // Setup print ref and handler
+  const reportRef = useRef<HTMLDivElement>(null);
+  const handlePrint = useReactToPrint({
+
+    content: () => reportRef.current,
+    documentTitle: 'Payroll Report',
+    removeAfterPrint: true,
+  });
   
   // Fetch staff data
   const { data: staffData = [], isLoading: isLoadingStaff } = useQuery({
@@ -204,156 +232,156 @@ export function StaffReports() {
     }
   }, [staffData, selectedStaffType]);
   
-  // Fetch hours data for the selected date range
+  // Fetch daily summaries (hours data) for the selected date range
   const { data: hoursData = [], isLoading: isLoadingHours } = useQuery({
-    queryKey: ['staffHours', startDate, endDate],
+    queryKey: ['time_daily_summary', startDate, endDate],
     queryFn: async () => {
       if (!startDate || !endDate) return [];
-      
+
       const formatDate = (date: Date) => format(date, 'yyyy-MM-dd');
       const start = formatDate(startDate);
       const end = formatDate(endDate);
-      
+
+      // Note: avoid select('*') to prevent Supabase 500 error
       const { data, error } = await supabase
-        .from('staff_hours')
-        .select('*')
+        .from('time_daily_summary')
+        .select('staff_id, date_worked, total_hours_worked, dt_minutes')
         .gte('date_worked', start)
         .lte('date_worked', end);
-      
+
       if (error) throw error;
-      return data as StaffHours[];
+      return (data || []) as DailySummary[];
     },
     enabled: !!startDate && !!endDate
   });
-  
+
+  // Debug: log fetched data counts
+  useEffect(() => {
+    if (!isLoadingStaff) {
+      console.log('[StaffReports] staffData loaded:', staffData.length, staffData);
+    }
+    if (!isLoadingHours) {
+      console.log('[StaffReports] hoursData loaded:', hoursData.length, hoursData.slice(0, 10));
+    }
+  }, [staffData, hoursData, isLoadingStaff, isLoadingHours]);
+
+  // Re-run generation automatically once loading completes if user already clicked Generate
+  useEffect(() => {
+    if (isGenerating && !isLoadingHours && !isLoadingStaff) {
+      let data: any[] = [];
+      if (activeTab === 'payroll') {
+        data = generatePayrollReport();
+      } else if (activeTab === 'absence') {
+        data = generateAttendanceReport();
+      }
+      setReportData(data);
+      setIsGenerating(false);
+    }
+  }, [isGenerating, isLoadingHours, isLoadingStaff, activeTab]);
+
   // Generate Payroll Report
   const generatePayrollReport = (): PayrollReport[] => {
-    if (!startDate || !endDate || !filteredStaff.length || !hoursData.length) return [];
-    
-    const report = filteredStaff
-      .filter(staff => {
-        // If individual staff is selected, filter for that staff only
-        if (selectedStaffId) {
-          return staff.staff_id === selectedStaffId;
-        }
-        return true;
-      })
+    if (!startDate || !endDate || !hoursData.length) return [];
+
+    // Derive staff list from summaries if main list empty (handles RLS)
+    const effectiveStaff: Staff[] = filteredStaff.length ? filteredStaff : Array.from(
+      new Map(
+        hoursData.map(h => [h.staff_id, {
+          staff_id: h.staff_id,
+          first_name: '',
+          last_name: '',
+          hourly_rate: 0,
+          current_staff: true
+        }])
+      ).values()
+    );
+
+    return effectiveStaff
+      .filter(s => !selectedStaffId || s.staff_id === selectedStaffId)
+      .sort((a, b) => a.first_name.localeCompare(b.first_name))
       .map(staff => {
-        // Get hours for this staff member
-        const staffHours = hoursData.filter(h => h.staff_id === staff.staff_id);
-        
-        // Calculate totals
-        let totalRegularHours = 0;
-        let totalOvertimeHours = 0;
-        let totalDoubleTimeHours = 0;
-        let weeklyRegularHours = 0;
-        
-        // First pass: Calculate total regular hours for the week (excluding Sundays and holidays)
-        staffHours.forEach(record => {
-          if (!record.is_holiday && !isSunday(new Date(record.date_worked))) {
-            weeklyRegularHours += record.hours_worked || 0;
-          }
-        });
-        
-        // Second pass: Distribute hours
-        staffHours.forEach(record => {
-          const hoursForDay = record.hours_worked || 0;
-          
-          if (record.is_holiday || isSunday(new Date(record.date_worked))) {
-            // All hours on holidays and Sundays are double time
-            totalDoubleTimeHours += hoursForDay;
-          } else {
-            // For regular days
-            if (totalRegularHours < 44) {
-              // How many more regular hours can we add before hitting 44?
-              const remainingRegularHours = 44 - totalRegularHours;
-              
-              if (hoursForDay <= remainingRegularHours) {
-                // All hours go to regular
-                totalRegularHours += hoursForDay;
-              } else {
-                // Split between regular and overtime
-                totalRegularHours += remainingRegularHours;
-                totalOvertimeHours += hoursForDay - remainingRegularHours;
-              }
-            } else {
-              // Already at 44 regular hours, everything goes to overtime
-              totalOvertimeHours += hoursForDay;
-            }
-            
-            // Add any explicitly marked overtime
-            if (record.overtime_hours > 0) {
-              if (record.overtime_rate === 2.0) {
-                totalDoubleTimeHours += record.overtime_hours;
-              } else {
-                totalOvertimeHours += record.overtime_hours;
-              }
-            }
-          }
-        });
-        
-        // Calculate earnings
-        const hourlyRate = staff.hourly_rate || 0;
-        const regularEarnings = totalRegularHours * hourlyRate;
-        const overtimeEarnings = totalOvertimeHours * (hourlyRate * 1.5); // Overtime at 1.5x
-        const doubletimeEarnings = totalDoubleTimeHours * (hourlyRate * 2.0); // Double time at 2.0x
+        // Summaries for this staff
+        const summaries = hoursData.filter(h => h.staff_id === staff.staff_id);
+        if (!summaries.length) {
+          return {
+            staff_id: staff.staff_id,
+            name: `${staff.first_name} ${staff.last_name}`.trim() || `${staff.staff_id}`,
+            hourly_rate: staff.hourly_rate || 0,
+            regular_hours: 0,
+            overtime_hours: 0,
+            doubletime_hours: 0,
+            total_hours: 0,
+            regular_earnings: 0,
+            overtime_earnings: 0,
+            doubletime_earnings: 0,
+            total_earnings: 0
+          } as PayrollReport;
+        }
+
+        const totalDoubleTimeHours = summaries.reduce((acc, s) => acc + (s.dt_minutes || 0) / 60, 0);
+        const totalWorkedHours = summaries.reduce((acc, s) => acc + (s.total_hours_worked || 0), 0);
+        const regPlusOt = totalWorkedHours - totalDoubleTimeHours;
+        const totalRegularHours = Math.min(regPlusOt, 44);
+        const totalOvertimeHours = Math.max(regPlusOt - 44, 0);
+
+        const rate = staff.hourly_rate || 0;
+        const regularEarnings = totalRegularHours * rate;
+        const overtimeEarnings = totalOvertimeHours * (rate * 1.5);
+        const doubletimeEarnings = totalDoubleTimeHours * (rate * 2.0);
         const totalEarnings = regularEarnings + overtimeEarnings + doubletimeEarnings;
-        
+
         return {
           staff_id: staff.staff_id,
-          name: `${staff.first_name} ${staff.last_name}`,
-          hourly_rate: hourlyRate,
+          name: `${staff.first_name} ${staff.last_name}`.trim() || `${staff.staff_id}`,
+          hourly_rate: rate,
           regular_hours: totalRegularHours,
           overtime_hours: totalOvertimeHours,
           doubletime_hours: totalDoubleTimeHours,
-          total_hours: totalRegularHours + totalOvertimeHours + totalDoubleTimeHours,
+          total_hours: totalWorkedHours,
           regular_earnings: regularEarnings,
           overtime_earnings: overtimeEarnings,
           doubletime_earnings: doubletimeEarnings,
           total_earnings: totalEarnings
-        };
+        } as PayrollReport;
       });
-    
-    return report;
   };
-  
+
   // Generate Attendance Report
   const generateAttendanceReport = (): AttendanceReport[] => {
-    if (!startDate || !endDate || !filteredStaff.length) return [];
-    
+    if (!startDate || !endDate || !hoursData.length) return [];
+
+    // Derive staff list from summaries if main list empty (handles RLS)
+    const effectiveStaff: Staff[] = filteredStaff.length ? filteredStaff : Array.from(
+      new Map(
+        hoursData.map(h => [h.staff_id, {
+          staff_id: h.staff_id,
+          first_name: '',
+          last_name: '',
+          hourly_rate: 0,
+          current_staff: true
+        }])
+      ).values()
+    );
+
     // Calculate the total number of working days in the date range
     const totalDays = differenceInDays(endDate, startDate) + 1;
-    
-    const report = filteredStaff
-      .filter(staff => {
-        // If individual staff is selected, filter for that staff only
-        if (selectedStaffId) {
-          return staff.staff_id === selectedStaffId;
-        }
-        return true;
-      })
+
+    return effectiveStaff
+      .filter(staff => !selectedStaffId || staff.staff_id === selectedStaffId)
       .map(staff => {
-        // Get hours for this staff member
-        const staffHours = hoursData.filter(h => h.staff_id === staff.staff_id);
-        
-        // Calculate days present (days with hours > 0)
-        const daysPresent = new Set(staffHours.map(h => h.date_worked)).size;
-        
-        // Calculate days absent
+        // Get summaries for this staff member
+        const staffSummaries = hoursData.filter(h => h.staff_id === staff.staff_id);
+
+        // Days present = days with total_hours_worked > 0
+        const daysPresent = staffSummaries.filter(s => (s.total_hours_worked || 0) > 0).length;
         const daysAbsent = totalDays - daysPresent;
-        
-        // Calculate days late (placeholder - would need actual late data)
-        const daysLate = 0;
-        
-        // Calculate total hours
-        const totalHours = staffHours.reduce((sum, record) => sum + (record.hours_worked || 0), 0);
-        
-        // Calculate attendance rate
+        const daysLate = 0; // Placeholder
+        const totalHours = staffSummaries.reduce((sum, s) => sum + (s.total_hours_worked || 0), 0);
         const attendanceRate = ((daysPresent / totalDays) * 100).toFixed(1) + '%';
-        
+
         return {
           staff_id: staff.staff_id,
-          name: `${staff.first_name} ${staff.last_name}`,
+          name: `${staff.first_name} ${staff.last_name}`.trim() || `${staff.staff_id}`,
           days_present: daysPresent,
           days_absent: daysAbsent,
           days_late: daysLate,
@@ -361,30 +389,14 @@ export function StaffReports() {
           attendance_rate: attendanceRate
         };
       });
-    
-    return report;
   };
   
   // Handle generate report
   const handleGenerateReport = () => {
-    setIsGenerating(true);
+    // Clear previous data and kick off generation
     setReportData(null);
-    
-    // Simulate API call delay
-    setTimeout(() => {
-      if (activeTab === 'payroll') {
-        const payrollData = generatePayrollReport();
-        setReportData(payrollData);
-      } else if (activeTab === 'absence') {
-        const absenceData = generateAttendanceReport();
-        setReportData(absenceData);
-      } else {
-        // Other report types would go here
-        setReportData([]);
-      }
-      setIsGenerating(false);
-    }, 1000);
-  };
+    setIsGenerating(true);
+  }
   
   // Export report data
   const exportReport = () => {
@@ -548,7 +560,7 @@ export function StaffReports() {
               {activeTab === 'payroll' && reportData && reportData.length > 0 && (
                 <>
                   <div className="overflow-auto">
-                    <PayrollTable data={reportData as PayrollReport[]} />
+                    <HoursTable data={reportData as PayrollReport[]} />
                   </div>
                   
                   {/* Export Actions */}
