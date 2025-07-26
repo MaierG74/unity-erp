@@ -1425,6 +1425,31 @@ export function DailyAttendanceGrid() {
               {sortedRecords.map((record) => (
                 <TableRow key={record.staff_id}>
                   <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title="Process only this staff member"
+                      onClick={async () => {
+                        setIsSaving(true);
+                        try {
+                          const dateStr = format(selectedDate, 'yyyy-MM-dd');
+                          await processClockEventsIntoSegments(dateStr, record.staff_id);
+                          await generateDailySummary(dateStr, record.staff_id);
+                          queryClient.invalidateQueries({ queryKey: ['time_segments', dateStr] });
+                          queryClient.invalidateQueries({ queryKey: ['time_daily_summary', dateStr] });
+                          toast({ title: 'Processed', description: `${record.staff_name} processed successfully.` });
+                        } catch (error) {
+                          toast({ title: 'Error', description: `Failed to process ${record.staff_name}` });
+                        } finally {
+                          setIsSaving(false);
+                        }
+                      }}
+                      disabled={isSaving}
+                    >
+                      {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                    </Button>
+                  </TableCell>
+                  <TableCell>
                     <Checkbox 
                       checked={record.present} 
                       onCheckedChange={() => togglePresence(record.staff_id)}

@@ -48,7 +48,8 @@ async function fetchOrderDetails(orderId: number): Promise<Order | null> {
       .select(`
         *,
         status:order_statuses(status_id, status_name),
-        customer:customers(*)
+        customer:customers(*),
+        quote:quotes(id, quote_number)
       `)
       .eq('order_id', orderId)
       .single();
@@ -58,7 +59,11 @@ async function fetchOrderDetails(orderId: number): Promise<Order | null> {
       throw new Error('Failed to fetch order details');
     }
 
-    if (!data) return null;
+    if (!data) return null; // include quote relationship
+
+    // Transform quote relationship from array to object
+    const quoteObj = data.quote?.[0] || null;
+
 
     // Next, fetch the order details (line items)
     const { data: orderDetails, error: detailsError } = await supabase
@@ -76,6 +81,7 @@ async function fetchOrderDetails(orderId: number): Promise<Order | null> {
     // Transform the data to ensure proper structure
     return {
       ...data,
+      quote: quoteObj,
       // Ensure status is properly structured
       status: data.status && data.status.length > 0 
         ? { 
