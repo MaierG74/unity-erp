@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Card,
   CardContent,
@@ -26,11 +26,22 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { Search, Plus, Package } from 'lucide-react';
+import { Search, Plus, Package, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { ProductCreateForm } from '@/components/features/products/product-create-form';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 // Types for our data
 interface Product {
@@ -168,11 +179,13 @@ async function fetchProductCategories(): Promise<ProductCategory[]> {
 }
 
 export default function ProductsPage() {
+  const queryClient = useQueryClient();
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(10);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const router = useRouter();
 
   // Fetch product categories
@@ -182,9 +195,38 @@ export default function ProductsPage() {
   });
 
   // Fetch products with category filter
-  const { data: products = [], isLoading, error } = useQuery({
+  const { data: products = [], isLoading, error, refetch } = useQuery({
     queryKey: ['products', selectedCategory],
     queryFn: () => fetchProducts(selectedCategory !== 'all' ? selectedCategory : undefined),
+  });
+
+  // Delete product mutation
+  const deleteProductMutation = useMutation({
+    mutationFn: async (productId: number) => {
+      const res = await fetch(`/api/products/${productId}`, { method: 'DELETE' });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body?.error || 'Failed to delete product');
+      }
+      return body;
+    },
+    onSuccess: async (_data, productId) => {
+      // Optimistically remove from current list cache
+      queryClient.setQueryData<Product[] | undefined>(['products', selectedCategory], (old) => {
+        if (!old) return old as any;
+        return old.filter((p: any) => p.product_id !== productId) as any;
+      });
+
+      // Invalidate all product list queries to ensure a fresh read
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      // Also invalidate the single product query if it's open elsewhere
+      queryClient.invalidateQueries({ queryKey: ['product', productId] });
+
+      setDeleteOpen(false);
+      setSelectedProduct(null);
+      // Fallback refetch of the current list (keeps UX snappy in slow nets)
+      await refetch();
+    },
   });
 
   // Filtered products based on search query
@@ -232,10 +274,7 @@ export default function ProductsPage() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold">Products</h1>
-        <Button>
-          <Plus className="h-4 w-4 mr-2" />
-          Add Product
-        </Button>
+        <ProductCreateForm onProductCreated={refetch} />
       </div>
 
       {/* Filters */}
@@ -299,6 +338,7 @@ export default function ProductsPage() {
                         <TableHead className="w-[100px]">Code</TableHead>
                         <TableHead>Name</TableHead>
                         <TableHead className="hidden md:table-cell">Description</TableHead>
+                        <TableHead className="w-[150px] text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -312,6 +352,33 @@ export default function ProductsPage() {
                           <TableCell>{product.name}</TableCell>
                           <TableCell className="hidden md:table-cell">
                             {product.description || 'No description'}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {/* Navigate to full details for editing */}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2 mr-2"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                router.push(`/products/${product.product_id}`);
+                              }}
+                            >
+                              Edit
+                            </Button>
+                            {/* Inline Delete */}
+                            <Button
+                              variant="destructiveSoft"
+                              size="sm"
+                              className="h-7 px-2"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedProduct(product);
+                                setDeleteOpen(true);
+                              }}
+                            >
+                              Delete
+                            </Button>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -354,23 +421,34 @@ export default function ProductsPage() {
         {selectedProduct && (
           <div className="w-96 shrink-0">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="text-xl">Product Details</CardTitle>
-                <Link href={`/products/${selectedProduct.product_id}`} passHref>
-                  <Button variant="outline" size="sm">
-                    View Full Details
+              <CardHeader className="flex flex-wrap items-center justify-between gap-2 pb-2">
+                <CardTitle className="text-xl flex-1 min-w-[8rem]">Product Details</CardTitle>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Link href={`/products/${selectedProduct.product_id}`} passHref>
+                    <Button variant="outline" size="sm" className="h-8 px-2">
+                      View Full Details
+                    </Button>
+                  </Link>
+                  <Button
+                    variant="destructiveSoft"
+                    size="sm"
+                    onClick={() => setDeleteOpen(true)}
+                    className="h-8 px-2"
+                  >
+                    <Trash2 className="h-4 w-4 mr-1" /> Delete
                   </Button>
-                </Link>
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="flex justify-center mb-4">
                   {selectedProduct.primary_image ? (
-                    <div className="h-48 w-48 relative rounded-md overflow-hidden">
+                    <div className="h-48 w-48 relative rounded-md overflow-hidden bg-card ring-0 dark:bg-white/5 dark:ring-1 dark:ring-white/10">
                       <Image 
                         src={selectedProduct.primary_image}
                         alt={selectedProduct.name}
                         fill
-                        className="object-contain"
+                        sizes="192px"
+                        className="object-contain dark:brightness-110 dark:drop-shadow-[0_8px_20px_rgba(0,0,0,0.8)]"
                       />
                     </div>
                   ) : (
@@ -387,7 +465,7 @@ export default function ProductsPage() {
                       <div 
                         key={image.image_id}
                         className={`
-                          h-16 w-16 relative rounded-md overflow-hidden flex-shrink-0 cursor-pointer
+                          h-16 w-16 relative rounded-md overflow-hidden flex-shrink-0 cursor-pointer bg-card dark:bg-white/5
                           ${image.is_primary ? 'ring-2 ring-primary' : 'ring-1 ring-border hover:ring-primary/50'}
                         `}
                       >
@@ -395,7 +473,8 @@ export default function ProductsPage() {
                           src={image.image_url}
                           alt={image.alt_text || selectedProduct.name}
                           fill
-                          className="object-contain"
+                          sizes="64px"
+                          className="object-contain dark:brightness-110"
                         />
                       </div>
                     ))}
@@ -418,9 +497,41 @@ export default function ProductsPage() {
                 </div>
               </CardContent>
             </Card>
-          </div>
-        )}
-      </div>
+
+          {/* Delete confirmation dialog */}
+          <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete product</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Are you sure you want to delete <strong>{selectedProduct.name}</strong>? This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel
+                  disabled={deleteProductMutation.isPending}
+                  onClick={() => setDeleteOpen(false)}
+                >
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  disabled={deleteProductMutation.isPending}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (selectedProduct) {
+                      deleteProductMutation.mutate(selectedProduct.product_id);
+                    }
+                  }}
+                >
+                  {deleteProductMutation.isPending ? 'Deleting...' : 'Delete'}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      )}
     </div>
-  );
-} 
+  </div>
+);
+}

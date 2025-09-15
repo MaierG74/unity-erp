@@ -39,7 +39,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
-import { Plus, Trash2, Edit, Save, X, Calendar } from 'lucide-react';
+import { Plus, Trash2, Edit, Save, X, Calendar, Loader2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { format } from 'date-fns';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -202,6 +202,8 @@ export function JobCategoriesManager() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobCategories'] });
       setEditingId(null);
+      // Clear the form back to defaults after a successful update
+      categoryForm.reset({ name: '', description: '', current_hourly_rate: 0 });
       toast({
         title: 'Success',
         description: 'Job category updated',
@@ -547,7 +549,10 @@ export function JobCategoriesManager() {
                             disabled={addCategory.isPending || updateCategory.isPending}
                           >
                             {addCategory.isPending || updateCategory.isPending ? (
-                              'Saving...'
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Saving...
+                              </>
                             ) : editingId ? (
                               'Update Category'
                             ) : (

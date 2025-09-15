@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { pdf } from '@react-pdf/renderer';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
@@ -52,9 +53,16 @@ import {
   Printer,
   Loader2,
   Columns,
-  RefreshCw
+  RefreshCw,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Search,
+  X
 } from 'lucide-react';
+import { DailyHoursDetailDialog } from '@/components/features/staff/DailyHoursDetailDialog';
 import React from 'react';
+import { WeeklySummaryPDF, WeeklySummaryDay } from '@/components/features/staff/WeeklySummaryPDF';
 
 // Types
 type Staff = {
@@ -107,12 +115,25 @@ type WeeklySummaryRow = {
   totalHours: number;
 };
 
+type SortField = 'name' | 'job' | 'regular' | 'doubletime' | 'overtime' | 'total';
+type SortDirection = 'asc' | 'desc';
+
 export function WeeklySummary() {
   const queryClient = useQueryClient();
   const [selectedWeek, setSelectedWeek] = useState<Date>(new Date());
   const [summaryData, setSummaryData] = useState<WeeklySummaryRow[]>([]);
+  const [filteredData, setFilteredData] = useState<WeeklySummaryRow[]>([]);
   const [isExporting, setIsExporting] = useState(false);
   const [compactView, setCompactView] = useState(false);
+  const [sortField, setSortField] = useState<SortField>('name');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [filterText, setFilterText] = useState('');
+  const [selectedDayDetail, setSelectedDayDetail] = useState<{
+    staffId: number;
+    staffName: string;
+    date: string;
+    hours: number;
+  } | null>(null);
   const { toast } = useToast();
 
   // Calculate week range (start on Friday)
@@ -213,6 +234,98 @@ export function WeeklySummary() {
 
   }, [activeStaff, weeklySummaries, publicHolidays, daysOfWeek]);
 
+  // Sort and filter data
+  useEffect(() => {
+    let filtered = summaryData.filter(row => {
+      if (!filterText) return true;
+      const searchTerm = filterText.toLowerCase();
+      return (
+        row.staff_name.toLowerCase().includes(searchTerm) ||
+        (row.job_description && row.job_description.toLowerCase().includes(searchTerm))
+      );
+    });
+
+    // Sort the filtered data
+    filtered.sort((a, b) => {
+      let aValue: string | number;
+      let bValue: string | number;
+
+      switch (sortField) {
+        case 'name':
+          aValue = a.staff_name;
+          bValue = b.staff_name;
+          break;
+        case 'job':
+          aValue = a.job_description || '';
+          bValue = b.job_description || '';
+          break;
+        case 'regular':
+          aValue = a.totalRegularHours;
+          bValue = b.totalRegularHours;
+          break;
+        case 'doubletime':
+          aValue = a.totalDoubleTimeHours;
+          bValue = b.totalDoubleTimeHours;
+          break;
+        case 'overtime':
+          aValue = a.totalOvertimeHours;
+          bValue = b.totalOvertimeHours;
+          break;
+        case 'total':
+          aValue = a.totalHours;
+          bValue = b.totalHours;
+          break;
+        default:
+          aValue = a.staff_name;
+          bValue = b.staff_name;
+      }
+
+      if (typeof aValue === 'string' && typeof bValue === 'string') {
+        return sortDirection === 'asc' 
+          ? aValue.localeCompare(bValue)
+          : bValue.localeCompare(aValue);
+      } else {
+        return sortDirection === 'asc'
+          ? (aValue as number) - (bValue as number)
+          : (bValue as number) - (aValue as number);
+      }
+    });
+
+    setFilteredData(filtered);
+  }, [summaryData, filterText, sortField, sortDirection]);
+
+  // Handle column sorting
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  // Clear filter
+  const clearFilter = () => {
+    setFilterText('');
+  };
+
+  // Handle daily hours cell click
+  const handleDayClick = (staffId: number, staffName: string, dateStr: string, hours: number) => {
+    if (hours > 0) {
+      setSelectedDayDetail({
+        staffId,
+        staffName,
+        date: dateStr,
+        hours
+      });
+    }
+  };
+
+  // Close daily detail dialog
+  const closeDayDetail = () => {
+    setSelectedDayDetail(null);
+  };
+
 
 
   // Navigate to previous week
@@ -242,7 +355,7 @@ export function WeeklySummary() {
       csvContent += ",Regular Hours,D/Time Hours,Overtime Hours,Total Hours\n";
       
       // Add data rows
-      summaryData.forEach(row => {
+      filteredData.forEach(row => {
         csvContent += `"${row.staff_name}","${row.job_description || 'N/A'}"`;
         
         // Add hours for each day
@@ -281,17 +394,90 @@ export function WeeklySummary() {
     }
   };
 
-  // Print weekly summary
-  const printSummary = () => {
-    window.print();
+  // Print weekly summary as PDF
+  const printSummary = async () => {
+    try {
+      // Days metadata for PDF
+      const days: WeeklySummaryDay[] = daysOfWeek.map((day) => ({
+        key: format(day, 'yyyy-MM-dd'),
+        label: `${format(day, 'EEE')} ${format(day, 'dd/MM')}`,
+      }));
+
+      // Rows from current filtered data
+      const rows = filteredData.map((row) => {
+        const daily: Record<string, number> = {};
+        days.forEach((d) => {
+          daily[d.key] = row.dailyHours[d.key]?.hours ?? 0;
+        });
+        return {
+          staff_name: row.staff_name,
+          job_description: row.job_description,
+          dailyHours: daily,
+          totalRegularHours: row.totalRegularHours,
+          totalDoubleTimeHours: row.totalDoubleTimeHours,
+          totalOvertimeHours: row.totalOvertimeHours,
+          totalHours: row.totalHours,
+        };
+      });
+
+      const component = (
+        <WeeklySummaryPDF
+          weekStart={format(weekStart, 'yyyy-MM-dd')}
+          weekEnd={format(weekEnd, 'yyyy-MM-dd')}
+          days={days}
+          rows={rows}
+          includeJob={!compactView}
+          generatedAt={new Date().toLocaleString()}
+        />
+      );
+
+      const blob = await pdf(component).toBlob();
+      const filename = `weekly_summary_${format(weekStart, 'yyyy-MM-dd')}_to_${format(weekEnd, 'yyyy-MM-dd')}.pdf`;
+
+      // Prefer native Save dialog when supported (Chromium-based browsers)
+      const savePicker: any = (window as any).showSaveFilePicker;
+      if (typeof savePicker === 'function') {
+        try {
+          const handle = await savePicker({
+            suggestedName: filename,
+            types: [
+              {
+                description: 'PDF document',
+                accept: { 'application/pdf': ['.pdf'] },
+              },
+            ],
+          });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          toast({ title: 'Saved', description: `Saved as ${handle.name || filename}` });
+          return;
+        } catch (err) {
+          // User may have canceled; fall through to download
+        }
+      }
+
+      // Fallback: trigger a normal download with a proper .pdf extension
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Failed to generate weekly summary PDF', e);
+      toast({ title: 'Error', description: 'Failed to generate PDF. Please try again.', variant: 'destructive' });
+    }
   };
 
   // Calculate daily totals
   const getDailyTotal = React.useCallback((dateStr: string) => {
-    return summaryData.reduce((total, staff) => {
+    return filteredData.reduce((total, staff) => {
       return total + (staff.dailyHours[dateStr]?.hours || 0);
     }, 0);
-  }, [summaryData]);
+  }, [filteredData]);
 
   // Loading state
   if (isLoadingStaff || isLoadingSummaries) {
@@ -344,6 +530,34 @@ export function WeeklySummary() {
             </Button>
           </div>
         </div>
+        
+        {/* Filter input */}
+        <div className="flex items-center space-x-2 mt-4">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Filter by name or job..."
+              value={filterText}
+              onChange={(e) => setFilterText(e.target.value)}
+              className="pl-8"
+            />
+            {filterText && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="absolute right-1 top-1 h-6 w-6 p-0"
+                onClick={clearFilter}
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
+          {filterText && (
+            <Badge variant="secondary">
+              {filteredData.length} of {summaryData.length} staff
+            </Badge>
+          )}
+        </div>
       </CardHeader>
       <CardContent>
         <div className="rounded-md border print:border-none overflow-x-auto max-w-[calc(100vw-3rem)] relative">
@@ -354,8 +568,34 @@ export function WeeklySummary() {
           <Table className="w-full table-fixed">
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[180px] sticky left-0 z-10 bg-background">Staff Member</TableHead>
-                {!compactView && <TableHead className="w-[120px]">Job</TableHead>}
+                <TableHead className="w-[180px] sticky left-0 z-10 bg-background">
+                  <Button
+                    variant="ghost"
+                    className="h-auto p-0 font-semibold text-left justify-start hover:bg-transparent"
+                    onClick={() => handleSort('name')}
+                  >
+                    Staff Member
+                    {sortField === 'name' && (
+                      sortDirection === 'asc' ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                    )}
+                    {sortField !== 'name' && <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />}
+                  </Button>
+                </TableHead>
+                {!compactView && (
+                  <TableHead className="w-[120px]">
+                    <Button
+                      variant="ghost"
+                      className="h-auto p-0 font-semibold text-left justify-start hover:bg-transparent"
+                      onClick={() => handleSort('job')}
+                    >
+                      Job
+                      {sortField === 'job' && (
+                        sortDirection === 'asc' ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                      )}
+                      {sortField !== 'job' && <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />}
+                    </Button>
+                  </TableHead>
+                )}
                 {daysOfWeek.map(day => {
                   // In compact view, only show weekend days and current day
                   const isWeekend = isSaturday(day) || isSunday(day);
@@ -375,14 +615,64 @@ export function WeeklySummary() {
                     </TableHead>
                   );
                 })}
-                <TableHead className="w-[80px] text-center">Regular</TableHead>
-                <TableHead className="w-[80px] text-center">D/Time</TableHead>
-                {!compactView && <TableHead className="w-[80px] text-center">Overtime</TableHead>}
-                <TableHead className="w-[80px] text-center">Total</TableHead>
+                <TableHead className="w-[80px] text-center">
+                  <Button
+                    variant="ghost"
+                    className="h-auto p-0 font-semibold hover:bg-transparent"
+                    onClick={() => handleSort('regular')}
+                  >
+                    Regular
+                    {sortField === 'regular' && (
+                      sortDirection === 'asc' ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                    )}
+                    {sortField !== 'regular' && <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />}
+                  </Button>
+                </TableHead>
+                <TableHead className="w-[80px] text-center">
+                  <Button
+                    variant="ghost"
+                    className="h-auto p-0 font-semibold hover:bg-transparent"
+                    onClick={() => handleSort('doubletime')}
+                  >
+                    D/Time
+                    {sortField === 'doubletime' && (
+                      sortDirection === 'asc' ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                    )}
+                    {sortField !== 'doubletime' && <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />}
+                  </Button>
+                </TableHead>
+                {!compactView && (
+                  <TableHead className="w-[80px] text-center">
+                    <Button
+                      variant="ghost"
+                      className="h-auto p-0 font-semibold hover:bg-transparent"
+                      onClick={() => handleSort('overtime')}
+                    >
+                      Overtime
+                      {sortField === 'overtime' && (
+                        sortDirection === 'asc' ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                      )}
+                      {sortField !== 'overtime' && <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />}
+                    </Button>
+                  </TableHead>
+                )}
+                <TableHead className="w-[80px] text-center">
+                  <Button
+                    variant="ghost"
+                    className="h-auto p-0 font-semibold hover:bg-transparent"
+                    onClick={() => handleSort('total')}
+                  >
+                    Total
+                    {sortField === 'total' && (
+                      sortDirection === 'asc' ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                    )}
+                    {sortField !== 'total' && <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />}
+                  </Button>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {summaryData.map((row) => (
+              {filteredData.map((row) => (
                 <TableRow key={row.staff_id}>
                   <TableCell className="font-medium sticky left-0 z-10 bg-background">{row.staff_name}</TableCell>
                   {!compactView && <TableCell>{row.job_description || 'N/A'}</TableCell>}
@@ -402,7 +692,8 @@ export function WeeklySummary() {
                     return (
                       <TableCell 
                         key={dateStr} 
-                        className={`text-center ${isWeekend ? 'bg-muted' : ''} ${isHoliday ? 'bg-muted-foreground/10' : ''} ${dayData?.isSunday ? 'text-red-500 font-semibold' : ''} ${isToday ? 'bg-primary/10' : ''}`}
+                        className={`text-center ${isWeekend ? 'bg-muted' : ''} ${isHoliday ? 'bg-muted-foreground/10' : ''} ${dayData?.isSunday ? 'text-red-500 font-semibold' : ''} ${isToday ? 'bg-primary/10' : ''} ${dayData?.hours > 0 ? 'cursor-pointer hover:bg-primary/20 transition-colors' : ''}`}
+                        onClick={() => handleDayClick(row.staff_id, row.staff_name, dateStr, dayData?.hours || 0)}
                       >
                         {dayData?.hours > 0 ? dayData.hours : '-'}
                       </TableCell>
@@ -445,16 +736,16 @@ export function WeeklySummary() {
                 })}
                 
                 <TableCell className="text-center font-bold">
-                  {summaryData.reduce((total, row) => total + row.totalRegularHours, 0).toFixed(2)}
+                  {filteredData.reduce((total, row) => total + row.totalRegularHours, 0).toFixed(2)}
                 </TableCell>
                 <TableCell className="text-center font-bold text-red-500">
-                  {summaryData.reduce((total, row) => total + row.totalDoubleTimeHours, 0).toFixed(2)}
+                  {filteredData.reduce((total, row) => total + row.totalDoubleTimeHours, 0).toFixed(2)}
                 </TableCell>
                 {!compactView && <TableCell className="text-center font-bold">
-                  {summaryData.reduce((total, row) => total + row.totalOvertimeHours, 0).toFixed(2)}
+                  {filteredData.reduce((total, row) => total + row.totalOvertimeHours, 0).toFixed(2)}
                 </TableCell>}
                 <TableCell className="text-center font-bold">
-                  {summaryData.reduce((total, row) => total + row.totalHours, 0).toFixed(2)}
+                  {filteredData.reduce((total, row) => total + row.totalHours, 0).toFixed(2)}
                 </TableCell>
               </TableRow>
             </TableBody>
@@ -464,7 +755,7 @@ export function WeeklySummary() {
       <CardFooter className="flex justify-between print:hidden">
         <div>
           <p className="text-sm text-muted-foreground">
-            {summaryData.length} staff members | Week {format(weekStart, 'w, yyyy')}
+            {filteredData.length} {filterText ? `of ${summaryData.length}` : ''} staff members | Week {format(weekStart, 'w, yyyy')}
           </p>
         </div>
         <div className="flex space-x-2">
@@ -491,6 +782,18 @@ export function WeeklySummary() {
           </Button>
         </div>
       </CardFooter>
+
+      {/* Daily Hours Detail Dialog */}
+      {selectedDayDetail && (
+        <DailyHoursDetailDialog
+          isOpen={!!selectedDayDetail}
+          onClose={closeDayDetail}
+          staffId={selectedDayDetail.staffId}
+          staffName={selectedDayDetail.staffName}
+          date={selectedDayDetail.date}
+          initialHours={selectedDayDetail.hours}
+        />
+      )}
     </Card>
   );
 } 

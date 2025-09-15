@@ -56,6 +56,17 @@ Focus: Resolve the 30-minute tea/lunch deduction logic and ensure accurate regul
 ## 5. Risks & Mitigations
 - **Double deduction**: Guard with feature flag until confirmed.
 - **Historical data mismatch**: Leave historical summaries untouched; re-process only if needed.
+- **Negative summary after deletion**: If all clock events for a day are removed, the summary row may persist with a **-0.50 h** value (30-min deduction applied to zero minutes). This could confuse users and must be auto-cleaned.
+
+## 6. Open Edge-Case Fix
+When `total_work_minutes = 0` **and** no clock events exist for the staff/date:
+1. **Option A – Auto-delete summary row** in `trigger_process_clock_event()` after segment re-processing.
+2. **Option B – Update summary row to all zeros** (regular/ot/dt/total) in `before_insert_or_update_time_daily_summary`.
+
+Preferred: **Option A** keeps table size small and avoids negative values. This was implemented on 26 Jul 2025: summary rows now reset to zero if all events are deleted, so negative (-0.50h) values will not persist after the fix.
+
+### Post-Fix Manual Cleanup
+For summary rows created before the fix, simply add and delete a dummy clock event for that staff/date and click "Process Clock Events". The negative value will be cleared and future calculations will be correct.
 
 ---
 > Last updated: 26 Jul 2025

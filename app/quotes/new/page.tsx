@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createQuote, Quote } from '@/lib/db/quotes';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select';
@@ -25,14 +24,24 @@ export default function NewQuotePage() {
   const handleCreate = async () => {
     setLoading(true);
     try {
-      const newQuote = await createQuote({
-        quote_number: quoteNumber,
-        customer_id: customerId,
-        status,
-      } as Partial<Quote>);
-      router.push(`/quotes/${newQuote.id}`);
+      const res = await fetch('/api/quotes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          quote_number: quoteNumber,
+          customer_id: Number(customerId),
+          status,
+        }),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody?.error || 'Failed to create quote');
+      }
+      const data = await res.json();
+      router.push(`/quotes/${data.quote.id}`);
     } catch (err) {
       console.error(err);
+    } finally {
       setLoading(false);
     }
   };

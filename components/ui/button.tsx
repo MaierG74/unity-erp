@@ -12,6 +12,10 @@ const buttonVariants = cva(
         default: "bg-primary text-primary-foreground hover:bg-primary/90",
         destructive:
           "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+        // Soft/desaturated destructive used for lightweight delete actions
+        destructiveSoft:
+          // Light: pastel surface with red text; Dark: strong red for contrast
+          "bg-destructive/15 text-destructive border border-destructive/20 hover:bg-destructive/20 dark:bg-destructive dark:text-destructive-foreground dark:border-transparent dark:hover:bg-destructive/90",
         outline:
           "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
         secondary:

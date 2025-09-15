@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import React from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useForm } from 'react-hook-form';
@@ -52,7 +53,17 @@ import { Button } from '@/components/ui/button';
 import { Plus, Trash2, Edit, Save, X, ChevronDown, ChevronUp, Search, Filter, LayoutList, LayoutGrid } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Badge } from '@/components/ui/badge';
-import { debounce } from 'lodash';
+import { useDebounce } from '@/hooks/use-debounce';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 // Define types
 interface JobCategory {
@@ -82,15 +93,26 @@ type JobFormValues = z.infer<typeof jobSchema>;
 export function JobsManager() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [totalJobs, setTotalJobs] = useState(0);
   const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({});
   const [isCompactView, setIsCompactView] = useState(true);
+  // Delete confirmation dialog state
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [jobToDelete, setJobToDelete] = useState<Job | null>(null);
   
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  
+  // Debounce the search input value
+  const debouncedSearchTerm = useDebounce(searchInput, 300);
+  useEffect(() => {
+    setSearchTerm(debouncedSearchTerm);
+    setPage(1); // Reset to first page on new search
+  }, [debouncedSearchTerm]);
   
   // Initialize form
   const form = useForm<JobFormValues>({
@@ -189,14 +211,9 @@ export function JobsManager() {
     },
   });
   
-  // Debounced search handler
-  const debouncedSearch = debounce((value: string) => {
-    setSearchTerm(value);
-    setPage(1); // Reset to first page on new search
-  }, 300);
-  
+  // Search handler (debounced via useDebounce)
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    debouncedSearch(e.target.value);
+    setSearchInput(e.target.value);
   };
   
   // Category filter handler
@@ -290,20 +307,37 @@ export function JobsManager() {
   // Delete job mutation
   const deleteJob = useMutation({
     mutationFn: async (jobId: number) => {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('jobs')
         .delete()
-        .eq('job_id', jobId);
-        
+        .eq('job_id', jobId)
+        .select('job_id');
+
       if (error) throw error;
+      return data as Array<{ job_id: number }>; // may be empty if nothing deleted
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['jobs'] });
-      toast({
-        title: 'Success',
-        description: 'Job deleted successfully',
-      });
-      refetchJobs();
+    onSuccess: async (data) => {
+      const deletedId = Array.isArray(data) && data[0]?.job_id ? Number(data[0].job_id) : null;
+      // Optimistically update current page cache so the row disappears immediately
+      if (deletedId != null) {
+        const key = ['jobs', page, pageSize, categoryFilter, searchTerm] as const;
+        queryClient.setQueryData<Job[] | undefined>(key, (old) =>
+          Array.isArray(old) ? old.filter((j) => j.job_id !== deletedId) : old
+        );
+      }
+
+      if (Array.isArray(data) && data.length > 0) {
+        toast({ title: 'Success', description: 'Job deleted successfully' });
+      } else {
+        toast({
+          title: 'Not deleted',
+          description: 'No rows affected (not found or blocked).',
+          variant: 'destructive',
+        });
+      }
+      // Ensure all jobs queries refresh (counts, other pages, etc.)
+      await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      await refetchJobs();
     },
     onError: (error) => {
       toast({
@@ -429,8 +463,8 @@ export function JobsManager() {
                       </TableRow>
                     ) : (
                       jobs.map((job) => (
-                        <>
-                          <TableRow key={job.job_id}>
+                        <React.Fragment key={job.job_id}>
+                          <TableRow>
                             {isCompactView && (
                               <TableCell className="px-2">
                                 <Button
@@ -464,12 +498,12 @@ export function JobsManager() {
                                   <Edit className="h-4 w-4" />
                                 </Button>
                                 <Button
+                                  type="button"
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => {
-                                    if (confirm(`Are you sure you want to delete ${job.name}?`)) {
-                                      deleteJob.mutate(job.job_id);
-                                    }
+                                    setJobToDelete(job);
+                                    setConfirmOpen(true);
                                   }}
                                 >
                                   <Trash2 className="h-4 w-4" />
@@ -487,7 +521,7 @@ export function JobsManager() {
                               </TableCell>
                             </TableRow>
                           )}
-                        </>
+                        </React.Fragment>
                       ))
                     )}
                   </TableBody>
@@ -691,6 +725,32 @@ export function JobsManager() {
           </div>
         </CardFooter>
       </Card>
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete job?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete {jobToDelete?.name}? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setJobToDelete(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (jobToDelete) {
+                  deleteJob.mutate(jobToDelete.job_id);
+                }
+                setConfirmOpen(false);
+                setJobToDelete(null);
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
-} 
+}

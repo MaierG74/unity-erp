@@ -10,6 +10,9 @@ export function RootLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const [forceShowSidebar, setForceShowSidebar] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const hasSupabaseEnv = Boolean(
+    process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  );
   
   // Check for authentication and set force sidebar if needed
   useEffect(() => {
@@ -39,17 +42,19 @@ export function RootLayout({ children }: { children: React.ReactNode }) {
   // Direct auth check as a backup
   const checkDirectAuth = async () => {
     try {
-      const { data } = await supabase.auth.getSession();
-      if (data.session) {
-        console.log('Direct auth check found session:', data.session);
-        setForceShowSidebar(true);
-      } else {
-        // Use localStorage as a last resort (for development/debugging)
-        const debugMode = localStorage.getItem('debug-show-sidebar') === 'true';
-        if (debugMode) {
-          console.log('Debug mode enabled - showing sidebar');
+      if (hasSupabaseEnv) {
+        const { data } = await supabase.auth.getSession();
+        if (data.session) {
+          console.log('Direct auth check found session:', data.session);
           setForceShowSidebar(true);
+          return;
         }
+      }
+      // Use localStorage as a last resort (for development/debugging)
+      const debugMode = localStorage.getItem('debug-show-sidebar') === 'true';
+      if (debugMode) {
+        console.log('Debug mode enabled - showing sidebar');
+        setForceShowSidebar(true);
       }
     } catch (err) {
       console.error('Error checking direct auth:', err);

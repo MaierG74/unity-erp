@@ -35,6 +35,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { pdf } from '@react-pdf/renderer';
 import { useReactToPrint } from 'react-to-print';
 import { 
   Table, 
@@ -46,6 +47,7 @@ import {
 } from '@/components/ui/table';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Label } from '@/components/ui/label';
+import StaffPayrollPDF, { StaffPayrollPDF as StaffPayrollPDFNamed, type PayrollRow as PayrollRowPDF } from './StaffPayrollPDF';
 
 // Types
 type Staff = {
@@ -405,6 +407,41 @@ export function StaffReports() {
     const filename = `${activeTab}-report-${format(startDate || new Date(), 'yyyy-MM-dd')}-to-${format(endDate || new Date(), 'yyyy-MM-dd')}`;
     exportToCSV(reportData, filename);
   };
+
+  // Print Payroll report as a formatted PDF
+  const printPayrollPdf = async () => {
+    if (!reportData || activeTab !== 'payroll') return;
+    const periodText = `${format(startDate || new Date(), 'PP')} – ${format(endDate || new Date(), 'PP')}`;
+    const doc = (
+      <StaffPayrollPDFNamed
+        periodText={periodText}
+        data={(reportData as PayrollReport[]).map(r => ({
+          staff_id: r.staff_id,
+          name: r.name,
+          hourly_rate: r.hourly_rate,
+          regular_hours: r.regular_hours,
+          overtime_hours: r.overtime_hours,
+          doubletime_hours: r.doubletime_hours,
+          total_hours: r.total_hours,
+          regular_earnings: r.regular_earnings,
+          overtime_earnings: r.overtime_earnings,
+          doubletime_earnings: r.doubletime_earnings,
+          total_earnings: r.total_earnings,
+        }))}
+        generatedAt={`${format(new Date(), 'PPpp')}`}
+      />
+    );
+
+    const blob = await pdf(doc).toBlob();
+    const url = URL.createObjectURL(blob);
+    const win = window.open(url);
+    if (!win) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `payroll-${format(startDate || new Date(), 'yyyy-MM-dd')}-to-${format(endDate || new Date(), 'yyyy-MM-dd')}.pdf`;
+      a.click();
+    }
+  };
   
   return (
     <div className="space-y-6">
@@ -569,9 +606,9 @@ export function StaffReports() {
                       <Download className="mr-2 h-4 w-4" />
                       Export to CSV
                     </Button>
-                    <Button variant="outline" onClick={() => window.print()}>
+                    <Button variant="outline" onClick={printPayrollPdf}>
                       <Printer className="mr-2 h-4 w-4" />
-                      Print Report
+                      Print PDF
                     </Button>
                   </div>
                 </>
