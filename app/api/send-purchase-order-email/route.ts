@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { renderAsync } from '@react-email/render';
 import { Resend } from 'resend';
 import { createClient } from '@supabase/supabase-js';
-import PurchaseOrderEmail from '@/emails/purchase-order-email';
+import PurchaseOrderEmail, { PurchaseOrderEmailProps, SupplierOrderItem } from '@/emails/purchase-order-email';
 
 
 
@@ -59,14 +59,19 @@ export async function POST(request: Request) {
       );
     }
 
-    // Extract unique suppliers from the order
+    // Extract unique suppliers from the order (handle array/object shapes from Supabase)
     const uniqueSuppliers = purchaseOrder.supplier_orders
-      .map((order: any) => ({
-        supplier_id: order.supplier_component.supplier.supplier_id,
-        name: order.supplier_component.supplier.name,
-      }))
-      .filter((supplier: any, index: number, self: any[]) => 
-        index === self.findIndex((s: any) => s.supplier_id === supplier.supplier_id)
+      .map((order: any) => {
+        const sc = Array.isArray(order.supplier_component)
+          ? order.supplier_component[0]
+          : order.supplier_component;
+        const sup = Array.isArray(sc?.supplier) ? sc.supplier[0] : sc?.supplier;
+        if (!sup) return null;
+        return { supplier_id: sup.supplier_id, name: sup.name };
+      })
+      .filter((s: any) => !!s)
+      .filter((supplier: any, index: number, self: any[]) =>
+        index === self.findIndex((t: any) => t.supplier_id === supplier.supplier_id)
       );
     
     // Send email to each supplier
@@ -90,20 +95,41 @@ export async function POST(request: Request) {
         continue; // Skip to next supplier if email not found
       }
       
-      // Get only the orders for this supplier
-      const supplierOrders = purchaseOrder.supplier_orders
-        .filter((order: any) => 
-          order.supplier_component.supplier.supplier_id === supplier.supplier_id
-        );
-      
-      // Prepare email data
-      const emailData = {
-        purchaseOrderId: purchaseOrder.purchase_order_id,
-        qNumber: purchaseOrder.q_number,
-        supplierName: supplier.name,
-        createdAt: purchaseOrder.created_at,
-        supplierOrders: supplierOrders,
-        notes: purchaseOrder.notes,
+      // Get only the orders for this supplier and normalize shape for email template
+      const supplierOrdersRaw = purchaseOrder.supplier_orders.filter((order: any) => {
+        const sc = Array.isArray(order.supplier_component)
+          ? order.supplier_component[0]
+          : order.supplier_component;
+        const sup = Array.isArray(sc?.supplier) ? sc.supplier[0] : sc?.supplier;
+        return sup?.supplier_id === supplier.supplier_id;
+      });
+
+      const supplierOrdersForEmail: SupplierOrderItem[] = supplierOrdersRaw.map((order: any) => {
+        const sc = Array.isArray(order.supplier_component)
+          ? order.supplier_component[0]
+          : order.supplier_component;
+        return {
+          order_id: Number(order.order_id),
+          order_quantity: Number(order.order_quantity),
+          supplier_component: {
+            supplier_code: sc?.supplier_code ?? '',
+            price: Number(sc?.price ?? 0),
+            component: {
+              internal_code: sc?.component?.internal_code ?? '',
+              description: sc?.component?.description ?? '',
+            },
+          },
+        };
+      });
+
+      // Prepare email data in the exact shape expected by the template
+      const emailData: PurchaseOrderEmailProps = {
+        purchaseOrderId: Number(purchaseOrder.purchase_order_id),
+        qNumber: String(purchaseOrder.q_number),
+        supplierName: String(supplier.name),
+        createdAt: String(purchaseOrder.created_at),
+        supplierOrders: supplierOrdersForEmail,
+        notes: purchaseOrder.notes ?? undefined,
         // Company details could be loaded from environment variables or database
         companyName: process.env.COMPANY_NAME || 'Unity',
         companyLogo: process.env.COMPANY_LOGO || 'https://your-company-logo-url.com',

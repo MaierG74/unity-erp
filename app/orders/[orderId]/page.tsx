@@ -1953,33 +1953,7 @@ const sections: { [key: string]: OrderSection } = {
   },
 };
 
-// Before any components or functions, add these type definitions
-interface Customer {
-  customer_id: number;
-  name: string;
-  email?: string;
-  contact_person?: string;
-  phone?: string;
-  address?: string;
-}
-
-interface OrderDetail {
-  order_detail_id: number;
-  order_id: number;
-  product_id: number;
-  quantity: number;
-  unit_price: number;
-  product?: {
-    product_id: number;
-    name: string;
-    description?: string;
-  };
-}
-
-interface Order extends DBOrder {
-  customer?: Customer;
-  details?: OrderDetail[];
-}
+// Using shared types from '@/types/orders' for Order, Customer, and OrderDetail
 
 interface SupplierInfo {
   supplier_id: number;

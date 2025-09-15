@@ -41,6 +41,11 @@ const navigation = [
     icon: Box 
   },
   { 
+    name: 'Collections', 
+    href: '/collections',
+    icon: Box 
+  },
+  { 
     name: 'Inventory', 
     href: '/inventory',
     icon: Package 

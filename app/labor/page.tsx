@@ -2,6 +2,8 @@ import { Metadata } from 'next';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { JobCategoriesManager } from '@/components/features/labor/job-categories-manager';
 import { JobsManager } from '@/components/features/labor/jobs-manager';
+import { PieceworkRatesManager } from '@/components/features/labor/piecework-rates-manager';
+import { JobHourlyRatesManager } from '@/components/features/labor/job-hourly-rates-manager';
 
 export const metadata: Metadata = {
   title: 'Labor Management',
@@ -22,6 +24,8 @@ export default function LaborManagementPage() {
         <TabsList>
           <TabsTrigger value="categories">Job Categories</TabsTrigger>
           <TabsTrigger value="jobs">Jobs</TabsTrigger>
+          <TabsTrigger value="hourly">Hourly Rates</TabsTrigger>
+          <TabsTrigger value="piecework">Piecework Rates</TabsTrigger>
         </TabsList>
         <TabsContent value="categories" className="space-y-4">
           <JobCategoriesManager />
@@ -29,7 +33,13 @@ export default function LaborManagementPage() {
         <TabsContent value="jobs" className="space-y-4">
           <JobsManager />
         </TabsContent>
+        <TabsContent value="hourly" className="space-y-4">
+          <JobHourlyRatesManager />
+        </TabsContent>
+        <TabsContent value="piecework" className="space-y-4">
+          <PieceworkRatesManager />
+        </TabsContent>
       </Tabs>
     </div>
   );
-} 
+}

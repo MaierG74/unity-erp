@@ -110,13 +110,13 @@ export function ImageGallery({
   return (
     <div className="space-y-4">
       {/* Main image display */}
-      <div className="relative h-[400px] w-full max-w-[600px] mx-auto overflow-hidden rounded-lg bg-muted">
+      <div className="relative h-[400px] w-full max-w-[600px] mx-auto overflow-hidden rounded-lg bg-card ring-0 dark:bg-white/5 dark:ring-1 dark:ring-white/10">
         {selectedImage ? (
           <Image
             src={selectedImage.image_url}
             alt="Product image"
             fill
-            className="object-contain"
+            className="object-contain dark:brightness-110 dark:drop-shadow-[0_8px_30px_rgba(0,0,0,0.85)]"
           />
         ) : (
           <div className="flex h-full items-center justify-center text-muted-foreground">
@@ -130,7 +130,7 @@ export function ImageGallery({
         {images.map((image) => (
           <div
             key={image.id}
-            className={`group relative aspect-square cursor-pointer overflow-hidden rounded-md bg-muted ${
+            className={`group relative aspect-square cursor-pointer overflow-hidden rounded-md bg-card dark:bg-white/5 ${
               selectedImage?.id === image.id ? "ring-2 ring-primary" : ""
             }`}
             onClick={() => setSelectedImage(image)}
@@ -139,7 +139,7 @@ export function ImageGallery({
               src={image.image_url}
               alt="Product thumbnail"
               fill
-              className="object-cover"
+              className="object-cover dark:brightness-110"
             />
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60 opacity-0 transition-opacity group-hover:opacity-100">
               {!image.is_primary && (

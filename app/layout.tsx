@@ -10,7 +10,10 @@ import { Toaster } from "@/components/ui/toaster";
 const inter = Inter({ subsets: ["latin"], preload: false });
 
 export const metadata: Metadata = {
-  title: "Unity ERP",
+  title: {
+    default: "Unity ERP",
+    template: "%s",
+  },
   description: "Internal ERP system built with modern React stack",
   icons: {
     icon: "/favicon.ico",

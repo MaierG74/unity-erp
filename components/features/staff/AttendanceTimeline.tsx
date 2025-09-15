@@ -14,7 +14,7 @@ import {
   DialogTitle,
   DialogClose
 } from '@/components/ui/dialog';
-import { ChevronDown, ChevronUp, Edit3, Trash2, Plus, User } from 'lucide-react';
+import { ChevronDown, ChevronUp, Edit3, Trash2, Plus, User, RefreshCw, Loader2 } from 'lucide-react';
 import { ClockEvent, TimeSegment } from '@/lib/types/attendance';
 
 import { DailySummary } from '@/lib/types/attendance';
@@ -25,8 +25,9 @@ interface AttendanceTimelineProps {
   date: Date;
   clockEvents: ClockEvent[];
   segments: TimeSegment[];
-  onAddManualEvent: (staffId: number, eventType: string, time: string, breakType?: string | null) => void;
+  onAddManualEvent: (staffId: number, eventType: string, time: string, breakType?: string | null) => Promise<void>;
   onSegmentsChanged: () => void;
+  onProcessStaff: (staffId?: number) => Promise<void>;
   summary?: DailySummary | null;
 };
 
@@ -38,6 +39,7 @@ export function AttendanceTimeline({
   segments,
   onAddManualEvent,
   onSegmentsChanged,
+  onProcessStaff,
   summary,
 }: AttendanceTimelineProps) {
   const { toast } = useToast();
@@ -48,6 +50,7 @@ export function AttendanceTimeline({
   const [eventType, setEventType] = useState<string>('clock_in');
   const [eventTime, setEventTime] = useState('');
   const [breakType, setBreakType] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
   
   // Time edit dialog states
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -114,10 +117,14 @@ export function AttendanceTimeline({
 
   // Calculate display hours
   const displayHours = useMemo(() => {
+    // Debug: Log summary data to understand what's being passed
+    console.log(`[AttendanceTimeline] Summary for ${staffName}:`, summary);
+    
     // If a precomputed daily summary is provided, use it so totals reflect unpaid-break deductions
     if (summary) {
-      const totalHours = Number(summary.total_hours_worked);
+      const totalHours = Number(summary.total_hours_worked || summary.total_work_minutes / 60);
       const unpaid = summary.unpaid_break_minutes ?? 0;
+      console.log(`[AttendanceTimeline] Using summary data for ${staffName}: ${totalHours} hours`);
       return {
         total_hours: totalHours,
         regular_hours: totalHours, // daily OT suppressed
@@ -207,6 +214,7 @@ export function AttendanceTimeline({
     
     setTimeError(null);
     setIsEditDialogOpen(false);
+    setIsProcessing(true);
     
     try {
       // console.log('[handleEdit] Event to edit:', editingEvent);
@@ -238,11 +246,11 @@ export function AttendanceTimeline({
         description: 'Event updated successfully. Refreshing data...'
       });
 
-      // Notify parent to refresh data, which will invalidate query cache and refetch
-      if (onSegmentsChanged) {
-        // console.log('[handleEditSubmit] Calling onSegmentsChanged to trigger data refresh');
-        onSegmentsChanged();
-      }
+      // Process only this staff member after editing a clock event
+      // Get staff ID from the editing event to ensure we have the right value
+      const eventStaffId = editingEvent.staff_id;
+      console.log(`[AttendanceTimeline] Edit completed for staffId: ${eventStaffId} (prop: ${staffId}), calling onProcessStaff`);
+      await onProcessStaff(eventStaffId);
     } catch (error: any) {
       console.error('[Edit Event] Error:', error);
       toast({
@@ -250,6 +258,8 @@ export function AttendanceTimeline({
         description: error.message || 'Failed to update event',
         variant: 'destructive'
       });
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -268,6 +278,11 @@ export function AttendanceTimeline({
     }
     
     setIsDeleteDialogOpen(false);
+    console.log('[handleDeleteConfirm] Starting delete process, setting isProcessing=true');
+    setIsProcessing(true);
+    
+    // Give React a moment to update the UI and show the spinner
+    await new Promise(resolve => setTimeout(resolve, 50));
     // console.log('[handleDeleteConfirm] Deleting event:', deletingEvent);
 
     try {
@@ -285,11 +300,10 @@ export function AttendanceTimeline({
         description: 'Event deleted successfully. Refreshing data...'
       });
 
-      // Notify parent to refresh data
-      if (onSegmentsChanged) {
-        // console.log('[handleDeleteConfirm] Calling onSegmentsChanged to trigger data refresh');
-        onSegmentsChanged();
-      }
+      // Process only this staff member after deleting a clock event
+      console.log('[handleDeleteConfirm] Event deleted, now processing segments...');
+      await onProcessStaff(staffId);
+      console.log('[handleDeleteConfirm] Segment processing complete');
     } catch (error: any) {
       console.error('[Delete Event] Error:', error);
       toast({
@@ -297,11 +311,14 @@ export function AttendanceTimeline({
         description: error.message || 'Failed to delete event',
         variant: 'destructive'
       });
+    } finally {
+      console.log('[handleDeleteConfirm] Delete process complete, setting isProcessing=false');
+      setIsProcessing(false);
     }
   };
 
   // Handle adding a new event
-  const handleAddEvent = () => {
+  const handleAddEvent = async () => {
     if (!eventType || !eventTime) {
       toast({
         title: 'Error',
@@ -311,15 +328,29 @@ export function AttendanceTimeline({
       return;
     }
 
-    if (onAddManualEvent) {
-      onAddManualEvent(staffId, eventType, eventTime, breakType);
-    }
+    console.log('[AttendanceTimeline] Starting manual event processing, setting isProcessing=true');
+    setIsProcessing(true);
+    
+    // Give React a moment to update the UI and show the spinner
+    await new Promise(resolve => setTimeout(resolve, 50));
+    try {
+      if (onAddManualEvent) {
+        console.log('[AttendanceTimeline] Calling onAddManualEvent...');
+        await onAddManualEvent(staffId, eventType, eventTime, breakType);
+        console.log('[AttendanceTimeline] onAddManualEvent completed');
+      }
 
-    // Reset form
-    setEventType('clock_in');
-    setEventTime('');
-    setBreakType(null);
-    setIsAddingEvent(false);
+      // Reset form
+      setEventType('clock_in');
+      setEventTime('');
+      setBreakType(null);
+      setIsAddingEvent(false);
+    } catch (error) {
+      console.error('Error adding manual event:', error);
+    } finally {
+      console.log('[AttendanceTimeline] Manual event processing complete, setting isProcessing=false');
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -337,6 +368,28 @@ export function AttendanceTimeline({
             {/* Conditionally render job description if available as a prop */}
             {/* Example: {props.jobDescription && <p className="text-sm text-gray-400">{props.jobDescription}</p>} */}
           </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-gray-400 hover:text-white"
+            onClick={async () => {
+              console.log(`[AttendanceTimeline] Processing staff: ${staffName} (ID: ${staffId})`);
+              setIsProcessing(true);
+              try {
+                await onProcessStaff(staffId);
+              } finally {
+                setIsProcessing(false);
+              }
+            }}
+            disabled={isProcessing}
+            title="Process this staff member's time segments"
+          >
+            {isProcessing ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4" />
+            )}
+          </Button>
         </div>
         <button
           className="text-xs px-2 py-1 rounded bg-gray-700 text-white hover:bg-gray-600 transition"
@@ -560,7 +613,16 @@ export function AttendanceTimeline({
       >
         Cancel
       </Button>
-      <Button onClick={handleAddEvent}>Add Event</Button>
+      <Button onClick={handleAddEvent} disabled={isProcessing}>
+        {isProcessing ? (
+          <>
+            <Loader2 className="w-4 h-4 animate-spin mr-2" />
+            Adding...
+          </>
+        ) : (
+          'Add Event'
+        )}
+      </Button>
     </div>
   </div>
 )}

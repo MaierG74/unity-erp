@@ -52,11 +52,21 @@ import {
 } from '@/components/ui/command';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Plus, Trash2, Edit, Save, X, Search } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Plus, Trash2, Edit, Save, X, Search, Loader2, Building2 } from 'lucide-react';
+import Link from 'next/link';
+import dynamic from 'next/dynamic';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import { useDebounce } from '@/hooks/use-debounce';
 import React from 'react';
+
+// Dynamically import dialogs on the client only to avoid server bundling issues
+const AddFromCollectionDialog = dynamic(() => import('./AddFromCollectionDialog'), { ssr: false });
+const AddProductToBOMDialog = dynamic(() => import('./AddProductToBOMDialog'), { ssr: false });
+const AddComponentDialog = dynamic(() => import('./AddComponentDialog'), { ssr: false });
 
 // Define types
 interface Component {
@@ -98,6 +108,26 @@ interface BOMItem {
   };
 }
 
+// Effective BOM unified item type (server aggregate)
+interface EffectiveBOMItem {
+  bom_id?: number | null;
+  component_id: number;
+  quantity_required: number;
+  supplier_component_id: number | null;
+  suppliercomponents?: { price?: number } | null;
+  _source?: 'direct' | 'link';
+  _sub_product_id?: number;
+  _editable?: boolean;
+}
+
+// Linked sub-product record for badge list
+interface ProductLink {
+  sub_product_id: number;
+  scale: number;
+  mode: string;
+  product?: { product_id: number; internal_code: string; name: string };
+}
+
 // Form schema for adding/editing BOM items
 const bomItemSchema = z.object({
   component_id: z.string().min(1, 'Component is required'),
@@ -119,9 +149,28 @@ export function ProductBOM({ productId }: ProductBOMProps) {
   const [componentSearch, setComponentSearch] = useState('');
   const [supplierSearch, setSupplierSearch] = useState('');
   const [selectedComponentId, setSelectedComponentId] = useState<string | null>(null);
+  const [showComponentDropdown, setShowComponentDropdown] = useState(false);
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  // Quick view dialog state
+  const [quickViewOpen, setQuickViewOpen] = useState(false);
+  const [quickViewProductId, setQuickViewProductId] = useState<number | null>(null);
+  const [quickTab, setQuickTab] = useState<'overview' | 'bom' | 'bol'>('overview')
+  const openQuickView = useCallback((id: number) => {
+    setQuickViewProductId(id);
+    setQuickTab('overview')
+    setQuickViewOpen(true);
+  }, []);
+
+  // Browse-by-supplier side panel state
+  const [browseOpen, setBrowseOpen] = useState(false);
+  const [browseSupplierQuery, setBrowseSupplierQuery] = useState('');
+  const [browseComponentQuery, setBrowseComponentQuery] = useState('');
+  const [browseSupplierId, setBrowseSupplierId] = useState<number | null>(null);
+  // Add Component (controlled) state for opening dialog from Browse-by-supplier
+  const [addComponentOpen, setAddComponentOpen] = useState(false)
+  const [addComponentPrefill, setAddComponentPrefill] = useState<{ component_id?: number; supplier_component_id?: number } | undefined>(undefined)
   
   // Initialize form
   const form = useForm<BOMItemFormValues>({
@@ -234,9 +283,251 @@ export function ProductBOM({ productId }: ProductBOMProps) {
       }));
     },
   });
+
+  // Map: bom_id -> full direct BOM row (for inline editing within unified table)
+  const bomById = React.useMemo(() => {
+    const m = new Map<number, BOMItem>()
+    for (const b of bomItems || []) {
+      if (typeof b?.bom_id === 'number') m.set(Number(b.bom_id), b)
+    }
+    return m
+  }, [bomItems])
+
+  // Effective BOM (includes attached links) for totals; fetch unconditionally and choose at compute time
+  const featureAttach = typeof process !== 'undefined' && process.env.NEXT_PUBLIC_FEATURE_ATTACH_BOM === 'true'
+  const { data: effectiveBOM } = useQuery({
+    // Always fetch; we'll decide whether to use it when computing totals
+    enabled: true,
+    queryKey: ['effectiveBOM', productId],
+    queryFn: async () => {
+      try {
+        const res = await fetch(`/api/products/${productId}/effective-bom`)
+        if (!res.ok) return { items: [] }
+        return (await res.json()) as { items: EffectiveBOMItem[] }
+      } catch {
+        return { items: [] }
+      }
+    }
+  })
+
+  // Helpers for BOL math in quick view
+  const convertToHoursQuick = (time: number | null, unit: string): number => {
+    if (!time) return 0
+    switch (unit) {
+      case 'hours':
+        return time
+      case 'minutes':
+        return time / 60
+      case 'seconds':
+        return time / 3600
+      default:
+        return time
+    }
+  }
+  const calcBOLCostQuick = (item: any): number => {
+    if ((item.pay_type || 'hourly') === 'piece') {
+      const pieceRate = item.piece_rate?.rate || 0
+      return pieceRate * (item.quantity || 1)
+    }
+    const hourlyRate = item.rate?.hourly_rate || item.job?.category?.current_hourly_rate || 0
+    const hours = convertToHoursQuick(item.time_required, item.time_unit)
+    return hourlyRate * hours * (item.quantity || 1)
+  }
+
+  // Quick effective BOM for popup (read-only)
+  const { data: quickEffectiveBOM, isLoading: quickBomLoading } = useQuery({
+    enabled: quickViewOpen && !!quickViewProductId && quickTab === 'bom',
+    queryKey: ['quickEffectiveBOM', quickViewProductId],
+    queryFn: async () => {
+      try {
+        const res = await fetch(`/api/products/${quickViewProductId}/effective-bom`)
+        if (!res.ok) return { items: [] }
+        return (await res.json()) as { items: EffectiveBOMItem[] }
+      } catch {
+        return { items: [] }
+      }
+    }
+  })
+
+  // Quick BOL for popup (read-only)
+  const { data: quickBOL = [], isLoading: quickBolLoading } = useQuery({
+    enabled: quickViewOpen && !!quickViewProductId && quickTab === 'bol',
+    queryKey: ['quickBOL', quickViewProductId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('billoflabour')
+        .select(`
+          bol_id,
+          product_id,
+          job_id,
+          time_required,
+          time_unit,
+          quantity,
+          rate_id,
+          pay_type,
+          piece_rate_id,
+          jobs (
+            job_id,
+            name,
+            description,
+            category_id,
+            job_categories (
+              category_id,
+              name,
+              description,
+              current_hourly_rate
+            )
+          ),
+          job_category_rates (
+            rate_id,
+            category_id,
+            hourly_rate,
+            effective_date,
+            end_date
+          ),
+          piece_rate:piece_work_rates (
+            rate_id,
+            rate
+          )
+        `)
+        .eq('product_id', quickViewProductId as number)
+      if (error) throw error
+      return (data || []).map((item: any) => ({
+        bol_id: item.bol_id,
+        product_id: item.product_id,
+        job_id: item.job_id,
+        time_required: item.time_required,
+        time_unit: item.time_unit,
+        quantity: item.quantity,
+        rate_id: item.rate_id,
+        pay_type: item.pay_type || 'hourly',
+        piece_rate_id: item.piece_rate_id,
+        job: {
+          ...item.jobs,
+          category: item.jobs.job_categories
+        },
+        rate: item.job_category_rates,
+        piece_rate: item.piece_rate
+      }))
+    }
+  })
+
+  // Quick product fetch for the popup
+  const { data: quickProduct, isLoading: quickLoading } = useQuery({
+    enabled: quickViewOpen && !!quickViewProductId,
+    queryKey: ['quickProduct', quickViewProductId],
+    queryFn: async () => {
+      // Fetch basic product fields (products table does not include primary_image)
+      const { data: product, error } = await supabase
+        .from('products')
+        .select('product_id, internal_code, name, description')
+        .eq('product_id', quickViewProductId as number)
+        .single();
+      if (error) throw error;
+
+      // Fetch images to resolve a primary image, mirroring product detail page
+      const { data: images, error: imgErr } = await supabase
+        .from('product_images')
+        .select('*')
+        .eq('product_id', quickViewProductId as number);
+      if (imgErr) throw imgErr;
+
+      const primaryImage = images?.find((img: any) => img.is_primary)?.image_url ||
+                           (images && images.length > 0 ? (images[0] as any).image_url : null);
+
+      return {
+        ...(product as any),
+        primary_image: primaryImage as string | null,
+      } as { product_id: number; internal_code: string; name: string | null; description: string | null; primary_image: string | null };
+    }
+  })
+
+  // Fetch linked sub-products for badges and detach controls
+  const { data: productLinks = [], isLoading: linksLoading } = useQuery({
+    enabled: featureAttach,
+    queryKey: ['productBOMLinks', productId],
+    queryFn: async () => {
+      try {
+        const { data: links, error: linkErr } = await supabase
+          .from('product_bom_links')
+          .select('sub_product_id, scale, mode')
+          .eq('product_id', productId)
+        if (linkErr) throw linkErr
+
+        const ids = (links || []).map((l: any) => l.sub_product_id)
+        let map: Record<number, { product_id: number; internal_code: string; name: string }> = {}
+        if (ids.length > 0) {
+          const { data: prods, error: prodErr } = await supabase
+            .from('products')
+            .select('product_id, internal_code, name')
+            .in('product_id', ids)
+          if (!prodErr && prods) {
+            for (const p of prods as any[]) map[(p as any).product_id] = p as any
+          }
+        }
+
+        return (links || []).map((l: any) => ({
+          sub_product_id: Number(l.sub_product_id),
+          scale: Number(l.scale ?? 1),
+          mode: String(l.mode || 'phantom'),
+          product: map[Number(l.sub_product_id)],
+        })) as ProductLink[]
+      } catch (e) {
+        console.error('Failed to load product links', e)
+        return [] as ProductLink[]
+      }
+    }
+  })
+
+  // Allow detaching a linked sub-product
+  const detachLink = useMutation({
+    mutationFn: async (subProductId: number) => {
+      const res = await fetch(`/api/products/${productId}/bom/attach-product?sub_product_id=${subProductId}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('Failed to detach')
+      return true
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['productBOMLinks', productId] })
+      queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
+      toast({ title: 'Detached', description: 'Sub-product link removed' })
+    },
+    onError: () => {
+      toast({ title: 'Error', description: 'Failed to detach sub-product', variant: 'destructive' })
+    },
+  })
+
+  // Map sub_product_id -> product for showing source code in Effective BOM
+  const linkProductMap = React.useMemo(() => {
+    const m = new Map<number, { product_id: number; internal_code: string; name: string }>()
+    for (const l of productLinks || []) {
+      if (l?.product) m.set(Number(l.sub_product_id), l.product)
+    }
+    return m
+  }, [productLinks])
+
+  // Helper to build a lookup map for components (defined here to avoid TDZ issues)
+  const buildComponentsById = (list: Component[]) => {
+    const m = new Map<number, Component>()
+    for (const c of list || []) {
+      if (c) m.set(c.component_id, c)
+    }
+    return m
+  }
+
+  // Debug: log effective BOM and computed total when data changes (dev only)
+  useEffect(() => {
+    if (typeof window !== 'undefined' && effectiveBOM) {
+      const items = effectiveBOM.items || []
+      const total = items.reduce((sum, it) => {
+        const price = (it as any)?.suppliercomponents?.price
+        return price != null ? sum + Number(price) * Number((it as any).quantity_required) : sum
+      }, 0)
+      console.debug('[BOM] effective items:', items.length, 'computed total:', total)
+    }
+  }, [effectiveBOM])
   
   // Fetch all components for the dropdown
-  const { data: components = [], isLoading: componentsLoading } = useQuery({
+  const { data: componentsList = [], isLoading: componentsLoading } = useQuery({
     queryKey: ['components'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -245,6 +536,45 @@ export function ProductBOM({ productId }: ProductBOMProps) {
         
       if (error) throw error;
       return data as Component[];
+    },
+  });
+
+  // Map of components for quick lookup when rendering effective BOM (now safe, after query declaration)
+  const componentsById = React.useMemo(() => buildComponentsById(componentsList || []), [componentsList])
+  
+  // Suppliers list for the browser
+  const { data: allSuppliers = [] } = useQuery({
+    queryKey: ['suppliers','simple-list'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('suppliers')
+        .select('supplier_id, name')
+        .order('name');
+      if (error) throw error;
+      return data as Supplier[];
+    },
+  });
+
+  // Supplier components for chosen supplier (joined to master component)
+  const { data: browseSupplierComponents = [], isLoading: browseLoading } = useQuery({
+    queryKey: ['suppliercomponents-by-supplier', browseSupplierId],
+    enabled: !!browseSupplierId,
+    queryFn: async () => {
+      if (!browseSupplierId) return [] as any[];
+      const { data, error } = await supabase
+        .from('suppliercomponents')
+        .select(`
+          supplier_component_id,
+          supplier_id,
+          component_id,
+          supplier_code,
+          price,
+          component:components ( component_id, internal_code, description )
+        `)
+        .eq('supplier_id', browseSupplierId)
+        .order('component_id');
+      if (error) throw error;
+      return data as Array<{ supplier_component_id: number; supplier_id: number; component_id: number; supplier_code: string; price: number; component: Component }>;
     },
   });
 
@@ -279,13 +609,13 @@ export function ProductBOM({ productId }: ProductBOMProps) {
 
   // Completely remove all filtering logic and use a simple approach
   const getFilteredComponents = () => {
-    if (!components || components.length === 0) return [];
-    if (!componentSearch) return components;
+    if (!componentsList || componentsList.length === 0) return [];
+    if (!componentSearch) return componentsList;
     
     console.log("Filtering components with search term:", componentSearch);
     
     const normalizedSearch = componentSearch.toLowerCase().trim();
-    const filtered = components.filter(component => {
+    const filtered = componentsList.filter(component => {
       if (!component) return false;
       
       const codeText = (component.internal_code || '').toLowerCase();
@@ -360,6 +690,9 @@ export function ProductBOM({ productId }: ProductBOMProps) {
     onSuccess: (data) => {
       console.log('BOM item added successfully, invalidating queries', data);
       queryClient.invalidateQueries({ queryKey: ['productBOM', productId] });
+      // Also refresh Effective BOM (explicit + linked) and any consumers like Costing
+      queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
+      queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] });
       form.reset({
         component_id: '',
         quantity_required: 1,
@@ -430,6 +763,8 @@ export function ProductBOM({ productId }: ProductBOMProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['productBOM', productId] });
+      queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
+      queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] });
       setEditingId(null);
       toast({
         title: 'Success',
@@ -458,6 +793,8 @@ export function ProductBOM({ productId }: ProductBOMProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['productBOM', productId] });
+      queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
+      queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] });
       toast({
         title: 'Success',
         description: 'Component removed from BOM',
@@ -532,12 +869,23 @@ export function ProductBOM({ productId }: ProductBOMProps) {
   };
   
   // Show total cost of all components in the BOM
-  const totalBOMCost = bomItems.reduce((total, item) => {
-    if (item.supplierComponent) {
-      return total + (parseFloat(item.supplierComponent.price.toString()) * item.quantity_required);
+  const totalBOMCost = (() => {
+    if ((featureAttach || true) && effectiveBOM?.items && effectiveBOM.items.length > 0) {
+      return effectiveBOM.items.reduce((total, item) => {
+        const price = item?.suppliercomponents?.price
+        if (price != null) {
+          return total + Number(price) * Number(item.quantity_required)
+        }
+        return total
+      }, 0)
     }
-    return total;
-  }, 0);
+    return bomItems.reduce((total, item) => {
+      if (item.supplierComponent) {
+        return total + (parseFloat(item.supplierComponent.price.toString()) * item.quantity_required);
+      }
+      return total;
+    }, 0)
+  })();
 
   // Add wrapper functions to track state changes
   const handleComponentSearchChange = (value: string) => {
@@ -584,12 +932,78 @@ export function ProductBOM({ productId }: ProductBOMProps) {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Bill of Materials</CardTitle>
-          <CardDescription>
-            Manage the components required to manufacture this product
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-lg">Bill of Materials</CardTitle>
+              <CardDescription>
+                Manage the components required to manufacture this product
+              </CardDescription>
+            </div>
+            <div className="flex gap-2">
+              {/* Add From Collection */}
+              <AddFromCollectionDialog
+                productId={productId}
+                onApplied={() => {
+                  queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] })
+                  queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
+                  queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] })
+                }}
+              />
+              {/* Browse by supplier (opens right-side panel) */}
+              <Button variant="outline" onClick={() => setBrowseOpen(true)}>
+                <Building2 className="h-4 w-4 mr-2" /> Browse by supplier
+              </Button>
+              {/* Add Component */}
+              <AddComponentDialog
+                productId={productId}
+                supplierFeatureAvailable={supplierFeatureAvailable}
+                onApplied={() => {
+                  queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] })
+                  queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
+                  queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] })
+                }}
+              />
+              {/* Add Product (explode/copy its BOM) */}
+              <AddProductToBOMDialog
+                productId={productId}
+                onApplied={() => {
+                  queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] })
+                  queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
+                  queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] })
+                  queryClient.invalidateQueries({ queryKey: ['productBOMLinks', productId] })
+                  queryClient.invalidateQueries({ queryKey: ['productBOL', productId] })
+                }}
+              />
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
+          {featureAttach && (productLinks?.length || 0) > 0 && (
+            <div className="mb-4">
+              <div className="text-xs text-muted-foreground mb-2">Linked sub-products (phantom):</div>
+              <div className="flex flex-wrap gap-2">
+                {productLinks.map((lnk) => (
+                  <div key={lnk.sub_product_id} className="flex items-center gap-2">
+                    <button onClick={() => openQuickView(lnk.sub_product_id)} className="no-underline">
+                      <Badge variant="secondary" className="cursor-pointer">
+                        {(lnk.product?.internal_code || `#${lnk.sub_product_id}`)}
+                        {lnk.scale !== 1 && <span className="ml-1 text-[10px] text-muted-foreground">× {Number(lnk.scale).toString()}</span>}
+                      </Badge>
+                    </button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      title="Detach"
+                      onClick={() => detachLink.mutate(lnk.sub_product_id)}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {supplierFeatureAvailable && (
             <div className="mb-4 text-right">
               <span className="text-sm font-medium">Total Component Cost: </span>
@@ -600,7 +1014,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
             <div className="text-center py-4">Loading BOM data...</div>
           ) : (
             <>
-              {/* BOM Items Table */}
+              {/* Unified Effective BOM table (direct + linked) with inline editing for direct rows */}
               <div className="rounded-md border mb-6">
                 <Table>
                   <TableHeader>
@@ -610,562 +1024,531 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                       {supplierFeatureAvailable && (
                         <>
                           <TableHead>Supplier</TableHead>
-                          <TableHead>Price</TableHead>
+                          <TableHead>Unit Price</TableHead>
                         </>
                       )}
                       <TableHead>Quantity</TableHead>
-                      {supplierFeatureAvailable && (
-                        <TableHead>Total</TableHead>
-                      )}
+                      {supplierFeatureAvailable && <TableHead>Total</TableHead>}
+                      <TableHead>Source</TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {bomItems.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={supplierFeatureAvailable ? 7 : 4} className="text-center py-4">
-                          No components added yet
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      bomItems.map((item) => (
-                        <TableRow key={item.bom_id}>
-                          {editingId === item.bom_id ? (
-                            <>
-                              <TableCell colSpan={2}>
-                                <FormField
-                                  control={form.control}
-                                  name="component_id"
-                                  render={({ field }) => (
-                                    <Popover>
-                                      <PopoverTrigger asChild>
-                                        <FormControl>
-                                          <Button
-                                            variant="outline"
-                                            role="combobox"
-                                            className={cn(
-                                              "w-full justify-between",
-                                              !field.value && "text-muted-foreground"
-                                            )}
-                                          >
-                                            {field.value
-                                              ? components.find(
-                                                  (component) => component?.component_id?.toString() === field.value
-                                                )?.internal_code || "Select component"
-                                              : "Select component"}
-                                            <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                          </Button>
-                                        </FormControl>
-                                      </PopoverTrigger>
-                                      <PopoverContent className="w-[400px] p-0">
-                                        <Command>
-                                          <CommandInput
-                                            placeholder="Search components..."
-                                            className="h-9"
-                                            onValueChange={handleComponentSearchChange}
-                                            value={componentSearch}
-                                          />
-                                          <CommandList>
-                                            <CommandEmpty>No components found</CommandEmpty>
-                                            <CommandGroup>
-                                              {filteredComponents.map((component) => (
-                                                <div
-                                                  key={component.component_id}
-                                                  className="px-2 py-1.5 text-sm rounded-sm cursor-pointer hover:bg-accent hover:text-accent-foreground aria-selected:bg-accent aria-selected:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
-                                                  onClick={() => {
-                                                    form.setValue("component_id", component.component_id.toString());
-                                                    handleComponentSearchChange("");
-                                                    handleSupplierSearchChange("");
-                                                    // Reset supplier when component changes
-                                                    if (supplierFeatureAvailable) {
-                                                      form.setValue('supplier_component_id', '');
-                                                    }
-                                                    // Close the popover
-                                                    const popoverElement = document.querySelector('[data-state="open"][role="dialog"]');
-                                                    if (popoverElement) {
-                                                      (popoverElement as HTMLElement).click();
-                                                    }
-                                                  }}
-                                                >
-                                                  <div className="flex flex-col w-full cursor-pointer">
-                                                    <div className="flex items-center">
-                                                      <span className="font-medium">{component.internal_code || 'No code'}</span>
-                                                    </div>
-                                                    {component.description && (
-                                                      <span className="text-xs text-muted-foreground">
-                                                        {component.description}
-                                                      </span>
-                                                    )}
-                                                  </div>
-                                                </div>
-                                              ))}
-                                            </CommandGroup>
-                                          </CommandList>
-                                        </Command>
-                                      </PopoverContent>
-                                    </Popover>
-                                  )}
-                                />
-                              </TableCell>
-                              {supplierFeatureAvailable && (
+                    {(() => {
+                      const rows: EffectiveBOMItem[] = (effectiveBOM?.items && effectiveBOM.items.length > 0)
+                        ? (effectiveBOM.items as EffectiveBOMItem[])
+                        : (bomItems.map((b) => ({
+                            bom_id: b.bom_id,
+                            component_id: b.component_id,
+                            quantity_required: b.quantity_required,
+                            supplier_component_id: b.supplier_component_id,
+                            _source: 'direct',
+                            _editable: true,
+                          })) as EffectiveBOMItem[])
+                      if (rows.length === 0) {
+                        return (
+                          <TableRow>
+                            <TableCell colSpan={supplierFeatureAvailable ? 8 : 5} className="text-center py-4">
+                              No components added yet
+                            </TableCell>
+                          </TableRow>
+                        )
+                      }
+                      return rows.map((it, idx) => {
+                        const comp = componentsById.get(Number(it.component_id))
+                        const code = comp?.internal_code || String(it.component_id)
+                        const desc = comp?.description || ''
+                        const direct = (it._editable && typeof it.bom_id === 'number') ? bomById.get(Number(it.bom_id)) : undefined
+                        // Price resolution
+                        const linkedPrice = (it as any)?.suppliercomponents?.price
+                        const directUnitPrice = direct?.supplierComponent ? Number(direct.supplierComponent.price) : null
+                        const qty = Number(it.quantity_required || direct?.quantity_required || 0)
+                        const unitPrice = (directUnitPrice != null ? directUnitPrice : (linkedPrice != null ? Number(linkedPrice) : null))
+                        const total = unitPrice != null ? unitPrice * qty : null
+                        const fromCode = typeof it._sub_product_id === 'number' ? linkProductMap.get(Number(it._sub_product_id))?.internal_code : undefined
+
+                        if (direct && editingId === direct.bom_id) {
+                          // Inline edit mode for direct row
+                          return (
+                            <TableRow key={`row-${idx}`}>
+                              <Form {...form}>
                                 <>
-                                  <TableCell>
+                                  <TableCell colSpan={2}>
                                     <FormField
                                       control={form.control}
-                                      name="supplier_component_id"
+                                      name="component_id"
                                       render={({ field }) => (
-                                        <FormItem>
-                                          <FormLabel>Supplier</FormLabel>
-                                          
-                                          {/* Use the same approach as the inline supplier selection */}
-                                          <div className="relative" ref={formSupplierDropdownRef}>
-                                            <Input 
-                                              placeholder="Search suppliers..." 
-                                              value={supplierSearch} 
-                                              onChange={(e) => handleSupplierSearchChange(e.target.value)}
-                                              className="mb-1 focus-visible:ring-1"
-                                              disabled={!form.getValues().component_id || suppliersLoading}
-                                              onFocus={() => setShowSupplierDropdown(true)}
-                                            />
-                                            {form.getValues().component_id && showSupplierDropdown && (
-                                              <div className="absolute z-10 w-full bg-background border rounded-md mt-1 max-h-[300px] overflow-y-auto" data-supplier-dropdown>
-                                                {supplierSearch && getFilteredSupplierComponents().length === 0 ? (
-                                                  <div className="px-2 py-4 text-sm text-center text-muted-foreground">No suppliers found</div>
-                                                ) : (
-                                                  <div>
-                                                    <div className="p-2 text-xs text-muted-foreground font-semibold border-b">
-                                                      Suppliers (sorted by lowest price first)
-                                                    </div>
-                                                    {getFilteredSupplierComponents()
-                                                      .sort((a, b) => {
-                                                        const priceA = parseFloat(a?.price?.toString() || '0');
-                                                        const priceB = parseFloat(b?.price?.toString() || '0');
-                                                        return priceA - priceB;
-                                                      })
-                                                      .map((sc) => (
-                                                        <div
-                                                          key={sc.supplier_component_id}
-                                                          className="px-2 py-1.5 text-sm rounded-sm cursor-pointer hover:bg-accent hover:text-accent-foreground"
-                                                          onClick={() => {
-                                                            form.setValue("supplier_component_id", sc.supplier_component_id.toString());
-                                                            handleSupplierSearchChange("");
-                                                            setShowSupplierDropdown(false);
-                                                          }}
-                                                        >
-                                                          <div className="flex justify-between w-full cursor-pointer">
-                                                            <span>{sc?.supplier?.name || "Unknown"}</span>
-                                                            <span className="font-medium">R{parseFloat(sc?.price?.toString() || '0').toFixed(2)}</span>
-                                                          </div>
-                                                        </div>
-                                                      ))
-                                                    }
-                                                  </div>
+                                        <Popover>
+                                          <PopoverTrigger asChild>
+                                            <FormControl>
+                                              <Button
+                                                variant="outline"
+                                                role="combobox"
+                                                className={cn(
+                                                  'w-full justify-between',
+                                                  !field.value && 'text-muted-foreground'
                                                 )}
-                                              </div>
-                                            )}
-                                            <div className="mt-2">
-                                              {field.value && (
-                                                <div className="text-sm p-2.5 border rounded-md bg-accent/10">
-                                                  <div className="flex justify-between items-center">
-                                                    <span>
-                                                      <span className="text-muted-foreground mr-1">Selected:</span> 
-                                                      <span className="font-medium">
-                                                        {supplierComponents.find(sc => sc.supplier_component_id.toString() === field.value)?.supplier?.name || 'Unknown'}
-                                                      </span>
-                                                    </span>
-                                                    <span className="font-medium text-primary">
-                                                      R{parseFloat(
-                                                        supplierComponents.find(sc => sc.supplier_component_id.toString() === field.value)?.price?.toString() || '0'
-                                                      ).toFixed(2)}
-                                                    </span>
-                                                  </div>
-                                                </div>
-                                              )}
-                                            </div>
-                                          </div>
-                                          <FormMessage />
-                                        </FormItem>
+                                              >
+                                                {field.value
+                                                  ? componentsList.find((c) => c?.component_id?.toString() === field.value)?.internal_code || 'Select component'
+                                                  : 'Select component'}
+                                                <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                              </Button>
+                                            </FormControl>
+                                          </PopoverTrigger>
+                                          <PopoverContent className="w-[400px] p-0">
+                                            <Command>
+                                              <CommandInput placeholder="Search components..." className="h-9" onValueChange={handleComponentSearchChange} value={componentSearch} />
+                                              <CommandList>
+                                                <CommandEmpty>No components found</CommandEmpty>
+                                                <CommandGroup>
+                                                  {filteredComponents.map((c) => (
+                                                    <div key={c.component_id} className="px-2 py-1.5 text-sm rounded-sm cursor-pointer hover:bg-accent hover:text-accent-foreground" onClick={() => {
+                                                      form.setValue('component_id', c.component_id.toString());
+                                                      handleComponentSearchChange('');
+                                                      handleSupplierSearchChange('');
+                                                      if (supplierFeatureAvailable) form.setValue('supplier_component_id', '');
+                                                      const el = document.querySelector('[data-state="open"][role="dialog"]');
+                                                      if (el) (el as HTMLElement).click();
+                                                    }}>
+                                                      <div className="flex flex-col w-full cursor-pointer">
+                                                        <div className="flex items-center">
+                                                          <span className="font-medium">{c.internal_code || 'No code'}</span>
+                                                        </div>
+                                                        {c.description && <span className="text-xs text-muted-foreground">{c.description}</span>}
+                                                      </div>
+                                                    </div>
+                                                  ))}
+                                                </CommandGroup>
+                                              </CommandList>
+                                            </Command>
+                                          </PopoverContent>
+                                        </Popover>
                                       )}
                                     />
                                   </TableCell>
+                                  {supplierFeatureAvailable && (
+                                    <>
+                                      <TableCell>
+                                        <FormField
+                                          control={form.control}
+                                          name="supplier_component_id"
+                                          render={({ field }) => (
+                                            <FormItem>
+                                              <FormLabel>Supplier</FormLabel>
+                                              <div className="relative" ref={formSupplierDropdownRef}>
+                                                <Input placeholder="Search suppliers..." value={supplierSearch} onChange={(e) => handleSupplierSearchChange(e.target.value)} className="mb-1 focus-visible:ring-1" disabled={!form.getValues().component_id || suppliersLoading} onFocus={() => setShowSupplierDropdown(true)} />
+                                                {form.getValues().component_id && showSupplierDropdown && (
+                                                  <div className="absolute z-10 w-full bg-background border rounded-md mt-1 max-h-[300px] overflow-y-auto" data-supplier-dropdown>
+                                                    {supplierSearch && getFilteredSupplierComponents().length === 0 ? (
+                                                      <div className="px-2 py-4 text-sm text-center text-muted-foreground">No suppliers found</div>
+                                                    ) : (
+                                                      <div>
+                                                        <div className="p-2 text-xs text-muted-foreground font-semibold border-b">Suppliers (sorted by lowest price first)</div>
+                                                        {getFilteredSupplierComponents().sort((a, b) => {
+                                                          const priceA = parseFloat(a?.price?.toString() || '0');
+                                                          const priceB = parseFloat(b?.price?.toString() || '0');
+                                                          return priceA - priceB;
+                                                        }).map((sc) => (
+                                                          <div key={sc.supplier_component_id} className="px-2 py-1.5 text-sm rounded-sm cursor-pointer hover:bg-accent hover:text-accent-foreground" onClick={() => { form.setValue('supplier_component_id', sc.supplier_component_id.toString()); handleSupplierSearchChange(''); setShowSupplierDropdown(false); }}>
+                                                            <div className="flex justify-between w-full cursor-pointer">
+                                                              <span>{sc?.supplier?.name || 'Unknown'}</span>
+                                                              <span className="font-medium">R{parseFloat(sc?.price?.toString() || '0').toFixed(2)}</span>
+                                                            </div>
+                                                          </div>
+                                                        ))}
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                )}
+                                                <div className="mt-2">
+                                                  {field.value && (
+                                                    <div className="text-sm p-2.5 border rounded-md bg-accent/10">
+                                                      <div className="flex justify-between items-center">
+                                                        <span>
+                                                          <span className="text-muted-foreground mr-1">Selected:</span>
+                                                          <span className="font-medium">{supplierComponents.find(sc => sc.supplier_component_id.toString() === field.value)?.supplier?.name || 'Unknown'}</span>
+                                                        </span>
+                                                        <span className="font-medium text-primary">R{parseFloat(supplierComponents.find(sc => sc.supplier_component_id.toString() === field.value)?.price?.toString() || '0').toFixed(2)}</span>
+                                                      </div>
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              </div>
+                                              <FormMessage />
+                                            </FormItem>
+                                          )}
+                                        />
+                                      </TableCell>
+                                      <TableCell>
+                                        {form.getValues().supplier_component_id && 'R' + parseFloat(supplierComponents.find(sc => sc.supplier_component_id.toString() === form.getValues().supplier_component_id)?.price.toString() || '0').toFixed(2)}
+                                      </TableCell>
+                                    </>
+                                  )}
                                   <TableCell>
-                                    {/* Price is shown based on the selected supplier */}
-                                    {form.getValues().supplier_component_id && 
-                                      'R' + parseFloat(
-                                        supplierComponents.find(sc => 
-                                          sc.supplier_component_id.toString() === form.getValues().supplier_component_id
-                                        )?.price.toString() || '0'
-                                      ).toFixed(2)
-                                    }
+                                    <FormField control={form.control} name="quantity_required" render={({ field }) => (
+                                      <FormControl>
+                                        <Input type="number" min="0.0001" step="any" className="w-20" placeholder="e.g., 0.05" title="Enter quantity (decimals allowed; supports < 0.1)" {...field} />
+                                      </FormControl>
+                                    )} />
+                                    <FormMessage />
+                                    <p className="text-xs text-muted-foreground mt-1">Decimal values allowed (e.g., 1.5, 2.75)</p>
+                                  </TableCell>
+                                  {supplierFeatureAvailable && (
+                                    <TableCell>
+                                      {(form.getValues().supplier_component_id && form.getValues().quantity_required) ? 'R' + (
+                                        parseFloat(supplierComponents.find(sc => sc.supplier_component_id.toString() === form.getValues().supplier_component_id)?.price.toString() || '0') * form.getValues().quantity_required
+                                      ).toFixed(2) : ''}
+                                    </TableCell>
+                                  )}
+                                  <TableCell><span className="text-xs text-muted-foreground">Direct</span></TableCell>
+                                  <TableCell>
+                                    <div className="flex items-center gap-2">
+                                      <Button variant="ghost" size="icon" onClick={() => saveEdit(direct.bom_id)}>
+                                        <Save className="h-4 w-4" />
+                                      </Button>
+                                      <Button variant="ghost" size="icon" onClick={cancelEditing}>
+                                        <X className="h-4 w-4" />
+                                      </Button>
+                                    </div>
                                   </TableCell>
                                 </>
-                              )}
-                              <TableCell>
-                                <FormField
-                                  control={form.control}
-                                  name="quantity_required"
-                                  render={({ field }) => (
-                                    <FormControl>
-                                      <Input
-                                        type="number"
-                                        min="0.1"
-                                        step="0.1"
-                                        className="w-20"
-                                        placeholder="e.g., 1.7"
-                                        title="Enter quantity (decimals allowed)"
-                                        {...field}
-                                      />
-                                    </FormControl>
+                              </Form>
+                            </TableRow>
+                          )
+                        }
+
+                        // Read-only row (either direct not editing or linked)
+                        return (
+                          <TableRow key={`row-${idx}`}>
+                            <TableCell>{code}</TableCell>
+                            <TableCell>{desc}</TableCell>
+                            {supplierFeatureAvailable && (
+                              <>
+                                <TableCell>{direct?.supplierComponent?.supplier?.name || '-'}</TableCell>
+                                <TableCell>{unitPrice != null ? `R${unitPrice.toFixed(2)}` : '-'}</TableCell>
+                              </>
+                            )}
+                            <TableCell>{qty.toFixed(2)}</TableCell>
+                            {supplierFeatureAvailable && (
+                              <TableCell>{total != null ? `R${total.toFixed(2)}` : '-'}</TableCell>
+                            )}
+                            <TableCell>
+                              {it._source === 'link' ? (
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline">Linked</Badge>
+                                  {fromCode && (
+                                    <button onClick={() => openQuickView(Number(it._sub_product_id))}>
+                                      <Badge variant="secondary" className="cursor-pointer">{fromCode}</Badge>
+                                    </button>
                                   )}
-                                />
-                                <FormMessage />
-                                <p className="text-xs text-muted-foreground mt-1">
-                                  Decimal values allowed (e.g., 1.5, 2.75)
-                                </p>
-                              </TableCell>
-                              {supplierFeatureAvailable && (
-                                <TableCell>
-                                  {/* Total cost calculation */}
-                                  {(form.getValues().supplier_component_id && form.getValues().quantity_required) ? 
-                                    'R' + (
-                                      parseFloat(
-                                        supplierComponents.find(sc => 
-                                          sc.supplier_component_id.toString() === form.getValues().supplier_component_id
-                                        )?.price.toString() || '0'
-                                      ) * 
-                                      form.getValues().quantity_required
-                                    ).toFixed(2) : 
-                                    ''
-                                  }
-                                </TableCell>
-                              )}
-                              <TableCell>
-                                <div className="flex items-center gap-2">
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => saveEdit(item.bom_id)}
-                                  >
-                                    <Save className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={cancelEditing}
-                                  >
-                                    <X className="h-4 w-4" />
-                                  </Button>
                                 </div>
-                              </TableCell>
-                            </>
-                          ) : (
-                            <>
-                              <TableCell>{item.component.internal_code}</TableCell>
-                              <TableCell>{item.component.description}</TableCell>
-                              {supplierFeatureAvailable && (
-                                <>
-                                  <TableCell>{item.supplierComponent?.supplier?.name || 'Not specified'}</TableCell>
-                                  <TableCell>{item.supplierComponent ? `R${parseFloat(item.supplierComponent.price.toString()).toFixed(2)}` : '-'}</TableCell>
-                                </>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">Direct</span>
                               )}
-                              <TableCell>{Number(item.quantity_required).toFixed(2)}</TableCell>
-                              {supplierFeatureAvailable && (
-                                <TableCell>
-                                  {item.supplierComponent 
-                                    ? `R${(parseFloat(item.supplierComponent.price.toString()) * item.quantity_required).toFixed(2)}` 
-                                    : '-'
-                                  }
-                                </TableCell>
-                              )}
-                              <TableCell>
+                            </TableCell>
+                            <TableCell>
+                              {direct ? (
                                 <div className="flex items-center gap-2">
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => startEditing(item)}
-                                  >
+                                  <Button variant="ghost" size="icon" onClick={() => startEditing(direct)}>
                                     <Edit className="h-4 w-4" />
                                   </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => deleteBOMItem.mutate(item.bom_id)}
-                                  >
+                                  <Button variant="destructiveSoft" size="icon" onClick={() => deleteBOMItem.mutate(direct.bom_id)} aria-label="Delete component">
                                     <Trash2 className="h-4 w-4" />
                                   </Button>
                                 </div>
-                              </TableCell>
-                            </>
-                          )}
-                        </TableRow>
-                      ))
-                    )}
+                              ) : (
+                                <span className="text-xs text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })
+                    })()}
                   </TableBody>
                 </Table>
               </div>
-
-              {/* Add New BOM Item Form */}
-              {editingId === null && (
-                <Card className="bg-card/50">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-md font-medium">Add Component</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <Form {...form}>
-                      <form
-                        onSubmit={form.handleSubmit(onSubmit)}
-                        className="space-y-6"
-                      >
-                        <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-                          <FormField
-                            control={form.control}
-                            name="component_id"
-                            render={({ field }) => (
-                              <FormItem className="flex flex-col md:col-span-8">
-                                <FormLabel>Component</FormLabel>
-                                
-                                {/* Simplified approach to component selection */}
-                                <div className="relative">
-                                  <Input 
-                                    placeholder="Search components..." 
-                                    value={componentSearch} 
-                                    onChange={(e) => handleComponentSearchChange(e.target.value)}
-                                    className="mb-1 focus-visible:ring-1"
-                                  />
-                                  {componentSearch && (
-                                    <div className="absolute z-10 w-full bg-background border rounded-md mt-1 max-h-[300px] overflow-y-auto">
-                                      {getFilteredComponents().length === 0 ? (
-                                        <div className="px-2 py-4 text-sm text-center text-muted-foreground">No components found</div>
-                                      ) : (
-                                        getFilteredComponents().map((component) => (
-                                          <div
-                                            key={component.component_id}
-                                            className="px-2 py-1.5 text-sm rounded-sm cursor-pointer hover:bg-accent hover:text-accent-foreground"
-                                            onClick={() => {
-                                              form.setValue("component_id", component.component_id.toString());
-                                              handleComponentSearchChange("");
-                                              handleSupplierSearchChange("");
-                                              // Reset supplier when component changes
-                                              if (supplierFeatureAvailable) {
-                                                form.setValue('supplier_component_id', '');
-                                              }
-                                            }}
-                                          >
-                                            <div className="flex flex-col w-full cursor-pointer">
-                                              <div className="flex items-center">
-                                                <span className="font-medium">{component.internal_code || 'No code'}</span>
-                                              </div>
-                                              {component.description && (
-                                                <span className="text-xs text-muted-foreground">
-                                                  {component.description}
-                                                </span>
-                                              )}
-                                            </div>
-                                          </div>
-                                        ))
-                                      )}
-                                    </div>
-                                  )}
-                                  <div className="mt-2">
-                                    {field.value && (
-                                      <div className="text-sm p-2.5 border rounded-md bg-accent/10 flex items-center">
-                                        <span className="text-muted-foreground mr-1">Selected:</span> 
-                                        <span className="font-medium ml-1">
-                                          {components.find(c => c.component_id.toString() === field.value)?.internal_code || 'Unknown'}
-                                        </span>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-
-                          <FormField
-                            control={form.control}
-                            name="quantity_required"
-                            render={({ field }) => (
-                              <FormItem className="md:col-span-4">
-                                <FormLabel>Quantity</FormLabel>
-                                <FormControl>
-                                  <Input
-                                    type="number"
-                                    min="0.1"
-                                    step="0.1"
-                                    className="w-20"
-                                    placeholder="e.g., 1.7"
-                                    title="Enter quantity (decimals allowed)"
-                                    {...field}
-                                  />
-                                </FormControl>
-                                <FormMessage />
-                                <p className="text-xs text-muted-foreground mt-1">
-                                  Decimal values allowed (e.g., 1.5, 2.75)
-                                </p>
-                              </FormItem>
-                            )}
-                          />
-
-                          {supplierFeatureAvailable && (
-                            <FormField
-                              control={form.control}
-                              name="supplier_component_id"
-                              render={({ field }) => (
-                                <FormItem className="md:col-span-12">
-                                  <FormLabel>Supplier</FormLabel>
-                                  
-                                  {/* Use the same approach as the inline supplier selection */}
-                                  <div className="relative" ref={formSupplierDropdownRef}>
-                                    <Input 
-                                      placeholder="Search suppliers..." 
-                                      value={supplierSearch} 
-                                      onChange={(e) => handleSupplierSearchChange(e.target.value)}
-                                      className="mb-1 focus-visible:ring-1"
-                                      disabled={!form.getValues().component_id || suppliersLoading}
-                                      onFocus={() => setShowSupplierDropdown(true)}
-                                    />
-                                    {form.getValues().component_id && showSupplierDropdown && (
-                                      <div className="absolute z-10 w-full bg-background border rounded-md mt-1 max-h-[300px] overflow-y-auto" data-supplier-dropdown>
-                                        {supplierSearch && getFilteredSupplierComponents().length === 0 ? (
-                                          <div className="px-2 py-4 text-sm text-center text-muted-foreground">No suppliers found</div>
-                                        ) : (
-                                          <div>
-                                            <div className="p-2 text-xs text-muted-foreground font-semibold border-b">
-                                              Suppliers (sorted by lowest price first)
-                                            </div>
-                                            {getFilteredSupplierComponents()
-                                              .sort((a, b) => {
-                                                const priceA = parseFloat(a?.price?.toString() || '0');
-                                                const priceB = parseFloat(b?.price?.toString() || '0');
-                                                return priceA - priceB;
-                                              })
-                                              .map((sc) => (
-                                                <div
-                                                  key={sc.supplier_component_id}
-                                                  className="px-2 py-1.5 text-sm rounded-sm cursor-pointer hover:bg-accent hover:text-accent-foreground"
-                                                  onClick={() => {
-                                                    form.setValue("supplier_component_id", sc.supplier_component_id.toString());
-                                                    handleSupplierSearchChange("");
-                                                    setShowSupplierDropdown(false);
-                                                  }}
-                                                >
-                                                  <div className="flex justify-between w-full cursor-pointer">
-                                                    <span>{sc?.supplier?.name || "Unknown"}</span>
-                                                    <span className="font-medium">R{parseFloat(sc?.price?.toString() || '0').toFixed(2)}</span>
-                                                  </div>
-                                                </div>
-                                              ))
-                                            }
-                                          </div>
-                                        )}
-                                      </div>
-                                    )}
-                                    <div className="mt-2">
-                                      {field.value && (
-                                        <div className="text-sm p-2.5 border rounded-md bg-accent/10">
-                                          <div className="flex justify-between items-center">
-                                            <span>
-                                              <span className="text-muted-foreground mr-1">Selected:</span> 
-                                              <span className="font-medium">
-                                                {supplierComponents.find(sc => sc.supplier_component_id.toString() === field.value)?.supplier?.name || 'Unknown'}
-                                              </span>
-                                            </span>
-                                            <span className="font-medium text-primary">
-                                              R{parseFloat(
-                                                supplierComponents.find(sc => sc.supplier_component_id.toString() === field.value)?.price?.toString() || '0'
-                                              ).toFixed(2)}
-                                            </span>
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-                          )}
-                        </div>
-
-                        {/* Summary section showing cost information */}
-                        {form.watch('component_id') && supplierFeatureAvailable && (
-                          <div className="mt-4 p-4 border rounded-md bg-muted/20">
-                            <h4 className="text-sm font-semibold mb-3 text-primary">Selection Summary</h4>
-                            <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                              <div className="text-muted-foreground font-medium">Component:</div>
-                              <div>
-                                {components.find(c => c?.component_id?.toString() === form.watch('component_id'))?.internal_code || 'Not selected'} 
-                              </div>
-                              
-                              <div className="text-muted-foreground font-medium">Supplier:</div>
-                              <div>
-                                {form.watch('supplier_component_id') 
-                                  ? supplierComponents.find(sc => 
-                                      sc?.supplier_component_id?.toString() === form.watch('supplier_component_id')
-                                    )?.supplier?.name || 'Not selected'
-                                  : 'Not selected'
-                                }
-                              </div>
-                              
-                              <div className="text-muted-foreground font-medium">Unit Price:</div>
-                              <div className="font-medium">
-                                {form.watch('supplier_component_id')
-                                  ? 'R' + parseFloat(
-                                      supplierComponents.find(sc => 
-                                        sc?.supplier_component_id?.toString() === form.watch('supplier_component_id')
-                                      )?.price?.toString() || '0'
-                                    ).toFixed(2)
-                                  : '-'
-                                }
-                              </div>
-                              
-                              <div className="text-muted-foreground font-medium">Quantity:</div>
-                              <div>{form.watch('quantity_required') || 1}</div>
-                              
-                              <div className="text-muted-foreground font-medium">Total Cost:</div>
-                              <div className="font-semibold">
-                                {(form.watch('supplier_component_id') && form.watch('quantity_required')) 
-                                  ? 'R' + (
-                                    parseFloat(
-                                      supplierComponents.find(sc => 
-                                        sc?.supplier_component_id?.toString() === form.watch('supplier_component_id')
-                                      )?.price?.toString() || '0'
-                                    ) * 
-                                    (form.watch('quantity_required') || 0)
-                                  ).toFixed(2)
-                                  : '-'
-                                }
-                              </div>
-                            </div>
-                          </div>
-                        )}
-
-                        <div className="flex justify-end pt-2">
-                          <Button
-                            type="submit"
-                            className="px-6"
-                            disabled={addBOMItem.isPending}
-                          >
-                            {addBOMItem.isPending ? (
-                              'Adding...'
-                            ) : (
-                              <>
-                                <Plus className="h-4 w-4 mr-2" />
-                                Add Component
-                              </>
-                            )}
-                          </Button>
-                        </div>
-                      </form>
-                    </Form>
-                  </CardContent>
-                </Card>
-              )}
             </>
           )}
         </CardContent>
       </Card>
+      {/* Quick Product View Dialog */}
+      <Dialog open={quickViewOpen} onOpenChange={setQuickViewOpen}>
+        <DialogContent className="sm:max-w-[820px]">
+          <DialogHeader>
+            <DialogTitle>{quickProduct?.internal_code || 'Product'}</DialogTitle>
+            <DialogDescription>
+              {quickProduct?.name || ''}
+            </DialogDescription>
+          </DialogHeader>
+          <Tabs value={quickTab} onValueChange={(v) => setQuickTab(v as any)} className="mt-2">
+            <TabsList>
+              <TabsTrigger value="overview">Overview</TabsTrigger>
+              <TabsTrigger value="bom">Effective BOM</TabsTrigger>
+              <TabsTrigger value="bol">Bill of Labor</TabsTrigger>
+            </TabsList>
+
+            {/* Overview */}
+            <TabsContent value="overview" className="mt-4">
+              <div className="space-y-3">
+                {quickLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+                  </div>
+                ) : (
+                  <>
+                    {quickProduct?.primary_image && (
+                      <div className="w-full rounded-md border bg-muted/10 p-2 flex items-center justify-center">
+                        <img
+                          src={quickProduct.primary_image}
+                          alt={quickProduct.internal_code}
+                          className="max-h-48 w-auto object-contain"
+                        />
+                      </div>
+                    )}
+                    {quickProduct?.description && (
+                      <p className="text-sm whitespace-pre-wrap">{quickProduct.description}</p>
+                    )}
+                  </>
+                )}
+              </div>
+            </TabsContent>
+
+            {/* Effective BOM */}
+            <TabsContent value="bom" className="mt-4">
+              {quickBomLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading BOM…
+                </div>
+              ) : (
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Component</TableHead>
+                        <TableHead>Description</TableHead>
+                        <TableHead>Qty</TableHead>
+                        <TableHead>Unit Price</TableHead>
+                        <TableHead>Total</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(quickEffectiveBOM?.items || []).map((it, idx) => {
+                        const comp = componentsById.get(Number((it as any).component_id))
+                        const code = comp?.internal_code || String((it as any).component_id)
+                        const desc = comp?.description || ''
+                        const qty = Number((it as any).quantity_required || 0)
+                        const price = (it as any)?.suppliercomponents?.price
+                        const total = price != null ? Number(price) * qty : null
+                        return (
+                          <TableRow key={`q-bom-${idx}`}>
+                            <TableCell>{code}</TableCell>
+                            <TableCell>{desc || '-'}</TableCell>
+                            <TableCell>{qty.toFixed(2)}</TableCell>
+                            <TableCell>{price != null ? `R${Number(price).toFixed(2)}` : '-'}</TableCell>
+                            <TableCell>{total != null ? `R${total.toFixed(2)}` : '-'}</TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </TabsContent>
+
+            {/* Bill of Labor */}
+            <TabsContent value="bol" className="mt-4">
+              {quickBolLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading BOL…
+                </div>
+              ) : (
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Category</TableHead>
+                        <TableHead>Job</TableHead>
+                        <TableHead>Time</TableHead>
+                        <TableHead>Qty</TableHead>
+                        <TableHead>Rate</TableHead>
+                        <TableHead>Total Time (hrs)</TableHead>
+                        <TableHead>Total Cost</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {quickBOL.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center py-4 text-sm text-muted-foreground">No jobs</TableCell>
+                        </TableRow>
+                      ) : (
+                        quickBOL.map((item: any) => {
+                          const category = item.job?.category
+                          const rate = (item.pay_type || 'hourly') === 'piece' ? item.piece_rate?.rate : (item.rate?.hourly_rate || category?.current_hourly_rate)
+                          const totalHrs = (item.pay_type || 'hourly') === 'piece' ? null : convertToHoursQuick(item.time_required, item.time_unit) * (item.quantity || 1)
+                          const totalCost = calcBOLCostQuick(item)
+                          return (
+                            <TableRow key={`q-bol-${item.bol_id}`}>
+                              <TableCell>{category?.name || '-'}</TableCell>
+                              <TableCell>{item.job?.name || '-'}</TableCell>
+                              <TableCell>{(item.pay_type || 'hourly') === 'piece' ? '—' : `${item.time_required} ${item.time_unit}`}</TableCell>
+                              <TableCell>{item.quantity}</TableCell>
+                              <TableCell>{(item.pay_type || 'hourly') === 'piece' ? `R${(rate || 0).toFixed(2)}/pc` : `R${(rate || 0).toFixed(2)}/hr`}</TableCell>
+                              <TableCell>{totalHrs == null ? '—' : totalHrs.toFixed(2)}</TableCell>
+                              <TableCell>R{totalCost.toFixed(2)}</TableCell>
+                            </TableRow>
+                          )
+                        })
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
+          <DialogFooter className="mt-4">
+            {quickViewProductId && (
+              <Link href={`/products/${quickViewProductId}`} className="no-underline">
+                <Button variant="outline">Open full page</Button>
+              </Link>
+            )}
+            <Button onClick={() => setQuickViewOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Controlled Add Component dialog for prefill from Browse-by-supplier */}
+      <AddComponentDialog
+        productId={productId}
+        supplierFeatureAvailable={supplierFeatureAvailable}
+        showTriggerButton={false}
+        open={addComponentOpen}
+        onOpenChange={setAddComponentOpen}
+        prefill={addComponentPrefill}
+        onApplied={() => {
+          setAddComponentPrefill(undefined)
+          queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] })
+          queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
+          queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] })
+        }}
+      />
+
+      {/* Browse by Supplier – right side panel */}
+      <Dialog open={browseOpen} onOpenChange={setBrowseOpen}>
+        <DialogContent className="fixed left-auto right-0 top-0 translate-x-0 translate-y-0 h-screen max-w-[90vw] w-[1200px] sm:rounded-none p-0 overflow-hidden border-l shadow-2xl">
+          <div className="flex h-full">
+            {/* Suppliers */}
+            <div className="w-64 shrink-0 border-r bg-card flex flex-col">
+              <div className="p-4 border-b">
+                <div className="text-sm font-medium mb-2">Suppliers</div>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={browseSupplierQuery}
+                    onChange={(e) => setBrowseSupplierQuery(e.target.value)}
+                    placeholder="Search suppliers"
+                    className="w-full h-9 pl-9 pr-3 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+              </div>
+              <div className="flex-1 overflow-auto">
+                {(allSuppliers || [])
+                  .filter(s => s.name.toLowerCase().includes(browseSupplierQuery.toLowerCase()))
+                  .map(s => (
+                    <button
+                      key={s.supplier_id}
+                      onClick={() => { setBrowseSupplierId(s.supplier_id); setBrowseComponentQuery(''); }}
+                      className={cn('w-full text-left px-4 py-3 border-b hover:bg-accent hover:text-accent-foreground text-sm', browseSupplierId === s.supplier_id && 'bg-accent/50')}
+                    >
+                      {s.name}
+                    </button>
+                  ))}
+                {(allSuppliers || []).length === 0 && (
+                  <div className="p-4 text-sm text-muted-foreground">No suppliers</div>
+                )}
+              </div>
+            </div>
+
+            {/* Components for selected supplier */}
+            <div className="flex-1 flex flex-col min-w-0">
+              <div className="p-4 border-b flex items-center gap-4">
+                <div className="text-sm font-medium">{browseSupplierId ? 'Components' : 'Select a supplier'}</div>
+                {browseSupplierId && (
+                  <div className="relative flex-1 max-w-sm">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <input
+                      type="text"
+                      value={browseComponentQuery}
+                      onChange={(e) => setBrowseComponentQuery(e.target.value)}
+                      placeholder="Filter components"
+                      className="w-full h-9 pl-9 pr-3 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  </div>
+                )}
+              </div>
+              <div className="flex-1 overflow-auto">
+                {browseSupplierId ? (
+                  browseLoading ? (
+                    <div className="p-4 text-sm text-muted-foreground">Loading…</div>
+                  ) : (
+                    <div className="min-w-full">
+                      <table className="w-full text-sm">
+                        <thead className="sticky top-0 bg-background border-b">
+                          <tr className="text-muted-foreground">
+                            <th className="text-left p-3 w-32 font-medium">Code</th>
+                            <th className="text-left p-3 font-medium">Description</th>
+                            <th className="text-left p-3 w-36 font-medium">Supplier Code</th>
+                            <th className="text-right p-3 w-24 font-medium">Price</th>
+                            <th className="text-right p-3 w-32 font-medium">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(browseSupplierComponents || [])
+                            .filter(it => {
+                              const q = browseComponentQuery.toLowerCase();
+                              if (!q) return true;
+                              const f = [it.component?.internal_code || '', it.component?.description || '', it.supplier_code || ''].map(v => v.toLowerCase());
+                              return f.some(x => x.includes(q));
+                            })
+                            .map((it) => (
+                              <tr key={it.supplier_component_id} className="border-b hover:bg-muted/40">
+                                <td className="p-3 font-medium">{it.component?.internal_code}</td>
+                                <td className="p-3 max-w-0 truncate">{it.component?.description || '-'}</td>
+                                <td className="p-3 truncate">{it.supplier_code || '-'}</td>
+                                <td className="p-3 text-right">R{Number(it.price || 0).toFixed(2)}</td>
+                                <td className="p-3 text-right">
+                                  <Button 
+                                    size="sm" 
+                                    className="min-w-[80px]" 
+                                    onClick={() => {
+                                      setAddComponentPrefill({ component_id: it.component_id, supplier_component_id: supplierFeatureAvailable ? it.supplier_component_id : undefined })
+                                      setBrowseOpen(false)
+                                      setAddComponentOpen(true)
+                                    }}
+                                  >
+                                    Select
+                                  </Button>
+                                </td>
+                              </tr>
+                            ))}
+                          {(!browseSupplierComponents || browseSupplierComponents.length === 0) && (
+                            <tr>
+                              <td className="p-6 text-center text-muted-foreground" colSpan={5}>No components available for this supplier</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  )
+                ) : (
+                  <div className="p-6 text-center text-muted-foreground">Choose a supplier on the left to browse their components.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
-} 
+}

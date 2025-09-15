@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
@@ -152,18 +152,27 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
   const storageBucket = 'QButton';
   const { toast } = useToast();
 
-  const { data: units = [] } = useQuery({
+  const { data: units = [] } = useQuery<{ unit_id: number; unit_code?: string; unit_name: string }[]>({
     queryKey: ["units"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("unitsofmeasure")
-        .select("unit_id, unit_name")
+        .select("unit_id, unit_code, unit_name")
         .order("unit_name")
       if (error) throw error
       console.log('Fetched units:', data)
       return data
     },
   })
+  // Ensure we never show duplicates in the dropdown (defensive in case of future inserts)
+  const uniqueUnits = useMemo(() => {
+    const byName = new Map<string, { unit_id: number; unit_code?: string; unit_name: string }>()
+    for (const u of units) {
+      const key = (u.unit_name || '').trim().toLowerCase()
+      if (!byName.has(key)) byName.set(key, u)
+    }
+    return Array.from(byName.values()).sort((a, b) => a.unit_name.localeCompare(b.unit_name))
+  }, [units])
 
   const { data: categories = [] } = useQuery({
     queryKey: ["categories"],
@@ -1068,12 +1077,12 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                         </FormControl>
                         <SelectContent>
                           <SelectItem value="_none">Select unit</SelectItem>
-                          {units.map((unit) => (
+                          {uniqueUnits.map((unit) => (
                             <SelectItem
                               key={unit.unit_id}
                               value={unit.unit_id.toString()}
                             >
-                              {unit.unit_name}
+                              {unit.unit_name}{unit.unit_code ? ` (${unit.unit_code.toUpperCase()})` : ''}
                             </SelectItem>
                           ))}
                         </SelectContent>

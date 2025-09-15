@@ -7,6 +7,9 @@ import { SupplierEmails } from '@/components/features/suppliers/supplier-emails'
 import { SupplierComponents } from '@/components/features/suppliers/supplier-components';
 import { SupplierPricelists } from '@/components/features/suppliers/supplier-pricelists';
 import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { ArrowLeft } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function SupplierDetailPage() {
@@ -43,10 +46,14 @@ export default function SupplierDetailPage() {
   return (
     <div className="space-y-6">
       <div>
+        <Button asChild variant="outline" size="sm">
+          <Link href="/suppliers" aria-label="Back to Suppliers">
+            <ArrowLeft className="mr-2 h-4 w-4" /> Back to Suppliers
+          </Link>
+        </Button>
+      </div>
+      <div>
         <h1 className="text-3xl font-bold">{supplier.name}</h1>
-        <p className="text-muted-foreground">
-          Manage supplier details, contact information, and components.
-        </p>
       </div>
 
       <Tabs defaultValue="details" className="space-y-4">

@@ -8,7 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { format } from 'date-fns';
 import { cn } from "@/lib/utils";
 import Image from 'next/image';
-import { Plus, ImageOff, Pencil, Trash2, RefreshCw, Check } from 'lucide-react';
+import { Plus, ImageOff, Pencil, Trash2, RefreshCw, Check, Search, X } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { ComponentDialog } from '@/components/features/inventory/ComponentDialog';
 import {
@@ -110,6 +111,7 @@ const columns = [
 ]
 
 export default function InventoryPage() {
+  const searchParams = useSearchParams();
   const [selectedComponent, setSelectedComponent] = useState<Component | null>(null);
   const [imageError, setImageError] = useState<{[key: string]: boolean}>({});
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -119,8 +121,7 @@ export default function InventoryPage() {
   const [selectedSupplier, setSelectedSupplier] = useState<string>('_all');
   const [categorySearch, setCategorySearch] = useState('');
   const [supplierSearch, setSupplierSearch] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  // Pagination is handled inside DataTable; no outer paging needed
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -204,6 +205,16 @@ export default function InventoryPage() {
     refetchOnWindowFocus: true, // Refetch when window regains focus
   });
 
+  // Select a component via URL param: /inventory?focusComponent=123
+  useEffect(() => {
+    const idParam = searchParams?.get('focusComponent');
+    if (!idParam) return;
+    const id = Number(idParam);
+    if (!Number.isFinite(id)) return;
+    const found = (components || []).find(c => c.component_id === id) || null;
+    if (found) setSelectedComponent(found);
+  }, [searchParams, components]);
+
   // Add back the effect to update selected component when components change
   useEffect(() => {
     if (selectedComponent && components.length > 0) {
@@ -219,7 +230,9 @@ export default function InventoryPage() {
 
   // Get unique categories
   const categories = useMemo(() => {
-    const uniqueCategories = Array.from(new Set(components.map(c => c.category?.categoryname || 'Uncategorized')));
+    const uniqueCategories = Array.from(
+      new Set(components.map(c => c.category?.categoryname || 'Uncategorized'))
+    ) as string[];
     return ['_all', ...uniqueCategories].sort();
   }, [components]);
 
@@ -237,8 +250,8 @@ export default function InventoryPage() {
     }
   });
 
-  // Filter, sort, and paginate components
-  const { paginatedComponents, totalPages } = useMemo(() => {
+  // Filter and sort components (DataTable handles pagination internally)
+  const filteredComponents = useMemo(() => {
     const filtered = components
       .filter(component => {
         const matchesFilter = (
@@ -261,18 +274,8 @@ export default function InventoryPage() {
         if (!a.internal_code && b.internal_code) return 1;
         return (a.internal_code || '').localeCompare(b.internal_code || '');
       });
-
-    const totalPages = Math.ceil(filtered.length / pageSize);
-    const start = (currentPage - 1) * pageSize;
-    const paginatedComponents = filtered.slice(start, start + pageSize);
-
-    return { paginatedComponents, totalPages };
-  }, [components, filterText, selectedCategory, selectedSupplier, currentPage, pageSize]);
-
-  // Reset to first page when filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [filterText, selectedCategory, selectedSupplier, pageSize]);
+    return filtered;
+  }, [components, filterText, selectedCategory, selectedSupplier]);
 
   // Filter categories based on search
   const filteredCategories = useMemo(() => {
@@ -290,11 +293,7 @@ export default function InventoryPage() {
     );
   }, [suppliers, supplierSearch]);
 
-  const getStockStatusColor = (quantity: number, reorderLevel: number | null) => {
-    if (quantity <= 0) return "bg-destructive/10 border-destructive text-destructive";
-    if (reorderLevel && quantity <= reorderLevel) return "bg-warning/10 border-warning text-warning";
-    return "bg-muted border-border";
-  };
+  // Removed unused getStockStatusColor; table cell renders semantic text colors inline
 
   const handleDelete = async () => {
     if (!selectedComponent) return;
@@ -579,172 +578,198 @@ export default function InventoryPage() {
 
   return (
     <div className="container mx-auto py-6">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Components</h1>
-        <div className="flex space-x-2">
-          <Button onClick={refreshData} size="sm" variant="outline">
+      {/* Header */}
+      <div className="space-y-2 mb-6">
+        <h1 className="text-3xl font-bold tracking-tight">Components</h1>
+        <p className="text-sm text-muted-foreground max-w-3xl">
+          Manage components, stock and supplier links. Use the toolbar to search and filter.
+        </p>
+        <div className="mt-2 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+      </div>
+
+      {/* Actions (separate from filters for a cleaner, symmetrical filter row) */}
+      <div className="mb-3">
+        <div className="inline-flex gap-2 p-3 bg-card rounded-xl border shadow-sm">
+          <Button onClick={refreshData} className="h-9" variant="outline">
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
           </Button>
           <Button
-            variant="outline"
+            className="h-9"
             onClick={() => {
               setSelectedComponent(null)
               setDialogOpen(true)
             }}
           >
+            <Plus className="h-4 w-4 mr-2" />
             Add Component
           </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div>
-          <label className="text-sm font-medium mb-1 block">Search</label>
-          <Input 
-            placeholder="Search by code or description..." 
-            value={filterText}
-            onChange={e => setFilterText(e.target.value)}
-          />
-        </div>
-        
-        <div>
-          <label className="text-sm font-medium mb-1 block">Category</label>
-          <Select 
-            value={selectedCategory} 
-            onValueChange={(value) => {
-              setSelectedCategory(value);
-              // Reset search when selecting a category
-              setCategorySearch('');
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Select category" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="_all">All Categories</SelectItem>
-              
-              <div className="p-2 border-t border-b">
-                <Input
-                  placeholder="Search categories..."
-                  value={categorySearch}
-                  onChange={(e) => setCategorySearch(e.target.value)}
-                  className="mb-1"
-                />
-              </div>
-              
-              {filteredCategories.length > 0 ? (
-                filteredCategories.map(category => (
-                  <SelectItem key={category} value={category}>
-                    {category}
-                  </SelectItem>
-                ))
-              ) : (
-                <div className="p-2 text-center text-sm text-muted-foreground">
-                  No matching categories
+      {/* Filter row (single centered line) */}
+      <div className="p-3 bg-card rounded-xl border shadow-sm mb-6">
+        <div className="mx-auto flex max-w-5xl items-center justify-center gap-4">
+          {/* Search */}
+          <div className="relative w-[520px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search by code or description..."
+              value={filterText}
+              onChange={(e) => setFilterText(e.target.value)}
+              className="w-full h-9 pl-9 pr-10 rounded-lg border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+            {filterText && (
+              <button
+                type="button"
+                onClick={() => setFilterText('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex h-6 w-6 items-center justify-center rounded hover:bg-muted"
+                aria-label="Clear search"
+              >
+                <X className="h-4 w-4 text-muted-foreground" />
+              </button>
+            )}
+          </div>
+
+          {/* Category */}
+          <div className="inline-flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Category</span>
+            <Select 
+              value={selectedCategory} 
+              onValueChange={(value) => {
+                setSelectedCategory(value);
+                setCategorySearch('');
+              }}
+            >
+              <SelectTrigger className="h-9 w-44">
+                <SelectValue placeholder="Select category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_all">All Categories</SelectItem>
+                <div className="p-2 border-t border-b">
+                  <Input
+                    placeholder="Search categories..."
+                    value={categorySearch}
+                    onChange={(e) => setCategorySearch(e.target.value)}
+                    className="mb-1 focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
                 </div>
-              )}
-            </SelectContent>
-          </Select>
-        </div>
-        
-        <div>
-          <label className="text-sm font-medium mb-1 block">Supplier</label>
-          <Select 
-            value={selectedSupplier} 
-            onValueChange={(value) => {
-              setSelectedSupplier(value);
-              // Reset search when selecting a supplier
-              setSupplierSearch('');
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Select supplier" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="_all">All Suppliers</SelectItem>
-              
-              <div className="p-2 border-t border-b">
-                <Input
-                  placeholder="Search suppliers..."
-                  value={supplierSearch}
-                  onChange={(e) => setSupplierSearch(e.target.value)}
-                  className="mb-1"
-                />
-              </div>
-              
-              {filteredSuppliers.length > 0 ? (
-                filteredSuppliers.map(supplier => (
-                  <SelectItem key={supplier.supplier_id} value={supplier.name}>
-                    {supplier.name}
-                  </SelectItem>
-                ))
-              ) : (
-                <div className="p-2 text-center text-sm text-muted-foreground">
-                  No matching suppliers
+                {filteredCategories.length > 0 ? (
+                  filteredCategories.map(category => (
+                    <SelectItem key={category} value={category}>
+                      {category}
+                    </SelectItem>
+                  ))
+                ) : (
+                  <div className="p-2 text-center text-sm text-muted-foreground">
+                    No matching categories
+                  </div>
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Supplier */}
+          <div className="inline-flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Supplier</span>
+            <Select 
+              value={selectedSupplier} 
+              onValueChange={(value) => {
+                setSelectedSupplier(value);
+                setSupplierSearch('');
+              }}
+            >
+              <SelectTrigger className="h-9 w-48">
+                <SelectValue placeholder="Select supplier" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_all">All Suppliers</SelectItem>
+                <div className="p-2 border-t border-b">
+                  <Input
+                    placeholder="Search suppliers..."
+                    value={supplierSearch}
+                    onChange={(e) => setSupplierSearch(e.target.value)}
+                    className="mb-1 focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
                 </div>
-              )}
-            </SelectContent>
-          </Select>
+                {filteredSuppliers.length > 0 ? (
+                  filteredSuppliers.map(supplier => (
+                    <SelectItem key={supplier.supplier_id} value={supplier.name}>
+                      {supplier.name}
+                    </SelectItem>
+                  ))
+                ) : (
+                  <div className="p-2 text-center text-sm text-muted-foreground">
+                    No matching suppliers
+                  </div>
+                )}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </div>
 
       <div className="flex flex-row gap-4">
         {/* Left side - Component list */}
         <div className="flex-1 overflow-auto">
-          <DataTable
-            columns={columns}
-            data={paginatedComponents}
-            onRowClick={(component) => {
-              console.log("Setting selected component:", component);
-              setSelectedComponent(component);
-            }}
-            selectedId={selectedComponent?.component_id}
-            hideFilters={true}
-          />
+          <div className="rounded-xl border bg-card shadow-sm overflow-auto">
+            <DataTable
+              columns={columns}
+              data={filteredComponents}
+              onRowClick={(component) => {
+                console.log("Setting selected component:", component);
+                setSelectedComponent(component);
+              }}
+              selectedId={selectedComponent?.component_id}
+              hideFilters={true}
+            />
+          </div>
         </div>
 
         {/* Right side - Component details */}
         <div className="w-[400px] shrink-0">
           <div className="sticky top-4">
-            <InventoryDetails 
-              selectedItem={selectedComponent ? {
-                inventory_id: selectedComponent.inventory && selectedComponent.inventory.length > 0 
-                  ? selectedComponent.inventory[0]?.inventory_id || null 
-                  : null,
-                quantity_on_hand: selectedComponent.inventory && selectedComponent.inventory.length > 0 && 
-                  selectedComponent.inventory[0]?.quantity_on_hand !== null && 
-                  selectedComponent.inventory[0]?.quantity_on_hand !== undefined 
-                  ? Number(selectedComponent.inventory[0]?.quantity_on_hand) 
-                  : 0,
-                location: selectedComponent.inventory && selectedComponent.inventory.length > 0 
-                  ? selectedComponent.inventory[0]?.location || "" 
-                  : "",
-                reorder_level: selectedComponent.inventory && selectedComponent.inventory.length > 0 && 
-                  selectedComponent.inventory[0]?.reorder_level !== null && 
-                  selectedComponent.inventory[0]?.reorder_level !== undefined 
-                  ? Number(selectedComponent.inventory[0]?.reorder_level) 
-                  : 0,
-                component: {
-                  component_id: selectedComponent.component_id || 0,
-                  internal_code: selectedComponent.internal_code || "",
-                  description: selectedComponent.description || "",
-                  image_url: selectedComponent.image_url,
-                  category: selectedComponent.category || { cat_id: 0, categoryname: "Uncategorized" },
-                  unit: selectedComponent.unit || { unit_id: 0, unit_name: "N/A" }
-                },
-                supplierComponents: Array.isArray(selectedComponent.supplierComponents) 
-                  ? selectedComponent.supplierComponents.map(sc => ({
-                      supplier_id: sc?.supplier_id || 0,
-                      supplier_code: sc?.supplier_code || "",
-                      price: sc?.price || 0,
-                      supplier: {
-                        name: sc?.supplier?.name || "Unknown Supplier"
-                      }
-                    }))
-                  : []
-              } : undefined}
-            />
+            <div className="rounded-xl border bg-card shadow-sm p-3">
+              <InventoryDetails 
+                selectedItem={selectedComponent ? {
+                  inventory_id: selectedComponent.inventory && selectedComponent.inventory.length > 0 
+                    ? selectedComponent.inventory[0]?.inventory_id || null 
+                    : null,
+                  quantity_on_hand: selectedComponent.inventory && selectedComponent.inventory.length > 0 && 
+                    selectedComponent.inventory[0]?.quantity_on_hand !== null && 
+                    selectedComponent.inventory[0]?.quantity_on_hand !== undefined 
+                    ? Number(selectedComponent.inventory[0]?.quantity_on_hand) 
+                    : 0,
+                  location: selectedComponent.inventory && selectedComponent.inventory.length > 0 
+                    ? selectedComponent.inventory[0]?.location || "" 
+                    : "",
+                  reorder_level: selectedComponent.inventory && selectedComponent.inventory.length > 0 && 
+                    selectedComponent.inventory[0]?.reorder_level !== null && 
+                    selectedComponent.inventory[0]?.reorder_level !== undefined 
+                    ? Number(selectedComponent.inventory[0]?.reorder_level) 
+                    : 0,
+                  component: {
+                    component_id: selectedComponent.component_id || 0,
+                    internal_code: selectedComponent.internal_code || "",
+                    description: selectedComponent.description || "",
+                    image_url: selectedComponent.image_url,
+                    category: selectedComponent.category || { cat_id: 0, categoryname: "Uncategorized" },
+                    unit: selectedComponent.unit || { unit_id: 0, unit_name: "N/A" }
+                  },
+                  supplierComponents: Array.isArray(selectedComponent.supplierComponents) 
+                    ? selectedComponent.supplierComponents.map(sc => ({
+                        supplier_id: sc?.supplier_id || 0,
+                        supplier_code: sc?.supplier_code || "",
+                        price: sc?.price || 0,
+                        supplier: {
+                          name: sc?.supplier?.name || "Unknown Supplier"
+                        }
+                      }))
+                    : []
+                } : undefined}
+              />
+            </div>
             
             {selectedComponent && (
               <div className="flex gap-2 mt-4 justify-end">

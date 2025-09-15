@@ -20,6 +20,7 @@ import { ImageGallery } from '@/components/features/products/image-gallery';
 import { CategoryDialog } from '@/components/features/products/category-dialog';
 import { ProductBOM } from '@/components/features/products/product-bom';
 import { ProductBOL } from '@/components/features/products/product-bol';
+import ProductCosting from '@/components/features/products/product-costing';
 import { useToast } from '@/components/ui/use-toast';
 
 interface ProductDetailPageProps {
@@ -184,6 +185,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
           <TabsTrigger value="categories">Categories</TabsTrigger>
           <TabsTrigger value="bom">Bill of Materials</TabsTrigger>
           <TabsTrigger value="bol">Bill of Labor</TabsTrigger>
+          <TabsTrigger value="costing">Costing</TabsTrigger>
         </TabsList>
         
         <TabsContent value="details" className="space-y-4">
@@ -195,12 +197,12 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
               </CardHeader>
               <CardContent className="flex justify-center">
                 {product.primary_image ? (
-                  <div className="relative h-60 w-60 rounded-md overflow-hidden">
+                  <div className="relative h-60 w-60 rounded-md overflow-hidden bg-card ring-0 dark:bg-white/5 dark:ring-1 dark:ring-white/10">
                     <Image 
                       src={product.primary_image}
                       alt={product.name}
                       fill
-                      className="object-contain"
+                      className="object-contain dark:brightness-110 dark:drop-shadow-[0_8px_24px_rgba(0,0,0,0.85)]"
                     />
                   </div>
                 ) : (
@@ -354,6 +356,10 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
         
         <TabsContent value="bol" className="space-y-4">
           <ProductBOL productId={product.product_id} />
+        </TabsContent>
+
+        <TabsContent value="costing" className="space-y-4">
+          <ProductCosting productId={product.product_id} />
         </TabsContent>
       </Tabs>
     </div>
