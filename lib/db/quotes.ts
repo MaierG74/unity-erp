@@ -554,6 +554,26 @@ export async function fetchProductLabor(productId: number): Promise<ProductLabor
   }
 }
 
+// Effective BOM (direct + linked) for quotes
+export interface EffectiveBOMItem {
+  component_id: number;
+  quantity_required: number;
+  suppliercomponents?: { price?: number } | null;
+}
+
+export async function fetchEffectiveBOM(productId: number): Promise<EffectiveBOMItem[]> {
+  try {
+    const res = await fetch(`/api/products/${productId}/effective-bom`, { cache: 'no-store' });
+    if (!res.ok) return [];
+    const json = (await res.json()) as { items?: any[] };
+    const items = Array.isArray(json?.items) ? json!.items! : [];
+    return items as EffectiveBOMItem[];
+  } catch (e) {
+    console.warn('fetchEffectiveBOM error:', e);
+    return [];
+  }
+}
+
 export async function fetchPrimaryProductImage(productId: number): Promise<{ url: string; original_name?: string | null } | null> {
   const { data, error } = await supabase
     .from('product_images')
@@ -583,6 +603,19 @@ export async function fetchComponents(): Promise<Component[]> {
   }
   
   return data || [];
+}
+
+export async function fetchComponentsByIds(ids: number[]): Promise<Component[]> {
+  if (!Array.isArray(ids) || ids.length === 0) return [];
+  const { data, error } = await supabase
+    .from('components')
+    .select('component_id, internal_code, description')
+    .in('component_id', ids);
+  if (error) {
+    console.error('Error fetching components by ids:', error);
+    return [];
+  }
+  return (data as Component[]) || [];
 }
 
 export async function fetchSupplierComponentsForComponent(componentId: number): Promise<SupplierComponent[]> {

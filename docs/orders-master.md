@@ -17,13 +17,69 @@
 - Bucket: `qbutton` (lowercase in code).
 - Upload path pattern: `Orders/Customer/<customer_id>/<filename>`.
 - Public URL is stored in `order_attachments.file_url` after upload.
-- UI pages for listing/uploading attachments: `app/orders/page.tsx:260` (UploadAttachmentDialog), listing via `listCustomerFiles` with prefix `Orders/Customer/<customerId>`.
+- UI for listing/uploading attachments lives in `app/orders/page.tsx`:
+  - Upload uses `UploadAttachmentDialog` which writes to Supabase Storage and inserts a row in `order_attachments`.
+  - Listing pulls from `order_attachments` via a React Query (`['orderAttachments', order_id]`).
+  - A helper `listCustomerFiles(customerId)` exists but is not currently used by the Orders UI.
 
 **UI & Routes**
 
-- Orders list: filters by status, search (order number, customer), shows sections, attachments count and upload dialog.
-  - Page: `app/orders/page.tsx:1` (fetch/filter logic), `app/orders/page.tsx:260` (storage + attachments handling).
-- Order detail/editor pages also reference order data; generation of POs occurs from the order page: `app/orders/[orderId]/page.tsx` (handles component requirements, creating purchase orders by supplier group and linking them).
+- Orders list: status filter, debounced search (order number, customer name, numeric ID), section chips, attachment count, upload dialog.
+  - List page: `app/orders/page.tsx`
+  - Detail page: `app/orders/[orderId]/page.tsx`
+  - New order (scaffolded): `app/orders/new/page.tsx`
+  - Orders layout: `app/orders/layout.tsx`
+  - A bypass page also exists: `app/bypass/orders/page.tsx`
+
+**Data Fetching & Filters (List Page)**
+
+- Query selects `orders` with nested relations: `status:order_statuses`, `customer:customers`, and `details:order_details(product:products)`; sorted by `created_at` desc.
+- Status filter resolves `status_id` by `order_statuses.status_name` and filters on the header.
+- Search builds an `.or(...)` clause combining:
+  - `customer_id.in.(<ids matching customers.name ilike %term%>)`
+  - `order_number.ilike.%<term>%`
+  - `order_id.eq.<numericTerm>` (when the term parses as an int)
+- Section chips are heuristic: `determineProductSections(product)` matches keywords in `product.name/description` to map to `chair`, `wood`, `steel`, `powdercoating`.
+- Status badges use a local map to colors: New, In Progress, Completed, Cancelled (fallback to gray).
+
+**Order Detail & Purchasing Linkage**
+
+- Detail page `app/orders/[orderId]/page.tsx` loads header (`orders` with `order_statuses`, `customers`, and `quotes`) plus `order_details(product:products)`.
+- Component requirements pipeline:
+  - RPC: `get_all_component_requirements` to compute global totals.
+  - RPC: `get_detailed_component_status(p_order_id)` for per-order requirements with stock/on-order and global fields.
+  - RPC: `get_order_component_history(p_order_id)` for per-component historical context.
+- Suppliers & PO creation:
+  - Suppliers fetched from `suppliercomponents` (with supplier emails joined from `supplier_emails`).
+  - Components grouped by supplier; user selects components and quantities, and can allocate between "For this order" vs "For stock".
+  - PO creation looks up `Draft` in `supplier_order_statuses`, inserts into `purchase_orders` and `supplier_orders`, then links each supplier order line to the sales order via `supplier_order_customer_orders` with `quantity_for_order` and `quantity_for_stock`.
+
+**API Routes**
+
+- `app/api/orders/[orderId]/add-products/route.ts` inserts `order_details` rows in bulk and recomputes the order total. Validates `order_id` and request shape.
+
+**Types & DB Utilities**
+
+- Types: `types/orders.ts` defines `Order`, `OrderDetail`, `OrderAttachment`, `Customer`, `OrderStatus`. `Order` uses `order_id` (number) and includes optional `quote` summary.
+- DB helpers: `lib/db/orders.ts` defines minimal `createOrder(order)` and `fetchOrders()`. Note: the `Order` interface here uses `id` instead of `order_id` and `quote_id` as string — this differs from `types/orders.ts` and the actual `orders` table.
+
+**Known Gaps / Inconsistencies**
+
+- `lib/db/orders.ts` shape vs runtime:
+  - Uses `id` (string) while UI and DB use `order_id` (number). The New Order page navigates with `router.push(\`/orders/${order.id}\`)`, which will be incorrect if Supabase returns `order_id`. Align types and navigation.
+- The New Order form is a scaffold; real customer/product selection and header creation are not implemented yet. Current flow prefers creating an order from a Quote (`quote_id`).
+- Section chips are heuristic and based on product text; consider explicit product → section metadata.
+- Attachments listing relies on `order_attachments`; a storage listing helper exists but is not used. Ensure DB rows are the source of truth to avoid drift.
+
+**Cleanup & Reset**
+
+- See `docs/orders-reset-guide.md` for test/dev cleanup.
+- Helper scripts: `scripts/cleanup-orders.ts` and `scripts/cleanup-purchasing.ts` can be used to reset data; Purchasing can be cleaned independently (see `docs/purchasing-reset-guide.md`).
+
+**Related Schema References**
+
+- Orders domain: `schema.txt` (orders + statuses around line 114 in the snapshot).
+- Junction table linking supplier orders to customer orders: `sql/create_junction_table.sql` (table: `supplier_order_customer_orders`).
 
 **Link to Purchasing**
 
