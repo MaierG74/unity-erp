@@ -35,6 +35,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import InlineAttachmentsCell from './InlineAttachmentsCell';
 import AddQuoteItemDialog from './AddQuoteItemDialog';
 import { createQuoteAttachmentFromUrl, fetchPrimaryProductImage } from '@/lib/db/quotes';
+import CutlistTool from '@/components/features/cutlist/CutlistTool';
+import { exportCutlistToQuote } from '@/components/features/cutlist/export';
 
 interface Props {
   quoteId: string;
@@ -124,6 +126,7 @@ function QuoteItemRow({
   onDeleteClusterLine,
   onUpdateCluster,
   onEnsureCluster,
+  onOpenCutlist,
   attachmentsVersion,
 }: {
   item: QuoteItem;
@@ -142,6 +145,7 @@ function QuoteItemRow({
   onDeleteClusterLine: (id: string) => void;
   onUpdateCluster: (clusterId: string, updates: Partial<QuoteItemCluster>) => void;
   onEnsureCluster: (itemId: string) => void;
+  onOpenCutlist: (itemId: string) => void;
   attachmentsVersion?: number;
 }) {
   const [desc, setDesc] = React.useState(item.description);
@@ -181,6 +185,16 @@ function QuoteItemRow({
           <div className="flex items-center justify-center gap-2">
             <Button variant="secondary" size="sm" className="px-3 py-1.5" onClick={() => setDetailsOpen(true)}>
               Details
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="px-3 py-1.5"
+              title="Cutlist Calculator"
+              aria-label="Cutlist Calculator"
+              onClick={() => onOpenCutlist(item.id)}
+            >
+              Cutlist
             </Button>
             <Button
               variant="destructiveSoft"
@@ -239,8 +253,11 @@ function QuoteItemRow({
 export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachmentsVersion }: Props) {
   const { toast } = useToast();
   const [showAddItemDialog, setShowAddItemDialog] = React.useState(false);
+  const [cutlistOpen, setCutlistOpen] = React.useState<{ open: boolean; itemId?: string | null }>({ open: false, itemId: null });
 
   const handleAddItem = () => setShowAddItemDialog(true);
+
+  const handleOpenCutlist = (itemId: string) => setCutlistOpen({ open: true, itemId });
 
   const handleCreateManualItem = async ({ description, qty, unit_price }: { description: string; qty: number; unit_price: number }) => {
     const newItem = await createQuoteItem({ total: 0, quote_id: quoteId, description, qty, unit_price });
@@ -551,7 +568,7 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
               <TableHead className="w-24 text-center font-medium">Unit Price</TableHead>
               <TableHead className="w-24 text-center font-medium">Total</TableHead>
               <TableHead className="w-28 text-center font-medium">Attachments</TableHead>
-              <TableHead className="w-20 text-center font-medium">Actions</TableHead>
+              <TableHead className="w-40 text-center font-medium">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -567,6 +584,7 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
                 onDeleteClusterLine={handleDeleteClusterLine}
                 onUpdateCluster={handleUpdateCluster}
                 onEnsureCluster={ensureItemHasCluster}
+                onOpenCutlist={handleOpenCutlist}
                 attachmentsVersion={attachmentsVersion}
               />
             ))}
@@ -579,6 +597,29 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
         onCreateManual={handleCreateManualItem}
         onCreateProduct={handleCreateProductItem}
       />
+
+      {/* Cutlist Calculator Modal */}
+      <Dialog open={cutlistOpen.open} onOpenChange={(o) => setCutlistOpen({ open: o, itemId: cutlistOpen.itemId })}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Cutlist Calculator</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <CutlistTool onExport={async (res) => {
+              if (!cutlistOpen.itemId) return;
+              try {
+                await exportCutlistToQuote({ quoteItemId: cutlistOpen.itemId, result: res });
+                toast({ title: 'Exported to Costing Cluster' });
+                // Refresh the page to reflect new cluster lines
+                window.location.reload();
+              } catch (e) {
+                console.error('Export failed', e);
+                toast({ variant: 'destructive', title: 'Export failed', description: (e as Error).message });
+              }
+            }} />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

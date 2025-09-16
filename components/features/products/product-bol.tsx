@@ -459,11 +459,8 @@ export function ProductBOL({ productId }: ProductBOLProps) {
     },
   });
   
-  // Handle form submission for adding new BOL item
-  const onSubmit = (values: BOLItemFormValues) => {
-    addBOLItem.mutate(values);
-  };
-  
+  // Note: adding new BOL items is handled via <AddJobDialog />; no local onSubmit needed here.
+
   // Start editing a BOL item
   const startEditing = (item: BOLItem) => {
     setEditingId(item.bol_id);
@@ -768,6 +765,7 @@ export function ProductBOL({ productId }: ProductBOLProps) {
                               </TableCell>
                             </>
                             </Form>
+                          </TableRow>
                           )
                         }
 
