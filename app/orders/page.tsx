@@ -18,7 +18,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { PlusCircle, Search, Package, Layers, Wrench, PaintBucket, Paperclip, Upload, FileText, ImageIcon, Eye, Download, FileUp, Check, RefreshCw } from 'lucide-react';
+import { PlusCircle, Search, Package, Layers, Wrench, PaintBucket, Paperclip, Upload, FileText, ImageIcon, Eye, Download, FileUp, Check, RefreshCw, Trash2 } from 'lucide-react';
 // Import the advanced AttachmentPreviewModal component
 import { AttachmentPreviewModal } from '@/components/ui/attachment-preview-modal';
 // Import the FileIcon component for use in the advanced modal
@@ -687,6 +687,9 @@ export default function OrdersPage() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [debouncedSearch, setDebouncedSearch] = useState<string>('');
   const [activeSection, setActiveSection] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   // Handle search input change with debounce
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -871,6 +874,7 @@ export default function OrdersPage() {
                       <TableHead className="font-semibold">Status</TableHead>
                       <TableHead className="font-semibold text-center">Attachments</TableHead>
                       <TableHead className="font-semibold"></TableHead>
+                      <TableHead className="font-semibold text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -908,6 +912,17 @@ export default function OrdersPage() {
                             View Details
                           </Link>
                         </TableCell>
+                        <TableCell className="text-right">
+                          <button
+                            type="button"
+                            onClick={() => setDeleteTargetId(order.order_id)}
+                            className="inline-flex items-center gap-1 text-red-600 hover:text-red-700"
+                            title="Delete order"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            <span className="text-sm">Delete</span>
+                          </button>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -922,6 +937,43 @@ export default function OrdersPage() {
           )}
         </div>
       </div>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={deleteTargetId !== null} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Delete order</DialogTitle>
+            <DialogDescription>
+              This action cannot be undone. This will permanently delete the order and related records (attachments, details, links).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setDeleteTargetId(null)} disabled={isDeleting}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (!deleteTargetId) return;
+                setIsDeleting(true);
+                try {
+                  const res = await fetch(`/api/orders/${deleteTargetId}`, { method: 'DELETE' });
+                  if (!res.ok) throw new Error(await res.text());
+                  setDeleteTargetId(null);
+                  // Refresh any orders query regardless of filters
+                  queryClient.invalidateQueries({ queryKey: ['orders'] });
+                } catch (e) {
+                  console.error('Delete failed', e);
+                  alert('Failed to delete order. Check console for details.');
+                } finally {
+                  setIsDeleting(false);
+                }
+              }}
+              disabled={isDeleting}
+            >
+              {isDeleting ? 'Deleting…' : 'Delete'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 } 

@@ -23,6 +23,8 @@ import {
   fetchComponents,
   fetchProductComponents,
   fetchProductLabor,
+  fetchEffectiveBOM,
+  fetchComponentsByIds,
 } from '@/lib/db/quotes';
 import QuoteItemClusterGrid from './QuoteItemClusterGrid';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
@@ -277,7 +279,23 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
       }
 
       if (explode) {
-        const bomPromise = fetchProductComponents(product_id);
+        // Prefer Effective BOM when available (includes linked sub-products)
+        const bomPromise = (async () => {
+          const eff = await fetchEffectiveBOM(product_id);
+          if (Array.isArray(eff) && eff.length > 0) {
+            const ids = eff.map(it => Number((it as any).component_id)).filter(Boolean);
+            const components = await fetchComponentsByIds(ids);
+            const map = new Map<number, string | undefined>();
+            for (const c of components) map.set(Number(c.component_id), c.description || undefined);
+            return eff.map(it => ({
+              component_id: Number((it as any).component_id),
+              quantity: Number((it as any).quantity_required || 1),
+              unit_cost: (it as any)?.suppliercomponents?.price ?? null,
+              description: map.get(Number((it as any).component_id)) || undefined,
+            }));
+          }
+          return await fetchProductComponents(product_id);
+        })();
         const laborPromise = include_labour === false ? Promise.resolve([]) : fetchProductLabor(product_id);
         const [bom, labor] = await Promise.all([bomPromise, laborPromise]);
 

@@ -1,31 +1,26 @@
 import { supabase } from '@/lib/supabase';
-
-export interface Order {
-  id: string;
-  quote_id: string;
-  created_at: string;
-  updated_at: string;
-}
+export type { Order } from '@/types/orders';
 
 /**
  * Creates a new order linked to a quote.
  */
 export async function createOrder(
-  order: Partial<Order>
-): Promise<Order> {
+  // Allow extra fields like quote_id that may exist on the table but not in the Order type
+  order: Partial<any>
+): Promise<any> {
   const { data, error } = await supabase
     .from('orders')
     .insert([order])
     .select()
     .single();
   if (error) throw error;
-  return data as Order;
+  return data as any;
 }
 
 /**
  * Fetches all orders (minimal implementation).
  */
-export async function fetchOrders(): Promise<Order[]> {
+export async function fetchOrders(): Promise<any[]> {
   const { data, error } = await supabase
     .from('orders')
     .select('*')
