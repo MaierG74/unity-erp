@@ -6,14 +6,15 @@ Build a lightweight, fast cutlist/nesting utility inside Quotes to estimate mate
 Reference: CutList Optimizer – feature inspiration only. We will focus on an in-house MVP tailored to our workflow. See: https://www.cutlistoptimizer.com
 
 ## MVP Scope
-- Input panels to cut (length, width, quantity, optional grain orientation, label).
+- Input panels to cut (length, width, quantity, grain orientation, label).
 - Stock sheets (length, width, quantity on hand, cost per sheet, kerf thickness).
 - Options: kerf thickness, labels on panels (off by default), single-sheet-only toggle, consider grain direction toggle.
 - Outputs:
   - Used sheets and waste summary (total used area, waste %, cuts count, total cut length).
+  - Fractional sheets used for primary and, when lamination present, backer sheets.
   - Per-sheet layout preview (static SVG/Canvas, not to scale initially OK).
-  - Bill of materials: sheets used, offcuts, edge-banding total length by edge flags.
-  - Export: add the calculated material lines into a quote cluster, or attach a PNG/SVG snapshot to the quote.
+  - Bill of materials: edgebanding split into 16mm and 32mm based on per-part lamination.
+  - Export: push fractional sheet usage and banding meters as lines to the quote cluster; optionally attach a PNG/SVG snapshot.
 
 ## Nice-to-haves (post-MVP)
 - Labels on panels (code/description).
@@ -23,9 +24,9 @@ Reference: CutList Optimizer – feature inspiration only. We will focus on an i
 - PDF export of layout.
 
 ## Data Model (UI layer only for MVP)
-- Part: `{ id, length_mm, width_mm, qty, label?, require_grain?: boolean, band_edges?: {top?: boolean, right?: boolean, bottom?: boolean, left?: boolean} }`
+- Part: `{ id, length_mm, width_mm, qty, label?, grain?: 'any'|'length'|'width', band_edges?: {top?: boolean, right?: boolean, bottom?: boolean, left?: boolean}, laminate?: boolean, require_grain?: boolean /* legacy */ }`
 - StockSheet: `{ id, length_mm, width_mm, qty, kerf_mm, cost?: number, material?: string }`
-- LayoutResult: `{ sheets: SheetLayout[], stats: { used_area_mm2, waste_area_mm2, cuts: number, cut_length_mm } }`
+- LayoutResult: `{ sheets: SheetLayout[], stats: { used_area_mm2, waste_area_mm2, cuts: number, cut_length_mm, edgebanding_length_mm, edgebanding_16mm_mm, edgebanding_32mm_mm } }`
 - SheetLayout: `{ sheet_id, placements: Placement[], waste_pockets?: Rect[] }`
 - Placement: `{ part_id, x, y, w, h, rot: 0|90 }` (top-left origin, mm)
 
@@ -34,11 +35,15 @@ Reference: CutList Optimizer – feature inspiration only. We will focus on an i
   - Normalize parts as rectangles; expand by kerf on boundaries when placing.
   - Sort by area desc, then by longest edge desc.
   - Guillotine cutting with splits: try both orientation splits.
-  - Allow 90° rotation when grain not required.
+  - Rotation policy respects `grain`:
+    - any → try 0° and 90°
+    - length → only 0°
+    - width → only 90° (requires global rotation enabled)
+    - legacy `require_grain: true` behaves like `grain: 'length'`
   - Maintain a list of free rectangles per sheet; place greedily with best-fit (min waste increase).
   - When no fit, open a new sheet if available.
 - Compute cut length: accumulate shared cut edges once; approximate via per-placement perimeter minus touching edges.
-- Edge banding length: sum selected edges of each final oriented part times quantity.
+- Edge banding length: sum selected edges of each final oriented part times quantity; accumulate into 16mm or 32mm buckets depending on `laminate`.
 
 ## Tech Implementation
 - Location: `components/features/cutlist/` with a client-side module.
@@ -55,9 +60,10 @@ Reference: CutList Optimizer – feature inspiration only. We will focus on an i
 ## Quotes Integration
 - Access from Quotes → Line Items tab as a tool button: “Cutlist Calculator”.
 - On save:
-  - Create/ensure a Costing Cluster and push component lines:
-    - `MELAMINE SHEET 2750×1830` × N sheets used (unit cost from inventory or manual input).
-    - `EDGE BANDING` total length in meters.
+  - Create/ensure a Costing Cluster and push component lines with fractional quantities:
+    - Primary sheet × fractional primary sheets used.
+    - Backer sheet × fractional backer sheets used (when lamination on any part).
+    - Edgebanding 16mm (m) and Edgebanding 32mm (m) as separate lines.
   - Attach SVG/PNG preview image(s) to the quote as item-level attachments.
 
 ## API/DB (later)

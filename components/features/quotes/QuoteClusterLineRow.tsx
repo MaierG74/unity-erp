@@ -48,7 +48,7 @@ const QuoteClusterLineRow: React.FC<QuoteClusterLineRowProps> = ({ line, onUpdat
           onChange={e => setQty(Number(e.target.value))}
           onBlur={() => handleBlur('qty', qty)}
           onFocus={e => e.target.select()}
-          className="text-sm h-8 w-20 bg-background text-foreground border-border"
+          className="text-sm h-8 w-24 text-right bg-background text-foreground border-border"
         />
       </TableCell>
       <TableCell>

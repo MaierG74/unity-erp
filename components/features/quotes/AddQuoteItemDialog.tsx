@@ -28,7 +28,7 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
   const [products, setProducts] = React.useState<Product[]>([]);
   const [productQuery, setProductQuery] = React.useState('');
   const [selectedProduct, setSelectedProduct] = React.useState<Product | null>(null);
-  const [productQty, setProductQty] = React.useState(1);
+  // Quantity input removed — items import as 1 by default; user sets final line qty later
   const [explode, setExplode] = React.useState(true);
   const [includeLabor, setIncludeLabor] = React.useState(true);
   const [attachImage, setAttachImage] = React.useState(true);
@@ -57,7 +57,6 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
     setProducts([]);
     setProductQuery('');
     setSelectedProduct(null);
-    setProductQty(1);
     setExplode(true);
     setAttachImage(true);
     setIncludeLabor(true);
@@ -70,7 +69,8 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
       onCreateManual({ description: description.trim(), qty, unit_price: unitPrice });
     } else if (tab === 'product') {
       if (!selectedProduct) return;
-      onCreateProduct({ product_id: selectedProduct.product_id, name: selectedProduct.name, qty: productQty, explode, include_labour: includeLabor as boolean, attach_image: attachImage as boolean });
+      // Always import as quantity 1; user can set the final quantity on the line item afterwards
+      onCreateProduct({ product_id: selectedProduct.product_id, name: selectedProduct.name, qty: 1, explode, include_labour: includeLabor as boolean, attach_image: attachImage as boolean });
     }
     handleClose();
   };
@@ -137,24 +137,21 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
                 {selectedProduct.internal_code && <div className="text-sm text-foreground">Code: {selectedProduct.internal_code}</div>}
               </div>
             )}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label htmlFor="p-qty">Quantity</Label>
-                <Input id="p-qty" type="number" min={1} value={productQty} onChange={(e) => setProductQty(Number(e.target.value || 0))} onFocus={(e) => e.target.select()} />
+            <div className="flex flex-col gap-3">
+              <div className="text-xs text-muted-foreground">
+                Items are imported at quantity 1. Set the final quantity on the line item after adding.
               </div>
-              <div className="flex flex-col gap-3 justify-end">
-                <div className="flex items-center gap-2">
-                  <Checkbox id="explode" checked={explode} onCheckedChange={(v) => setExplode(Boolean(v))} />
-                  <Label htmlFor="explode" className="text-sm text-muted-foreground">Explode BOM into Costing Cluster</Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox id="include-labor" checked={includeLabor} onCheckedChange={(v) => setIncludeLabor(Boolean(v))} />
-                  <Label htmlFor="include-labor" className="text-sm text-muted-foreground">Include Labour</Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox id="attach-image" checked={attachImage} onCheckedChange={(v) => setAttachImage(Boolean(v))} />
-                  <Label htmlFor="attach-image" className="text-sm text-muted-foreground">Attach product image to this item</Label>
-                </div>
+              <div className="flex items-center gap-2">
+                <Checkbox id="explode" checked={explode} onCheckedChange={(v) => setExplode(Boolean(v))} />
+                <Label htmlFor="explode" className="text-sm text-muted-foreground">Explode BOM into Costing Cluster</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox id="include-labor" checked={includeLabor} onCheckedChange={(v) => setIncludeLabor(Boolean(v))} />
+                <Label htmlFor="include-labor" className="text-sm text-muted-foreground">Include Labour</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox id="attach-image" checked={attachImage} onCheckedChange={(v) => setAttachImage(Boolean(v))} />
+                <Label htmlFor="attach-image" className="text-sm text-muted-foreground">Attach product image to this item</Label>
               </div>
             </div>
           </TabsContent>
