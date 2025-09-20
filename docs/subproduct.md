@@ -62,6 +62,26 @@ File: app/orders/[orderId]/page.tsx
   - Per‑order badge: “All components available for this order” or “N components with shortfall (this order)”.
   - Global badge: “N global shortfalls (all orders)”. Tooltip/title clarifies scope is across all open orders.
 
+## Product UI
+File: app/products/[productId]/page.tsx
+
+- Finished‑Goods Inventory card in Details tab
+  - Displays On Hand, Reserved (all orders), Available metrics.
+  - Reads from `product_inventory` and `product_reservations`.
+- Reserved breakdown
+  - The "Reserved (all orders)" tile includes a "View" popover that lists each order and the reserved quantity, with links to `/orders/[orderId]`.
+  - Clicking "View" now opens a dialog that:
+    - Lists each order with reserved quantity for this product
+    - Provides a direct "Open PDF" link to the latest `order_attachments` file (if any)
+    - Only fetches attachments when the dialog opens (efficient)
+- Add Finished Goods action
+  - Inline form with Quantity and optional Location.
+  - API: `POST /api/products/[productId]/add-fg` updates or inserts a row in `product_inventory`.
+  - On success: refetches inventory and reservation totals and shows a toast.
+- Edit Product dialog
+  - Edits Product Code, Name, Description via inline dialog.
+  - Saves to `products` and refetches on success.
+
 ## Error Fixes Applied in Phase 2
 - Ambiguous column references in SQL (e.g., component_id) were qualified.
 - Type mismatches fixed with explicit casts (e.g., bigint→integer, numeric(10,2)→integer where required by PostgREST signatures).
@@ -75,12 +95,23 @@ File: app/orders/[orderId]/page.tsx
 4) Verify global context columns and global shortfalls badge are unaffected by the toggle.
 5) Click “Release”: reservations clear and UI updates.
 6) Click “Consume (Ship)”: on‑hand decreases, a transaction is logged, reservations clear.
+7) On a Product page with reservations, click Reserved → View: the dialog shows per‑order rows and “Open PDF” links where available.
 
 ## Future Enhancements
 - Move FG‑coverage scaling from client to a DB view/RPC to ensure consistent reporting.
 - Add confirmations and loading states to Release/Consume flows (UI polish).
 - Reporting for FG turnover and reorder suggestions.
 - Performance: materialize/refresh views where needed; add indexes guided by EXPLAIN.
+
+## Backend Assets (Migrations & Scripts)
+- Migration: `db/migrations/20250920_fg_reservations.sql`
+  - Ensures `product_reservations` table exists (id, product_id, order_id, qty_reserved, created_at).
+  - Creates or replaces RPCs: `reserve_finished_goods`, `release_finished_goods`, `consume_finished_goods`.
+- Scripts:
+  - `scripts/check-fg.mjs` — read‑only verification of tables and RPC endpoints. Usage:
+    - `node -r dotenv/config scripts/check-fg.mjs dotenv_config_path=.env.local`
+  - `scripts/apply-fg-migration.mjs` — applies the migration via PG connection (requires SUPABASE_DB_URL or PG* env vars). Usage:
+    - `node -r dotenv/config scripts/apply-fg-migration.mjs dotenv_config_path=.env.local`
 
 ## References
 - UI: app/orders/[orderId]/page.tsx
