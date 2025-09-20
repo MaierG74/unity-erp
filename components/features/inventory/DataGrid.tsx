@@ -278,11 +278,12 @@ export function DataGrid({ onRowSelect, onEdit, filters }: DataGridProps) {
   const filteredData = useMemo(() => {
     return inventoryData.filter(item => {
       // Text search
+      const searchTerm = filters.search.toLowerCase()
       const matchesSearch = !filters.search || [
         item.component?.internal_code,
         item.component?.description
-      ].some(field => 
-        field?.toLowerCase().includes(filters.search.toLowerCase())
+      ].some(field =>
+        (field?.toLowerCase() ?? '').includes(searchTerm)
       )
 
       // Category filter
