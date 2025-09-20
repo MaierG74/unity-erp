@@ -34,6 +34,8 @@ Focus: Resolve the 30-minute tea/lunch deduction logic and ensure accurate regul
 ### 3.2 Client
 - [ ] `generateDailySummary()` – remove 30-min subtraction under feature flag `USE_DB_DEDUCTION`.
 - [ ] UI: surface server-calculated values for validation.
+- [x] `processClockEventsIntoSegments()` – trigger staff-scoped summary regeneration only, preventing full-day reprocessing when a single employee refreshes.
+- [x] `generateDailySummary()` – persist computed overtime minutes when inserting a brand-new summary row so totals are correct immediately.
 
 ### 3.3 Testing
 - [ ] Seed sample clock events for Mon, Fri, Sun.
@@ -69,4 +71,4 @@ Preferred: **Option A** keeps table size small and avoids negative values. This 
 For summary rows created before the fix, simply add and delete a dummy clock event for that staff/date and click "Process Clock Events". The negative value will be cleared and future calculations will be correct.
 
 ---
-> Last updated: 26 Jul 2025
+> Last updated: 20 Sep 2025

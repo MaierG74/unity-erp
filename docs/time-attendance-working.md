@@ -166,6 +166,11 @@ This document details the Unity ERP time and attendance system architecture, per
 - Server resource usage
 - Database lock contention
 
+**Fix Implemented (20 Sep 2025)**:
+1. `processClockEventsIntoSegments()` now regenerates summaries with `generateDailySummary(dateStr, staffId)` immediately after each staff member's segments are rebuilt, keeping the refresh scoped to the intended employee.
+2. React and API callers no longer issue an extra `generateDailySummary` invocation, so the per-staff 🔄 button avoids the second full-day pass.
+3. When a targeted refresh finds no clock events, the helper removes any lingering segments and deletes the stale summary row so the UI clears instantly.
+
 ### Issue 3: Spinner Timing
 **Problem**: Loading spinner stops before processing completes
 
@@ -205,6 +210,10 @@ for (const staffIdStr in staffEvents) {
 
   // Process only the target staff member
 }
+
+// After segments are rebuilt the helper immediately calls
+// generateDailySummary(dateStr, currentStaffId), so callers
+// no longer need to fire a second summary job.
 ```
 
 ### 3. Ultra-Lightweight Manual Events
@@ -288,6 +297,8 @@ if (dayOfWeek === 0) { // Sunday
   overtimeHours = Math.max(0, totalHours - 9);
 }
 ```
+
+> Update 20 Sep 2025: When inserting a brand-new `time_daily_summary` row we now persist the computed `ot_minutes` instead of hard-coding zero, so overtime totals are correct on first insert.
 
 ### Segment Pairing Logic
 ```typescript
