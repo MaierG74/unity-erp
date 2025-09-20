@@ -182,6 +182,85 @@ export function DailyAttendanceGrid() {
   const [viewMode, setViewMode] = useState<'legacy' | 'timeline'>('timeline');
   const { toast } = useToast();
 
+  const refreshStaffAttendanceCaches = useCallback(
+    async (dateStr: string, staffId: number) => {
+      console.log(`[refreshStaffAttendanceCaches] Refreshing caches for staff ${staffId} on ${dateStr}`);
+
+      const { startOfDay, startOfNextDay } = getSASTDayBoundaries(dateStr);
+
+      const [eventsRes, segmentsRes, summaryRes] = await Promise.all([
+        supabase
+          .from('time_clock_events')
+          .select('*')
+          .eq('staff_id', staffId)
+          .gte('event_time', startOfDay)
+          .lt('event_time', startOfNextDay)
+          .order('event_time', { ascending: true }),
+        supabase
+          .from('time_segments')
+          .select('id,staff_id,date_worked,start_time,end_time,break_type,segment_type,duration_minutes')
+          .eq('date_worked', dateStr)
+          .eq('staff_id', staffId)
+          .order('start_time', { ascending: true }),
+        supabase
+          .from('time_daily_summary')
+          .select('*')
+          .eq('date_worked', dateStr)
+          .eq('staff_id', staffId)
+          .maybeSingle(),
+      ]);
+
+      if (eventsRes.error) {
+        throw eventsRes.error;
+      }
+      if (segmentsRes.error) {
+        throw segmentsRes.error;
+      }
+      if (summaryRes.error) {
+        throw summaryRes.error;
+      }
+
+      const updatedEvents = (eventsRes.data ?? []) as ClockEvent[];
+      const updatedSegments = (segmentsRes.data ?? []) as TimeSegment[];
+      const staffSummary = (summaryRes.data ?? null) as DailySummary | null;
+
+      queryClient.setQueryData<ClockEvent[]>(['time_clock_events', dateStr], (current = []) => {
+        const remaining = current.filter(event => event.staff_id !== staffId);
+        const merged = [...remaining, ...updatedEvents];
+        return merged.sort((a, b) => new Date(a.event_time).getTime() - new Date(b.event_time).getTime());
+      });
+
+      queryClient.setQueryData<TimeSegment[]>(['time_segments', dateStr], (current = []) => {
+        const remaining = current.filter(segment => segment.staff_id !== staffId);
+        const merged = [...remaining, ...updatedSegments];
+        return merged.sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+      });
+
+      queryClient.setQueryData<DailySummary | null>(['time_daily_summary', dateStr, staffId], staffSummary);
+
+      const updatedSummaryList = queryClient.setQueryData<DailySummary[]>(
+        ['time_daily_summary_all', dateStr],
+        (current = []) => {
+          const remaining = current.filter(summary => summary.staff_id !== staffId);
+          if (staffSummary) {
+            const merged = [...remaining, staffSummary];
+            merged.sort((a, b) => a.staff_id - b.staff_id);
+            return merged;
+          }
+          remaining.sort((a, b) => a.staff_id - b.staff_id);
+          return remaining;
+        }
+      );
+
+      if (updatedSummaryList) {
+        queryClient.setQueryData<DailySummary[]>(['time_daily_summary', dateStr], updatedSummaryList);
+      }
+
+      console.log(`[refreshStaffAttendanceCaches] Cache refresh complete for staff ${staffId} on ${dateStr}`);
+    },
+    [queryClient]
+  );
+
   // Invalidate time_segments cache after edit/delete
   // TEMPORARILY DISABLED to test if this is causing mass re-renders
   const handleSegmentsChanged = useCallback(() => {
@@ -371,16 +450,22 @@ export function DailyAttendanceGrid() {
           title: 'Event Added',
           description: `${eventType.replace('_', ' ')} event added for ${time}`
         });
-        
-        // Skip heavy processing entirely and just invalidate the specific staff member's query
-        console.log(`[handleManualClockEvent] Using ultra-lightweight invalidation for staff ${staffId}`);
-        
-        // Only invalidate this specific staff member's daily summary query
-        queryClient.invalidateQueries({ 
-          queryKey: ['time_daily_summary', dateStr, staffId]
-        });
-        
-        console.log(`[handleManualClockEvent] Completed ultra-lightweight update for staff ${staffId}`);
+
+        // Refresh cached data for this staff member so the UI updates immediately
+        console.log(`[handleManualClockEvent] Refreshing cached queries for staff ${staffId}`);
+        try {
+          await refreshStaffAttendanceCaches(dateStr, staffId);
+          console.log(`[handleManualClockEvent] Completed cache refresh for staff ${staffId}`);
+        } catch (refreshError) {
+          console.error('[handleManualClockEvent] Cache refresh failed, falling back to invalidation:', refreshError);
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['time_clock_events', dateStr] }),
+            queryClient.invalidateQueries({ queryKey: ['time_segments', dateStr] }),
+            queryClient.invalidateQueries({ queryKey: ['time_daily_summary', dateStr, staffId] }),
+            queryClient.invalidateQueries({ queryKey: ['time_daily_summary_all', dateStr] }),
+            queryClient.invalidateQueries({ queryKey: ['time_daily_summary', dateStr] }),
+          ]);
+        }
       } else {
         toast({
           title: 'Error',
@@ -419,72 +504,19 @@ export function DailyAttendanceGrid() {
 
       if (isTargeted && typeof staffId === 'number') {
         console.log(`[processClockEventsData] Targeted processing complete for staff ${staffId} - refreshing cached queries`);
-        const { startOfDay, startOfNextDay } = getSASTDayBoundaries(dateStr);
-
-        const [eventsRes, segmentsRes, summaryRes] = await Promise.all([
-          supabase
-            .from('time_clock_events')
-            .select('*')
-            .eq('staff_id', staffId)
-            .gte('event_time', startOfDay)
-            .lt('event_time', startOfNextDay)
-            .order('event_time', { ascending: true }),
-          supabase
-            .from('time_segments')
-            .select('id,staff_id,date_worked,start_time,end_time,break_type,segment_type,duration_minutes')
-            .eq('date_worked', dateStr)
-            .eq('staff_id', staffId)
-            .order('start_time', { ascending: true }),
-          supabase
-            .from('time_daily_summary')
-            .select('*')
-            .eq('date_worked', dateStr)
-            .eq('staff_id', staffId)
-            .maybeSingle(),
-        ]);
-
-        if (eventsRes.error) {
-          throw eventsRes.error;
+        try {
+          await refreshStaffAttendanceCaches(dateStr, staffId);
+          console.log(`[processClockEventsData] Staff-specific cache refresh complete for ${staffId}`);
+        } catch (refreshError) {
+          console.error('[processClockEventsData] Targeted cache refresh failed, invalidating instead:', refreshError);
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['time_clock_events', dateStr] }),
+            queryClient.invalidateQueries({ queryKey: ['time_segments', dateStr] }),
+            queryClient.invalidateQueries({ queryKey: ['time_daily_summary', dateStr, staffId] }),
+            queryClient.invalidateQueries({ queryKey: ['time_daily_summary_all', dateStr] }),
+            queryClient.invalidateQueries({ queryKey: ['time_daily_summary', dateStr] }),
+          ]);
         }
-        if (segmentsRes.error) {
-          throw segmentsRes.error;
-        }
-        if (summaryRes.error) {
-          throw summaryRes.error;
-        }
-
-        const updatedEvents = (eventsRes.data ?? []) as ClockEvent[];
-        const updatedSegments = (segmentsRes.data ?? []) as TimeSegment[];
-        const staffSummary = (summaryRes.data ?? null) as DailySummary | null;
-
-        queryClient.setQueryData<ClockEvent[]>(['time_clock_events', dateStr], (current = []) => {
-          const others = current.filter(event => event.staff_id !== staffId);
-          const merged = [...others, ...updatedEvents];
-          return merged.sort((a, b) => new Date(a.event_time).getTime() - new Date(b.event_time).getTime());
-        });
-
-        queryClient.setQueryData<TimeSegment[]>(['time_segments', dateStr], (current = []) => {
-          const others = current.filter(segment => segment.staff_id !== staffId);
-          const merged = [...others, ...updatedSegments];
-          return merged.sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
-        });
-
-        queryClient.setQueryData<DailySummary | null>(['time_daily_summary', dateStr, staffId], staffSummary);
-
-        const updatedSummaryList = queryClient.setQueryData<DailySummary[]>(
-          ['time_daily_summary_all', dateStr],
-          (current = []) => {
-            const others = current.filter(summary => summary.staff_id !== staffId);
-            const merged = staffSummary ? [...others, staffSummary] : [...others];
-            return merged.sort((a, b) => a.staff_id - b.staff_id);
-          }
-        );
-
-        if (updatedSummaryList) {
-          queryClient.setQueryData<DailySummary[]>(['time_daily_summary', dateStr], updatedSummaryList);
-        }
-
-        console.log(`[processClockEventsData] Staff-specific cache refresh complete for ${staffId}`);
       } else {
         // For full processing, invalidate all queries so everything refetches
         await Promise.all([
