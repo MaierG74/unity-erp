@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -203,15 +203,24 @@ export default function QuotesPage() {
 
   return (
     <div className="min-h-screen bg-background py-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <Card className="rounded-xl">
-          <CardHeader className="pb-4 border-b">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-2xl">Quotes Management</CardTitle>
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <Card className="rounded-2xl border bg-card shadow-sm">
+          <CardHeader className="gap-4 border-b bg-card md:flex md:flex-row md:items-center md:justify-between">
+            <div className="space-y-1">
+              <CardTitle className="text-2xl text-foreground">Quotes Management</CardTitle>
+              <CardDescription>Monitor quote activity, track status, and access PDF previews.</CardDescription>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Button asChild size="sm" className="h-9 px-4">
+                <Link href="/quotes/new">Create New Quote</Link>
+              </Button>
+              <Button asChild variant="outline" size="sm" className="h-9 px-4">
+                <Link href="/pdf-quote-demo">View PDF Demo</Link>
+              </Button>
             </div>
           </CardHeader>
 
-          <CardContent className="pt-6">
+          <CardContent className="space-y-6 pt-6">
             {error && (
               <Alert variant="destructive" className="mb-4">
                 <AlertTitle>Failed to load</AlertTitle>
@@ -220,36 +229,29 @@ export default function QuotesPage() {
             )}
 
             {/* Toolbar */}
-            <div className="flex flex-col gap-3 p-3 mb-6 bg-card rounded-xl border shadow-sm md:flex-row md:items-center md:justify-between">
-              <div className="inline-flex items-center gap-2">
-                <Button asChild className="h-9">
-                  <Link href="/quotes/new">Create New Quote</Link>
-                </Button>
-                <Button asChild variant="outline" size="sm" className="h-9">
-                  <Link href="/pdf-quote-demo">View PDF Demo</Link>
-                </Button>
+            <div className="flex flex-col gap-3 rounded-xl border bg-card/60 p-4 shadow-sm md:flex-row md:items-center md:justify-between">
+              <div className="relative w-full md:max-w-md">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={searchInput}
+                  onChange={(e) => { setSearchInput(e.target.value); }}
+                  placeholder="Search quotes or customers"
+                  className="h-9 w-full rounded-lg pl-9 pr-10 focus:ring-2 focus:ring-inset focus:ring-ring focus:ring-offset-0"
+                />
+                {searchInput && (
+                  <button
+                    type="button"
+                    aria-label="Clear search"
+                    className="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded hover:bg-muted"
+                    onClick={() => setSearchInput('')}
+                  >
+                    <X className="h-4 w-4 text-muted-foreground" />
+                  </button>
+                )}
               </div>
-              <div className="flex w-full items-center gap-3 md:max-w-2xl md:justify-end">
-                <div className="relative w-full md:w-96">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    value={searchInput}
-                    onChange={(e) => { setSearchInput(e.target.value); }}
-                    placeholder="Search quotes or customers"
-                    className="h-9 pl-9 pr-10"
-                  />
-                  {searchInput && (
-                    <button
-                      aria-label="Clear search"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex h-6 w-6 items-center justify-center rounded hover:bg-muted"
-                      onClick={() => setSearchInput('')}
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-3">
                 <Select value={status} onValueChange={(v) => { setStatus(v as any); setPage(1); }}>
-                  <SelectTrigger className="h-9 w-40">
+                  <SelectTrigger className="h-9 min-w-[10rem]">
                     <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
@@ -262,7 +264,7 @@ export default function QuotesPage() {
                   </SelectContent>
                 </Select>
                 <Select value={sort} onValueChange={(v) => setSort(v as any)}>
-                  <SelectTrigger className="h-9 w-44">
+                  <SelectTrigger className="h-9 min-w-[11rem]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -277,14 +279,14 @@ export default function QuotesPage() {
 
             {/* Stats */}
             <div className="grid grid-cols-1 gap-4 mb-6 md:grid-cols-4">
-              <Card className="rounded-xl">
-                <CardContent className="p-4">
+              <Card className="rounded-xl border bg-background/80 shadow-sm">
+                <CardContent className="space-y-2 p-4">
                   <div className="text-sm text-muted-foreground">Total Quotes</div>
                   <div className="text-2xl font-semibold text-foreground">{quotes.length}</div>
                 </CardContent>
               </Card>
-              <Card className="rounded-xl">
-                <CardContent className="p-4">
+              <Card className="rounded-xl border bg-background/80 shadow-sm">
+                <CardContent className="space-y-2 p-4">
                   <div className="flex items-center justify-between">
                     <div className="text-sm text-muted-foreground">Accepted</div>
                     <Badge variant="success">OK</Badge>
@@ -294,8 +296,8 @@ export default function QuotesPage() {
                   </div>
                 </CardContent>
               </Card>
-              <Card className="rounded-xl">
-                <CardContent className="p-4">
+              <Card className="rounded-xl border bg-background/80 shadow-sm">
+                <CardContent className="space-y-2 p-4">
                   <div className="flex items-center justify-between">
                     <div className="text-sm text-muted-foreground">Pending</div>
                     <Badge variant="secondary">Awaiting</Badge>
@@ -305,8 +307,8 @@ export default function QuotesPage() {
                   </div>
                 </CardContent>
               </Card>
-              <Card className="rounded-xl">
-                <CardContent className="p-4">
+              <Card className="rounded-xl border bg-background/80 shadow-sm">
+                <CardContent className="space-y-2 p-4">
                   <div className="text-sm text-muted-foreground">Draft</div>
                   <div className="text-2xl font-semibold text-foreground">
                     {quotes.filter(q => q.status === 'draft').length}
@@ -319,12 +321,12 @@ export default function QuotesPage() {
             <div
               ref={tableContainerRef}
               className={cn(
-                "rounded-xl border transition-shadow",
+                "rounded-xl border bg-card shadow-sm transition-shadow",
                 tableFlash && "ring-2 ring-ring"
               )}
             >
               <Table>
-                <TableHeader>
+                <TableHeader className="bg-muted/50">
                   <TableRow>
                     <TableHead>Quote Number</TableHead>
                     <TableHead>Customer</TableHead>
@@ -373,7 +375,7 @@ export default function QuotesPage() {
                   {!loading && paged.map((quote) => (
                     <TableRow
                       key={quote.id}
-                      className="cursor-pointer"
+                      className="cursor-pointer transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       onClick={() => routerNav.push(`/quotes/${quote.id}`)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
@@ -385,7 +387,7 @@ export default function QuotesPage() {
                       aria-label={`Open quote ${quote.quote_number}`}
                     >
                       <TableCell>
-                        <Link href={`/quotes/${quote.id}`} className="text-primary font-medium hover:underline">
+                        <Link href={`/quotes/${quote.id}`} className="font-medium text-primary hover:underline">
                           {quote.quote_number}
                         </Link>
                       </TableCell>

@@ -25,7 +25,7 @@ export async function PUT(req: NextRequest) {
   try {
     const body = await req.json();
     // Only allow writable fields
-    const allowed = ['company_name','company_logo_path','address_line1','address_line2','city','postal_code','country','phone','email','website','vat_number','bank_details','terms_conditions'];
+    const allowed = ['company_name','company_logo_path','address_line1','address_line2','city','postal_code','country','phone','email','website','vat_number','bank_details','terms_conditions','fg_auto_consume_on_add'];
     const updates: Record<string, any> = {};
     for (const k of allowed) {
       if (k in body) updates[k] = body[k];

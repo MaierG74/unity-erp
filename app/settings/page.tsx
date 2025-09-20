@@ -18,6 +18,7 @@ interface Settings {
   vat_number: string | null;
   bank_details: string | null;
   terms_conditions: string | null;
+  fg_auto_consume_on_add?: boolean;
 }
 
 export default function SettingsPage() {
@@ -215,6 +216,27 @@ export default function SettingsPage() {
             <div>
               <label className="block text-sm font-medium mb-1">Terms & Conditions</label>
               <textarea className="w-full px-3 py-2 rounded border bg-background h-28" value={settings.terms_conditions || ''} onChange={(e) => onChange('terms_conditions', e.target.value)} />
+            </div>
+
+            {/* Inventory & Finished Goods */}
+            <div className="border-t pt-6">
+              <h2 className="text-base font-semibold mb-2">Inventory & Finished Goods</h2>
+              <div className="flex items-start gap-3">
+                <input
+                  id="fg-auto-consume"
+                  type="checkbox"
+                  className="mt-1"
+                  checked={Boolean(settings.fg_auto_consume_on_add)}
+                  onChange={(e) => onChange('fg_auto_consume_on_add', e.target.checked)}
+                />
+                <label htmlFor="fg-auto-consume" className="text-sm">
+                  Consume reservations automatically when FG is added
+                  <div className="text-xs text-muted-foreground">
+                    When on, newly added finished goods will be allocated to existing reservations (FIFO) and deducted from on‑hand immediately.
+                    When off (default), consumption occurs at shipping.
+                  </div>
+                </label>
+              </div>
             </div>
 
             <div className="flex justify-end">

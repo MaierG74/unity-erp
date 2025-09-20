@@ -623,18 +623,14 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
             <DialogTitle>Cutlist Calculator</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <CutlistTool onExport={async (res) => {
-              if (!cutlistOpen.itemId) return;
-              try {
-                await exportCutlistToQuote({ quoteItemId: cutlistOpen.itemId, result: res });
+            <CutlistTool
+              quoteItemId={cutlistOpen.itemId || undefined}
+              onExportSuccess={() => {
                 toast({ title: 'Exported to Costing Cluster' });
                 // Refresh the page to reflect new cluster lines
                 window.location.reload();
-              } catch (e) {
-                console.error('Export failed', e);
-                toast({ variant: 'destructive', title: 'Export failed', description: (e as Error).message });
-              }
-            }} />
+              }}
+            />
           </div>
         </DialogContent>
       </Dialog>

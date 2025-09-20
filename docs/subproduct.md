@@ -103,6 +103,27 @@ File: app/products/[productId]/page.tsx
 - Reporting for FG turnover and reorder suggestions.
 - Performance: materialize/refresh views where needed; add indexes guided by EXPLAIN.
 
+## FG Consumption Timing (Toggle)
+
+We support two operational modes for when reservations are converted into consumed stock:
+
+- Consume on Add (instant consumption)
+  - When FG is added into `product_inventory`, immediately allocate/consume against existing reservations (FIFO by order date or reservation time), decreasing `qty_reserved` and the on‑hand balance in one logical operation.
+  - Best for make‑to‑order where building FG is synonymous with fulfilling specific orders.
+
+- Consume on Ship (deferred consumption)
+  - Keep the on‑hand balance increased by Add FG, keep reservations unchanged; actual deduction happens when shipping via `consume_finished_goods(p_order_id)`.
+  - Best for mixed MTS/MTO or when QA/packing happens later.
+
+Proposed implementation:
+- Global setting key: `fg_auto_consume_on_add` in `settings` table (boolean; default false ⇒ "Consume on Ship").
+- Add‑FG endpoint checks this setting:
+  - If true: call `auto_consume_on_add(p_product_id, p_quantity_added)` RPC that walks reservations (ordered by creation) and applies FIFO consumption, inserting rows in `product_inventory_transactions`.
+  - If false: current behavior (increase on‑hand only).
+- UI: surface a toggle in Settings, and an inline hint under the Add FG form reflecting the current mode.
+
+Status: Not yet implemented. Default runtime behavior is "Consume on Ship" via `consume_finished_goods(p_order_id)`.
+
 ## Backend Assets (Migrations & Scripts)
 - Migration: `db/migrations/20250920_fg_reservations.sql`
   - Ensures `product_reservations` table exists (id, product_id, order_id, qty_reserved, created_at).
