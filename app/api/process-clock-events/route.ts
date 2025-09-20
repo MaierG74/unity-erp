@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { processClockEventsIntoSegments } from '@/lib/utils/attendance';
+import { processClockEventsIntoSegments, generateDailySummary } from '@/lib/utils/attendance';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,8 +14,11 @@ export async function POST(request: Request) {
       }, { status: 400 });
     }
 
-    // Process clock events (summary regeneration occurs inside the helper)
+    // Process clock events for the specific date and staff (if provided)
     await processClockEventsIntoSegments(date, staffId);
+    
+    // Generate daily summary for the specific date and staff (if provided)
+    await generateDailySummary(date, staffId);
     
     const message = staffId 
       ? `Processed clock events for staff ${staffId} on ${date}`
