@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { supabase } from '@/lib/supabase';
-import { type Order, type Product, type OrderDetail, type Customer, type OrderAttachment, type OrderStatus } from '@/types/orders';
+import { type Order, type Product, type OrderDetail, type Customer, type OrderAttachment, type OrderStatus, type FinishedGoodReservation } from '@/types/orders';
 import { ComponentRequirement, ProductRequirement, OrderComponentsDialogProps, SupplierInfo, OrderBreakdown, SupplierOrderBreakdown } from '@/types/components';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { ArrowLeft, File, Download, Paperclip, Package, Layers, Wrench, Cog, Search, PaintBucket, PlusCircle, Check, Plus, Loader2, AlertCircle, ShoppingCart, ChevronDown, CheckCircle, Trash, FilePlus, Terminal, ChevronRight, Info, ShoppingBag, Users } from 'lucide-react';
+import { ArrowLeft, File, Download, Paperclip, Package, Layers, Wrench, Cog, Search, PaintBucket, PlusCircle, Check, Plus, Loader2, AlertCircle, ShoppingCart, ChevronDown, CheckCircle, Trash, FilePlus, Terminal, ChevronRight, Info, ShoppingBag, Users, RotateCcw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
@@ -26,6 +26,7 @@ import { useRouter } from 'next/navigation';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { clsx } from 'clsx';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { Switch } from '@/components/ui/switch';
 
 type OrderDetailPageProps = {
   params: {
@@ -37,6 +38,17 @@ type OrderDetailPageProps = {
 function formatCurrency(amount: number | null): string {
   if (amount === null || amount === undefined) return 'N/A';
   return `R ${amount.toFixed(2)}`;
+}
+
+function formatQuantity(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return '0';
+  }
+  const numeric = Number(value);
+  if (Math.abs(numeric - Math.round(numeric)) < 0.001) {
+    return Math.round(numeric).toString();
+  }
+  return numeric.toFixed(2);
 }
 
 // Fetch a single order with all related data
@@ -119,6 +131,58 @@ async function fetchOrderAttachments(orderId: number): Promise<OrderAttachment[]
     console.error('Error in fetchOrderAttachments:', error);
     return [];
   }
+}
+
+async function fetchFinishedGoodReservations(orderId: number): Promise<FinishedGoodReservation[]> {
+  const response = await fetch(`/api/orders/${orderId}/fg-reservations`, {
+    method: 'GET',
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to load finished-good reservations');
+  }
+
+  const payload = await response.json();
+  return (payload?.reservations ?? []) as FinishedGoodReservation[];
+}
+
+async function reserveFinishedGoods(orderId: number): Promise<FinishedGoodReservation[]> {
+  const response = await fetch(`/api/orders/${orderId}/reserve-fg`, {
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to reserve finished goods');
+  }
+
+  const payload = await response.json();
+  return (payload?.reservations ?? []) as FinishedGoodReservation[];
+}
+
+async function releaseFinishedGoods(orderId: number): Promise<number | null> {
+  const response = await fetch(`/api/orders/${orderId}/release-fg`, {
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to release finished goods');
+  }
+
+  const payload = await response.json();
+  return (payload?.released ?? null) as number | null;
+}
+
+async function consumeFinishedGoods(orderId: number): Promise<Array<{ product_id: number; consumed_quantity: number }>> {
+  const response = await fetch(`/api/orders/${orderId}/consume-fg`, {
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to consume finished goods');
+  }
+
+  const payload = await response.json();
+  return (payload?.consumed ?? []) as Array<{ product_id: number; consumed_quantity: number }>;
 }
 
 // Function to fetch component requirements for an order
@@ -2322,6 +2386,8 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   const [statusOptions, setStatusOptions] = useState<any[]>([]);
   // Add state for expanded rows
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
+  const [applyFgCoverage, setApplyFgCoverage] = useState<boolean>(true);
+  const [showGlobalContext, setShowGlobalContext] = useState<boolean>(true);
 
   // Add toggle function for product row expansion
   const toggleRowExpansion = (productId: string) => {
@@ -2342,14 +2408,133 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   });
 
   // Fetch order attachments
-  const { 
-    data: attachments, 
-    isLoading: attachmentsLoading, 
-    error: attachmentsError 
+  const {
+    data: attachments,
+    isLoading: attachmentsLoading,
+    error: attachmentsError
   } = useQuery({
     queryKey: ['orderAttachments', orderId],
     queryFn: () => fetchOrderAttachments(orderId),
   });
+
+  const {
+    data: fgReservations = [],
+    isLoading: fgReservationsLoading,
+  } = useQuery({
+    queryKey: ['fgReservations', orderId],
+    queryFn: () => fetchFinishedGoodReservations(orderId),
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const storedCoverage = window.localStorage.getItem('orders.applyFgCoverage');
+    const storedGlobal = window.localStorage.getItem('orders.showGlobalContext');
+    if (storedCoverage !== null) {
+      setApplyFgCoverage(storedCoverage === 'true');
+    }
+    if (storedGlobal !== null) {
+      setShowGlobalContext(storedGlobal === 'true');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('orders.applyFgCoverage', applyFgCoverage ? 'true' : 'false');
+  }, [applyFgCoverage]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('orders.showGlobalContext', showGlobalContext ? 'true' : 'false');
+  }, [showGlobalContext]);
+
+  const fgReservationMap = useMemo(() => {
+    const map = new Map<number, number>();
+    (fgReservations ?? []).forEach((reservation: FinishedGoodReservation) => {
+      if (typeof reservation?.product_id === 'number') {
+        map.set(
+          reservation.product_id,
+          Number(
+            reservation.reserved_quantity ??
+            0
+          )
+        );
+      }
+    });
+    return map;
+  }, [fgReservations]);
+
+  const coverageByProduct = useMemo(() => {
+    const map = new Map<number, { ordered: number; reserved: number; remain: number; factor: number }>();
+    if (order?.details) {
+      order.details.forEach((detail: OrderDetail) => {
+        if (!detail?.product_id) return;
+        const ordered = Number(detail?.quantity ?? 0);
+        const reserved = fgReservationMap.get(detail.product_id) ?? 0;
+        const remain = Math.max(0, ordered - reserved);
+        const factor = ordered > 0 ? remain / ordered : 1;
+        map.set(detail.product_id, { ordered, reserved, remain, factor });
+      });
+    }
+    return map;
+  }, [order?.details, fgReservationMap]);
+
+  const finishedGoodsRows = useMemo(() => {
+    if (!order?.details || order.details.length === 0) {
+      return [] as Array<{
+        product_id: number;
+        name: string;
+        internal_code?: string | null;
+        ordered: number;
+        reserved: number;
+        remain: number;
+      }>;
+    }
+
+    return order.details.map((detail: OrderDetail & { product?: Product }) => {
+      const coverage = coverageByProduct.get(detail.product_id) ?? {
+        ordered: Number(detail.quantity ?? 0),
+        reserved: 0,
+        remain: Number(detail.quantity ?? 0),
+        factor: 1,
+      };
+      const reservation = fgReservations.find(res => res.product_id === detail.product_id);
+      return {
+        product_id: detail.product_id,
+        name: detail.product?.name || reservation?.product_name || `Product ${detail.product_id}`,
+        internal_code: detail.product?.internal_code || reservation?.product_internal_code || null,
+        ordered: coverage.ordered,
+        reserved: coverage.reserved,
+        remain: coverage.remain,
+      };
+    });
+  }, [coverageByProduct, fgReservations, order?.details]);
+
+  const hasFgReservations = useMemo(() => (fgReservations?.length ?? 0) > 0, [fgReservations]);
+
+  const computeComponentMetrics = useCallback((component: any, productId: number) => {
+    const baseRequired = Number(
+      component?.quantity_required ??
+      component?.total_required ??
+      component?.order_required ??
+      0
+    );
+    const inStock = Number(component?.quantity_in_stock ?? component?.in_stock ?? 0);
+    const onOrder = Number(component?.quantity_on_order ?? component?.on_order ?? 0);
+    const coverage = coverageByProduct.get(productId);
+    const factor = applyFgCoverage ? (coverage?.factor ?? 1) : 1;
+    const required = baseRequired * factor;
+    const apparent = Math.max(0, required - inStock);
+    const real = Math.max(0, required - inStock - onOrder);
+
+    return {
+      required,
+      inStock,
+      onOrder,
+      apparent,
+      real,
+      factor,
+    };
+  }, [applyFgCoverage, coverageByProduct]);
 
   // Fetch order statuses
   useEffect(() => {
@@ -2377,6 +2562,60 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     },
   });
 
+  const reserveFgMutation = useMutation({
+    mutationFn: () => reserveFinishedGoods(orderId),
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['fgReservations', orderId] });
+    },
+    onSuccess: (reservations) => {
+      queryClient.setQueryData(['fgReservations', orderId], reservations);
+      toast.success('Finished goods reserved');
+    },
+    onError: (error: any) => {
+      console.error('[reserve-fg] mutation error', error);
+      toast.error('Failed to reserve finished goods');
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+    },
+  });
+
+  const releaseFgMutation = useMutation({
+    mutationFn: () => releaseFinishedGoods(orderId),
+    onSuccess: () => {
+      queryClient.setQueryData(['fgReservations', orderId], [] as FinishedGoodReservation[]);
+      toast.success('Finished goods released');
+    },
+    onError: (error: any) => {
+      console.error('[release-fg] mutation error', error);
+      toast.error('Failed to release finished goods');
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+    },
+  });
+
+  const consumeFgMutation = useMutation({
+    mutationFn: () => consumeFinishedGoods(orderId),
+    onSuccess: () => {
+      queryClient.setQueryData(['fgReservations', orderId], [] as FinishedGoodReservation[]);
+      toast.success('Finished goods consumed');
+    },
+    onError: (error: any) => {
+      console.error('[consume-fg] mutation error', error);
+      toast.error('Failed to consume finished goods');
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+    },
+  });
+
   // Inside the OrderDetailPage component, add this query for component requirements
   const { 
     data: componentRequirements = [], 
@@ -2393,21 +2632,22 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   const totals = useMemo(() => {
     let totalComponents = 0;
     let totalShortfall = 0;
-    
+
     componentRequirements.forEach((productReq: ProductRequirement) => {
-      productReq.components.forEach((component: ComponentRequirement) => {
+      (productReq.components ?? []).forEach((component: any) => {
         totalComponents++;
-        if (component.real_shortfall > 0) {
+        const metrics = computeComponentMetrics(component, productReq.product_id);
+        if (metrics.real > 0.0001) {
           totalShortfall++;
         }
       });
     });
-    
+
     return {
       totalComponents,
       totalShortfall
     };
-  }, [componentRequirements]);
+  }, [componentRequirements, computeComponentMetrics]);
 
   // Enhanced filter function to include section filtering
   const filterOrderDetails = (details: any[]) => {
@@ -2564,6 +2804,121 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
           </CardContent>
         </Card>
 
+          {/* Finished-Good Reservations */}
+          <Card>
+            <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <div>
+                <CardTitle className="text-lg">Finished-Good Reservations</CardTitle>
+                <CardDescription>
+                  Reserve available finished goods to reduce component demand before issuing stock.
+                </CardDescription>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  onClick={() => reserveFgMutation.mutate()}
+                  disabled={reserveFgMutation.isPending || orderLoading}
+                >
+                  {reserveFgMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Package className="mr-2 h-4 w-4" />
+                  )}
+                  Reserve FG
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => releaseFgMutation.mutate()}
+                  disabled={!hasFgReservations || releaseFgMutation.isPending}
+                >
+                  {releaseFgMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                  )}
+                  Release
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => consumeFgMutation.mutate()}
+                  disabled={!hasFgReservations || consumeFgMutation.isPending}
+                >
+                  {consumeFgMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <CheckCircle className="mr-2 h-4 w-4" />
+                  )}
+                  Consume (Ship)
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {applyFgCoverage && (
+                <Badge variant="outline" className="mb-3 bg-blue-50 text-blue-700">
+                  FG coverage applied
+                </Badge>
+              )}
+              {fgReservationsLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading finished-good reservations…
+                </div>
+              ) : finishedGoodsRows.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No products on this order can be reserved as finished goods yet.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Product</TableHead>
+                      <TableHead className="text-right">Ordered</TableHead>
+                      <TableHead className="text-right">Reserved FG</TableHead>
+                      <TableHead className="text-right">Remain to Explode</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {finishedGoodsRows.map((row) => {
+                      const reservedPercent = row.ordered > 0
+                        ? Math.round(((row.ordered - row.remain) / row.ordered) * 100)
+                        : 0;
+                      return (
+                        <TableRow key={`fg-row-${row.product_id}`}>
+                          <TableCell>
+                            <div className="font-medium">{row.name}</div>
+                            {row.internal_code && (
+                              <div className="text-xs text-muted-foreground">{row.internal_code}</div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">{formatQuantity(row.ordered)}</TableCell>
+                          <TableCell className="text-right">
+                            <span className={cn(
+                              row.reserved > 0 ? 'text-blue-700 font-medium' : 'text-muted-foreground'
+                            )}>
+                              {formatQuantity(row.reserved)}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {formatQuantity(row.remain)}
+                            {row.reserved > 0 && (
+                              <span className="ml-2 text-xs text-muted-foreground">
+                                {reservedPercent}% reserved
+                              </span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+              {!hasFgReservations && finishedGoodsRows.length > 0 && (
+                <div className="mt-3 rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+                  Reserving finished goods will automatically reduce the component quantities required for this order.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Products List */}
           <Card>
           <CardHeader>
@@ -2575,7 +2930,9 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Product</TableHead>
-                      <TableHead className="text-right">Quantity</TableHead>
+                      <TableHead className="text-right">Ordered</TableHead>
+                      <TableHead className="text-right">Reserved FG</TableHead>
+                      <TableHead className="text-right">Remain to Explode</TableHead>
                       <TableHead className="text-right">Unit Price</TableHead>
                       <TableHead className="text-right">Total</TableHead>
                     </TableRow>
@@ -2591,7 +2948,21 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                             </p>
                           </div>
                         </TableCell>
-                        <TableCell className="text-right">{detail.quantity}</TableCell>
+                        {(() => {
+                          const coverage = coverageByProduct.get(detail.product_id) ?? {
+                            ordered: Number(detail.quantity ?? 0),
+                            reserved: 0,
+                            remain: Number(detail.quantity ?? 0),
+                            factor: 1,
+                          };
+                          return (
+                            <>
+                              <TableCell className="text-right">{formatQuantity(coverage.ordered)}</TableCell>
+                              <TableCell className="text-right">{formatQuantity(coverage.reserved)}</TableCell>
+                              <TableCell className="text-right">{formatQuantity(coverage.remain)}</TableCell>
+                            </>
+                          );
+                        })()}
                         <TableCell className="text-right">{formatCurrency(detail.unit_price || 0)}</TableCell>
                         <TableCell className="text-right">{formatCurrency((detail.quantity || 0) * (detail.unit_price || 0))}</TableCell>
                       </TableRow>
@@ -2599,7 +2970,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                   </TableBody>
                   <TableFooter>
                     <TableRow>
-                      <TableCell colSpan={3}>Total</TableCell>
+                      <TableCell colSpan={5}>Total</TableCell>
                       <TableCell className="text-right">{formatCurrency(order.total_amount || 0)}</TableCell>
                     </TableRow>
                   </TableFooter>
@@ -2693,19 +3064,20 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                 // Calculate totals from all components
                 componentRequirements?.forEach(prodReq => {
                   if (!prodReq?.components) return;
-                  
+
                   prodReq.components?.forEach(comp => {
                     totals.totalComponents++;
-                    
-                    if (comp.real_shortfall > 0) {
+
+                    const metrics = computeComponentMetrics(comp, prodReq.product_id);
+                    if (metrics.real > 0.0001) {
                       totals.totalShortfall++;
                     }
-                    
-                    if (comp.global_real_shortfall > 0) {
+
+                    if ((comp?.global_real_shortfall ?? 0) > 0) {
                       totals.totalGlobalShortfall++;
                     }
-                    
-                    if (comp.order_count > 1) {
+
+                    if ((comp?.order_count ?? 0) > 1) {
                       totals.multiOrderComponents++;
                     }
                   });
@@ -2723,26 +3095,63 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                       </Button>
                     </div>
                     <Card className="shadow-sm border border-muted/40 overflow-hidden">
-                      <CardHeader className="pb-2">
-                        <div className="flex items-center justify-between">
-                          <CardTitle>Components needed for this order</CardTitle>
-                          <div className="flex items-center gap-2">
-                            {totals.totalShortfall > 0 ? (
-                              <Badge variant="destructive" className="bg-red-100 text-red-700 hover:bg-red-100">
-                                {totals.totalShortfall} components with shortfall
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="bg-green-100 text-green-700 hover:bg-green-100">
-                                All components available
-                              </Badge>
-                            )}
-                            
-                            {/* Global requirements summary */}
-                            {totals.totalGlobalShortfall > 0 && (
-                              <Badge variant="outline" className="bg-amber-100 text-amber-800 hover:bg-amber-100">
-                                {totals.totalGlobalShortfall} global shortfalls
-                              </Badge>
-                            )}
+                      <CardHeader className="pb-2 space-y-4">
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                          <div>
+                            <CardTitle>Components needed for this order</CardTitle>
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              {totals.totalShortfall > 0 ? (
+                                <Badge variant="destructive" className="bg-red-100 text-red-700 hover:bg-red-100">
+                                  {totals.totalShortfall} components with shortfall
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="bg-green-100 text-green-700 hover:bg-green-100">
+                                  All components available
+                                </Badge>
+                              )}
+                              {showGlobalContext && totals.totalGlobalShortfall > 0 && (
+                                <Badge variant="outline" className="bg-amber-100 text-amber-800 hover:bg-amber-100">
+                                  {totals.totalGlobalShortfall} global shortfalls
+                                </Badge>
+                              )}
+                              {applyFgCoverage && (
+                                <Badge variant="outline" className="bg-blue-50 text-blue-700 hover:bg-blue-50">
+                                  FG coverage applied
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                            <div className="flex items-center gap-3 rounded-md border border-muted/40 p-2">
+                              <Switch
+                                id="toggle-fg-coverage"
+                                checked={applyFgCoverage}
+                                onCheckedChange={setApplyFgCoverage}
+                              />
+                              <div className="space-y-1">
+                                <Label htmlFor="toggle-fg-coverage" className="text-sm font-medium leading-tight">
+                                  Apply FG coverage
+                                </Label>
+                                <p className="text-xs text-muted-foreground">
+                                  Scale component requirements using reserved finished goods.
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3 rounded-md border border-muted/40 p-2">
+                              <Switch
+                                id="toggle-global-context"
+                                checked={showGlobalContext}
+                                onCheckedChange={setShowGlobalContext}
+                              />
+                              <div className="space-y-1">
+                                <Label htmlFor="toggle-global-context" className="text-sm font-medium leading-tight">
+                                  Show global context
+                                </Label>
+                                <p className="text-xs text-muted-foreground">
+                                  Display totals across all open orders.
+                                </p>
+                              </div>
+                            </div>
                           </div>
                         </div>
                         <CardDescription>
@@ -2753,13 +3162,11 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                             </span>
                           )}
                         </CardDescription>
-                        
-                        {/* Add global requirements alert if there are components with high global demand */}
-                        {totals.multiOrderComponents > 0 && (
+                        {showGlobalContext && totals.multiOrderComponents > 0 && (
                           <div className="mt-2 text-xs p-2 bg-blue-50 text-blue-700 rounded-md flex items-start">
                             <Info className="h-4 w-4 mr-2 mt-0.5 flex-shrink-0" />
                             <span>
-                              Some components are required by multiple orders. "Total Across Orders" shows the total quantity 
+                              Some components are required by multiple orders. "Total Across Orders" shows the total quantity
                               needed for all open orders, and "Global Shortfall" indicates potential shortages across all orders.
                             </span>
                           </div>
@@ -2769,13 +3176,17 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                         {/* Display component requirements here */}
                         <div className="space-y-4">
                           {componentRequirements?.map((productReq: any, index: number) => {
-                            const hasShortfall = productReq?.components && productReq.components?.some((c: any) => c.shortfall > 0);
+                            const hasShortfall = productReq?.components?.some((component: any) => {
+                              const metrics = computeComponentMetrics(component, productReq.product_id);
+                              return metrics.real > 0.0001;
+                            });
                             const productId = productReq.product_id || `product-${index}`;
                             const isExpanded = !!expandedRows[productId];
-                            
+                            const coverageSummary = coverageByProduct.get(productReq.product_id);
+
                             return (
                               <div key={productReq.order_detail_id || index} className="border rounded-lg overflow-hidden shadow-sm hover:shadow transition-all duration-200">
-                                <div 
+                                <div
                                   className={cn(
                                     "p-4 flex justify-between items-center cursor-pointer",
                                     hasShortfall ? 'bg-red-50' : 'bg-white'
@@ -2792,6 +3203,11 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                                     <p className="text-sm text-muted-foreground">
                                       Order quantity: {productReq.order_quantity || 0} × {productReq.components?.length || 0} component types
                                     </p>
+                                    {coverageSummary && (
+                                      <p className="text-xs text-muted-foreground mt-1">
+                                        Reserved FG: {formatQuantity(coverageSummary.reserved)} of {formatQuantity(coverageSummary.ordered)} — Remaining: {formatQuantity(coverageSummary.remain)}
+                                      </p>
+                                    )}
                                   </div>
                                   <div className="flex items-center">
                                     <Button variant="ghost" size="sm" className="ml-2">
@@ -2813,127 +3229,130 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                                           <TableRow>
                                             <TableHead>Component</TableHead>
                                             <TableHead className="text-right">Required</TableHead>
-                                            <TableHead className="text-right whitespace-nowrap">
-                                              Total Across Orders
-                                              <span className="sr-only">(Total required across all orders)</span>
-                                            </TableHead>
+                                            {showGlobalContext && (
+                                              <TableHead className="text-right whitespace-nowrap">
+                                                Total Across Orders
+                                                <span className="sr-only">(Total required across all orders)</span>
+                                              </TableHead>
+                                            )}
                                             <TableHead className="text-right">In Stock</TableHead>
                                             <TableHead className="text-right">On Order</TableHead>
                                             <TableHead className="text-right">Apparent Shortfall</TableHead>
                                             <TableHead className="text-right">Real Shortfall</TableHead>
-                                            <TableHead className="text-right whitespace-nowrap">
-                                              Global Shortfall
-                                              <span className="sr-only">(Total shortfall across all orders)</span>
-                                            </TableHead>
+                                            {showGlobalContext && (
+                                              <TableHead className="text-right whitespace-nowrap">
+                                                Global Shortfall
+                                                <span className="sr-only">(Total shortfall across all orders)</span>
+                                              </TableHead>
+                                            )}
                                           </TableRow>
                                         </TableHeader>
-                                        <TableBody>
-                                          {productReq.components?.map((component: any, compIndex: number) => (
-                                            <TableRow 
-                                              key={component.component_id || `comp-${compIndex}`}
-                                              className={cn(
-                                                compIndex % 2 === 0 ? "bg-white" : "bg-muted/20",
-                                                "hover:bg-muted/30 transition-all duration-200 ease-in-out"
-                                              )}
-                                            >
-                                              <TableCell>
-                                                <div className="font-medium">{component.internal_code || 'Unknown'}</div>
-                                                <div className="text-sm text-muted-foreground">{component.description || 'No description'}</div>
-                                              </TableCell>
-                                              <TableCell className="text-right font-medium">{component.quantity_required || 0}</TableCell>
-                                              <TableCell className="text-right">
-                                                <Popover>
-                                                  <PopoverTrigger>
-                                                    <div className="cursor-help inline-flex items-center">
-                                                      <span className={cn(
-                                                        component.total_required_all_orders > component.quantity_required 
-                                                          ? "text-blue-600" 
-                                                          : "",
-                                                        "font-medium"
-                                                      )}>
-                                                        {component.total_required_all_orders || 0}
-                                                      </span>
-                                                      {component.order_count > 1 && (
-                                                        <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
-                                                      )}
-                                                    </div>
-                                                  </PopoverTrigger>
-                                                  <PopoverContent className="p-0">
-                                                    <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
-                                                      <p className="text-sm font-medium mb-2">Required across {component.order_count} orders:</p>
-                                                      <div className="space-y-1 text-sm">
-                                                        {(component.order_breakdown || [])?.map((order: any) => (
-                                                          <div key={order.order_id} className="flex justify-between">
-                                                            <span>Order #{order.order_id}:</span>
-                                                            <span>{order.quantity} units</span>
-                                                          </div>
-                                                        ))}
-                                                      </div>
-                                                    </div>
-                                                  </PopoverContent>
-                                                </Popover>
-                                              </TableCell>
-                                              <TableCell className="text-right font-medium">{component.quantity_in_stock || 0}</TableCell>
-                                              <TableCell className="text-right">
-                                                {component.quantity_on_order > 0 ? (
-                                                  <span className="text-blue-600 font-medium">{component.quantity_on_order}</span>
-                                                ) : (
-                                                  component.quantity_on_order || 0
+                                                                                                                        <TableBody>
+                                          {productReq.components?.map((component: any, compIndex: number) => {
+                                            const metrics = computeComponentMetrics(component, productReq.product_id);
+                                            const globalRequired = Number(component.total_required_all_orders ?? 0);
+                                            const globalShortfall = Number(component.global_real_shortfall ?? 0);
+                                            const globalApparent = Number(component.global_apparent_shortfall ?? 0);
+
+                                            return (
+                                              <TableRow
+                                                key={component.component_id || `comp-${compIndex}`}
+                                                className={cn(
+                                                  compIndex % 2 === 0 ? "bg-white" : "bg-muted/20",
+                                                  "hover:bg-muted/30 transition-all duration-200 ease-in-out"
                                                 )}
-                                              </TableCell>
-                                              <TableCell className="text-right">
-                                                <span className={cn(
-                                                  component.apparent_shortfall > 0 
-                                                    ? "text-orange-600" 
-                                                    : "text-green-600",
-                                                  "font-medium"
-                                                )}>
-                                                  {component.apparent_shortfall || 0}
-                                                </span>
-                                              </TableCell>
-                                              <TableCell className="text-right">
-                                                {component.apparent_shortfall > 0 && component.real_shortfall === 0 ? (
-                                                  <Popover>
-                                                    <PopoverTrigger>
-                                                      <div className="cursor-help inline-flex items-center">
-                                                        <span className="text-green-600 font-medium">{component.real_shortfall || 0}</span>
-                                                        <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
-                                                      </div>
-                                                    </PopoverTrigger>
-                                                    <PopoverContent className="p-0">
-                                                      <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
-                                                        <p className="text-sm">This apparent shortfall is covered by existing supplier orders.</p>
-                                                      </div>
-                                                    </PopoverContent>
-                                                  </Popover>
-                                                ) : (
+                                              >
+                                                <TableCell>
+                                                  <div className="font-medium">{component.internal_code || 'Unknown'}</div>
+                                                  <div className="text-sm text-muted-foreground">{component.description || 'No description'}</div>
+                                                </TableCell>
+                                                <TableCell className="text-right font-medium">{formatQuantity(metrics.required)}</TableCell>
+                                                {showGlobalContext && (
+                                                  <TableCell className="text-right">
+                                                    <Popover>
+                                                      <PopoverTrigger>
+                                                        <div className="cursor-help inline-flex items-center">
+                                                          <span className={cn(
+                                                            globalRequired > metrics.required ? "text-blue-600" : "",
+                                                            "font-medium"
+                                                          )}>
+                                                            {formatQuantity(globalRequired)}
+                                                          </span>
+                                                          {(component.order_count ?? 0) > 1 && (
+                                                            <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
+                                                          )}
+                                                        </div>
+                                                      </PopoverTrigger>
+                                                      <PopoverContent className="p-0">
+                                                        <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
+                                                          <p className="text-sm font-medium mb-2">Required across {component.order_count || 1} orders:</p>
+                                                          <div className="space-y-1 text-sm">
+                                                            {(component.order_breakdown || [])?.map((order: any) => (
+                                                              <div key={order.order_id} className="flex justify-between">
+                                                                <span>Order #{order.order_id}:</span>
+                                                                <span>{order.quantity} units</span>
+                                                              </div>
+                                                            ))}
+                                                          </div>
+                                                        </div>
+                                                      </PopoverContent>
+                                                    </Popover>
+                                                  </TableCell>
+                                                )}
+                                                <TableCell className="text-right font-medium">{formatQuantity(metrics.inStock)}</TableCell>
+                                                <TableCell className="text-right font-medium">{formatQuantity(metrics.onOrder)}</TableCell>
+                                                <TableCell className="text-right">
+                                                  {metrics.apparent > 0 && metrics.real === 0 ? (
+                                                    <Popover>
+                                                      <PopoverTrigger>
+                                                        <div className="cursor-help inline-flex items-center">
+                                                          <span className="text-green-600 font-medium">{formatQuantity(metrics.apparent)}</span>
+                                                          <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
+                                                        </div>
+                                                      </PopoverTrigger>
+                                                      <PopoverContent className="p-0">
+                                                        <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
+                                                          <p className="text-sm">This apparent shortfall is covered by existing supplier orders.</p>
+                                                        </div>
+                                                      </PopoverContent>
+                                                    </Popover>
+                                                  ) : (
+                                                    <span className={cn(
+                                                      metrics.apparent > 0 ? "text-orange-600" : "text-green-600",
+                                                      "font-medium"
+                                                    )}>
+                                                      {formatQuantity(metrics.apparent)}
+                                                    </span>
+                                                  )}
+                                                </TableCell>
+                                                <TableCell className="text-right">
                                                   <span className={cn(
-                                                    component.real_shortfall > 0 
-                                                      ? "text-red-600" 
-                                                      : "text-green-600",
+                                                    metrics.real > 0 ? "text-red-600" : "text-green-600",
                                                     "font-medium"
                                                   )}>
-                                                    {component.real_shortfall || 0}
+                                                    {formatQuantity(metrics.real)}
                                                   </span>
+                                                </TableCell>
+                                                {showGlobalContext && (
+                                                  <TableCell className="text-right">
+                                                    <span className={cn(
+                                                      globalShortfall > 0
+                                                        ? "text-red-600"
+                                                        : globalApparent > 0
+                                                          ? "text-amber-600"
+                                                          : "text-green-600",
+                                                      "font-medium"
+                                                    )}>
+                                                      {formatQuantity(globalShortfall)}
+                                                    </span>
+                                                    {globalApparent > 0 && globalShortfall === 0 && (
+                                                      <span className="text-xs text-muted-foreground ml-1">(Covered)</span>
+                                                    )}
+                                                  </TableCell>
                                                 )}
-                                              </TableCell>
-                                              <TableCell className="text-right">
-                                                <span className={cn(
-                                                  component.global_real_shortfall > 0 
-                                                    ? "text-red-600" 
-                                                    : component.global_apparent_shortfall > 0 
-                                                      ? "text-amber-600" 
-                                                      : "text-green-600",
-                                                  "font-medium"
-                                                )}>
-                                                  {component.global_real_shortfall || 0}
-                                                </span>
-                                                {component.global_apparent_shortfall > 0 && component.global_real_shortfall === 0 && (
-                                                  <span className="text-xs text-muted-foreground ml-1">(Covered)</span>
-                                                )}
-                                              </TableCell>
-                                            </TableRow>
-                                          ))}
+                                              </TableRow>
+                                            );
+                                          })}
                                         </TableBody>
                                       </Table>
                                     </div>

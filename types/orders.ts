@@ -35,6 +35,16 @@ export interface OrderAttachment {
   uploaded_at: string;
 }
 
+export interface FinishedGoodReservation {
+  order_id: number;
+  product_id: number;
+  reserved_quantity: number;
+  product_name?: string;
+  product_internal_code?: string;
+  available_quantity?: number | null;
+  updated_at?: string | null;
+}
+
 export interface Order {
   order_id: number;
   customer_id: number;
