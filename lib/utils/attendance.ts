@@ -19,7 +19,6 @@ export const processClockEventsIntoSegments = async (dateStr: string, staffId?: 
   try {
     // Get all clock events for the date
     // // console.log(`[DEBUG] Fetching clock events for date: ${dateStr}, filtering by staffId: ${staffId}`);
-    let staffFilter = staffId ? `.eq('staff_id', staffId)` : '';
     // Get SAST day boundaries
     const { startOfDay: localDateStart, startOfNextDay: localNextDayStart } = getSASTDayBoundaries(dateStr);
 
@@ -41,6 +40,19 @@ export const processClockEventsIntoSegments = async (dateStr: string, staffId?: 
     }
 
     if (!clockEvents || clockEvents.length === 0) {
+      if (staffId) {
+        const { error: cleanupError } = await supabase
+          .from('time_segments')
+          .delete()
+          .eq('staff_id', staffId)
+          .eq('date_worked', dateStr);
+
+        if (cleanupError) {
+          console.error(`[DEBUG] Error deleting empty-day segments for staff ${staffId} on ${dateStr}:`, cleanupError);
+        }
+
+        await generateDailySummary(dateStr, staffId);
+      }
       // // console.log(`[DEBUG] No clock events found for ${dateStr}. Exiting.`);
       return;
     }
@@ -331,12 +343,10 @@ const midnight = new Date(`${dateStr}T00:00:00+02:00`);
         }
       }
       // console.log(`[DEBUG] Finished processing for staff_id: ${staffId}`);
+
+      await generateDailySummary(dateStr, currentStaffId);
     }
-    
-    // console.log(`[DEBUG] All staff processed for ${dateStr}. Regenerating daily summary...`);
-    await generateDailySummary(dateStr);
-    // console.log(`[DEBUG] Daily summary generation complete for ${dateStr}.`);
-    
+
   } catch (error) {
     console.error('[DEBUG] Critical error in processClockEventsIntoSegments:', error);
   }
@@ -570,7 +580,7 @@ export const generateDailySummary = async (dateStr: string, staffId?: number): P
             other_breaks_minutes: otherBreakMinutes,
             regular_minutes: regularMinutes,
             dt_minutes: dtMinutes,
-            ot_minutes: 0,
+            ot_minutes: otMinutes,
             wage_cents: wageCents,
             is_complete: isComplete,
             created_at: new Date().toISOString(),

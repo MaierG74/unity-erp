@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { processClockEventsIntoSegments, generateDailySummary } from '@/lib/utils/attendance';
+import { processClockEventsIntoSegments } from '@/lib/utils/attendance';
 import type { StaffHours } from '@/components/features/staff/StaffReports';
 import { useToast } from '@/components/ui/use-toast';
 import { format, parseISO, isToday, isSunday } from 'date-fns';
@@ -111,15 +111,12 @@ const updateSingleEventSegments = async (staffId: number, dateStr: string): Prom
 
     console.log(`[updateSingleEventSegments] Step 3: Found ${clockEvents.length} events, about to call processClockEventsIntoSegments...`);
     
-    const { processClockEventsIntoSegments, generateDailySummary } = await import('@/lib/utils/attendance');
-    
+    const { processClockEventsIntoSegments } = await import('@/lib/utils/attendance');
+
     console.log(`[updateSingleEventSegments] Step 4: Calling processClockEventsIntoSegments...`);
     await processClockEventsIntoSegments(dateStr, staffId);
-    
-    console.log(`[updateSingleEventSegments] Step 5: Calling generateDailySummary...`);
-    await generateDailySummary(dateStr, staffId);
-    
-    console.log(`[updateSingleEventSegments] Step 6: Completed targeted update for staff ${staffId}`);
+
+    console.log(`[updateSingleEventSegments] Step 5: Completed targeted update for staff ${staffId} (summary handled internally)`);
     
   } catch (error) {
     console.error('[updateSingleEventSegments] Error during incremental update:', error);
@@ -404,7 +401,7 @@ export function DailyAttendanceGrid() {
     }
   };
 
-  // Process clock events into segments and generate daily summary
+  // Process clock events into segments (summary regeneration handled inside the helper)
   const processClockEventsData = async (staffId?: number) => {
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
     console.log(`[DailyAttendanceGrid] processClockEventsData called with staffId: ${staffId}`);
@@ -414,10 +411,6 @@ export function DailyAttendanceGrid() {
       // Process clock events into segments (for specific staff if provided)
       console.log(`[DailyAttendanceGrid] Calling processClockEventsIntoSegments with dateStr: ${dateStr}, staffId: ${staffId}`);
       await processClockEventsIntoSegments(dateStr, staffId);
-      
-      // Generate daily summary (for specific staff if provided)
-      console.log(`[DailyAttendanceGrid] Calling generateDailySummary with dateStr: ${dateStr}, staffId: ${staffId}`);
-      await generateDailySummary(dateStr, staffId);
       
       // For targeted processing, use staff-specific query invalidation
       if (staffId) {
