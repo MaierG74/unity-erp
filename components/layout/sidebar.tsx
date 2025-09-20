@@ -172,9 +172,8 @@ export function Sidebar() {
 
   return (
     <SidebarContext.Provider value={{ collapsed, setCollapsed: handleSetCollapsed }}>
-      
-      <aside 
-        className="h-screen border-r bg-background z-30 flex flex-shrink-0 flex-col transition-all duration-200 ease-in-out"
+      <aside
+        className="h-screen border-r bg-gradient-to-b from-background via-background to-muted/30 z-30 flex flex-shrink-0 flex-col transition-all duration-200 ease-in-out"
         style={{
           width: collapsed ? '64px' : '256px'
         }}
@@ -196,29 +195,48 @@ export function Sidebar() {
           </Button>
         </div>
         
-        <nav className="flex-1 overflow-y-auto py-4">
+        <nav className="flex-1 overflow-y-auto overflow-x-visible py-4">
           <ul className="flex flex-col gap-1 px-2">
             {navigation.map((item) => {
               const Icon = item.icon;
               const isActive = pathname === item.href;
-              
+
               return (
-                <li key={item.name}>
+                <li
+                  key={item.name}
+                  className={cn('relative', collapsed && 'group')}
+                >
                   <Link
                     href={item.href}
                     className={cn(
-                      'flex h-10 items-center rounded-md px-3 text-sm font-medium transition-colors',
-                      isActive 
-                        ? 'bg-primary text-primary-foreground' 
-                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                      'group relative flex h-10 items-center rounded-xl px-3 text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+                      isActive
+                        ? 'bg-gradient-to-r from-primary/90 to-primary text-primary-foreground shadow-lg shadow-primary/30'
+                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground hover:shadow-sm',
                       collapsed ? 'justify-center' : 'justify-start gap-3'
                     )}
                     title={collapsed ? item.name : undefined}
+                    aria-label={collapsed ? item.name : undefined}
                     onClick={() => isMobile && handleSetCollapsed(true)}
                   >
-                    <Icon className="h-5 w-5 flex-shrink-0" />
-                    {!collapsed && <span className="truncate">{item.name}</span>}
+                    <Icon className="h-5 w-5 flex-shrink-0 transition-transform duration-200 group-hover:scale-110" />
+                    {!collapsed && (
+                      <span className="truncate font-medium tracking-wide">
+                        {item.name}
+                      </span>
+                    )}
                   </Link>
+                  {collapsed && (
+                    <div className="pointer-events-none absolute left-full top-1/2 z-50 ml-3 hidden -translate-y-1/2 whitespace-nowrap rounded-md bg-popover px-3 py-1 text-xs font-semibold text-popover-foreground shadow-lg shadow-black/5 group-focus-within:block group-hover:block">
+                      <span
+                        className="absolute left-[-6px] top-1/2 h-3 w-3 -translate-y-1/2 rotate-45 rounded-sm bg-popover shadow-lg shadow-black/5"
+                        aria-hidden="true"
+                      />
+                      <span className="relative">
+                        {item.name}
+                      </span>
+                    </div>
+                  )}
                 </li>
               );
             })}
