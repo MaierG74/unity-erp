@@ -254,9 +254,10 @@ export default function InventoryPage() {
   const filteredComponents = useMemo(() => {
     const filtered = components
       .filter(component => {
+        const searchTerm = filterText.toLowerCase();
         const matchesFilter = (
-          component.internal_code?.toLowerCase().includes(filterText.toLowerCase()) ||
-          component.description?.toLowerCase().includes(filterText.toLowerCase())
+          (component.internal_code?.toLowerCase() ?? '').includes(searchTerm) ||
+          (component.description?.toLowerCase() ?? '').includes(searchTerm)
         );
         const matchesCategory = selectedCategory === '_all' || 
           (component.category?.categoryname || 'Uncategorized') === selectedCategory;
