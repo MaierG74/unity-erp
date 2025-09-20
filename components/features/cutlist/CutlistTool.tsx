@@ -349,7 +349,7 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
                 </div>
               </div>
             </div>
-            {onExport && (
+            {(onExport || quoteItemId) && (
               <div className="flex justify-end pt-2">
                 <Button onClick={handleExport}>Export to Quote</Button>
               </div>
@@ -443,7 +443,7 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
                   ))}
                 </div>
               </div>
-              {onExport && (
+              {(onExport || quoteItemId) && (
                 <div className="pt-2">
                   <Button onClick={handleExport}>Export to Quote</Button>
                 </div>
@@ -466,5 +466,4 @@ function Stat({ label, value, unit }: { label: string; value: string; unit?: str
     </div>
   );
 }
-
 

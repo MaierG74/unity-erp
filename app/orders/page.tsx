@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { Order, OrderStatus } from '@/types/orders';
@@ -18,7 +19,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { PlusCircle, Search, Package, Layers, Wrench, PaintBucket, Paperclip, Upload, FileText, ImageIcon, Eye, Download, FileUp, Check, RefreshCw, Trash2 } from 'lucide-react';
+import { PlusCircle, Search, Package, Layers, Wrench, PaintBucket, Paperclip, Upload, FileText, ImageIcon, Eye, Download, FileUp, Check, RefreshCw, Trash2, ChevronRight } from 'lucide-react';
 // Import the advanced AttachmentPreviewModal component
 import { AttachmentPreviewModal } from '@/components/ui/attachment-preview-modal';
 // Import the FileIcon component for use in the advanced modal
@@ -630,22 +631,34 @@ function OrderAttachments({ order }: { order: Order }): JSX.Element {
 
   return (
     <>
-      <td className="p-4 text-center">
+      <td className="p-4 text-center align-middle">
         {attachments.length > 0 ? (
           <button
-            onClick={() => setSelectedOrder(order)}
-            className="inline-flex items-center gap-1 text-primary hover:text-primary/90"
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              setSelectedOrder(order);
+            }}
+            className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary transition-colors hover:bg-primary/20 focus:outline-none focus:ring-2 focus:ring-primary/40"
+            aria-label={`View ${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`}
           >
             <FileText className="h-4 w-4" />
-            <span className="text-sm">{attachments.length}</span>
+            <span>{attachments.length}</span>
           </button>
         ) : (
-          <span className="text-muted-foreground text-sm">None</span>
+          <span className="inline-flex items-center justify-center rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
+            None
+          </span>
         )}
         <button
-          onClick={() => setIsUploadDialogOpen(true)}
-          className="text-primary hover:text-primary/90 ml-2"
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            setIsUploadDialogOpen(true);
+          }}
+          className="ml-2 inline-flex items-center justify-center rounded-full p-1.5 text-primary transition-colors hover:bg-primary/10 hover:text-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/40"
           title="Upload attachment"
+          aria-label="Upload attachment"
         >
           <Upload className="h-4 w-4" />
         </button>
@@ -690,6 +703,7 @@ export default function OrdersPage() {
   const queryClient = useQueryClient();
   const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const router = useRouter();
   
   // Handle search input change with debounce
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -730,7 +744,7 @@ export default function OrdersPage() {
   });
 
   return (
-    <div className="space-y-8 w-full max-w-full p-6">
+    <div className="space-y-8 w-full max-w-7xl mx-auto p-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
         <div className="space-y-1">
           <h1 className="text-4xl font-bold tracking-tight">
@@ -873,54 +887,68 @@ export default function OrdersPage() {
                       <TableHead className="font-semibold">Total Amount</TableHead>
                       <TableHead className="font-semibold">Status</TableHead>
                       <TableHead className="font-semibold text-center">Attachments</TableHead>
-                      <TableHead className="font-semibold"></TableHead>
+                      <TableHead className="w-10 text-right">
+                        <span className="sr-only">Open</span>
+                      </TableHead>
                       <TableHead className="font-semibold text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredOrders.map((order) => (
-                      <TableRow 
+                      <TableRow
                         key={order.order_id}
-                        className="hover:bg-muted/50 transition-colors duration-200"
+                        className="group cursor-pointer transition-colors duration-200 hover:bg-muted/50 focus-visible:bg-muted/50"
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => router.push(`/orders/${order.order_id}`)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            router.push(`/orders/${order.order_id}`);
+                          }
+                        }}
                       >
-                        <TableCell className="font-medium">
+                        <TableCell className="align-middle font-semibold tracking-tight text-foreground">
                           {order.order_number || `#${order.order_id}`}
                         </TableCell>
-                        <TableCell>{order.customer?.name || 'N/A'}</TableCell>
-                        <TableCell>
+                        <TableCell className="align-middle">
+                          {order.customer?.name || 'N/A'}
+                        </TableCell>
+                        <TableCell className="align-middle text-sm text-muted-foreground">
                           {order.created_at ? format(new Date(order.created_at), 'MMM d, yyyy') : 'N/A'}
                         </TableCell>
-                        <TableCell>
-                          {order.delivery_date 
+                        <TableCell className="align-middle text-sm text-muted-foreground">
+                          {order.delivery_date
                             ? format(new Date(order.delivery_date), 'MMM d, yyyy')
                             : 'Not set'}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="align-middle text-sm font-medium text-foreground">
                           {order.total_amount !== null && order.total_amount !== undefined
                             ? `R ${Number(order.total_amount).toFixed(2)}`
                             : 'N/A'}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="align-middle">
                           <StatusBadge status={order.status?.status_name || 'Unknown'} />
                         </TableCell>
                         <OrderAttachments order={order} />
-                        <TableCell>
-                          <Link
-                            href={`/orders/${order.order_id}`}
-                            className="text-[#F26B3A] hover:text-[#E25A29] hover:underline text-sm flex items-center transition-colors duration-200"
-                          >
-                            View Details
-                          </Link>
+                        <TableCell className="w-10 pr-4 text-right align-middle">
+                          <ChevronRight
+                            className="h-4 w-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-1 group-hover:text-[#F26B3A]"
+                            aria-hidden="true"
+                          />
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-right align-middle">
                           <button
                             type="button"
-                            onClick={() => setDeleteTargetId(order.order_id)}
-                            className="inline-flex items-center gap-1 text-red-600 hover:text-red-700"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setDeleteTargetId(order.order_id);
+                            }}
+                            className="inline-flex items-center justify-center rounded-full border border-transparent p-2 text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-red-500/40"
                             title="Delete order"
+                            aria-label="Delete order"
                           >
                             <Trash2 className="h-4 w-4" />
-                            <span className="text-sm">Delete</span>
                           </button>
                         </TableCell>
                       </TableRow>

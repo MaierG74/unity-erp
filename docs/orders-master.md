@@ -22,6 +22,21 @@
   - Listing pulls from `order_attachments` via a React Query (`['orderAttachments', order_id]`).
   - A helper `listCustomerFiles(customerId)` exists but is not currently used by the Orders UI.
 
+**Quick‑Open Attachments (from Product page)**
+
+- The Product page FG reservations dialog (see `app/products/[productId]/page.tsx`) shows per‑order rows when a product is reserved.
+- For each order, we fetch the latest record from `order_attachments` and provide an “Open PDF” link.
+- This path is read‑only and intended for fast reference while reviewing finished‑goods availability.
+
+**FG Reservations – API Recap**
+
+- Server routes under `app/api/orders/[orderId]/` wrap the FG RPCs:
+  - `POST reserve-fg` → `reserve_finished_goods(p_order_id)`
+  - `POST release-fg` → `release_finished_goods(p_order_id)`
+  - `POST consume-fg` → `consume_finished_goods(p_order_id)`
+- Read route:
+  - `GET fg-reservations` → reads `product_reservations` then merges product info.
+
 **UI & Routes**
 
 - Orders list: status filter, debounced search (order number, customer name, numeric ID), section chips, attachment count, upload dialog.
@@ -30,6 +45,9 @@
   - New order (scaffolded): `app/orders/new/page.tsx`
   - Orders layout: `app/orders/layout.tsx`
   - A bypass page also exists: `app/bypass/orders/page.tsx`
+  - Each table row is hover/focus interactive and navigates directly to the detail view (chevron indicator replaces the previous "View Details" text link).
+  - Attachment counts render as pill buttons with improved hover/focus treatment; Upload and Delete controls stop event propagation so row clicks do not trigger unintentionally.
+  - The delete action is now an icon-only circular control (`aria-label` supplied) to declutter the actions column while keeping the tooltip/title.
 
 **Data Fetching & Filters (List Page)**
 

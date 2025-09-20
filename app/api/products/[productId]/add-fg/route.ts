@@ -26,6 +26,17 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   )
 
   try {
+    // Read global toggle from settings
+    let autoConsume = false
+    try {
+      const { data: settingsRow } = await supabaseAdmin
+        .from('quote_company_settings')
+        .select('fg_auto_consume_on_add')
+        .eq('setting_id', 1)
+        .single()
+      autoConsume = Boolean(settingsRow?.fg_auto_consume_on_add)
+    } catch {}
+
     // Prefer a primary/null-location row if no location provided
     let query = supabaseAdmin
       .from('product_inventory')
@@ -42,6 +53,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     const { data: invRows, error: invErr } = await query.limit(1)
     if (invErr) throw invErr
 
+    let resultPayload: any = { success: true, product_id: productId, location, quantity_added: quantity }
+
     if (invRows && invRows.length > 0) {
       const row = invRows[0]
       const current = Number(row?.quantity_on_hand ?? 0)
@@ -53,18 +66,37 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         .select('product_inventory_id, product_id, quantity_on_hand, location')
         .single()
       if (updErr) throw updErr
-      return NextResponse.json({ success: true, product_id: productId, location, quantity_added: quantity, new_on_hand: Number(updated?.quantity_on_hand ?? newQty) })
+      resultPayload.new_on_hand = Number(updated?.quantity_on_hand ?? newQty)
     }
 
-    // Insert new inventory row
-    const { data: inserted, error: insErr } = await supabaseAdmin
-      .from('product_inventory')
-      .insert({ product_id: productId, quantity_on_hand: quantity, location })
-      .select('product_inventory_id, product_id, quantity_on_hand, location')
-      .single()
-    if (insErr) throw insErr
+    // If not found, insert a new row
+    if (!resultPayload.new_on_hand) {
+      const { data: inserted, error: insErr } = await supabaseAdmin
+        .from('product_inventory')
+        .insert({ product_id: productId, quantity_on_hand: quantity, location })
+        .select('product_inventory_id, product_id, quantity_on_hand, location')
+        .single()
+      if (insErr) throw insErr
+      resultPayload.new_on_hand = Number(inserted?.quantity_on_hand ?? quantity)
+    }
 
-    return NextResponse.json({ success: true, product_id: productId, location, quantity_added: quantity, new_on_hand: Number(inserted?.quantity_on_hand ?? quantity) })
+    // If auto-consume is enabled, allocate the added quantity against reservations FIFO
+    if (autoConsume && quantity > 0) {
+      const { data: applied, error: acErr } = await supabaseAdmin.rpc('auto_consume_on_add', {
+        p_product_id: productId,
+        p_quantity: quantity,
+      })
+      if (acErr) {
+        // Do not fail the whole request; report warning
+        resultPayload.auto_consume = { applied: [], warning: acErr.message }
+      } else {
+        resultPayload.auto_consume = { applied: applied || [] }
+      }
+    } else {
+      resultPayload.auto_consume = { applied: [] }
+    }
+
+    return NextResponse.json(resultPayload)
   } catch (e: any) {
     console.error('[add-fg]', e)
     return NextResponse.json({ error: e?.message || 'Unexpected error while adding finished goods' }, { status: 500 })
