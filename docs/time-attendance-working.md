@@ -63,6 +63,7 @@ This document details the Unity ERP time and attendance system architecture, per
 - **Purpose**: Main attendance dashboard showing all staff for a selected date
 - **Key Functions**:
   - `handleManualClockEvent()`: Processes manually added clock events
+  - `refreshStaffAttendanceCaches()`: Re-syncs React Query caches for a single staff member after targeted edits
   - `processClockEventsData()`: Triggers segment processing and summary generation
   - `updateSingleEventSegments()`: Lightweight processing for single events
   - `OptimizedAttendanceTimeline`: Staff-specific component wrapper
@@ -216,23 +217,75 @@ for (const staffIdStr in staffEvents) {
 // no longer need to fire a second summary job.
 ```
 
-### 3. Ultra-Lightweight Manual Events
+### 3. Targeted Cache Refresh Helper
 ```typescript
-// Current approach: Skip heavy processing entirely
-const handleManualClockEvent = async (staffId, eventType, time, breakType) => {
-  // 1. Add event to database (fast)
-  const result = await addManualClockEvent(staffId, eventType, dateStr, time, breakType);
+const refreshStaffAttendanceCaches = async (dateStr: string, staffId: number) => {
+  const { startOfDay, startOfNextDay } = getSASTDayBoundaries(dateStr);
 
-  // 2. Only invalidate this staff member's summary (fast)
-  queryClient.invalidateQueries({
-    queryKey: ['time_daily_summary', dateStr, staffId]
+  const [eventsRes, segmentsRes, summaryRes] = await Promise.all([
+    supabase
+      .from('time_clock_events')
+      .select('*')
+      .eq('staff_id', staffId)
+      .gte('event_time', startOfDay)
+      .lt('event_time', startOfNextDay)
+      .order('event_time', { ascending: true }),
+    supabase
+      .from('time_segments')
+      .select('id,staff_id,date_worked,start_time,end_time,break_type,segment_type,duration_minutes')
+      .eq('date_worked', dateStr)
+      .eq('staff_id', staffId)
+      .order('start_time', { ascending: true }),
+    supabase
+      .from('time_daily_summary')
+      .select('*')
+      .eq('date_worked', dateStr)
+      .eq('staff_id', staffId)
+      .maybeSingle(),
+  ]);
+
+  const events = (eventsRes.data ?? []) as ClockEvent[];
+  const segments = (segmentsRes.data ?? []) as TimeSegment[];
+  const summary = (summaryRes.data ?? null) as DailySummary | null;
+
+  queryClient.setQueryData(['time_clock_events', dateStr], (current: ClockEvent[] = []) => {
+    const remaining = current.filter(event => event.staff_id !== staffId);
+    return [...remaining, ...events].sort((a, b) => new Date(a.event_time).getTime() - new Date(b.event_time).getTime());
   });
 
-  // 3. User manually refreshes for updated segments (manual step)
+  queryClient.setQueryData(['time_segments', dateStr], (current: TimeSegment[] = []) => {
+    const remaining = current.filter(segment => segment.staff_id !== staffId);
+    return [...remaining, ...segments].sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+  });
+
+  queryClient.setQueryData(['time_daily_summary', dateStr, staffId], summary);
+
+  queryClient.setQueryData(['time_daily_summary_all', dateStr], (current: DailySummary[] = []) => {
+    const remaining = current.filter(item => item.staff_id !== staffId);
+    const merged = summary ? [...remaining, summary] : remaining;
+    return merged.sort((a, b) => a.staff_id - b.staff_id);
+  });
 };
 ```
 
-### 4. Enhanced Loading States
+- Keeps deletions and manual additions in sync without needing a full page refresh.
+- Falls back to targeted query invalidation if any fetch fails (ensures UI still updates).
+- Used after per-staff processing and manual event creation so the timeline updates instantly.
+
+### 4. Manual Event UX Improvements
+```tsx
+<Input
+  type="time"
+  lang="en-GB"
+  step={60}
+  className="bg-gray-700 border-gray-600 text-white"
+/> // Forces 24-hour picker and minute precision
+```
+
+- Added helper text reminding users to enter 24-hour times (e.g. 07:00, 17:30).
+- Prevents AM/PM mistakes when supervisors add or adjust events on behalf of staff.
+
+### 5. Enhanced Loading States
 ```typescript
 // Spinner shows during entire process
 const handleAddEvent = async () => {

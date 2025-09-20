@@ -579,6 +579,9 @@ export function AttendanceTimeline({
           type="time"
           value={eventTime}
           onChange={(e) => setEventTime(e.target.value)}
+          lang="en-GB"
+          step={60}
+          className="bg-gray-700 border-gray-600 text-white"
         />
         {(eventType === 'break_start' || eventType === 'break_end') && (
           <Select
@@ -598,7 +601,7 @@ export function AttendanceTimeline({
       </div>
       <div className="mt-2 text-xs text-gray-400">
         <b>Clock In</b> and <b>Clock Out</b> are for work. <b>Break Start</b> and <b>Break End</b> are for breaks.<br />
-        Make sure you select the correct type for accurate hours!
+        Enter times in <b>24-hour format</b> (e.g. 07:00, 17:30) to avoid AM/PM mistakes and keep records accurate.
       </div>
     </div>
     <div className="mt-4 flex justify-end gap-2">
