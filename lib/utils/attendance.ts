@@ -19,7 +19,6 @@ export const processClockEventsIntoSegments = async (dateStr: string, staffId?: 
   try {
     // Get all clock events for the date
     // // console.log(`[DEBUG] Fetching clock events for date: ${dateStr}, filtering by staffId: ${staffId}`);
-    let staffFilter = staffId ? `.eq('staff_id', staffId)` : '';
     // Get SAST day boundaries
     const { startOfDay: localDateStart, startOfNextDay: localNextDayStart } = getSASTDayBoundaries(dateStr);
 
@@ -41,6 +40,19 @@ export const processClockEventsIntoSegments = async (dateStr: string, staffId?: 
     }
 
     if (!clockEvents || clockEvents.length === 0) {
+      if (staffId) {
+        const { error: cleanupError } = await supabase
+          .from('time_segments')
+          .delete()
+          .eq('staff_id', staffId)
+          .eq('date_worked', dateStr);
+
+        if (cleanupError) {
+          console.error(`[DEBUG] Error clearing segments for staff ${staffId} on ${dateStr}:`, cleanupError);
+        } else {
+          await generateDailySummary(dateStr, staffId);
+        }
+      }
       // // console.log(`[DEBUG] No clock events found for ${dateStr}. Exiting.`);
       return;
     }
@@ -59,7 +71,7 @@ export const processClockEventsIntoSegments = async (dateStr: string, staffId?: 
     // Process each staff member's events (or just the specified staff member)
     for (const staffIdStr in staffEvents) {
       const currentStaffId = parseInt(staffIdStr); // Ensure staffId is a number for lookups
-      
+
       // If we're processing a specific staff member, skip others
       if (staffId && currentStaffId !== staffId) {
         // console.log(`[DEBUG] Skipping staff_id: ${currentStaffId} (only processing ${staffId})`);
@@ -330,12 +342,13 @@ const midnight = new Date(`${dateStr}T00:00:00+02:00`);
           processedInEvents.add(pendingBreakStart.id);
         }
       }
-      // console.log(`[DEBUG] Finished processing for staff_id: ${staffId}`);
+      // console.log(`[DEBUG] Finished processing for staff_id: ${currentStaffId}`);
+
+      // Regenerate the daily summary only for the staff member we just processed
+      await generateDailySummary(dateStr, currentStaffId);
     }
-    
-    // console.log(`[DEBUG] All staff processed for ${dateStr}. Regenerating daily summary...`);
-    await generateDailySummary(dateStr);
-    // console.log(`[DEBUG] Daily summary generation complete for ${dateStr}.`);
+
+    // console.log(`[DEBUG] All staff processed for ${dateStr}.`);
     
   } catch (error) {
     console.error('[DEBUG] Critical error in processClockEventsIntoSegments:', error);

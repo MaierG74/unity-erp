@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useState, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { processClockEventsIntoSegments, generateDailySummary } from '@/lib/utils/attendance';
+import { processClockEventsIntoSegments } from '@/lib/utils/attendance';
 import type { StaffHours } from '@/components/features/staff/StaffReports';
 import { useToast } from '@/components/ui/use-toast';
 import { format, parseISO, isToday, isSunday } from 'date-fns';
-import { formatTimeToSAST } from '@/lib/utils/timezone';
+import { formatTimeToSAST, getSASTDayBoundaries } from '@/lib/utils/timezone';
 import { 
   Table, 
   TableBody, 
@@ -111,15 +111,12 @@ const updateSingleEventSegments = async (staffId: number, dateStr: string): Prom
 
     console.log(`[updateSingleEventSegments] Step 3: Found ${clockEvents.length} events, about to call processClockEventsIntoSegments...`);
     
-    const { processClockEventsIntoSegments, generateDailySummary } = await import('@/lib/utils/attendance');
-    
-    console.log(`[updateSingleEventSegments] Step 4: Calling processClockEventsIntoSegments...`);
+    const { processClockEventsIntoSegments } = await import('@/lib/utils/attendance');
+
+    console.log(`[updateSingleEventSegments] Step 4: Calling processClockEventsIntoSegments (with summary refresh)...`);
     await processClockEventsIntoSegments(dateStr, staffId);
-    
-    console.log(`[updateSingleEventSegments] Step 5: Calling generateDailySummary...`);
-    await generateDailySummary(dateStr, staffId);
-    
-    console.log(`[updateSingleEventSegments] Step 6: Completed targeted update for staff ${staffId}`);
+
+    console.log(`[updateSingleEventSegments] Step 5: Completed targeted update for staff ${staffId}`);
     
   } catch (error) {
     console.error('[updateSingleEventSegments] Error during incremental update:', error);
@@ -271,7 +268,7 @@ export function DailyAttendanceGrid() {
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
       const { data, error } = await supabase
         .from('time_segments')
-        .select('staff_id,start_time,end_time,break_type,segment_type')
+        .select('id,staff_id,date_worked,start_time,end_time,break_type,segment_type,duration_minutes')
         .eq('date_worked', dateStr);
 
       if (error) throw error;
@@ -404,45 +401,104 @@ export function DailyAttendanceGrid() {
     }
   };
 
-  // Process clock events into segments and generate daily summary
+  // Process clock events and refresh related daily summary data
   const processClockEventsData = async (staffId?: number) => {
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    const isTargeted = typeof staffId === 'number';
     console.log(`[DailyAttendanceGrid] processClockEventsData called with staffId: ${staffId}`);
-    setIsSaving(true);
-    
+    const shouldToggleSaving = !isTargeted;
+
+    if (shouldToggleSaving) {
+      setIsSaving(true);
+    }
+
     try {
       // Process clock events into segments (for specific staff if provided)
-      console.log(`[DailyAttendanceGrid] Calling processClockEventsIntoSegments with dateStr: ${dateStr}, staffId: ${staffId}`);
+      console.log(`[DailyAttendanceGrid] Calling processClockEventsIntoSegments (with summary refresh) for dateStr: ${dateStr}, staffId: ${staffId}`);
       await processClockEventsIntoSegments(dateStr, staffId);
-      
-      // Generate daily summary (for specific staff if provided)
-      console.log(`[DailyAttendanceGrid] Calling generateDailySummary with dateStr: ${dateStr}, staffId: ${staffId}`);
-      await generateDailySummary(dateStr, staffId);
-      
-      // For targeted processing, use staff-specific query invalidation
-      if (staffId) {
-        console.log(`[processClockEventsData] Targeted processing complete for staff ${staffId} - invalidating staff-specific queries`);
-        
-        // Only invalidate the specific staff member's queries to avoid mass re-renders
-        console.log(`[processClockEventsData] Invalidating only staff-specific queries for ${staffId}...`);
-        
-        // Only invalidate the specific staff member's daily summary query
-        await queryClient.invalidateQueries({ 
-          queryKey: ['time_daily_summary', dateStr, staffId]
+
+      if (isTargeted && typeof staffId === 'number') {
+        console.log(`[processClockEventsData] Targeted processing complete for staff ${staffId} - refreshing cached queries`);
+        const { startOfDay, startOfNextDay } = getSASTDayBoundaries(dateStr);
+
+        const [eventsRes, segmentsRes, summaryRes] = await Promise.all([
+          supabase
+            .from('time_clock_events')
+            .select('*')
+            .eq('staff_id', staffId)
+            .gte('event_time', startOfDay)
+            .lt('event_time', startOfNextDay)
+            .order('event_time', { ascending: true }),
+          supabase
+            .from('time_segments')
+            .select('id,staff_id,date_worked,start_time,end_time,break_type,segment_type,duration_minutes')
+            .eq('date_worked', dateStr)
+            .eq('staff_id', staffId)
+            .order('start_time', { ascending: true }),
+          supabase
+            .from('time_daily_summary')
+            .select('*')
+            .eq('date_worked', dateStr)
+            .eq('staff_id', staffId)
+            .maybeSingle(),
+        ]);
+
+        if (eventsRes.error) {
+          throw eventsRes.error;
+        }
+        if (segmentsRes.error) {
+          throw segmentsRes.error;
+        }
+        if (summaryRes.error) {
+          throw summaryRes.error;
+        }
+
+        const updatedEvents = (eventsRes.data ?? []) as ClockEvent[];
+        const updatedSegments = (segmentsRes.data ?? []) as TimeSegment[];
+        const staffSummary = (summaryRes.data ?? null) as DailySummary | null;
+
+        queryClient.setQueryData<ClockEvent[]>(['time_clock_events', dateStr], (current = []) => {
+          const others = current.filter(event => event.staff_id !== staffId);
+          const merged = [...others, ...updatedEvents];
+          return merged.sort((a, b) => new Date(a.event_time).getTime() - new Date(b.event_time).getTime());
         });
-        
-        console.log(`[processClockEventsData] Staff-specific query invalidation complete for ${staffId}`);
+
+        queryClient.setQueryData<TimeSegment[]>(['time_segments', dateStr], (current = []) => {
+          const others = current.filter(segment => segment.staff_id !== staffId);
+          const merged = [...others, ...updatedSegments];
+          return merged.sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+        });
+
+        queryClient.setQueryData<DailySummary | null>(['time_daily_summary', dateStr, staffId], staffSummary);
+
+        const updatedSummaryList = queryClient.setQueryData<DailySummary[]>(
+          ['time_daily_summary_all', dateStr],
+          (current = []) => {
+            const others = current.filter(summary => summary.staff_id !== staffId);
+            const merged = staffSummary ? [...others, staffSummary] : [...others];
+            return merged.sort((a, b) => a.staff_id - b.staff_id);
+          }
+        );
+
+        if (updatedSummaryList) {
+          queryClient.setQueryData<DailySummary[]>(['time_daily_summary', dateStr], updatedSummaryList);
+        }
+
+        console.log(`[processClockEventsData] Staff-specific cache refresh complete for ${staffId}`);
       } else {
-        // For full processing, invalidate all queries
-        queryClient.invalidateQueries({ queryKey: ['time_clock_events', dateStr] });
-        queryClient.invalidateQueries({ queryKey: ['time_segments', dateStr] });
-        queryClient.invalidateQueries({ queryKey: ['time_daily_summary', dateStr] });
+        // For full processing, invalidate all queries so everything refetches
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['time_clock_events', dateStr] }),
+          queryClient.invalidateQueries({ queryKey: ['time_segments', dateStr] }),
+          queryClient.invalidateQueries({ queryKey: ['time_daily_summary_all', dateStr] }),
+          queryClient.invalidateQueries({ queryKey: ['time_daily_summary', dateStr] }),
+        ]);
       }
-      
-      const successMessage = staffId 
+
+      const successMessage = staffId
         ? `Clock events processed for staff member!`
         : `Clock events processed for all staff on ${dateStr}!`;
-      
+
       toast({
         title: 'Success',
         description: successMessage,
@@ -455,7 +511,9 @@ export function DailyAttendanceGrid() {
         variant: 'destructive',
       });
     } finally {
-      setIsSaving(false);
+      if (shouldToggleSaving) {
+        setIsSaving(false);
+      }
     }
   };
   
