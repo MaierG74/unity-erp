@@ -19,13 +19,13 @@ Implemented/updated in Phase 2:
 - release_finished_goods(p_order_id integer) returns integer
   - Deletes rows from product_reservations for the order.
 - consume_finished_goods(p_order_id integer) returns table(product_id int, qty_consumed numeric)
-  - Deducts on‑hand (prefers primary/null location), logs product_inventory_transactions, then clears reservations.
+  - Walks every `product_inventory` row for the product (preferring null/primary locations first) and decrements each in FIFO order, then clears reservations.
 
 Component views/functions used by the Components tab:
 - get_detailed_component_status(p_order_id integer)
   - Per‑order requirements + in_stock, on_order, global fields. Fixed ambiguous component_id refs and explicit casts for integer columns.
 - get_all_component_requirements()
-  - Provides global totals across all open orders used for context.
+  - Provides global totals across all open orders using `component_status_mv` for stock/allocation figures so the API never reads stale `components` columns.
 - get_order_component_history(p_order_id integer)
   - Supplier order history linking via supplier_order_customer_orders. Fixed numeric/varchar casts to match declared return types.
 
@@ -105,31 +105,30 @@ File: app/products/[productId]/page.tsx
 
 ## FG Consumption Timing (Toggle)
 
-We support two operational modes for when reservations are converted into consumed stock:
+Two operational modes control when reservations are converted into consumed stock:
 
-- Consume on Add (instant consumption)
-  - When FG is added into `product_inventory`, immediately allocate/consume against existing reservations (FIFO by order date or reservation time), decreasing `qty_reserved` and the on‑hand balance in one logical operation.
-  - Best for make‑to‑order where building FG is synonymous with fulfilling specific orders.
+- Consume on Add (instant)
+  - When FG is added into `product_inventory`, immediately allocate/consume against existing reservations (FIFO by reservation time), decreasing `qty_reserved` and on‑hand in one step.
+  - Useful for strict make‑to‑order flows.
 
-- Consume on Ship (deferred consumption)
-  - Keep the on‑hand balance increased by Add FG, keep reservations unchanged; actual deduction happens when shipping via `consume_finished_goods(p_order_id)`.
-  - Best for mixed MTS/MTO or when QA/packing happens later.
+- Consume on Ship (deferred)
+  - Add FG increases on‑hand; reservations remain unchanged until shipping uses `consume_finished_goods(p_order_id)`.
+  - Default mode; good for MTS/MTO mix or when QA/packing delays shipment.
 
-Proposed implementation:
-- Global setting key: `fg_auto_consume_on_add` in `settings` table (boolean; default false ⇒ "Consume on Ship").
-- Add‑FG endpoint checks this setting:
-  - If true: call `auto_consume_on_add(p_product_id, p_quantity_added)` RPC that walks reservations (ordered by creation) and applies FIFO consumption, inserting rows in `product_inventory_transactions`.
-  - If false: current behavior (increase on‑hand only).
-- UI: surface a toggle in Settings, and an inline hint under the Add FG form reflecting the current mode.
+Implementation:
+- Global setting: `quote_company_settings.fg_auto_consume_on_add` (boolean; default false ⇒ Consume on Ship).
+- RPC: `auto_consume_on_add(p_product_id integer, p_quantity numeric)` walks all inventory rows FIFO to apply reservations and adjusts on‑hand balances.
+- API: `POST /api/products/[productId]/add-fg` reads the setting; when true, calls the RPC and returns an `auto_consume.applied` breakdown.
+- UI: Settings page (`app/settings/page.tsx`) exposes a checkbox “Consume reservations automatically when FG is added”.
 
-Status: Not yet implemented. Default runtime behavior is "Consume on Ship" via `consume_finished_goods(p_order_id)`.
+Status: Implemented. Default is Consume on Ship; enable Consume on Add in Settings.
 
 ## Backend Assets (Migrations & Scripts)
 - Migration: `db/migrations/20250920_fg_reservations.sql`
   - Ensures `product_reservations` table exists (id, product_id, order_id, qty_reserved, created_at).
   - Creates or replaces RPCs: `reserve_finished_goods`, `release_finished_goods`, `consume_finished_goods`.
 - Scripts:
-  - `scripts/check-fg.mjs` — read‑only verification of tables and RPC endpoints. Usage:
+  - `scripts/check-fg.mjs` — read‑only verification of tables, materialized views, and RPC endpoints (including `auto_consume_on_add`). Usage:
     - `node -r dotenv/config scripts/check-fg.mjs dotenv_config_path=.env.local`
   - `scripts/apply-fg-migration.mjs` — applies the migration via PG connection (requires SUPABASE_DB_URL or PG* env vars). Usage:
     - `node -r dotenv/config scripts/apply-fg-migration.mjs dotenv_config_path=.env.local`

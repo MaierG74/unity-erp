@@ -79,44 +79,48 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
   r RECORD;
-  v_inv_id INTEGER;
-  v_qoh NUMERIC;
-  v_new_qoh NUMERIC;
+  inv RECORD;
+  v_required NUMERIC;
+  v_to_take NUMERIC;
+  v_consumed NUMERIC;
 BEGIN
   -- Snapshot reservations for this order
   FOR r IN (
     SELECT product_id, qty_reserved
     FROM public.product_reservations
     WHERE order_id = p_order_id
+    FOR UPDATE
   ) LOOP
-    -- Prefer a primary/null-location row; otherwise any row
-    SELECT pi.product_inventory_id, COALESCE(pi.quantity_on_hand,0)
-    INTO v_inv_id, v_qoh
-    FROM public.product_inventory pi
-    WHERE pi.product_id = r.product_id AND pi.location IS NULL
-    ORDER BY pi.product_inventory_id
-    LIMIT 1;
+    v_required := COALESCE(r.qty_reserved, 0);
+    v_consumed := 0;
 
-    IF v_inv_id IS NULL THEN
-      SELECT pi.product_inventory_id, COALESCE(pi.quantity_on_hand,0)
-      INTO v_inv_id, v_qoh
-      FROM public.product_inventory pi
-      WHERE pi.product_id = r.product_id
-      ORDER BY pi.product_inventory_id
-      LIMIT 1;
+    IF v_required > 0 THEN
+      FOR inv IN (
+        SELECT product_inventory_id, COALESCE(quantity_on_hand, 0) AS qty
+        FROM public.product_inventory
+        WHERE product_id = r.product_id AND COALESCE(quantity_on_hand, 0) > 0
+        ORDER BY CASE WHEN location IS NULL THEN 0 ELSE 1 END, product_inventory_id
+        FOR UPDATE
+      ) LOOP
+        EXIT WHEN v_required <= 0;
+
+        v_to_take := LEAST(v_required, inv.qty);
+        IF v_to_take > 0 THEN
+          UPDATE public.product_inventory
+          SET quantity_on_hand = quantity_on_hand - v_to_take
+          WHERE product_inventory_id = inv.product_inventory_id;
+
+          v_required := v_required - v_to_take;
+          v_consumed := v_consumed + v_to_take;
+        END IF;
+      END LOOP;
     END IF;
 
-    IF v_inv_id IS NOT NULL THEN
-      v_new_qoh := GREATEST(0, v_qoh - COALESCE(r.qty_reserved,0));
-      UPDATE public.product_inventory
-      SET quantity_on_hand = v_new_qoh
-      WHERE product_inventory_id = v_inv_id;
-    END IF;
-
-    -- Return row for this product regardless of whether an inventory row existed
     product_id := r.product_id;
-    qty_consumed := COALESCE(r.qty_reserved,0);
+    qty_consumed := v_consumed;
     RETURN NEXT;
+
+    -- If we cannot consume anything else, allow subsequent rows to report zero consumption
   END LOOP;
 
   -- Clear reservations for this order
