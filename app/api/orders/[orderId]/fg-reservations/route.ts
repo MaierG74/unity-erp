@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+export const dynamic = 'force-dynamic';
 import { createClient } from '@supabase/supabase-js';
 
 type RouteParams = {
@@ -32,7 +33,7 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
       .from('product_reservations')
       .select('*')
       .eq('order_id', orderId)
-      .order('updated_at', { ascending: false });
+      .order('created_at', { ascending: false });
 
     if (reservationError) {
       console.error('[fg-reservations] Failed to load reservations', reservationError);
@@ -53,7 +54,7 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
         0
       ),
       available_quantity: row?.available_quantity ?? null,
-      updated_at: row?.updated_at ?? row?.created_at ?? null,
+      updated_at: row?.created_at ?? null,
     }));
 
     const productIds = Array.from(
@@ -88,7 +89,10 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
       product_internal_code: productMap[reservation.product_id]?.internal_code ?? null,
     }));
 
-    return NextResponse.json({ reservations: enriched });
+    return NextResponse.json(
+      { reservations: enriched },
+      { status: 200, headers: { 'Cache-Control': 'no-store' } }
+    );
   } catch (error) {
     console.error('[fg-reservations] Unexpected error', error);
     return NextResponse.json(

@@ -402,37 +402,25 @@ WITH
             o.order_id IN (SELECT order_id FROM open_orders)
         GROUP BY 
             c.component_id
-    ),
-    
-    -- Get component stock levels
-    component_stock AS (
-        SELECT 
-            c.component_id,
-            COALESCE(c.in_stock, 0) AS in_stock,
-            COALESCE(c.allocated_to_orders, 0) AS allocated_to_orders
-        FROM 
-            public.components c
-        WHERE 
-            c.component_id IN (SELECT component_id FROM all_order_components)
     )
     
     SELECT 
         jsonb_build_object(
             'component_id', aoc.component_id,
-            'internal_code', aoc.internal_code,
-            'description', aoc.description,
+            'internal_code', COALESCE(cs.internal_code, aoc.internal_code),
+            'description', COALESCE(cs.description, aoc.description),
             'total_required', aoc.total_required::INTEGER,
             'order_count', aoc.order_count,
-            'in_stock', cs.in_stock::INTEGER,
-            'allocated_to_orders', cs.allocated_to_orders::INTEGER,
-            'global_apparent_shortfall', GREATEST(aoc.total_required - cs.in_stock, 0)::INTEGER,
-            'global_real_shortfall', GREATEST(aoc.total_required - cs.in_stock - cs.allocated_to_orders, 0)::INTEGER,
+            'in_stock', COALESCE(cs.in_stock, 0)::INTEGER,
+            'allocated_to_orders', COALESCE(cs.allocated_to_orders, 0)::INTEGER,
+            'global_apparent_shortfall', GREATEST(aoc.total_required - COALESCE(cs.in_stock, 0), 0)::INTEGER,
+            'global_real_shortfall', GREATEST(aoc.total_required - COALESCE(cs.in_stock, 0) - COALESCE(cs.allocated_to_orders, 0), 0)::INTEGER,
             'order_breakdown', COALESCE(od.order_breakdown, '[]'::JSONB)
         )
     FROM 
         all_order_components aoc
-    JOIN 
-        component_stock cs ON aoc.component_id = cs.component_id
+    LEFT JOIN 
+        public.component_status_mv cs ON aoc.component_id = cs.component_id
     LEFT JOIN 
         order_details od ON aoc.component_id = od.component_id;
 $$ LANGUAGE SQL; 

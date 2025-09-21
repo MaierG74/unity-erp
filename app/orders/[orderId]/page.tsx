@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { type Order, type Product, type OrderDetail, type Customer, type OrderAttachment, type OrderStatus, type FinishedGoodReservation } from '@/types/orders';
-import { ComponentRequirement, ProductRequirement, OrderComponentsDialogProps, SupplierInfo, OrderBreakdown, SupplierOrderBreakdown } from '@/types/components';
+import { ComponentRequirement, ProductRequirement, SupplierInfo, SupplierOption } from '@/types/components';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -136,6 +136,7 @@ async function fetchOrderAttachments(orderId: number): Promise<OrderAttachment[]
 async function fetchFinishedGoodReservations(orderId: number): Promise<FinishedGoodReservation[]> {
   const response = await fetch(`/api/orders/${orderId}/fg-reservations`, {
     method: 'GET',
+    cache: 'no-store',
   });
 
   if (!response.ok) {
@@ -149,6 +150,7 @@ async function fetchFinishedGoodReservations(orderId: number): Promise<FinishedG
 async function reserveFinishedGoods(orderId: number): Promise<FinishedGoodReservation[]> {
   const response = await fetch(`/api/orders/${orderId}/reserve-fg`, {
     method: 'POST',
+    cache: 'no-store',
   });
 
   if (!response.ok) {
@@ -162,6 +164,7 @@ async function reserveFinishedGoods(orderId: number): Promise<FinishedGoodReserv
 async function releaseFinishedGoods(orderId: number): Promise<number | null> {
   const response = await fetch(`/api/orders/${orderId}/release-fg`, {
     method: 'POST',
+    cache: 'no-store',
   });
 
   if (!response.ok) {
@@ -175,6 +178,7 @@ async function releaseFinishedGoods(orderId: number): Promise<number | null> {
 async function consumeFinishedGoods(orderId: number): Promise<Array<{ product_id: number; consumed_quantity: number }>> {
   const response = await fetch(`/api/orders/${orderId}/consume-fg`, {
     method: 'POST',
+    cache: 'no-store',
   });
 
   if (!response.ok) {
@@ -188,30 +192,6 @@ async function consumeFinishedGoods(orderId: number): Promise<Array<{ product_id
 // Function to fetch component requirements for an order
 async function fetchOrderComponentRequirements(orderId: number): Promise<ProductRequirement[]> {
   try {
-    console.log(`[DEBUG] Fetching component requirements for order ${orderId}`);
-    
-    // First get all components across all orders to ensure we have global totals
-    const { data: globalComponents, error: globalError } = await supabase.rpc(
-      'get_all_component_requirements'
-    );
-    
-    if (globalError) {
-      console.error(`[ERROR] Error fetching global component requirements:`, globalError);
-      // Continue anyway with null/empty data
-    }
-    
-    // Create a map of component IDs to their global requirements
-    const globalRequirementsMap = globalComponents ?
-      globalComponents.reduce((map: Record<number, any>, item: any) => {
-        if (item && item.component_id) {
-          map[item.component_id] = item;
-        }
-        return map;
-      }, {}) : {};
-      
-    console.log(`[DEBUG] Retrieved global requirements for ${Object.keys(globalRequirementsMap).length} components`);
-    
-    // Get the order details with products
     const { data: orderDetails, error: orderError } = await supabase
       .from('order_details')
       .select(`
@@ -227,227 +207,145 @@ async function fetchOrderComponentRequirements(orderId: number): Promise<Product
         )
       `)
       .eq('order_id', orderId);
-    
+
     if (orderError) {
-      console.error(`[ERROR] Error fetching order details:`, orderError);
+      console.error('[components] Failed to fetch order details', orderError);
       throw new Error('Failed to fetch order details');
     }
-    
-    console.log(`[DEBUG] Found ${orderDetails?.length || 0} order details`);
-    
+
     if (!orderDetails || orderDetails.length === 0) {
       return [];
     }
-    
-    // Use the detailed component status function that includes global requirements
-    const { data: componentStatus, error: statusError } = await supabase.rpc(
-      'get_detailed_component_status',
-      { p_order_id: orderId }
+
+    const productIds = Array.from(
+      new Set(
+        orderDetails
+          .map((detail) => detail.product_id)
+          .filter((id): id is number => typeof id === 'number' && Number.isFinite(id))
+      )
     );
-    
-    if (statusError) {
-      console.error(`[ERROR] Error fetching detailed component status:`, statusError);
-      // Don't throw here, just continue with null/empty data
-    }
-    
-    console.log(`[DEBUG] Retrieved component status for ${componentStatus?.length || 0} components`);
-    // Log a sample of the data to debug the issue
-    if (componentStatus && componentStatus.length > 0) {
-      console.log(`[DEBUG] Sample component data:`, JSON.stringify(componentStatus[0], null, 2));
-    }
-    
-    // Create a map of component IDs to their status - safely handle null/undefined
-    const componentStatusMap = componentStatus ?
-      componentStatus.reduce((map: Record<number, any>, item: any) => {
-        if (item && item.component_id) {
-          map[item.component_id] = item;
-        }
-        return map;
-      }, {}) : {};
-    
-    // Fetch component order history for this order - wrap in try/catch
-    let orderHistoryMap: Record<number, any[]> = {};
-    
-    try {
-      const { data: orderHistory, error: historyError } = await supabase.rpc(
-        'get_order_component_history',
-        { p_order_id: orderId }
-      );
-      
-      if (historyError) {
-        console.error(`[ERROR] Error fetching order history:`, historyError);
-        // Continue anyway with empty history
-      } else if (orderHistory) {
-        // Safely create the history map
-        orderHistoryMap = orderHistory.reduce((map: Record<number, any[]>, item: any) => {
-          if (item && item.component_id) {
-            if (!map[item.component_id]) {
-              map[item.component_id] = [];
-            }
-            map[item.component_id].push(item);
-          }
-          return map;
-        }, {});
-      }
-    } catch (historyError) {
-      console.error(`[ERROR] Exception fetching order history:`, historyError);
-      // Continue with empty history map
-    }
-    
-    // Process each order detail to get component requirements
-    const requirements = await Promise.all(
-      orderDetails.map(async (detail) => {
-        try {
-          console.log(`[DEBUG] Processing order detail ${detail.order_detail_id} for product ${detail.product_id}`);
-          
-          // Get bill of materials for this product
-          const { data: bomData, error: bomError } = await supabase
+
+    const [statusResult, historyResult, bomResult] = await Promise.all([
+      supabase.rpc('get_detailed_component_status', { p_order_id: orderId }),
+      supabase.rpc('get_order_component_history', { p_order_id: orderId }),
+      productIds.length > 0
+        ? supabase
             .from('billofmaterials')
             .select(`
-              bom_id,
-              quantity_required,
+              product_id,
               component_id,
+              quantity_required,
               component:components(
                 component_id,
                 internal_code,
                 description
-              ),
-              supplierComponent:suppliercomponents(
-                supplier_component_id,
-                supplier:suppliers(
-                  supplier_id,
-                  name
-                ),
-                price
               )
             `)
-            .eq('product_id', detail.product_id);
-          
-          if (bomError) {
-            console.error(`[ERROR] Error fetching BOM for product ${detail.product_id}:`, bomError);
-            throw new Error('Failed to fetch bill of materials');
+            .in('product_id', productIds)
+        : Promise.resolve({ data: [], error: null })
+    ]);
+
+    if (bomResult.error) {
+      console.error('[components] Failed to fetch bill of materials', bomResult.error);
+      throw new Error('Failed to load bill of materials');
+    }
+
+    if (statusResult.error) {
+      console.error('[components] Failed to fetch component status', statusResult.error);
+    }
+
+    if (historyResult.error) {
+      console.error('[components] Failed to fetch component history', historyResult.error);
+    }
+
+    const componentStatusMap = new Map<number, any>();
+    (statusResult.data ?? []).forEach((item: any) => {
+      if (item?.component_id) {
+        componentStatusMap.set(item.component_id, item);
+      }
+    });
+
+    const historyMap = new Map<number, any[]>();
+    (historyResult.data ?? []).forEach((entry: any) => {
+      if (!entry?.component_id) return;
+      if (!historyMap.has(entry.component_id)) {
+        historyMap.set(entry.component_id, []);
+      }
+      historyMap.get(entry.component_id)!.push(entry);
+    });
+
+    const bomByProduct = new Map<number, any[]>();
+    (bomResult.data ?? []).forEach((row: any) => {
+      if (!row?.product_id || !row?.component) return;
+      if (!bomByProduct.has(row.product_id)) {
+        bomByProduct.set(row.product_id, []);
+      }
+      bomByProduct.get(row.product_id)!.push(row);
+    });
+
+    return orderDetails.map((detail) => {
+      const bomRows = bomByProduct.get(detail.product_id) ?? [];
+
+      const components = bomRows
+        .map((bomRow) => {
+          const componentId = bomRow.component_id;
+          const component = bomRow.component;
+
+          if (!componentId || !component) {
+            return null;
           }
-          
-          console.log(`[DEBUG] Found ${bomData?.length || 0} BOM items for product ${detail.product_id}`);
-          
-          if (!bomData || bomData.length === 0) {
-            return {
-              order_detail_id: detail.order_detail_id,
-              product_id: detail.product_id,
-              product_name: detail.product?.name || 'Unknown Product',
-              order_quantity: detail.quantity,
-              components: []
-            } as ProductRequirement;
-          }
-          
-          // Process components and their requirements
-          const components = bomData.map(bomItem => {
-            const componentId = bomItem.component_id;
-            const component = bomItem.component;
-            const status = componentStatusMap[componentId];
-            
-            if (!component) {
-              console.error(`[ERROR] Component ${componentId} not found in component data`);
-              return null;
-            }
-            
-            // Use the computed values from our database function
-            // or calculate fallbacks if they're not available
-            const requiredQuantity = detail.quantity * parseFloat(bomItem.quantity_required);
-            const inStock = status ? status.in_stock : 0;
-            const onOrder = status ? status.on_order : 0;
-            const apparentShortfall = status ? status.apparent_shortfall : Math.max(requiredQuantity - inStock, 0);
-            const realShortfall = status ? status.real_shortfall : Math.max(requiredQuantity - inStock - onOrder, 0);
-            const isCovered = realShortfall <= 0 && apparentShortfall > 0;
-            
-            // Process supplier options
-            const supplierOptions = Array.isArray(bomItem.supplierComponent) ?
-              bomItem.supplierComponent
-                .filter(sc => sc && sc.supplier)
-                .map(sc => ({
-                  supplier: sc.supplier,
-                  price: sc.price,
-                  supplier_component_id: sc.supplier_component_id
-                })) : [];
-            
-            // Find the lowest price supplier option
-            const selectedSupplier = supplierOptions.length > 0 ?
-              supplierOptions.reduce((lowest, current) => {
-                return (current.price < lowest.price) ? current : lowest;
-              }, supplierOptions[0]) : null;
-              
-            // Get global requirements for this component
-            const globalRequirements = globalRequirementsMap[componentId];
-            
-            // Add the global requirement fields from detailed component status and global requirements
-            const totalRequiredAllOrders = globalRequirements ? 
-              globalRequirements.total_required : 
-              (status ? status.total_required : requiredQuantity);
-                
-            const orderCount = globalRequirements ? 
-              globalRequirements.order_count : 
-              (status ? status.order_count : 1);
-                
-            const globalApparentShortfall = globalRequirements ? 
-              globalRequirements.global_apparent_shortfall : 
-              (status ? status.global_apparent_shortfall : apparentShortfall);
-                
-            const globalRealShortfall = globalRequirements ? 
-              globalRequirements.global_real_shortfall : 
-              (status ? status.global_real_shortfall : realShortfall);
-                
-            const orderBreakdown = globalRequirements ? 
-              globalRequirements.order_breakdown || [] : 
-              (status ? status.order_breakdown || [] : []);
-            
-            return {
-              component_id: componentId,
-              internal_code: component.internal_code,
-              description: component.description,
-              quantity_required: requiredQuantity,
-              quantity_in_stock: inStock,
-              quantity_on_order: onOrder,
-              apparent_shortfall: apparentShortfall,
-              real_shortfall: realShortfall,
-              is_covered_by_orders: isCovered,
-              history: orderHistoryMap[componentId] || [],
-              supplier_options: supplierOptions,
-              selected_supplier: selectedSupplier,
-              // Add global requirement fields
-              total_required_all_orders: totalRequiredAllOrders,
-              order_count: orderCount,
-              global_apparent_shortfall: globalApparentShortfall,
-              global_real_shortfall: globalRealShortfall,
-              order_breakdown: orderBreakdown
-            } as ComponentRequirement;
-          }).filter(Boolean) as ComponentRequirement[];
-          
+
+          const status = componentStatusMap.get(componentId);
+          const requiredQuantity = Number(detail.quantity ?? 0) * Number(bomRow.quantity_required ?? 0);
+          const quantityInStock = Number(status?.in_stock ?? 0);
+          const quantityOnOrder = Number(status?.on_order ?? 0);
+          const apparentShortfall = Number(
+            status?.apparent_shortfall ?? Math.max(requiredQuantity - quantityInStock, 0)
+          );
+          const realShortfall = Number(
+            status?.real_shortfall ?? Math.max(requiredQuantity - quantityInStock - quantityOnOrder, 0)
+          );
+          const totalRequiredAllOrders = Number(status?.total_required ?? requiredQuantity);
+          const orderCount = Number(status?.order_count ?? 1);
+          const globalApparentShortfall = Number(
+            status?.global_apparent_shortfall ?? Math.max(totalRequiredAllOrders - quantityInStock, 0)
+          );
+          const globalRealShortfall = Number(
+            status?.global_real_shortfall ?? Math.max(totalRequiredAllOrders - quantityInStock - quantityOnOrder, 0)
+          );
+
           return {
-            order_detail_id: detail.order_detail_id,
-            product_id: detail.product_id,
-            product_name: detail.product?.name || 'Unknown Product',
-            order_quantity: detail.quantity,
-            components
-          } as ProductRequirement;
-        } catch (error) {
-          console.error(`[ERROR] Error processing order detail ${detail.order_detail_id}:`, error);
-          return {
-            order_detail_id: detail.order_detail_id,
-            product_id: detail.product_id,
-            product_name: detail.product?.name || 'Unknown Product',
-            order_quantity: detail.quantity,
-            components: [],
-            error: 'Failed to process components'
-          } as ProductRequirement;
-        }
-      })
-    );
-    
-    console.log(`[DEBUG] Processed ${requirements.length} product requirements with components`);
-    
-    return requirements;
+            component_id: componentId,
+            internal_code: component.internal_code,
+            description: component.description,
+            quantity_required: requiredQuantity,
+            quantity_in_stock: quantityInStock,
+            quantity_on_order: quantityOnOrder,
+            apparent_shortfall: apparentShortfall,
+            real_shortfall: realShortfall,
+            order_breakdown: Array.isArray(status?.order_breakdown) ? status.order_breakdown : [],
+            on_order_breakdown: Array.isArray(status?.on_order_breakdown) ? status.on_order_breakdown : [],
+            history: historyMap.get(componentId) ?? [],
+            total_required_all_orders: totalRequiredAllOrders,
+            order_count: orderCount,
+            global_apparent_shortfall: globalApparentShortfall,
+            global_real_shortfall: globalRealShortfall,
+            supplier_options: [],
+            selected_supplier: null,
+          } as ComponentRequirement;
+        })
+        .filter((comp): comp is ComponentRequirement => Boolean(comp));
+
+      return {
+        order_detail_id: detail.order_detail_id,
+        product_id: detail.product_id,
+        product_name: detail.product?.name || 'Unknown Product',
+        order_quantity: detail.quantity,
+        components,
+      } as ProductRequirement;
+    });
   } catch (error) {
-    console.error(`[ERROR] Error in fetchOrderComponentRequirements:`, error);
+    console.error('[components] Error building order component requirements', error);
     throw error;
   }
 }
@@ -455,258 +353,182 @@ async function fetchOrderComponentRequirements(orderId: number): Promise<Product
 // Function to fetch component suppliers for ordering
 async function fetchComponentSuppliers(orderId: number) {
   try {
-    console.log(`[DEBUG] Fetching component suppliers for order ${orderId}`);
-    
-    // First, get the component requirements for this order
-    const requirements = await fetchOrderComponentRequirements(orderId);
-    
-    // Filter to only components with a real shortfall
-    const componentsWithShortfall = requirements.flatMap(req => 
-      req.components
-        .filter(comp => comp.real_shortfall > 0) // Use real shortfall (after accounting for on-order)
-        .map(comp => ({
-          component_id: comp.component_id,
-          internal_code: comp.internal_code,
-          description: comp.description,
-          shortfall: comp.real_shortfall,
-          quantity_required: comp.quantity_required,
-          quantity_on_order: comp.quantity_on_order,
-          // Add global requirement data
-          total_required_all_orders: comp.total_required_all_orders,
-          order_count: comp.order_count,
-          global_apparent_shortfall: comp.global_apparent_shortfall,
-          global_real_shortfall: comp.global_real_shortfall
-        }))
+    const { data: statusData, error: statusError } = await supabase.rpc('get_detailed_component_status', {
+      p_order_id: orderId,
+    });
+
+    if (statusError) {
+      console.error('[suppliers] Failed to load component status', statusError);
+      return [];
+    }
+
+    const componentsWithShortfall = (statusData ?? []).filter(
+      (item: any) => Number(item?.real_shortfall ?? 0) > 0
     );
-    
-    console.log(`[DEBUG] Found ${componentsWithShortfall.length} components with shortfall`);
-    
+
     if (componentsWithShortfall.length === 0) {
       return [];
     }
-    
-    // For each component with shortfall, find supplier options
-    let allSupplierComponents: any[] = [];
-    
-    for (const comp of componentsWithShortfall) {
-      const componentId = comp.component_id;
-      
-      if (!componentId) {
-        console.error(`[ERROR] Missing component ID for:`, comp);
-        continue;
-      }
-      
-      const { data, error } = await supabase
-        .from('suppliercomponents')
-        .select(`
-          supplier_component_id,
-          price,
-          supplier:suppliers(
-            supplier_id,
-            name,
-            contact_info
-          )
-        `)
-        .eq('component_id', componentId);
-      
-      if (error) {
-        console.error(`[ERROR] Error fetching suppliers for component ${componentId}:`, error);
-        continue;
-      }
-      
-      if (!data || data.length === 0) {
-        console.log(`[DEBUG] No suppliers found for component ${componentId}`);
-        continue;
-      }
-      
-      // Add missing fields needed by the UI
-      for (const supplierComponent of data) {
-        if (supplierComponent.supplier?.supplier_id) {
-          // Fetch emails for this supplier
-          const { data: emails, error: emailError } = await supabase
-            .from('supplier_emails')
-            .select('email, is_primary')
-            .eq('supplier_id', supplierComponent.supplier.supplier_id);
-          
-          if (!emailError && emails) {
-            // Add emails array to the supplier object
-            supplierComponent.supplier.emails = emails.map(e => e.email);
-          } else {
-            // Empty array if no emails or error
-            supplierComponent.supplier.emails = [];
-          }
-          
-          // Add more required fields with default values
-          supplierComponent.supplier.address = '';
-          supplierComponent.supplier.phone = '';
-          supplierComponent.supplier.contact_person = '';
-        }
-      }
-      
-      // Add valid supplier components to our list
-      const validSupplierComponents = data.filter(d => 
-        d.supplier && d.supplier_component_id && d.price !== null
-      );
-      
-      // Attach the component and shortfall info to each supplier component
-      const supplierComponentsWithInfo = validSupplierComponents.map(sc => ({
-        ...sc,
-        component: {
-          component_id: comp.component_id,
-          internal_code: comp.internal_code,
-          description: comp.description
-        },
-        shortfall: comp.shortfall,
-        quantity_required: comp.quantity_required,
-        quantity_on_order: comp.quantity_on_order,
-        // Add global requirement data
-        total_required_all_orders: comp.total_required_all_orders,
-        order_count: comp.order_count,
-        global_apparent_shortfall: comp.global_apparent_shortfall,
-        global_real_shortfall: comp.global_real_shortfall,
-        selectedSupplier: {
-          supplier: sc.supplier,
-          price: sc.price,
-          supplier_component_id: sc.supplier_component_id
-        },
-        supplierOptions: [{
-          supplier: sc.supplier,
-          price: sc.price,
-          supplier_component_id: sc.supplier_component_id
-        }]
-      }));
-      
-      allSupplierComponents = [...allSupplierComponents, ...supplierComponentsWithInfo];
-    }
-    
-    console.log(`[DEBUG] Found ${allSupplierComponents.length} supplier components total`);
-    
-    if (allSupplierComponents.length === 0) {
+
+    const componentMetaMap = new Map<number, any>();
+    const componentIds: number[] = [];
+
+    componentsWithShortfall.forEach((item: any) => {
+      if (!item?.component_id) return;
+      componentMetaMap.set(item.component_id, item);
+      componentIds.push(item.component_id);
+    });
+
+    const { data: supplierComponents, error: supplierError } = await supabase
+      .from('suppliercomponents')
+      .select(`
+        supplier_component_id,
+        component_id,
+        price,
+        supplier:suppliers(
+          supplier_id,
+          name,
+          contact_person,
+          phone
+        )
+      `)
+      .in('component_id', componentIds);
+
+    if (supplierError) {
+      console.error('[suppliers] Failed to load supplier components', supplierError);
       return [];
     }
-    
-    // Group supplier components by supplier
-    const supplierGroups = allSupplierComponents.reduce((groups: any[], sc) => {
-      // Find if we already have a group for this supplier
-      const existingGroup = groups.find(g => 
-        g.supplier.supplier_id === sc.supplier.supplier_id
-      );
-      
-      if (existingGroup) {
-        // Check if we already have this component in this supplier group
-        const existingComp = existingGroup.components.find((c: any) => 
-          c.component.component_id === sc.component.component_id
-        );
-        
-        if (existingComp) {
-          // If this supplier already has this component listed, add as another option
-          existingComp.supplierOptions = [
-            ...(existingComp.supplierOptions || []),
-            {
-              supplier: sc.supplier,
-              price: sc.price,
-              supplier_component_id: sc.supplier_component_id
-            }
-          ];
-          
-          // If the new option is cheaper, make it the selected one
-          if (sc.price < existingComp.selectedSupplier.price) {
-            existingComp.selectedSupplier = {
-              supplier: sc.supplier,
-              price: sc.price,
-              supplier_component_id: sc.supplier_component_id
-            };
+
+    if (!supplierComponents || supplierComponents.length === 0) {
+      return [];
+    }
+
+    const supplierIds = Array.from(
+      new Set(
+        supplierComponents
+          .map((sc: any) => sc?.supplier?.supplier_id)
+          .filter((id): id is number => typeof id === 'number' && Number.isFinite(id))
+      )
+    );
+
+    let emailMap = new Map<number, string[]>();
+    if (supplierIds.length > 0) {
+      const { data: supplierEmails, error: emailError } = await supabase
+        .from('supplier_emails')
+        .select('supplier_id, email, is_primary')
+        .in('supplier_id', supplierIds);
+
+      if (emailError) {
+        console.error('[suppliers] Failed to load supplier emails', emailError);
+      } else if (supplierEmails) {
+        emailMap = supplierEmails.reduce((map, row) => {
+          if (!row?.supplier_id || !row?.email) return map;
+          if (!map.has(row.supplier_id)) {
+            map.set(row.supplier_id, []);
           }
-        } else {
-          // Add component to existing supplier group
-          existingGroup.components.push({
-            component: sc.component,
-            shortfall: sc.shortfall,
-            quantity_required: sc.quantity_required,
-            quantity_on_order: sc.quantity_on_order,
-            // Add global requirement fields
-            total_required_all_orders: sc.total_required_all_orders,
-            order_count: sc.order_count,
-            global_apparent_shortfall: sc.global_apparent_shortfall,
-            global_real_shortfall: sc.global_real_shortfall,
-            selectedSupplier: {
-              supplier: sc.supplier,
-              price: sc.price,
-              supplier_component_id: sc.supplier_component_id
-            },
-            supplierOptions: [{
-              supplier: sc.supplier,
-              price: sc.price,
-              supplier_component_id: sc.supplier_component_id
-            }]
-          });
+          const list = map.get(row.supplier_id)!;
+          if (row.is_primary) {
+            list.unshift(row.email);
+          } else {
+            list.push(row.email);
+          }
+          return map;
+        }, new Map<number, string[]>());
+      }
+    }
+
+    const groups = new Map<number, SupplierGroup>();
+
+    supplierComponents.forEach((sc: any) => {
+      const supplier = sc?.supplier;
+      const componentId = sc?.component_id;
+      const componentMeta = componentMetaMap.get(componentId);
+
+      if (!supplier || !componentMeta) {
+        return;
+      }
+
+      const existingGroup = groups.get(supplier.supplier_id);
+      const supplierInfo: SupplierInfo = existingGroup?.supplier ?? {
+        supplier_id: supplier.supplier_id,
+        name: supplier.name,
+        contact_person: supplier.contact_person ?? '',
+        emails: emailMap.get(supplier.supplier_id) ?? [],
+        phone: supplier.phone ?? '',
+      };
+
+      const option: SupplierOption = {
+        supplier: supplierInfo,
+        price: Number(sc.price ?? 0),
+        supplier_component_id: sc.supplier_component_id,
+      };
+
+      const componentEntry = {
+        component: {
+          component_id: componentMeta.component_id,
+          internal_code: componentMeta.internal_code,
+          description: componentMeta.description,
+        },
+        shortfall: Number(componentMeta.real_shortfall ?? 0),
+        quantity_required: Number(componentMeta.order_required ?? 0),
+        quantity_on_order: Number(componentMeta.on_order ?? 0),
+        total_required_all_orders: Number(
+          componentMeta.total_required ?? componentMeta.order_required ?? 0
+        ),
+        order_count: Number(componentMeta.order_count ?? 1),
+        global_apparent_shortfall: Number(componentMeta.global_apparent_shortfall ?? 0),
+        global_real_shortfall: Number(componentMeta.global_real_shortfall ?? 0),
+        selectedSupplier: option,
+        supplierOptions: [option],
+      };
+
+      if (!existingGroup) {
+        groups.set(supplierInfo.supplier_id, {
+          supplier: supplierInfo,
+          components: [componentEntry],
+        });
+        return;
+      }
+
+      const existingComponent = existingGroup.components.find(
+        (entry) => entry.component.component_id === componentEntry.component.component_id
+      );
+
+      if (existingComponent) {
+        existingComponent.supplierOptions.push(option);
+        if (option.price < existingComponent.selectedSupplier.price) {
+          existingComponent.selectedSupplier = option;
         }
       } else {
-        // Create a new supplier group
-        groups.push({
-          supplier: sc.supplier,
-          components: [{
-            component: sc.component,
-            shortfall: sc.shortfall,
-            quantity_required: sc.quantity_required,
-            quantity_on_order: sc.quantity_on_order,
-            // Add global requirement fields
-            total_required_all_orders: sc.total_required_all_orders,
-            order_count: sc.order_count,
-            global_apparent_shortfall: sc.global_apparent_shortfall,
-            global_real_shortfall: sc.global_real_shortfall,
-            selectedSupplier: {
-              supplier: sc.supplier,
-              price: sc.price,
-              supplier_component_id: sc.supplier_component_id
-            },
-            supplierOptions: [{
-              supplier: sc.supplier,
-              price: sc.price,
-              supplier_component_id: sc.supplier_component_id
-            }]
-          }]
-        });
+        existingGroup.components.push(componentEntry);
       }
-      
-      return groups;
-    }, []);
-    
-    // Sort suppliers by those that can provide the most components
-    supplierGroups.sort((a, b) => b.components.length - a.components.length);
-    
-    console.log(`[DEBUG] Grouped into ${supplierGroups.length} supplier groups`);
-    
-    return supplierGroups;
+    });
+
+    return Array.from(groups.values()).sort(
+      (a, b) => b.components.length - a.components.length
+    );
   } catch (error) {
-    console.error(`[ERROR] Error in fetchComponentSuppliers:`, error);
+    console.error('[suppliers] Error assembling supplier options', error);
     return [];
   }
 }
 
-// Define types for suppliers and components
-type SupplierInfo = {
-  supplier_id: number;
-  name: string;
-  contact_person: string;
-  emails: string[];  // Changed from single email to array
-  phone: string;
-};
-
 // Define the SupplierComponent type
 type SupplierComponent = {
-  component: any;
+  component: {
+    component_id: number;
+    internal_code: string;
+    description: string;
+  };
   shortfall: number;
-  // Add global requirement fields
+  quantity_required: number;
+  quantity_on_order: number;
   total_required_all_orders?: number;
   order_count?: number;
   global_apparent_shortfall?: number;
   global_real_shortfall?: number;
-  selectedSupplier: { 
-    supplier_component_id: number;
-    supplier: SupplierInfo; 
-    price: number; 
-  };
+  selectedSupplier: SupplierOption;
+  supplierOptions: SupplierOption[];
 };
 
 // Define the SupplierGroup type
@@ -719,7 +541,7 @@ type SupplierGroup = {
 async function createComponentPurchaseOrders(
   selectedComponents: Record<number, boolean>,
   supplierGroups: SupplierGroup[],
-  notes: Record<string, string>,
+  notes: Record<number, string>,
   orderQuantities: Record<number, number>,
   allocation: Record<number, { forThisOrder: number; forStock: number }>,
   orderId: string
@@ -841,14 +663,14 @@ const OrderComponentsDialog = ({
   onCreated?: () => void;
 }) => {
   const [step, setStep] = useState<'select' | 'review'>('select');
-  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [notes, setNotes] = useState<Record<number, string>>({});
   const [selectedComponents, setSelectedComponents] = useState<Record<number, boolean>>({});
   const [orderQuantities, setOrderQuantities] = useState<Record<number, number>>({});
   const [allocation, setAllocation] = useState<Record<number, { forThisOrder: number; forStock: number }>>({});
   const [apparentShortfallExists, setApparentShortfallExists] = useState(false);
   
   // Group components by supplier
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery<SupplierGroup[]>({
     queryKey: ['component-suppliers', orderId],
     queryFn: () => fetchComponentSuppliers(Number(orderId)),
   });
@@ -1007,7 +829,7 @@ const OrderComponentsDialog = ({
     }));
   };
 
-  const handleNoteChange = (supplierId: string, note: string) => {
+  const handleNoteChange = (supplierId: number, note: string) => {
     setNotes(prev => ({
       ...prev,
       [supplierId]: note,
@@ -1037,7 +859,7 @@ const OrderComponentsDialog = ({
   };
 
   if (isLoading) {
-  return (
+    return (
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-[900px]">
           <DialogHeader>
@@ -1433,10 +1255,10 @@ function AddProductsDialog({
         delete newState[productId];
       } else {
         // Product is not selected, select it
-        const product = products.find((p: any) => p.product_id === productId);
+        const productAny: any = products.find((p: any) => p.product_id === productId);
         newState[productId] = {
           quantity: 1,
-          price: product?.unit_price || 0
+          price: (productAny?.unit_price ?? productAny?.price ?? 0) as number
         };
       }
       
@@ -2017,39 +1839,7 @@ const sections: { [key: string]: OrderSection } = {
   },
 };
 
-// Using shared types from '@/types/orders' for Order, Customer, and OrderDetail
-
-interface SupplierInfo {
-  supplier_id: number;
-  name: string;
-  contact_person: string;
-  emails: string[];  // Changed from single email to array
-  phone: string;
-}
-
-interface SupplierGroup {
-  supplier: SupplierInfo;
-  components: Array<{
-    component: {
-      component_id: number;
-      internal_code: string;
-      description: string;
-    };
-    shortfall: number;
-    quantity_required: number;
-    quantity_on_order: number;
-    selectedSupplier: {
-      supplier: SupplierInfo;
-      price: number;
-      supplier_component_id: number;
-    };
-    supplierOptions?: Array<{
-      supplier: SupplierInfo;
-      price: number;
-      supplier_component_id: number;
-    }>;
-  }>;
-}
+// Using shared types from '@/types/components' for SupplierInfo and SupplierGroup
 
 interface SupplierOrder {
   supplier_id: number;
@@ -2063,318 +1853,7 @@ interface SupplierOrder {
   }>;
 }
 
-interface OrderComponentsDialogProps {
-  isOpen: boolean;
-  onClose: () => void;
-  orderId: number;
-  onOrderPlaced?: () => void;
-}
-
-interface OrderBreakdown {
-  order_id: number;
-  quantity: number;
-  order_date: string;
-  status: string;
-}
-
-interface SupplierOrderBreakdown {
-  supplier_order_id: number;
-  supplier_name: string;
-  quantity: number;
-  received: number;
-  status: string;
-  order_date: string;
-}
-
-interface ComponentRequirement {
-  component_id: number;
-  internal_code: string;
-  description: string;
-  total_required: number;
-  order_breakdown: OrderBreakdown[];
-  in_stock: number;
-  on_order: number;
-  on_order_breakdown: SupplierOrderBreakdown[];
-  apparent_shortfall: number;
-  real_shortfall: number;
-  supplier_options: Array<{
-    supplier: SupplierInfo;
-    price: number;
-    supplier_component_id: number;
-  }>;
-  selected_supplier: {
-    supplier: SupplierInfo;
-    price: number;
-    supplier_component_id: number;
-  } | null;
-}
-
-interface ProductRequirement {
-  order_detail_id: number;
-  product_id: number;
-  product_name: string;
-  order_quantity: number;
-  components: ComponentRequirement[];
-  error?: string;
-}
-
-// Add new components for tooltips
-function RequirementTooltip({ breakdown }: { breakdown: OrderBreakdown[] }) {
-  return (
-    <div className="p-2 max-w-sm">
-      <p className="font-semibold mb-2">Order Breakdown:</p>
-      <ul className="space-y-1">
-        {breakdown?.map((order) => (
-          <li key={order.order_id} className="text-sm">
-            Order #{order.order_id}: {order.quantity} units ({order.status})
-            <br />
-            <span className="text-xs text-muted-foreground">
-              {new Date(order.order_date).toLocaleDateString()}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function OnOrderTooltip({ breakdown }: { breakdown: SupplierOrderBreakdown[] }) {
-  return (
-    <div className="p-2 max-w-sm">
-      <p className="font-semibold mb-2">Supplier Orders:</p>
-      <ul className="space-y-2">
-        {breakdown?.map((order) => (
-          <li key={order.supplier_order_id} className="text-sm">
-            <div className="flex justify-between">
-              <span>PO #{order.supplier_order_id}</span>
-              <span>{order.status}</span>
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {order.supplier_name}
-            </div>
-            <div className="text-xs">
-              Ordered: {order.quantity} | Received: {order.received}
-              <br />
-              {new Date(order.order_date).toLocaleDateString()}
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 // Update the component requirements table to use the new tooltips
-function ComponentRequirementsTable({ requirements }: { requirements: ComponentRequirement[] }) {
-  return (
-    <Table>
-      <TableHeader className="bg-muted/50">
-        <TableRow>
-          <TableHead>Component</TableHead>
-          <TableHead className="text-right">Required</TableHead>
-          <TableHead className="text-right whitespace-nowrap">
-            Total Across Orders
-            <span className="sr-only">(Total required across all orders)</span>
-          </TableHead>
-          <TableHead className="text-right">In Stock</TableHead>
-          <TableHead className="text-right">On Order</TableHead>
-          <TableHead className="text-right">Apparent Shortfall</TableHead>
-          <TableHead className="text-right">Real Shortfall</TableHead>
-          <TableHead className="text-right whitespace-nowrap">
-            Global Shortfall
-            <span className="sr-only">(Total shortfall across all orders)</span>
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {requirements?.map((req, index) => (
-          <TableRow 
-            key={req.component_id}
-            className={cn(
-              index % 2 === 0 ? "bg-white" : "bg-muted/20",
-              "hover:bg-muted/30 transition-all duration-200 ease-in-out"
-            )}
-          >
-            <TableCell>
-              <div>
-                <p className="font-medium">{req.internal_code}</p>
-                <p className="text-sm text-muted-foreground">{req.description}</p>
-              </div>
-            </TableCell>
-            <TableCell className="text-right">
-              <Popover>
-                <PopoverTrigger>
-                  <div className="cursor-help inline-flex items-center">
-                    {req.total_required}
-                    <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
-                  </div>
-                </PopoverTrigger>
-                <PopoverContent className="p-0">
-                  <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
-                    <RequirementTooltip breakdown={req.order_breakdown || []} />
-                  </div>
-                </PopoverContent>
-              </Popover>
-            </TableCell>
-            <TableCell className="text-right">
-              <Popover>
-                <PopoverTrigger>
-                  <div className="cursor-help inline-flex items-center">
-                    <span className={cn(
-                      req.total_required_all_orders > req.total_required 
-                        ? "text-blue-600" 
-                        : "",
-                      "font-medium"
-                    )}>
-                      {req.total_required_all_orders || 0}
-                    </span>
-                    {req.order_count > 1 && (
-                      <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
-                    )}
-                  </div>
-                </PopoverTrigger>
-                <PopoverContent className="p-0">
-                  <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
-                    <p className="text-sm font-medium mb-2">Required across {req.order_count} orders:</p>
-                    <div className="space-y-1 text-sm">
-                      {(req.order_breakdown || [])?.map((order: any) => (
-                        <div key={order.order_id} className="flex justify-between">
-                          <span>Order #{order.order_id}:</span>
-                          <span>{order.quantity} units</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </PopoverContent>
-              </Popover>
-            </TableCell>
-            <TableCell className="text-right font-medium">{req.in_stock}</TableCell>
-            <TableCell className="text-right">
-              {req.on_order > 0 ? (
-                <Popover>
-                  <PopoverTrigger>
-                    <div className="cursor-help inline-flex items-center">
-                      {req.on_order}
-                      <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
-                    </div>
-                  </PopoverTrigger>
-                  <PopoverContent className="p-0">
-                    <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
-                      <OnOrderTooltip breakdown={req.on_order_breakdown || []} />
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              ) : (
-                req.on_order
-              )}
-            </TableCell>
-            <TableCell className="text-right">
-              <span className={cn(
-                req.apparent_shortfall > 0 
-                  ? "text-orange-600" 
-                  : "text-green-600",
-                "font-medium"
-              )}>
-                {req.apparent_shortfall}
-              </span>
-            </TableCell>
-            <TableCell className="text-right">
-              {req.apparent_shortfall > 0 && req.real_shortfall === 0 ? (
-                <Popover>
-                  <PopoverTrigger>
-                    <div className="cursor-help inline-flex items-center">
-                      <span className="text-green-600 font-medium">{req.real_shortfall}</span>
-                      <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
-                    </div>
-                  </PopoverTrigger>
-                  <PopoverContent className="p-0">
-                    <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
-                      <p className="text-sm">This apparent shortfall is covered by existing supplier orders.</p>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              ) : (
-                <span className={cn(
-                  req.real_shortfall > 0 
-                    ? "text-red-600" 
-                    : "text-green-600",
-                  "font-medium"
-                )}>
-                  {req.real_shortfall}
-                </span>
-              )}
-            </TableCell>
-            <TableCell className="text-right">
-              <span className={cn(
-                req.global_real_shortfall > 0 
-                  ? "text-red-600" 
-                  : req.global_apparent_shortfall > 0 
-                    ? "text-amber-600" 
-                    : "text-green-600",
-                "font-medium"
-              )}>
-                {req.global_real_shortfall || 0}
-              </span>
-              {req.global_apparent_shortfall > 0 && req.global_real_shortfall === 0 && (
-                <span className="text-xs text-muted-foreground ml-1">(Covered)</span>
-              )}
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  );
-}
-
-async function fetchComponentRequirements(orderId: number): Promise<ComponentRequirement[]> {
-  const { data, error } = await supabase.rpc('get_detailed_component_status', { p_order_id: orderId });
-  
-  if (error) {
-    console.error('Error fetching component requirements:', error);
-    return [];
-  }
-
-  return (data || []).map((item: any) => ({
-    component_id: item.component_id,
-    internal_code: item.internal_code,
-    description: item.description,
-    total_required: item.order_required,
-    in_stock: item.in_stock,
-    on_order: item.on_order,
-    apparent_shortfall: item.apparent_shortfall,
-    real_shortfall: item.real_shortfall,
-    // Add the new global requirement fields
-    total_required_all_orders: item.total_required,
-    order_count: item.order_count,
-    global_apparent_shortfall: item.global_apparent_shortfall,
-    global_real_shortfall: item.global_real_shortfall,
-    order_breakdown: item.order_breakdown || [],
-    on_order_breakdown: item.on_order_breakdown || [],
-    supplier_options: item.supplier_options?.map((opt: any) => ({
-      supplier: {
-        supplier_id: opt.supplier.supplier_id,
-        name: opt.supplier.name,
-        contact_person: opt.supplier.contact_person || '',
-        emails: opt.supplier.emails || [],
-        phone: opt.supplier.phone || ''
-      },
-      price: opt.price,
-      supplier_component_id: opt.supplier_component_id
-    })) || [],
-    selected_supplier: item.selected_supplier ? {
-      supplier: {
-        supplier_id: item.selected_supplier.supplier.supplier_id,
-        name: item.selected_supplier.supplier.name,
-        contact_person: item.selected_supplier.supplier.contact_person || '',
-        emails: item.selected_supplier.supplier.emails || [],
-        phone: item.selected_supplier.supplier.phone || ''
-      },
-      price: item.selected_supplier.price,
-      supplier_component_id: item.selected_supplier.supplier_component_id
-    } : null
-  }));
-}
-
 export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   const orderId = parseInt(params.orderId, 10);
   // Set initial tab back to details
@@ -2423,6 +1902,9 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   } = useQuery({
     queryKey: ['fgReservations', orderId],
     queryFn: () => fetchFinishedGoodReservations(orderId),
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
   });
 
   useEffect(() => {
@@ -2584,18 +2066,22 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
 
   const releaseFgMutation = useMutation({
     mutationFn: () => releaseFinishedGoods(orderId),
-    onSuccess: () => {
+    onSuccess: async () => {
+      // Optimistic UI: clear reservations immediately
       queryClient.setQueryData(['fgReservations', orderId], [] as FinishedGoodReservation[]);
       toast.success('Finished goods released');
+      // Proactively refetch to sync any server-side side effects
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] }),
+        queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] }),
+        queryClient.invalidateQueries({ queryKey: ['order', orderId] }),
+      ]);
+      // Also refresh supplier group data if dialog is open
+      queryClient.invalidateQueries({ queryKey: ['component-suppliers', String(orderId)] });
     },
     onError: (error: any) => {
       console.error('[release-fg] mutation error', error);
       toast.error('Failed to release finished goods');
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] });
-      queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
-      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
     },
   });
 
@@ -2620,12 +2106,9 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   const { 
     data: componentRequirements = [], 
     refetch: refetchComponentRequirements
-  } = useQuery({
+  } = useQuery<ProductRequirement[]>({
     queryKey: ['orderComponentRequirements', orderId],
     queryFn: () => fetchOrderComponentRequirements(orderId),
-    onSuccess: (data) => {
-      console.log('Component requirements loaded:', JSON.stringify(data, null, 2));
-    }
   });
 
   // Calculate totals from component requirements

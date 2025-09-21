@@ -44,7 +44,6 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       .eq('product_id', productId)
 
     if (location === null) {
-      // @ts-expect-error supabase-js types for .is(null)
       query = query.is('location', null)
     } else {
       query = query.eq('location', location)
@@ -102,3 +101,4 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: e?.message || 'Unexpected error while adding finished goods' }, { status: 500 })
   }
 }
+

@@ -90,6 +90,12 @@ This guide documents how we style the app: Tailwind CSS utilities + shadcn/ui pr
   - Avoid: mixing multiple saturated colors in one view; rely on neutral surfaces with a single accent.
 
 ## Typography
+- __Typeface__: Inter is our primary and only sanctioned UI typeface. It is loaded globally in `app/layout.tsx` and mapped to the
+  Tailwind `font-sans` token, so prefer utilities like `font-sans`/`text-foreground` rather than declaring custom font stacks.
+  Do not introduce additional fonts without design sign-off.
+- __Application__: Replicate the "Apply FG coverage" control pattern—`Label` set in `text-sm font-medium leading-tight` and
+  supporting copy in `text-xs text-muted-foreground`—for similar toggles, settings rows, and metadata blocks so the interface
+  maintains consistent hierarchy and comfortable density.
 - __Sizes__: Use Tailwind presets (`text-xs`..`text-2xl`). Lists/tables default to `text-sm`.
 - __Weights__: Use semantic emphasis (`font-medium` for headings/labels).
 - __Line-height__: Default (`leading-normal`) unless compact UI requires `leading-tight`.

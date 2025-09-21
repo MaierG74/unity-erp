@@ -9,6 +9,9 @@ export interface Customer {
   contact: string;
   email: string;
   telephone: string;
+  // Optional fields used in some UI surfaces
+  contact_person?: string | null;
+  phone?: string | null;
 }
 
 export interface Product {
@@ -61,4 +64,6 @@ export interface Order {
   attachments?: OrderAttachment[];
   /** Linked quote */
   quote?: { id: string; quote_number: string; };
-} 
+  /** Optional customer-provided reference string */
+  customer_reference?: string | null;
+}

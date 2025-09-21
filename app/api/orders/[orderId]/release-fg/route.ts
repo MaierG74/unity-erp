@@ -28,19 +28,37 @@ export async function POST(_request: NextRequest, { params }: RouteParams) {
   );
 
   try {
+    // Primary path: use the RPC
     const { data, error } = await supabaseAdmin.rpc('release_finished_goods', {
       p_order_id: orderId,
     });
 
-    if (error) {
-      console.error('[release-fg] Failed to release finished goods', error);
+    if (!error) {
+      return NextResponse.json(
+        { success: true, released: data ?? null },
+        { status: 200, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    // Fallback: directly delete rows (in case RPC is missing or signature drifted)
+    console.warn('[release-fg] RPC failed; falling back to direct delete', error);
+    const { count, error: delErr } = await supabaseAdmin
+      .from('product_reservations')
+      .delete({ count: 'exact' })
+      .eq('order_id', orderId);
+
+    if (delErr) {
+      console.error('[release-fg] Fallback delete also failed', delErr);
       return NextResponse.json(
         { error: 'Failed to release finished goods' },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ success: true, released: data ?? null });
+    return NextResponse.json(
+      { success: true, released: count ?? 0 },
+      { status: 200, headers: { 'Cache-Control': 'no-store' } }
+    );
   } catch (error) {
     console.error('[release-fg] Unexpected error', error);
     return NextResponse.json(
