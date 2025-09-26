@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-export const dynamic = 'force-dynamic';
 import { createClient } from '@supabase/supabase-js';
 
 type RouteParams = {
@@ -89,10 +88,7 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
       product_internal_code: productMap[reservation.product_id]?.internal_code ?? null,
     }));
 
-    return NextResponse.json(
-      { reservations: enriched },
-      { status: 200, headers: { 'Cache-Control': 'no-store' } }
-    );
+    return NextResponse.json({ reservations: enriched });
   } catch (error) {
     console.error('[fg-reservations] Unexpected error', error);
     return NextResponse.json(

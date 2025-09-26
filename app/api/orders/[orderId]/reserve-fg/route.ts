@@ -51,10 +51,7 @@ export async function POST(_request: NextRequest, { params }: RouteParams) {
       ),
     }));
 
-    return NextResponse.json(
-      { success: true, reservations },
-      { status: 200, headers: { 'Cache-Control': 'no-store' } }
-    );
+    return NextResponse.json({ success: true, reservations });
   } catch (error) {
     console.error('[reserve-fg] Unexpected error', error);
     return NextResponse.json(

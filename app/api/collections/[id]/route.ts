@@ -25,12 +25,17 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
     const { data: items, error: errItems } = await supabase
       .from('bom_collection_items')
-      .select('item_id, component_id, quantity_required, supplier_component_id, components(component_id, internal_code, description)')
+      .select('item_id, component_id, quantity_required, supplier_component_id, components(component_id, internal_code, description), suppliercomponents(price)')
       .eq('collection_id', id)
       .order('item_id')
     if (errItems) throw errItems
 
-    return NextResponse.json({ collection, items: items ?? [] })
+    // Map supplier price for convenience at the top level of each item
+    const normalized = (items || []).map((it: any) => ({
+      ...it,
+      price: it?.suppliercomponents?.price ?? null,
+    }))
+    return NextResponse.json({ collection, items: normalized })
   } catch (err: any) {
     console.error('Collections get error:', err)
     return NextResponse.json({ error: 'Failed to fetch collection' }, { status: 500 })

@@ -1,3 +1,4 @@
+import { resolveProductConfiguration, type ProductOptionSelection } from '@/lib/db/products';
 import { supabase } from '@/lib/supabase';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
@@ -19,6 +20,7 @@ export interface QuoteItem {
   unit_price: number;
   total: number;
   bullet_points?: string | null;
+  selected_options?: Record<string, string> | null;
   quote_item_clusters?: QuoteItemCluster[];
 }
 
@@ -365,7 +367,7 @@ export async function deleteQuoteItemCluster(id: string): Promise<void> {
 export async function fetchQuoteItemClusters(quoteItemId: string): Promise<QuoteItemCluster[]> {
   const { data, error } = await supabase
     .from('quote_item_clusters')
-    .select('*')
+    .select('*, quote_cluster_lines(*)')
     .eq('quote_item_id', quoteItemId)
     .order('position');
   if (error) throw error;
@@ -473,66 +475,35 @@ export async function fetchProducts(): Promise<Product[]> {
   return (data as Product[]) || [];
 }
 
-export async function fetchProductComponents(productId: number): Promise<ProductComponent[]> {
-  try {
-    const { data, error } = await supabase
-      // Prefer RPC if available
-      .rpc('get_product_components', { product_id: productId as any });
-    if (error) {
-      console.warn('RPC get_product_components unavailable, falling back:', error.message);
-    } else if (data) {
-      // Normalize common shapes
-      return (data as any[]).map((row) => ({
-        component_id: Number(row.component_id ?? row.componentid ?? row.component),
-        quantity: Number(row.quantity ?? row.qty ?? 1),
-        unit_cost: row.unit_cost ?? row.price ?? null,
-        description: row.description ?? null,
-      }));
-    }
-  } catch (e) {
-    console.warn('RPC get_product_components error:', e);
+export async function fetchProductComponents(
+  productId: number,
+  selectedOptions: ProductOptionSelection = {}
+): Promise<ProductComponent[]> {
+  const resolved = await resolveProductConfiguration(productId, selectedOptions);
+
+  if (resolved.length > 0) {
+    return resolved.map((row) => ({
+      component_id: row.component_id,
+      quantity: row.quantity,
+      unit_cost: row.supplier_price ?? null,
+      description: row.component_description ?? null,
+    }));
   }
 
-  // Fallback 1: try billofmaterials (this exists in our app)
-  try {
-    const { data, error } = await supabase
-      .from('billofmaterials')
-      .select(`
-        component_id,
-        quantity_required,
-        supplier_component_id,
-        components(description),
-        supplierComponent:suppliercomponents(price)
-      `)
-      .eq('product_id', productId);
-    if (!error && data) {
-      return (data as any[]).map((row) => ({
-        component_id: Number(row.component_id),
-        quantity: Number(row.quantity_required ?? row.qty ?? 1),
-        unit_cost: row?.supplierComponent?.[0]?.price ?? row?.supplierComponent?.price ?? null,
-        description: row?.components?.description ?? null,
-      }));
-    }
-    if (error) {
-      console.warn('Fallback billofmaterials failed:', error.message);
-    }
-  } catch (e) {
-    console.warn('Fallback billofmaterials query failed:', e);
-  }
-
-  // Fallback 2: try a generic product_components table
   try {
     const { data, error } = await supabase
       .from('product_components')
       .select('component_id, quantity, unit_cost, description')
       .eq('product_id', productId);
+
     if (error) {
       console.warn('Fallback table product_components failed:', error.message);
       return [];
     }
-    return (data as ProductComponent[]) || [];
-  } catch (e) {
-    console.warn('Fallback table query failed:', e);
+
+    return Array.isArray(data) ? (data as ProductComponent[]) : [];
+  } catch (tableError) {
+    console.warn('Fallback table query failed:', tableError);
     return [];
   }
 }

@@ -8,7 +8,7 @@
 
 - `orders`: Header containing `order_id`, `customer_id`, `order_date`, `status_id`, `order_number`, timestamps, optional `delivery_date`. See `schema.txt:114` (orders + statuses).
 - `order_statuses`: Canonical order workflow names (e.g., New, In Progress, Completed, Cancelled).
-- `order_details`: Lines: `order_detail_id`, `order_id`, `product_id`, `quantity`, `unit_price`.
+- `order_details`: Lines: `order_detail_id`, `order_id`, `product_id`, `quantity`, `unit_price`, planned `selected_options` JSONB for configurable products (parity with `quote_items`).
 - `order_attachments`: Attachment metadata (DB record) with `file_url`, `file_name`, `uploaded_at`. Storage files live in the Supabase Storage bucket (see below).
 - `customers`: Linked via `customer_id`.
 
@@ -62,7 +62,7 @@
 
 **Order Detail & Purchasing Linkage**
 
-- Detail page `app/orders/[orderId]/page.tsx` loads header (`orders` with `order_statuses`, `customers`, and `quotes`) plus `order_details(product:products)`.
+- Detail page `app/orders/[orderId]/page.tsx` loads header (`orders` with `order_statuses`, `customers`, and `quotes`) plus `order_details(product:products)`. For configurable products, extend the line editor to surface option group/value selectors, persist `selected_options`, and call the shared resolver so FG reservations and purchasing respect the chosen configuration even when an order is created directly (no quote).
 - Component requirements pipeline:
   - RPC: `get_all_component_requirements` to compute global totals.
   - RPC: `get_detailed_component_status(p_order_id)` for per-order requirements with stock/on-order and global fields.
@@ -86,8 +86,14 @@
 - `lib/db/orders.ts` shape vs runtime:
   - Uses `id` (string) while UI and DB use `order_id` (number). The New Order page navigates with `router.push(\`/orders/${order.id}\`)`, which will be incorrect if Supabase returns `order_id`. Align types and navigation.
 - The New Order form is a scaffold; real customer/product selection and header creation are not implemented yet. Current flow prefers creating an order from a Quote (`quote_id`).
+- Configurable products: direct order entry does not yet capture option selections. Need to reuse the quote option UI, persist `selected_options` on `order_details`, and update BOM/reservation logic to honor the configuration without requiring a quote.
 - Section chips are heuristic and based on product text; consider explicit product → section metadata.
 - Attachments listing relies on `order_attachments`; a storage listing helper exists but is not used. Ensure DB rows are the source of truth to avoid drift.
+
+**Next Steps — Configurable Products Parity**
+- Add `selected_options` persistence to `order_details` (column/migration + API updates).
+- Reuse `resolveProductConfiguration` when adding or editing products on an order so BOM/FG reservations reflect option choices.
+- Display configuration summary chips in the order detail UI and include selections in PDFs/emails to match the quoting experience.
 
 **Cleanup & Reset**
 
@@ -119,4 +125,3 @@
 
 - New → In Progress → Completed or Cancelled.
 - Cancel instead of delete in production to preserve auditability. For test/dev, see `docs/orders-reset-guide.md` for a safe deletion path.
-

@@ -136,7 +136,6 @@ async function fetchOrderAttachments(orderId: number): Promise<OrderAttachment[]
 async function fetchFinishedGoodReservations(orderId: number): Promise<FinishedGoodReservation[]> {
   const response = await fetch(`/api/orders/${orderId}/fg-reservations`, {
     method: 'GET',
-    cache: 'no-store',
   });
 
   if (!response.ok) {
@@ -150,7 +149,6 @@ async function fetchFinishedGoodReservations(orderId: number): Promise<FinishedG
 async function reserveFinishedGoods(orderId: number): Promise<FinishedGoodReservation[]> {
   const response = await fetch(`/api/orders/${orderId}/reserve-fg`, {
     method: 'POST',
-    cache: 'no-store',
   });
 
   if (!response.ok) {
@@ -164,7 +162,6 @@ async function reserveFinishedGoods(orderId: number): Promise<FinishedGoodReserv
 async function releaseFinishedGoods(orderId: number): Promise<number | null> {
   const response = await fetch(`/api/orders/${orderId}/release-fg`, {
     method: 'POST',
-    cache: 'no-store',
   });
 
   if (!response.ok) {
@@ -178,7 +175,6 @@ async function releaseFinishedGoods(orderId: number): Promise<number | null> {
 async function consumeFinishedGoods(orderId: number): Promise<Array<{ product_id: number; consumed_quantity: number }>> {
   const response = await fetch(`/api/orders/${orderId}/consume-fg`, {
     method: 'POST',
-    cache: 'no-store',
   });
 
   if (!response.ok) {
@@ -1899,6 +1895,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   const {
     data: fgReservations = [],
     isLoading: fgReservationsLoading,
+    refetch: refetchFgReservations,
   } = useQuery({
     queryKey: ['fgReservations', orderId],
     queryFn: () => fetchFinishedGoodReservations(orderId),
@@ -2049,9 +2046,13 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     onMutate: async () => {
       await queryClient.cancelQueries({ queryKey: ['fgReservations', orderId] });
     },
-    onSuccess: (reservations) => {
+    onSuccess: async (reservations) => {
       queryClient.setQueryData(['fgReservations', orderId], reservations);
       toast.success('Finished goods reserved');
+      await Promise.all([
+        refetchFgReservations(),
+        refetchComponentRequirements(),
+      ]);
     },
     onError: (error: any) => {
       console.error('[reserve-fg] mutation error', error);
@@ -2072,8 +2073,8 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       toast.success('Finished goods released');
       // Proactively refetch to sync any server-side side effects
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] }),
-        queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] }),
+        refetchFgReservations(),
+        refetchComponentRequirements(),
         queryClient.invalidateQueries({ queryKey: ['order', orderId] }),
       ]);
       // Also refresh supplier group data if dialog is open
@@ -2087,9 +2088,13 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
 
   const consumeFgMutation = useMutation({
     mutationFn: () => consumeFinishedGoods(orderId),
-    onSuccess: () => {
+    onSuccess: async () => {
       queryClient.setQueryData(['fgReservations', orderId], [] as FinishedGoodReservation[]);
       toast.success('Finished goods consumed');
+      await Promise.all([
+        refetchFgReservations(),
+        refetchComponentRequirements(),
+      ]);
     },
     onError: (error: any) => {
       console.error('[consume-fg] mutation error', error);
