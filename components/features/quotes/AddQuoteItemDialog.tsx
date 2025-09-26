@@ -7,13 +7,27 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { fetchProducts, type Product } from '@/lib/db/quotes';
+import {
+  fetchProductOptionGroups,
+  type ProductOptionGroup,
+  type ProductOptionSelection,
+} from '@/lib/db/products';
 
 interface AddQuoteItemDialogProps {
   open: boolean;
   onClose: () => void;
   onCreateManual: (payload: { description: string; qty: number; unit_price: number }) => void;
-  onCreateProduct: (payload: { product_id: number; name: string; qty: number; explode: boolean; include_labour?: boolean; attach_image?: boolean }) => void;
+  onCreateProduct: (payload: {
+    product_id: number;
+    name: string;
+    qty: number;
+    explode: boolean;
+    include_labour?: boolean;
+    attach_image?: boolean;
+    selected_options?: ProductOptionSelection;
+  }) => void;
 }
 
 export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCreateProduct }: AddQuoteItemDialogProps) {
@@ -28,25 +42,79 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
   const [products, setProducts] = React.useState<Product[]>([]);
   const [productQuery, setProductQuery] = React.useState('');
   const [selectedProduct, setSelectedProduct] = React.useState<Product | null>(null);
+  const [optionGroups, setOptionGroups] = React.useState<ProductOptionGroup[]>([]);
+  const [selectedOptions, setSelectedOptions] = React.useState<ProductOptionSelection>({});
   // Quantity input removed — items import as 1 by default; user sets final line qty later
   const [explode, setExplode] = React.useState(true);
   const [includeLabor, setIncludeLabor] = React.useState(true);
   const [attachImage, setAttachImage] = React.useState(true);
-  const [loading, setLoading] = React.useState(false);
+  const [productsLoading, setProductsLoading] = React.useState(false);
+  const [optionsLoading, setOptionsLoading] = React.useState(false);
 
   React.useEffect(() => {
     if (open && tab === 'product') {
       (async () => {
-        setLoading(true);
+        setProductsLoading(true);
         try {
           const data = await fetchProducts();
           setProducts(data);
         } finally {
-          setLoading(false);
+          setProductsLoading(false);
         }
       })();
     }
   }, [open, tab]);
+
+  React.useEffect(() => {
+    if (!selectedProduct) {
+      setOptionGroups([]);
+      setSelectedOptions({});
+      setOptionsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setOptionsLoading(true);
+
+    (async () => {
+      const groups = await fetchProductOptionGroups(selectedProduct.product_id);
+      if (cancelled) return;
+      setOptionGroups(groups);
+      setSelectedOptions((prev) => {
+        const next: ProductOptionSelection = {};
+        for (const group of groups) {
+          const existing = prev[group.code];
+          const matching = group.values.find((value) => value.code === existing);
+          if (matching) {
+            next[group.code] = matching.code;
+            continue;
+          }
+
+          const defaultValue =
+            group.values.find((value) => value.is_default) ||
+            (group.is_required && group.values.length > 0 ? group.values[0] : undefined);
+          if (defaultValue?.code) {
+            next[group.code] = defaultValue.code;
+          }
+        }
+        return next;
+      });
+    })()
+      .catch((error) => {
+        console.warn('Failed to load product options:', error);
+        setOptionGroups([]);
+        setSelectedOptions({});
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setOptionsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProduct?.product_id]);
 
   const handleClose = () => {
     // reset
@@ -57,9 +125,12 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
     setProducts([]);
     setProductQuery('');
     setSelectedProduct(null);
+    setOptionGroups([]);
+    setSelectedOptions({});
     setExplode(true);
     setAttachImage(true);
     setIncludeLabor(true);
+    setOptionsLoading(false);
     onClose();
   };
 
@@ -69,8 +140,19 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
       onCreateManual({ description: description.trim(), qty, unit_price: unitPrice });
     } else if (tab === 'product') {
       if (!selectedProduct) return;
+      const normalizedOptions = Object.fromEntries(
+        Object.entries(selectedOptions).filter(([, value]) => typeof value === 'string' && value.length > 0)
+      );
       // Always import as quantity 1; user can set the final quantity on the line item afterwards
-      onCreateProduct({ product_id: selectedProduct.product_id, name: selectedProduct.name, qty: 1, explode, include_labour: includeLabor as boolean, attach_image: attachImage as boolean });
+      onCreateProduct({
+        product_id: selectedProduct.product_id,
+        name: selectedProduct.name,
+        qty: 1,
+        explode,
+        include_labour: includeLabor as boolean,
+        attach_image: attachImage as boolean,
+        selected_options: Object.keys(normalizedOptions).length ? normalizedOptions : undefined,
+      });
     }
     handleClose();
   };
@@ -115,7 +197,7 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
               <Label htmlFor="p-search">Search Products</Label>
               <Input id="p-search" value={productQuery} onChange={(e) => setProductQuery(e.target.value)} placeholder="Search by code or name" />
             </div>
-            {loading ? (
+            {productsLoading ? (
               <div className="text-center py-4">Loading products…</div>
             ) : (
               <div className="max-h-56 overflow-y-auto border border-input rounded bg-card">
@@ -135,6 +217,53 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
               <div className="p-3 bg-muted/40 border border-input rounded">
                 <div className="font-medium">Selected: {selectedProduct.name}</div>
                 {selectedProduct.internal_code && <div className="text-sm text-foreground">Code: {selectedProduct.internal_code}</div>}
+                {optionsLoading ? (
+                  <div className="text-xs text-muted-foreground mt-2">Loading configuration…</div>
+                ) : optionGroups.length > 0 ? (
+                  <div className="space-y-4 mt-3">
+                    <div className="text-xs uppercase tracking-wide text-muted-foreground">Configuration</div>
+                    {optionGroups.map((group) => {
+                      const value = selectedOptions[group.code] ?? '';
+                      const handleChange = (next: string) => {
+                        setSelectedOptions((prev) => {
+                          const copy = { ...prev };
+                          if (!next) {
+                            delete copy[group.code];
+                          } else {
+                            copy[group.code] = next;
+                          }
+                          return copy;
+                        });
+                      };
+
+                      return (
+                        <div key={group.option_group_id} className="space-y-1">
+                          <Label htmlFor={`option-${group.code}`} className="text-sm">
+                            {group.label}
+                            {group.is_required ? <span className="text-destructive"> *</span> : null}
+                          </Label>
+                          <Select value={value} onValueChange={handleChange}>
+                            <SelectTrigger id={`option-${group.code}`} className="w-full">
+                              <SelectValue placeholder="Choose option" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {!group.is_required && (
+                                <SelectItem value="">No selection</SelectItem>
+                              )}
+                              {group.values.map((option) => (
+                                <SelectItem key={option.option_value_id} value={option.code}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-xs text-muted-foreground mt-2">No configurable options for this product.</div>
+                )}
               </div>
             )}
             <div className="flex flex-col gap-3">

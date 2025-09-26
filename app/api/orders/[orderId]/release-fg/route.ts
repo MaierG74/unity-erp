@@ -34,10 +34,7 @@ export async function POST(_request: NextRequest, { params }: RouteParams) {
     });
 
     if (!error) {
-      return NextResponse.json(
-        { success: true, released: data ?? null },
-        { status: 200, headers: { 'Cache-Control': 'no-store' } }
-      );
+      return NextResponse.json({ success: true, released: data ?? null });
     }
 
     // Fallback: directly delete rows (in case RPC is missing or signature drifted)
@@ -55,10 +52,7 @@ export async function POST(_request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    return NextResponse.json(
-      { success: true, released: count ?? 0 },
-      { status: 200, headers: { 'Cache-Control': 'no-store' } }
-    );
+    return NextResponse.json({ success: true, released: count ?? 0 });
   } catch (error) {
     console.error('[release-fg] Unexpected error', error);
     return NextResponse.json(

@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { useDropzone } from 'react-dropzone';
-import { 
+import {
   QuoteItem,
   QuoteItemCluster,
   QuoteClusterLine,
@@ -37,6 +37,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import InlineAttachmentsCell from './InlineAttachmentsCell';
 import AddQuoteItemDialog from './AddQuoteItemDialog';
 import { createQuoteAttachmentFromUrl, fetchPrimaryProductImage } from '@/lib/db/quotes';
+import type { ProductOptionSelection } from '@/lib/db/products';
 import CutlistTool from '@/components/features/cutlist/CutlistTool';
 import { exportCutlistToQuote } from '@/components/features/cutlist/export';
 
@@ -136,12 +137,16 @@ function QuoteItemRow({
   onUpdate: (id: string, field: keyof Pick<QuoteItem, 'description' | 'qty' | 'unit_price' | 'bullet_points'>, value: string | number) => void;
   onDelete: (id: string) => void;
   onAddClusterLine: (clusterId: string, component: {
-    type: 'manual' | 'database';
+    type: 'manual' | 'database' | 'product' | 'collection';
     description: string;
     qty: number;
     unit_cost: number;
     component_id?: number;
     supplier_component_id?: number;
+    product_id?: number;
+    explode?: boolean;
+    include_labour?: boolean;
+    collection_id?: number;
   }) => void;
   onUpdateClusterLine: (id: string, updates: Partial<QuoteClusterLine>) => void;
   onDeleteClusterLine: (id: string) => void;
@@ -266,9 +271,35 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
     onItemsChange([...items, newItem]);
   };
 
-  const handleCreateProductItem = async ({ product_id, name, qty, explode, include_labour, attach_image }: { product_id: number; name: string; qty: number; explode: boolean; include_labour?: boolean; attach_image?: boolean }) => {
+  const handleCreateProductItem = async ({
+    product_id,
+    name,
+    qty,
+    explode,
+    include_labour,
+    attach_image,
+    selected_options,
+  }: {
+    product_id: number;
+    name: string;
+    qty: number;
+    explode: boolean;
+    include_labour?: boolean;
+    attach_image?: boolean;
+    selected_options?: ProductOptionSelection;
+  }) => {
     try {
-      const newItem = await createQuoteItem({ total: 0, quote_id: quoteId, description: name, qty, unit_price: 0 });
+      const optionSelections = selected_options ?? {};
+      const optionPayload = Object.keys(optionSelections).length > 0 ? optionSelections : null;
+
+      const newItem = await createQuoteItem({
+        total: 0,
+        quote_id: quoteId,
+        description: name,
+        qty,
+        unit_price: 0,
+        selected_options: optionPayload,
+      });
 
       let newItemWithCluster = { ...newItem } as QuoteItem;
       let clusters = await fetchQuoteItemClusters(newItem.id);
@@ -294,7 +325,7 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
               description: map.get(Number((it as any).component_id)) || undefined,
             }));
           }
-          return await fetchProductComponents(product_id);
+          return await fetchProductComponents(product_id, optionSelections);
         })();
         const laborPromise = include_labour === false ? Promise.resolve([]) : fetchProductLabor(product_id);
         const [bom, labor] = await Promise.all([bomPromise, laborPromise]);
@@ -357,6 +388,7 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
                 quote_cluster_lines: createdLines,
               },
             ],
+            selected_options: optionSelections,
           } as any;
         }
       }
@@ -380,7 +412,13 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
         }
       }
 
-      onItemsChange([...items, newItemWithCluster]);
+      onItemsChange([
+        ...items,
+        {
+          ...newItemWithCluster,
+          selected_options: optionSelections,
+        } as QuoteItem,
+      ]);
     } catch (e) {
       console.error('Failed to add product item:', e);
       toast({ variant: 'destructive', title: 'Failed to add product', description: (e as Error).message });
@@ -390,13 +428,22 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
   // Helper function to ensure an item has a cluster
   const ensureItemHasCluster = async (itemId: string) => {
     try {
-      await createQuoteItemCluster({
+      const newCluster = await createQuoteItemCluster({
         quote_item_id: itemId,
         name: 'Costing Cluster',
         position: 0,
       });
-      // Trigger a refresh of the quote data
-      window.location.reload();
+      // Optimistically update local state to avoid full page reload
+      const updatedItems = items.map(i => {
+        if (i.id !== itemId) return i;
+        const existingClusters = i.quote_item_clusters || [];
+        return {
+          ...i,
+          quote_item_clusters: [...existingClusters, newCluster],
+        } as QuoteItem;
+      });
+      onItemsChange(updatedItems);
+      toast({ title: 'Cluster created', description: 'Added a Costing Cluster to this item.' });
     } catch (error) {
       console.error('Error creating cluster:', error);
     }
@@ -413,7 +460,7 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
   };
 
   const handleAddClusterLine = async (clusterId: string, component: {
-    type: 'manual' | 'database' | 'product';
+    type: 'manual' | 'database' | 'product' | 'collection';
     description: string;
     qty: number;
     unit_cost: number;
@@ -422,6 +469,7 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
     product_id?: number;
     explode?: boolean;
     include_labour?: boolean;
+    collection_id?: number;
   }) => {
     try {
       if (component.type === 'product') {
@@ -489,6 +537,40 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
         } else {
           console.warn('Product added with explode=false is not implemented at cluster level. Consider adding as top-level item.');
         }
+      } else if (component.type === 'collection') {
+        if (!component.collection_id) return;
+        // Fetch the collection items via API and insert each as a component line
+        const res = await fetch(`/api/collections/${component.collection_id}`, { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to load costing cluster');
+        const json = await res.json();
+        const itemsInCollection = (json.items || []) as Array<{ component_id: number; quantity_required: number; supplier_component_id?: number | null; price?: number | null; components?: { description?: string } }>; 
+        const createdLines: QuoteClusterLine[] = [];
+        for (const row of itemsInCollection) {
+          const line = await createQuoteClusterLine({
+            cluster_id: clusterId,
+            line_type: 'component',
+            description: row.components?.description ?? '',
+            qty: (row.quantity_required || 1) * (component.qty || 1),
+            unit_cost: row.price ?? null,
+            component_id: row.component_id,
+            include_in_markup: true,
+            sort_order: 0,
+          });
+          createdLines.push(line);
+        }
+
+        const updatedItems = items.map(item => {
+          if (!item.quote_item_clusters) return item;
+          const updatedClusters = item.quote_item_clusters.map(c => {
+            if (c.id !== clusterId) return c;
+            return {
+              ...c,
+              quote_cluster_lines: [...(c.quote_cluster_lines || []), ...createdLines],
+            };
+          });
+          return { ...item, quote_item_clusters: updatedClusters };
+        });
+        onItemsChange(updatedItems);
       } else {
         const newLine = await createQuoteClusterLine({
           cluster_id: clusterId,
@@ -627,8 +709,18 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
               quoteItemId={cutlistOpen.itemId || undefined}
               onExportSuccess={() => {
                 toast({ title: 'Exported to Costing Cluster' });
-                // Refresh the page to reflect new cluster lines
-                window.location.reload();
+                const itemId = cutlistOpen.itemId;
+                if (itemId) {
+                  // Refresh just this item's clusters and merge into local state
+                  fetchQuoteItemClusters(itemId).then((clusters) => {
+                    const updatedItems = items.map(i => i.id === itemId ? { ...i, quote_item_clusters: clusters } : i);
+                    onItemsChange(updatedItems);
+                  }).finally(() => {
+                    setCutlistOpen({ open: false, itemId: null });
+                  });
+                } else {
+                  setCutlistOpen({ open: false, itemId: null });
+                }
               }}
             />
           </div>

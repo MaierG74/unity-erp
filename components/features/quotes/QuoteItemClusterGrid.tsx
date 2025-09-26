@@ -13,7 +13,7 @@ interface QuoteItemClusterGridProps {
   cluster: QuoteItemCluster;
   onUpdateLine: (id: string, updates: Partial<QuoteClusterLine>) => void;
   onAddLine: (clusterId: string, component: {
-    type: 'manual' | 'database' | 'product';
+    type: 'manual' | 'database' | 'product' | 'collection';
     description: string;
     qty: number;
     unit_cost: number;
@@ -22,6 +22,7 @@ interface QuoteItemClusterGridProps {
     product_id?: number;
     explode?: boolean;
     include_labour?: boolean;
+    collection_id?: number;
   }) => void;
   onDeleteLine: (id: string) => void;
   onUpdateCluster: (clusterId: string, updates: Partial<QuoteItemCluster>) => void;

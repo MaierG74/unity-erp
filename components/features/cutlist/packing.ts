@@ -41,6 +41,7 @@ export interface Placement {
 export interface SheetLayout {
   sheet_id: string;
   placements: Placement[];
+  used_area_mm2?: number;
 }
 
 export interface LayoutStats {
@@ -53,9 +54,18 @@ export interface LayoutStats {
   edgebanding_32mm_mm?: number;
 }
 
+export type UnplacedReason = 'too_large_for_sheet' | 'insufficient_sheet_capacity';
+
+export interface UnplacedPart {
+  part: PartSpec;
+  count: number;
+  reason: UnplacedReason;
+}
+
 export interface LayoutResult {
   sheets: SheetLayout[];
   stats: LayoutStats;
+  unplaced?: UnplacedPart[];
 }
 
 export interface PackOptions {
@@ -135,7 +145,13 @@ export function packPartsIntoSheets(parts: PartSpec[], stock: StockSheetSpec[], 
       }
     }
 
-    result.sheets.push({ sheet_id: `${sheet.id}:${sheetIdx+1}`, placements });
+    const sheetUsedArea = placements.reduce((sum, pl) => sum + pl.w * pl.h, 0);
+
+    if (placements.length === 0 || sheetUsedArea === 0) {
+      break;
+    }
+
+    result.sheets.push({ sheet_id: `${sheet.id}:${sheetIdx+1}`, placements, used_area_mm2: sheetUsedArea });
     sheetIdx++; remainingSheets--;
     if (opts.singleSheetOnly) break;
   }
@@ -144,7 +160,9 @@ export function packPartsIntoSheets(parts: PartSpec[], stock: StockSheetSpec[], 
   const sheetArea = (stock[0]?.length_mm || 0) * (stock[0]?.width_mm || 0);
   let used = 0; let cuts = 0; let cutLen = 0;
   for (const s of result.sheets) {
-    used += s.placements.reduce((sum, pl) => sum + pl.w * pl.h, 0);
+    const sheetUsed = typeof s.used_area_mm2 === 'number' ? s.used_area_mm2 : s.placements.reduce((sum, pl) => sum + pl.w * pl.h, 0);
+    if (typeof s.used_area_mm2 !== 'number') s.used_area_mm2 = sheetUsed;
+    used += sheetUsed;
   }
   const totalSheetArea = sheetArea * result.sheets.length;
   result.stats.used_area_mm2 = used;
@@ -166,6 +184,9 @@ export function packPartsIntoSheets(parts: PartSpec[], stock: StockSheetSpec[], 
   cuts = vCount + hCount;
   result.stats.cuts = cuts;
   result.stats.cut_length_mm = cutLen;
+  if (expanded.length > 0) {
+    result.unplaced = summarizeUnplacedParts(expanded, stock[0], allowRotation, remainingSheets <= 0 || opts.singleSheetOnly === true);
+  }
   return result;
 }
 
@@ -314,6 +335,49 @@ function mergeAndMeasureVertical(segments: VerticalSegment[]): { mergedLength: n
     if (cur) { length += cur.y2 - cur.y1; count++; }
   }
   return { mergedLength: length, count };
+}
+
+function summarizeUnplacedParts(parts: Array<PartSpec & { uid: string }>, sheet: StockSheetSpec | undefined, allowRotation: boolean, noAdditionalSheetsAvailable: boolean): UnplacedPart[] {
+  if (parts.length === 0) return [];
+  const summary = new Map<string, UnplacedPart>();
+  for (const item of parts) {
+    const { uid, ...rest } = item as PartSpec & { uid: string };
+    const fits = sheet ? canFitOnEmptySheet(rest, sheet, allowRotation) : false;
+    let reason: UnplacedReason;
+    if (!sheet) {
+      reason = 'insufficient_sheet_capacity';
+    } else if (fits) {
+      reason = noAdditionalSheetsAvailable ? 'insufficient_sheet_capacity' : 'insufficient_sheet_capacity';
+    } else {
+      reason = 'too_large_for_sheet';
+    }
+    const existing = summary.get(rest.id);
+    if (existing) {
+      existing.count += 1;
+      if (reason === 'too_large_for_sheet') existing.reason = 'too_large_for_sheet';
+    } else {
+      summary.set(rest.id, { part: { ...rest, qty: 0 }, count: 1, reason });
+    }
+  }
+  for (const entry of summary.values()) {
+    entry.part = { ...entry.part, qty: entry.count };
+  }
+  return Array.from(summary.values());
+}
+
+function canFitOnEmptySheet(part: PartSpec, sheet: StockSheetSpec, allowRotation: boolean): boolean {
+  const partGrain: GrainOrientation = (part.grain ?? (part.require_grain ? 'length' : 'any')) as GrainOrientation;
+  if (partGrain === 'any' || partGrain === 'length') {
+    if (part.width_mm <= sheet.width_mm && part.length_mm <= sheet.length_mm) {
+      return true;
+    }
+  }
+  if (allowRotation && (partGrain === 'any' || partGrain === 'width')) {
+    if (part.length_mm <= sheet.width_mm && part.width_mm <= sheet.length_mm) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function mergeAndMeasureHorizontal(segments: HorizontalSegment[]): { mergedLength: number; count: number } {

@@ -50,10 +50,7 @@ export async function POST(_request: NextRequest, { params }: RouteParams) {
       ),
     }));
 
-    return NextResponse.json(
-      { success: true, consumed },
-      { status: 200, headers: { 'Cache-Control': 'no-store' } }
-    );
+    return NextResponse.json({ success: true, consumed });
   } catch (error) {
     console.error('[consume-fg] Unexpected error', error);
     return NextResponse.json(

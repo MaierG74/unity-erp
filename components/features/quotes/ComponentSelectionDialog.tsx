@@ -13,7 +13,7 @@ interface ComponentSelectionDialogProps {
   open: boolean;
   onClose: () => void;
   onAddComponent: (component: {
-    type: 'manual' | 'database' | 'product';
+    type: 'manual' | 'database' | 'product' | 'collection';
     description: string;
     qty: number;
     unit_cost: number;
@@ -22,6 +22,7 @@ interface ComponentSelectionDialogProps {
     product_id?: number;
     explode?: boolean;
     include_labour?: boolean;
+    collection_id?: number;
   }) => void;
 }
 
@@ -46,6 +47,9 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
   const [unitCost, setUnitCost] = useState(0);
   // Product selection fields
   const [products, setProducts] = useState<Product[]>([]);
+  const [collections, setCollections] = useState<Array<{ collection_id: number; name: string; code?: string }>>([]);
+  const [selectedCollection, setSelectedCollection] = useState<number | null>(null);
+  const [collectionScale, setCollectionScale] = useState<number>(1);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [productQty, setProductQty] = useState(1);
   const [explodeProduct, setExplodeProduct] = useState(true);
@@ -59,6 +63,9 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
     }
     if (open && entryType === 'product') {
       loadProducts();
+    }
+    if (open && entryType === 'collection') {
+      loadCollections();
     }
   }, [open, entryType]);
 
@@ -81,6 +88,19 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
       setProducts(productData);
     } catch (error) {
       console.error('Error loading products:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadCollections = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/collections', { cache: 'no-store' });
+      const json = await res.json();
+      setCollections(json.collections || []);
+    } catch (error) {
+      console.error('Error loading collections:', error);
     } finally {
       setLoading(false);
     }
@@ -165,6 +185,16 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
         description: selectedProduct.name,
         unit_cost: 0,
       });
+    } else if (entryType === 'collection') {
+      if (!selectedCollection) return;
+      onAddComponent({
+        // @ts-ignore - extended
+        type: 'collection',
+        collection_id: selectedCollection,
+        qty: 1,
+        unit_cost: 0,
+        description: 'Costing Cluster',
+      });
     }
 
     // Reset form
@@ -200,7 +230,14 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-2xl sm:rounded-xl">
         <DialogHeader>
-          <DialogTitle>Add Component</DialogTitle>
+          <div className="flex items-center justify-between">
+            <DialogTitle>Add Component</DialogTitle>
+            {entryType === 'database' && (
+              <Button type="button" variant="outline" size="sm" className="h-8 mr-10" onClick={() => setShowSupplierBrowse(true)}>
+                <Building2 className="h-4 w-4 mr-2" /> Browse by supplier
+              </Button>
+            )}
+          </div>
         </DialogHeader>
         
         <div className="space-y-3 max-h-[70vh] overflow-y-auto overflow-x-visible px-1">
@@ -215,6 +252,7 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
                 <SelectItem value="manual">Manual Entry</SelectItem>
                 <SelectItem value="database">Database Component</SelectItem>
                 <SelectItem value="product">Product</SelectItem>
+                <SelectItem value="collection">Costing Cluster</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -247,18 +285,17 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
                     placeholder="Search by internal code or description..."
                     className="placeholder:text-muted-foreground text-foreground"
                   />
-                  <div className="mt-2">
-                    <Button type="button" variant="outline" size="sm" className="h-8" onClick={() => setShowSupplierBrowse(true)}>
-                      <Building2 className="h-4 w-4 mr-2" /> Browse by supplier
-                    </Button>
-                  </div>
-                  {loading ? (
+                  {searchQuery.trim().length === 0 ? (
+                    <div className="text-sm text-muted-foreground mt-2">
+                      Start typing to search components, or use “Browse by supplier”.
+                    </div>
+                  ) : loading ? (
                     <div className="text-center py-4">Loading components...</div>
                   ) : (
                     <div className="max-h-48 overflow-y-auto border border-input rounded bg-card mt-2">
                       {filteredComponents.length === 0 ? (
                         <div className="text-center py-4 text-muted-foreground">
-                          {searchQuery ? 'No components found matching your search.' : 'No components available.'}
+                          No components found matching your search.
                         </div>
                       ) : (
                         filteredComponents.map((component) => (
@@ -345,6 +382,32 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
                 </div>
               )}
             </div>
+          ) : entryType === 'collection' ? (
+            <div className="space-y-3">
+              {loading ? (
+                <div className="text-center py-4">Loading clusters...</div>
+              ) : (
+                <div className="max-h-48 overflow-y-auto border border-input rounded bg-card">
+                  {collections.map((c) => (
+                    <div
+                      key={c.collection_id}
+                      className={`p-3 border-b border-input cursor-pointer hover:bg-muted/40 ${selectedCollection === c.collection_id ? 'bg-accent text-accent-foreground' : ''}`}
+                      onClick={() => setSelectedCollection(c.collection_id)}
+                    >
+                      <div className="font-medium">{c.name}</div>
+                      {c.code && <div className="text-sm">Code: {c.code}</div>}
+                    </div>
+                  ))}
+                  {collections.length === 0 && (
+                    <div className="text-center py-4 text-muted-foreground">No costing clusters available</div>
+                  )}
+                </div>
+              )}
+              <div>
+                <Label htmlFor="cc-scale">Scale</Label>
+                <Input id="cc-scale" type="number" value={collectionScale} onChange={(e) => setCollectionScale(Number(e.target.value || 1))} onFocus={(e) => e.target.select()} />
+              </div>
+            </div>
           ) : (
             /* Product Selection */
             <div className="space-y-3">
@@ -394,7 +457,7 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
             </div>
           )}
 
-          {/* Quantity and Unit Cost (common for both types) */}
+          {/* Quantity and Unit Cost (common for manual/database/product) */}
           <div className="grid grid-cols-2 gap-3 items-end">
             <div>
               <Label htmlFor="qty">Quantity</Label>
@@ -402,14 +465,14 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
                 id="qty"
                 type="number"
                 min="1"
-                value={entryType === 'product' ? productQty : qty}
+                value={entryType === 'product' ? productQty : entryType === 'collection' ? 1 : qty}
                 onChange={(e) => {
                   const value = e.target.value;
                   if (value === '') {
-                    entryType === 'product' ? setProductQty(0) : setQty(0);
+                    if (entryType === 'product') setProductQty(0); else if (entryType !== 'collection') setQty(0);
                   } else {
                     const n = Number(value) || 1;
-                    entryType === 'product' ? setProductQty(n) : setQty(n);
+                    if (entryType === 'product') setProductQty(n); else if (entryType !== 'collection') setQty(n);
                   }
                 }}
                 onFocus={(e) => e.target.select()}
@@ -431,25 +494,25 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
                 type="number"
                 min="0"
                 step="0.01"
-                value={unitCost}
+                value={entryType === 'collection' ? 0 : unitCost}
                 onChange={(e) => {
                   const value = e.target.value;
                   if (value === '') {
-                    setUnitCost(0);
+                    if (entryType !== 'collection') setUnitCost(0);
                   } else {
-                    setUnitCost(Number(value) || 0);
+                    if (entryType !== 'collection') setUnitCost(Number(value) || 0);
                   }
                 }}
                 onFocus={(e) => e.target.select()}
-                disabled={entryType === 'database' && selectedSupplierComponent !== null && !overrideUnitCost}
-                className={`placeholder:text-muted-foreground text-foreground ${entryType === 'database' && selectedSupplierComponent && !overrideUnitCost ? 'bg-muted cursor-not-allowed' : ''}`}
+                disabled={entryType === 'collection' || (entryType === 'database' && selectedSupplierComponent !== null && !overrideUnitCost)}
+                className={`placeholder:text-muted-foreground text-foreground ${entryType === 'collection' ? 'bg-muted cursor-not-allowed' : ''} ${entryType === 'database' && selectedSupplierComponent && !overrideUnitCost ? 'bg-muted cursor-not-allowed' : ''}`}
                 />
             </div>
           </div>
 
           {/* Total Display */}
           <div className="text-right">
-            <span className="font-medium text-foreground">Total: R{((entryType === 'product' ? productQty : qty) * unitCost).toFixed(2)}</span>
+            <span className="font-medium text-foreground">Total: R{((entryType === 'product' ? productQty : qty) * (entryType === 'collection' ? 0 : unitCost)).toFixed(2)}</span>
           </div>
 
           {/* Product explode option */}
@@ -478,7 +541,8 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
             disabled={
               (entryType === 'manual' && !description.trim()) ||
               (entryType === 'database' && (!selectedComponent || !selectedSupplierComponent)) ||
-              (entryType === 'product' && !selectedProduct)
+              (entryType === 'product' && !selectedProduct) ||
+              (entryType === 'collection' && !selectedCollection)
             }
           >
             Add Component

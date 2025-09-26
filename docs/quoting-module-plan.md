@@ -9,6 +9,11 @@
 - Quote detail header now includes an outline “Back to Quotes” button that prefers history back when coming from `/quotes`, else navigates to `/quotes`.
 - Add Component dialog aligned with STYLE_GUIDE modal pattern: header/title, compact body spacing, scrollable content area, and footer actions with `h-9` buttons. Borders standardized to `border-input` for lists and selections.
 
+### 2025-09-22 – UX polish
+- Creating a Costing Cluster with the “+ Cluster” button no longer reloads the page. The cluster is created and added to the item state optimistically, keeping the user on the Line Items tab.
+- Cutlist “Export to Quote” now updates the affected item’s cluster lines in place and closes the dialog, without a full page reload. The active tab remains on Line Items.
+- Add Component dialog: component list stays hidden until the user types in the search field, preventing the dialog from resizing on open. “Browse by supplier” moved to the top-right header.
+
 ### 2025-09-07 – Phase 2 Progress (Products as Items)
 - New Add Item dialog: `components/features/quotes/AddQuoteItemDialog.tsx` with tabs `Manual | Product`.
 - Product tab supports search/select, quantity, and an “Explode BOM into Costing Cluster” toggle (on by default).
@@ -72,6 +77,7 @@ Action Plan
 1. Data helpers
    - Add `fetchProducts()` (list with `product_id, name, internal_code`). [Implemented]
    - Add `fetchProductComponents(productId)` using RPC `get_product_components` or join tables. [Implemented]
+   - Add `fetchProductOptionGroups(productId)` to surface option groups/values in UI; capture selections alongside BOM explosion. [Implemented]
 2. Dialog extension (costing)
    - Extend `ComponentSelectionDialog`:
      - Add `product` to `entryType` union.
@@ -80,12 +86,19 @@ Action Plan
    - In `QuoteItemsTable.handleAddClusterLine`, detect `type==='product'` and: fetch product components, then create `quote_cluster_lines` for each component. Optimistically update UI. (Batching planned.) [Implemented]
 3. New `AddQuoteItemDialog` (top‑level)
    - Trigger from “Add Item”. Tabs: Manual | Product. [Implemented]
-   - Manual behaves like today (but in dialog). Product creates `quote_items` and optional default cluster with BOM exploded. [Implemented]
+   - Manual behaves like today (but in dialog). Product creates `quote_items`, surfaces option selectors (when available), and optionally explodes BOM with selected configurations applied. [Implemented]
+   - Product Options tab (Product page) now manages option groups/values so quoting flows can be configured without SQL.
 4. Pricing + totals
    - For product lines, set `unit_price` from product or computed from cluster total via “Update Price” action already present. [Planned]
    - Highlight missing unit costs on exploded lines to aid costing. [Implemented]
 5. Docs & tests
    - Document UX and payload shapes; add examples and edge cases (no BOM, missing prices).
+   - Add resolver/unit tests covering option selections and base-only fallbacks (pending option override data).
+
+Next up
+- Persist `selected_options` when converting quotes to orders and expose them in order detail editors.
+- Display configuration chips in quote line summary and include in PDF exports.
+- Mirror option-aware BOM handling in direct order entry so quotes and orders stay in sync (see `docs/orders-master.md`).
 
 Open Questions
 - Source of product default price? Use `products.unit_price` if available; otherwise compute from BOM or leave 0 and prompt to update.
@@ -105,6 +118,7 @@ Provide a flexible, auditable, and user-friendly quoting workflow that supports:
 ### Core tables
 - `quotes` – header record (id, customer_id, status, total_price, currency, created_by, approved_by, created_at).
 - `quote_items` – one row per line item. Links to `inventory_items` (nullable) _or_ stores free-text description for external items / subcontractor costs (fields: description, vendor_id, unit_cost, markup_pct, unit_price, quantity, line_total, attachments).
+  - Fields now include `selected_options jsonb` to store product configuration choices captured in the Add Item dialog.
 - `quote_attachments` – files attached at either quote level or line-item level (`scope ENUM('quote','item')`, `quote_item_id` nullable).
 - `quote_notes` – RICH TEXT notes/observations keyed to quote_id and optionally quote_item_id.
 - `quote_versions` – snapshot of quote JSON at commit points for diff / rollback.

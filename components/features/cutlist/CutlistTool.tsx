@@ -7,6 +7,9 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { packPartsIntoSheets, type PartSpec, type StockSheetSpec, type LayoutResult } from './packing';
 import { Trash2 } from 'lucide-react';
@@ -34,6 +37,9 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
   const [activeTab, setActiveTab] = React.useState<'inputs' | 'stock' | 'results'>('inputs');
   const [result, setResult] = React.useState<LayoutResult | null>(null);
   const [backerResult, setBackerResult] = React.useState<LayoutResult | null>(null);
+  const [sheetOverrides, setSheetOverrides] = React.useState<Record<string, { mode: 'auto' | 'full' | 'manual'; manualPct: number }>>({});
+  const [globalFullBoard, setGlobalFullBoard] = React.useState(false);
+  const [zoomSheetId, setZoomSheetId] = React.useState<string | null>(null);
 
   // Costing state
   const [primarySheetDescription, setPrimarySheetDescription] = React.useState<string>('MELAMINE SHEET');
@@ -80,6 +86,8 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
     const normalized: StockSheetSpec[] = [{ ...stock[0], kerf_mm: Math.max(0, kerf) }];
     const res = packPartsIntoSheets(parts, normalized, { allowRotation, singleSheetOnly });
     setResult(res);
+    setSheetOverrides({});
+    setGlobalFullBoard(false);
     // Optional backer calculation (laminate=true parts, grain-any)
     if (parts.some(p => p.laminate)) {
       const backerParts: PartSpec[] = parts
@@ -176,6 +184,28 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
   const primarySheetsFractional = sheetArea > 0 ? usedArea / sheetArea : 0;
   const backerUsedArea = backerResult?.stats.used_area_mm2 || 0;
   const backerSheetsFractional = sheetArea > 0 ? backerUsedArea / sheetArea : 0;
+  const computeSheetCharge = React.useCallback((layout: LayoutResult | null): number => {
+    if (!layout) return 0;
+    const area = sheetArea > 0 ? sheetArea : 0;
+    if (area <= 0) return 0;
+    return layout.sheets.reduce((sum, s) => {
+      const used = s.used_area_mm2 ?? 0;
+      const autoPct = Math.min(100, Math.max(0, (used / area) * 100));
+      const override = sheetOverrides[s.sheet_id];
+      let pct = autoPct;
+      if (globalFullBoard) {
+        pct = 100;
+      } else if (override) {
+        if (override.mode === 'full') pct = 100;
+        if (override.mode === 'manual') pct = Math.min(100, Math.max(0, override.manualPct));
+      }
+      return sum + pct / 100;
+    }, 0);
+  }, [globalFullBoard, sheetArea, sheetOverrides]);
+
+  const primaryChargeSheets = computeSheetCharge(result);
+  const backerChargeSheets = computeSheetCharge(backerResult);
+
   const [activePage, setActivePage] = React.useState(0); // 0-based, 3 sheets per page
   React.useEffect(() => { setActivePage(0); }, [result?.sheets.length]);
 
@@ -416,12 +446,37 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
             <div className="space-y-4">
               <div className={`grid grid-cols-2 ${backerResult ? 'md:grid-cols-6' : 'md:grid-cols-5'} gap-3`}>
                 <Stat label="Sheets used" value={`${primarySheetsFractional.toFixed(3)}`} />
+                <Stat label="Billable sheets" value={`${primaryChargeSheets.toFixed(3)}`} />
                 <Stat label="Board used %" value={`${usedPct.toFixed(1)}%`} />
                 <Stat label="Edge 16mm" value={`${(bandLen16 / 1000).toFixed(2)}m`} />
                 <Stat label="Edge 32mm" value={`${(bandLen32 / 1000).toFixed(2)}m`} />
                 <Stat label="Lamination" value={parts.some(p => p.laminate) ? 'On' : 'Off'} />
                 {backerResult && <Stat label="Backer sheets" value={`${backerSheetsFractional.toFixed(3)}`} />}
+                {backerResult && <Stat label="Billable backer" value={`${backerChargeSheets.toFixed(3)}`} />}
               </div>
+              <div className="flex items-center gap-3 bg-muted/40 border rounded px-3 py-2">
+                <Switch id="full-board-switch" checked={globalFullBoard} onCheckedChange={(v) => setGlobalFullBoard(Boolean(v))} />
+                <Label htmlFor="full-board-switch" className="text-sm">Charge full sheet for every used board</Label>
+              </div>
+              {result.unplaced && result.unplaced.length > 0 && (
+                <Alert variant="warning">
+                  <AlertTitle>Unplaced parts</AlertTitle>
+                  <AlertDescription>
+                    <div className="text-sm leading-relaxed space-y-1">
+                      {result.unplaced.map((item, idx) => (
+                        <div key={idx}>
+                          <span className="font-medium">{item.part.id}</span>
+                          {` × ${item.count} — `}
+                          {item.reason === 'too_large_for_sheet'
+                            ? 'Part exceeds stock sheet dimensions (check grain/rotation and sizing).'
+                            : 'No sheet capacity remaining. Increase available sheets or adjust layout.'}
+                          {` (${item.part.length_mm} × ${item.part.width_mm} mm)`}
+                        </div>
+                      ))}
+                    </div>
+                  </AlertDescription>
+                </Alert>
+              )}
               <div className="space-y-3">
                 <div className="flex flex-wrap gap-2 items-center">
                   <div className="text-sm text-muted-foreground mr-1">Pages:</div>
@@ -435,12 +490,60 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {result.sheets.slice(activePage * 3, activePage * 3 + 3).map((sheetLayout, idx) => (
-                    <div key={idx} className="border rounded p-2">
-                      <div className="text-xs text-muted-foreground mb-1">Sheet {activePage * 3 + idx + 1}</div>
-                      <SheetPreview sheetWidth={sheet.width_mm} sheetLength={sheet.length_mm} layout={sheetLayout} />
-                    </div>
-                  ))}
+                  {result.sheets.slice(activePage * 3, activePage * 3 + 3).map((sheetLayout, idx) => {
+                    const autoPct = sheetArea > 0 ? (sheetLayout.used_area_mm2 || 0) / sheetArea * 100 : 0;
+                    const override = sheetOverrides[sheetLayout.sheet_id];
+                    const mode = globalFullBoard ? 'full' : override?.mode ?? 'auto';
+                    const manualPct = override?.manualPct ?? autoPct;
+                    const chargePct = mode === 'full' ? 100 : mode === 'manual' ? manualPct : autoPct;
+                    return (
+                      <div key={sheetLayout.sheet_id} className="border rounded p-2 space-y-2">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span>Sheet {activePage * 3 + idx + 1}</span>
+                          <button className="text-foreground hover:underline" onClick={() => setZoomSheetId(sheetLayout.sheet_id)}>Zoom</button>
+                        </div>
+                        <SheetPreview sheetWidth={sheet.width_mm} sheetLength={sheet.length_mm} layout={sheetLayout} maxWidth={260} maxHeight={200} />
+                        <div className="text-xs text-muted-foreground">
+                          Used {(autoPct).toFixed(1)}% ({((sheetLayout.used_area_mm2 || 0) / 1_000_000).toFixed(2)} m² of {(sheetArea / 1_000_000).toFixed(2)} m²)
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 text-xs">
+                            <Switch
+                              id={`full-${sheetLayout.sheet_id}`}
+                              checked={mode === 'full'}
+                              disabled={globalFullBoard}
+                              onCheckedChange={(v) => {
+                                setSheetOverrides(prev => ({
+                                  ...prev,
+                                  [sheetLayout.sheet_id]: v ? { mode: 'full', manualPct: manualPct } : { mode: 'auto', manualPct: manualPct },
+                                }));
+                              }}
+                            />
+                            <Label htmlFor={`full-${sheetLayout.sheet_id}`} className="text-xs">Charge full sheet</Label>
+                          </div>
+                          <div className="grid grid-cols-[auto_1fr] items-center gap-2 text-xs">
+                            <Label htmlFor={`manual-${sheetLayout.sheet_id}`}>Manual %</Label>
+                            <Input
+                              id={`manual-${sheetLayout.sheet_id}`}
+                              type="number"
+                              value={Math.round(chargePct)}
+                              min={0}
+                              max={100}
+                              disabled={globalFullBoard}
+                              onChange={(e) => {
+                                const next = Number(e.target.value || 0);
+                                setSheetOverrides(prev => ({
+                                  ...prev,
+                                  [sheetLayout.sheet_id]: { mode: 'manual', manualPct: next },
+                                }));
+                              }}
+                            />
+                          </div>
+                          <div className="text-xs text-muted-foreground">Billing {chargePct.toFixed(1)}%</div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
               {(onExport || quoteItemId) && (
@@ -452,6 +555,24 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
           )}
         </TabsContent>
       </Tabs>
+      <Dialog open={zoomSheetId != null} onOpenChange={(open) => { if (!open) setZoomSheetId(null); }}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Sheet preview</DialogTitle>
+          </DialogHeader>
+          {zoomSheetId && result && result.sheets.find(s => s.sheet_id === zoomSheetId) && (
+            <div className="flex justify-center">
+              <SheetPreview
+                sheetWidth={sheet.width_mm}
+                sheetLength={sheet.length_mm}
+                layout={result.sheets.find(s => s.sheet_id === zoomSheetId)!}
+                maxWidth={800}
+                maxHeight={600}
+              />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

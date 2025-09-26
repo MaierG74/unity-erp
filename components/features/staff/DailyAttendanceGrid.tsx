@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { processClockEventsIntoSegments } from '@/lib/utils/attendance';
-import type { StaffHours } from '@/components/features/staff/StaffReports';
 import { useToast } from '@/components/ui/use-toast';
 import { format, parseISO, isToday, isSunday } from 'date-fns';
 import { formatTimeToSAST, getSASTDayBoundaries } from '@/lib/utils/timezone';
@@ -51,7 +50,8 @@ import {
   Loader2, 
   Plus,
   RefreshCw,
-  Save 
+  Save, 
+  Users
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -60,6 +60,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 // Import our custom AttendanceTimeline component
 import { AttendanceTimeline } from '@/components/features/staff/AttendanceTimeline';
+import { MassClockActionDialog } from '@/components/features/staff/MassClockActionDialog';
 
 // Import centralized types
 import { 
@@ -140,6 +141,7 @@ const getDefaultTimes = (date: Date) => {
         morningBreak: false,
         afternoonBreak: false
       };
+
     case 5: // Friday
       return {
         startTime: '07:00',
@@ -175,6 +177,7 @@ export function DailyAttendanceGrid() {
   const [holidayName, setHolidayName] = useState('');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isMassDialogOpen, setIsMassDialogOpen] = useState(false);
 
   
   const [sortField, setSortField] = useState<string>('staff_name');
@@ -486,6 +489,59 @@ export function DailyAttendanceGrid() {
     }
   };
 
+  // Mass apply handler wired to MassClockActionDialog
+  const handleMassApply = async ({
+    action,
+    time,
+    staffIds,
+    force,
+    note,
+  }: {
+    action: 'clock_in' | 'clock_out';
+    time: string;
+    staffIds: number[];
+    force?: boolean;
+    note?: string;
+  }) => {
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    setIsSaving(true);
+    try {
+      const results = await Promise.allSettled(
+        staffIds.map(async (id) => {
+          const result = await addManualClockEvent(
+            id,
+            action as any,
+            dateStr,
+            time,
+            null,
+            note && note.trim() !== '' ? note : 'Mass action from Hours Tracking'
+          );
+          if (!result.success) {
+            throw new Error(result.error?.message || 'Failed to add event');
+          }
+          await refreshStaffAttendanceCaches(dateStr, id);
+        })
+      );
+
+      const successCount = results.filter((r) => r.status === 'fulfilled').length;
+      const failCount = results.length - successCount;
+      toast({
+        title: 'Mass Action Complete',
+        description: `${action.replace('_', ' ')} applied to ${successCount}/${results.length} staff${failCount ? ` (${failCount} errors)` : ''}.`,
+        variant: failCount ? 'destructive' : undefined,
+      });
+    } catch (err: any) {
+      console.error('[handleMassApply] Error applying mass action:', err);
+      toast({
+        title: 'Error',
+        description: err?.message || 'Mass action failed',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   // Process clock events and refresh related daily summary data
   const processClockEventsData = async (staffId?: number) => {
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
@@ -629,7 +685,7 @@ export function DailyAttendanceGrid() {
 
   // Save hours mutation
   const saveHoursMutation = useMutation({
-    mutationFn: async (records: StaffHours[]) => {
+    mutationFn: async (records: any[]) => {
       // Filter out records where present is false (absent staff)
       const recordsToSave = records.filter(record => record.hours_worked > 0);
       
@@ -1510,6 +1566,16 @@ export function DailyAttendanceGrid() {
             </Popover>
           </div>
         </div>
+
+        {/* Mass Clock Action Dialog */}
+        <MassClockActionDialog
+          isOpen={isMassDialogOpen}
+          onOpenChange={setIsMassDialogOpen}
+          date={selectedDate}
+          staff={activeStaff as any}
+          clockEvents={clockEvents as any}
+          onApply={handleMassApply}
+        />
         {isHoliday && (
           <Alert className="mt-2">
             <AlertCircle className="h-4 w-4" />
@@ -1524,11 +1590,20 @@ export function DailyAttendanceGrid() {
       <CardContent>
         {/* Action buttons */}
         <div className="flex justify-between mb-4">
-          <div>
+          <div className="flex items-center gap-2">
             <Button 
               variant="outline" 
               size="sm"
-              onClick={processClockEventsData}
+              onClick={() => setIsMassDialogOpen(true)}
+              disabled={isSaving}
+            >
+              <Users className="w-4 h-4 mr-2" />
+              Mass Actions
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => processClockEventsData()}
               disabled={isSaving}
             >
               {isSaving ? (
@@ -1547,7 +1622,6 @@ export function DailyAttendanceGrid() {
             <Button 
               variant="outline" 
               size="sm"
-              className="ml-2"
               onClick={fixTimeSegments}
               disabled={isSaving}
             >
