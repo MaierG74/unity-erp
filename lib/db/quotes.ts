@@ -22,6 +22,18 @@ export interface QuoteItem {
   bullet_points?: string | null;
   selected_options?: Record<string, string> | null;
   quote_item_clusters?: QuoteItemCluster[];
+  cutlist_snapshot?: QuoteItemCutlist | null;
+}
+
+export interface QuoteItemCutlist {
+  id: string;
+  quote_item_id: string;
+  options_hash?: string | null;
+  layout_json: unknown;
+  billing_overrides?: unknown;
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface QuoteItemCluster {
@@ -101,42 +113,103 @@ export async function fetchQuote(
     customer?: { id: number; name: string; email?: string | null; telephone?: string | null };
   }
 > {
-  console.log('fetchQuote called with ID:', id, 'type:', typeof id);
-  
-  // Use admin client to bypass RLS for development/testing
   const client = supabaseAdmin;
-  
-  // First, get the basic quote data with customer join
+
   const { data: quote, error: quoteError } = await client
     .from('quotes')
     .select('*, customer:customers(id, name, email, telephone)')
     .eq('id', id)
     .single();
-  
-  console.log('Quote query result:', { quote, error: quoteError });
-  
+
   if (quoteError) throw quoteError;
 
-  // Then get related data separately to handle missing tables gracefully
   const { data: items, error: itemsError } = await client
     .from('quote_items')
-    .select('*, quote_item_clusters(*, quote_cluster_lines(*))')
-    .eq('quote_id', id);
+    .select('*, quote_item_clusters(*, quote_cluster_lines(*)), quote_item_cutlists(*)')
+    .eq('quote_id', id)
+    .order('created_at', { ascending: true });
 
   const { data: attachments, error: attachmentsError } = await client
     .from('quote_attachments')
     .select('*')
     .eq('quote_id', id);
 
-  // Log any errors but don't fail the whole operation
   if (itemsError) console.warn('Failed to fetch quote items:', itemsError);
   if (attachmentsError) console.warn('Failed to fetch quote attachments:', attachmentsError);
 
+  const typedItems = Array.isArray(items)
+    ? items.map((item: any) => {
+        const cutlists = Array.isArray(item?.quote_item_cutlists) ? item.quote_item_cutlists : [];
+        const [latestCutlist] = cutlists;
+        const { quote_item_cutlists, ...rest } = item;
+        return {
+          ...(rest as QuoteItem),
+          cutlist_snapshot: latestCutlist ?? null,
+        };
+      })
+    : [];
+
   return {
     ...quote,
-    items: items || [],
+    items: typedItems,
     attachments: attachments || [],
   } as any;
+}
+
+export async function fetchQuoteItemCutlistSnapshot(quoteItemId: string): Promise<QuoteItemCutlist | null> {
+  if (!quoteItemId) return null;
+  try {
+    const res = await fetch(`/api/quote-items/${quoteItemId}/cutlist`, {
+      method: 'GET',
+      cache: 'no-store',
+    });
+
+    if (res.status === 204) return null;
+    if (!res.ok) {
+      console.warn('fetchQuoteItemCutlistSnapshot failed', res.status, await res.text());
+      return null;
+    }
+
+    const json = await res.json();
+    return (json?.cutlist ?? null) as QuoteItemCutlist | null;
+  } catch (error) {
+    console.warn('fetchQuoteItemCutlistSnapshot error:', error);
+    return null;
+  }
+}
+
+export async function saveQuoteItemCutlistSnapshot(
+  quoteItemId: string,
+  payload: {
+    optionsHash?: string;
+    layout: unknown;
+    billingOverrides?: unknown;
+  }
+): Promise<QuoteItemCutlist | null> {
+  if (!quoteItemId) throw new Error('quoteItemId is required');
+
+  try {
+    const res = await fetch(`/api/quote-items/${quoteItemId}/cutlist`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        optionsHash: payload.optionsHash,
+        layout: payload.layout,
+        billingOverrides: payload.billingOverrides,
+      }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Save failed (${res.status}): ${text}`);
+    }
+
+    const json = await res.json();
+    return (json?.cutlist ?? null) as QuoteItemCutlist | null;
+  } catch (error) {
+    console.error('saveQuoteItemCutlistSnapshot error:', error);
+    throw (error instanceof Error ? error : new Error('Failed to save cutlist snapshot'));
+  }
 }
 
 export async function createQuote(quote: Partial<Quote>): Promise<Quote> {

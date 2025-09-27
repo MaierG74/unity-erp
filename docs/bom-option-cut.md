@@ -56,7 +56,7 @@
    - 🔬 Follow-up testing: add unit coverage that exercises base-only and option-aware branches of `resolveProductConfiguration` once override tables land.
 3. **Product Admin UI**
    - ✅ Options tab implemented with CRUD for groups/values, default selection toggles, and ordering controls (Product page → Options tab).
-   - Add ability to associate BOM rows with option overrides (e.g., inline editor or dedicated dialog from BOM table).
+   - ✅ Override editor added on BOM rows so option values can swap components, adjust quantity deltas, and override cutlist metadata.
 4. **Quote Integration**
    - ✅ `AddQuoteItemDialog` now fetches product option groups, captures selections, and forwards `selected_options` into the BOM resolver when exploding clusters.
    - Display option summary chips in `QuoteItemsTable` and include in PDF export later.
@@ -74,7 +74,7 @@
 - Confirm whether cutlist generation should be automatic on order creation or triggered manually with review.
 
 ## Immediate Action Items
-- Build override editor on the product Options tab (map option values → BOM rows, cutlist overrides).
+- Expose replacement supplier selection and advanced cutlist editing in the override dialog (optional polish).
 - Prototype resolver logic unit tests (input: base BOM, overrides, selections → output BOM lines + cutlist parts).
 - Audit existing BOM records to identify which components need `is_cutlist_item` tagging and collect dimensional metadata for pedestals.
 - Wire quote → order conversion to carry `selected_options` through to order_details and downstream reservation logic (next task).
@@ -84,10 +84,10 @@
    - Add every required component in `Bill of Materials`.
    - For panels that feed the cutlist, tick `is_cutlist_item` and populate `cutlist_dimensions`/`attributes` (length, width, thickness, grain, edge banding, laminate code, etc.).
 2. **Create option groups & values**
-   - Use the Product → Options tab to add groups (`code`, `label`, required flag) and populate values with defaults (Oak, White, Black, etc.).
+   - Use the Product → Options tab to add groups (`code`, `label`, required flag) and populate values with defaults (Oak, White, Black, etc.). Include a “Custom / Specify” value when you need ad-hoc picks.
    - Backend tables `product_option_groups` / `product_option_values` receive the writes automatically.
 3. **Define overrides**
-   - For each BOM row affected by an option, add a `bom_option_overrides` entry pointing at the value and supplying `replace_component_id`, `quantity_delta`, and optional cutlist overrides (e.g., change edging attributes).
+   - Open the BOM row’s “Configure option overrides” dialog and map each value to a replacement component, quantity delta, and cutlist tweaks. Leave the “Custom” value blank so quoting can prompt for a manual component.
 4. **Test via quote dialog**
    - Use the updated quote flow to select your product and choose option values; verify the exploded cluster swaps components and that `selected_options` persists.
 5. **Cutlist preview** *(once automation arrives)*
