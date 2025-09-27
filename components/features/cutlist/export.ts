@@ -9,11 +9,12 @@ export async function exportCutlistToQuote(params: {
   pricePerSheet?: number | null;
   pricePerMeterBanding?: number | null;
   fractionalSheetQty?: number; // override default integer sheet count
+  chargeSheetsOverride?: number | null;
   extraManualLines?: Array<{ description: string; qty: number; unit_cost?: number | null; component_id?: number }>; // optional component-backed lines
   addDefaultSheetLine?: boolean; // default true
   addDefaultBandingLine?: boolean; // default true
 }) {
-  const { quoteItemId, result, sheetDescription = 'MELAMINE SHEET', edgeBandingDescription = 'EDGE BANDING (m)', pricePerSheet = null, pricePerMeterBanding = null, fractionalSheetQty, extraManualLines, addDefaultSheetLine = true, addDefaultBandingLine = true } = params;
+  const { quoteItemId, result, sheetDescription = 'MELAMINE SHEET', edgeBandingDescription = 'EDGE BANDING (m)', pricePerSheet = null, pricePerMeterBanding = null, fractionalSheetQty, chargeSheetsOverride, extraManualLines, addDefaultSheetLine = true, addDefaultBandingLine = true } = params;
 
   // Ensure a cluster exists for this item
   let clusters = await fetchQuoteItemClusters(quoteItemId);
@@ -22,7 +23,7 @@ export async function exportCutlistToQuote(params: {
     targetCluster = await createQuoteItemCluster({ quote_item_id: quoteItemId, name: 'Costing Cluster', position: 0 });
   }
 
-  const sheetCount = fractionalSheetQty != null ? fractionalSheetQty : result.sheets.length;
+  const sheetCount = chargeSheetsOverride != null ? chargeSheetsOverride : fractionalSheetQty != null ? fractionalSheetQty : result.sheets.length;
   const bandingMeters = (result.stats.edgebanding_length_mm || 0) / 1000;
 
   if (addDefaultSheetLine && sheetCount > 0) {

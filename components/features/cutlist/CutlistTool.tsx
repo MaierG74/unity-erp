@@ -111,19 +111,23 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
       const backerPriceVal = backerPricePerSheet === '' ? (backerComponent?.unit_cost ?? null) : Number(backerPricePerSheet);
       // Build extra lines (component-backed when available)
       const allExtras: Array<{ description: string; qty: number; unit_cost?: number | null; component_id?: number; supplier_component_id?: number }> = [];
+      const chargePrimarySheets = primaryChargeSheets;
+      const chargeBackerSheets = backerChargeSheets;
       // Primary sheet as its own line (we'll suppress default by sending fractionalSheetQty=0)
-      allExtras.push({
-        description: primaryComponent?.description || primarySheetDescription,
-        qty: primarySheetsFractional,
-        unit_cost: pricePerSheetVal ?? undefined,
-        component_id: primaryComponent?.component_id,
-        supplier_component_id: primaryComponent?.supplier_component_id,
-      });
+      if (chargePrimarySheets > 0.0001) {
+        allExtras.push({
+          description: primaryComponent?.description || primarySheetDescription,
+          qty: chargePrimarySheets,
+          unit_cost: pricePerSheetVal ?? undefined,
+          component_id: primaryComponent?.component_id,
+          supplier_component_id: primaryComponent?.supplier_component_id,
+        });
+      }
       // Backer sheet if applicable
-      if (backerResult && backerSheetsFractional > 0.0001 && laminationOn) {
+      if (backerResult && chargeBackerSheets > 0.0001 && laminationOn) {
         allExtras.push({
           description: backerComponent?.description || backerSheetDescription,
-          qty: backerSheetsFractional,
+          qty: chargeBackerSheets,
           unit_cost: backerPriceVal ?? undefined,
           component_id: backerComponent?.component_id,
           supplier_component_id: backerComponent?.supplier_component_id,
@@ -161,6 +165,7 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
           addDefaultSheetLine: false,
           addDefaultBandingLine: false,
           extraManualLines: allExtras,
+          chargeSheetsOverride: chargePrimarySheets,
         });
         // Notify parent so it can close dialog and optionally expand cluster
         onExportSuccess?.();
@@ -459,7 +464,7 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
                 <Label htmlFor="full-board-switch" className="text-sm">Charge full sheet for every used board</Label>
               </div>
               {result.unplaced && result.unplaced.length > 0 && (
-                <Alert variant="warning">
+                <Alert className="border-amber-400/70 bg-amber-50">
                   <AlertTitle>Unplaced parts</AlertTitle>
                   <AlertDescription>
                     <div className="text-sm leading-relaxed space-y-1">
@@ -500,7 +505,9 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
                       <div key={sheetLayout.sheet_id} className="border rounded p-2 space-y-2">
                         <div className="flex items-center justify-between text-xs text-muted-foreground">
                           <span>Sheet {activePage * 3 + idx + 1}</span>
-                          <button className="text-foreground hover:underline" onClick={() => setZoomSheetId(sheetLayout.sheet_id)}>Zoom</button>
+                          <Button variant="link" size="sm" className="h-auto px-1" onClick={() => setZoomSheetId(sheetLayout.sheet_id)}>
+                            Zoom
+                          </Button>
                         </div>
                         <SheetPreview sheetWidth={sheet.width_mm} sheetLength={sheet.length_mm} layout={sheetLayout} maxWidth={260} maxHeight={200} />
                         <div className="text-xs text-muted-foreground">
@@ -513,10 +520,20 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
                               checked={mode === 'full'}
                               disabled={globalFullBoard}
                               onCheckedChange={(v) => {
-                                setSheetOverrides(prev => ({
-                                  ...prev,
-                                  [sheetLayout.sheet_id]: v ? { mode: 'full', manualPct: manualPct } : { mode: 'auto', manualPct: manualPct },
-                                }));
+                                setSheetOverrides(prev => {
+                                  const next = { ...prev };
+                                  const existing = next[sheetLayout.sheet_id];
+                                  if (v) {
+                                    next[sheetLayout.sheet_id] = { mode: 'full', manualPct: existing?.manualPct ?? manualPct };
+                                  } else {
+                                    if (existing?.mode === 'manual') {
+                                      next[sheetLayout.sheet_id] = { mode: 'manual', manualPct: existing.manualPct };
+                                    } else {
+                                      delete next[sheetLayout.sheet_id];
+                                    }
+                                  }
+                                  return next;
+                                });
                               }}
                             />
                             <Label htmlFor={`full-${sheetLayout.sheet_id}`} className="text-xs">Charge full sheet</Label>
@@ -526,12 +543,13 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
                             <Input
                               id={`manual-${sheetLayout.sheet_id}`}
                               type="number"
-                              value={Math.round(chargePct)}
+                              value={mode === 'manual' ? Number.isFinite(manualPct) ? manualPct : autoPct : Number(chargePct.toFixed(1))}
                               min={0}
                               max={100}
-                              disabled={globalFullBoard}
+                              step={0.1}
+                              disabled={globalFullBoard || mode === 'full'}
                               onChange={(e) => {
-                                const next = Number(e.target.value || 0);
+                                const next = Math.max(0, Math.min(100, Number(e.target.value || 0)));
                                 setSheetOverrides(prev => ({
                                   ...prev,
                                   [sheetLayout.sheet_id]: { mode: 'manual', manualPct: next },
@@ -539,7 +557,25 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
                               }}
                             />
                           </div>
-                          <div className="text-xs text-muted-foreground">Billing {chargePct.toFixed(1)}%</div>
+                          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                            <span>Billing {chargePct.toFixed(1)}%</span>
+                            <Button
+                              type="button"
+                              variant="link"
+                              size="sm"
+                              className="h-auto px-1"
+                              disabled={globalFullBoard || (!override && mode === 'auto')}
+                              onClick={() => {
+                                setSheetOverrides(prev => {
+                                  const next = { ...prev };
+                                  delete next[sheetLayout.sheet_id];
+                                  return next;
+                                });
+                              }}
+                            >
+                              Reset to auto
+                            </Button>
+                          </div>
                         </div>
                       </div>
                     );

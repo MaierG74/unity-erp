@@ -91,6 +91,7 @@ Action Plan
 4. Pricing + totals
    - For product lines, set `unit_price` from product or computed from cluster total via “Update Price” action already present. [Planned]
    - Highlight missing unit costs on exploded lines to aid costing. [Implemented]
+   - BOM overrides managed from the product Options tab now feed the resolver so exploded lines follow the selected configuration.
 5. Docs & tests
    - Document UX and payload shapes; add examples and edge cases (no BOM, missing prices).
    - Add resolver/unit tests covering option selections and base-only fallbacks (pending option override data).

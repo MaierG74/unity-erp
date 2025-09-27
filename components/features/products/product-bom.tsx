@@ -53,7 +53,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Trash2, Edit, Save, X, Search, Loader2, Building2 } from 'lucide-react';
+import { Plus, Trash2, Edit, Save, X, Search, Loader2, Building2, SlidersHorizontal, XCircle } from 'lucide-react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -67,6 +67,7 @@ import React from 'react';
 const AddFromCollectionDialog = dynamic(() => import('./AddFromCollectionDialog'), { ssr: false });
 const AddProductToBOMDialog = dynamic(() => import('./AddProductToBOMDialog'), { ssr: false });
 const AddComponentDialog = dynamic(() => import('./AddComponentDialog'), { ssr: false });
+const BOMOverrideDialog = dynamic(() => import('./BOMOverrideDialog'), { ssr: false });
 
 // Define types
 interface Component {
@@ -148,6 +149,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [componentSearch, setComponentSearch] = useState('');
   const [supplierSearch, setSupplierSearch] = useState('');
+  const [supplierFilter, setSupplierFilter] = useState('');
   const [selectedComponentId, setSelectedComponentId] = useState<string | null>(null);
   const [showComponentDropdown, setShowComponentDropdown] = useState(false);
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
@@ -171,6 +173,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
   // Add Component (controlled) state for opening dialog from Browse-by-supplier
   const [addComponentOpen, setAddComponentOpen] = useState(false)
   const [addComponentPrefill, setAddComponentPrefill] = useState<{ component_id?: number; supplier_component_id?: number } | undefined>(undefined)
+  const [overrideDialog, setOverrideDialog] = useState<{ bomId: number; componentId: number | null } | null>(null)
   
   // Initialize form
   const form = useForm<BOMItemFormValues>({
@@ -541,6 +544,13 @@ export function ProductBOM({ productId }: ProductBOMProps) {
 
   // Map of components for quick lookup when rendering effective BOM (now safe, after query declaration)
   const componentsById = React.useMemo(() => buildComponentsById(componentsList || []), [componentsList])
+  const componentSummaries = React.useMemo(() => {
+    return (componentsList || []).map((component: any) => ({
+      component_id: Number(component.component_id),
+      internal_code: component.internal_code || '',
+      description: component.description || null,
+    }));
+  }, [componentsList])
   
   // Suppliers list for the browser
   const { data: allSuppliers = [] } = useQuery({
@@ -1005,9 +1015,32 @@ export function ProductBOM({ productId }: ProductBOMProps) {
             </div>
           )}
           {supplierFeatureAvailable && (
-            <div className="mb-4 text-right">
-              <span className="text-sm font-medium">Total Component Cost: </span>
-              <span className="text-lg font-bold">R{totalBOMCost.toFixed(2)}</span>
+            <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="text-right md:text-left">
+                <span className="text-sm font-medium text-muted-foreground">Total component cost</span>
+                <div className="text-lg font-bold text-foreground">R{totalBOMCost.toFixed(2)}</div>
+              </div>
+              <div className="w-full md:w-auto md:min-w-[18rem]">
+                <div className="relative w-full">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={supplierFilter}
+                    onChange={(e) => setSupplierFilter(e.target.value)}
+                    placeholder="Filter by supplier"
+                    className="h-9 pl-9 pr-10 placeholder:text-muted-foreground"
+                  />
+                  {supplierFilter && (
+                    <button
+                      type="button"
+                      onClick={() => setSupplierFilter('')}
+                      className="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
+                      aria-label="Clear supplier filter"
+                    >
+                      <XCircle className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           )}
           {bomLoading ? (
@@ -1054,7 +1087,29 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                           </TableRow>
                         )
                       }
-                      return rows.map((it, idx) => {
+                      const supplierQuery = supplierFeatureAvailable ? supplierFilter.trim().toLowerCase() : ''
+                      const filteredRows = supplierQuery
+                        ? rows.filter((row) => {
+                            if (!supplierFeatureAvailable || !supplierQuery) return true
+                            const directRow = row._editable && typeof row.bom_id === 'number'
+                              ? bomById.get(Number(row.bom_id))
+                              : undefined
+                            const supplierName = directRow?.supplierComponent?.supplier?.name?.toLowerCase() ?? ''
+                            return supplierName.includes(supplierQuery)
+                          })
+                        : rows
+
+                      if (filteredRows.length === 0) {
+                        return (
+                          <TableRow key="no-filter-results">
+                            <TableCell colSpan={supplierFeatureAvailable ? 8 : 5} className="text-center py-4 text-sm text-muted-foreground">
+                              No components match the current supplier filter.
+                            </TableCell>
+                          </TableRow>
+                        )
+                      }
+
+                      return filteredRows.map((it, idx) => {
                         const comp = componentsById.get(Number(it.component_id))
                         const code = comp?.internal_code || String(it.component_id)
                         const desc = comp?.description || ''
@@ -1253,6 +1308,14 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                                   <Button variant="ghost" size="icon" onClick={() => startEditing(direct)}>
                                     <Edit className="h-4 w-4" />
                                   </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => setOverrideDialog({ bomId: direct.bom_id, componentId: direct.component_id })}
+                                    aria-label="Configure option overrides"
+                                  >
+                                    <SlidersHorizontal className="h-4 w-4" />
+                                  </Button>
                                   <Button variant="destructiveSoft" size="icon" onClick={() => deleteBOMItem.mutate(direct.bom_id)} aria-label="Delete component">
                                     <Trash2 className="h-4 w-4" />
                                   </Button>
@@ -1272,6 +1335,16 @@ export function ProductBOM({ productId }: ProductBOMProps) {
           )}
         </CardContent>
       </Card>
+      <BOMOverrideDialog
+        productId={productId}
+        bomId={overrideDialog?.bomId ?? null}
+        open={Boolean(overrideDialog)}
+        onOpenChange={(open) => {
+          if (!open) setOverrideDialog(null);
+        }}
+        baseComponent={overrideDialog?.componentId ? componentsById.get(Number(overrideDialog.componentId)) ?? null : null}
+        components={componentSummaries}
+      />
       {/* Quick Product View Dialog */}
       <Dialog open={quickViewOpen} onOpenChange={setQuickViewOpen}>
         <DialogContent className="sm:max-w-[820px]">

@@ -27,7 +27,7 @@ export async function GET(
     // Fetch related items
     const { data: items, error: itemsError } = await supabaseAdmin
       .from('quote_items')
-      .select('*, quote_item_clusters(*, quote_cluster_lines(*))')
+      .select('*, quote_item_clusters(*, quote_cluster_lines(*)), quote_item_cutlists(*)')
       .eq('quote_id', quoteId);
 
     // Fetch related attachments
@@ -42,7 +42,17 @@ export async function GET(
 
     const result = {
       ...quote,
-      items: items || [],
+      items: Array.isArray(items)
+        ? items.map((item: any) => {
+            const cutlists = Array.isArray(item?.quote_item_cutlists) ? item.quote_item_cutlists : [];
+            const [latestCutlist] = cutlists;
+            const { quote_item_cutlists, ...rest } = item;
+            return {
+              ...rest,
+              cutlist_snapshot: latestCutlist ?? null,
+            };
+          })
+        : [],
       attachments: attachments || [],
     };
 
@@ -88,3 +98,4 @@ export async function DELETE(
     );
   }
 }
+

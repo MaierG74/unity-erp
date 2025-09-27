@@ -138,6 +138,62 @@ Types referenced:
 - Image management: background uploads, progress, thumbnail generation.
 - Role-based capabilities (view-only vs edit).
 
+### Component Detail View (Planning — 2025-09-26)
+- **Goal**: move beyond the narrow side panel and provide a dedicated component detail surface that mirrors the richer tabbed layout used on product detail pages.
+- **Entry**: add a `View` button on each DataTable row (or double-click) that routes to `app/inventory/components/[componentId]/page.tsx`. Keep the existing side panel for quick context so list navigation remains fast.
+- **Page Shell**: reuse the `Tabs` pattern from product detail. Top header shows code, description, status pill (based on stock state), and quick actions (`Edit`, `Adjust Stock`, `Delete`). A secondary toolbar offers `Refresh` and deep links to purchase orders / work orders.
+
+#### Proposed Tabs
+- `Overview`
+  - Hero block with primary image (fallback icon), core metadata (code, description, unit, category, default location).
+  - Stock summary cards: On-hand, Reserved, Available, Reorder level (per location if tracking multiples). Pull from `inventory`, `inventory_reservations` (if/when introduced), and open MO/WO allocations.
+  - Supplier panel with preferred supplier, last PO price, lead time (join `suppliercomponents`, `purchase_order_lines`).
+  - Quick links to edit metadata and manage suppliers (reuse `ComponentDialog` sections inline).
+- `Inventory Activity`
+  - Timeline/table showing `inventory_transactions` with quantity, type (IN/OUT/ADJUST), reference (purchase order, order consumption, manual adjustment), user, and notes.
+  - Filters: date range, transaction type. Expose “Expected” rows by combining pending PO receipts (lines with `expected_delivery_date` in future) and open production issues that will consume the component.
+  - Provide export (`CSV`) and `Load more` pagination using infinite query.
+- `Purchasing`
+  - List of open purchase orders that include this component with status, supplier, expected receipt, ordered qty, received qty. Source tables: `purchase_orders`, `purchase_order_lines` filtered by `component_id`.
+  - Section for historical receipts (last 5) with cost trend chart (optional stretch).
+  - Actions: `Create PO` prefilled with this component, `Email supplier` (link to existing flow).
+- `Usage / Where Used`
+  - “Bill of Materials” usage: query `product_bom` and upcoming `bom_collections` links to show which products and collections depend on the component (quantity per). Add badges for `active` vs `archived` products.
+  - “Open Orders” usage: gather current sales/work orders that reserve the component via `order_requirements` / `work_order_components`. Show qty reserved/issued.
+  - “Historical” drill-down: optionally link to analytics dashboard once available.
+- `Images`
+  - Port over `ImageGallery` from products but scoped to components (storage bucket `QButton`). Allow upload, set primary image, delete. Show crop guidance for consistent 1:1 squares.
+- `Files` *(optional follow-up)*
+  - Placeholder for spec sheets, MSDS PDFs stored in Supabase Storage `component-files/`.
+
+#### Data & API Considerations
+- Create React Query hook `useComponentDetail(componentId)` that assembles:
+  - Base component (`components` + `component_categories` + `unitsofmeasure`).
+  - Inventory summary (`inventory`, future `inventory_locations`).
+  - Supplier pricing (`suppliercomponents` + `suppliers`).
+  - Aggregated counts (e.g., reserved qty) via RPC or view to avoid multiple round trips.
+- Add supporting queries:
+  - `GET /api/inventory/components/:componentId/transactions` with pagination & filters.
+  - `GET /api/inventory/components/:componentId/purchase-orders` for open PO lines.
+  - `GET /api/inventory/components/:componentId/usage` returning BOM and order usage arrays.
+- Consider Supabase Postgres views/materialized views for heavy joins:
+  - `component_usage_view` summarising BOM references and quantities.
+  - `component_open_po_view` showing outstanding procurement per supplier.
+- Ensure RLS covers new endpoints: allow authenticated `org` members to read detail data while protecting supplier pricing by role.
+
+#### UX Notes
+- Favor skeleton states for each tab instead of global spinner so users can pivot quickly.
+- Persist last-opened tab per user (LocalStorage key `component-detail:lastTab`).
+- Show breadcrumb `Inventory / Components / {code}` for orientation; include back-to-list button.
+- For navigation from the list, shallow push the route (`router.push('/inventory?focusComponent=…', { shallow: true })`) so filters persist when returning.
+- Keep destructive actions inside the detail page as secondary (use existing delete flow but require confirmation with usage summary).
+
+#### Open Questions
+- Should adjustments (manual, cycle counts) move to a dedicated modal accessible from this page? Need workflow definition.
+- Do we need multi-location support before launching detail view? Current schema stores one location per component inventory row; design should not block future expansion.
+- How to handle archived/obsolete components? Plan for `status` field and archive badge.
+- Should we cache aggregated usage to speed up load? Evaluate once we size the record counts (products × components).
+
 ### Testing Ideas
 - Unit tests for hooks (mutations) mocking Supabase client.
 - Integration tests for `ComponentDialog` form flows, including image upload mock.
