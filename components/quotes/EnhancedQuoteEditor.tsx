@@ -93,21 +93,21 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
     loadSettings();
   }, []);
 
+  const refreshAttachments = React.useCallback(async () => {
+    if (!quote?.id) return;
+    try {
+      const data = await fetchAllQuoteAttachments(quote.id);
+      setAttachments(data);
+      setAttachmentsVersion((v) => v + 1);
+    } catch (e) {
+      console.warn('Failed to refresh attachments:', e);
+    }
+  }, [quote?.id]);
+
   // Refresh attachments when item count changes (captures auto-attached product images)
   useEffect(() => {
-    const refresh = async () => {
-      if (!quote?.id) return;
-      try {
-        const data = await fetchAllQuoteAttachments(quote.id);
-        setAttachments(data);
-        setAttachmentsVersion((v) => v + 1);
-      } catch (e) {
-        console.warn('Failed to refresh attachments:', e);
-      }
-    };
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items.length]);
+    refreshAttachments();
+  }, [refreshAttachments, items.length]);
 
   useEffect(() => {
     if (quoteId) {
@@ -230,6 +230,14 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
     setAttachments(newAttachments);
     setAttachmentsVersion(v => v + 1);
   };
+
+  const handleItemAttachmentsChange = React.useCallback((itemId: string, itemAttachments: QuoteAttachment[]) => {
+    setAttachments(prev => {
+      const others = prev.filter(att => att.quote_item_id !== itemId);
+      return [...others, ...itemAttachments];
+    });
+    setAttachmentsVersion(v => v + 1);
+  }, []);
 
   if (!quote) {
     return (
@@ -391,6 +399,7 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
                 onItemsChange={handleItemsChange}
                 quoteId={quote.id}
                 attachmentsVersion={attachmentsVersion}
+                onItemAttachmentsChange={handleItemAttachmentsChange}
               />
             </CardContent>
           </Card>

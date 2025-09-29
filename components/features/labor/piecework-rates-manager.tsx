@@ -44,9 +44,13 @@ import { format } from 'date-fns';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
+import { useDebounce } from '@/hooks/use-debounce';
+import { CreateJobModal } from './create-job-modal';
 
 type Job = { job_id: number; name: string };
 type Product = { product_id: number; name: string; internal_code: string | null };
+
+type JobCategory = { category_id: number; name: string };
 
 type PieceRate = {
   rate_id: number;
@@ -76,6 +80,23 @@ export function PieceworkRatesManager() {
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [productSearch, setProductSearch] = useState('');
 
+  // Reset filters handler
+  const resetFilters = () => {
+    setSelectedCategoryId('');
+    setSelectedJobId('');
+    setJobSearchInput('');
+    setJobPage(1);
+    setJobsList([]);
+    setJobsHasMore(false);
+    setScope('default');
+    setSelectedProductId('');
+    setProductSearch('');
+    addForm.setValue('job_id', '');
+    addForm.setValue('applies_to', 'default');
+    addForm.setValue('product_id', undefined);
+  };
+  const [jobModalOpen, setJobModalOpen] = useState(false);
+
   const addForm = useForm<AddRateFormValues>({
     resolver: zodResolver(addRateSchema),
     defaultValues: {
@@ -87,17 +108,82 @@ export function PieceworkRatesManager() {
     },
   });
 
-  // Jobs
-  const { data: jobs = [], isLoading: jobsLoading } = useQuery({
-    queryKey: ['jobs-simple'],
+// Categories for optional filtering
+  const { data: categories = [] } = useQuery({
+    queryKey: ['jobCategories-simple'],
     queryFn: async () => {
+      const { data, error } = await supabase
+        .from('job_categories')
+        .select('category_id, name')
+        .order('name');
+      if (error) throw error;
+      return (data || []) as JobCategory[];
+    },
+  });
+
+  // Async, paginated jobs search
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string>('');
+  const [jobSearchInput, setJobSearchInput] = useState('');
+  const jobSearch = useDebounce(jobSearchInput, 300);
+  const pageSize = 25;
+  const [jobPage, setJobPage] = useState(1);
+  const [jobsList, setJobsList] = useState<Job[]>([]);
+  const [jobsHasMore, setJobsHasMore] = useState(false);
+
+  const { data: jobsChunk, isLoading: jobsLoading } = useQuery({
+    queryKey: ['jobs-search', selectedCategoryId, jobSearch, jobPage],
+    queryFn: async () => {
+      const search = jobSearch.trim();
+      if (!selectedCategoryId && search.length < 3) {
+        return { items: [] as Job[], hasMore: false };
+      }
+      let query = supabase
+        .from('jobs')
+        .select('job_id, name, category_id')
+        .order('name');
+      if (selectedCategoryId) {
+        query = query.eq('category_id', parseInt(selectedCategoryId));
+      }
+      if (search) {
+        query = query.ilike('name', `%${search}%`);
+      }
+      const from = (jobPage - 1) * pageSize;
+      const to = from + pageSize - 1;
+      const { data, error } = await query.range(from, to);
+      if (error) throw error;
+      const items = (data || []) as Job[];
+      return { items, hasMore: items.length === pageSize };
+    },
+    keepPreviousData: true,
+  });
+
+  useEffect(() => {
+    // Reset paging when filters/search change
+    setJobsList([]);
+    setJobPage(1);
+  }, [selectedCategoryId, jobSearch]);
+
+  useEffect(() => {
+    if (jobsChunk) {
+      setJobsList((prev) => (jobPage === 1 ? jobsChunk.items : [...prev, ...jobsChunk.items]));
+      setJobsHasMore(jobsChunk.hasMore);
+    }
+  }, [jobsChunk, jobPage]);
+
+  // Fetch the currently selected job for display in the rates table
+  const { data: selectedJob } = useQuery({
+    queryKey: ['job-by-id', selectedJobId],
+    queryFn: async () => {
+      if (!selectedJobId) return null as unknown as Job | null;
       const { data, error } = await supabase
         .from('jobs')
         .select('job_id, name')
-        .order('name');
-      if (error) throw error;
-      return (data || []) as Job[];
+        .eq('job_id', parseInt(selectedJobId))
+        .maybeSingle();
+      if (error && (error as any).code !== 'PGRST116') throw error;
+      return (data || null) as Job | null;
     },
+    enabled: !!selectedJobId,
   });
 
   // Products (basic list; filtered client-side for search)
@@ -281,6 +367,19 @@ export function PieceworkRatesManager() {
 
   return (
     <div className="space-y-6">
+      {/* Create Job modal mounted at root of this component */}
+      <CreateJobModal
+        isOpen={jobModalOpen}
+        onClose={() => setJobModalOpen(false)}
+        initialCategoryId={selectedCategoryId ? parseInt(selectedCategoryId) : undefined}
+        onJobCreated={(job: any) => {
+          const catId = job?.category_id ? String(job.category_id) : '';
+          if (catId) setSelectedCategoryId(catId);
+          setSelectedJobId(String(job.job_id));
+          addForm.setValue('job_id', String(job.job_id));
+          setJobModalOpen(false);
+        }}
+      />
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Piecework Rates</CardTitle>
@@ -290,30 +389,117 @@ export function PieceworkRatesManager() {
           {/* Filters */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <Form {...addForm}>
-                <FormField
-                  control={addForm.control}
-                  name="job_id"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Job</FormLabel>
-                      <Select value={selectedJobId} onValueChange={(v) => { setSelectedJobId(v); }}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder={jobsLoading ? 'Loading jobs...' : 'Select job'} />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {jobs.map((j) => (
-                            <SelectItem key={j.job_id} value={j.job_id.toString()}>{j.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </Form>
+              {/* Optional Category filter + async Job picker */}
+              <div className="space-y-2">
+                <Form {...addForm}>
+                  <FormItem>
+                    <FormLabel>Category (optional)</FormLabel>
+                    <Select
+                      value={selectedCategoryId || '_all'}
+                      onValueChange={(v) => {
+                        const val = v === '_all' ? '' : v;
+                        setSelectedCategoryId(val);
+                        setSelectedJobId('');
+                        setJobSearchInput('');
+                      }}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="All Categories" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="_all">All Categories</SelectItem>
+                        {categories.map((c) => (
+                          <SelectItem key={c.category_id} value={c.category_id.toString()}>
+                            {c.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormItem>
+                </Form>
+
+                <Form {...addForm}>
+                  <FormField
+                    control={addForm.control}
+                    name="job_id"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Job</FormLabel>
+                        <Select
+                          value={selectedJobId}
+                          onValueChange={(v) => {
+                            setSelectedJobId(v);
+                          }}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder={jobsLoading ? 'Loading jobs...' : (selectedCategoryId ? 'Select job' : 'Type to search jobs')} />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {/* Search bar inside dropdown */}
+                            <div className="px-2 py-2">
+                              <div className="flex items-center gap-2">
+                                <Search className="h-4 w-4 text-muted-foreground" />
+                                <Input
+                                  placeholder={selectedCategoryId ? 'Search jobs (optional)' : 'Type at least 3 characters'}
+                                  value={jobSearchInput}
+                                  onChange={(e) => setJobSearchInput(e.target.value)}
+                                />
+                              </div>
+                            </div>
+                            {/* Guidance when not enough input and no category */}
+                            {!selectedCategoryId && jobSearch.trim().length < 3 ? (
+                              <div className="px-3 py-2 text-sm text-muted-foreground">Enter at least 3 characters to search</div>
+                            ) : jobsList.length === 0 && !jobsLoading ? (
+                              <div className="px-3 py-2 text-sm text-muted-foreground">No jobs found</div>
+                            ) : (
+                              jobsList.map((j) => (
+                                <SelectItem key={j.job_id} value={j.job_id.toString()}>
+                                  {j.name}
+                                </SelectItem>
+                              ))
+                            )}
+                            {/* Load more */}
+                            {jobsHasMore && (
+                              <div className="px-2 py-2">
+                                <Button
+                                  variant="outline"
+                                  className="w-full"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setJobPage((p) => p + 1);
+                                  }}
+                                >
+                                  Load more
+                                </Button>
+                              </div>
+                            )}
+                            {/* Create new job inline */}
+                            <div className="px-2 py-2">
+                              <Button
+                                variant="ghost"
+                                className="w-full"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setJobModalOpen(true);
+                                }}
+                              >
+                                + Create new job
+                              </Button>
+                            </div>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </Form>
+              </div>
             </div>
 
             <div>
@@ -381,6 +567,11 @@ export function PieceworkRatesManager() {
                 </div>
               )}
             </div>
+
+          </div>
+          {/* Reset filters action */}
+          <div className="mt-2">
+            <Button variant="outline" size="sm" onClick={resetFilters}>Reset filters</Button>
           </div>
 
           {/* Rates table */}
@@ -413,11 +604,11 @@ export function PieceworkRatesManager() {
                   </TableRow>
                 ) : (
                   rates.map((r) => {
-                    const job = jobs.find(j => j.job_id === r.job_id);
+                    const jobName = selectedJob?.name || jobsList.find(j => j.job_id === r.job_id)?.name;
                     const product = r.product_id ? products.find(p => p.product_id === r.product_id) : null;
                     return (
                       <TableRow key={r.rate_id}>
-                        <TableCell>{job?.name || r.job_id}</TableCell>
+                        <TableCell>{jobName || r.job_id}</TableCell>
                         <TableCell>{product ? ((product.internal_code ? `${product.internal_code} — ` : '') + product.name) : 'All products'}</TableCell>
                         <TableCell>R{r.rate.toFixed(2)}/pc</TableCell>
                         <TableCell>{format(new Date(r.effective_date), 'PPP')}</TableCell>
@@ -466,19 +657,28 @@ export function PieceworkRatesManager() {
                     control={addForm.control}
                     name="effective_date"
                     render={({ field }) => (
-                      <FormItem className="flex flex-col">
+<FormItem>
                         <FormLabel>Effective Date</FormLabel>
                         <Popover>
                           <PopoverTrigger asChild>
                             <FormControl>
-                              <Button variant={'outline'} className={cn('w-full pl-3 text-left font-normal', !field.value && 'text-muted-foreground')}>
+                              <Button
+                                variant={'outline'}
+                                className={cn('w-full h-10 pl-3 text-left font-normal', !field.value && 'text-muted-foreground')}
+                              >
                                 {field.value ? format(field.value, 'PPP') : <span>Pick a date</span>}
                                 <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                               </Button>
                             </FormControl>
                           </PopoverTrigger>
                           <PopoverContent className="w-auto p-0" align="start">
-                            <Calendar mode="single" selected={field.value} onSelect={field.onChange} disabled={(date) => date < new Date('1900-01-01')} initialFocus />
+                            <Calendar
+                              mode="single"
+                              selected={field.value}
+                              onSelect={field.onChange}
+                              disabled={(date) => date < new Date('1900-01-01')}
+                              initialFocus
+                            />
                           </PopoverContent>
                         </Popover>
                         <FormMessage />

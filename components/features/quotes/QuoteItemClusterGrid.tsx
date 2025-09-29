@@ -48,8 +48,20 @@ const QuoteItemClusterGrid: FC<QuoteItemClusterGridProps> = ({
     setLocalMarkupValue(cluster.markup_percent || 0);
   }, [cluster.markup_percent]);
   
+  const sortedLines = React.useMemo(() => {
+    if (!Array.isArray(cluster.quote_cluster_lines)) return [] as QuoteClusterLine[];
+    return [...cluster.quote_cluster_lines].sort((a, b) => {
+      const orderA = a.sort_order ?? 0;
+      const orderB = b.sort_order ?? 0;
+      if (orderA !== orderB) return orderA - orderB;
+      const timeA = new Date(a.created_at).getTime();
+      const timeB = new Date(b.created_at).getTime();
+      return timeA - timeB;
+    });
+  }, [cluster.quote_cluster_lines]);
+
   // Calculate subtotal from all cluster lines
-  const subtotal = cluster.quote_cluster_lines?.reduce((sum, line) => {
+  const subtotal = sortedLines.reduce((sum, line) => {
     const lineTotal = (line.qty || 0) * (line.unit_cost || 0);
     return sum + lineTotal;
   }, 0) || 0;
@@ -119,7 +131,7 @@ const QuoteItemClusterGrid: FC<QuoteItemClusterGridProps> = ({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {cluster.quote_cluster_lines?.map(line => (
+            {sortedLines.map(line => (
               <QuoteClusterLineRow 
                 key={line.id} 
                 line={line} 

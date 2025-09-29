@@ -11,9 +11,10 @@ interface InlineAttachmentsCellProps {
   quoteId: string;
   itemId: string;
   version?: number;
+  onItemAttachmentsChange?: (itemId: string, attachments: QuoteAttachment[]) => void;
 }
 
-export default function InlineAttachmentsCell({ quoteId, itemId, version }: InlineAttachmentsCellProps) {
+export default function InlineAttachmentsCell({ quoteId, itemId, version, onItemAttachmentsChange }: InlineAttachmentsCellProps) {
   const [attachments, setAttachments] = React.useState<QuoteAttachment[]>([]);
   const [open, setOpen] = React.useState(false);
   const isImage = (m?: string) => !!m && m.startsWith('image/');
@@ -28,6 +29,11 @@ export default function InlineAttachmentsCell({ quoteId, itemId, version }: Inli
   }, [quoteId, itemId]);
 
   React.useEffect(() => { refresh(); }, [refresh, version]);
+
+  const handleManagerChange = React.useCallback((next: QuoteAttachment[]) => {
+    setAttachments(next);
+    onItemAttachmentsChange?.(itemId, next);
+  }, [itemId, onItemAttachmentsChange]);
 
   // Build thumbs: up to 2 images, else doc icon
   const imageThumbs = attachments.filter(a => isImage(a.mime_type));
@@ -79,7 +85,7 @@ export default function InlineAttachmentsCell({ quoteId, itemId, version }: Inli
             quoteId={quoteId}
             quoteItemId={itemId}
             attachments={attachments}
-            onAttachmentsChange={setAttachments}
+            onAttachmentsChange={handleManagerChange}
             scope="item"
             title="Item Images & Documents"
             description="Upload product images and specifications for this line item"
@@ -89,4 +95,3 @@ export default function InlineAttachmentsCell({ quoteId, itemId, version }: Inli
     </>
   );
 }
-

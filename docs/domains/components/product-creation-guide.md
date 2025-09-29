@@ -110,16 +110,27 @@ CREATE TABLE public.billoflabour (
 
 #### Product Detail Page (`/app/products/[productId]/page.tsx`)
 - Tabbed interface with sections for:
-  - **Details**: Basic product information
-  - **Images**: Image management with gallery
-  - **Categories**: Category assignment management
-- **Bill of Materials**: Component requirements
-- **Bill of Labor**: Labor requirements
-- **Costing**: Combined materials + labor unit cost summary (see `docs/plans/product-costing-plan.md`)
-- Edit Product button reserved for future full‑form editing
+  - **Details** – Basic product information
+  - **Images** – Image management with gallery
+  - **Categories** – Category assignment management
+  - **Bill of Materials** – Component requirements (inline editing, supplier-aware tooling)
+  - **Bill of Labor** – Labor requirements
+  - **Options** – Manage configurable attributes (option groups + values) and hook BOM overrides
+  - **Costing** – Combined materials + labor unit cost summary (see `docs/plans/product-costing-plan.md`)
+- Options tab specifics:
+  - Create option groups (`code`, `label`, required flag, order).
+  - Add option values with default toggles; supports lightweight “Custom / Specify” entries.
+  - Data persists to `product_option_groups` / `product_option_values` and feeds quoting/order flows.
+- BOM override dialog:
+  - Each BOM row exposes “Configure option overrides”.
+  - Map option values to replacement components, quantity deltas, cutlist metadata, and notes (stored in `bom_option_overrides`).
+  - UI uses collapsible groups/values (closed by default unless configured), summaries showing configuration status, and the new component picker with code/description search.
+  - “Save” is disabled when there are no changes and shows a spinner during persistence; clearing shows a spinner as well.
+  - Saving/clearing triggers inline toasts (success/destructive) and “No changes to save” appears if nothing changed.
+- Edit Product button reserved for future full‑form editing.
 - Consistent styling across tabs:
-  - Delete actions use `destructiveSoft` (pastel in light, strong in dark)
-  - Image frames use `bg-card` in light and `dark:bg-white/5 dark:ring-1 dark:ring-white/10` with subtle image lift in dark
+  - Delete actions use `destructiveSoft` (pastel in light, strong in dark).
+  - Image frames use `bg-card` in light and `dark:bg-white/5 dark:ring-1 dark:ring-white/10` with subtle image lift in dark.
 
 ### Product Image Management
 

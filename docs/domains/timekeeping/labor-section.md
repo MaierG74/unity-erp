@@ -11,10 +11,11 @@ This document consolidates how the Labor section of the app works today across U
 ## UI Overview
 
 - **Labor Management (`/labor`)**: app/labor/page.tsx:1
-  - Renders two tabs: `Job Categories` and `Jobs`.
+  - Tabs: `Job Categories`, `Jobs`, and `Piecework Rates`.
   - Components used:
     - `components/features/labor/job-categories-manager.tsx:1`
     - `components/features/labor/jobs-manager.tsx:1`
+    - `components/features/labor/piecework-rates-manager.tsx:1`
 
 - **Product Bill of Labor**: components/features/products/product-bol.tsx:1
   - Embedded on product detail: app/products/[productId]/page.tsx:358
@@ -120,16 +121,30 @@ Tables involved and their key columns and relationships. Source: Supabase MCP qu
   - Delete BOL item: `from('billoflabour').delete().eq('bol_id', ...)`.
   - Helper conversions: minutes/seconds → hours for totals and costing.
 
-  (Planned)
+(Implemented)
   - Pay Type selector per line: `hourly` or `piece`.
-  - When `piece`, hide time fields and fetch the effective `piece_work_rates` row for `(job_id, product_id)` as of today; if none, fall back to job default (no product).
-  - Store the selected piece rate via `piece_rate_id` on the line.
+  - When `piece`, time inputs are disabled and the effective `piece_work_rates` row is used for `(job_id, product_id)` as of today; if none, fallback to the job default (no product).
+  - The line stores `piece_rate_id` for auditability. The pairing check on `billoflabour` prevents invalid combinations.
 
 ### Create Job Modal
 
 - File: components/features/labor/create-job-modal.tsx:1
 - Purpose: Create a job inline during BOL entry; optionally pre-selects a category.
 - Behavior: Inserts into `jobs`, invalidates queries, and returns the created record to prefill the BOL form.
+
+### Piecework Rates Manager
+
+- File: components/features/labor/piecework-rates-manager.tsx:1
+- Features:
+  - Manage per-piece rates by job, with optional product-specific overrides.
+  - View versioned rate history for the selected job and scope (default vs product).
+  - Add new rate versions; UI computes end_date gaps similar to category hourly rates.
+- Job selection at scale:
+  - Optional Category filter; when selected, jobs list can be browsed immediately.
+  - Async searchable combobox for jobs with server-side pagination (25 per page) and debounce.
+  - If no category is selected, the user must type at least 3 characters to search.
+  - “Load more” appends the next page; “Create new job” opens the CreateJobModal and preselects the category.
+  - A “Reset filters” button (beneath the filters, left-aligned) clears Category, Job, Applies To, and Product selections.
 
 ## Calculations
 

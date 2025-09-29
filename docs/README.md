@@ -30,6 +30,7 @@ Welcome to the Unity ERP knowledge base. The documentation is now organized by t
   - Suppliers: [`domains/suppliers/suppliers-master.md`](domains/suppliers/suppliers-master.md)
 - Operations: [`operations/BOL_SYSTEM.md`](operations/BOL_SYSTEM.md)
 - Plans: [`plans/`](plans/) – implementation briefs such as `quoting-module-plan.md`, `time-attendance-plan.md`, and other project plans
+- New: [`plans/todo-module-plan.md`](plans/todo-module-plan.md) – To-Do module planning doc covering cross-module task assignments
 - Changelogs: [`changelogs/`](changelogs/)
 
 Use relative links when creating new docs so that navigation remains stable across moves. When referencing plans, prefer `docs/plans/...` paths to keep the directory consistent.

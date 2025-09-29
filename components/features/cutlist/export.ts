@@ -1,68 +1,48 @@
-import type { LayoutResult } from './packing';
-import { createQuoteClusterLine, fetchQuoteItemClusters, createQuoteItemCluster } from '@/lib/db/quotes';
+export type CutlistLineRefs = {
+  primary?: string | null;
+  backer?: string | null;
+  band16?: string | null;
+  band32?: string | null;
+};
+
+export type CutlistLineInput = {
+  description: string;
+  qty: number;
+  unit_cost?: number | null;
+  component_id?: number;
+};
 
 export async function exportCutlistToQuote(params: {
   quoteItemId: string;
-  result: LayoutResult;
-  sheetDescription?: string; // e.g., MELAMINE SHEET 2750×1830
-  edgeBandingDescription?: string; // e.g., EDGE BANDING (m)
-  pricePerSheet?: number | null;
-  pricePerMeterBanding?: number | null;
-  fractionalSheetQty?: number; // override default integer sheet count
-  chargeSheetsOverride?: number | null;
-  extraManualLines?: Array<{ description: string; qty: number; unit_cost?: number | null; component_id?: number }>; // optional component-backed lines
-  addDefaultSheetLine?: boolean; // default true
-  addDefaultBandingLine?: boolean; // default true
-}) {
-  const { quoteItemId, result, sheetDescription = 'MELAMINE SHEET', edgeBandingDescription = 'EDGE BANDING (m)', pricePerSheet = null, pricePerMeterBanding = null, fractionalSheetQty, chargeSheetsOverride, extraManualLines, addDefaultSheetLine = true, addDefaultBandingLine = true } = params;
+  existingLineRefs?: CutlistLineRefs;
+  primaryLine?: CutlistLineInput | null;
+  backerLine?: CutlistLineInput | null;
+  band16Line?: CutlistLineInput | null;
+  band32Line?: CutlistLineInput | null;
+}): Promise<CutlistLineRefs> {
+  const { quoteItemId, existingLineRefs = {}, primaryLine, backerLine, band16Line, band32Line } = params;
 
-  // Ensure a cluster exists for this item
-  let clusters = await fetchQuoteItemClusters(quoteItemId);
-  let targetCluster = clusters[0];
-  if (!targetCluster) {
-    targetCluster = await createQuoteItemCluster({ quote_item_id: quoteItemId, name: 'Costing Cluster', position: 0 });
+  const response = await fetch(`/api/quote-items/${quoteItemId}/cutlist/export`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      existingLineRefs,
+      lines: {
+        primary: primaryLine ?? null,
+        backer: backerLine ?? null,
+        band16: band16Line ?? null,
+        band32: band32Line ?? null,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(errorText || `Failed to export cutlist (status ${response.status})`);
   }
 
-  const sheetCount = chargeSheetsOverride != null ? chargeSheetsOverride : fractionalSheetQty != null ? fractionalSheetQty : result.sheets.length;
-  const bandingMeters = (result.stats.edgebanding_length_mm || 0) / 1000;
-
-  if (addDefaultSheetLine && sheetCount > 0) {
-    await createQuoteClusterLine({
-      cluster_id: targetCluster.id,
-      line_type: 'manual',
-      description: `${sheetDescription}`,
-      qty: Number(sheetCount.toFixed(3)),
-      unit_cost: pricePerSheet,
-      include_in_markup: true,
-      sort_order: 0,
-    });
-  }
-
-  if (addDefaultBandingLine && bandingMeters > 0.0001) {
-    await createQuoteClusterLine({
-      cluster_id: targetCluster.id,
-      line_type: 'manual',
-      description: `${edgeBandingDescription}`,
-      qty: Number(bandingMeters.toFixed(2)),
-      unit_cost: pricePerMeterBanding,
-      include_in_markup: true,
-      sort_order: 0,
-    });
-  }
-
-  for (const line of extraManualLines || []) {
-    if (!line || !(line.qty > 0)) continue;
-    await createQuoteClusterLine({
-      cluster_id: targetCluster.id,
-      line_type: line.component_id ? 'component' : 'manual',
-      description: line.description,
-      qty: Number(line.qty.toFixed(3)),
-      unit_cost: line.unit_cost ?? null,
-      include_in_markup: true,
-      component_id: line.component_id,
-      sort_order: 0,
-    } as any);
-  }
+  const json = await response.json();
+  return (json?.lineRefs ?? {}) as CutlistLineRefs;
 }
 
 

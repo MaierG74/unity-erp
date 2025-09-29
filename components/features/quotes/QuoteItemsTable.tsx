@@ -46,6 +46,7 @@ interface Props {
   items: QuoteItem[];
   onItemsChange: (items: QuoteItem[]) => void;
   attachmentsVersion?: number; // bump to force cells to refresh their local attachments
+  onItemAttachmentsChange?: (itemId: string, attachments: QuoteAttachment[]) => void;
 }
 
 // --- Attachments Cell Component ---
@@ -53,9 +54,10 @@ interface QuoteItemAttachmentsCellProps {
   quoteId: string;
   itemId: string;
   version?: number;
+  onItemAttachmentsChange?: (itemId: string, attachments: QuoteAttachment[]) => void;
 }
 
-function QuoteItemAttachmentsCell({ quoteId, itemId, version }: QuoteItemAttachmentsCellProps) {
+function QuoteItemAttachmentsCell({ quoteId, itemId, version, onItemAttachmentsChange }: QuoteItemAttachmentsCellProps) {
   const [attachments, setAttachments] = React.useState<QuoteAttachment[]>([]);
   const [isUploading, setIsUploading] = React.useState(false);
   const { toast } = useToast();
@@ -114,7 +116,12 @@ function QuoteItemAttachmentsCell({ quoteId, itemId, version }: QuoteItemAttachm
   };
 
   return (
-    <InlineAttachmentsCell quoteId={quoteId} itemId={itemId} version={version} />
+    <InlineAttachmentsCell
+      quoteId={quoteId}
+      itemId={itemId}
+      version={version}
+      onItemAttachmentsChange={onItemAttachmentsChange}
+    />
   );
 }
 
@@ -131,6 +138,7 @@ function QuoteItemRow({
   onEnsureCluster,
   onOpenCutlist,
   attachmentsVersion,
+  onItemAttachmentsChange,
 }: {
   item: QuoteItem;
   quoteId: string;
@@ -154,6 +162,7 @@ function QuoteItemRow({
   onEnsureCluster: (itemId: string) => void;
   onOpenCutlist: (itemId: string) => void;
   attachmentsVersion?: number;
+  onItemAttachmentsChange?: (itemId: string, attachments: QuoteAttachment[]) => void;
 }) {
   const [desc, setDesc] = React.useState(item.description);
   const [qty, setQty] = React.useState(item.qty);
@@ -167,7 +176,22 @@ function QuoteItemRow({
   React.useEffect(() => { setUnitPrice(item.unit_price); }, [item.unit_price]);
   React.useEffect(() => { setBpText(item.bullet_points || ''); }, [item.bullet_points]);
 
-  const cluster = item.quote_item_clusters?.[0];
+  const cluster = React.useMemo(() => {
+    if (!Array.isArray(item.quote_item_clusters) || item.quote_item_clusters.length === 0) {
+      return undefined;
+    }
+    const sorted = [...item.quote_item_clusters].sort((a, b) => {
+      const posA = a.position ?? 0;
+      const posB = b.position ?? 0;
+      if (posA !== posB) return posA - posB;
+      const timeA = new Date(a.created_at).getTime();
+      const timeB = new Date(b.created_at).getTime();
+      return timeA - timeB;
+    });
+    return (
+      sorted.find((c) => (c.quote_cluster_lines?.length ?? 0) > 0) ?? sorted[0]
+    );
+  }, [item.quote_item_clusters]);
 
   return (
     <React.Fragment>
@@ -187,7 +211,14 @@ function QuoteItemRow({
         <TableCell><Input type="number" value={qty} onChange={e => setQty(Number(e.target.value) || 0)} onBlur={() => { if (qty !== item.qty) onUpdate(item.id, 'qty', qty); }} onFocus={e => e.target.select()} /></TableCell>
         <TableCell><Input type="number" value={unitPrice} onChange={e => setUnitPrice(Number(e.target.value) || 0)} onBlur={() => { if (unitPrice !== item.unit_price) onUpdate(item.id, 'unit_price', unitPrice); }} onFocus={e => e.target.select()} /></TableCell>
         <TableCell>{(qty * unitPrice).toFixed(2)}</TableCell>
-        <TableCell><QuoteItemAttachmentsCell quoteId={quoteId} itemId={item.id} version={attachmentsVersion} /></TableCell>
+        <TableCell>
+          <QuoteItemAttachmentsCell
+            quoteId={quoteId}
+            itemId={item.id}
+            version={attachmentsVersion}
+            onItemAttachmentsChange={onItemAttachmentsChange}
+          />
+        </TableCell>
         <TableCell className="text-center">
           <div className="flex items-center justify-center gap-2">
             <Button variant="secondary" size="sm" className="px-3 py-1.5" onClick={() => setDetailsOpen(true)}>
@@ -257,7 +288,7 @@ function QuoteItemRow({
 }
 
 // --- Main Table Component ---
-export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachmentsVersion }: Props) {
+export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachmentsVersion, onItemAttachmentsChange }: Props) {
   const { toast } = useToast();
   const [showAddItemDialog, setShowAddItemDialog] = React.useState(false);
   const [cutlistOpen, setCutlistOpen] = React.useState<{ open: boolean; itemId?: string | null }>({ open: false, itemId: null });
@@ -686,6 +717,7 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
                 onEnsureCluster={ensureItemHasCluster}
                 onOpenCutlist={handleOpenCutlist}
                 attachmentsVersion={attachmentsVersion}
+                onItemAttachmentsChange={onItemAttachmentsChange}
               />
             ))}
           </TableBody>
