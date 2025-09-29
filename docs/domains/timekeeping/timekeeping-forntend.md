@@ -1,6 +1,6 @@
 # Timekeeping Frontend – Living Document
 
-This document describes the current frontend implementation of Time & Attendance in Unity ERP. It is meant to be a living reference for future changes. It focuses on the client-side flows, key files, query contracts, and UX patterns. See `docs/time-attendance-working.md` and `docs/time-attendance-plan.md` for deeper architecture and backend logic.
+This document describes the current frontend implementation of Time & Attendance in Unity ERP. It is meant to be a living reference for future changes. It focuses on the client-side flows, key files, query contracts, and UX patterns. See `docs/domains/timekeeping/time-attendance-working.md` and `docs/plans/time-attendance-plan.md` for deeper architecture and backend logic.
 
 ## High-level user flows
 
@@ -115,9 +115,9 @@ This document describes the current frontend implementation of Time & Attendance
   - Regular vs OT: first 9 hours regular, remainder OT (1.5×)
 
 See additional detail in:
-- `docs/time-attendance-working.md` – schema and performance notes
-- `docs/time-attendance-plan.md` – planned DB trigger to centralize deductions
-- `docs/master-plan.md` – global rules recap
+- `docs/domains/timekeeping/time-attendance-working.md` – schema and performance notes
+- `docs/plans/time-attendance-plan.md` – planned DB trigger to centralize deductions
+- `docs/overview/master-plan.md` – global rules recap
 
 ## Pages and navigation
 

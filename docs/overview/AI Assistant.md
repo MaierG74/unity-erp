@@ -45,7 +45,7 @@ These map to current tables (from Supabase) like `components`, `inventory`, `inv
   - “Show [staff] work segments for [date]” → existing segments/events logic, with careful filtering and timezone handling.
 
 - Knowledge and Onboarding
-  - “How do I publish a collection?” → RAG over `docs/` (e.g., `docs/subcomponent-planning-and-execution.md`) to answer from our own documentation.
+  - “How do I publish a collection?” → RAG over `docs/` (e.g., `docs/domains/components/subcomponent-planning-and-execution.md`) to answer from our own documentation.
   - “Explain this screen” → page-scoped assistant that knows UI routes and relevant docs.
 
 ---

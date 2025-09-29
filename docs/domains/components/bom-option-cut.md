@@ -1,10 +1,10 @@
 # BOM Options & Cutlist Integration Plan
 
 ## Background & References
-- Current product creation & BOM tooling is documented in `docs/product-creation-guide.md`, including the Product BOM UI and supplier-aware component rows.
-- Cost rollups for materials and labour are planned in `docs/product-costing-plan.md`; option-driven BOM changes must keep costing consistent.
-- Quoting flows (`docs/quoting-module-plan.md`) already explode product BOMs into quote clusters, which we should extend to respect option selections.
-- Cutlist expectations (`docs/cuttingplan.md` and `docs/cutlist-nesting-plan.md`) outline how sheet optimisations consume BOM data flagged as cut parts.
+- Current product creation & BOM tooling is documented in `docs/domains/components/product-creation-guide.md`, including the Product BOM UI and supplier-aware component rows.
+- Cost rollups for materials and labour are planned in `docs/plans/product-costing-plan.md`; option-driven BOM changes must keep costing consistent.
+- Quoting flows (`docs/plans/quoting-module-plan.md`) already explode product BOMs into quote clusters, which we should extend to respect option selections.
+- Cutlist expectations (`docs/operations/cuttingplan.md` and `docs/plans/cutlist-nesting-plan.md`) outline how sheet optimisations consume BOM data flagged as cut parts.
 
 ## Goals
 1. Allow each product to define configurable option groups (e.g., handle style, carcass finish, lock inclusion).

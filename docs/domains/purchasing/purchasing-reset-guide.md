@@ -35,4 +35,4 @@
 
 **Related Docs**
 
-- `docs/purchasing-master.md`
+- `docs/domains/purchasing/purchasing-master.md`

@@ -286,8 +286,8 @@ If fully implemented, the following files/directories will be touched or added:
   - `components/features/products/product-bol.tsx` — labor counterpart
   - `app/products/[productId]/page.tsx` — wire dialogs and refresh after changes
   - `components/features/products/AddFromCollectionDialog.tsx` — preview now shows component code and description
-  - `docs/STYLE_GUIDE.md` — confirm patterns (already updated with action styles and image frames)
-  - `docs/product-creation-guide.md` — link to this document
+  - `docs/overview/STYLE_GUIDE.md` — confirm patterns (already updated with action styles and image frames)
+  - `docs/domains/components/product-creation-guide.md` — link to this document
 
 ## Migration Sketch (Postgres)
 

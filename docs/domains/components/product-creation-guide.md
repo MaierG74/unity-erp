@@ -115,7 +115,7 @@ CREATE TABLE public.billoflabour (
   - **Categories**: Category assignment management
 - **Bill of Materials**: Component requirements
 - **Bill of Labor**: Labor requirements
-- **Costing**: Combined materials + labor unit cost summary (see `docs/product-costing-plan.md`)
+- **Costing**: Combined materials + labor unit cost summary (see `docs/plans/product-costing-plan.md`)
 - Edit Product button reserved for future full‑form editing
 - Consistent styling across tabs:
   - Delete actions use `destructiveSoft` (pastel in light, strong in dark)
@@ -195,7 +195,7 @@ API endpoint backing this action:
 - Status: available behind feature flag `NEXT_PUBLIC_FEATURE_ATTACH_BOM=true`. With the flag on, totals use the effective BOM (explicit + attached); the table still shows explicit rows.
 - Initial scope: follow latest only; later we’ll support pinning to a published snapshot/version.
 - Controls: scale factor; mode (phantom now, stocked later); quick actions to bake (convert link to rows) or detach (planned).
-- See: `docs/subcomponent-planning-and-execution.md` → “Phase 2 — Attach Product (Dynamic Link)”.
+- See: `docs/domains/components/subcomponent-planning-and-execution.md` → “Phase 2 — Attach Product (Dynamic Link)”.
 
 ##### Decisions Pending (BOM)
 - Merge duplicates on Apply (sum by `component_id`) vs keep separate rows; consider a user toggle on apply.
@@ -251,7 +251,7 @@ API endpoint backing this action:
    - Implemented. See "Product Deletion" section below.
 
 4. **Product Costing Tab**
-   - Planned. See `docs/product-costing-plan.md` for UX and data model. Will surface Unit Cost and detailed breakdowns.
+   - Planned. See `docs/plans/product-costing-plan.md` for UX and data model. Will surface Unit Cost and detailed breakdowns.
 
 ## Product Deletion
 
