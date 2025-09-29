@@ -92,7 +92,7 @@ chosen = first where product_id = $productId
   - Cost and totals updated to support mixed basis.
 - Costing UI: `components/features/products/product-costing.tsx`
   - Reads `pay_type` and joins `piece_work_rates`; mixed line computations; header label “Rate”.
-- Docs updated: `docs/BOL_SYSTEM.md`, `docs/labor-section.md`, `docs/product-costing-plan.md` with piecework model and behavior.
+- Docs updated: `docs/operations/BOL_SYSTEM.md`, `docs/domains/timekeeping/labor-section.md`, `docs/plans/product-costing-plan.md` with piecework model and behavior.
 
 ## Validation & Rules
 - UI prevents entering time when pay type is Piecework.

@@ -97,8 +97,8 @@
 
 **Cleanup & Reset**
 
-- See `docs/orders-reset-guide.md` for test/dev cleanup.
-- Helper scripts: `scripts/cleanup-orders.ts` and `scripts/cleanup-purchasing.ts` can be used to reset data; Purchasing can be cleaned independently (see `docs/purchasing-reset-guide.md`).
+- See `docs/domains/orders/orders-reset-guide.md` for test/dev cleanup.
+- Helper scripts: `scripts/cleanup-orders.ts` and `scripts/cleanup-purchasing.ts` can be used to reset data; Purchasing can be cleaned independently (see `docs/domains/purchasing/purchasing-reset-guide.md`).
 
 **Related Schema References**
 
@@ -119,9 +119,9 @@
   - Delete `order_attachments` DB rows and delete the corresponding storage files under `qbutton/Orders/Customer/<customer_id>/`.
   - Delete `order_details` rows before deleting the `orders` headers.
   - Refresh component views if you use them to compute requirements: `SELECT refresh_component_views();`.
-- Purchasing can be cleaned independently (see `docs/purchasing-reset-guide.md`). If you do not also delete POs, the POs and supplier orders remain but will no longer be linked to any order.
+- Purchasing can be cleaned independently (see `docs/domains/purchasing/purchasing-reset-guide.md`). If you do not also delete POs, the POs and supplier orders remain but will no longer be linked to any order.
 
 **Recommended Status Workflow**
 
 - New → In Progress → Completed or Cancelled.
-- Cancel instead of delete in production to preserve auditability. For test/dev, see `docs/orders-reset-guide.md` for a safe deletion path.
+- Cancel instead of delete in production to preserve auditability. For test/dev, see `docs/domains/orders/orders-reset-guide.md` for a safe deletion path.

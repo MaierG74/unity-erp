@@ -137,4 +137,4 @@ Status: Implemented. Default is Consume on Ship; enable Consume on Add in Settin
 - UI: app/orders/[orderId]/page.tsx
 - RPCs: db/migrations/20250917_fg_phase2_reservations.sql and follow‑ups
 - Components views/functions: sql/create_component_views.sql
-- Related docs: docs/orders-master.md, docs/components-section.md
+- Related docs: docs/domains/orders/orders-master.md, docs/domains/components/components-section.md

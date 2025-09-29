@@ -42,7 +42,7 @@ Commands:
 **Post‑Cleanup**
 
 - Refresh component views if used: `SELECT refresh_component_views();`
-- Optional: Run Purchasing reset if you want a fully clean pipeline (see `docs/purchasing-reset-guide.md`).
+- Optional: Run Purchasing reset if you want a fully clean pipeline (see `docs/domains/purchasing/purchasing-reset-guide.md`).
 
 **Caveats**
 

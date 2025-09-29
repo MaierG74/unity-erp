@@ -159,4 +159,4 @@
 
 **Reset & Cleanup**
 
-- See `docs/purchasing-reset-guide.md` for the scoped cleanup script, dry‑run steps, and safeguards when clearing only Purchasing data.
+- See `docs/domains/purchasing/purchasing-reset-guide.md` for the scoped cleanup script, dry‑run steps, and safeguards when clearing only Purchasing data.

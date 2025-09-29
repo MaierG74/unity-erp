@@ -18,6 +18,6 @@ Branch: September
 
 ## Docs
 - Updated:
-  - docs/subproduct.md
-  - docs/orders-master.md
-  - docs/components-section.md
+  - docs/domains/components/subproduct.md
+  - docs/domains/orders/orders-master.md
+  - docs/domains/components/components-section.md

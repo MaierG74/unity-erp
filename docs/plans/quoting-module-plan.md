@@ -99,7 +99,7 @@ Action Plan
 Next up
 - Persist `selected_options` when converting quotes to orders and expose them in order detail editors.
 - Display configuration chips in quote line summary and include in PDF exports.
-- Mirror option-aware BOM handling in direct order entry so quotes and orders stay in sync (see `docs/orders-master.md`).
+- Mirror option-aware BOM handling in direct order entry so quotes and orders stay in sync (see `docs/domains/orders/orders-master.md`).
 
 Open Questions
 - Source of product default price? Use `products.unit_price` if available; otherwise compute from BOM or leave 0 and prompt to update.
@@ -172,7 +172,7 @@ Provide a flexible, auditable, and user-friendly quoting workflow that supports:
 - **Margin Analysis Dashboard** – see cost vs sell, margin % by quote/item.
 - **Mobile-first Quick Quote** – simplified flow for on-site quoting.
 - **Dynamic BOM Expansion** – explode assemblies into parts on quote.
-- **Cutlist / Nesting Tool** – see `docs/cutlist-nesting-plan.md` for the planning doc and MVP.
+- **Cutlist / Nesting Tool** – see `docs/plans/cutlist-nesting-plan.md` for the planning doc and MVP.
 
 ---
 

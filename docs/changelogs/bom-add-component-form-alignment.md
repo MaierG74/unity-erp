@@ -1,7 +1,7 @@
 # BOM Add Component Form – Alignment & Dropdown UX
 
 Date: 2025-09-12
-Files: `components/features/products/product-bom.tsx`, `docs/STYLE_GUIDE.md`
+Files: `components/features/products/product-bom.tsx`, `docs/overview/STYLE_GUIDE.md`
 
 ## Summary
 Cleaned up the Add Component form in the Bill of Materials (BOM) UI:
