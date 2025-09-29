@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { packPartsIntoSheets, type PartSpec, type StockSheetSpec, type LayoutResult } from './packing';
 import { Trash2 } from 'lucide-react';
 import { SheetPreview } from './preview';
-import { exportCutlistToQuote } from '@/components/features/cutlist/export';
+import { exportCutlistToQuote, type CutlistLineRefs, type CutlistLineInput } from '@/components/features/cutlist/export';
 import ComponentSelectionDialog from '@/components/features/quotes/ComponentSelectionDialog';
 
 export interface CutlistToolProps {
@@ -34,12 +34,20 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
   const [allowRotation, setAllowRotation] = React.useState(true);
   const [singleSheetOnly, setSingleSheetOnly] = React.useState(false);
   const [kerf, setKerf] = React.useState(3);
-  const [activeTab, setActiveTab] = React.useState<'inputs' | 'stock' | 'results'>('inputs');
   const [result, setResult] = React.useState<LayoutResult | null>(null);
+  const [activeTab, setActiveTab] = React.useState<'inputs' | 'stock' | 'results'>('inputs');
   const [backerResult, setBackerResult] = React.useState<LayoutResult | null>(null);
   const [sheetOverrides, setSheetOverrides] = React.useState<Record<string, { mode: 'auto' | 'full' | 'manual'; manualPct: number }>>({});
   const [globalFullBoard, setGlobalFullBoard] = React.useState(false);
   const [zoomSheetId, setZoomSheetId] = React.useState<string | null>(null);
+  const [isLoadingSnapshot, setIsLoadingSnapshot] = React.useState(false);
+  const [isSavingSnapshot, setIsSavingSnapshot] = React.useState(false);
+  const [isExporting, setIsExporting] = React.useState(false);
+  const [snapshotError, setSnapshotError] = React.useState<string | null>(null);
+  const [lastSavedAt, setLastSavedAt] = React.useState<string | null>(null);
+  const [lineRefs, setLineRefs] = React.useState<CutlistLineRefs>({});
+  const restoringSnapshotRef = React.useRef(false);
+  const autoSaveTimeoutRef = React.useRef<number | null>(null);
 
   // Costing state
   const [primarySheetDescription, setPrimarySheetDescription] = React.useState<string>('MELAMINE SHEET');
@@ -60,6 +68,296 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
   const [pickerFor, setPickerFor] = React.useState<null | 'primary' | 'backer' | 'band16' | 'band32'>(null);
 
   const sheet = stock[0];
+
+  const normalizeNullableNumber = (value: number | '' | null | undefined) =>
+    typeof value === 'number' && !Number.isNaN(value) ? value : null;
+
+  const hydrateNumberInput = (value: number | null | undefined): number | '' =>
+    value == null || Number.isNaN(value) ? '' : value;
+
+  type SnapshotLayout = {
+    result: LayoutResult;
+    backerResult: LayoutResult | null;
+    parts: Array<PartSpec & { label?: string }>;
+    stock: StockSheetSpec[];
+    kerf: number;
+    allowRotation: boolean;
+    singleSheetOnly: boolean;
+    costing: {
+      primarySheetDescription: string;
+      primaryPricePerSheet: number | null;
+      backerSheetDescription: string;
+      backerPricePerSheet: number | null;
+      bandingDesc16: string;
+      bandingPrice16: number | null;
+      bandingDesc32: string;
+      bandingPrice32: number | null;
+      primaryComponent: SelectedComponent;
+      backerComponent: SelectedComponent;
+      band16Component: SelectedComponent;
+      band32Component: SelectedComponent;
+    };
+  };
+
+  type SnapshotBilling = {
+    globalFullBoard: boolean;
+    sheetOverrides: Record<string, { mode: 'auto' | 'full' | 'manual'; manualPct: number }>;
+    lineRefs?: CutlistLineRefs;
+  };
+
+  const buildSnapshotPayload = React.useCallback(
+    (overrides?: {
+      result?: LayoutResult | null;
+      backerResult?: LayoutResult | null;
+      sheetOverrides?: Record<string, { mode: 'auto' | 'full' | 'manual'; manualPct: number }>;
+      globalFullBoard?: boolean;
+      parts?: Array<PartSpec & { label?: string }>;
+      stock?: StockSheetSpec[];
+      lineRefs?: CutlistLineRefs;
+    }) => {
+      const snapshotResult = overrides?.result ?? result;
+      if (!quoteItemId || !snapshotResult) return null;
+      const snapshotBacker = overrides?.backerResult ?? backerResult ?? null;
+      const snapshotParts = overrides?.parts ?? parts;
+      const snapshotStock = overrides?.stock ?? stock;
+      const snapshotSheetOverrides = overrides?.sheetOverrides ?? sheetOverrides;
+      const snapshotGlobalFullBoard = overrides?.globalFullBoard ?? globalFullBoard;
+      const snapshotLineRefs = overrides?.lineRefs ?? lineRefs;
+
+      const layout: SnapshotLayout = {
+        result: snapshotResult,
+        backerResult: snapshotBacker,
+        parts: snapshotParts,
+        stock: snapshotStock,
+        kerf,
+        allowRotation,
+        singleSheetOnly,
+        costing: {
+          primarySheetDescription,
+          primaryPricePerSheet: normalizeNullableNumber(primaryPricePerSheet),
+          backerSheetDescription,
+          backerPricePerSheet: normalizeNullableNumber(backerPricePerSheet),
+          bandingDesc16,
+          bandingPrice16: normalizeNullableNumber(bandingPrice16),
+          bandingDesc32,
+          bandingPrice32: normalizeNullableNumber(bandingPrice32),
+          primaryComponent,
+          backerComponent,
+          band16Component,
+          band32Component,
+        },
+      };
+
+      const billing: SnapshotBilling = {
+        globalFullBoard: snapshotGlobalFullBoard,
+        sheetOverrides: snapshotSheetOverrides,
+        lineRefs: snapshotLineRefs,
+      };
+
+      const optionsHash = JSON.stringify({
+        parts: snapshotParts,
+        stock: snapshotStock,
+        kerf,
+        allowRotation,
+        singleSheetOnly,
+      });
+
+      return { layout, billing, optionsHash } as const;
+    },
+    [
+      allowRotation,
+      backerResult,
+      band16Component,
+      band32Component,
+      bandingDesc16,
+      bandingDesc32,
+      bandingPrice16,
+      bandingPrice32,
+      globalFullBoard,
+      kerf,
+      lineRefs,
+      parts,
+      primaryComponent,
+      primaryPricePerSheet,
+      primarySheetDescription,
+      quoteItemId,
+      result,
+      sheetOverrides,
+      singleSheetOnly,
+      stock,
+      backerComponent,
+      backerPricePerSheet,
+      backerSheetDescription,
+    ]
+  );
+
+  const persistSnapshot = React.useCallback(
+    async (
+      payload: ReturnType<typeof buildSnapshotPayload>,
+      reason: 'manual' | 'auto' | 'export' = 'manual'
+    ) => {
+      if (!quoteItemId || !payload) return;
+      setIsSavingSnapshot(true);
+      setSnapshotError(null);
+      try {
+        const res = await fetch(`/api/quote-items/${quoteItemId}/cutlist`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            layout: payload.layout,
+            billingOverrides: payload.billing,
+            optionsHash: payload.optionsHash,
+          }),
+        });
+        if (!res.ok) {
+          const message = await res.text();
+          throw new Error(message || `Failed to save snapshot (${res.status})`);
+        }
+        const json = await res.json();
+        const updatedAt: string | undefined = json?.cutlist?.updated_at;
+        if (updatedAt) {
+          setLastSavedAt(updatedAt);
+        } else {
+          setLastSavedAt(new Date().toISOString());
+        }
+      } catch (err) {
+        console.error('persistSnapshot error', err);
+        setSnapshotError(err instanceof Error ? err.message : 'Unknown error saving snapshot');
+      } finally {
+        setIsSavingSnapshot(false);
+      }
+    },
+    [buildSnapshotPayload, quoteItemId]
+  );
+
+  React.useEffect(() => {
+    if (!quoteItemId) {
+      setLastSavedAt(null);
+      setSnapshotError(null);
+      return;
+    }
+
+    let cancelled = false;
+    async function loadSnapshot() {
+      setIsLoadingSnapshot(true);
+      setSnapshotError(null);
+      restoringSnapshotRef.current = true;
+      try {
+        const res = await fetch(`/api/quote-items/${quoteItemId}/cutlist`, { cache: 'no-store' });
+        if (cancelled) return;
+        if (res.status === 204) {
+          setLastSavedAt(null);
+          return;
+        }
+        if (!res.ok) {
+          const message = await res.text();
+          throw new Error(message || `Failed to load snapshot (${res.status})`);
+        }
+        const json = await res.json();
+        const cutlist = json?.cutlist;
+        if (!cutlist) return;
+
+        const layout = cutlist.layout_json as SnapshotLayout | undefined;
+        const billing = (cutlist.billing_overrides as SnapshotBilling | undefined) ?? null;
+
+        if (layout?.parts?.length) {
+          setParts(layout.parts as any);
+        }
+        if (layout?.stock?.length) {
+          setStock(layout.stock as any);
+        }
+        if (typeof layout?.kerf === 'number') {
+          setKerf(layout.kerf);
+        }
+        if (typeof layout?.allowRotation === 'boolean') {
+          setAllowRotation(layout.allowRotation);
+        }
+        if (typeof layout?.singleSheetOnly === 'boolean') {
+          setSingleSheetOnly(layout.singleSheetOnly);
+        }
+        if (layout?.costing) {
+          setPrimarySheetDescription(layout.costing.primarySheetDescription ?? 'MELAMINE SHEET');
+          setPrimaryPricePerSheet(hydrateNumberInput(layout.costing.primaryPricePerSheet));
+          setBackerSheetDescription(layout.costing.backerSheetDescription ?? 'BACKER BOARD');
+          setBackerPricePerSheet(hydrateNumberInput(layout.costing.backerPricePerSheet));
+          setBandingDesc16(layout.costing.bandingDesc16 ?? 'EDGE BANDING 16mm (m)');
+          setBandingPrice16(hydrateNumberInput(layout.costing.bandingPrice16));
+          setBandingDesc32(layout.costing.bandingDesc32 ?? 'EDGE BANDING 32mm (m)');
+          setBandingPrice32(hydrateNumberInput(layout.costing.bandingPrice32));
+          setPrimaryComponent(layout.costing.primaryComponent ?? null);
+          setBackerComponent(layout.costing.backerComponent ?? null);
+          setBand16Component(layout.costing.band16Component ?? null);
+          setBand32Component(layout.costing.band32Component ?? null);
+        }
+        if (layout?.result) {
+          setResult(layout.result);
+          onResultsChange?.(layout.result);
+        }
+        if (layout?.backerResult) {
+          setBackerResult(layout.backerResult);
+        } else {
+          setBackerResult(null);
+        }
+
+        if (billing) {
+          setGlobalFullBoard(Boolean(billing.globalFullBoard));
+          setSheetOverrides(billing.sheetOverrides ?? {});
+          setLineRefs(billing.lineRefs ?? {});
+        } else {
+          setGlobalFullBoard(false);
+          setSheetOverrides({});
+          setLineRefs({});
+        }
+
+        if (cutlist.updated_at) {
+          setLastSavedAt(cutlist.updated_at as string);
+        }
+      } catch (err) {
+        console.error('loadSnapshot error', err);
+        if (!cancelled) {
+          setSnapshotError(err instanceof Error ? err.message : 'Failed to load cutlist snapshot');
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingSnapshot(false);
+          window.setTimeout(() => {
+            restoringSnapshotRef.current = false;
+          }, 0);
+        }
+      }
+    }
+
+    loadSnapshot();
+
+    return () => {
+      cancelled = true;
+      if (autoSaveTimeoutRef.current) {
+        window.clearTimeout(autoSaveTimeoutRef.current);
+        autoSaveTimeoutRef.current = null;
+      }
+    };
+  }, [onResultsChange, quoteItemId]);
+
+  React.useEffect(() => {
+    if (!quoteItemId || !result) return;
+    if (restoringSnapshotRef.current) return;
+    if (autoSaveTimeoutRef.current) {
+      window.clearTimeout(autoSaveTimeoutRef.current);
+    }
+    const payload = buildSnapshotPayload();
+    if (!payload) return;
+    autoSaveTimeoutRef.current = window.setTimeout(() => {
+      persistSnapshot(payload, 'auto');
+      autoSaveTimeoutRef.current = null;
+    }, 800);
+
+    return () => {
+      if (autoSaveTimeoutRef.current) {
+        window.clearTimeout(autoSaveTimeoutRef.current);
+        autoSaveTimeoutRef.current = null;
+      }
+    };
+  }, [buildSnapshotPayload, persistSnapshot, quoteItemId, result, sheetOverrides, globalFullBoard, lineRefs]);
 
   const addPartRow = () => {
     const nextIndex = parts.length + 1;
@@ -95,8 +393,17 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
         .map(p => ({ ...p, grain: 'any', require_grain: undefined, band_edges: undefined } as PartSpec));
       const resBacker = packPartsIntoSheets(backerParts, normalized, { allowRotation: true, singleSheetOnly });
       setBackerResult(resBacker);
+      const payload = buildSnapshotPayload({
+        result: res,
+        backerResult: resBacker,
+        sheetOverrides: {},
+        globalFullBoard: false,
+      });
+      if (payload) persistSnapshot(payload, 'manual');
     } else {
       setBackerResult(null);
+      const payload = buildSnapshotPayload({ result: res, sheetOverrides: {}, globalFullBoard: false });
+      if (payload) persistSnapshot(payload, 'manual');
     }
     setActiveTab('results');
     onResultsChange?.(res);
@@ -106,71 +413,66 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
     if (!result) return;
     // If a quote item id is provided, export directly with costing
     if (quoteItemId) {
+      setIsExporting(true);
       const laminationOn = parts.some(p => p.laminate);
       const pricePerSheetVal = primaryPricePerSheet === '' ? (primaryComponent?.unit_cost ?? null) : Number(primaryPricePerSheet);
       const backerPriceVal = backerPricePerSheet === '' ? (backerComponent?.unit_cost ?? null) : Number(backerPricePerSheet);
-      // Build extra lines (component-backed when available)
-      const allExtras: Array<{ description: string; qty: number; unit_cost?: number | null; component_id?: number; supplier_component_id?: number }> = [];
       const chargePrimarySheets = primaryChargeSheets;
       const chargeBackerSheets = backerChargeSheets;
-      // Primary sheet as its own line (we'll suppress default by sending fractionalSheetQty=0)
-      if (chargePrimarySheets > 0.0001) {
-        allExtras.push({
-          description: primaryComponent?.description || primarySheetDescription,
-          qty: chargePrimarySheets,
-          unit_cost: pricePerSheetVal ?? undefined,
-          component_id: primaryComponent?.component_id,
-          supplier_component_id: primaryComponent?.supplier_component_id,
-        });
-      }
-      // Backer sheet if applicable
-      if (backerResult && chargeBackerSheets > 0.0001 && laminationOn) {
-        allExtras.push({
-          description: backerComponent?.description || backerSheetDescription,
-          qty: chargeBackerSheets,
-          unit_cost: backerPriceVal ?? undefined,
-          component_id: backerComponent?.component_id,
-          supplier_component_id: backerComponent?.supplier_component_id,
-        });
-      }
-      // Banding 16mm and 32mm
-      if (bandLen16 > 0.0001) {
-        allExtras.push({
-          description: band16Component?.description || bandingDesc16,
-          qty: bandLen16 / 1000,
-          unit_cost: band16Component?.unit_cost ?? (bandingPrice16 === '' ? null : Number(bandingPrice16)) ?? undefined,
-          component_id: band16Component?.component_id,
-          supplier_component_id: band16Component?.supplier_component_id,
-        });
-      }
-      if (bandLen32 > 0.0001) {
-        allExtras.push({
-          description: band32Component?.description || bandingDesc32,
-          qty: bandLen32 / 1000,
-          unit_cost: band32Component?.unit_cost ?? (bandingPrice32 === '' ? null : Number(bandingPrice32)) ?? undefined,
-          component_id: band32Component?.component_id,
-          supplier_component_id: band32Component?.supplier_component_id,
-        });
-      }
+
+      const primaryLine: CutlistLineInput | null = chargePrimarySheets > 0.0001
+        ? {
+            description: primaryComponent?.description || primarySheetDescription,
+            qty: chargePrimarySheets,
+            unit_cost: pricePerSheetVal ?? undefined,
+            component_id: primaryComponent?.component_id,
+          }
+        : null;
+
+      const backerLine: CutlistLineInput | null = backerResult && chargeBackerSheets > 0.0001 && laminationOn
+        ? {
+            description: backerComponent?.description || backerSheetDescription,
+            qty: chargeBackerSheets,
+            unit_cost: backerPriceVal ?? undefined,
+            component_id: backerComponent?.component_id,
+          }
+        : null;
+
+      const band16Line: CutlistLineInput | null = bandLen16 > 0.0001
+        ? {
+            description: band16Component?.description || bandingDesc16,
+            qty: bandLen16 / 1000,
+            unit_cost: band16Component?.unit_cost ?? (bandingPrice16 === '' ? null : Number(bandingPrice16)) ?? undefined,
+            component_id: band16Component?.component_id,
+          }
+        : null;
+
+      const band32Line: CutlistLineInput | null = bandLen32 > 0.0001
+        ? {
+            description: band32Component?.description || bandingDesc32,
+            qty: bandLen32 / 1000,
+            unit_cost: band32Component?.unit_cost ?? (bandingPrice32 === '' ? null : Number(bandingPrice32)) ?? undefined,
+            component_id: band32Component?.component_id,
+          }
+        : null;
 
       try {
-        await exportCutlistToQuote({
+        const updatedRefs = await exportCutlistToQuote({
           quoteItemId,
-          result,
-          sheetDescription: '',
-          edgeBandingDescription: '',
-          pricePerSheet: null,
-          pricePerMeterBanding: null,
-          fractionalSheetQty: 0,
-          addDefaultSheetLine: false,
-          addDefaultBandingLine: false,
-          extraManualLines: allExtras,
-          chargeSheetsOverride: chargePrimarySheets,
+          existingLineRefs: lineRefs,
+          primaryLine,
+          backerLine,
+          band16Line,
+          band32Line,
         });
-        // Notify parent so it can close dialog and optionally expand cluster
+        setLineRefs(updatedRefs);
+        const payload = buildSnapshotPayload({ lineRefs: updatedRefs });
+        if (payload) persistSnapshot(payload, 'export');
         onExportSuccess?.();
       } catch (e) {
         console.error('Cutlist export failed:', e);
+      } finally {
+        setIsExporting(false);
       }
     } else {
       onExport?.(result);
@@ -459,6 +761,13 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
                 {backerResult && <Stat label="Backer sheets" value={`${backerSheetsFractional.toFixed(3)}`} />}
                 {backerResult && <Stat label="Billable backer" value={`${backerChargeSheets.toFixed(3)}`} />}
               </div>
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <div>
+                  {isLoadingSnapshot ? 'Loading saved snapshot…' : lastSavedAt ? `Last saved ${new Date(lastSavedAt).toLocaleString()}` : 'No saved snapshot yet'}
+                  {snapshotError ? ` — Save issue: ${snapshotError}` : ''}
+                </div>
+                <div>{isSavingSnapshot ? 'Saving…' : null}</div>
+              </div>
               <div className="flex items-center gap-3 bg-muted/40 border rounded px-3 py-2">
                 <Switch id="full-board-switch" checked={globalFullBoard} onCheckedChange={(v) => setGlobalFullBoard(Boolean(v))} />
                 <Label htmlFor="full-board-switch" className="text-sm">Charge full sheet for every used board</Label>
@@ -564,7 +873,6 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
                               variant="link"
                               size="sm"
                               className="h-auto px-1"
-                              disabled={globalFullBoard || (!override && mode === 'auto')}
                               onClick={() => {
                                 setSheetOverrides(prev => {
                                   const next = { ...prev };
@@ -584,7 +892,9 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
               </div>
               {(onExport || quoteItemId) && (
                 <div className="pt-2">
-                  <Button onClick={handleExport}>Export to Quote</Button>
+                  <Button onClick={handleExport} disabled={isExporting}>
+                    {isExporting ? 'Exporting…' : 'Export to Quote'}
+                  </Button>
                 </div>
               )}
             </div>
@@ -623,4 +933,3 @@ function Stat({ label, value, unit }: { label: string; value: string; unit?: str
     </div>
   );
 }
-

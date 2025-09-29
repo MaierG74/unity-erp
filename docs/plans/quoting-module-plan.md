@@ -10,6 +10,7 @@
 - Add Component dialog aligned with STYLE_GUIDE modal pattern: header/title, compact body spacing, scrollable content area, and footer actions with `h-9` buttons. Borders standardized to `border-input` for lists and selections.
 
 ### 2025-09-22 – UX polish
+- Quote items now prefer the first costing cluster that actually contains lines, falling back to an empty shell when no lines exist. Cluster lists and their lines are sorted by `position`/`created_at` and `sort_order` respectively so re-fetching data no longer hides valid cost entries when Supabase returns rows in a different order.
 - Creating a Costing Cluster with the “+ Cluster” button no longer reloads the page. The cluster is created and added to the item state optimistically, keeping the user on the Line Items tab.
 - Cutlist “Export to Quote” now updates the affected item’s cluster lines in place and closes the dialog, without a full page reload. The active tab remains on Line Items.
 - Add Component dialog: component list stays hidden until the user types in the search field, preventing the dialog from resizing on open. “Browse by supplier” moved to the top-right header.

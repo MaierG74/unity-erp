@@ -35,12 +35,15 @@ Time fields guidance:
 ## UI/UX
 
 ### Labor Management (`/labor`)
-- Existing tabs: Job Categories, Jobs.
-- Planned new tab: Piecework Rates.
-  - CRUD job‑ and product‑level rates with effective date ranges.
+- Tabs: Job Categories, Jobs, Piecework Rates.
+  - Piecework Rates: CRUD job‑ and product‑level rates with effective date ranges.
   - “Applies to”: All products (job default) or Specific product.
   - List history with current effective highlighted; prevent overlapping ranges.
   - Optional bulk apply by product category (future).
+  - Job selection at scale:
+    - Optional Category filter; if not selected, users must type at least 3 characters to search.
+    - Server-side pagination with page size 25 and debounced search (~300ms).
+    - “Create New Job” inline via CreateJobModal with category preselected when available.
 
 ### Product BOL (on product page)
 - Component: `components/features/products/product-bol.tsx`
@@ -95,6 +98,7 @@ chosen = first where product_id = $productId
 - Docs updated: `docs/operations/BOL_SYSTEM.md`, `docs/domains/timekeeping/labor-section.md`, `docs/plans/product-costing-plan.md` with piecework model and behavior.
 
 ## Validation & Rules
+- Jobs search: min 3 characters when no category filter; 25 items per page; prevents loading hundreds of rows into the dropdown.
 - UI prevents entering time when pay type is Piecework.
 - DB constraints ensure a BOL line can’t be saved with an invalid pairing of rate refs.
 - Overlapping rate ranges: hourly uniqueness already exists (on start date); for piecework, consider adding an exclusion constraint if needed.

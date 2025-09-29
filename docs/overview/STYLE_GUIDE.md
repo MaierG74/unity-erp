@@ -53,7 +53,7 @@ This guide documents how we style the app: Tailwind CSS utilities + shadcn/ui pr
 - __Background layering__
   - Page: `bg-background`
   - Contained surfaces: `bg-card` + `border`
-  - Popovers/menus: `bg-popover` + `border`
+- Popovers/menus: `bg-popover` + `border`
   - Subtle areas/chips: `bg-muted` (ensure text uses `text-foreground` or within a labeled control)
 
 - __Borders & elevation__
@@ -255,3 +255,11 @@ This guide documents how we style the app: Tailwind CSS utilities + shadcn/ui pr
 ---
 
 This guide will evolve. When introducing a new pattern, add a short snippet here and prefer extending existing primitives/variants over introducing ad-hoc styles.
+- __Nested accordions (override editor pattern)__
+  - Group header: `bg-card` + `shadow-sm`, rounded corners, summary copy (`text-xs text-muted-foreground`).
+  - Value rows: border with `bg-muted/20`, expand to `bg-card/80` for form sections.
+  - Indicators: use `ChevronDown` with rotation transition.
+  - Summary text: show quick status (“Uses base BOM row”, “Qty Δ 1 • Cutlist”) in `text-muted-foreground`.
+  - Buttons inside expanded panel: right-aligned, `Button size="sm"` for Save/Clear.
+  - Ensure collapse/expand states are accessible via `button` + `aria-expanded` (handled by default state toggles).
+  - Component picker popovers use `bg-popover`, `z-[80]`, and a manual list (buttons) to avoid pointer-capture issues inside dialogs; input search field sits at top with icon, list entries render as full-width buttons.

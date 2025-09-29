@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, Search, X } from 'lucide-react';
+import { Loader2, Search, X, ChevronDown } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 
@@ -98,6 +98,11 @@ export function BOMOverrideDialog({
   const { toast } = useToast();
   const [componentQuery, setComponentQuery] = useState('');
   const [draftGroups, setDraftGroups] = useState<OptionGroupDraft[]>([]);
+  const [expandedGroups, setExpandedGroups] = useState<Record<number, boolean>>({});
+  const [expandedValues, setExpandedValues] = useState<Record<number, boolean>>({});
+  const [openPickerFor, setOpenPickerFor] = useState<number | null>(null);
+  const [pendingSaveId, setPendingSaveId] = useState<number | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
 
   const enabled = open && typeof bomId === 'number';
 
@@ -116,6 +121,16 @@ export function BOMOverrideDialog({
     }
     return map;
   }, [data]);
+
+  const hasOverrideData = (value: OptionValueDraft) =>
+    Boolean(
+      value.replace_component_id != null ||
+        value.replace_supplier_component_id != null ||
+        value.quantity_delta != null ||
+        value.notes ||
+        value.is_cutlist_item != null ||
+        value.cutlist_category
+    );
 
   useEffect(() => {
     if (data?.groups) {
@@ -145,19 +160,47 @@ export function BOMOverrideDialog({
         }),
       }));
       setDraftGroups(transformed);
+
+      setExpandedGroups((prev) => {
+        const next: Record<number, boolean> = { ...prev };
+        for (const group of transformed) {
+          if (!(group.option_group_id in next)) {
+            const configured = group.values.some((value) => hasOverrideData(value));
+            next[group.option_group_id] = configured;
+          }
+        }
+        return next;
+      });
+
+      setExpandedValues((prev) => {
+        const next: Record<number, boolean> = { ...prev };
+        for (const group of transformed) {
+          for (const value of group.values) {
+            if (!(value.option_value_id in next)) {
+              next[value.option_value_id] = hasOverrideData(value);
+            }
+          }
+        }
+        return next;
+      });
     } else {
       setDraftGroups([]);
+      setExpandedGroups({});
+      setExpandedValues({});
     }
   }, [data, overridesByValue]);
 
   useEffect(() => {
     if (!open) {
       setComponentQuery('');
+      setOpenPickerFor(null);
     }
   }, [open]);
 
   const saveMutation = useMutation({
-    mutationFn: async (payload: { option_value_id: number; data: OverrideRecord }) => {
+    mutationFn: async (
+      payload: { option_value_id: number; data: OverrideRecord; valueLabel: string; componentLabel: string }
+    ) => {
       const res = await fetch(`/api/products/${productId}/options/bom/${bomId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -169,13 +212,22 @@ export function BOMOverrideDialog({
       }
       return res.json();
     },
-   onSuccess: () => {
-     queryClient.invalidateQueries({ queryKey: ['bomOverrides', productId, bomId] });
+    onMutate: (variables) => {
+      setPendingSaveId(variables.option_value_id);
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['bomOverrides', productId, bomId] });
       queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
-      toast({ title: 'Override saved' });
+      toast({
+        title: 'Override saved',
+        description: `${variables.valueLabel} now uses ${variables.componentLabel}`,
+      });
     },
     onError: (error: any) => {
       toast({ variant: 'destructive', title: 'Error saving override', description: error?.message });
+    },
+    onSettled: () => {
+      setPendingSaveId(null);
     },
   });
 
@@ -192,13 +244,25 @@ export function BOMOverrideDialog({
       }
       return res.json();
     },
-   onSuccess: () => {
-     queryClient.invalidateQueries({ queryKey: ['bomOverrides', productId, bomId] });
+    onMutate: (optionValueId) => {
+      setPendingDeleteId(optionValueId);
+    },
+    onSuccess: (_data, optionValueId) => {
+      queryClient.invalidateQueries({ queryKey: ['bomOverrides', productId, bomId] });
       queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
-      toast({ title: 'Override cleared' });
+      const clearedValue = draftGroups
+        .flatMap((group) => group.values)
+        .find((value) => value.option_value_id === optionValueId);
+      toast({
+        title: 'Override cleared',
+        description: clearedValue ? `${clearedValue.label} reverted to base BOM row` : undefined,
+      });
     },
     onError: (error: any) => {
       toast({ variant: 'destructive', title: 'Error clearing override', description: error?.message });
+    },
+    onSettled: () => {
+      setPendingDeleteId(null);
     },
   });
 
@@ -223,7 +287,36 @@ export function BOMOverrideDialog({
     );
   };
 
+  const hasChanged = (value: OptionValueDraft) => {
+    const current = overridesByValue.get(value.option_value_id);
+    if (!current) {
+      return (
+        value.replace_component_id != null ||
+        value.replace_supplier_component_id != null ||
+        value.quantity_delta != null ||
+        value.notes ||
+        value.is_cutlist_item != null ||
+        value.cutlist_category
+      );
+    }
+    return (
+      current.replace_component_id !== (value.replace_component_id ?? null) ||
+      current.replace_supplier_component_id !== (value.replace_supplier_component_id ?? null) ||
+      Number(current.quantity_delta ?? null) !== (value.quantity_delta ?? null) ||
+      (current.notes ?? null) !== (value.notes ?? null) ||
+      (current.is_cutlist_item ?? null) !== (value.is_cutlist_item ?? null) ||
+      (current.cutlist_category ?? null) !== (value.cutlist_category ?? null)
+    );
+  };
+
   const handleSave = (value: OptionValueDraft) => {
+    if (!hasChanged(value)) {
+      toast({ title: 'No changes to save', description: `${value.label} is already up to date.` });
+      return;
+    }
+    const componentLabel = value.replace_component_id
+      ? components.find((c) => c.component_id === value.replace_component_id)?.internal_code || 'selected component'
+      : 'base BOM row';
     saveMutation.mutate({
       option_value_id: value.option_value_id,
       data: {
@@ -236,6 +329,8 @@ export function BOMOverrideDialog({
         cutlist_dimensions: value.cutlist_dimensions ?? null,
         attributes: value.attributes ?? null,
       },
+      valueLabel: value.label,
+      componentLabel,
     });
   };
 
@@ -245,13 +340,23 @@ export function BOMOverrideDialog({
 
   const renderComponentPicker = (value: OptionValueDraft) => {
     const selected = value.replace_component_id ? components.find((c) => c.component_id === value.replace_component_id) : null;
+    const popoverOpen = openPickerFor === value.option_value_id;
     return (
-      <Popover>
+      <Popover
+        open={popoverOpen}
+        onOpenChange={(next) => {
+          if (next) {
+            setComponentQuery('');
+            setOpenPickerFor(value.option_value_id);
+          } else if (openPickerFor === value.option_value_id) {
+            setOpenPickerFor(null);
+          }
+        }}
+      >
         <PopoverTrigger asChild>
           <Button
             variant="outline"
             className="justify-between w-full h-9 bg-background"
-            onClick={() => setComponentQuery('')}
           >
             {selected ? (
               <span>
@@ -264,49 +369,98 @@ export function BOMOverrideDialog({
             <Search className="ml-2 h-4 w-4 opacity-60" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-[420px] p-0 border border-border bg-popover text-popover-foreground shadow-xl">
-          <Command className="bg-popover">
-            <CommandInput
-              placeholder="Search code or description…"
-              value={componentQuery}
-              onValueChange={setComponentQuery}
-              className="h-9"
-            />
-            <CommandList className="max-h-72 overflow-y-auto">
-              <CommandEmpty>No components found.</CommandEmpty>
-              <CommandGroup>
-                {filteredComponents.map((component) => (
-                  <CommandItem
-                    key={component.component_id}
-                    value={component.internal_code || String(component.component_id)}
-                    onSelect={() => {
-                      setDraftValue(value.option_value_id, (prev) => ({
-                        ...prev,
-                        replace_component_id: component.component_id,
-                      }));
-                    }}
-                    className={cn(
-                      'flex flex-col items-start gap-1 px-3 py-2 text-sm rounded-md',
-                      'aria-selected:bg-primary/10 aria-selected:text-primary'
-                    )}
-                  >
-                    <span className="font-medium text-foreground">{component.internal_code || 'Component'}</span>
-                    {component.description && (
-                      <span className="text-xs text-muted-foreground">{component.description}</span>
-                    )}
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </CommandList>
-          </Command>
+        <PopoverContent className="z-[80] w-[420px] border border-border bg-popover text-popover-foreground shadow-xl" align="start" sideOffset={4}>
+          <div className="p-2">
+            <div className="relative mb-2">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                autoFocus
+                placeholder="Search code or description…"
+                value={componentQuery}
+                onChange={(e) => setComponentQuery(e.target.value)}
+                className="h-9 w-full pl-9"
+              />
+            </div>
+            <div className="max-h-64 overflow-y-auto">
+              {filteredComponents.length === 0 ? (
+                <div className="px-3 py-6 text-center text-sm text-muted-foreground">No components found.</div>
+              ) : (
+                <ul className="space-y-1">
+                  {filteredComponents.map((component) => (
+                    <li key={component.component_id}>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          setDraftValue(value.option_value_id, (prev) => ({
+                            ...prev,
+                            replace_component_id: component.component_id,
+                          }));
+                          setOpenPickerFor(null);
+                        }}
+                        className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted focus:bg-muted"
+                      >
+                        <div className="font-medium text-foreground">{component.internal_code || 'Component'}</div>
+                        {component.description && (
+                          <div className="text-xs text-muted-foreground">{component.description}</div>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
         </PopoverContent>
       </Popover>
     );
   };
 
+  const toggleGroup = (groupId: number) => {
+    setExpandedGroups((prev) => ({
+      ...prev,
+      [groupId]: !(prev[groupId] ?? true),
+    }));
+  };
+
+  const toggleValue = (valueId: number) => {
+    setExpandedValues((prev) => ({
+      ...prev,
+      [valueId]: !(prev[valueId] ?? false),
+    }));
+  };
+
+  const valueSummary = (value: OptionValueDraft) => {
+    const parts: string[] = [];
+    if (value.replace_component_id) {
+      const component = components.find((c) => c.component_id === value.replace_component_id);
+      if (component) {
+        parts.push(component.internal_code || 'Replacement component');
+      }
+    }
+    if (value.quantity_delta != null && value.quantity_delta !== 0) {
+      parts.push(`Qty Δ ${value.quantity_delta}`);
+    }
+    if (value.is_cutlist_item) {
+      parts.push('Cutlist');
+    }
+    return parts.length > 0 ? parts.join(' • ') : 'Uses base BOM row';
+  };
+
+  const groupSummary = (group: OptionGroupDraft) => {
+    const total = group.values.length;
+    const configured = group.values.filter(hasOverrideData).length;
+    if (configured === 0) return `${total} value${total === 1 ? '' : 's'}`;
+    if (configured === total) return `All ${total} configured`;
+    return `${configured} of ${total} configured`;
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl">
+        {openPickerFor !== null && (
+          <div className="pointer-events-none fixed inset-0 z-40 bg-background/70 backdrop-blur-sm" />
+        )}
         <DialogHeader>
           <DialogTitle>Configure Option Overrides</DialogTitle>
           <DialogDescription>
@@ -333,136 +487,185 @@ export function BOMOverrideDialog({
           </div>
         ) : (
           <div className="space-y-6 max-h-[65vh] overflow-y-auto pr-1">
-            {draftGroups.map((group) => (
-              <div key={group.option_group_id} className="rounded-lg border p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="font-medium">{group.label}</h4>
-                    <p className="text-xs text-muted-foreground">Code: {group.code}</p>
-                  </div>
-                  <Badge variant={group.is_required ? 'default' : 'outline'}>
-                    {group.is_required ? 'Required' : 'Optional'}
-                  </Badge>
-                </div>
-
-                <div className="space-y-4">
-                  {group.values.map((value) => (
-                    <div key={value.option_value_id} className="rounded-md border bg-muted/20 p-4 space-y-3">
-                      <div className="flex flex-wrap items-center gap-3 justify-between">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold">{value.label}</span>
-                            {value.is_default && <Badge>Default</Badge>}
-                          </div>
-                          <div className="text-xs text-muted-foreground">Code: {value.code}</div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleClear(value)}
-                            disabled={deleteMutation.isLoading}
-                          >
-                            Clear override
-                          </Button>
-                          <Button
-                            size="sm"
-                            onClick={() => handleSave(value)}
-                            disabled={saveMutation.isLoading}
-                          >
-                            Save
-                          </Button>
-                        </div>
+            {draftGroups.map((group) => {
+              const groupOpen = expandedGroups[group.option_group_id] ?? true;
+              return (
+                <div key={group.option_group_id} className="rounded-lg border bg-background">
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(group.option_group_id)}
+                    className="flex w-full items-center justify-between gap-3 rounded-lg bg-card px-4 py-4 shadow-sm"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-medium text-foreground">{group.label}</h4>
+                        <Badge variant={group.is_required ? 'default' : 'outline'}>
+                          {group.is_required ? 'Required' : 'Optional'}
+                        </Badge>
                       </div>
-
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <div className="space-y-2">
-                          <Label>Replacement component</Label>
-                          {renderComponentPicker(value)}
-                          {value.replace_component_id && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="mt-1 h-8 px-2 text-xs text-muted-foreground"
-                              onClick={() =>
-                                setDraftValue(value.option_value_id, (prev) => ({
-                                  ...prev,
-                                  replace_component_id: null,
-                                }))
-                              }
-                            >
-                              <X className="h-3 w-3 mr-1" /> Remove selection
-                            </Button>
-                          )}
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor={`qty-${value.option_value_id}`}>Quantity delta</Label>
-                          <Input
-                            id={`qty-${value.option_value_id}`}
-                            type="number"
-                            value={value.quantity_delta ?? ''}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setDraftValue(value.option_value_id, (prev) => ({
-                                ...prev,
-                                quantity_delta: val === '' ? null : Number(val),
-                              }));
-                            }}
-                            placeholder="e.g., -1 to remove default component"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <div className="space-y-2">
-                          <Label htmlFor={`cat-${value.option_value_id}`}>Cutlist category (optional)</Label>
-                          <Input
-                            id={`cat-${value.option_value_id}`}
-                            value={value.cutlist_category ?? ''}
-                            onChange={(e) =>
-                              setDraftValue(value.option_value_id, (prev) => ({
-                                ...prev,
-                                cutlist_category: e.target.value || null,
-                              }))
-                            }
-                          />
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <Checkbox
-                            id={`cutlist-${value.option_value_id}`}
-                            checked={Boolean(value.is_cutlist_item)}
-                            onCheckedChange={(checked) =>
-                              setDraftValue(value.option_value_id, (prev) => ({
-                                ...prev,
-                                is_cutlist_item: Boolean(checked),
-                              }))
-                            }
-                          />
-                          <Label htmlFor={`cutlist-${value.option_value_id}`} className="text-sm">
-                            Treat override as cutlist item
-                          </Label>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor={`notes-${value.option_value_id}`}>Notes (optional)</Label>
-                        <Textarea
-                          id={`notes-${value.option_value_id}`}
-                          value={value.notes ?? ''}
-                          onChange={(e) =>
-                            setDraftValue(value.option_value_id, (prev) => ({
-                              ...prev,
-                              notes: e.target.value || null,
-                            }))
-                          }
-                          rows={2}
-                        />
-                      </div>
+                      <p className="text-xs text-muted-foreground">{groupSummary(group)}</p>
                     </div>
-                  ))}
+                    <ChevronDown
+                      className={cn(
+                        'h-4 w-4 shrink-0 text-muted-foreground transition-transform',
+                        groupOpen ? 'rotate-180' : 'rotate-0'
+                      )}
+                    />
+                  </button>
+
+                  {groupOpen && (
+                    <div className="space-y-3 border-t border-border bg-muted/20 px-3 py-3">
+                      {group.values.map((value) => {
+                        const valueOpen = expandedValues[value.option_value_id] ?? false;
+                        return (
+                          <div key={value.option_value_id} className="rounded-md border bg-muted/10">
+                            <button
+                              type="button"
+                          onClick={() => toggleValue(value.option_value_id)}
+                          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+                        >
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-foreground">{value.label}</span>
+                              {value.is_default && <Badge>Default</Badge>}
+                            </div>
+                            <div className="text-xs text-muted-foreground">{valueSummary(value)}</div>
+                          </div>
+                          <ChevronDown
+                            className={cn(
+                              'h-4 w-4 shrink-0 text-muted-foreground transition-transform',
+                              valueOpen ? 'rotate-180' : 'rotate-0'
+                            )}
+                          />
+                        </button>
+
+                        {valueOpen && (
+                          <div className="space-y-4 border-t border-border bg-card/80 px-4 py-4">
+                            <div className="flex flex-wrap items-center gap-2 justify-end">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleClear(value)}
+                                disabled={pendingDeleteId === value.option_value_id}
+                              >
+                                {pendingDeleteId === value.option_value_id ? (
+                                  <span className="flex items-center gap-1">
+                                    <Loader2 className="h-3 w-3 animate-spin" /> Clearing…
+                                  </span>
+                                ) : (
+                                  'Clear override'
+                                )}
+                              </Button>
+                              <Button
+                                size="sm"
+                                onClick={() => handleSave(value)}
+                                disabled={pendingSaveId === value.option_value_id || !hasChanged(value)}
+                              >
+                                {pendingSaveId === value.option_value_id ? (
+                                  <span className="flex items-center gap-1">
+                                    <Loader2 className="h-3 w-3 animate-spin" /> Saving…
+                                  </span>
+                                ) : hasChanged(value) ? (
+                                  'Save'
+                                ) : (
+                                  'Saved'
+                                )}
+                              </Button>
+                            </div>
+
+                            <div className="grid gap-3 md:grid-cols-2">
+                              <div className="space-y-2">
+                                <Label>Replacement component</Label>
+                                {renderComponentPicker(value)}
+                                {value.replace_component_id && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="mt-1 h-8 px-2 text-xs text-muted-foreground"
+                                    onClick={() =>
+                                      setDraftValue(value.option_value_id, (prev) => ({
+                                        ...prev,
+                                        replace_component_id: null,
+                                      }))
+                                    }
+                                  >
+                                    <X className="h-3 w-3 mr-1" /> Remove selection
+                                  </Button>
+                                )}
+                              </div>
+                              <div className="space-y-2">
+                                <Label htmlFor={`qty-${value.option_value_id}`}>Quantity delta</Label>
+                                <Input
+                                  id={`qty-${value.option_value_id}`}
+                                  type="number"
+                                  value={value.quantity_delta ?? ''}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setDraftValue(value.option_value_id, (prev) => ({
+                                      ...prev,
+                                      quantity_delta: val === '' ? null : Number(val),
+                                    }));
+                                  }}
+                                  placeholder="e.g., -1 to remove default component"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="grid gap-3 md:grid-cols-2">
+                              <div className="space-y-2">
+                                <Label htmlFor={`cat-${value.option_value_id}`}>Cutlist category (optional)</Label>
+                                <Input
+                                  id={`cat-${value.option_value_id}`}
+                                  value={value.cutlist_category ?? ''}
+                                  onChange={(e) =>
+                                    setDraftValue(value.option_value_id, (prev) => ({
+                                      ...prev,
+                                      cutlist_category: e.target.value || null,
+                                    }))
+                                  }
+                                />
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <Checkbox
+                                  id={`cutlist-${value.option_value_id}`}
+                                  checked={Boolean(value.is_cutlist_item)}
+                                  onCheckedChange={(checked) =>
+                                    setDraftValue(value.option_value_id, (prev) => ({
+                                      ...prev,
+                                      is_cutlist_item: Boolean(checked),
+                                    }))
+                                  }
+                                />
+                                <Label htmlFor={`cutlist-${value.option_value_id}`} className="text-sm">
+                                  Treat override as cutlist item
+                                </Label>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor={`notes-${value.option_value_id}`}>Notes (optional)</Label>
+                              <Textarea
+                                id={`notes-${value.option_value_id}`}
+                                value={value.notes ?? ''}
+                                onChange={(e) =>
+                                  setDraftValue(value.option_value_id, (prev) => ({
+                                    ...prev,
+                                    notes: e.target.value || null,
+                                  }))
+                                }
+                                rows={2}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
