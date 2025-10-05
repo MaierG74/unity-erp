@@ -148,32 +148,100 @@ export async function fetchProductOptionGroups(productId: number): Promise<Produ
       return [];
     }
 
-    if (!Array.isArray(data)) {
-      return [];
+    const productGroups = Array.isArray(data)
+      ? data.map((group: any) => {
+          const valuesRaw = Array.isArray(group?.product_option_values) ? group.product_option_values : [];
+          const values = valuesRaw
+            .map((value: any) => ({
+              option_value_id: Number(value.option_value_id),
+              code: value.code ?? String(value.option_value_id),
+              label: value.label ?? value.code ?? String(value.option_value_id),
+              is_default: Boolean(value.is_default),
+              attributes: value.attributes ?? null,
+              display_order: Number(value.display_order ?? 0),
+            }))
+            .sort((a: ProductOptionValue, b: ProductOptionValue) => a.display_order - b.display_order);
+
+          return {
+            option_group_id: Number(group.option_group_id),
+            code: group.code ?? String(group.option_group_id),
+            label: group.label ?? group.code ?? String(group.option_group_id),
+            is_required: Boolean(group.is_required),
+            display_order: Number(group.display_order ?? 0),
+            values,
+          } as ProductOptionGroup;
+        })
+      : [];
+
+    const optionSetGroups: ProductOptionGroup[] = [];
+    try {
+      const res = await fetch(`/api/products/${productId}/option-sets`, { cache: 'no-store' });
+      if (res.ok) {
+        const json = await res.json();
+        const links = Array.isArray(json.links) ? json.links : [];
+        for (const link of links) {
+          const linkId = Number(link.link_id);
+          const groupOverlays = Array.isArray(link.product_option_group_overlays) ? link.product_option_group_overlays : [];
+          const valueOverlays = Array.isArray(link.product_option_value_overlays) ? link.product_option_value_overlays : [];
+          const optionSet = link.option_set;
+          const groups = Array.isArray(optionSet?.option_set_groups) ? optionSet.option_set_groups : [];
+
+          for (const group of groups) {
+            const overlay = groupOverlays.find((item: any) => Number(item.option_set_group_id) === Number(group.option_set_group_id));
+            if (overlay?.hide) continue;
+
+            const valuesRaw = Array.isArray(group.option_set_values) ? group.option_set_values : [];
+            const values = valuesRaw
+              .map((value: any) => {
+                const valueOverlay = valueOverlays.find(
+                  (item: any) => Number(item.option_set_value_id) === Number(value.option_set_value_id)
+                );
+                if (valueOverlay?.hide) return null;
+                const isDefault =
+                  valueOverlay?.is_default != null ? Boolean(valueOverlay.is_default) : Boolean(value.is_default);
+                return {
+                  option_value_id: -Number(value.option_set_value_id),
+                  code: value.code ?? String(value.option_set_value_id),
+                  label: valueOverlay?.alias_label?.length ? valueOverlay.alias_label : value.label ?? value.code ?? String(value.option_set_value_id),
+                  is_default: isDefault,
+                  attributes: value.attributes ?? null,
+                  display_order: Number(value.display_order ?? 0),
+                } as ProductOptionValue;
+              })
+              .filter(Boolean)
+              .sort((a: ProductOptionValue, b: ProductOptionValue) => a.display_order - b.display_order);
+
+            if (values.length === 0) continue;
+
+            const label = overlay?.alias_label?.length ? overlay.alias_label : group.label ?? group.code ?? String(group.option_set_group_id);
+            const isRequired = overlay?.is_required != null ? Boolean(overlay.is_required) : Boolean(group.is_required);
+            const displayOrder = Number(group.display_order ?? 0) + Number(link.display_order ?? 0) * 1000;
+
+            optionSetGroups.push({
+              option_group_id: -Number(group.option_set_group_id),
+              code: group.code ?? String(group.option_set_group_id),
+              label,
+              is_required: isRequired,
+              display_order: displayOrder,
+              values,
+            });
+          }
+        }
+      }
+    } catch (optionSetError) {
+      console.warn('fetchProductOptionGroups option set fetch error:', optionSetError);
     }
 
-    return data.map((group: any) => {
-      const valuesRaw = Array.isArray(group?.product_option_values) ? group.product_option_values : [];
-      const values = valuesRaw
-        .map((value: any) => ({
-          option_value_id: Number(value.option_value_id),
-          code: value.code ?? String(value.option_value_id),
-          label: value.label ?? value.code ?? String(value.option_value_id),
-          is_default: Boolean(value.is_default),
-          attributes: value.attributes ?? null,
-          display_order: Number(value.display_order ?? 0),
-        }))
-        .sort((a: ProductOptionValue, b: ProductOptionValue) => a.display_order - b.display_order);
-
-      return {
-        option_group_id: Number(group.option_group_id),
-        code: group.code ?? String(group.option_group_id),
-        label: group.label ?? group.code ?? String(group.option_group_id),
-        is_required: Boolean(group.is_required),
-        display_order: Number(group.display_order ?? 0),
-        values,
-      } as ProductOptionGroup;
+    const combined = [...productGroups, ...optionSetGroups];
+    combined.sort((a, b) => {
+      const aSet = a.option_group_id < 0;
+      const bSet = b.option_group_id < 0;
+      if (aSet !== bSet) return aSet ? 1 : -1;
+      if (a.display_order !== b.display_order) return a.display_order - b.display_order;
+      return a.code.localeCompare(b.code);
     });
+
+    return combined;
   } catch (error) {
     console.warn('fetchProductOptionGroups error:', error);
     return [];

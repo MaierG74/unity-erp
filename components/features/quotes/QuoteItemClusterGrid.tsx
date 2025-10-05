@@ -1,5 +1,5 @@
 import React, { FC, useState } from 'react';
-import { QuoteItemCluster, QuoteClusterLine, fetchProductComponents } from '@/lib/db/quotes';
+import { QuoteItemCluster, QuoteClusterLine, fetchProductComponents, formatCurrency } from '@/lib/db/quotes';
 import QuoteClusterLineRow from './QuoteClusterLineRow';
 import ComponentSelectionDialog from './ComponentSelectionDialog';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
@@ -41,11 +41,11 @@ const QuoteItemClusterGrid: FC<QuoteItemClusterGridProps> = ({
 }) => {
   const [showComponentDialog, setShowComponentDialog] = useState(false);
   const [markupType, setMarkupType] = useState<'percentage' | 'fixed'>('percentage');
-  const [localMarkupValue, setLocalMarkupValue] = useState(cluster.markup_percent || 0);
+  const [localMarkupValue, setLocalMarkupValue] = useState<string>(String(cluster.markup_percent || 0));
   
   // Update local state when cluster markup changes from external source
   React.useEffect(() => {
-    setLocalMarkupValue(cluster.markup_percent || 0);
+    setLocalMarkupValue(String(cluster.markup_percent || 0));
   }, [cluster.markup_percent]);
   
   const sortedLines = React.useMemo(() => {
@@ -68,8 +68,8 @@ const QuoteItemClusterGrid: FC<QuoteItemClusterGridProps> = ({
   
   // Calculate markup amount using local value for immediate UI feedback
   const markupAmount = markupType === 'percentage' 
-    ? (subtotal * (localMarkupValue || 0) / 100)
-    : (localMarkupValue || 0); // When fixed, we store the fixed amount in markup_percent field
+    ? (subtotal * (Number(localMarkupValue) || 0) / 100)
+    : (Number(localMarkupValue) || 0); // When fixed, we store the fixed amount in markup_percent field
   
   // Calculate total with markup
   const totalWithMarkup = subtotal + markupAmount;
@@ -88,21 +88,22 @@ const QuoteItemClusterGrid: FC<QuoteItemClusterGridProps> = ({
   };
   
   const handleMarkupChange = (value: string) => {
-    const numValue = parseFloat(value) || 0;
-    setLocalMarkupValue(numValue);
+    setLocalMarkupValue(value);
   };
   
   const handleMarkupBlur = () => {
+    const numValue = parseFloat(localMarkupValue) || 0;
     // Only save to database if value actually changed
-    if (localMarkupValue !== cluster.markup_percent) {
-      onUpdateCluster(cluster.id, { markup_percent: localMarkupValue });
+    if (numValue !== cluster.markup_percent) {
+      onUpdateCluster(cluster.id, { markup_percent: numValue });
     }
+    setLocalMarkupValue(String(numValue));
   };
   
   const handleMarkupTypeChange = (type: 'percentage' | 'fixed') => {
     setMarkupType(type);
     // Reset markup to 0 when changing type to avoid confusion
-    setLocalMarkupValue(0);
+    setLocalMarkupValue('0');
     onUpdateCluster(cluster.id, { markup_percent: 0 });
   };
 
@@ -158,7 +159,7 @@ const QuoteItemClusterGrid: FC<QuoteItemClusterGridProps> = ({
             {/* Subtotal Row */}
             <TableRow className="bg-muted/30 border-t border-border">
               <TableHead className="text-xs font-semibold text-foreground" colSpan={4}>Subtotal</TableHead>
-              <TableHead className="text-xs font-semibold text-right text-foreground">R{subtotal.toFixed(2)}</TableHead>
+              <TableHead className="text-xs font-semibold text-right text-foreground">{formatCurrency(subtotal)}</TableHead>
               <TableHead></TableHead>
             </TableRow>
             
@@ -188,20 +189,20 @@ const QuoteItemClusterGrid: FC<QuoteItemClusterGridProps> = ({
                   />
                 </div>
               </TableHead>
-              <TableHead className="text-xs font-semibold text-right text-foreground">R{markupAmount.toFixed(2)}</TableHead>
+              <TableHead className="text-xs font-semibold text-right text-foreground">{formatCurrency(markupAmount)}</TableHead>
               <TableHead></TableHead>
             </TableRow>
             
             {/* Total Row */}
             <TableRow className="bg-primary/10 border-t-2 border-primary/20">
               <TableHead className="text-sm font-bold text-foreground" colSpan={4}>Total</TableHead>
-              <TableHead className="text-sm font-bold text-right text-foreground">R{totalWithMarkup.toFixed(2)}</TableHead>
+              <TableHead className="text-sm font-bold text-right text-foreground">{formatCurrency(totalWithMarkup)}</TableHead>
               <TableHead>
                 {onUpdateItemPrice && itemId && (
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => onUpdateItemPrice(itemId, totalWithMarkup)}
+                    onClick={() => onUpdateItemPrice(itemId, Math.round(totalWithMarkup * 100) / 100)}
                     className="text-xs h-6 px-2"
                     title="Update line item price with this total"
                   >

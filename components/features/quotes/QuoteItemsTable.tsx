@@ -18,6 +18,7 @@ import {
   QuoteAttachment,
   uploadQuoteAttachment,
   fetchQuoteItemAttachments,
+  formatCurrency,
   deleteQuoteAttachment,
   Component,
   fetchComponents,
@@ -165,15 +166,15 @@ function QuoteItemRow({
   onItemAttachmentsChange?: (itemId: string, attachments: QuoteAttachment[]) => void;
 }) {
   const [desc, setDesc] = React.useState(item.description);
-  const [qty, setQty] = React.useState(item.qty);
-  const [unitPrice, setUnitPrice] = React.useState(item.unit_price);
+  const [qty, setQty] = React.useState<string>(String(item.qty));
+  const [unitPrice, setUnitPrice] = React.useState<string>(String(Math.round((item.unit_price || 0) * 100) / 100));
   const [isExpanded, setIsExpanded] = React.useState(false);
   const [detailsOpen, setDetailsOpen] = React.useState(false);
   const [bpText, setBpText] = React.useState<string>(item.bullet_points || '');
 
   React.useEffect(() => { setDesc(item.description); }, [item.description]);
-  React.useEffect(() => { setQty(item.qty); }, [item.qty]);
-  React.useEffect(() => { setUnitPrice(item.unit_price); }, [item.unit_price]);
+  React.useEffect(() => { setQty(String(item.qty)); }, [item.qty]);
+  React.useEffect(() => { setUnitPrice(String(Math.round((item.unit_price || 0) * 100) / 100)); }, [item.unit_price]);
   React.useEffect(() => { setBpText(item.bullet_points || ''); }, [item.bullet_points]);
 
   const cluster = React.useMemo(() => {
@@ -208,9 +209,9 @@ function QuoteItemRow({
           )}
         </TableCell>
         <TableCell><Input value={desc} onChange={e => setDesc(e.target.value)} onBlur={() => { if (desc !== item.description) onUpdate(item.id, 'description', desc); }} onFocus={e => e.target.select()} /></TableCell>
-        <TableCell><Input type="number" value={qty} onChange={e => setQty(Number(e.target.value) || 0)} onBlur={() => { if (qty !== item.qty) onUpdate(item.id, 'qty', qty); }} onFocus={e => e.target.select()} /></TableCell>
-        <TableCell><Input type="number" value={unitPrice} onChange={e => setUnitPrice(Number(e.target.value) || 0)} onBlur={() => { if (unitPrice !== item.unit_price) onUpdate(item.id, 'unit_price', unitPrice); }} onFocus={e => e.target.select()} /></TableCell>
-        <TableCell>{(qty * unitPrice).toFixed(2)}</TableCell>
+        <TableCell><Input type="number" value={qty} onChange={e => setQty(e.target.value)} onBlur={() => { const numQty = Number(qty) || 0; if (numQty !== item.qty) onUpdate(item.id, 'qty', numQty); setQty(String(numQty)); }} onFocus={e => e.target.select()} /></TableCell>
+        <TableCell><Input type="number" step="0.01" value={unitPrice} onChange={e => setUnitPrice(e.target.value)} onBlur={() => { const numPrice = Math.round((Number(unitPrice) || 0) * 100) / 100; if (numPrice !== item.unit_price) onUpdate(item.id, 'unit_price', numPrice); setUnitPrice(String(numPrice)); }} onFocus={e => e.target.select()} /></TableCell>
+        <TableCell className="text-right font-medium">{formatCurrency((Number(qty) || 0) * (Number(unitPrice) || 0))}</TableCell>
         <TableCell>
           <QuoteItemAttachmentsCell
             quoteId={quoteId}
@@ -694,10 +695,10 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
           <TableHeader>
             <TableRow className="bg-muted/50">
               <TableHead className="w-12 text-center"></TableHead>
-              <TableHead className="w-1/3 font-medium">Description</TableHead>
-              <TableHead className="w-20 text-center font-medium">Qty</TableHead>
-              <TableHead className="w-24 text-center font-medium">Unit Price</TableHead>
-              <TableHead className="w-24 text-center font-medium">Total</TableHead>
+              <TableHead className="font-medium">Description</TableHead>
+              <TableHead className="w-32 text-center font-medium">Qty</TableHead>
+              <TableHead className="w-36 text-center font-medium">Unit Price</TableHead>
+              <TableHead className="w-40 text-right font-medium">Total</TableHead>
               <TableHead className="w-28 text-center font-medium">Attachments</TableHead>
               <TableHead className="w-40 text-center font-medium">Actions</TableHead>
             </TableRow>

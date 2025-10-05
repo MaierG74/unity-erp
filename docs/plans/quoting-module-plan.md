@@ -1,7 +1,46 @@
 # Unity ERP – Quoting Module Implementation Plan
 
 ---
-## Status / UI Changelog (2025-09-07)
+## Status / UI Changelog
+
+### 2025-10-04 – Currency Formatting (ZAR), Column Width Optimization & Number Input UX
+- **Currency Formatting**: Implemented consistent South African Rand (ZAR) currency formatting across all quote displays
+  - Updated `QuoteItemsTable.tsx`: Line item totals now display with proper ZAR formatting (e.g., "R 63,828.60")
+  - Updated `QuoteClusterLineRow.tsx`: Cluster line totals now use ZAR formatting
+  - Updated `QuoteItemClusterGrid.tsx`: Subtotal, markup, and total calculations display in ZAR format
+  - Updated `app/quotes/page.tsx`: Quote listing grand totals formatted as ZAR
+  - Updated `app/quotes/[id]/working-page.tsx`: Pricing summary (subtotal, VAT, grand total) formatted as ZAR
+  - All formatting uses `formatCurrency()` utility from `lib/quotes.ts` with `en-ZA` locale and proper thousand separators
+- **Currency Precision**: All currency values automatically rounded to 2 decimal places
+  - Unit prices and unit costs rounded using `Math.round(value * 100) / 100` on blur/submit
+  - Currency values also rounded when displayed (initialization and prop updates) to clean up existing data
+  - "Update Price" button in costing cluster rounds total before setting unit price
+  - Added `step="0.01"` attribute to all currency input fields
+  - Updated components: `QuoteItemsTable`, `QuoteClusterLineRow`, `QuoteItemClusterGrid`, `ComponentSelectionDialog`, `AddQuoteItemDialog`
+  - Existing database values with excessive decimal places (e.g., `116.051999`) now display as `116.05`
+- **Column Width Optimization**: Adjusted quote line items table for better numeric display:
+  - Description: Changed from fixed `w-1/3` to flexible width (takes remaining space)
+  - Qty: Increased from `w-20` → `w-24` → `w-32` (128px) to accommodate large quantities (1000+)
+  - Unit Price: Increased from `w-24` → `w-36` (144px) to prevent clipping on values like 3000+
+  - Total: Increased from `w-24` → `w-32` → `w-40` (160px) for formatted currency display
+  - These changes eliminate number clipping issues for large values while maintaining description readability
+- **Number Input UX Fix**: Fixed issue where users couldn't delete leading zeros in number inputs
+  - Changed all numeric inputs to store values as strings internally
+  - Convert to numbers only on blur/submit events
+  - Updated components: `QuoteItemsTable`, `QuoteClusterLineRow`, `QuoteItemClusterGrid`, `ComponentSelectionDialog`, `AddQuoteItemDialog`
+  - Users can now clear fields completely without values immediately resetting to 0
+  - Pattern documented in `docs/overview/STYLE_GUIDE.md` for future reference
+
+### 2025-09-30 – Automatic Totals Calculation
+- Implemented database triggers for automatic quote totals calculation
+- `quote_items.total` now auto-calculated on INSERT/UPDATE via `update_quote_item_total()` function
+- `quotes.subtotal`, `vat_amount`, and `grand_total` now auto-calculated via `update_quote_totals()` function
+- Triggers fire automatically on quote_items changes (INSERT/UPDATE/DELETE)
+- VAT rate stored as percentage (15.00 = 15%) and correctly converted to decimal in calculations
+- Migration: `migrations/20250930_quote_totals_triggers.sql`
+- Fixed existing quote data with correct totals calculation
+
+### 2025-09-07
 - Quotes landing uses style‑guide: toolbar with search, status filter, sort; table with row‑click to open; delete uses confirm dialog + toast.
 - URL query params for filters/sort/pagination: `q`, `status`, `sort`, `page`, `pageSize`.
 - Debounced search (250 ms) reduces re-renders and URL churn.
@@ -88,7 +127,7 @@ Action Plan
 3. New `AddQuoteItemDialog` (top‑level)
    - Trigger from “Add Item”. Tabs: Manual | Product. [Implemented]
    - Manual behaves like today (but in dialog). Product creates `quote_items`, surfaces option selectors (when available), and optionally explodes BOM with selected configurations applied. [Implemented]
-   - Product Options tab (Product page) now manages option groups/values so quoting flows can be configured without SQL.
+   - Product Options tab now focuses on attaching reusable **Option Sets** (see `docs/domains/components/bom-option-cut.md`) and lightweight per-product overlays. Bespoke groups remain supported for edge cases.
 4. Pricing + totals
    - For product lines, set `unit_price` from product or computed from cluster total via “Update Price” action already present. [Planned]
    - Highlight missing unit costs on exploded lines to aid costing. [Implemented]
@@ -125,8 +164,21 @@ Provide a flexible, auditable, and user-friendly quoting workflow that supports:
 - `quote_notes` – RICH TEXT notes/observations keyed to quote_id and optionally quote_item_id.
 - `quote_versions` – snapshot of quote JSON at commit points for diff / rollback.
 
-### Derived fields
-- `subtotal`, `tax`, `shipping`, `discount_pct`, `grand_total` – maintained by DB function `update_quote_totals()` triggered on quote_items change.
+### Derived fields & Automatic Calculations
+All totals are automatically maintained by database triggers (implemented 2025-09-30):
+
+**Quote Items:**
+- `total` – automatically calculated as `qty * unit_price` via `update_quote_item_total()` trigger
+
+**Quotes:**
+- `subtotal` – sum of all `quote_items.total` for the quote
+- `vat_rate` – stored as percentage (e.g., `15.00` = 15%)
+- `vat_amount` – calculated as `subtotal * (vat_rate / 100)`
+- `grand_total` – calculated as `subtotal + vat_amount`
+
+These fields are maintained by the `update_quote_totals()` function triggered on quote_items INSERT/UPDATE/DELETE.
+
+**Migration:** `migrations/20250930_quote_totals_triggers.sql`
 
 ---
 
@@ -217,7 +269,11 @@ Provide a flexible, auditable, and user-friendly quoting workflow that supports:
 ### New technical tasks (Phase 2 – Products as Items)
 - [ ] Batch insert BOM lines for performance (`createQuoteClusterLines(lines[])`).
 - [ ] Normalize/implement RPC `get_product_components(product_id int)` server-side for consistent BOM fetching.
-- [ ] DB triggers: maintain `quote_items.total = qty * unit_price` and `quotes.grand_total = sum(items.total)`.
+- [x] DB triggers: maintain `quote_items.total = qty * unit_price` and `quotes.grand_total = sum(items.total)`.
+  - ✅ Implemented in migration `20250930_quote_totals_triggers.sql`
+  - ✅ `update_quote_item_total()` function auto-calculates item totals
+  - ✅ `update_quote_totals()` function auto-calculates quote subtotal, VAT (15%), and grand total
+  - ✅ VAT rate stored as percentage (15.00 = 15%) and converted to decimal in calculations
 - [ ] Optional: endpoint/helper to compute item price from cluster subtotal + markup.
 
 ---

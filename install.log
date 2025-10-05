@@ -1,0 +1,18 @@
+Lockfile is up to date, resolution step is skipped
+Already up to date
+
+dependencies:
++ date-fns 3.6.0
++ geist 1.5.1
++ stream-http 3.2.0
++ url 0.11.4
+
+╭ Warning ─────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│   Ignored build scripts: @tsparticles/engine, esbuild, unrs-resolver.        │
+│   Run "pnpm approve-builds" to pick which dependencies should be allowed     │
+│   to run scripts.                                                            │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Done in 622ms using pnpm v10.14.0

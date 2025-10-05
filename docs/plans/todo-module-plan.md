@@ -115,6 +115,25 @@ Link the task to any ERP record without hard-coding each table per feature.
   - `POST /api/todos/[id]/acknowledge` – assigner confirms completion.
 - Server helpers in `lib/db/todos.ts` with typed responses; ensures entity metadata is hydrated for UI.
 
+## Backend Integration Sketch
+- **Database migration**: `migrations/20250305_create_todo_module.sql` creates enums, `todo_items`, `todo_watchers`, `todo_activity`, and `todo_comments`, plus reusable RLS helper functions (`todo_user_is_participant`, `todo_user_can_manage`).
+- **Route handlers**: place REST endpoints under `app/api/todos/...`, aligning handlers per HTTP verb with shared validation utilities (Zod) and Supabase server client helpers.
+- **Data access layer**: build `lib/db/todos.ts` for CRUD operations and typed DTOs. Consolidate Supabase queries (filters, joins to `profiles`, entity snapshots) so UI hooks stay slim.
+- **Activity logging**: expose a Postgres RPC (`log_todo_event`) or use server actions that wrap inserts into `todo_activity` to keep audit entries consistent with RLS policies.
+- **Realtime wiring**: subscribe to `todo_activity` channel in React query hooks (likely via Supabase client) and bubble events to dashboards/toasts. Leverage the existing `todo_user_is_participant` function to authorize listeners.
+- **Testing hooks**: add integration tests (Vitest/Playwright) that call the Next.js handlers to verify RLS + workflow behaviors before exposing UI.
+
+### API implementation (2025-03-05)
+- `GET /api/todos` – lists participant tasks with query filters (`scope`, `status`, `q`, `includeCompleted`, pagination). Requires Supabase JWT via `Authorization` header or cookie.
+- `POST /api/todos` – creates a new task, optional watchers + context snapshot, and records initial activity.
+- `GET /api/todos/:todoId` – returns task detail plus activity + comments; `PATCH` updates status, assignment, metadata, and watcher list while logging relevant activities.
+- `GET|POST /api/todos/:todoId/comments` – loads or appends discussion entries and mirrors them into `todo_activity`.
+- `POST /api/todos/:todoId/acknowledge` – creator-only acknowledgement for completed tasks; writes activity and surfaces refreshed detail payloads.
+- `/api/profiles` – merges `profiles` rows with Supabase auth metadata so UI pickers can show friendly display names + avatars.
+- `/api/entity-links` – search endpoint that returns orders, supplier orders, and quotes with navigation paths for contextual linking.
+- Front-end (`/todos`): React Query powered dashboard with scope tabs, status filters, creation dialog, detail editor (status, priority, due date, assignee/watchers), comment stream, and entity link command palette wired to the new endpoints. Uses Supabase session token on requests to respect RLS.
+- Entity linking UX: “Select record” launches a command dialog modal to search orders/supplier orders/quotes, auto-populates `context_type/context_id/context_path`, and stores a snapshot so tasks display helpful metadata.
+
 ## Notifications & Realtime
 - Use Supabase Realtime on `todo_activity` to push UI updates for participants.
 - Optional: Edge Function to queue email/push notifications later; MVP can rely on in-app toasts + realtime.

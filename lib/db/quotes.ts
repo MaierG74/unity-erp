@@ -730,3 +730,6 @@ export async function fetchSupplierComponentsBySupplier(
 
   return (data as unknown as SupplierComponentWithMaster[]) || [];
 }
+
+// Re-export formatCurrency utility
+export { formatCurrency } from '@/lib/quotes';

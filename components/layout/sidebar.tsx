@@ -20,6 +20,9 @@ import {
   Box,
   Hammer,
   FileText,
+  CheckSquare,
+  Ruler,
+  Layers,
 } from 'lucide-react';
 import { useState, useEffect, createContext, useContext } from 'react';
 import { Button } from '@/components/ui/button';
@@ -71,6 +74,16 @@ const navigation = [
     icon: FileText 
   },
   { 
+    name: 'Cutlist',
+    href: '/cutlist',
+    icon: Ruler,
+  },
+  { 
+    name: 'To-Dos',
+    href: '/todos',
+    icon: CheckSquare
+  },
+  { 
     name: 'Customers', 
     href: '/customers',
     icon: Users 
@@ -84,6 +97,11 @@ const navigation = [
     name: 'Reports', 
     href: '/reports',
     icon: BarChart 
+  },
+  { 
+    name: 'Option Sets',
+    href: '/settings/option-sets',
+    icon: Layers
   },
   { 
     name: 'Settings', 

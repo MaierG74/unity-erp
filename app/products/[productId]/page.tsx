@@ -26,7 +26,7 @@ import { CategoryDialog } from '@/components/features/products/category-dialog';
 import { ProductBOM } from '@/components/features/products/product-bom';
 import { ProductBOL } from '@/components/features/products/product-bol';
 import ProductCosting from '@/components/features/products/product-costing';
-import ProductOptionsTab from '@/components/features/products/ProductOptionsTab';
+import { ProductOptionsTab } from '@/components/features/products/ProductOptionsTab';
 import { useToast } from '@/components/ui/use-toast';
 
 interface ProductDetailPageProps {

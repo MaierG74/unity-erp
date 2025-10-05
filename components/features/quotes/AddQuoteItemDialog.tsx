@@ -35,8 +35,8 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
 
   // manual fields
   const [description, setDescription] = React.useState('');
-  const [qty, setQty] = React.useState(1);
-  const [unitPrice, setUnitPrice] = React.useState(0);
+  const [qty, setQty] = React.useState<string>('1');
+  const [unitPrice, setUnitPrice] = React.useState<string>('0');
 
   // product fields
   const [products, setProducts] = React.useState<Product[]>([]);
@@ -120,8 +120,8 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
     // reset
     setTab('manual');
     setDescription('');
-    setQty(1);
-    setUnitPrice(0);
+    setQty('1');
+    setUnitPrice('0');
     setProducts([]);
     setProductQuery('');
     setSelectedProduct(null);
@@ -137,7 +137,7 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
   const handleCreate = () => {
     if (tab === 'manual') {
       if (!description.trim()) return;
-      onCreateManual({ description: description.trim(), qty, unit_price: unitPrice });
+      onCreateManual({ description: description.trim(), qty: Number(qty) || 1, unit_price: Math.round((Number(unitPrice) || 0) * 100) / 100 });
     } else if (tab === 'product') {
       if (!selectedProduct) return;
       const normalizedOptions = Object.fromEntries(
@@ -183,11 +183,11 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label htmlFor="m-qty">Quantity</Label>
-                <Input id="m-qty" type="number" min={1} value={qty} onChange={(e) => setQty(Number(e.target.value || 0))} onFocus={(e) => e.target.select()} />
+                <Input id="m-qty" type="number" min={1} value={qty} onChange={(e) => setQty(e.target.value)} onFocus={(e) => e.target.select()} />
               </div>
               <div>
                 <Label htmlFor="m-price">Unit Price (R)</Label>
-                <Input id="m-price" type="number" min={0} step="0.01" value={unitPrice} onChange={(e) => setUnitPrice(Number(e.target.value || 0))} onFocus={(e) => e.target.select()} />
+                <Input id="m-price" type="number" min={0} step="0.01" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} onFocus={(e) => e.target.select()} />
               </div>
             </div>
           </TabsContent>
