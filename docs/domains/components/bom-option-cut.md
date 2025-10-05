@@ -7,77 +7,96 @@
 - Cutlist expectations (`docs/operations/cuttingplan.md` and `docs/plans/cutlist-nesting-plan.md`) outline how sheet optimisations consume BOM data flagged as cut parts.
 
 ## Goals
-1. Allow each product to define configurable option groups (e.g., handle style, carcass finish, lock inclusion).
-2. Map option selections to BOM consequences so default components can be swapped, quantities adjusted, or optional rows toggled.
+1. Define reusable configuration building blocks that can be shared across many products (e.g., a single "Handles" definition used by pedestals, cupboards, credenzas).
+2. Map option selections to BOM consequences so default components can be swapped, quantities adjusted, or optional rows toggled with minimal duplication.
 3. Flag relevant BOM entries as cutlist parts so orders can aggregate material usage automatically when options vary per line item.
-4. Keep quoting → order → production data consistent, leveraging existing dialogs and cost exports with minimal duplication.
+4. Keep quoting → order → production data consistent, leveraging overrides with a single dialog flow rather than hopping between pages.
 
-## Product Option Modelling
-- **Option Groups**: Define a new `product_option_groups` table with `product_id`, `code`, `label`, `display_order`, and `is_required`.
-- **Option Values**: Child table `product_option_values` with `group_id`, `value_id`, `code`, `label`, `is_default`, `attributes (JSONB)` for metadata (e.g., colour hex, SKU overrides).
-- **Selection Templates**: Optional `product_option_presets` to store named bundles (e.g., "Standard Pedestal") for quick apply during quoting/orders.
-- **Validation Rules**: Later support `dependencies` (e.g., only allow locks when drawers ≥1) via a JSON rule set or join table.
-- **UI Surfacing**:
-  - Product page: new **Options** tab to maintain groups/values, using components similar to BOM tables.
-  - Quote/Order flows: extend existing selection modals to render dropdowns (leveraging ShadCN `Select`). Defaults auto-populate.
+## Reusable Option Sets
+- **Global Option Sets**: New top-level catalog of reusable option definitions.
+  - `option_sets` — named library entries (e.g., `Handles`, `Top Finish`).
+  - `option_set_groups` — groups within a set (code, label, required flag, display order).
+  - `option_set_values` — values for a group (code, label, default flag, attributes JSON for metadata like colour hex or SKU mapping).
+- **Product Links**: Join table `product_option_set_links(product_id, option_set_id, display_order, alias_label?, alias_code?)` attaches a set to a product.
+  - Per-product aliases allow renaming a group/value while still resolving back to the shared code.
+  - Overrides at the product level can toggle defaults or hide individual values without editing the global set (stored in an overlay table `product_option_overlays`).
+- **Product-Specific Extras**: Existing `product_option_groups` / `product_option_values` remain for bespoke cases; the resolver merges linked sets + per-product groups.
+
+## Authoring Workflow
+1. Create a global option set in the **Option Set Library** (new admin page) or reuse an existing set.
+2. Attach the set to a product from the Options tab or directly from the BOM override modal.
+3. (Optional) Apply product-specific aliases/defaults via lightweight inline edits.
+4. Configure BOM overrides per component row using the shared groups/values.
+
+## UI Surfacing
+- **Option Set Library Page**
+  - `/products/options/sets` shows all sets with usage counts, clone/version actions, and value previews.
+  - Supports bulk maintenance (e.g., add a new handle value once, push to all linked products).
+- **Product Options Tab** (`components/features/products/ProductOptionsTab.tsx`)
+  - Reworked to focus on attaching option sets and managing per-product overlays.
+  - Quick actions: attach existing set, create set inline, edit aliases, toggle defaults, detach.
+  - Shows which BOM rows currently reference each group via badges.
+- **Configure Option Overrides Dialog** (`components/features/products/BOMOverrideDialog.tsx`)
+  - Primary entry point for override mapping; includes shortcuts to attach sets if none are present.
+  - Displays reusable groups/values with status summaries (configured / pending) and supports bulk apply across selected BOM rows.
+  - Remains the single modal used while editing the Bill of Materials, avoiding context switching to the Options tab.
+- **Quoting / Ordering Flows**
+  - `AddQuoteItemDialog` and upcoming order editors load merged option definitions (global set + product overlays) and persist `selected_options` JSON for resolvers.
 
 ## BOM Integration Strategy
 - **Default BOM Rows**: Continue storing the most common configuration in `billofmaterials`; tag each row with `configuration_scope`: `"base" | "option"`.
-- **Option Overrides Table**: Introduce `bom_option_overrides` linking `(bom_row_id | component_id)` to `(group_id, value_id)` with fields for `quantity_delta`, `replace_component_id`, and `notes`. Supports two scenarios:
-  1. **Substitution**: Swap the default handle with a selected handle component.
-  2. **Adjustment**: Add/remove components (locks) or tweak quantity (drawer fronts count for wider pedestals).
-- **Optional Components**: Permit `quantity_delta = -1 * base_quantity` to remove defaults when an option deselects it. When no base row exists (pure add-on), create a virtual base row flagged as `configuration_scope="option"` and only include when selected.
-- **Supplier Handling**: Allow override rows to specify `supplier_component_id` so costing pulls correct pricing.
+- **Option Overrides Table**: Existing `bom_option_overrides` links `(bom_id, option_value_id)` to override payload (replacement component, supplier, quantity delta, notes, cutlist metadata).
+- **Set-aware Overrides**: When a global set is attached, `option_value_id` references `option_set_values`. Product-specific values continue referencing `product_option_values`. A database view exposes a unified `option_value_catalog` so the modal can treat both paths uniformly.
+- **Optional Components**: Supported via `quantity_delta = -base_qty` or by authoring virtual option-only BOM rows (`configuration_scope = 'option'`).
+- **Supplier Handling**: Overrides may specify `replace_supplier_component_id` and inherit cost metadata from shared sets where available.
 - **Effective BOM Resolver**:
-  - Extend existing effective BOM logic (`lib/db/quotes.ts`, order BOM fetch) to accept an `optionSelections` map and resolve replacements before cost aggregation.
-  - Cache computed BOM snapshots per quote/order line to avoid recomputation when editing other fields.
+  - `resolveProductConfiguration(productId, selectedOptions)` loads attached sets, overlays, and product-specific groups, then applies overrides before returning quantities/cutlist flags.
+  - Resolver caches linked set metadata to minimize round trips and provides trace data (which set supplied a value) for debugging.
 
 ## Order & Quote Workflow Changes
-- **Selection Capture**: For quote items and order details, store option selections in a JSONB column (e.g., `selected_options` keyed by option group code → value code).
-- **Dialogs**: Update `AddQuoteItemDialog` and order item editors to prompt for options (prefill defaults, allow edits later).
-- **Pricing**: After selection, run the effective BOM resolver to populate cost clusters (quotes) or consumption rows (orders). Ensure totals update when selections change.
-- **Work Orders / Production Sheets**: Include option summary so downstream teams know which handle/fabric applies.
+- **Selection Capture**: Quote items already persist `selected_options jsonb`. Order details will add the same column (`docs/domains/orders/orders-master.md`) so selections flow end-to-end.
+- **Dialogs**: Option pickers render merged groups. Required fields inherit default values from the attached set; optional groups allow "No selection" when permitted.
+- **Pricing**: BOM resolver continues to drive cost clusters. Future enhancement: allow set values to carry `unit_price_delta` for surcharge scenarios.
+- **Production Context**: Work orders and PDFs will surface option labels using aliases so teams see the terminology familiar for that product.
 
 ## Cutlist Flagging & Aggregation
-- **BOM Flag**: Add `is_cutlist_item boolean` (default false) and optional `cutlist_category` (e.g., `drawer_front`, `carcass_panel`) to BOM rows.
-- **Dimension Metadata**: Leverage `attributes` JSON for dimensions (`length_mm`, `width_mm`, `thickness_mm`, `grain`, `laminate`, `edge_banding`) aligned with `packing.ts` expectations.
-- **Resolver Output**: When generating the effective BOM for an order, aggregate rows with `is_cutlist_item=true` into a structured payload: `{ component_id, dimensions, qty, optionContext }`.
-- **Cutlist Job Trigger**: On order confirmation (or manual action), feed aggregated parts into the cutlist module via a new API endpoint (e.g., `/api/cutlists/generate-from-order`). Reuse algorithms defined in `components/features/cutlist/` to produce sheet usage and attach previews to the order.
-- **Multi-Product Aggregation**: Ensure deduping merges identical parts across different products/options; preserve metadata (grain, laminate) for accurate nesting.
+- **BOM Flag**: Continue to use `is_cutlist_item`, `cutlist_category`, and dimension metadata. Overrides can mark the replacement component as a cutlist row even if the base BOM was not.
+- **Resolver Output**: Includes `option_set_code` and `option_value_code` so aggregated cutlist jobs can show which configuration generated a part.
+- **Automation**: Future cutlist automation still leverages aggregated parts; no workflow change beyond referencing shared value codes.
 
 ## Implementation Roadmap
-1. **Schema Draft (Backend)**
-   - ✅ Added option metadata tables (`product_option_groups`, `product_option_values`, presets) plus `bom_option_overrides` and new `billofmaterials` columns (`is_cutlist_item`, `cutlist_dimensions`, `attributes`) in `db/migrations/20250921_configurable_product_options.sql`.
-   - Provide Supabase RLS updates so product managers can edit options. *(pending)*
-   - ✅ Added `quote_items.selected_options jsonb` column to persist captured selections (`db/migrations/20250921_add_selected_options_to_quote_items.sql`).
-2. **Backend Utilities**
-   - ✅ Extend RPC `get_product_components` to accept optional `selected_options` JSON, returning resolved components plus cutlist/cost metadata even when option tables are absent (`db/migrations/20250921_get_product_components.sql`).
-   - ✅ Add helper `resolveProductConfiguration(productId, options)` in `lib/db/products.ts`, now used by quote BOM lookups via `fetchProductComponents`.
-   - 🔬 Follow-up testing: add unit coverage that exercises base-only and option-aware branches of `resolveProductConfiguration` once override tables land.
-3. **Product Admin UI**
-   - ✅ Options tab implemented with CRUD for groups/values, default selection toggles, and ordering controls (Product page → Options tab).
-   - ✅ Override editor added on BOM rows so option values can swap components, adjust quantity deltas, and override cutlist metadata.
-4. **Quote Integration**
-   - ✅ `AddQuoteItemDialog` now fetches product option groups, captures selections, and forwards `selected_options` into the BOM resolver when exploding clusters.
-   - Display option summary chips in `QuoteItemsTable` and include in PDF export later.
-5. **Order Integration**
-   - Mirror the quote UI when converting quotes → orders (carry selections forward).
-   - Allow editing selections within order detail page, re-running resolver to update material reservations.
-6. **Cutlist Automation (Phase 2)**
-   - After orders capture options, build aggregation service + UI to generate cutlists, leveraging existing `CutlistTool` components for rendering/export.
-   - Consider background job to refresh cutlists when orders change.
+1. **Schema & Policies**
+   - Add `option_sets`, `option_set_groups`, `option_set_values`, `product_option_set_links`, and overlay tables.
+   - Extend RLS so product managers can manage the library and attach sets to products.
+   - Update views/RPC (`get_product_components`) to emit merged option catalogs.
+2. **Data Migration**
+   - Seed initial sets (e.g., Handles, Locks, Finishes) by promoting existing product option groups.
+   - Backfill `product_option_set_links` for current products using identical groups.
+3. **Backend Utilities**
+   - Update `resolveProductConfiguration` and related helpers to resolve via the unified catalog.
+   - Add logging/tests covering global set usage versus product-specific overrides.
+4. **UI Updates**
+   - Build Option Set Library page.
+   - Refactor Product Options tab for set attachment + overlays.
+   - Enhance BOM override dialog with set awareness and attach shortcuts.
+5. **Quote / Order Parity**
+   - Update order detail UI to capture `selected_options` using shared sets.
+   - Add summary chips / tooltips referencing the set + value labels.
+6. **Testing & QA**
+   - Unit tests for resolver exploring: base only, set value substitution, overlay aliasing, quantity deltas, cutlist toggles.
+   - E2E smoke for: attach set → configure overrides → create quote → verify exploded BOM.
 
 ## Open Questions & Next Steps
-- How to handle price differentials driven by options (e.g., premium handle surcharge)? Option override rows could include `unit_price_delta`.
-- Should option presets live at product or category level for reuse across similar items (e.g., desks vs pedestals)?
-- Decide on versioning strategy when option/BOM rules change post-order—do we snapshot resolved BOM per order line?
-- Confirm whether cutlist generation should be automatic on order creation or triggered manually with review.
+- How should versioning work when a global set changes? Proposal: store `option_set_version` on the link so products can opt-in to updates.
+- Do we allow partial adoption (e.g., product hides certain values) without cloning the set? Overlay table covers simple excludes; evaluate complex cases later.
+- Should we surface analytics (usage counts) to help deprecate unused values? Library page can expose this if we track it in a materialized view.
+- Evaluate whether `bom_option_overrides` needs `option_set_id` for faster joins versus relying on the catalog view.
 
 ## Immediate Action Items
-- Expose replacement supplier selection and advanced cutlist editing in the override dialog (optional polish).
-- Prototype resolver logic unit tests (input: base BOM, overrides, selections → output BOM lines + cutlist parts).
-- Audit existing BOM records to identify which components need `is_cutlist_item` tagging and collect dimensional metadata for pedestals.
-- Wire quote → order conversion to carry `selected_options` through to order_details and downstream reservation logic (next task).
+- Design database migrations for the new set tables and overlays.
+- Outline Supabase policy updates so only authorised roles manage global sets.
+- Draft API/RPC changes for merged option catalogs and override persistence.
+- Prepare UI tickets: option set library, product attachment UX, enhanced override modal.
 
 ## How to Model a Configurable Cutlist Product (current workflow)
 1. **Author the base BOM**

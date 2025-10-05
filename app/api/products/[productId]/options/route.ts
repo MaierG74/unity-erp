@@ -31,34 +31,89 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
   const supabase = getSupabaseAdmin();
 
   try {
-    const { data, error } = await supabase
-      .from('product_option_groups')
-      .select(`
-        option_group_id,
-        product_id,
-        code,
-        label,
-        display_order,
-        is_required,
-        product_option_values (
-          option_value_id,
+    const [{ data: groupsRaw, error: groupsError }, { data: linksRaw, error: linksError }] = await Promise.all([
+      supabase
+        .from('product_option_groups')
+        .select(`
           option_group_id,
+          product_id,
           code,
           label,
-          is_default,
           display_order,
-          attributes
-        )
-      `)
-      .eq('product_id', productId)
-      .order('display_order', { ascending: true });
+          is_required,
+          product_option_values (
+            option_value_id,
+            option_group_id,
+            code,
+            label,
+            is_default,
+            display_order,
+            attributes
+          )
+        `)
+        .eq('product_id', productId)
+        .order('display_order', { ascending: true }),
+      supabase
+        .from('product_option_set_links')
+        .select(`
+          link_id,
+          product_id,
+          option_set_id,
+          display_order,
+          alias_label,
+          option_sets:option_sets (
+            option_set_id,
+            code,
+            name,
+            description,
+            option_set_groups (
+              option_set_group_id,
+              code,
+              label,
+              display_order,
+              is_required,
+              option_set_values (
+                option_set_value_id,
+                code,
+                label,
+                is_default,
+                display_order,
+                attributes
+              )
+            )
+          ),
+          product_option_group_overlays (
+            overlay_id,
+            option_set_group_id,
+            alias_label,
+            is_required,
+            hide,
+            display_order
+          ),
+          product_option_value_overlays (
+            overlay_id,
+            option_set_value_id,
+            alias_label,
+            is_default,
+            hide,
+            display_order
+          )
+        `)
+        .eq('product_id', productId)
+        .order('display_order', { ascending: true }),
+    ]);
 
-    if (error) {
-      console.error('[options] failed loading groups', error);
+    if (groupsError) {
+      console.error('[options] failed loading product groups', groupsError);
       return NextResponse.json({ error: 'Failed to load option groups' }, { status: 500 });
     }
 
-    const groups = (data ?? []).map(group => ({
+    if (linksError) {
+      console.error('[options] failed loading option set links', linksError);
+      return NextResponse.json({ error: 'Failed to load option set links' }, { status: 500 });
+    }
+
+    const productGroups = (groupsRaw ?? []).map(group => ({
       option_group_id: Number(group.option_group_id),
       product_id: Number(group.product_id),
       code: group.code,
@@ -78,7 +133,58 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
         .sort((a: any, b: any) => a.display_order - b.display_order),
     }));
 
-    return NextResponse.json({ groups });
+    const optionSetLinks = (linksRaw ?? []).map(link => ({
+      link_id: Number(link.link_id),
+      product_id: Number(link.product_id),
+      option_set_id: Number(link.option_set_id),
+      display_order: Number(link.display_order ?? 0),
+      alias_label: link.alias_label ?? null,
+      option_set: link.option_sets
+        ? {
+            option_set_id: Number(link.option_sets.option_set_id),
+            code: link.option_sets.code,
+            name: link.option_sets.name,
+            description: link.option_sets.description ?? null,
+            groups: (link.option_sets.option_set_groups ?? [])
+              .map((group: any) => ({
+                option_set_group_id: Number(group.option_set_group_id),
+                code: group.code,
+                label: group.label,
+                display_order: Number(group.display_order ?? 0),
+                is_required: Boolean(group.is_required),
+                values: (group.option_set_values ?? [])
+                  .map((value: any) => ({
+                    option_set_value_id: Number(value.option_set_value_id),
+                    code: value.code,
+                    label: value.label,
+                    is_default: Boolean(value.is_default),
+                    display_order: Number(value.display_order ?? 0),
+                    attributes: value.attributes ?? null,
+                  }))
+                  .sort((a: any, b: any) => a.display_order - b.display_order),
+              }))
+              .sort((a: any, b: any) => a.display_order - b.display_order),
+          }
+        : null,
+      group_overlays: (link.product_option_group_overlays ?? []).map((overlay: any) => ({
+        overlay_id: Number(overlay.overlay_id),
+        option_set_group_id: Number(overlay.option_set_group_id),
+        alias_label: overlay.alias_label ?? null,
+        is_required: overlay.is_required === null || overlay.is_required === undefined ? null : Boolean(overlay.is_required),
+        hide: Boolean(overlay.hide),
+        display_order: overlay.display_order === null || overlay.display_order === undefined ? null : Number(overlay.display_order),
+      })),
+      value_overlays: (link.product_option_value_overlays ?? []).map((overlay: any) => ({
+        overlay_id: Number(overlay.overlay_id),
+        option_set_value_id: Number(overlay.option_set_value_id),
+        alias_label: overlay.alias_label ?? null,
+        is_default: overlay.is_default === null || overlay.is_default === undefined ? null : Boolean(overlay.is_default),
+        hide: Boolean(overlay.hide),
+        display_order: overlay.display_order === null || overlay.display_order === undefined ? null : Number(overlay.display_order),
+      })),
+    }));
+
+    return NextResponse.json({ product_groups: productGroups, option_set_links: optionSetLinks });
   } catch (error) {
     console.error('[options] unexpected error', error);
     return NextResponse.json({ error: 'Unexpected error while loading options' }, { status: 500 });

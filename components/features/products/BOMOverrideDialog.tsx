@@ -15,14 +15,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Loader2, Search, X, ChevronDown } from 'lucide-react';
@@ -46,25 +38,40 @@ interface OverrideRecord {
   attributes: Record<string, unknown> | null;
 }
 
+type OverrideSource = 'product' | 'set';
+
 interface OptionValueDraft extends OverrideRecord {
-  option_value_id: number;
+  id: string;
+  source: OverrideSource;
+  option_value_id?: number;
+  option_set_value_id?: number;
   code: string;
   label: string;
+  display_label: string;
+  alias_label?: string | null;
+  hidden?: boolean;
   is_default: boolean;
   display_order: number;
 }
 
 interface OptionGroupDraft {
-  option_group_id: number;
+  id: string;
+  source: OverrideSource;
+  option_group_id?: number;
+  option_set_group_id?: number;
+  link_id?: number;
   code: string;
   label: string;
+  display_label: string;
   is_required: boolean;
+  hidden?: boolean;
   display_order: number;
   values: OptionValueDraft[];
 }
 
 interface OverridesResponse {
-  groups: any[];
+  product_groups: any[];
+  option_sets: any[];
   overrides: any[];
 }
 
@@ -98,11 +105,11 @@ export function BOMOverrideDialog({
   const { toast } = useToast();
   const [componentQuery, setComponentQuery] = useState('');
   const [draftGroups, setDraftGroups] = useState<OptionGroupDraft[]>([]);
-  const [expandedGroups, setExpandedGroups] = useState<Record<number, boolean>>({});
-  const [expandedValues, setExpandedValues] = useState<Record<number, boolean>>({});
-  const [openPickerFor, setOpenPickerFor] = useState<number | null>(null);
-  const [pendingSaveId, setPendingSaveId] = useState<number | null>(null);
-  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [expandedValues, setExpandedValues] = useState<Record<string, boolean>>({});
+  const [openPickerFor, setOpenPickerFor] = useState<string | null>(null);
+  const [pendingSaveId, setPendingSaveId] = useState<string | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const enabled = open && typeof bomId === 'number';
 
@@ -112,14 +119,20 @@ export function BOMOverrideDialog({
     enabled,
   });
 
-  const overridesByValue = useMemo(() => {
-    const map = new Map<number, any>();
+  const { productOverrides, optionSetOverrides } = useMemo(() => {
+    const productMap = new Map<number, any>();
+    const setMap = new Map<number, any>();
     if (data?.overrides) {
       for (const item of data.overrides) {
-        map.set(Number(item.option_value_id), item);
+        if (item.option_value_id != null) {
+          productMap.set(Number(item.option_value_id), item);
+        }
+        if (item.option_set_value_id != null) {
+          setMap.set(Number(item.option_set_value_id), item);
+        }
       }
     }
-    return map;
+    return { productOverrides: productMap, optionSetOverrides: setMap };
   }, [data]);
 
   const hasOverrideData = (value: OptionValueDraft) =>
@@ -132,63 +145,139 @@ export function BOMOverrideDialog({
         value.cutlist_category
     );
 
-  useEffect(() => {
-    if (data?.groups) {
-      const transformed: OptionGroupDraft[] = (data.groups as any[]).map((group) => ({
-        option_group_id: Number(group.option_group_id),
+useEffect(() => {
+  if (!data) {
+    setDraftGroups([]);
+    setExpandedGroups({});
+    setExpandedValues({});
+    return;
+  }
+
+  const productGroups: OptionGroupDraft[] = (data.product_groups ?? []).map((group: any) => ({
+    id: `product:${group.option_group_id}`,
+    source: 'product',
+    option_group_id: Number(group.option_group_id),
+    code: group.code,
+    label: group.label,
+    display_label: group.label,
+    is_required: Boolean(group.is_required),
+    hidden: false,
+    display_order: Number(group.display_order ?? 0),
+    values: (group.product_option_values ?? []).map((value: any) => {
+      const override = productOverrides.get(Number(value.option_value_id));
+      return {
+        id: `product:${value.option_value_id}`,
+        source: 'product',
+        option_value_id: Number(value.option_value_id),
+        code: value.code,
+        label: value.label,
+        display_label: value.label,
+        alias_label: null,
+        hidden: false,
+        is_default: Boolean(value.is_default),
+        display_order: Number(value.display_order ?? 0),
+        replace_component_id: override?.replace_component_id ?? null,
+        replace_supplier_component_id: override?.replace_supplier_component_id ?? null,
+        quantity_delta: override?.quantity_delta != null ? Number(override.quantity_delta) : null,
+        notes: override?.notes ?? null,
+        is_cutlist_item: override?.is_cutlist_item ?? null,
+        cutlist_category: override?.cutlist_category ?? null,
+        cutlist_dimensions: override?.cutlist_dimensions ?? null,
+        attributes: override?.attributes ?? null,
+      } as OptionValueDraft;
+    }),
+  }));
+
+  const optionSetGroups: OptionGroupDraft[] = [];
+  for (const link of data.option_sets ?? []) {
+    const linkId = Number(link.link_id);
+    const groupOverlays = link.product_option_group_overlays ?? [];
+    const valueOverlays = link.product_option_value_overlays ?? [];
+    const groups = link.option_sets?.option_set_groups ?? [];
+
+    for (const group of groups) {
+      const overlay = groupOverlays.find((item: any) => Number(item.option_set_group_id) === Number(group.option_set_group_id));
+      const displayLabel = overlay?.alias_label?.length ? overlay.alias_label : group.label;
+      const groupHidden = overlay?.hide ?? false;
+      const isRequired = overlay?.is_required != null ? Boolean(overlay.is_required) : Boolean(group.is_required);
+      const baseOrder = Number(group.display_order ?? 0);
+      const linkOrder = Number(link.display_order ?? 0);
+      const combinedOrder = linkOrder * 1000 + baseOrder;
+
+      const values: OptionValueDraft[] = (group.option_set_values ?? []).map((value: any) => {
+        const valueOverlay = valueOverlays.find((item: any) => Number(item.option_set_value_id) === Number(value.option_set_value_id));
+        const displayValueLabel = valueOverlay?.alias_label?.length ? valueOverlay.alias_label : value.label;
+        const valueHidden = valueOverlay?.hide ?? false;
+        const override = optionSetOverrides.get(Number(value.option_set_value_id));
+        return {
+          id: `set:${value.option_set_value_id}`,
+          source: 'set',
+          option_set_value_id: Number(value.option_set_value_id),
+          code: value.code,
+          label: value.label,
+          display_label: displayValueLabel,
+          alias_label: valueOverlay?.alias_label ?? null,
+          hidden: valueHidden,
+          is_default: Boolean(value.is_default),
+          display_order: Number(value.display_order ?? 0),
+          replace_component_id: override?.replace_component_id ?? null,
+          replace_supplier_component_id: override?.replace_supplier_component_id ?? null,
+          quantity_delta: override?.quantity_delta != null ? Number(override.quantity_delta) : null,
+          notes: override?.notes ?? null,
+          is_cutlist_item: override?.is_cutlist_item ?? null,
+          cutlist_category: override?.cutlist_category ?? null,
+          cutlist_dimensions: override?.cutlist_dimensions ?? null,
+          attributes: override?.attributes ?? null,
+        } as OptionValueDraft;
+      });
+
+      optionSetGroups.push({
+        id: `set:${linkId}:${group.option_set_group_id}`,
+        source: 'set',
+        link_id: linkId,
+        option_set_group_id: Number(group.option_set_group_id),
         code: group.code,
         label: group.label,
-        is_required: Boolean(group.is_required),
-        display_order: Number(group.display_order ?? 0),
-        values: (group.product_option_values ?? []).map((value: any) => {
-          const override = overridesByValue.get(Number(value.option_value_id));
-          return {
-            option_value_id: Number(value.option_value_id),
-            code: value.code,
-            label: value.label,
-            is_default: Boolean(value.is_default),
-            display_order: Number(value.display_order ?? 0),
-            replace_component_id: override?.replace_component_id ?? null,
-            replace_supplier_component_id: override?.replace_supplier_component_id ?? null,
-            quantity_delta: override?.quantity_delta != null ? Number(override.quantity_delta) : null,
-            notes: override?.notes ?? null,
-            is_cutlist_item: override?.is_cutlist_item ?? null,
-            cutlist_category: override?.cutlist_category ?? null,
-            cutlist_dimensions: override?.cutlist_dimensions ?? null,
-            attributes: override?.attributes ?? null,
-          } as OptionValueDraft;
-        }),
-      }));
-      setDraftGroups(transformed);
-
-      setExpandedGroups((prev) => {
-        const next: Record<number, boolean> = { ...prev };
-        for (const group of transformed) {
-          if (!(group.option_group_id in next)) {
-            const configured = group.values.some((value) => hasOverrideData(value));
-            next[group.option_group_id] = configured;
-          }
-        }
-        return next;
+        display_label: displayLabel,
+        is_required: isRequired,
+        hidden: groupHidden,
+        display_order: combinedOrder,
+        values,
       });
-
-      setExpandedValues((prev) => {
-        const next: Record<number, boolean> = { ...prev };
-        for (const group of transformed) {
-          for (const value of group.values) {
-            if (!(value.option_value_id in next)) {
-              next[value.option_value_id] = hasOverrideData(value);
-            }
-          }
-        }
-        return next;
-      });
-    } else {
-      setDraftGroups([]);
-      setExpandedGroups({});
-      setExpandedValues({});
     }
-  }, [data, overridesByValue]);
+  }
+
+  const combined = [...productGroups, ...optionSetGroups].sort((a, b) => {
+    if (a.source !== b.source) return a.source === 'product' ? -1 : 1;
+    if (a.display_order !== b.display_order) return a.display_order - b.display_order;
+    return a.id.localeCompare(b.id);
+  });
+
+  setDraftGroups(combined);
+
+  setExpandedGroups((prev) => {
+    const next: Record<string, boolean> = { ...prev };
+    for (const group of combined) {
+      if (!(group.id in next)) {
+        const configured = group.values.some((value) => hasOverrideData(value));
+        next[group.id] = configured;
+      }
+    }
+    return next;
+  });
+
+  setExpandedValues((prev) => {
+    const next: Record<string, boolean> = { ...prev };
+    for (const group of combined) {
+      for (const value of group.values) {
+        if (!(value.id in next)) {
+          next[value.id] = hasOverrideData(value);
+        }
+      }
+    }
+    return next;
+  });
+}, [data, productOverrides, optionSetOverrides]);
 
   useEffect(() => {
     if (!open) {
@@ -198,13 +287,28 @@ export function BOMOverrideDialog({
   }, [open]);
 
   const saveMutation = useMutation({
-    mutationFn: async (
-      payload: { option_value_id: number; data: OverrideRecord; valueLabel: string; componentLabel: string }
-    ) => {
+    mutationFn: async ({ value, componentLabel }: { value: OptionValueDraft; componentLabel: string }) => {
+      const payload: Record<string, any> = {
+        replace_component_id: value.replace_component_id ?? null,
+        replace_supplier_component_id: value.replace_supplier_component_id ?? null,
+        quantity_delta: value.quantity_delta ?? null,
+        notes: value.notes ?? null,
+        is_cutlist_item: value.is_cutlist_item ?? null,
+        cutlist_category: value.cutlist_category ?? null,
+        cutlist_dimensions: value.cutlist_dimensions ?? null,
+        attributes: value.attributes ?? null,
+      };
+      if (value.option_value_id != null) {
+        payload.option_value_id = value.option_value_id;
+      }
+      if (value.option_set_value_id != null) {
+        payload.option_set_value_id = value.option_set_value_id;
+      }
+
       const res = await fetch(`/api/products/${productId}/options/bom/${bomId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ option_value_id: payload.option_value_id, ...payload.data }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const msg = await res.text();
@@ -212,15 +316,15 @@ export function BOMOverrideDialog({
       }
       return res.json();
     },
-    onMutate: (variables) => {
-      setPendingSaveId(variables.option_value_id);
+    onMutate: ({ value }) => {
+      setPendingSaveId(value.id);
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['bomOverrides', productId, bomId] });
       queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
       toast({
         title: 'Override saved',
-        description: `${variables.valueLabel} now uses ${variables.componentLabel}`,
+        description: `${variables.value.display_label} now uses ${variables.componentLabel}`,
       });
     },
     onError: (error: any) => {
@@ -232,11 +336,14 @@ export function BOMOverrideDialog({
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (optionValueId: number) => {
+    mutationFn: async (value: OptionValueDraft) => {
+      const body: Record<string, any> = {};
+      if (value.option_value_id != null) body.option_value_id = value.option_value_id;
+      if (value.option_set_value_id != null) body.option_set_value_id = value.option_set_value_id;
       const res = await fetch(`/api/products/${productId}/options/bom/${bomId}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ option_value_id: optionValueId }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const msg = await res.text();
@@ -244,18 +351,15 @@ export function BOMOverrideDialog({
       }
       return res.json();
     },
-    onMutate: (optionValueId) => {
-      setPendingDeleteId(optionValueId);
+    onMutate: (value) => {
+      setPendingDeleteId(value.id);
     },
-    onSuccess: (_data, optionValueId) => {
+    onSuccess: (_data, value) => {
       queryClient.invalidateQueries({ queryKey: ['bomOverrides', productId, bomId] });
       queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
-      const clearedValue = draftGroups
-        .flatMap((group) => group.values)
-        .find((value) => value.option_value_id === optionValueId);
       toast({
         title: 'Override cleared',
-        description: clearedValue ? `${clearedValue.label} reverted to base BOM row` : undefined,
+        description: `${value.display_label} reverted to base BOM row`,
       });
     },
     onError: (error: any) => {
@@ -276,19 +380,50 @@ export function BOMOverrideDialog({
     });
   }, [componentQuery, components]);
 
-  const setDraftValue = (optionValueId: number, updater: (prev: OptionValueDraft) => OptionValueDraft) => {
+  const setDraftValue = (valueId: string, updater: (prev: OptionValueDraft) => OptionValueDraft) => {
     setDraftGroups((prev) =>
       prev.map((group) => ({
         ...group,
-        values: group.values.map((value) =>
-          value.option_value_id === optionValueId ? updater(value) : value
-        ),
+        values: group.values.map((value) => (value.id === valueId ? updater(value) : value)),
       }))
     );
   };
 
+  const handleSave = (value: OptionValueDraft) => {
+    if (!hasChanged(value)) {
+      toast({ title: 'No changes to save', description: `${value.display_label} is already up to date.` });
+      return;
+    }
+    if (value.option_value_id == null && value.option_set_value_id == null) {
+      toast({ variant: 'destructive', title: 'Unable to save override', description: 'Missing option identifier.' });
+      return;
+    }
+    const componentLabel = value.replace_component_id
+      ? components.find((c) => c.component_id === value.replace_component_id)?.internal_code || 'selected component'
+      : 'base BOM row';
+    saveMutation.mutate({ value, componentLabel });
+  };
+
+  const handleClear = (value: OptionValueDraft) => {
+    if (value.option_value_id == null && value.option_set_value_id == null) {
+      toast({ variant: 'destructive', title: 'Unable to clear override', description: 'Missing option identifier.' });
+      return;
+    }
+    deleteMutation.mutate(value);
+  };
+
+  const getExistingOverride = (value: OptionValueDraft) => {
+    if (value.source === 'product' && value.option_value_id != null) {
+      return productOverrides.get(value.option_value_id) ?? null;
+    }
+    if (value.source === 'set' && value.option_set_value_id != null) {
+      return optionSetOverrides.get(value.option_set_value_id) ?? null;
+    }
+    return null;
+  };
+
   const hasChanged = (value: OptionValueDraft) => {
-    const current = overridesByValue.get(value.option_value_id);
+    const current = getExistingOverride(value);
     if (!current) {
       return (
         value.replace_component_id != null ||
@@ -309,46 +444,17 @@ export function BOMOverrideDialog({
     );
   };
 
-  const handleSave = (value: OptionValueDraft) => {
-    if (!hasChanged(value)) {
-      toast({ title: 'No changes to save', description: `${value.label} is already up to date.` });
-      return;
-    }
-    const componentLabel = value.replace_component_id
-      ? components.find((c) => c.component_id === value.replace_component_id)?.internal_code || 'selected component'
-      : 'base BOM row';
-    saveMutation.mutate({
-      option_value_id: value.option_value_id,
-      data: {
-        replace_component_id: value.replace_component_id ?? null,
-        replace_supplier_component_id: value.replace_supplier_component_id ?? null,
-        quantity_delta: value.quantity_delta ?? null,
-        notes: value.notes ?? null,
-        is_cutlist_item: value.is_cutlist_item ?? null,
-        cutlist_category: value.cutlist_category ?? null,
-        cutlist_dimensions: value.cutlist_dimensions ?? null,
-        attributes: value.attributes ?? null,
-      },
-      valueLabel: value.label,
-      componentLabel,
-    });
-  };
-
-  const handleClear = (value: OptionValueDraft) => {
-    deleteMutation.mutate(value.option_value_id);
-  };
-
   const renderComponentPicker = (value: OptionValueDraft) => {
     const selected = value.replace_component_id ? components.find((c) => c.component_id === value.replace_component_id) : null;
-    const popoverOpen = openPickerFor === value.option_value_id;
+    const popoverOpen = openPickerFor === value.id;
     return (
       <Popover
         open={popoverOpen}
         onOpenChange={(next) => {
           if (next) {
             setComponentQuery('');
-            setOpenPickerFor(value.option_value_id);
-          } else if (openPickerFor === value.option_value_id) {
+            setOpenPickerFor(value.id);
+          } else if (openPickerFor === value.id) {
             setOpenPickerFor(null);
           }
         }}
@@ -392,7 +498,7 @@ export function BOMOverrideDialog({
                         type="button"
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={() => {
-                          setDraftValue(value.option_value_id, (prev) => ({
+                          setDraftValue(value.id, (prev) => ({
                             ...prev,
                             replace_component_id: component.component_id,
                           }));
@@ -416,14 +522,14 @@ export function BOMOverrideDialog({
     );
   };
 
-  const toggleGroup = (groupId: number) => {
+  const toggleGroup = (groupId: string) => {
     setExpandedGroups((prev) => ({
       ...prev,
       [groupId]: !(prev[groupId] ?? true),
     }));
   };
 
-  const toggleValue = (valueId: number) => {
+  const toggleValue = (valueId: string) => {
     setExpandedValues((prev) => ({
       ...prev,
       [valueId]: !(prev[valueId] ?? false),
@@ -488,20 +594,22 @@ export function BOMOverrideDialog({
         ) : (
           <div className="space-y-6 max-h-[65vh] overflow-y-auto pr-1">
             {draftGroups.map((group) => {
-              const groupOpen = expandedGroups[group.option_group_id] ?? true;
+              const groupOpen = expandedGroups[group.id] ?? true;
               return (
-                <div key={group.option_group_id} className="rounded-lg border bg-background">
+                <div key={group.id} className="rounded-lg border bg-background">
                   <button
                     type="button"
-                    onClick={() => toggleGroup(group.option_group_id)}
+                    onClick={() => toggleGroup(group.id)}
                     className="flex w-full items-center justify-between gap-3 rounded-lg bg-card px-4 py-4 shadow-sm"
                   >
                     <div>
                       <div className="flex items-center gap-2">
-                        <h4 className="font-medium text-foreground">{group.label}</h4>
+                        <h4 className="font-medium text-foreground">{group.display_label}</h4>
                         <Badge variant={group.is_required ? 'default' : 'outline'}>
                           {group.is_required ? 'Required' : 'Optional'}
                         </Badge>
+                        {group.source === 'set' && <Badge variant="secondary">Option set</Badge>}
+                        {group.hidden && <Badge variant="destructive">Hidden</Badge>}
                       </div>
                       <p className="text-xs text-muted-foreground">{groupSummary(group)}</p>
                     </div>
@@ -516,18 +624,19 @@ export function BOMOverrideDialog({
                   {groupOpen && (
                     <div className="space-y-3 border-t border-border bg-muted/20 px-3 py-3">
                       {group.values.map((value) => {
-                        const valueOpen = expandedValues[value.option_value_id] ?? false;
+                        const valueOpen = expandedValues[value.id] ?? false;
                         return (
-                          <div key={value.option_value_id} className="rounded-md border bg-muted/10">
+                          <div key={value.id} className="rounded-md border bg-muted/10">
                             <button
                               type="button"
-                          onClick={() => toggleValue(value.option_value_id)}
-                          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-                        >
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-semibold text-foreground">{value.label}</span>
+                              onClick={() => toggleValue(value.id)}
+                              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+                            >
+                              <div>
+                                <div className="flex items-center gap-2">
+                              <span className="font-semibold text-foreground">{value.display_label}</span>
                               {value.is_default && <Badge>Default</Badge>}
+                              {value.hidden && <Badge variant="destructive">Hidden</Badge>}
                             </div>
                             <div className="text-xs text-muted-foreground">{valueSummary(value)}</div>
                           </div>
@@ -541,14 +650,14 @@ export function BOMOverrideDialog({
 
                         {valueOpen && (
                           <div className="space-y-4 border-t border-border bg-card/80 px-4 py-4">
-                            <div className="flex flex-wrap items-center gap-2 justify-end">
+                            <div className="flex flex-wrap items-center justify-end gap-2">
                               <Button
                                 size="sm"
                                 variant="outline"
                                 onClick={() => handleClear(value)}
-                                disabled={pendingDeleteId === value.option_value_id}
+                                disabled={pendingDeleteId === value.id}
                               >
-                                {pendingDeleteId === value.option_value_id ? (
+                                {pendingDeleteId === value.id ? (
                                   <span className="flex items-center gap-1">
                                     <Loader2 className="h-3 w-3 animate-spin" /> Clearing…
                                   </span>
@@ -559,9 +668,9 @@ export function BOMOverrideDialog({
                               <Button
                                 size="sm"
                                 onClick={() => handleSave(value)}
-                                disabled={pendingSaveId === value.option_value_id || !hasChanged(value)}
+                                disabled={pendingSaveId === value.id || !hasChanged(value)}
                               >
-                                {pendingSaveId === value.option_value_id ? (
+                                {pendingSaveId === value.id ? (
                                   <span className="flex items-center gap-1">
                                     <Loader2 className="h-3 w-3 animate-spin" /> Saving…
                                   </span>
@@ -583,25 +692,25 @@ export function BOMOverrideDialog({
                                     size="sm"
                                     className="mt-1 h-8 px-2 text-xs text-muted-foreground"
                                     onClick={() =>
-                                      setDraftValue(value.option_value_id, (prev) => ({
+                                      setDraftValue(value.id, (prev) => ({
                                         ...prev,
                                         replace_component_id: null,
                                       }))
                                     }
                                   >
-                                    <X className="h-3 w-3 mr-1" /> Remove selection
+                                    <X className="mr-1 h-3 w-3" /> Remove selection
                                   </Button>
                                 )}
                               </div>
                               <div className="space-y-2">
-                                <Label htmlFor={`qty-${value.option_value_id}`}>Quantity delta</Label>
+                                <Label htmlFor={`qty-${value.id}`}>Quantity delta</Label>
                                 <Input
-                                  id={`qty-${value.option_value_id}`}
+                                  id={`qty-${value.id}`}
                                   type="number"
                                   value={value.quantity_delta ?? ''}
                                   onChange={(e) => {
                                     const val = e.target.value;
-                                    setDraftValue(value.option_value_id, (prev) => ({
+                                    setDraftValue(value.id, (prev) => ({
                                       ...prev,
                                       quantity_delta: val === '' ? null : Number(val),
                                     }));
@@ -613,12 +722,12 @@ export function BOMOverrideDialog({
 
                             <div className="grid gap-3 md:grid-cols-2">
                               <div className="space-y-2">
-                                <Label htmlFor={`cat-${value.option_value_id}`}>Cutlist category (optional)</Label>
+                                <Label htmlFor={`cat-${value.id}`}>Cutlist category (optional)</Label>
                                 <Input
-                                  id={`cat-${value.option_value_id}`}
+                                  id={`cat-${value.id}`}
                                   value={value.cutlist_category ?? ''}
                                   onChange={(e) =>
-                                    setDraftValue(value.option_value_id, (prev) => ({
+                                    setDraftValue(value.id, (prev) => ({
                                       ...prev,
                                       cutlist_category: e.target.value || null,
                                     }))
@@ -627,28 +736,28 @@ export function BOMOverrideDialog({
                               </div>
                               <div className="flex items-center space-x-2">
                                 <Checkbox
-                                  id={`cutlist-${value.option_value_id}`}
+                                  id={`cutlist-${value.id}`}
                                   checked={Boolean(value.is_cutlist_item)}
                                   onCheckedChange={(checked) =>
-                                    setDraftValue(value.option_value_id, (prev) => ({
+                                    setDraftValue(value.id, (prev) => ({
                                       ...prev,
                                       is_cutlist_item: Boolean(checked),
                                     }))
                                   }
                                 />
-                                <Label htmlFor={`cutlist-${value.option_value_id}`} className="text-sm">
+                                <Label htmlFor={`cutlist-${value.id}`} className="text-sm">
                                   Treat override as cutlist item
                                 </Label>
                               </div>
                             </div>
 
                             <div className="space-y-2">
-                              <Label htmlFor={`notes-${value.option_value_id}`}>Notes (optional)</Label>
+                              <Label htmlFor={`notes-${value.id}`}>Notes (optional)</Label>
                               <Textarea
-                                id={`notes-${value.option_value_id}`}
+                                id={`notes-${value.id}`}
                                 value={value.notes ?? ''}
                                 onChange={(e) =>
-                                  setDraftValue(value.option_value_id, (prev) => ({
+                                  setDraftValue(value.id, (prev) => ({
                                     ...prev,
                                     notes: e.target.value || null,
                                   }))
@@ -661,7 +770,7 @@ export function BOMOverrideDialog({
                       </div>
                     );
                   })}
-                    </div>
+            </div>
                   )}
                 </div>
               );

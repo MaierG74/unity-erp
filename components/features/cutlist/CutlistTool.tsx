@@ -20,11 +20,27 @@ import ComponentSelectionDialog from '@/components/features/quotes/ComponentSele
 export interface CutlistToolProps {
   onExport?: (result: LayoutResult) => void;
   onResultsChange?: (result: LayoutResult | null) => void;
+  onSummaryChange?: (summary: CutlistSummary | null) => void;
   quoteItemId?: string | null;
   onExportSuccess?: () => void;
+  showCostingTab?: boolean;
+  persistCostingDefaultsKey?: string;
 }
 
-export default function CutlistTool({ onExport, onResultsChange, quoteItemId, onExportSuccess }: CutlistToolProps) {
+export interface CutlistSummary {
+  result: LayoutResult;
+  backerResult: LayoutResult | null;
+  primarySheetsUsed: number;
+  primarySheetsBillable: number;
+  backerSheetsUsed: number;
+  backerSheetsBillable: number;
+  edgebanding16mm: number;
+  edgebanding32mm: number;
+  edgebandingTotal: number;
+  laminationOn: boolean;
+}
+
+export default function CutlistTool({ onExport, onResultsChange, onSummaryChange, quoteItemId, onExportSuccess, showCostingTab = true, persistCostingDefaultsKey }: CutlistToolProps) {
   const [parts, setParts] = React.useState<Array<PartSpec & { label?: string }>>([
     { id: 'P1', length_mm: 500, width_mm: 300, qty: 2, grain: 'length', band_edges: { top: true, right: true, bottom: true, left: true } },
   ]);
@@ -68,12 +84,43 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
   const [pickerFor, setPickerFor] = React.useState<null | 'primary' | 'backer' | 'band16' | 'band32'>(null);
 
   const sheet = stock[0];
+  const laminationOn = React.useMemo(() => parts.some((p) => p.laminate), [parts]);
 
   const normalizeNullableNumber = (value: number | '' | null | undefined) =>
     typeof value === 'number' && !Number.isNaN(value) ? value : null;
 
   const hydrateNumberInput = (value: number | null | undefined): number | '' =>
     value == null || Number.isNaN(value) ? '' : value;
+
+  React.useEffect(() => {
+    if (!persistCostingDefaultsKey) return;
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = window.localStorage.getItem(persistCostingDefaultsKey);
+      if (!stored) return;
+      const parsed = JSON.parse(stored) as {
+        primarySheetDescription?: string;
+        primaryPricePerSheet?: number | null;
+        backerSheetDescription?: string;
+        backerPricePerSheet?: number | null;
+        bandingDesc16?: string;
+        bandingPrice16?: number | null;
+        bandingDesc32?: string;
+        bandingPrice32?: number | null;
+      } | null;
+      if (!parsed) return;
+      if (typeof parsed.primarySheetDescription === 'string') setPrimarySheetDescription(parsed.primarySheetDescription);
+      if (typeof parsed.backerSheetDescription === 'string') setBackerSheetDescription(parsed.backerSheetDescription);
+      if (typeof parsed.bandingDesc16 === 'string') setBandingDesc16(parsed.bandingDesc16);
+      if (typeof parsed.bandingDesc32 === 'string') setBandingDesc32(parsed.bandingDesc32);
+      if (parsed.primaryPricePerSheet !== undefined) setPrimaryPricePerSheet(hydrateNumberInput(parsed.primaryPricePerSheet));
+      if (parsed.backerPricePerSheet !== undefined) setBackerPricePerSheet(hydrateNumberInput(parsed.backerPricePerSheet));
+      if (parsed.bandingPrice16 !== undefined) setBandingPrice16(hydrateNumberInput(parsed.bandingPrice16));
+      if (parsed.bandingPrice32 !== undefined) setBandingPrice32(hydrateNumberInput(parsed.bandingPrice32));
+    } catch (err) {
+      console.warn('Failed to load cutlist costing defaults', err);
+    }
+  }, [persistCostingDefaultsKey]);
 
   type SnapshotLayout = {
     result: LayoutResult;
@@ -414,7 +461,6 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
     // If a quote item id is provided, export directly with costing
     if (quoteItemId) {
       setIsExporting(true);
-      const laminationOn = parts.some(p => p.laminate);
       const pricePerSheetVal = primaryPricePerSheet === '' ? (primaryComponent?.unit_cost ?? null) : Number(primaryPricePerSheet);
       const backerPriceVal = backerPricePerSheet === '' ? (backerComponent?.unit_cost ?? null) : Number(backerPricePerSheet);
       const chargePrimarySheets = primaryChargeSheets;
@@ -516,14 +562,80 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
   const [activePage, setActivePage] = React.useState(0); // 0-based, 3 sheets per page
   React.useEffect(() => { setActivePage(0); }, [result?.sheets.length]);
 
+  React.useEffect(() => {
+    if (!onSummaryChange) return;
+    if (!result) {
+      onSummaryChange(null);
+      return;
+    }
+
+    onSummaryChange({
+      result,
+      backerResult: backerResult ?? null,
+      primarySheetsUsed: primarySheetsFractional,
+      primarySheetsBillable: primaryChargeSheets,
+      backerSheetsUsed: backerSheetsFractional,
+      backerSheetsBillable: backerChargeSheets,
+      edgebanding16mm: bandLen16,
+      edgebanding32mm: bandLen32,
+      edgebandingTotal: bandLen,
+      laminationOn,
+    });
+  }, [
+    onSummaryChange,
+    result,
+    backerResult,
+    primarySheetsFractional,
+    primaryChargeSheets,
+    backerSheetsFractional,
+    backerChargeSheets,
+    bandLen16,
+    bandLen32,
+    bandLen,
+    laminationOn,
+  ]);
+
+  React.useEffect(() => {
+    if (!persistCostingDefaultsKey) return;
+    if (typeof window === 'undefined') return;
+    if (restoringSnapshotRef.current) return;
+    try {
+      const toNullable = (value: number | '' | null | undefined) =>
+        typeof value === 'number' && !Number.isNaN(value) ? value : null;
+      const payload = {
+        primarySheetDescription,
+        primaryPricePerSheet: toNullable(primaryPricePerSheet),
+        backerSheetDescription,
+        backerPricePerSheet: toNullable(backerPricePerSheet),
+        bandingDesc16,
+        bandingPrice16: toNullable(bandingPrice16),
+        bandingDesc32,
+        bandingPrice32: toNullable(bandingPrice32),
+      } as const;
+      window.localStorage.setItem(persistCostingDefaultsKey, JSON.stringify(payload));
+    } catch (err) {
+      console.warn('Failed to persist cutlist costing defaults', err);
+    }
+  }, [
+    persistCostingDefaultsKey,
+    primarySheetDescription,
+    primaryPricePerSheet,
+    backerSheetDescription,
+    backerPricePerSheet,
+    bandingDesc16,
+    bandingPrice16,
+    bandingDesc32,
+    bandingPrice32,
+  ]);
+
   return (
     <div className="space-y-4">
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
-        <TabsList className="grid grid-cols-4 w-full">
+        <TabsList className={`grid ${showCostingTab ? 'grid-cols-4' : 'grid-cols-3'} w-full`}>
           <TabsTrigger value="inputs">Inputs</TabsTrigger>
           <TabsTrigger value="stock">Stock</TabsTrigger>
           <TabsTrigger value="results">Results</TabsTrigger>
-          <TabsTrigger value="costing">Costing</TabsTrigger>
+          {showCostingTab && <TabsTrigger value="costing">Costing</TabsTrigger>}
         </TabsList>
         <TabsContent value="inputs" className="space-y-4">
           <div className="grid grid-cols-1 gap-4">
@@ -614,6 +726,7 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
           </div>
         </TabsContent>
 
+        {showCostingTab && (
         <TabsContent value="costing" className="space-y-4">
           <div className="space-y-3">
             <div className="font-medium">Costing</div>
@@ -710,6 +823,7 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
             }}
           />
         </TabsContent>
+        )}
         <TabsContent value="stock" className="space-y-4">
           <div className="space-y-3">
             <div className="font-medium">Stock Sheet</div>
@@ -757,7 +871,7 @@ export default function CutlistTool({ onExport, onResultsChange, quoteItemId, on
                 <Stat label="Board used %" value={`${usedPct.toFixed(1)}%`} />
                 <Stat label="Edge 16mm" value={`${(bandLen16 / 1000).toFixed(2)}m`} />
                 <Stat label="Edge 32mm" value={`${(bandLen32 / 1000).toFixed(2)}m`} />
-                <Stat label="Lamination" value={parts.some(p => p.laminate) ? 'On' : 'Off'} />
+                <Stat label="Lamination" value={laminationOn ? 'On' : 'Off'} />
                 {backerResult && <Stat label="Backer sheets" value={`${backerSheetsFractional.toFixed(3)}`} />}
                 {backerResult && <Stat label="Billable backer" value={`${backerChargeSheets.toFixed(3)}`} />}
               </div>

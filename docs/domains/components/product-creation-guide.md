@@ -118,15 +118,17 @@ CREATE TABLE public.billoflabour (
   - **Options** – Manage configurable attributes (option groups + values) and hook BOM overrides
   - **Costing** – Combined materials + labor unit cost summary (see `docs/plans/product-costing-plan.md`)
 - Options tab specifics:
-  - Create option groups (`code`, `label`, required flag, order).
-  - Add option values with default toggles; supports lightweight “Custom / Specify” entries.
-  - Data persists to `product_option_groups` / `product_option_values` and feeds quoting/order flows.
+  - Focuses on attaching **Option Sets** from the global library (see `docs/domains/components/bom-option-cut.md`).
+  - Displays attached sets in order; each group shows usage badges indicating which BOM rows reference it.
+  - Inline controls let authors alias group/value labels for this product, toggle defaults, hide unused values, and detach the set.
+  - Supports adding bespoke product-only groups when necessary (legacy `product_option_groups` / `product_option_values`). These appear under a separate "Product-specific" heading.
+  - Quick action "Create option set" opens a side panel to author a new reusable set without leaving the page.
 - BOM override dialog:
-  - Each BOM row exposes “Configure option overrides”.
-  - Map option values to replacement components, quantity deltas, cutlist metadata, and notes (stored in `bom_option_overrides`).
-  - UI uses collapsible groups/values (closed by default unless configured), summaries showing configuration status, and the new component picker with code/description search.
-  - “Save” is disabled when there are no changes and shows a spinner during persistence; clearing shows a spinner as well.
-  - Saving/clearing triggers inline toasts (success/destructive) and “No changes to save” appears if nothing changed.
+  - Each BOM row exposes “Configure option overrides” and is now the primary entry point for configuring option behavior.
+  - If no option set is attached, the dialog prompts to attach an existing set or create a new one inline before override editing.
+  - Map option values to replacement components, quantity deltas, cutlist metadata, and notes (persisted in `bom_option_overrides`).
+  - UI uses collapsible groups/values with summaries showing configuration status, includes a search picker for replacement components, and supports copying overrides to additional BOM rows.
+  - “Save” remains disabled when there are no changes and displays a spinner during persistence; clearing shows a spinner as well. Inline toasts surface success/destructive states.
 - Edit Product button reserved for future full‑form editing.
 - Consistent styling across tabs:
   - Delete actions use `destructiveSoft` (pastel in light, strong in dark).

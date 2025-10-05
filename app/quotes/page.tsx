@@ -25,6 +25,7 @@ import {
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useRef, useState as useReactState } from 'react';
 import { cn } from '@/lib/utils';
+import { formatCurrency } from '@/lib/quotes';
 
 interface Quote {
   id: string;
@@ -398,7 +399,7 @@ export default function QuotesPage() {
                       <TableCell className="text-foreground">
                         {new Date(quote.created_at).toLocaleDateString()}
                       </TableCell>
-                      <TableCell className="font-medium text-foreground">R{quote.grand_total.toFixed(2)}</TableCell>
+                      <TableCell className="font-medium text-foreground text-right">{formatCurrency(quote.grand_total)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
                           <Button

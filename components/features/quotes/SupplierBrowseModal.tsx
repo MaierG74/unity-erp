@@ -3,7 +3,7 @@
 import React from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { fetchSuppliersSimple, fetchSupplierComponentsBySupplier, type SupplierLite, type SupplierComponentWithMaster } from '@/lib/db/quotes';
+import { fetchSuppliersSimple, fetchSupplierComponentsBySupplier, type SupplierLite, type SupplierComponentWithMaster, formatCurrency } from '@/lib/db/quotes';
 import { Search } from 'lucide-react';
 
 interface SupplierBrowseModalProps {
@@ -126,7 +126,7 @@ export default function SupplierBrowseModal({ open, onOpenChange, onSelect }: Su
                                 <td className="p-3 font-medium">{it.component?.internal_code}</td>
                                 <td className="p-3 max-w-0 truncate">{it.component?.description || '-'}</td>
                                 <td className="p-3 truncate">{it.supplier_code || '-'}</td>
-                                <td className="p-3 text-right">R{Number(it.price || 0).toFixed(2)} {isLowest && (<span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 align-middle">Lowest</span>)}</td>
+                                <td className="p-3 text-right">{formatCurrency(Number(it.price || 0))} {isLowest && (<span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 align-middle">Lowest</span>)}</td>
                                 <td className="p-3 text-right">
                                   <Button size="sm" className="min-w-[80px]" onClick={() => { onSelect(it); onOpenChange(false); }}>
                                     Select

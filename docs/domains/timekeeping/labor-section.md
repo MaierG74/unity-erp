@@ -70,38 +70,59 @@ Tables involved and their key columns and relationships. Source: Supabase MCP qu
   - `job_categories`, `job_category_rates`, `jobs`, `billoflabour`: RLS disabled.
   - `job_cards`, `job_card_items`: RLS enabled with authenticated-user policies.
 - Implication: The Labor Management UI writes directly to core labor tables without RLS constraints; access control is handled at the app level and Supabase anon/service keys.
-
 ## Frontend Behavior
 
 ### Job Categories Manager
 
 - File: components/features/labor/job-categories-manager.tsx:1
+- **UI Improvements (2025-10-04)**:
+  - **Stats Dashboard**: Four-card summary showing total categories, average rate, highest rate, and lowest rate
+  - **Enhanced Toolbar**: 
+    - Prominent "Add Category" button (opens modal dialog)
+    - Search bar with icon for filtering categories by name/description
+    - Sort toggle buttons (Name/Rate)
+  - **Single-Column Layout**: Scalable list view that works with hundreds/thousands of categories
+  - **Collapsible Rate History**: Each category row expands to show rate history inline
+  - **Modal Dialogs**: Add/Edit category forms in dialogs instead of inline forms
+  - **Inline Rate Management**: Add rate versions directly within expanded category sections
 - Features:
-  - List, select, create, edit, delete categories.
-  - Show and manage versioned rate history for the selected category.
-  - Add Rate Version flow automatically maintains date ranges and updates `job_categories.current_hourly_rate` when the new version covers “today”.
+  - List, search, filter, sort, create, edit, delete categories.
+  - Collapsible rate history per category with expand/collapse chevron icons.
+  - Add Rate Version flow automatically maintains date ranges and updates `job_categories.current_hourly_rate` when the new version covers "today".
+  - Visual indicators for active rates with "Active" badge.
+  - Responsive design optimized for both desktop and mobile.
 - Supabase interactions:
   - Read categories: `from('job_categories').select('*')`.
-  - Read rates: `from('job_category_rates').select('*').eq('category_id', ...).order('effective_date desc')`.
-  - Create category: insert into `job_categories`, then insert initial rate row into `job_category_rates` with today’s date.
+  - Read all rates: `from('job_category_rates').select('*').order('effective_date desc')` (filtered client-side per category).
+  - Create category: insert into `job_categories`, then insert initial rate row into `job_category_rates` with today's date.
   - Update category: update fields including `current_hourly_rate`.
   - Delete category: delete all `job_category_rates` for the category, then delete the category.
   - Add rate version:
     - Determines the next `end_date` by looking for the first later `effective_date`.
-    - Sets the previous version’s `end_date` to the day before the new `effective_date`.
-    - If new version is effective “today”, updates `job_categories.current_hourly_rate`.
+    - Sets the previous version's `end_date` to the day before the new `effective_date`.
+    - If new version is effective "today", updates `job_categories.current_hourly_rate`.
 
 ### Jobs Manager
 
 - File: components/features/labor/jobs-manager.tsx:1
+- **UI Improvements (2025-10-04)**:
+  - **Stats Dashboard**: Three-card summary showing total jobs, average rate, and categories used
+  - **Enhanced Toolbar**: 
+    - Prominent "Add Job" button (opens modal dialog)
+    - Search bar with icon for filtering jobs by name/description/category
+    - Category filter dropdown
+  - **Single-Column Layout**: Scalable list view that works with hundreds/thousands of jobs
+  - **Collapsible Descriptions**: Each job row expands to show full description inline
+  - **Modal Dialogs**: Add/Edit job forms in dialogs instead of inline forms at bottom
+  - **No Pagination**: All jobs loaded client-side with efficient filtering
 - Features:
-  - List with search, category filter, pagination (server-side range), and compact/detailed views.
-  - Create, edit, delete jobs with category assignment.
-  - Row expansion to view job description in detailed view.
+  - List, search, filter by category, create, edit, delete jobs with category assignment.
+  - Collapsible job descriptions with expand/collapse chevron icons.
+  - Visual category badges and rate display per job.
+  - Responsive design optimized for both desktop and mobile.
 - Supabase interactions:
   - Read categories: `from('job_categories').select('*').order('name')`.
-  - Count jobs for pagination using `select('*', { count: 'exact', head: true })` pattern (via a separate effect).
-  - Read jobs with join to categories using foreign table syntax, with filters + `.range(from, to)`.
+  - Read all jobs: `from('jobs').select('job_id, name, description, category_id, job_categories(...)').order('name')` (filtered client-side).
   - Insert/update/delete into `jobs`.
 
 ### Product Bill of Labor (BOL)

@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { QuoteClusterLine } from '@/lib/db/quotes';
+import { QuoteClusterLine, formatCurrency } from '@/lib/db/quotes';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Trash2 } from 'lucide-react';
@@ -15,8 +15,8 @@ interface QuoteClusterLineRowProps {
 
 const QuoteClusterLineRow: React.FC<QuoteClusterLineRowProps> = ({ line, onUpdate, onDelete }) => {
   const [description, setDescription] = React.useState(line.description || '');
-  const [qty, setQty] = React.useState(line.qty);
-  const [unitCost, setUnitCost] = React.useState(line.unit_cost || 0);
+  const [qty, setQty] = React.useState<string>(String(line.qty));
+  const [unitCost, setUnitCost] = React.useState<string>(String(Math.round((line.unit_cost || 0) * 100) / 100));
 
   const handleBlur = <T extends keyof QuoteClusterLine>(field: T, value: QuoteClusterLine[T]) => {
     if (line[field] !== value) {
@@ -25,8 +25,8 @@ const QuoteClusterLineRow: React.FC<QuoteClusterLineRowProps> = ({ line, onUpdat
   };
 
   React.useEffect(() => { setDescription(line.description || ''); }, [line.description]);
-  React.useEffect(() => { setQty(line.qty); }, [line.qty]);
-  React.useEffect(() => { setUnitCost(line.unit_cost || 0); }, [line.unit_cost]);
+  React.useEffect(() => { setQty(String(line.qty)); }, [line.qty]);
+  React.useEffect(() => { setUnitCost(String(Math.round((line.unit_cost || 0) * 100) / 100)); }, [line.unit_cost]);
 
   const missingCost = (line.unit_cost ?? 0) === 0;
 
@@ -45,8 +45,8 @@ const QuoteClusterLineRow: React.FC<QuoteClusterLineRowProps> = ({ line, onUpdat
         <Input
           type="number"
           value={qty}
-          onChange={e => setQty(Number(e.target.value))}
-          onBlur={() => handleBlur('qty', qty)}
+          onChange={e => setQty(e.target.value)}
+          onBlur={() => { const numQty = Number(qty) || 0; handleBlur('qty', numQty as QuoteClusterLine['qty']); setQty(String(numQty)); }}
           onFocus={e => e.target.select()}
           className="text-sm h-8 w-24 text-right bg-background text-foreground border-border"
         />
@@ -54,14 +54,15 @@ const QuoteClusterLineRow: React.FC<QuoteClusterLineRowProps> = ({ line, onUpdat
       <TableCell>
         <Input
           type="number"
+          step="0.01"
           value={unitCost}
-          onChange={e => setUnitCost(Number(e.target.value))}
-          onBlur={() => handleBlur('unit_cost', unitCost)}
+          onChange={e => setUnitCost(e.target.value)}
+          onBlur={() => { const numCost = Math.round((Number(unitCost) || 0) * 100) / 100; handleBlur('unit_cost', numCost as QuoteClusterLine['unit_cost']); setUnitCost(String(numCost)); }}
           onFocus={e => e.target.select()}
           className={`text-sm h-8 w-24 bg-background text-foreground border ${missingCost ? 'border-red-300 bg-red-50' : 'border-border'}`}
         />
       </TableCell>
-      <TableCell className="text-sm text-right">{(qty * unitCost).toFixed(2)}</TableCell>
+      <TableCell className="text-sm text-right font-medium">{formatCurrency((Number(qty) || 0) * (Number(unitCost) || 0))}</TableCell>
       <TableCell>
         <Button
           variant="destructiveSoft"

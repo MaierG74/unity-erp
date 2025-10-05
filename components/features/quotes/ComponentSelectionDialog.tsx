@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { fetchComponents, Component, fetchSupplierComponentsForComponent, SupplierComponent, fetchProducts, Product } from '@/lib/db/quotes';
+import { fetchComponents, Component, fetchSupplierComponentsForComponent, SupplierComponent, fetchProducts, Product, formatCurrency } from '@/lib/db/quotes';
 import SupplierBrowseModal from './SupplierBrowseModal';
 import { Building2 } from 'lucide-react';
 
@@ -43,15 +43,15 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
   
   // Manual entry fields
   const [description, setDescription] = useState('');
-  const [qty, setQty] = useState(1);
-  const [unitCost, setUnitCost] = useState(0);
+  const [qty, setQty] = useState<string>('1');
+  const [unitCost, setUnitCost] = useState<string>('0');
   // Product selection fields
   const [products, setProducts] = useState<Product[]>([]);
   const [collections, setCollections] = useState<Array<{ collection_id: number; name: string; code?: string }>>([]);
   const [selectedCollection, setSelectedCollection] = useState<number | null>(null);
-  const [collectionScale, setCollectionScale] = useState<number>(1);
+  const [collectionScale, setCollectionScale] = useState<string>('1');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [productQty, setProductQty] = useState(1);
+  const [productQty, setProductQty] = useState<string>('1');
   const [explodeProduct, setExplodeProduct] = useState(true);
   const [includeLabor, setIncludeLabor] = useState(true);
   const [showSupplierBrowse, setShowSupplierBrowse] = useState(false);
@@ -116,7 +116,7 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
     setSelectedComponent(component);
     setDescription(component.description || '');
     setSelectedSupplierComponent(null); // Reset supplier selection
-    setUnitCost(0);
+    setUnitCost('0');
     
     // Load suppliers for this component
     if (component.component_id) {
@@ -130,7 +130,7 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
           if (withPrice.length > 0) {
             const lowest = withPrice.reduce((min, s) => (Number(s.price) < Number(min.price) ? s : min));
             setSelectedSupplierComponent(lowest);
-            setUnitCost(Number(lowest.price || 0));
+            setUnitCost(String(Number(lowest.price || 0)));
             setOverrideUnitCost(false);
           }
         }
@@ -145,7 +145,7 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
 
   const handleSupplierSelect = (supplierComponent: SupplierComponent) => {
     setSelectedSupplierComponent(supplierComponent);
-    setUnitCost(supplierComponent.price || 0);
+    setUnitCost(String(supplierComponent.price || 0));
     setOverrideUnitCost(false);
   };
 
@@ -156,8 +156,8 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
       onAddComponent({
         type: 'manual',
         description: description.trim(),
-        qty,
-        unit_cost: unitCost
+        qty: Number(qty) || 1,
+        unit_cost: Math.round((Number(unitCost) || 0) * 100) / 100
       });
     } else if (entryType === 'database') {
       if (!selectedComponent || !selectedSupplierComponent) return;
@@ -165,8 +165,8 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
       onAddComponent({
         type: 'database',
         description: `${selectedComponent.description} (${selectedSupplierComponent.supplier?.name})`,
-        qty,
-        unit_cost: unitCost,
+        qty: Number(qty) || 1,
+        unit_cost: Math.round((Number(unitCost) || 0) * 100) / 100,
         component_id: selectedComponent.component_id,
         supplier_component_id: selectedSupplierComponent.supplier_component_id
       });
@@ -178,7 +178,7 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
         // @ts-ignore - allowed extended shape
         type: 'product',
         product_id: selectedProduct.product_id,
-        qty: productQty,
+        qty: Number(productQty) || 1,
         // carry explode preference
         explode: explodeProduct,
         include_labour: includeLabor,
@@ -199,8 +199,8 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
 
     // Reset form
     setDescription('');
-    setQty(1);
-    setUnitCost(0);
+    setQty('1');
+    setUnitCost('0');
     setSelectedComponent(null);
     setSelectedSupplierComponent(null);
     setSupplierComponents([]);
@@ -211,8 +211,8 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
   const handleClose = () => {
     // Reset form on close
     setDescription('');
-    setQty(1);
-    setUnitCost(0);
+    setQty('1');
+    setUnitCost('0');
     setSelectedComponent(null);
     setSelectedSupplierComponent(null);
     setSupplierComponents([]);
@@ -220,7 +220,7 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
     setEntryType('manual');
     setProducts([]);
     setSelectedProduct(null);
-    setProductQty(1);
+    setProductQty('1');
     setExplodeProduct(true);
     setIncludeLabor(true);
     onClose();
@@ -319,7 +319,7 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
                     {selectedComponent.internal_code && <div className="text-xs text-muted-foreground truncate">Code: {selectedComponent.internal_code}</div>}
                   </div>
                   <div className="shrink-0 flex gap-2">
-                    <Button size="sm" variant="outline" className="h-8" onClick={() => { setSelectedComponent(null); setSupplierComponents([]); setSelectedSupplierComponent(null); setUnitCost(0); }}>
+                    <Button size="sm" variant="outline" className="h-8" onClick={() => { setSelectedComponent(null); setSupplierComponents([]); setSelectedSupplierComponent(null); setUnitCost('0'); }}>
                       Change
                     </Button>
                   </div>
@@ -354,7 +354,7 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
                                 )}
                               </div>
                               <div className="text-right">
-                                <div className="font-medium">R{Number(sc.price || 0).toFixed(2)} {isLowest && (<span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 align-middle">Lowest</span>)}</div>
+                                <div className="font-medium">{formatCurrency(Number(sc.price || 0))} {isLowest && (<span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 align-middle">Lowest</span>)}</div>
                                 {sc.min_order_quantity && (
                                   <div className="text-xs">Min: {sc.min_order_quantity}</div>
                                 )}
@@ -372,7 +372,7 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
                 <div className="p-3 border rounded bg-accent/10 flex items-center justify-between">
                   <div>
                     <div className="font-medium">{selectedSupplierComponent.supplier?.name}</div>
-                    <div className="text-xs text-muted-foreground">Price: R{Number(selectedSupplierComponent.price || 0).toFixed(2)}</div>
+                    <div className="text-xs text-muted-foreground">Price: {formatCurrency(Number(selectedSupplierComponent.price || 0))}</div>
                   </div>
                   <div className="shrink-0 flex gap-2">
                     <Button size="sm" variant="outline" className="h-8" onClick={() => { setSelectedSupplierComponent(null); setOverrideUnitCost(false); }}>
@@ -405,7 +405,7 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
               )}
               <div>
                 <Label htmlFor="cc-scale">Scale</Label>
-                <Input id="cc-scale" type="number" value={collectionScale} onChange={(e) => setCollectionScale(Number(e.target.value || 1))} onFocus={(e) => e.target.select()} />
+                <Input id="cc-scale" type="number" value={collectionScale} onChange={(e) => setCollectionScale(e.target.value)} onFocus={(e) => e.target.select()} />
               </div>
             </div>
           ) : (
@@ -468,12 +468,8 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
                 value={entryType === 'product' ? productQty : entryType === 'collection' ? 1 : qty}
                 onChange={(e) => {
                   const value = e.target.value;
-                  if (value === '') {
-                    if (entryType === 'product') setProductQty(0); else if (entryType !== 'collection') setQty(0);
-                  } else {
-                    const n = Number(value) || 1;
-                    if (entryType === 'product') setProductQty(n); else if (entryType !== 'collection') setQty(n);
-                  }
+                  if (entryType === 'product') setProductQty(value);
+                  else if (entryType !== 'collection') setQty(value);
                 }}
                 onFocus={(e) => e.target.select()}
                 className="placeholder:text-muted-foreground text-foreground"
@@ -497,11 +493,7 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
                 value={entryType === 'collection' ? 0 : unitCost}
                 onChange={(e) => {
                   const value = e.target.value;
-                  if (value === '') {
-                    if (entryType !== 'collection') setUnitCost(0);
-                  } else {
-                    if (entryType !== 'collection') setUnitCost(Number(value) || 0);
-                  }
+                  if (entryType !== 'collection') setUnitCost(value);
                 }}
                 onFocus={(e) => e.target.select()}
                 disabled={entryType === 'collection' || (entryType === 'database' && selectedSupplierComponent !== null && !overrideUnitCost)}
@@ -512,7 +504,7 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
 
           {/* Total Display */}
           <div className="text-right">
-            <span className="font-medium text-foreground">Total: R{((entryType === 'product' ? productQty : qty) * (entryType === 'collection' ? 0 : unitCost)).toFixed(2)}</span>
+            <span className="font-medium text-foreground">Total: {formatCurrency((entryType === 'product' ? (Number(productQty) || 0) : (Number(qty) || 0)) * (entryType === 'collection' ? 0 : (Number(unitCost) || 0)))}</span>
           </div>
 
           {/* Product explode option */}
@@ -562,7 +554,7 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
           setSelectedSupplierComponent({
             ...sc,
           } as any);
-          setUnitCost(sc.price || 0);
+          setUnitCost(String(sc.price || 0));
           setSearchQuery('');
           setOverrideUnitCost(false);
         }}

@@ -119,6 +119,43 @@ This guide documents how we style the app: Tailwind CSS utilities + shadcn/ui pr
 - __Inputs__
   - Text inputs: rounded, `h-9`, with left icons positioned via `absolute`.
   - Clear buttons in inputs: small icon button on the right; keep hit area `h-6 w-6`.
+  - **Number inputs**: Store as `string` in state, convert to `number` only on blur/submit. This allows users to clear the field without it immediately resetting to 0.
+    ```tsx
+    // ❌ BAD: Cannot clear input - resets to 0 immediately
+    const [qty, setQty] = useState(0);
+    <Input type="number" value={qty} onChange={e => setQty(Number(e.target.value) || 0)} />
+    
+    // ✅ GOOD: Can clear input - converts on blur
+    const [qty, setQty] = useState<string>('0');
+    <Input 
+      type="number" 
+      value={qty} 
+      onChange={e => setQty(e.target.value)}
+      onBlur={() => { 
+        const num = Number(qty) || 0; 
+        // Update parent with number
+        onUpdate(num); 
+        // Normalize display
+        setQty(String(num)); 
+      }}
+    />
+    ```
+  - **Currency inputs**: Always round to 2 decimal places and use `step="0.01"`:
+    ```tsx
+    // For currency (prices, costs)
+    const [unitPrice, setUnitPrice] = useState<string>('0');
+    <Input 
+      type="number" 
+      step="0.01"
+      value={unitPrice} 
+      onChange={e => setUnitPrice(e.target.value)}
+      onBlur={() => { 
+        const price = Math.round((Number(unitPrice) || 0) * 100) / 100;
+        onUpdate(price);
+        setUnitPrice(String(price)); 
+      }}
+    />
+    ```
 - __Checkbox__ (`components/ui/checkbox.tsx`)
   - Height/width `h-4 w-4`, bordered, uses `data-[state=checked]` styles.
   - Label via `label` or `Label` component; ensure `htmlFor`/`id` are linked.

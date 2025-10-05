@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { QuotePDFDownload } from '@/components/quotes/QuotePDF';
+import { formatCurrency } from '@/lib/quotes';
 
 interface Quote {
   id: string;
@@ -233,7 +234,7 @@ export default function WorkingQuotePage({ params }: { params: { id: string } })
                     <label className="block text-sm font-medium text-muted-foreground">Subtotal</label>
                     <input 
                       type="text" 
-                      value={`R${quote.subtotal.toFixed(2)}`} 
+                      value={formatCurrency(quote.subtotal)} 
                       readOnly
                       className="mt-1 block w-full rounded-md border-input bg-muted px-3 py-2"
                     />
@@ -242,7 +243,7 @@ export default function WorkingQuotePage({ params }: { params: { id: string } })
                     <label className="block text-sm font-medium text-muted-foreground">VAT ({quote.vat_rate}%)</label>
                     <input 
                       type="text" 
-                      value={`R${quote.vat_amount.toFixed(2)}`} 
+                      value={formatCurrency(quote.vat_amount)} 
                       readOnly
                       className="mt-1 block w-full rounded-md border-input bg-muted px-3 py-2"
                     />
@@ -251,7 +252,7 @@ export default function WorkingQuotePage({ params }: { params: { id: string } })
                     <label className="block text-sm font-medium text-muted-foreground">Total</label>
                     <input 
                       type="text" 
-                      value={`R${quote.grand_total.toFixed(2)}`} 
+                      value={formatCurrency(quote.grand_total)} 
                       readOnly
                       className="mt-1 block w-full rounded-md border-input bg-muted px-3 py-2 font-semibold"
                     />
@@ -290,11 +291,11 @@ export default function WorkingQuotePage({ params }: { params: { id: string } })
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
                           {item.qty}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
-                          R{item.unit_price.toFixed(2)}
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground text-right">
+                          {formatCurrency(item.unit_price)}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground font-medium">
-                          R{item.total.toFixed(2)}
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground font-medium text-right">
+                          {formatCurrency(item.total)}
                         </td>
                       </tr>
                     ))}
