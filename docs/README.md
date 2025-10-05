@@ -32,6 +32,7 @@ Welcome to the Unity ERP knowledge base. The documentation is now organized by t
 - Operations:
   - [`operations/BOL_SYSTEM.md`](operations/BOL_SYSTEM.md)
   - [`operations/cutlist-standalone.md`](operations/cutlist-standalone.md)
+  - [`operations/email-integration.md`](operations/email-integration.md)
 - Plans: [`plans/`](plans/) – implementation briefs such as `quoting-module-plan.md`, `time-attendance-plan.md`, and other project plans
 - New: [`plans/todo-module-plan.md`](plans/todo-module-plan.md) – To-Do module planning doc covering cross-module task assignments
 - Changelogs: [`changelogs/`](changelogs/)
