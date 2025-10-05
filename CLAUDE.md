@@ -26,6 +26,13 @@ If encountering dependency issues:
 3. `npm install --verbose`
 4. If React missing: `npm install react react-dom`
 
+## Documentation
+
+### Documentation Structure
+- **Index**: [docs/README.md](docs/README.md) serves as the reference and index file for all documentation
+- **Workflow**: All app updates must be documented in the appropriate documentation files
+- **Working on New Areas**: When starting a new chat or working on a new area of the app without existing context, consult the existing documentation first. If coverage is missing, create the necessary docs and ensure [docs/README.md](docs/README.md) points to them so the index remains complete.
+
 ## Architecture Overview
 
 ### Tech Stack
