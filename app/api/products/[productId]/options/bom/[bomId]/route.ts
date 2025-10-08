@@ -107,7 +107,14 @@ async function loadProductOptionSets(client: ReturnType<typeof createClient>, pr
             label,
             is_default,
             display_order,
-            attributes
+            attributes,
+            default_component_id,
+            default_supplier_component_id,
+            default_quantity_delta,
+            default_notes,
+            default_is_cutlist,
+            default_cutlist_category,
+            default_cutlist_dimensions
           )
         )
       ),
@@ -133,57 +140,72 @@ async function loadProductOptionSets(client: ReturnType<typeof createClient>, pr
 
   if (error) throw error;
 
-  return (data ?? []).map((link: any) => ({
-    link_id: Number(link.link_id),
-    product_id: Number(link.product_id),
-    option_set_id: Number(link.option_set_id),
-    display_order: Number(link.display_order ?? 0),
-    alias_label: link.alias_label ?? null,
-    option_set: link.option_sets
-      ? {
-          option_set_id: Number(link.option_sets.option_set_id),
-          code: link.option_sets.code,
-          name: link.option_sets.name,
-          description: link.option_sets.description ?? null,
-          groups: (link.option_sets.option_set_groups ?? [])
-            .map((group: any) => ({
-              option_set_group_id: Number(group.option_set_group_id),
-              code: group.code,
-              label: group.label,
-              display_order: Number(group.display_order ?? 0),
-              is_required: Boolean(group.is_required),
-              values: (group.option_set_values ?? [])
-                .map((value: any) => ({
-                  option_set_value_id: Number(value.option_set_value_id),
-                  code: value.code,
-                  label: value.label,
-                  is_default: Boolean(value.is_default),
-                  display_order: Number(value.display_order ?? 0),
-                  attributes: value.attributes ?? null,
-                }))
-                .sort((a: any, b: any) => a.display_order - b.display_order),
-            }))
-            .sort((a: any, b: any) => a.display_order - b.display_order),
-        }
-      : null,
-    group_overlays: (link.product_option_group_overlays ?? []).map((overlay: any) => ({
-      overlay_id: Number(overlay.overlay_id),
-      option_set_group_id: Number(overlay.option_set_group_id),
-      alias_label: overlay.alias_label ?? null,
-      is_required: overlay.is_required === null || overlay.is_required === undefined ? null : Boolean(overlay.is_required),
-      hide: Boolean(overlay.hide),
-      display_order: overlay.display_order === null || overlay.display_order === undefined ? null : Number(overlay.display_order),
-    })),
-    value_overlays: (link.product_option_value_overlays ?? []).map((overlay: any) => ({
-      overlay_id: Number(overlay.overlay_id),
-      option_set_value_id: Number(overlay.option_set_value_id),
-      alias_label: overlay.alias_label ?? null,
-      is_default: overlay.is_default === null || overlay.is_default === undefined ? null : Boolean(overlay.is_default),
-      hide: Boolean(overlay.hide),
-      display_order: overlay.display_order === null || overlay.display_order === undefined ? null : Number(overlay.display_order),
-    })),
-  }));
+  return (data ?? []).map((link: any) => {
+    const optionSetRecord = Array.isArray(link.option_sets) ? link.option_sets[0] : link.option_sets;
+    const rawGroups = optionSetRecord?.option_set_groups ?? [];
+
+    const normalizedGroups = rawGroups
+      .map((group: any) => ({
+        option_set_group_id: Number(group.option_set_group_id),
+        code: group.code,
+        label: group.label,
+        display_order: Number(group.display_order ?? 0),
+        is_required: Boolean(group.is_required),
+        values: (group.option_set_values ?? [])
+          .map((value: any) => ({
+            option_set_value_id: Number(value.option_set_value_id),
+            code: value.code,
+            label: value.label,
+            is_default: Boolean(value.is_default),
+            display_order: Number(value.display_order ?? 0),
+            attributes: value.attributes ?? null,
+            default_component_id: value.default_component_id != null ? Number(value.default_component_id) : null,
+            default_supplier_component_id: value.default_supplier_component_id != null ? Number(value.default_supplier_component_id) : null,
+            default_quantity_delta: value.default_quantity_delta != null ? Number(value.default_quantity_delta) : null,
+            default_notes: value.default_notes ?? null,
+            default_is_cutlist: value.default_is_cutlist === null || value.default_is_cutlist === undefined ? null : Boolean(value.default_is_cutlist),
+            default_cutlist_category: value.default_cutlist_category ?? null,
+            default_cutlist_dimensions: value.default_cutlist_dimensions ?? null,
+          }))
+          .sort((a: any, b: any) => a.display_order - b.display_order),
+      }))
+      .sort((a: any, b: any) => a.display_order - b.display_order);
+
+    return {
+      link_id: Number(link.link_id),
+      product_id: Number(link.product_id),
+      option_set_id: Number(link.option_set_id),
+      display_order: Number(link.display_order ?? 0),
+      alias_label: link.alias_label ?? null,
+      option_set: optionSetRecord
+        ? {
+            option_set_id: Number(optionSetRecord.option_set_id),
+            code: optionSetRecord.code,
+            name: optionSetRecord.name,
+            description: optionSetRecord.description ?? null,
+            groups: normalizedGroups,
+          }
+        : null,
+      group_overlays: (link.product_option_group_overlays ?? []).map((overlay: any) => ({
+        overlay_id: Number(overlay.overlay_id),
+        option_set_group_id: Number(overlay.option_set_group_id),
+        alias_label: overlay.alias_label ?? null,
+        is_required: overlay.is_required === null || overlay.is_required === undefined ? null : Boolean(overlay.is_required),
+        hide: Boolean(overlay.hide),
+        display_order: overlay.display_order === null || overlay.display_order === undefined ? null : Number(overlay.display_order),
+      })),
+      value_overlays: (link.product_option_value_overlays ?? []).map((overlay: any) => ({
+        overlay_id: Number(overlay.overlay_id),
+        option_set_value_id: Number(overlay.option_set_value_id),
+        alias_label: overlay.alias_label ?? null,
+        is_default: overlay.is_default === null || overlay.is_default === undefined ? null : Boolean(overlay.is_default),
+        hide: Boolean(overlay.hide),
+        display_order: overlay.display_order === null || overlay.display_order === undefined ? null : Number(overlay.display_order),
+      })),
+    };
+  });
 }
+
 
 export async function GET(_req: NextRequest, { params }: RouteParams) {
   const productId = parseId(params.productId);

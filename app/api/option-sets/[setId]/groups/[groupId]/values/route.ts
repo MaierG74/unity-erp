@@ -52,6 +52,41 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   const isDefault = body.is_default === true;
   const displayOrderInput = body.display_order;
   const attributes = body.attributes && typeof body.attributes === 'object' ? body.attributes : null;
+  const defaultComponentId =
+    body.default_component_id === null || Number.isInteger(body.default_component_id)
+      ? body.default_component_id
+      : undefined;
+  const defaultSupplierComponentId =
+    body.default_supplier_component_id === null || Number.isInteger(body.default_supplier_component_id)
+      ? body.default_supplier_component_id
+      : undefined;
+  const defaultQuantityDelta =
+    typeof body.default_quantity_delta === 'number'
+      ? body.default_quantity_delta
+      : body.default_quantity_delta === null
+        ? null
+        : undefined;
+  const defaultNotes = typeof body.default_notes === 'string'
+    ? body.default_notes.trim()
+    : body.default_notes === null
+      ? null
+      : undefined;
+  const defaultIsCutlist = typeof body.default_is_cutlist === 'boolean'
+    ? body.default_is_cutlist
+    : body.default_is_cutlist === null
+      ? null
+      : undefined;
+  const defaultCutlistCategory = typeof body.default_cutlist_category === 'string'
+    ? body.default_cutlist_category.trim()
+    : body.default_cutlist_category === null
+      ? null
+      : undefined;
+  const defaultCutlistDimensions =
+    body.default_cutlist_dimensions && typeof body.default_cutlist_dimensions === 'object'
+      ? body.default_cutlist_dimensions
+      : body.default_cutlist_dimensions === null
+        ? null
+        : undefined;
 
   if (!code) {
     return NextResponse.json({ error: 'Option value code is required' }, { status: 400 });
@@ -102,6 +137,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         is_default: isDefault,
         display_order: resolvedDisplayOrder ?? 0,
         attributes,
+        default_component_id: defaultComponentId,
+        default_supplier_component_id: defaultSupplierComponentId,
+        default_quantity_delta: defaultQuantityDelta,
+        default_notes: defaultNotes,
+        default_is_cutlist: defaultIsCutlist,
+        default_cutlist_category: defaultCutlistCategory,
+        default_cutlist_dimensions: defaultCutlistDimensions,
       })
       .select('*')
       .single();
@@ -123,6 +165,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         is_default: Boolean(data.is_default),
         display_order: Number(data.display_order ?? 0),
         attributes: data.attributes ?? null,
+        default_component_id: data.default_component_id ?? null,
+        default_supplier_component_id: data.default_supplier_component_id ?? null,
+        default_quantity_delta: data.default_quantity_delta ?? null,
+        default_notes: data.default_notes ?? null,
+        default_is_cutlist: data.default_is_cutlist ?? null,
+        default_cutlist_category: data.default_cutlist_category ?? null,
+        default_cutlist_dimensions: data.default_cutlist_dimensions ?? null,
       },
     }, { status: 201 });
   } catch (error: any) {

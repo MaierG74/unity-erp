@@ -8,6 +8,7 @@ export interface PartSpec {
   width_mm: number;  // X dimension
   qty: number;
   laminate?: boolean; // if true, indicates backer lamination for costing/export UX
+  material_id?: string | null;
   /**
    * Preferred grain orientation.
    * - 'any': can rotate 0° or 90° (subject to global rotation option)
@@ -406,5 +407,4 @@ function mergeAndMeasureHorizontal(segments: HorizontalSegment[]): { mergedLengt
   }
   return { mergedLength: length, count };
 }
-
 

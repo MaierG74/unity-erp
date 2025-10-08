@@ -4,12 +4,20 @@
       "command": "npx",
       "args": [
         "-y",
-        "@supabase/mcp-server-supabase@latest",
-        "--project-ref=ttlyfhkrsjjrzxiagzpb"
+        "@modelcontextprotocol/server-postgres"
       ],
       "env": {
-        "SUPABASE_ACCESS_TOKEN": "sbp_d0e0bed9e80a9a371e244ab6430184c14ac23c19"
+        "POSTGRES_CONNECTION_STRING": "postgresql://postgres.ttlyfhkrsjjrzxiagzpb:ke6tOTxvv45TRNVp@aws-0-us-east-1.pooler.supabase.com:6543/postgres"
       }
+    },
+    "chrome-devtools": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "chrome-devtools-mcp@latest",
+        "--headless=true",
+        "--isolated=true"
+      ]
     }
   }
 }

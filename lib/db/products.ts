@@ -181,16 +181,16 @@ export async function fetchProductOptionGroups(productId: number): Promise<Produ
         const links = Array.isArray(json.links) ? json.links : [];
         for (const link of links) {
           const linkId = Number(link.link_id);
-          const groupOverlays = Array.isArray(link.product_option_group_overlays) ? link.product_option_group_overlays : [];
-          const valueOverlays = Array.isArray(link.product_option_value_overlays) ? link.product_option_value_overlays : [];
+          const groupOverlays = Array.isArray(link.group_overlays) ? link.group_overlays : [];
+          const valueOverlays = Array.isArray(link.value_overlays) ? link.value_overlays : [];
           const optionSet = link.option_set;
-          const groups = Array.isArray(optionSet?.option_set_groups) ? optionSet.option_set_groups : [];
+          const groups = Array.isArray(optionSet?.groups) ? optionSet.groups : [];
 
           for (const group of groups) {
             const overlay = groupOverlays.find((item: any) => Number(item.option_set_group_id) === Number(group.option_set_group_id));
             if (overlay?.hide) continue;
 
-            const valuesRaw = Array.isArray(group.option_set_values) ? group.option_set_values : [];
+            const valuesRaw = Array.isArray(group.values) ? group.values : [];
             const values = valuesRaw
               .map((value: any) => {
                 const valueOverlay = valueOverlays.find(

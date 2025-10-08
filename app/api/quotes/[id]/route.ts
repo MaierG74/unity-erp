@@ -40,6 +40,20 @@ export async function GET(
     if (itemsError) console.warn('Failed to fetch quote items:', itemsError);
     if (attachmentsError) console.warn('Failed to fetch quote attachments:', attachmentsError);
 
+    // Group attachments by scope and quote_item_id
+    const allAttachments = attachments || [];
+    const quoteAttachments = allAttachments.filter((att: any) => att.scope === 'quote');
+    const itemAttachmentsMap = new Map<string, any[]>();
+
+    allAttachments
+      .filter((att: any) => att.scope === 'item' && att.quote_item_id)
+      .forEach((att: any) => {
+        if (!itemAttachmentsMap.has(att.quote_item_id)) {
+          itemAttachmentsMap.set(att.quote_item_id, []);
+        }
+        itemAttachmentsMap.get(att.quote_item_id)!.push(att);
+      });
+
     const result = {
       ...quote,
       items: Array.isArray(items)
@@ -50,10 +64,11 @@ export async function GET(
             return {
               ...rest,
               cutlist_snapshot: latestCutlist ?? null,
+              attachments: itemAttachmentsMap.get(item.id) || [],
             };
           })
         : [],
-      attachments: attachments || [],
+      attachments: quoteAttachments,
     };
 
     console.log('Quote fetched successfully via API:', result);

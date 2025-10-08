@@ -1,9 +1,31 @@
 # Subproduct, Finished-Good Reservations, and Components – Phase 2
 
-Status: Implemented in September branch • Last updated: 2025‑09‑19
+Status: Implemented in September branch • Last updated: 2025‑10‑05
 
 ## Purpose
 This document captures the design and implementation details for Finished‑Good (FG) reservations, how they integrate with Orders and Components, and the client‑side adjustments to component requirements based on reserved FG.
+
+## Option Set Library & Product Options Integration (2025‑10‑05)
+- **Library UX refresh** (`app/settings/option-sets/page.tsx`)
+  - Search across sets, groups, and values with optional “Show linked only” filter (usage_count > 0).
+  - Collapsible cards: sets and groups load collapsed by default; search auto-expands relevant matches.
+  - Deletions and edits leverage shared dialogs with optimistic cache invalidation via `['optionSets']` query key.
+- **Product flow touchpoints** (`app/products/[productId]/option-sets-tab.tsx` & related API routes)
+  - `Attach Option Set` opens selector drawing from the refreshed library endpoint (`/api/option-sets`).
+  - After attaching, product overlays (alias labels, hide toggles, default overrides) persist to `product_option_set_links`, `product_option_group_overlays`, and `product_option_value_overlays`.
+  - Changes to a library value (e.g., default flag) invalidate product queries so the Options tab reflects updated defaults on reload.
+- **Current rollout checklist**
+  - [x] Global library management with search/filter/collapse.
+  - [x] Product Options tab reading from `option_sets` API.
+  - [ ] Category/tag metadata on option sets for faster discovery.
+  - [ ] Modal listing “Products using this set” to assess impact before edits.
+  - [ ] Virtualized list/pagination once library count exceeds ~30 sets.
+
+### Flow Summary
+1. Admin curates reusable configurations in `Settings → Option Sets` (library).
+2. Product editor navigates to `Products → [product] → Options` and clicks **Attach Option Set** to link a library set.
+3. Per-product overrides (group/value alias, hide, default tweaks) are stored as overlays; base library remains canonical.
+4. When the library set changes (new value, default switch), any attached products inherit the update on next fetch while respecting overrides.
 
 ## Terminology
 - FG (Finished‑Good): Stocked products with make_strategy = MTS that can be reserved and later consumed at shipment.

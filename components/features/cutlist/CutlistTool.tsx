@@ -12,10 +12,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { packPartsIntoSheets, type PartSpec, type StockSheetSpec, type LayoutResult } from './packing';
-import { Trash2 } from 'lucide-react';
+import { ChevronDown, Trash2 } from 'lucide-react';
 import { SheetPreview } from './preview';
 import { exportCutlistToQuote, type CutlistLineRefs, type CutlistLineInput } from '@/components/features/cutlist/export';
 import ComponentSelectionDialog from '@/components/features/quotes/ComponentSelectionDialog';
+import { cn } from '@/lib/utils';
 
 export interface CutlistToolProps {
   onExport?: (result: LayoutResult) => void;
@@ -25,6 +26,7 @@ export interface CutlistToolProps {
   onExportSuccess?: () => void;
   showCostingTab?: boolean;
   persistCostingDefaultsKey?: string;
+  enableMaterialPalette?: boolean;
 }
 
 export interface CutlistSummary {
@@ -38,11 +40,63 @@ export interface CutlistSummary {
   edgebanding32mm: number;
   edgebandingTotal: number;
   laminationOn: boolean;
+  materials?: CutlistMaterialSummary[];
 }
 
-export default function CutlistTool({ onExport, onResultsChange, onSummaryChange, quoteItemId, onExportSuccess, showCostingTab = true, persistCostingDefaultsKey }: CutlistToolProps) {
+export interface CutlistMaterialSummary {
+  materialId: string;
+  materialName: string;
+  sheetsUsed: number;
+  sheetsBillable: number;
+  edgebanding16mm: number;
+  edgebanding32mm: number;
+  totalBanding: number;
+  sheetCost: number;
+  band16Cost: number;
+  band32Cost: number;
+  backerSheets: number;
+  backerCost: number;
+  totalCost: number;
+}
+
+type MaterialDefinition = {
+  id: string;
+  name: string;
+  sheetDescription: string;
+  pricePerSheet: number | '';
+  band16Description: string;
+  band16Price: number | '';
+  band32Description: string;
+  band32Price: number | '';
+  component_id?: number;
+  supplier_component_id?: number;
+  unit_cost?: number | null;
+};
+
+export default function CutlistTool({
+  onExport,
+  onResultsChange,
+  onSummaryChange,
+  quoteItemId,
+  onExportSuccess,
+  showCostingTab = true,
+  persistCostingDefaultsKey,
+  enableMaterialPalette = false,
+}: CutlistToolProps) {
+  const generateId = React.useCallback(() => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    return `mat-${Math.random().toString(36).slice(2, 10)}`;
+  }, []);
+  const NONE_MATERIAL_VALUE = 'none';
+
+  const [materials, setMaterials] = React.useState<MaterialDefinition[]>([]);
+
+  const firstMaterialId = materials[0]?.id ?? null;
+
   const [parts, setParts] = React.useState<Array<PartSpec & { label?: string }>>([
-    { id: 'P1', length_mm: 500, width_mm: 300, qty: 2, grain: 'length', band_edges: { top: true, right: true, bottom: true, left: true } },
+    { id: 'P1', length_mm: 500, width_mm: 300, qty: 2, grain: 'length', band_edges: { top: true, right: true, bottom: true, left: true }, material_id: firstMaterialId },
   ]);
   const [stock, setStock] = React.useState<StockSheetSpec[]>([
     { id: 'S1', length_mm: 2750, width_mm: 1830, qty: 10, kerf_mm: 3 },
@@ -65,6 +119,17 @@ export default function CutlistTool({ onExport, onResultsChange, onSummaryChange
   const restoringSnapshotRef = React.useRef(false);
   const autoSaveTimeoutRef = React.useRef<number | null>(null);
 
+  type CostingSectionKey = 'backer' | 'primary' | 'palette' | 'edgebanding';
+  const [costingSections, setCostingSections] = React.useState<Record<CostingSectionKey, boolean>>({
+    backer: true,
+    primary: true,
+    palette: true,
+    edgebanding: true,
+  });
+  const toggleCostingSection = React.useCallback((section: CostingSectionKey) => {
+    setCostingSections((prev) => ({ ...prev, [section]: !prev[section] }));
+  }, []);
+
   // Costing state
   const [primarySheetDescription, setPrimarySheetDescription] = React.useState<string>('MELAMINE SHEET');
   const [primaryPricePerSheet, setPrimaryPricePerSheet] = React.useState<number | ''>('');
@@ -82,6 +147,11 @@ export default function CutlistTool({ onExport, onResultsChange, onSummaryChange
   const [band16Component, setBand16Component] = React.useState<SelectedComponent>(null);
   const [band32Component, setBand32Component] = React.useState<SelectedComponent>(null);
   const [pickerFor, setPickerFor] = React.useState<null | 'primary' | 'backer' | 'band16' | 'band32'>(null);
+  type MaterialPickerState =
+    | { mode: 'part'; partIndex: number }
+    | { mode: 'material'; materialId: string }
+    | { mode: 'new' };
+  const [materialPicker, setMaterialPicker] = React.useState<MaterialPickerState | null>(null);
 
   const sheet = stock[0];
   const laminationOn = React.useMemo(() => parts.some((p) => p.laminate), [parts]);
@@ -91,6 +161,16 @@ export default function CutlistTool({ onExport, onResultsChange, onSummaryChange
 
   const hydrateNumberInput = (value: number | null | undefined): number | '' =>
     value == null || Number.isNaN(value) ? '' : value;
+
+  const MATERIALS_STORAGE_KEY = 'cutlist-materials';
+  const BACKER_COMPONENT_STORAGE_KEY = 'cutlist-default-backer-component';
+  const materialsLoadedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (!enableMaterialPalette) {
+      setMaterialPicker(null);
+    }
+  }, [enableMaterialPalette]);
 
   React.useEffect(() => {
     if (!persistCostingDefaultsKey) return;
@@ -122,6 +202,105 @@ export default function CutlistTool({ onExport, onResultsChange, onSummaryChange
     }
   }, [persistCostingDefaultsKey]);
 
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = window.localStorage.getItem(BACKER_COMPONENT_STORAGE_KEY);
+      if (!stored) return;
+      const parsed = JSON.parse(stored) as SelectedComponent | null;
+      if (parsed && typeof parsed === 'object') {
+        setBackerComponent(parsed);
+        if (parsed.unit_cost != null && backerPricePerSheet === '') {
+          setBackerPricePerSheet(parsed.unit_cost);
+        }
+        if (parsed.description && backerSheetDescription === 'BACKER BOARD') {
+          setBackerSheetDescription(parsed.description);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load default backer component', err);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  React.useEffect(() => {
+    if (!enableMaterialPalette) {
+      materialsLoadedRef.current = true;
+      return;
+    }
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = window.localStorage.getItem(MATERIALS_STORAGE_KEY);
+      if (!stored) {
+        materialsLoadedRef.current = true;
+        return;
+      }
+      const parsed = JSON.parse(stored) as MaterialDefinition[] | null;
+      if (parsed && Array.isArray(parsed) && parsed.length > 0) {
+        setMaterials(parsed);
+      }
+    } catch (err) {
+      console.warn('Failed to load cutlist materials', err);
+    } finally {
+      materialsLoadedRef.current = true;
+    }
+  }, [enableMaterialPalette]);
+
+  React.useEffect(() => {
+    if (!enableMaterialPalette) return;
+    if (!materialsLoadedRef.current) return;
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(MATERIALS_STORAGE_KEY, JSON.stringify(materials));
+    } catch (err) {
+      console.warn('Failed to persist cutlist materials', err);
+    }
+  }, [enableMaterialPalette, materials]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (restoringSnapshotRef.current) return;
+    try {
+      if (backerComponent) {
+        window.localStorage.setItem(BACKER_COMPONENT_STORAGE_KEY, JSON.stringify(backerComponent));
+      } else {
+        window.localStorage.removeItem(BACKER_COMPONENT_STORAGE_KEY);
+      }
+    } catch (err) {
+      console.warn('Failed to persist default backer component', err);
+    }
+  }, [backerComponent]);
+
+  React.useEffect(() => {
+    const defaultId = materials[0]?.id ?? null;
+    setParts((prev) => {
+      let changed = false;
+      const next = prev.map((part) => {
+        const hasMaterial = part.material_id && materials.some((mat) => mat.id === part.material_id);
+        if (hasMaterial) return part;
+        changed = true;
+        return { ...part, material_id: defaultId } as any;
+      });
+      return changed ? next : prev;
+    });
+  }, [materials]);
+
+  React.useEffect(() => {
+    const first = materials[0];
+    if (!first) return;
+    const derivedPrice = typeof first.pricePerSheet === 'number'
+      ? first.pricePerSheet
+      : typeof first.unit_cost === 'number'
+        ? first.unit_cost
+        : '';
+    setPrimarySheetDescription((prev) => (prev === first.sheetDescription ? prev : first.sheetDescription));
+    setPrimaryPricePerSheet((prev) => (prev === derivedPrice ? prev : derivedPrice));
+    setBandingDesc16((prev) => (prev === first.band16Description ? prev : first.band16Description));
+    setBandingPrice16((prev) => (prev === first.band16Price ? prev : first.band16Price));
+    setBandingDesc32((prev) => (prev === first.band32Description ? prev : first.band32Description));
+    setBandingPrice32((prev) => (prev === first.band32Price ? prev : first.band32Price));
+  }, [materials]);
+
   type SnapshotLayout = {
     result: LayoutResult;
     backerResult: LayoutResult | null;
@@ -143,6 +322,19 @@ export default function CutlistTool({ onExport, onResultsChange, onSummaryChange
       backerComponent: SelectedComponent;
       band16Component: SelectedComponent;
       band32Component: SelectedComponent;
+      materials: Array<{
+        id: string;
+        name: string;
+        sheetDescription: string;
+        pricePerSheet: number | null;
+      band16Description: string;
+      band16Price: number | null;
+      band32Description: string;
+      band32Price: number | null;
+      component_id?: number;
+      supplier_component_id?: number;
+      unit_cost?: number | null;
+    }>;
     };
   };
 
@@ -192,6 +384,19 @@ export default function CutlistTool({ onExport, onResultsChange, onSummaryChange
           backerComponent,
           band16Component,
           band32Component,
+          materials: materials.map((mat) => ({
+            id: mat.id,
+            name: mat.name,
+            sheetDescription: mat.sheetDescription,
+            pricePerSheet: normalizeNullableNumber(mat.pricePerSheet),
+            band16Description: mat.band16Description,
+            band16Price: normalizeNullableNumber(mat.band16Price),
+            band32Description: mat.band32Description,
+            band32Price: normalizeNullableNumber(mat.band32Price),
+            component_id: mat.component_id,
+            supplier_component_id: mat.supplier_component_id,
+            unit_cost: typeof mat.unit_cost === 'number' ? mat.unit_cost : normalizeNullableNumber(mat.pricePerSheet),
+          })),
         },
       };
 
@@ -223,6 +428,7 @@ export default function CutlistTool({ onExport, onResultsChange, onSummaryChange
       globalFullBoard,
       kerf,
       lineRefs,
+      materials,
       parts,
       primaryComponent,
       primaryPricePerSheet,
@@ -335,6 +541,21 @@ export default function CutlistTool({ onExport, onResultsChange, onSummaryChange
           setBackerComponent(layout.costing.backerComponent ?? null);
           setBand16Component(layout.costing.band16Component ?? null);
           setBand32Component(layout.costing.band32Component ?? null);
+          if (Array.isArray(layout.costing.materials) && layout.costing.materials.length > 0) {
+            setMaterials(layout.costing.materials.map((mat, idx) => ({
+              id: mat.id || `material-${idx + 1}`,
+              name: mat.name || `Material ${idx + 1}`,
+              sheetDescription: mat.sheetDescription || 'MELAMINE SHEET',
+              pricePerSheet: hydrateNumberInput(mat.pricePerSheet ?? null),
+              band16Description: mat.band16Description || 'EDGE BANDING 16mm',
+              band16Price: hydrateNumberInput(mat.band16Price ?? null),
+              band32Description: mat.band32Description || 'EDGE BANDING 32mm',
+              band32Price: hydrateNumberInput(mat.band32Price ?? null),
+              component_id: mat.component_id,
+              supplier_component_id: mat.supplier_component_id,
+              unit_cost: typeof mat.unit_cost === 'number' ? mat.unit_cost : (typeof mat.pricePerSheet === 'number' ? mat.pricePerSheet : null),
+            })));
+          }
         }
         if (layout?.result) {
           setResult(layout.result);
@@ -408,7 +629,19 @@ export default function CutlistTool({ onExport, onResultsChange, onSummaryChange
 
   const addPartRow = () => {
     const nextIndex = parts.length + 1;
-    setParts([...parts, { id: `P${nextIndex}`, length_mm: 400, width_mm: 300, qty: 1, grain: 'length', band_edges: { top: true, right: true, bottom: true, left: true } }]);
+    const defaultMaterialId = materials[0]?.id ?? null;
+    setParts([
+      ...parts,
+      {
+        id: `P${nextIndex}`,
+        length_mm: 400,
+        width_mm: 300,
+        qty: 1,
+        grain: 'length',
+        band_edges: { top: true, right: true, bottom: true, left: true },
+        material_id: defaultMaterialId,
+      },
+    ]);
   };
 
   const removePartRow = (idx: number) => {
@@ -421,9 +654,152 @@ export default function CutlistTool({ onExport, onResultsChange, onSummaryChange
     setParts(next);
   };
 
+  const addMaterial = () => {
+    if (!enableMaterialPalette) return;
+    setMaterialPicker({ mode: 'new' });
+  };
+
+  const updateMaterial = (id: string, updates: Partial<MaterialDefinition>) => {
+    setMaterials((prev) => prev.map((mat) => {
+      if (mat.id !== id) return mat;
+      const next: MaterialDefinition = { ...mat, ...updates };
+      if (updates.pricePerSheet !== undefined) {
+        if (typeof updates.pricePerSheet === 'number') {
+          next.unit_cost = updates.pricePerSheet;
+        } else if (updates.pricePerSheet === '') {
+          next.unit_cost = null;
+        }
+      }
+      return next;
+    }));
+  };
+
+  const removeMaterial = (id: string) => {
+    setMaterials((prev) => {
+      if (prev.length <= 1) return prev;
+      const next = prev.filter((mat) => mat.id !== id);
+      const fallbackId = next[0]?.id ?? null;
+      setParts((prevParts) =>
+        prevParts.map((part) =>
+          part.material_id === id ? ({ ...part, material_id: fallbackId } as any) : part
+        )
+      );
+      return next;
+    });
+  };
+
   const updateStock = (updates: Partial<StockSheetSpec>) => {
     const next = [{ ...stock[0], ...updates } as StockSheetSpec];
     setStock(next);
+  };
+
+  const applyMaterialSelection = React.useCallback((picker: MaterialPickerState, selection: {
+    description: string;
+    unit_cost: number;
+    component_id?: number;
+    supplier_component_id?: number;
+  }) => {
+    if (!enableMaterialPalette) return;
+    const description = selection.description?.trim() || 'Material';
+    const price = Number.isFinite(selection.unit_cost) ? Number(selection.unit_cost) : null;
+
+    const findByComponent = selection.component_id
+      ? materials.find(
+          (mat) =>
+            mat.component_id === selection.component_id &&
+            mat.supplier_component_id === selection.supplier_component_id
+        )
+      : undefined;
+
+    let targetId: string;
+    if (picker.mode === 'material') {
+      targetId = picker.materialId;
+    } else if (findByComponent) {
+      targetId = findByComponent.id;
+    } else {
+      targetId = generateId();
+    }
+
+    const existing = picker.mode === 'material'
+      ? materials.find((mat) => mat.id === picker.materialId)
+      : findByComponent;
+
+    const nextDefinition: MaterialDefinition = {
+      id: targetId,
+      name: existing?.name || description,
+      sheetDescription: description,
+      pricePerSheet: price ?? existing?.pricePerSheet ?? '',
+      band16Description: existing?.band16Description || bandingDesc16 || 'EDGE BANDING 16mm (m)',
+      band16Price: existing?.band16Price ?? bandingPrice16,
+      band32Description: existing?.band32Description || bandingDesc32 || 'EDGE BANDING 32mm (m)',
+      band32Price: existing?.band32Price ?? bandingPrice32,
+      component_id: selection.component_id ?? existing?.component_id,
+      supplier_component_id: selection.supplier_component_id ?? existing?.supplier_component_id,
+      unit_cost: price ?? existing?.unit_cost ?? null,
+    };
+
+    setMaterials((prev) => {
+      const has = prev.some((mat) => mat.id === targetId);
+      if (has) {
+        return prev.map((mat) => (mat.id === targetId ? { ...mat, ...nextDefinition } : mat));
+      }
+      return [...prev, nextDefinition];
+    });
+
+    if (picker.mode === 'part') {
+      const partIndex = picker.partIndex;
+      setParts((prev) => prev.map((part, idx) => (idx === partIndex ? { ...part, material_id: targetId } : part)));
+    }
+
+    const willBePrimary = materials.length === 0 || materials[0]?.id === targetId;
+    if (willBePrimary) {
+      const primarySel: SelectedComponent = {
+        description,
+        component_id: selection.component_id,
+        supplier_component_id: selection.supplier_component_id,
+        unit_cost: price,
+      } as SelectedComponent;
+      setPrimaryComponent(primarySel);
+      setPrimarySheetDescription(description);
+      if (price != null) {
+        setPrimaryPricePerSheet(price);
+      }
+    }
+  }, [bandingDesc16, bandingPrice16, bandingDesc32, bandingPrice32, enableMaterialPalette, generateId, materials]);
+
+  const CostingSectionCard = ({
+    section,
+    title,
+    description,
+    accent,
+    children,
+  }: {
+    section: CostingSectionKey;
+    title: string;
+    description?: string;
+    accent?: string;
+    children: React.ReactNode;
+  }) => {
+    const isOpen = costingSections[section];
+    return (
+      <section className={cn('rounded-xl border shadow-sm backdrop-blur-sm transition-colors', accent)}>
+        <button
+          type="button"
+          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => toggleCostingSection(section)}
+        >
+          <div>
+            <div className="font-semibold text-foreground">{title}</div>
+            {description ? <p className="mt-1 text-xs text-muted-foreground">{description}</p> : null}
+          </div>
+          <ChevronDown className={cn('h-4 w-4 text-muted-foreground transition-transform duration-200', isOpen ? 'rotate-180' : 'rotate-0')} />
+        </button>
+        <Separator />
+        <div className={cn('px-4 py-4 space-y-4', !isOpen && 'hidden')}>
+          {children}
+        </div>
+      </section>
+    );
   };
 
   const handleCalculate = () => {
@@ -569,6 +945,79 @@ export default function CutlistTool({ onExport, onResultsChange, onSummaryChange
       return;
     }
 
+    const sheetAreaSafe = sheetArea > 0 ? sheetArea : 1;
+    const totalPartsArea = parts.reduce((sum, part) => {
+      const qty = Math.max(0, Number(part.qty) || 0);
+      return sum + (part.length_mm || 0) * (part.width_mm || 0) * qty;
+    }, 0);
+
+    const backerPriceNumeric = typeof backerPricePerSheet === 'number' ? backerPricePerSheet : 0;
+
+    const materialStats = new Map<string, { name: string; area: number; band16: number; band32: number; laminateArea: number }>();
+
+    const getMaterial = (id: string | null | undefined) => materials.find((m) => m.id === id) ?? materials[0];
+
+    for (const part of parts) {
+      const qty = Math.max(0, Number(part.qty) || 0);
+      if (qty <= 0) continue;
+      const area = (part.length_mm || 0) * (part.width_mm || 0) * qty;
+      const band = part.band_edges || {};
+      const perBandLen =
+        ((band.top ? part.width_mm : 0) ?? 0) +
+        ((band.bottom ? part.width_mm : 0) ?? 0) +
+        ((band.left ? part.length_mm : 0) ?? 0) +
+        ((band.right ? part.length_mm : 0) ?? 0);
+      const totalBandLen = perBandLen * qty;
+      const mat = getMaterial(part.material_id);
+      const key = mat?.id || materials[0]?.id || 'default';
+      if (!materialStats.has(key)) {
+        materialStats.set(key, { name: mat?.name || 'Material', area: 0, band16: 0, band32: 0, laminateArea: 0 });
+      }
+      const bucket = materialStats.get(key)!;
+      bucket.area += area;
+      if (part.laminate) {
+        bucket.band32 += totalBandLen;
+        bucket.laminateArea += area;
+      } else {
+        bucket.band16 += totalBandLen;
+      }
+    }
+
+    const materialSummaries: CutlistMaterialSummary[] = materials.map((mat) => {
+      const stats = materialStats.get(mat.id) || { name: mat.name, area: 0, band16: 0, band32: 0, laminateArea: 0 };
+      const sheetsUsed = stats.area / sheetAreaSafe;
+      const usageRatio = totalPartsArea > 0 ? stats.area / totalPartsArea : 0;
+      const sheetsBillable = primaryChargeSheets * usageRatio;
+      const sheetPrice = typeof mat.pricePerSheet === 'number'
+        ? mat.pricePerSheet
+        : typeof mat.unit_cost === 'number'
+          ? mat.unit_cost
+          : 0;
+      const band16Price = typeof mat.band16Price === 'number' ? mat.band16Price : 0;
+      const band32Price = typeof mat.band32Price === 'number' ? mat.band32Price : 0;
+      const sheetCost = sheetsBillable * sheetPrice;
+      const band16Cost = (stats.band16 / 1000) * band16Price;
+      const band32Cost = (stats.band32 / 1000) * band32Price;
+      const backerSheets = stats.laminateArea / sheetAreaSafe;
+      const backerCost = backerSheets * backerPriceNumeric;
+      const totalCost = sheetCost + band16Cost + band32Cost + backerCost;
+      return {
+        materialId: mat.id,
+        materialName: mat.name,
+        sheetsUsed,
+        sheetsBillable,
+        edgebanding16mm: stats.band16,
+        edgebanding32mm: stats.band32,
+        totalBanding: stats.band16 + stats.band32,
+        sheetCost,
+        band16Cost,
+        band32Cost,
+        backerSheets,
+        backerCost,
+        totalCost,
+      };
+    });
+
     onSummaryChange({
       result,
       backerResult: backerResult ?? null,
@@ -580,6 +1029,7 @@ export default function CutlistTool({ onExport, onResultsChange, onSummaryChange
       edgebanding32mm: bandLen32,
       edgebandingTotal: bandLen,
       laminationOn,
+      materials: materialSummaries,
     });
   }, [
     onSummaryChange,
@@ -593,6 +1043,10 @@ export default function CutlistTool({ onExport, onResultsChange, onSummaryChange
     bandLen32,
     bandLen,
     laminationOn,
+    materials,
+    parts,
+    sheetArea,
+    backerPricePerSheet,
   ]);
 
   React.useEffect(() => {
@@ -642,186 +1096,447 @@ export default function CutlistTool({ onExport, onResultsChange, onSummaryChange
             <div className="space-y-3">
               <div className="font-medium">Parts</div>
               <div className="space-y-2">
-                <div className="grid grid-cols-9 gap-4 md:gap-8 text-xs text-muted-foreground items-center">
-                  <div>ID</div>
-                  <div>Length (mm)</div>
-                  <div>Width (mm)</div>
-                  <div>Qty</div>
-                  <div>Grain</div>
-                  <div className="pl-1">Edge length</div>
-                  <div>Edge width</div>
-                  <div className="flex items-center justify-center w-[48px]">Lami</div>
-                  <div></div>
+                <div className="space-y-4">
+                  {parts.map((p, idx) => {
+                    const material = p.material_id ? materials.find((m) => m.id === p.material_id) : null;
+                    return (
+                      <div key={idx} className="rounded-xl border bg-card/40 shadow-sm">
+                        <div className="flex flex-col gap-4 border-b px-4 py-4 md:flex-row md:items-start md:justify-between">
+                          <div
+                            className={`grid w-full gap-4 md:w-auto ${
+                              enableMaterialPalette ? 'md:grid-cols-[96px minmax(0,1fr)] md:items-start' : 'md:grid-cols-[96px]'
+                            }`}
+                          >
+                            <div className="space-y-1">
+                              <Label htmlFor={`pid-${idx}`} className="text-xs font-medium uppercase text-muted-foreground">ID</Label>
+                              <Input id={`pid-${idx}`} className="w-full md:w-[96px]" value={p.id} onChange={(e) => updatePart(idx, { id: e.target.value })} />
+                            </div>
+                            {enableMaterialPalette && (
+                              <div className="space-y-1">
+                                <Label htmlFor={`mat-${idx}`} className="text-xs font-medium uppercase text-muted-foreground">Material</Label>
+                                <div className="flex flex-wrap items-start gap-2">
+                                  <Select
+                                    value={p.material_id ?? NONE_MATERIAL_VALUE}
+                                    onValueChange={(v) => updatePart(idx, { material_id: v === NONE_MATERIAL_VALUE ? null : v })}
+                                  >
+                                    <SelectTrigger id={`mat-${idx}`} className="w-full md:w-[220px]">
+                                      <SelectValue placeholder="Select material" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value={NONE_MATERIAL_VALUE}>No material</SelectItem>
+                                      {materials.map((mat) => (
+                                        <SelectItem key={mat.id} value={mat.id}>
+                                          {mat.name || mat.sheetDescription}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="shrink-0"
+                                    onClick={() => setMaterialPicker({ mode: 'part', partIndex: idx })}
+                                  >
+                                    Choose…
+                                  </Button>
+                                </div>
+                                {material && (
+                                  <div className="text-[11px] text-muted-foreground">
+                                    {material.sheetDescription}
+                                    {material.unit_cost != null ? ` • ${material.unit_cost.toFixed(2)}` : ''}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <Button variant="destructiveSoft" size="icon" className="h-8 w-8 self-start" type="button" onClick={() => removePartRow(idx)} aria-label="Delete row">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <div className="grid gap-4 px-4 py-4 md:grid-cols-2 xl:grid-cols-3">
+                          <div className="space-y-2">
+                            <Label htmlFor={`len-${idx}`}>Length (mm)</Label>
+                            <Input id={`len-${idx}`} type="number" value={p.length_mm} onChange={(e) => updatePart(idx, { length_mm: Number(e.target.value || 0) })} onFocus={(e) => e.target.select()} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor={`wid-${idx}`}>Width (mm)</Label>
+                            <Input id={`wid-${idx}`} type="number" value={p.width_mm} onChange={(e) => updatePart(idx, { width_mm: Number(e.target.value || 0) })} onFocus={(e) => e.target.select()} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor={`qty-${idx}`}>Quantity</Label>
+                            <Input id={`qty-${idx}`} type="number" value={p.qty} onChange={(e) => updatePart(idx, { qty: Number(e.target.value || 0) })} onFocus={(e) => e.target.select()} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor={`grain-${idx}`}>Grain</Label>
+                            <Select value={p.grain ?? (p.require_grain ? 'length' : 'any')} onValueChange={(v) => updatePart(idx, { grain: v as any, require_grain: undefined })}>
+                              <SelectTrigger id={`grain-${idx}`}>
+                                <SelectValue placeholder="Grain" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="any">Any</SelectItem>
+                                <SelectItem value="length">Length</SelectItem>
+                                <SelectItem value="width">Width</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Edge length</Label>
+                            <div className="flex flex-wrap items-center gap-3 text-sm">
+                              <div className="flex items-center gap-1">
+                                <Checkbox id={`len-left-${idx}`} className="h-4 w-4" checked={Boolean(p.band_edges?.left)} onCheckedChange={(v) => updatePart(idx, { band_edges: { ...p.band_edges, left: Boolean(v) } })} />
+                                <Label htmlFor={`len-left-${idx}`} className="leading-none">Left ({p.length_mm})</Label>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <Checkbox id={`len-right-${idx}`} className="h-4 w-4" checked={Boolean(p.band_edges?.right)} onCheckedChange={(v) => updatePart(idx, { band_edges: { ...p.band_edges, right: Boolean(v) } })} />
+                                <Label htmlFor={`len-right-${idx}`} className="leading-none">Right ({p.length_mm})</Label>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Edge width</Label>
+                            <div className="flex flex-wrap items-center gap-3 text-sm">
+                              <div className="flex items-center gap-1">
+                                <Checkbox id={`wid-top-${idx}`} className="h-4 w-4" checked={Boolean(p.band_edges?.top)} onCheckedChange={(v) => updatePart(idx, { band_edges: { ...p.band_edges, top: Boolean(v) } })} />
+                                <Label htmlFor={`wid-top-${idx}`} className="leading-none">Top ({p.width_mm})</Label>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <Checkbox id={`wid-bot-${idx}`} className="h-4 w-4" checked={Boolean(p.band_edges?.bottom)} onCheckedChange={(v) => updatePart(idx, { band_edges: { ...p.band_edges, bottom: Boolean(v) } })} />
+                                <Label htmlFor={`wid-bot-${idx}`} className="leading-none">Bottom ({p.width_mm})</Label>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor={`lam-${idx}`}>Lamination</Label>
+                            <div className="flex items-center gap-2">
+                              <Checkbox id={`lam-${idx}`} checked={Boolean(p.laminate)} onCheckedChange={(v) => updatePart(idx, { laminate: Boolean(v) })} />
+                              <Label htmlFor={`lam-${idx}`} className="text-sm text-muted-foreground">Apply backer</Label>
+                            </div>
+                          </div>
+                          {enableMaterialPalette && material && (
+                            <div className="space-y-1 text-xs text-muted-foreground">
+                              <div className="font-medium text-foreground">{material.sheetDescription}</div>
+                              {material.unit_cost != null && (
+                                <div>Unit price: {material.unit_cost.toFixed(2)}</div>
+                              )}
+                              {material.component_id && (
+                                <div>Component #{material.component_id}</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-                {parts.map((p, idx) => (
-                  <div key={idx} className="grid grid-cols-9 gap-4 md:gap-8 items-start">
-                    <div>
-                      <Label htmlFor={`pid-${idx}`} className="sr-only">ID</Label>
-                      <Input id={`pid-${idx}`} className="w-[72px]" value={p.id} onChange={(e) => updatePart(idx, { id: e.target.value })} />
-                    </div>
-                    <div>
-                      <Label htmlFor={`len-${idx}`} className="sr-only">Length (mm)</Label>
-                      <Input id={`len-${idx}`} className="w-[88px]" type="number" value={p.length_mm} onChange={(e) => updatePart(idx, { length_mm: Number(e.target.value || 0) })} onFocus={(e) => e.target.select()} />
-                    </div>
-                    <div>
-                      <Label htmlFor={`wid-${idx}`} className="sr-only">Width (mm)</Label>
-                      <Input id={`wid-${idx}`} className="w-[88px]" type="number" value={p.width_mm} onChange={(e) => updatePart(idx, { width_mm: Number(e.target.value || 0) })} onFocus={(e) => e.target.select()} />
-                    </div>
-                    <div>
-                      <Label htmlFor={`qty-${idx}`} className="sr-only">Qty</Label>
-                      <Input id={`qty-${idx}`} className="w-[72px]" type="number" value={p.qty} onChange={(e) => updatePart(idx, { qty: Number(e.target.value || 0) })} onFocus={(e) => e.target.select()} />
-                    </div>
-                    <div className="md:pr-4">
-                      <Label htmlFor={`grain-${idx}`} className="sr-only">Grain</Label>
-                      <Select value={p.grain ?? (p.require_grain ? 'length' : 'any')} onValueChange={(v) => updatePart(idx, { grain: v as any, require_grain: undefined })}>
-                        <SelectTrigger id={`grain-${idx}`} className="w-[120px]">
-                          <SelectValue placeholder="Grain" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="any">Any</SelectItem>
-                          <SelectItem value="length">Length</SelectItem>
-                          <SelectItem value="width">Width</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex flex-col gap-1 text-xs w-[130px] whitespace-nowrap ml-2 md:ml-4">
-                      <div className="flex items-center gap-1" title="Apply edging to left length edge">
-                        <Checkbox id={`len-left-${idx}`} className="h-4 w-4" checked={Boolean(p.band_edges?.left)} onCheckedChange={(v) => updatePart(idx, { band_edges: { ...p.band_edges, left: Boolean(v) } })} />
-                        <Label htmlFor={`len-left-${idx}`} className="leading-none">Left <span className="ml-1 text-[11px] text-muted-foreground">({p.length_mm})</span></Label>
-                      </div>
-                      <div className="flex items-center gap-1" title="Apply edging to right length edge">
-                        <Checkbox id={`len-right-${idx}`} className="h-4 w-4" checked={Boolean(p.band_edges?.right)} onCheckedChange={(v) => updatePart(idx, { band_edges: { ...p.band_edges, right: Boolean(v) } })} />
-                        <Label htmlFor={`len-right-${idx}`} className="leading-none">Right <span className="ml-1 text-[11px] text-muted-foreground">({p.length_mm})</span></Label>
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-1 text-xs w-[130px] whitespace-nowrap">
-                      <div className="flex items-center gap-1" title="Apply edging to top width edge">
-                        <Checkbox id={`wid-top-${idx}`} className="h-4 w-4" checked={Boolean(p.band_edges?.top)} onCheckedChange={(v) => updatePart(idx, { band_edges: { ...p.band_edges, top: Boolean(v) } })} />
-                        <Label htmlFor={`wid-top-${idx}`} className="leading-none">Top <span className="ml-1 text-[11px] text-muted-foreground">({p.width_mm})</span></Label>
-                      </div>
-                      <div className="flex items-center gap-1" title="Apply edging to bottom width edge">
-                        <Checkbox id={`wid-bot-${idx}`} className="h-4 w-4" checked={Boolean(p.band_edges?.bottom)} onCheckedChange={(v) => updatePart(idx, { band_edges: { ...p.band_edges, bottom: Boolean(v) } })} />
-                        <Label htmlFor={`wid-bot-${idx}`} className="leading-none">Bottom <span className="ml-1 text-[11px] text-muted-foreground">({p.width_mm})</span></Label>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-center w-[48px]">
-                      <Checkbox id={`lam-${idx}`} checked={Boolean(p.laminate)} onCheckedChange={(v) => updatePart(idx, { laminate: Boolean(v) })} />
-                      <Label htmlFor={`lam-${idx}`} className="sr-only">Laminate with backer</Label>
-                    </div>
-                    <div className="flex items-center w-[48px] justify-end">
-                      <Button variant="destructiveSoft" size="icon" className="h-8 w-8" type="button" onClick={() => removePartRow(idx)} aria-label="Delete row">
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-                <div>
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <Button type="button" variant="secondary" onClick={addPartRow}>+ Add Part</Button>
+                  <Button onClick={handleCalculate}>Calculate</Button>
                 </div>
               </div>
-            </div>
-            <div className="flex justify-end">
-              <Button onClick={handleCalculate}>Calculate</Button>
             </div>
           </div>
         </TabsContent>
 
         {showCostingTab && (
         <TabsContent value="costing" className="space-y-4">
-          <div className="space-y-3">
-            <div className="font-medium">Costing</div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <CostingSectionCard
+            section="backer"
+            title="Backer defaults"
+            description="Set the laminate backer and rate that applies whenever lamination is on."
+            accent="bg-muted/15"
+          >
+            <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <div className="text-sm text-muted-foreground">Primary sheet</div>
-                <div className="grid grid-cols-2 gap-2 items-center">
-                  <div>
-                    <Label>Component</Label>
-                    <div className="flex items-center gap-2">
-                      <Input readOnly value={primaryComponent?.description || primarySheetDescription} />
-                      <Button type="button" variant="outline" onClick={() => setPickerFor('primary')}>{primaryComponent ? 'Change' : 'Select'}</Button>
-                    </div>
-                  </div>
-                  <div>
-                    <Label htmlFor="cost-primary-price">Price per sheet</Label>
-                    <Input id="cost-primary-price" type="number" value={primaryPricePerSheet} onChange={e => setPrimaryPricePerSheet(e.target.value === '' ? '' : Number(e.target.value))} onFocus={e => e.target.select()} placeholder={primaryComponent?.unit_cost != null ? String(primaryComponent.unit_cost) : undefined} />
-                  </div>
-                </div>
+                <Label>Backer description</Label>
+                <Input value={backerSheetDescription} onChange={(e) => setBackerSheetDescription(e.target.value)} className="w-full" />
               </div>
               <div className="space-y-2">
-                <div className="text-sm text-muted-foreground">Backer sheet</div>
-                <div className="grid grid-cols-2 gap-2 items-center">
-                  <div>
-                    <Label>Component</Label>
-                    <div className="flex items-center gap-2">
-                      <Input readOnly value={backerComponent?.description || backerSheetDescription} />
-                      <Button type="button" variant="outline" onClick={() => setPickerFor('backer')}>{backerComponent ? 'Change' : 'Select'}</Button>
-                    </div>
-                  </div>
-                  <div>
-                    <Label htmlFor="cost-backer-price">Price per sheet</Label>
-                    <Input id="cost-backer-price" type="number" value={backerPricePerSheet} onChange={e => setBackerPricePerSheet(e.target.value === '' ? '' : Number(e.target.value))} onFocus={e => e.target.select()} placeholder={backerComponent?.unit_cost != null ? String(backerComponent.unit_cost) : undefined} />
-                  </div>
-                </div>
+                <Label htmlFor="cost-backer-price">Price per sheet</Label>
+                <Input
+                  id="cost-backer-price"
+                  type="number"
+                  value={backerPricePerSheet}
+                  onChange={(e) => setBackerPricePerSheet(e.target.value === '' ? '' : Number(e.target.value))}
+                  onFocus={(e) => e.target.select()}
+                  placeholder={backerComponent?.unit_cost != null ? String(backerComponent.unit_cost) : undefined}
+                  className="w-full"
+                />
               </div>
             </div>
-            <Separator />
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <div className="text-sm text-muted-foreground">Banding (16mm)</div>
-                <div className="grid grid-cols-2 gap-2 items-center">
-                  <div>
-                    <Label>Component</Label>
-                    <div className="flex items-center gap-2">
-                      <Input readOnly value={band16Component?.description || bandingDesc16} />
-                      <Button type="button" variant="outline" onClick={() => setPickerFor('band16')}>{band16Component ? 'Change' : 'Select'}</Button>
-                    </div>
-                  </div>
-                  <div>
-                    <Label htmlFor="cost-band16-price">Price per meter</Label>
-                    <Input id="cost-band16-price" type="number" value={bandingPrice16} onChange={e => setBandingPrice16(e.target.value === '' ? '' : Number(e.target.value))} onFocus={e => e.target.select()} placeholder={band16Component?.unit_cost != null ? String(band16Component.unit_cost) : undefined} />
-                  </div>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <div className="text-sm text-muted-foreground">Banding (32mm)</div>
-                <div className="grid grid-cols-2 gap-2 items-center">
-                  <div>
-                    <Label>Component</Label>
-                    <div className="flex items-center gap-2">
-                      <Input readOnly value={band32Component?.description || bandingDesc32} />
-                      <Button type="button" variant="outline" onClick={() => setPickerFor('band32')}>{band32Component ? 'Change' : 'Select'}</Button>
-                    </div>
-                  </div>
-                  <div>
-                    <Label htmlFor="cost-band32-price">Price per meter</Label>
-                    <Input id="cost-band32-price" type="number" value={bandingPrice32} onChange={e => setBandingPrice32(e.target.value === '' ? '' : Number(e.target.value))} onFocus={e => e.target.select()} placeholder={band32Component?.unit_cost != null ? String(band32Component.unit_cost) : undefined} />
-                  </div>
-                </div>
-              </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" onClick={() => setPickerFor('backer')}>
+                {backerComponent ? 'Change backer component' : 'Select backer component'}
+              </Button>
+              {backerComponent && <span className="text-sm text-muted-foreground">{backerComponent.description}</span>}
             </div>
-            {(onExport || quoteItemId) && (
-              <div className="flex justify-end pt-2">
-                <Button onClick={handleExport}>Export to Quote</Button>
+            {backerComponent?.unit_cost != null && (
+              <div className="text-xs text-muted-foreground">
+                Current rate: <span className="font-medium text-foreground">{backerComponent.unit_cost.toFixed(2)}</span>
               </div>
             )}
-          </div>
-          <ComponentSelectionDialog
-            open={pickerFor !== null}
-            onClose={() => setPickerFor(null)}
-            onAddComponent={(comp) => {
-              const sel = {
-                description: comp.description,
-                component_id: comp.component_id,
-                supplier_component_id: comp.supplier_component_id,
-                unit_cost: comp.unit_cost,
-              } as any;
-              if (pickerFor === 'primary') { setPrimaryComponent(sel); if (primaryPricePerSheet === '') setPrimaryPricePerSheet(comp.unit_cost || ''); }
-              if (pickerFor === 'backer') { setBackerComponent(sel); if (backerPricePerSheet === '') setBackerPricePerSheet(comp.unit_cost || ''); }
-              if (pickerFor === 'band16') { setBand16Component(sel); if (bandingPrice16 === '') setBandingPrice16(comp.unit_cost || ''); }
-              if (pickerFor === 'band32') { setBand32Component(sel); if (bandingPrice32 === '') setBandingPrice32(comp.unit_cost || ''); }
-              setPickerFor(null);
-            }}
-          />
+          </CostingSectionCard>
+
+          {enableMaterialPalette ? (
+            <>
+              <CostingSectionCard
+                section="palette"
+                title="Material palette"
+                description="Define sheet and edging pricing for every finish. Assign materials in the Inputs tab; the first entry exports by default."
+                accent="bg-card/50"
+              >
+                <div className="space-y-5">
+                  {materials.map((mat, idx) => (
+                    <div
+                      key={mat.id}
+                      className={cn(
+                        'rounded-lg border p-5 space-y-5 transition-colors',
+                        idx % 2 === 0 ? 'bg-white/60 dark:bg-muted/30' : 'bg-muted/25'
+                      )}
+                    >
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="w-full lg:max-w-xs space-y-2">
+                          <Label htmlFor={`material-name-${mat.id}`}>Material name</Label>
+                          <Input
+                            id={`material-name-${mat.id}`}
+                            value={mat.name}
+                            onChange={(e) => updateMaterial(mat.id, { name: e.target.value })}
+                            placeholder={`Material ${idx + 1}`}
+                            className="w-full"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">{idx === 0 ? 'Primary / export default' : `Material ${idx + 1}`}</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => removeMaterial(mat.id)}
+                            disabled={materials.length <= 1}
+                            aria-label="Remove material"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                        <div className="space-y-2">
+                          <Label htmlFor={`material-sheet-${mat.id}`}>Sheet description</Label>
+                          <Input
+                            id={`material-sheet-${mat.id}`}
+                            value={mat.sheetDescription}
+                            onChange={(e) => updateMaterial(mat.id, { sheetDescription: e.target.value })}
+                            placeholder="e.g. White Melamine"
+                            className="w-full"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`material-price-${mat.id}`}>Price per sheet</Label>
+                          <Input
+                            id={`material-price-${mat.id}`}
+                            type="number"
+                            value={mat.pricePerSheet}
+                            onChange={(e) => updateMaterial(mat.id, { pricePerSheet: e.target.value === '' ? '' : Number(e.target.value) })}
+                            onFocus={(e) => e.target.select()}
+                            className="w-full"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`material-band16-desc-${mat.id}`}>Edgebanding 16mm description</Label>
+                          <Input
+                            id={`material-band16-desc-${mat.id}`}
+                            value={mat.band16Description}
+                            onChange={(e) => updateMaterial(mat.id, { band16Description: e.target.value })}
+                            placeholder="e.g. White PVC 16mm"
+                            className="w-full"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`material-band16-price-${mat.id}`}>Edgebanding 16mm price / meter</Label>
+                          <Input
+                            id={`material-band16-price-${mat.id}`}
+                            type="number"
+                            value={mat.band16Price}
+                            onChange={(e) => updateMaterial(mat.id, { band16Price: e.target.value === '' ? '' : Number(e.target.value) })}
+                            onFocus={(e) => e.target.select()}
+                            className="w-full"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`material-band32-desc-${mat.id}`}>Edgebanding 32mm description</Label>
+                          <Input
+                            id={`material-band32-desc-${mat.id}`}
+                            value={mat.band32Description}
+                            onChange={(e) => updateMaterial(mat.id, { band32Description: e.target.value })}
+                            placeholder="e.g. White PVC 32mm"
+                            className="w-full"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`material-band32-price-${mat.id}`}>Edgebanding 32mm price / meter</Label>
+                          <Input
+                            id={`material-band32-price-${mat.id}`}
+                            type="number"
+                            value={mat.band32Price}
+                            onChange={(e) => updateMaterial(mat.id, { band32Price: e.target.value === '' ? '' : Number(e.target.value) })}
+                            onFocus={(e) => e.target.select()}
+                            className="w-full"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                        <Button type="button" variant="outline" size="sm" onClick={() => setMaterialPicker({ mode: 'material', materialId: mat.id })}>
+                          Choose sheet…
+                        </Button>
+                        {mat.component_id && <span>Component #{mat.component_id}</span>}
+                      </div>
+
+                      {idx === 0 && (
+                        <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+                          <span className="uppercase tracking-wide text-xs text-muted-foreground">Export components</span>
+                          <Button type="button" variant="outline" size="sm" onClick={() => setPickerFor('primary')}>
+                            {primaryComponent ? 'Change sheet component' : 'Select sheet component'}
+                          </Button>
+                          {primaryComponent && <span>{primaryComponent.description}</span>}
+                          <Button type="button" variant="outline" size="sm" onClick={() => setPickerFor('band16')}>
+                            {band16Component ? 'Change 16mm component' : 'Select 16mm component'}
+                          </Button>
+                          {band16Component && <span>{band16Component.description}</span>}
+                          <Button type="button" variant="outline" size="sm" onClick={() => setPickerFor('band32')}>
+                            {band32Component ? 'Change 32mm component' : 'Select 32mm component'}
+                          </Button>
+                          {band32Component && <span>{band32Component.description}</span>}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <Button type="button" variant="secondary" onClick={addMaterial}>
+                  + Add material
+                </Button>
+              </CostingSectionCard>
+            </>
+          ) : (
+            <>
+              <CostingSectionCard
+                section="primary"
+                title="Primary material"
+                description="Set the sheet that exports to the costing cluster by default."
+                accent="bg-card/50"
+              >
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="primary-sheet-desc">Sheet description</Label>
+                    <Input
+                      id="primary-sheet-desc"
+                      value={primarySheetDescription}
+                      onChange={(e) => setPrimarySheetDescription(e.target.value)}
+                      placeholder="e.g. White Melamine"
+                      className="w-full"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="primary-sheet-price">Price per sheet</Label>
+                    <Input
+                      id="primary-sheet-price"
+                      type="number"
+                      value={primaryPricePerSheet}
+                      onChange={(e) => setPrimaryPricePerSheet(e.target.value === '' ? '' : Number(e.target.value))}
+                      onFocus={(e) => e.target.select()}
+                      placeholder={primaryComponent?.unit_cost != null ? String(primaryComponent.unit_cost) : undefined}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button type="button" variant="outline" onClick={() => setPickerFor('primary')}>
+                    {primaryComponent ? 'Change sheet component' : 'Select sheet component'}
+                  </Button>
+                  {primaryComponent && <span className="text-sm text-muted-foreground">{primaryComponent.description}</span>}
+                </div>
+              </CostingSectionCard>
+
+              <CostingSectionCard
+                section="edgebanding"
+                title="Edgebanding"
+                description="Configure the banding descriptions and supplier selections that export with the cutlist."
+                accent="bg-muted/20"
+              >
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="band16-desc">Edgebanding 16mm description</Label>
+                      <Input
+                        id="band16-desc"
+                        value={bandingDesc16}
+                        onChange={(e) => setBandingDesc16(e.target.value)}
+                        placeholder="e.g. White PVC 16mm"
+                        className="w-full"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="band16-price">Edgebanding 16mm price / meter</Label>
+                      <Input
+                        id="band16-price"
+                        type="number"
+                        value={bandingPrice16}
+                        onChange={(e) => setBandingPrice16(e.target.value === '' ? '' : Number(e.target.value))}
+                        onFocus={(e) => e.target.select()}
+                        placeholder={band16Component?.unit_cost != null ? String(band16Component.unit_cost) : undefined}
+                        className="w-full"
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button type="button" variant="outline" onClick={() => setPickerFor('band16')}>
+                        {band16Component ? 'Change 16mm component' : 'Select 16mm component'}
+                      </Button>
+                      {band16Component && <span className="text-sm text-muted-foreground">{band16Component.description}</span>}
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="band32-desc">Edgebanding 32mm description</Label>
+                      <Input
+                        id="band32-desc"
+                        value={bandingDesc32}
+                        onChange={(e) => setBandingDesc32(e.target.value)}
+                        placeholder="e.g. White PVC 32mm"
+                        className="w-full"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="band32-price">Edgebanding 32mm price / meter</Label>
+                      <Input
+                        id="band32-price"
+                        type="number"
+                        value={bandingPrice32}
+                        onChange={(e) => setBandingPrice32(e.target.value === '' ? '' : Number(e.target.value))}
+                        onFocus={(e) => e.target.select()}
+                        placeholder={band32Component?.unit_cost != null ? String(band32Component.unit_cost) : undefined}
+                        className="w-full"
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button type="button" variant="outline" onClick={() => setPickerFor('band32')}>
+                        {band32Component ? 'Change 32mm component' : 'Select 32mm component'}
+                      </Button>
+                      {band32Component && <span className="text-sm text-muted-foreground">{band32Component.description}</span>}
+                    </div>
+                  </div>
+                </div>
+              </CostingSectionCard>
+            </>
+          )}
+
+          {showCostingTab && (onExport || quoteItemId) && (
+            <div className="flex justify-end pt-2">
+              <Button onClick={handleExport} disabled={isExporting}>
+                {isExporting ? 'Exporting…' : 'Export to Quote'}
+              </Button>
+            </div>
+          )}
         </TabsContent>
         )}
         <TabsContent value="stock" className="space-y-4">
@@ -858,6 +1573,24 @@ export default function CutlistTool({ onExport, onResultsChange, onSummaryChange
             </div>
             
           </div>
+          <Separator />
+          <section className="space-y-2">
+            <header className="space-y-1">
+              <div className="font-medium">Backer board</div>
+              <p className="text-sm text-muted-foreground">Select the laminate backer used for most runs. This feeds the Costing tab automatically.</p>
+            </header>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" onClick={() => setPickerFor('backer')}>
+                {backerComponent ? 'Change backer component' : 'Select backer component'}
+              </Button>
+              {backerComponent && <span className="text-sm text-muted-foreground">{backerComponent.description}</span>}
+            </div>
+            {backerComponent?.unit_cost != null && (
+              <div className="text-xs text-muted-foreground">
+                Price per sheet: <span className="text-foreground font-medium">{backerComponent.unit_cost.toFixed(2)}</span>
+              </div>
+            )}
+          </section>
         </TabsContent>
 
         <TabsContent value="results" className="space-y-4">
@@ -1015,6 +1748,44 @@ export default function CutlistTool({ onExport, onResultsChange, onSummaryChange
           )}
         </TabsContent>
       </Tabs>
+      {enableMaterialPalette && (
+        <ComponentSelectionDialog
+          open={materialPicker != null}
+          onClose={() => setMaterialPicker(null)}
+          defaultEntryType="database"
+          onAddComponent={(comp) => {
+            if (!materialPicker) return;
+            if (comp.type !== 'manual' && comp.type !== 'database') {
+              setMaterialPicker(null);
+              return;
+            }
+            applyMaterialSelection(materialPicker, {
+              description: comp.description,
+              unit_cost: Number.isFinite(comp.unit_cost) ? Number(comp.unit_cost) : 0,
+              component_id: comp.component_id,
+              supplier_component_id: comp.supplier_component_id,
+            });
+            setMaterialPicker(null);
+          }}
+        />
+      )}
+      <ComponentSelectionDialog
+        open={pickerFor !== null}
+        onClose={() => setPickerFor(null)}
+        onAddComponent={(comp) => {
+          const sel = {
+            description: comp.description,
+            component_id: comp.component_id,
+            supplier_component_id: comp.supplier_component_id,
+            unit_cost: comp.unit_cost,
+          } as SelectedComponent;
+          if (pickerFor === 'primary') { setPrimaryComponent(sel); if (primaryPricePerSheet === '') setPrimaryPricePerSheet(comp.unit_cost || ''); }
+          if (pickerFor === 'backer') { setBackerComponent(sel); if (backerPricePerSheet === '') setBackerPricePerSheet(comp.unit_cost || ''); if (sel.description) setBackerSheetDescription((prev) => (prev === 'BACKER BOARD' ? sel.description : prev)); }
+          if (pickerFor === 'band16') { setBand16Component(sel); if (bandingPrice16 === '') setBandingPrice16(comp.unit_cost || ''); }
+          if (pickerFor === 'band32') { setBand32Component(sel); if (bandingPrice32 === '') setBandingPrice32(comp.unit_cost || ''); }
+          setPickerFor(null);
+        }}
+      />
       <Dialog open={zoomSheetId != null} onOpenChange={(open) => { if (!open) setZoomSheetId(null); }}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>

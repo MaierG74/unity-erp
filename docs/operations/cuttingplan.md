@@ -31,6 +31,8 @@ This document summarizes algorithm, UI, integration, and performance suggestions
 - Buttons: **Calculate**, **Export to Quote**.
 - Stats summary: sheets used (fractional), board used %, edgebanding 16mm (m), edgebanding 32mm (m), lamination on/off, and backer sheets (fractional when applicable).
 - Results: Preview each sheet (SVG) with dimensions and part IDs.
+- Stock tab carries the default backer board selector so estimators can lock in the common lamination component without jumping to Costing.
+- Costing tab groups Backer, Primary, Palette, and Edgebanding settings into collapsible cards with muted backgrounds so operators can hide sections they rarely tweak.
 - Debounce calculations or require manual “Calculate” to hit <100 ms target.
 
 ## Preview (preview.tsx)
@@ -62,6 +64,7 @@ This document summarizes algorithm, UI, integration, and performance suggestions
 - Select components for: Primary sheet, Backer sheet, Edgebanding 16mm, Edgebanding 32mm (via existing Component Selection dialog)
 - Prices default from selected supplier component; can be overridden manually.
 - Export uses selected components and meters/sheets calculated by the tool.
+- Standalone `/cutlist` runs the full material palette (per-part material selector + palette persistence); the Quote modal keeps the legacy costing layout without the palette to preserve the established workflow.
 
 ## UX / Feature Ideas
 

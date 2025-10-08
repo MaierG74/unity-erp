@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { format, isBefore, parseISO } from 'date-fns';
+import { isBefore, parseISO } from 'date-fns';
 import { CheckCircle, Clock, Loader2, Plus, Search, Users as UsersIcon } from 'lucide-react';
+import { formatDate, formatDateTime } from '@/lib/date-utils';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -70,12 +71,7 @@ function priorityBadge(priority: string) {
 
 function formatDueDate(dueAt: string | null) {
   if (!dueAt) return 'No due date';
-  try {
-    const date = parseISO(dueAt);
-    return format(date, 'PP');
-  } catch {
-    return dueAt;
-  }
+  return formatDate(dueAt);
 }
 
 function isOverdue(todo: TodoItem) {
@@ -254,7 +250,7 @@ export function TodoDashboard() {
                         <div className="flex flex-col gap-2">
                           {statusBadge(todo.status)}
                           <span className="text-xs text-muted-foreground">
-                            {todo.updatedAt ? `Updated ${format(parseISO(todo.updatedAt), 'PPpp')}` : ''}
+                            {todo.updatedAt ? `Updated ${formatDateTime(todo.updatedAt)}` : ''}
                           </span>
                         </div>
                       </TableCell>

@@ -50,7 +50,7 @@ function formatMeta(link: EntityLink): string | null {
 
 export function TodoEntityLinkPicker({ open, onOpenChange, onSelect }: TodoEntityLinkPickerProps) {
   const [query, setQuery] = useState('');
-  const { data, isLoading } = useEntityLinks(query, open);
+  const { data, isLoading, error } = useEntityLinks(query, open);
 
   useEffect(() => {
     if (!open) {
@@ -58,16 +58,27 @@ export function TodoEntityLinkPicker({ open, onOpenChange, onSelect }: TodoEntit
     }
   }, [open]);
 
+  useEffect(() => {
+    if (open) {
+      console.log('[TodoEntityLinkPicker] Data:', data);
+      console.log('[TodoEntityLinkPicker] Loading:', isLoading);
+      console.log('[TodoEntityLinkPicker] Error:', error);
+      console.log('[TodoEntityLinkPicker] Query:', query);
+    }
+  }, [data, isLoading, error, query, open]);
+
   const groups = useMemo(() => {
-    return [
+    const result = [
       { type: 'order' as const, links: data?.orders ?? [] },
       { type: 'supplier_order' as const, links: data?.supplierOrders ?? [] },
       { type: 'quote' as const, links: data?.quotes ?? [] },
     ].filter(group => group.links.length > 0);
+    console.log('[TodoEntityLinkPicker] Groups:', result);
+    return result;
   }, [data]);
 
   return (
-    <CommandDialog open={open} onOpenChange={onOpenChange} label="Link a record">
+    <CommandDialog open={open} onOpenChange={onOpenChange}>
       <CommandInput
         placeholder="Search orders, supplier orders, quotes..."
         value={query}

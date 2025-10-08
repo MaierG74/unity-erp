@@ -66,6 +66,9 @@ function buildClient(accessToken: string | null): SupabaseClient {
       persistSession: false,
       autoRefreshToken: false,
     },
+    db: {
+      schema: 'public',
+    },
   });
 }
 
@@ -79,6 +82,7 @@ export async function getRouteClient(req: NextRequest): Promise<RouteClientResul
 
   const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
   if (userError || !userData?.user) {
+    console.error('[getRouteClient] User fetch error:', userError);
     return { error: 'Unable to resolve authenticated user', status: 401 };
   }
 

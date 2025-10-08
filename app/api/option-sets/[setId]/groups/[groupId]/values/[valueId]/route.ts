@@ -72,6 +72,40 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   } else if (body.attributes === null) {
     updates.attributes = null;
   }
+  if (body.default_component_id === null || Number.isInteger(body.default_component_id)) {
+    updates.default_component_id = body.default_component_id;
+  }
+  if (
+    body.default_supplier_component_id === null ||
+    Number.isInteger(body.default_supplier_component_id)
+  ) {
+    updates.default_supplier_component_id = body.default_supplier_component_id;
+  }
+  if (typeof body.default_quantity_delta === 'number') {
+    updates.default_quantity_delta = body.default_quantity_delta;
+  } else if (body.default_quantity_delta === null) {
+    updates.default_quantity_delta = null;
+  }
+  if (typeof body.default_notes === 'string') {
+    updates.default_notes = body.default_notes;
+  } else if (body.default_notes === null) {
+    updates.default_notes = null;
+  }
+  if (typeof body.default_is_cutlist === 'boolean') {
+    updates.default_is_cutlist = body.default_is_cutlist;
+  } else if (body.default_is_cutlist === null) {
+    updates.default_is_cutlist = null;
+  }
+  if (typeof body.default_cutlist_category === 'string') {
+    updates.default_cutlist_category = body.default_cutlist_category;
+  } else if (body.default_cutlist_category === null) {
+    updates.default_cutlist_category = null;
+  }
+  if (body.default_cutlist_dimensions && typeof body.default_cutlist_dimensions === 'object') {
+    updates.default_cutlist_dimensions = body.default_cutlist_dimensions;
+  } else if (body.default_cutlist_dimensions === null) {
+    updates.default_cutlist_dimensions = null;
+  }
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: 'No fields provided to update' }, { status: 400 });

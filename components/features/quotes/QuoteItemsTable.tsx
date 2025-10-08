@@ -733,7 +733,7 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
 
       {/* Cutlist Calculator Modal */}
       <Dialog open={cutlistOpen.open} onOpenChange={(o) => setCutlistOpen({ open: o, itemId: cutlistOpen.itemId })}>
-        <DialogContent className="max-w-5xl">
+        <DialogContent className="max-w-5xl max-h-[calc(100vh-4rem)] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Cutlist Calculator</DialogTitle>
           </DialogHeader>

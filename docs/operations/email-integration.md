@@ -54,7 +54,25 @@ Errors encountered while rendering or sending emails are logged to the server co
 3. Inspect Resend’s dashboard to confirm delivery.
 4. If running locally without real deliveries, use a test API key from Resend’s dashboard; emails will be dropped but the API still returns structured results.
 
+## Quote Email Integration (Planned)
+Unity ERP will soon support emailing quote PDFs directly to customers from the quote detail page. This feature will leverage the existing Resend infrastructure and follow similar patterns to the purchase order email implementation.
+
+**Planning Document**: See [`docs/plans/quote-email-plan.md`](../plans/quote-email-plan.md) for the complete implementation plan.
+
+**Key Features**:
+- Send quote PDF as email attachment to customer
+- Professional HTML email template with quote summary
+- Audit trail via `quote_email_log` table
+- Server-side PDF generation for reliability
+- Integration with company settings for branding
+
+**New Components**:
+- Email Template: `emails/quote-email.tsx`
+- API Route: `app/api/quotes/[id]/send-email/route.ts`
+- UI Dialog: `components/features/quotes/EmailQuoteDialog.tsx`
+
 ## Open Questions / Next Steps
 - Consolidate duplicate logic by reusing `lib/email.ts` inside the API route to reduce drift between the helper and production pathway.
-- Expand to customer-facing notifications (quotes, order acknowledgements) once templates and workflows are defined.
+- **Implement quote email feature** – See [`docs/plans/quote-email-plan.md`](../plans/quote-email-plan.md) for detailed plan.
+- Expand to additional customer-facing notifications (order acknowledgements, shipping notifications) once quote emails are stable.
 - Hook route outcomes into the centralized logging/auditing queue for long-term traceability.

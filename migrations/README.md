@@ -13,6 +13,30 @@ Migrations should be run through the Supabase Dashboard SQL Editor:
 
 ## Migration Files
 
+### 20251008_backfill_profiles.sql
+**Created:** 2025-10-08
+**Purpose:** Populate `public.profiles` for existing users created before the profiles table was introduced.
+
+**What it does:**
+- Inserts a profile row for every user in `auth.users` that lacks one, pulling the display name from `raw_user_meta_data->>'full_name'` with email fallback.
+- Leaves existing profiles untouched via `ON CONFLICT (id) DO NOTHING`.
+
+**Safe to re-run:** Yes (idempotent insert with conflict handling).
+
+**Verification:** After running the migration, execute:
+```sql
+SELECT COUNT(*) AS users_with_profiles
+FROM auth.users u
+INNER JOIN public.profiles p ON u.id = p.id;
+
+SELECT COUNT(*) AS users_without_profiles
+FROM auth.users u
+LEFT JOIN public.profiles p ON u.id = p.id
+WHERE p.id IS NULL;
+```
+
+---
+
 ### 20250930_quote_totals_triggers.sql
 **Created:** 2025-09-30
 **Purpose:** Automatic totals calculation for quotes system
