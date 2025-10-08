@@ -27,7 +27,7 @@ Reference: CutList Optimizer – feature inspiration only. We will focus on an i
 - Part: `{ id, length_mm, width_mm, qty, label?, grain?: 'any'|'length'|'width', band_edges?: {top?: boolean, right?: boolean, bottom?: boolean, left?: boolean}, laminate?: boolean, require_grain?: boolean /* legacy */ }`
 - StockSheet: `{ id, length_mm, width_mm, qty, kerf_mm, cost?: number, material?: string }`
 - LayoutResult: `{ sheets: SheetLayout[], stats: { used_area_mm2, waste_area_mm2, cuts: number, cut_length_mm, edgebanding_length_mm, edgebanding_16mm_mm, edgebanding_32mm_mm } }`
-- SheetLayout: `{ sheet_id, placements: Placement[], waste_pockets?: Rect[] }`
+- SheetLayout: `{ sheet_id, placements: Placement[], used_area_mm2?, waste_pockets?: Rect[] }`
 - Placement: `{ part_id, x, y, w, h, rot: 0|90 }` (top-left origin, mm)
 
 ## Algorithm
@@ -58,29 +58,28 @@ Reference: CutList Optimizer – feature inspiration only. We will focus on an i
 - `components/features/cutlist/packing.ts` – pure functions: `packPartsIntoSheets(parts, stock, options)` returns `LayoutResult`
 - `components/features/cutlist/preview.tsx` – SVG renderer for one `SheetLayout`
 - `components/features/cutlist/export.ts` – helper to push results to Quote cluster lines
+
 ## Quotes Integration
 - Access from Quotes → Line Items tab as a tool button: “Cutlist Calculator”.
 - On save:
   - Create/ensure a Costing Cluster and push component lines with fractional quantities:
     - Primary sheet × fractional primary sheets used.
-    - Buttons: **Calculate**, **Export to Quote**.
+  - Buttons: **Calculate**, **Export to Quote**.
 - Stats summary: sheets used (fractional), board used %, edgebanding 16mm (m), edgebanding 32mm (m), lamination on/off, and backer sheets (fractional when applicable).
 - Each sheet card shows its own usage %, billed % and m², with controls to charge the full sheet or set a manual billing percentage. A global toggle applies 100% billing across all sheets.
-  - Attach SVG/PNG preview image(s) to the quote as item-level attachments.
+- Attach SVG/PNG preview image(s) to the quote as item-level attachments.
 
 ## API/DB (later)
 - Optional persistence: save named cutlist scenarios per quote item.
 - Server-side optimization (WebWorker first; server later if needed).
 
-### Persistence Plan (in progress)
+### Persistence Implementation (2025-09-27)
 
-- **Problem today**
-  - `CutlistTool.tsx` keeps `result` state in-memory only; closing the modal or refreshing discards layouts.
-  - Costing exports add `quote_cluster_lines`, but the underlying `LayoutResult` (placements, overrides) is not stored anywhere.
-  - Operators expect to re-open a quote line item and see the last generated cutlist without recalculating.
+- **Why**
+  - Operators can now re-open a quote line item and immediately see the most recent cutlist run, including costing overrides.
 
-- **Proposed data model**
-  - Create table `quote_item_cutlists`:
+- **Data model**
+  - Table `quote_item_cutlists` (Supabase migration applied Sept 2025):
     - `id uuid PRIMARY KEY DEFAULT gen_random_uuid()`
     - `quote_item_id uuid REFERENCES quote_items(id) ON DELETE CASCADE`
     - `options_hash text` (hash of inputs to detect stale snapshots)
@@ -91,31 +90,37 @@ Reference: CutList Optimizer – feature inspiration only. We will focus on an i
     - `updated_at timestamptz DEFAULT now()`
   - Index on `(quote_item_id)` for fast lookups; optionally `(quote_item_id, created_at DESC)` for history.
 
-- **Client flow changes** (`components/features/cutlist/CutlistTool.tsx`)
-  - On mount, fetch latest cutlist snapshot for the active `quote_item_id` via new API (`/api/quote-items/[id]/cutlist`).
-  - Hydrate `result`, `sheetOverrides`, and `globalFullBoard` from persisted data when available.
-  - After `Calculate` or `Export`, call a `PUT` endpoint to upsert the snapshot (with optimistic UI update).
-  - Provide "Last saved" timestamp and optionally a manual save button.
+- **Client flow** (`components/features/cutlist/CutlistTool.tsx`)
+  - Auto-loads the latest snapshot on modal open (hydrates parts, stock, costing fields, overrides, layout).
+  - Auto-saves (debounced) whenever results or billing overrides change; manual saves occur after calculate/export.
+  - Shows a "Saving…" status while snapshot persistence is in-flight so operators see progress feedback.
+  - Tracks costing line references (`CutlistLineRefs`) so subsequent exports update/delete existing lines instead of duplicating them.
+  - Displays "Last saved" timestamp and any save/load errors inline with the results summary.
 
-- **API additions**
+- **API**
   - `app/api/quote-items/[id]/cutlist/route.ts`
-    - `GET` → returns latest snapshot (`200` with JSON payload or `204` if none).
-    - `PUT` → validates payload against current quote item ownership, hashes inputs, stores snapshot, updates `updated_at`.
-  - Use `supabaseAdmin` server-side to bypass RLS where necessary; ensure authorization by verifying current user can edit the quote.
+    - `GET` → returns the latest snapshot (`204` if none).
+    - `PUT` → upserts the payload (layout + billing) scoped to `quote_item_id`.
+  - Uses `supabaseAdmin` to bypass RLS while logging errors for debugging.
 
 - **Export alignment**
-  - `exportCutlistToQuote()` already receives override-aware sheet quantities. Ensure the persisted payload mirrors these values so re-opening the modal shows the exact billed amounts used during export.
-  - Add optional `cutlist_snapshot_id` field to `quote_cluster_lines` for traceability (future enhancement).
-
-- **Migration checklist**
-  - `db/migrations/20250926_quote_item_cutlists.sql` (new table + trigger to auto-update `updated_at`).
-  - Update `lib/db/quotes.ts` to include cutlist snapshot in `fetchQuote()` (eager load) and provide helper `saveQuoteItemCutlist()`.
-  - Add zod schema in `app/api/.../cutlist/route.ts` for payload validation.
-  - Adjust unit tests / manual QA to cover load/save/export flows.
+  - `exportCutlistToQuote()` now upserts the individual sheet/banding lines and returns their IDs; snapshots persist those references for later runs.
+  - Future idea: add `cutlist_snapshot_id` to `quote_cluster_lines` for traceability.
 
 - **Future considerations**
   - Support multiple named snapshots per line item (version history).
   - Optionally store generated SVG/PNG assets for quick attachment without re-rendering client-side.
+  - Nested cutlists per quote item (e.g., carcass vs top material) with grouped costing references.
+
+- **Follow-ups**
+  - Optional helpers in `lib/db/quotes.ts` if we need server-side snapshot access.
+  - Additional QA to ensure multi-user edits merge well (consider optimistic conflicts via `options_hash`).
+  - Evaluate version history / named snapshots per quote line.
+
+- **Future considerations**
+  - Support multiple named snapshots per line item (version history).
+  - Optionally store generated SVG/PNG assets for quick attachment without re-rendering client-side.
+
 ## UX Notes
 - Compact, single-screen; collapsible panels for inputs.
 - Inputs default to mm; show helpers to convert from cm/inches.

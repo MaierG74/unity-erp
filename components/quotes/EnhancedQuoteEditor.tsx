@@ -16,13 +16,16 @@ import { Separator } from '@/components/ui/separator';
 import QuoteAttachmentManager from './QuoteAttachmentManager';
 import { QuotePDFDownload } from './QuotePDF';
 import QuoteItemsTable from '@/components/features/quotes/QuoteItemsTable';
-import { 
-  FileText, 
-  Save, 
-  Eye, 
+import EmailQuoteDialog from '@/components/features/quotes/EmailQuoteDialog';
+import { useToast } from '@/components/ui/use-toast';
+import {
+  FileText,
+  Save,
+  Eye,
   Image as ImageIcon,
   Calculator,
-  ChevronLeft
+  ChevronLeft,
+  Mail
 } from 'lucide-react';
 
 interface EnhancedQuoteEditorProps {
@@ -38,7 +41,9 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
   const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('details');
   const [showItemAttachmentSections, setShowItemAttachmentSections] = useState(false);
+  const [showEmailDialog, setShowEmailDialog] = useState(false);
   const router = useRouter();
+  const { toast } = useToast();
 
   const handleBack = () => {
     try {
@@ -128,10 +133,17 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
           
           const quoteData = await response.json();
           console.log('Quote data received from API:', quoteData);
-          
+
           setQuote(quoteData);
           setItems(quoteData.items || []);
-          setAttachments(quoteData.attachments || []);
+
+          // Flatten attachments from both quote-level and item-level
+          const allAttachments = [
+            ...(quoteData.attachments || []), // Quote-level attachments
+            ...(quoteData.items || []).flatMap((item: any) => item.attachments || []) // Item-level attachments
+          ];
+          console.log('Flattened attachments:', allAttachments);
+          setAttachments(allAttachments);
           
         } catch (error) {
           console.error('Failed to fetch quote via API:', error);
@@ -292,10 +304,19 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <QuotePDFDownload 
+          <QuotePDFDownload
             quote={pdfQuote}
             companyInfo={settingsCompanyInfo || defaultCompanyInfo}
           />
+          <Button
+            variant="outline"
+            onClick={() => setShowEmailDialog(true)}
+            disabled={!quote.customer?.email && !quote.customer}
+            className="flex items-center gap-2"
+          >
+            <Mail size={16} />
+            Email Quote
+          </Button>
           <Button onClick={handleSave} disabled={isSaving}>
             <Save size={16} className="mr-2" />
             {isSaving ? 'Saving...' : 'Save Changes'}
@@ -518,6 +539,57 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Email Quote Dialog */}
+      <EmailQuoteDialog
+        open={showEmailDialog}
+        onOpenChange={setShowEmailDialog}
+        quote={(() => {
+          console.log('[EnhancedQuoteEditor] Building quote for email dialog');
+          console.log('[EnhancedQuoteEditor] Total attachments:', attachments.length);
+          console.log('[EnhancedQuoteEditor] All attachments:', attachments);
+
+          const itemsWithAttachments = items.map((item: any) => {
+            const itemAttachments = attachments.filter(
+              (att) => att.scope === 'item' && att.quote_item_id === item.id
+            );
+            console.log(`[EnhancedQuoteEditor] Item ${item.description} (${item.id}): found ${itemAttachments.length} attachments`);
+            return {
+              ...item,
+              attachments: itemAttachments,
+            };
+          });
+
+          return {
+            ...quote,
+            items: itemsWithAttachments,
+            attachments: attachments.filter((att) => att.scope === 'quote'),
+          };
+        })() as any}
+        companyInfo={settingsCompanyInfo || defaultCompanyInfo}
+        onEmailSent={() => {
+          toast({
+            title: 'Email sent successfully',
+            description: `Quote ${quote.quote_number} has been emailed to ${quote.customer?.email || 'the customer'}.`,
+          });
+        }}
+        onPreviewPDF={() => {
+          // Open PDF in new tab using existing PDF download component logic
+          const pdfQuote = {
+            ...quote,
+            items: items.map((item: any) => ({
+              ...item,
+              attachments: attachments.filter(
+                (att) => att.scope === 'item' && att.quote_item_id === item.id
+              ),
+            })),
+            attachments: attachments.filter((att) => att.scope === 'quote'),
+            customer: quote.customer,
+          };
+          // This is a simplified preview - in production you might want to generate and open the PDF
+          console.log('Preview PDF clicked', pdfQuote);
+        }}
+      />
     </div>
   );
 }

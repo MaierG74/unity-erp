@@ -8,6 +8,13 @@ export interface OptionSetValue {
   is_default: boolean;
   display_order: number;
   attributes: Record<string, unknown> | null;
+  default_component_id: number | null;
+  default_supplier_component_id: number | null;
+  default_quantity_delta: number | null;
+  default_notes: string | null;
+  default_is_cutlist: boolean | null;
+  default_cutlist_category: string | null;
+  default_cutlist_dimensions: Record<string, unknown> | null;
 }
 
 export interface OptionSetGroup {

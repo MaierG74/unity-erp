@@ -272,6 +272,25 @@ This guide documents how we style the app: Tailwind CSS utilities + shadcn/ui pr
   - Both `unit_code` and `unit_name` are unique case-insensitively; duplicates like EA/ea are not allowed.
   - UI should present de-duplicated, alphabetized `unit_name` options.
   - Database normalizes inputs via trigger: `unit_code` → UPPER, `unit_name` → Title Case.
+- Date & Time Formatting
+  - **Locale**: South Africa (en-ZA)
+  - **Date format**: `dd/MM/yyyy` (e.g., 07/10/2025)
+  - **Date with time**: `dd/MM/yyyy HH:mm` (e.g., 07/10/2025 14:30)
+  - **Relative times**: Use `date-fns` `formatDistanceToNow` for recent activity (e.g., "2 hours ago")
+  - **Date inputs**: Use HTML5 date input (`type="date"`) which provides native picker; store as ISO 8601 (`yyyy-MM-dd`) in database
+  - **Implementation**: Use `date-fns` format tokens:
+    ```tsx
+    import { format, parseISO } from 'date-fns';
+
+    // Date only
+    format(parseISO(isoString), 'dd/MM/yyyy')  // 07/10/2025
+
+    // Date with time
+    format(parseISO(isoString), 'dd/MM/yyyy HH:mm')  // 07/10/2025 14:30
+
+    // Relative time for activity feeds
+    formatDistanceToNow(parseISO(isoString), { addSuffix: true })  // "2 hours ago"
+    ```
 
 ## Do / Avoid
 - __Do__: Reuse UI primitives from `components/ui/*`.

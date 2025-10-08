@@ -45,7 +45,14 @@ async function fetchOptionSet(setId: number) {
           label,
           is_default,
           display_order,
-          attributes
+          attributes,
+          default_component_id,
+          default_supplier_component_id,
+          default_quantity_delta,
+          default_notes,
+          default_is_cutlist,
+          default_cutlist_category,
+          default_cutlist_dimensions
         )
       ),
       product_option_set_links(count)
@@ -79,6 +86,13 @@ async function fetchOptionSet(setId: number) {
             is_default: Boolean(value.is_default),
             display_order: Number(value.display_order ?? 0),
             attributes: value.attributes ?? null,
+            default_component_id: value.default_component_id != null ? Number(value.default_component_id) : null,
+            default_supplier_component_id: value.default_supplier_component_id != null ? Number(value.default_supplier_component_id) : null,
+            default_quantity_delta: value.default_quantity_delta != null ? Number(value.default_quantity_delta) : null,
+            default_notes: value.default_notes ?? null,
+            default_is_cutlist: value.default_is_cutlist === null || value.default_is_cutlist === undefined ? null : Boolean(value.default_is_cutlist),
+            default_cutlist_category: value.default_cutlist_category ?? null,
+            default_cutlist_dimensions: value.default_cutlist_dimensions ?? null,
           }))
           .sort((a: any, b: any) => a.display_order - b.display_order),
       }))

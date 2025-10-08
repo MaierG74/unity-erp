@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { CalendarIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -19,6 +20,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
 import { useCreateTodo } from '@/hooks/useTodosApi';
 import { TODO_PRIORITIES } from '@/lib/db/todos';
 import { useProfiles } from '@/hooks/useProfiles';
@@ -26,6 +29,8 @@ import { useAuth } from '@/components/common/auth-provider';
 import { useToast } from '@/components/ui/use-toast';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
+import { formatDate } from '@/lib/date-utils';
+import { cn } from '@/lib/utils';
 
 import { TodoEntityLinkPicker } from './TodoEntityLinkPicker';
 import type { EntityLink } from '@/lib/client/entity-links';
@@ -34,12 +39,12 @@ const createSchema = z.object({
   title: z.string().min(1, 'Title is required').max(255),
   description: z.string().max(4000).optional(),
   priority: z.enum(TODO_PRIORITIES).default('medium'),
-  dueDate: z.string().optional(),
+  dueDate: z.date().optional().nullable(),
   assignedTo: z.string().uuid().optional(),
   watchers: z.array(z.string().uuid()).optional(),
-  contextPath: z.string().max(255).optional(),
-  contextType: z.string().max(64).optional(),
-  contextId: z.string().uuid().optional(),
+  contextPath: z.string().max(255).optional().nullable(),
+  contextType: z.string().max(64).optional().nullable(),
+  contextId: z.string().uuid().optional().nullable(),
 });
 
 type CreateValues = z.infer<typeof createSchema>;
@@ -64,19 +69,19 @@ export function TodoCreateDialog({ open, onOpenChange }: TodoCreateDialogProps) 
     handleSubmit,
     reset,
     setValue,
-    formState: { isDirty, isSubmitting },
+    formState: { isDirty, isSubmitting, errors },
   } = useForm<CreateValues>({
     resolver: zodResolver(createSchema),
     defaultValues: {
       title: '',
       description: '',
       priority: 'medium',
-      dueDate: '',
+      dueDate: null,
       assignedTo: user?.id,
       watchers: [],
-      contextPath: '',
-      contextType: '',
-      contextId: undefined,
+      contextPath: null,
+      contextType: null,
+      contextId: null,
     },
   });
 
@@ -86,20 +91,25 @@ export function TodoCreateDialog({ open, onOpenChange }: TodoCreateDialogProps) 
         title: '',
         description: '',
         priority: 'medium',
-        dueDate: '',
+        dueDate: null,
         assignedTo: user?.id,
         watchers: [],
-        contextPath: '',
-        contextType: '',
-        contextId: undefined,
+        contextPath: null,
+        contextType: null,
+        contextId: null,
       });
       setSelectedLink(null);
     }
   }, [open, reset, user?.id]);
 
   const onSubmit = async (values: CreateValues) => {
+    console.log('Form submitted with values:', values);
+    console.log('Form errors:', errors);
     try {
-      const dueAt = values.dueDate ? new Date(`${values.dueDate}T23:59:59Z`).toISOString() : null;
+      const dueAt = values.dueDate
+        ? new Date(new Date(values.dueDate).setHours(23, 59, 59, 999)).toISOString()
+        : null;
+      console.log('Submitting todo with dueAt:', dueAt);
       const result = await createMutation.mutateAsync({
         title: values.title,
         description: values.description || null,
@@ -141,6 +151,16 @@ export function TodoCreateDialog({ open, onOpenChange }: TodoCreateDialogProps) 
           <DialogTitle>Create Task</DialogTitle>
           <DialogDescription>Capture the work, pick an owner, and keep watchers in the loop.</DialogDescription>
         </DialogHeader>
+        {Object.keys(errors).length > 0 && (
+          <div className="rounded-lg bg-destructive/15 p-3 text-sm text-destructive">
+            <p className="font-medium">Please fix the following errors:</p>
+            <ul className="mt-2 list-disc list-inside">
+              {Object.entries(errors).map(([key, error]) => (
+                <li key={key}>{key}: {error.message}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
           <div className="grid gap-4">
             <div className="grid gap-2">
@@ -178,7 +198,34 @@ export function TodoCreateDialog({ open, onOpenChange }: TodoCreateDialogProps) 
 
             <div className="grid gap-2">
               <Label htmlFor="dueDate">Due date</Label>
-              <Input type="date" id="dueDate" {...register('dueDate')} />
+              <Controller
+                control={control}
+                name="dueDate"
+                render={({ field }) => (
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className={cn(
+                          'justify-start text-left font-normal h-9',
+                          !field.value && 'text-muted-foreground'
+                        )}
+                      >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {field.value ? formatDate(field.value) : <span>Pick a date</span>}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={field.value || undefined}
+                        onSelect={field.onChange}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                )}
+              />
             </div>
 
             <div className="grid gap-2">

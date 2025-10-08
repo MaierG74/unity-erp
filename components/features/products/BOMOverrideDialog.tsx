@@ -52,6 +52,13 @@ interface OptionValueDraft extends OverrideRecord {
   hidden?: boolean;
   is_default: boolean;
   display_order: number;
+  default_component_id?: number | null;
+  default_supplier_component_id?: number | null;
+  default_quantity_delta?: number | null;
+  default_notes?: string | null;
+  default_is_cutlist?: boolean | null;
+  default_cutlist_category?: string | null;
+  default_cutlist_dimensions?: Record<string, unknown> | null;
 }
 
 interface OptionGroupDraft {
@@ -142,7 +149,8 @@ export function BOMOverrideDialog({
         value.quantity_delta != null ||
         value.notes ||
         value.is_cutlist_item != null ||
-        value.cutlist_category
+        value.cutlist_category ||
+        value.cutlist_dimensions
     );
 
 useEffect(() => {
@@ -191,9 +199,9 @@ useEffect(() => {
   const optionSetGroups: OptionGroupDraft[] = [];
   for (const link of data.option_sets ?? []) {
     const linkId = Number(link.link_id);
-    const groupOverlays = link.product_option_group_overlays ?? [];
-    const valueOverlays = link.product_option_value_overlays ?? [];
-    const groups = link.option_sets?.option_set_groups ?? [];
+    const groupOverlays = link.group_overlays ?? [];
+    const valueOverlays = link.value_overlays ?? [];
+    const groups = link.option_set?.groups ?? [];
 
     for (const group of groups) {
       const overlay = groupOverlays.find((item: any) => Number(item.option_set_group_id) === Number(group.option_set_group_id));
@@ -204,7 +212,7 @@ useEffect(() => {
       const linkOrder = Number(link.display_order ?? 0);
       const combinedOrder = linkOrder * 1000 + baseOrder;
 
-      const values: OptionValueDraft[] = (group.option_set_values ?? []).map((value: any) => {
+      const values: OptionValueDraft[] = (group.values ?? []).map((value: any) => {
         const valueOverlay = valueOverlays.find((item: any) => Number(item.option_set_value_id) === Number(value.option_set_value_id));
         const displayValueLabel = valueOverlay?.alias_label?.length ? valueOverlay.alias_label : value.label;
         const valueHidden = valueOverlay?.hide ?? false;
@@ -220,14 +228,30 @@ useEffect(() => {
           hidden: valueHidden,
           is_default: Boolean(value.is_default),
           display_order: Number(value.display_order ?? 0),
-          replace_component_id: override?.replace_component_id ?? null,
-          replace_supplier_component_id: override?.replace_supplier_component_id ?? null,
-          quantity_delta: override?.quantity_delta != null ? Number(override.quantity_delta) : null,
-          notes: override?.notes ?? null,
-          is_cutlist_item: override?.is_cutlist_item ?? null,
-          cutlist_category: override?.cutlist_category ?? null,
-          cutlist_dimensions: override?.cutlist_dimensions ?? null,
-          attributes: override?.attributes ?? null,
+          replace_component_id: override?.replace_component_id ?? value.default_component_id ?? null,
+          replace_supplier_component_id: override?.replace_supplier_component_id ?? value.default_supplier_component_id ?? null,
+          quantity_delta:
+            override?.quantity_delta != null
+              ? Number(override.quantity_delta)
+              : value.default_quantity_delta != null
+              ? Number(value.default_quantity_delta)
+              : null,
+          notes: override?.notes ?? value.default_notes ?? null,
+          is_cutlist_item:
+            override?.is_cutlist_item != null
+              ? override.is_cutlist_item
+              : value.default_is_cutlist != null
+              ? Boolean(value.default_is_cutlist)
+              : null,
+          cutlist_category: override?.cutlist_category ?? value.default_cutlist_category ?? null,
+          cutlist_dimensions: override?.cutlist_dimensions ?? value.default_cutlist_dimensions ?? null,
+          default_component_id: value.default_component_id ?? null,
+          default_supplier_component_id: value.default_supplier_component_id ?? null,
+          default_quantity_delta: value.default_quantity_delta ?? null,
+          default_notes: value.default_notes ?? null,
+          default_is_cutlist: value.default_is_cutlist ?? null,
+          default_cutlist_category: value.default_cutlist_category ?? null,
+          default_cutlist_dimensions: value.default_cutlist_dimensions ?? null,
         } as OptionValueDraft;
       });
 

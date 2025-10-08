@@ -24,14 +24,18 @@ interface ComponentSelectionDialogProps {
     include_labour?: boolean;
     collection_id?: number;
   }) => void;
+  defaultEntryType?: 'manual' | 'database' | 'product' | 'collection';
+  requireSupplier?: boolean;
 }
 
 const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
   open,
   onClose,
-  onAddComponent
+  onAddComponent,
+  defaultEntryType = 'manual',
+  requireSupplier = true,
 }) => {
-  const [entryType, setEntryType] = useState<'manual' | 'database' | 'product'>('manual');
+  const [entryType, setEntryType] = useState<'manual' | 'database' | 'product' | 'collection'>(defaultEntryType);
   const [components, setComponents] = useState<Component[]>([]);
   const [selectedComponent, setSelectedComponent] = useState<Component | null>(null);
   const [supplierComponents, setSupplierComponents] = useState<SupplierComponent[]>([]);
@@ -57,6 +61,11 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
   const [showSupplierBrowse, setShowSupplierBrowse] = useState(false);
 
   // Load components/products when dialog opens and specific type is selected
+  useEffect(() => {
+    if (!open) return;
+    setEntryType(defaultEntryType);
+  }, [open, defaultEntryType]);
+
   useEffect(() => {
     if (open && entryType === 'database') {
       loadComponents();
@@ -119,7 +128,7 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
     setUnitCost('0');
     
     // Load suppliers for this component
-    if (component.component_id) {
+    if (requireSupplier && component.component_id) {
       setLoadingSuppliers(true);
       try {
         const suppliers = await fetchSupplierComponentsForComponent(component.component_id);
@@ -140,6 +149,10 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
       } finally {
         setLoadingSuppliers(false);
       }
+    } else {
+      setSupplierComponents([]);
+      setSelectedSupplierComponent(null);
+      setLoadingSuppliers(false);
     }
   };
 
@@ -160,15 +173,22 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
         unit_cost: Math.round((Number(unitCost) || 0) * 100) / 100
       });
     } else if (entryType === 'database') {
-      if (!selectedComponent || !selectedSupplierComponent) return;
-      
+      if (!selectedComponent) return;
+
+      const supplierComponent = requireSupplier ? selectedSupplierComponent : selectedSupplierComponent ?? null;
+      if (requireSupplier && !supplierComponent) return;
+
+      const effectiveUnitCost = Math.round((Number(unitCost) || 0) * 100) / 100;
+
       onAddComponent({
         type: 'database',
-        description: `${selectedComponent.description} (${selectedSupplierComponent.supplier?.name})`,
+        description: supplierComponent
+          ? `${selectedComponent.description} (${supplierComponent.supplier?.name})`
+          : selectedComponent.description || selectedComponent.internal_code || 'Component',
         qty: Number(qty) || 1,
-        unit_cost: Math.round((Number(unitCost) || 0) * 100) / 100,
+        unit_cost: effectiveUnitCost,
         component_id: selectedComponent.component_id,
-        supplier_component_id: selectedSupplierComponent.supplier_component_id
+        supplier_component_id: supplierComponent?.supplier_component_id,
       });
     } else if (entryType === 'product') {
       if (!selectedProduct) return;

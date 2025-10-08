@@ -216,7 +216,7 @@ These fields are maintained by the `update_quote_totals()` function triggered on
 
 8. **Export & Delivery**
    - Generate beautiful PDF with company letterhead, embedded images, optionally external docs as appendix.
-   - Email directly from app with log of send attempts.
+   - Email directly from app with log of send attempts. **See [`quote-email-plan.md`](quote-email-plan.md) for implementation details.**
 
 ---
 
@@ -275,6 +275,12 @@ These fields are maintained by the `update_quote_totals()` function triggered on
   - ✅ `update_quote_totals()` function auto-calculates quote subtotal, VAT (15%), and grand total
   - ✅ VAT rate stored as percentage (15.00 = 15%) and converted to decimal in calculations
 - [ ] Optional: endpoint/helper to compute item price from cluster subtotal + markup.
+
+### Email Integration (Planned)
+- [ ] Email quote PDFs to customers directly from quote detail page
+- [ ] See **[`quote-email-plan.md`](quote-email-plan.md)** for complete implementation plan
+- [ ] Leverages existing Resend email infrastructure
+- [ ] Includes email audit trail and customer email validation
 
 ---
 

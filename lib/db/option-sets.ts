@@ -5,6 +5,13 @@ export interface OptionSetValue {
   is_default: boolean;
   display_order: number;
   attributes: Record<string, unknown> | null;
+  default_component_id: number | null;
+  default_supplier_component_id: number | null;
+  default_quantity_delta: number | null;
+  default_notes: string | null;
+  default_is_cutlist: boolean | null;
+  default_cutlist_category: string | null;
+  default_cutlist_dimensions: Record<string, unknown> | null;
 }
 
 export interface OptionSetGroup {
@@ -80,22 +87,6 @@ export interface ProductOptionSetLink {
   display_order: number;
   alias_label: string | null;
   option_set: OptionSetSummary | null;
-  group_overlays: Array<{
-    overlay_id: number;
-    option_set_group_id: number;
-    alias_label: string | null;
-    is_required: boolean | null;
-    hide: boolean;
-    display_order: number | null;
-  }>;
-  value_overlays: Array<{
-    overlay_id: number;
-    option_set_value_id: number;
-    alias_label: string | null;
-    is_default: boolean | null;
-    hide: boolean;
-    display_order: number | null;
-  }>;
 }
 
 export async function fetchProductOptionSetLinks(productId: number): Promise<ProductOptionSetLink[]> {

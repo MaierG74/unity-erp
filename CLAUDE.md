@@ -2,6 +2,50 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## MCP Configuration
+
+**IMPORTANT**: This project uses multiple MCP servers:
+
+- **Supabase Postgres** – full read/write database access
+- **Chrome DevTools** – live browser automation/debugging (headless by default)
+
+### MCP Files Location
+- **Global**: `~/Library/Application Support/Claude/mcp.json`
+- **Project**: `/Users/gregorymaier/Documents/Projects/unity-erp/.mcp.json`
+
+Both files should contain both server entries:
+```json
+{
+  "mcpServers": {
+    "supabase": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres"
+      ],
+      "env": {
+        "POSTGRES_CONNECTION_STRING": "postgresql://postgres.ttlyfhkrsjjrzxiagzpb:ke6tOTxvv45TRNVp@aws-0-us-east-1.pooler.supabase.com:6543/postgres"
+      }
+    },
+    "chrome-devtools": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "chrome-devtools-mcp@latest",
+        "--headless=true",
+        "--isolated=true"
+      ]
+    }
+  }
+}
+```
+
+This configuration provides full read-write access to the Supabase PostgreSQL database via direct connection.
+
+The Chrome DevTools server launches a headless, isolated Chrome profile. Use this MCP server when the agent needs to automate or inspect the running app (e.g., screenshots, performance traces). Disable the `--headless`/`--isolated` flags locally if you need an interactive browser session.
+
+**Note**: Do NOT use `@supabase/mcp-server-supabase` as it only provides read-only access via the `query` tool.
+
 ## Development Commands
 
 ### Core Commands

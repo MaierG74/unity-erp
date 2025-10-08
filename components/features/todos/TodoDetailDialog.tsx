@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { formatDistanceToNow, parseISO } from 'date-fns';
-import { CheckCircle2, Loader2, MessageSquare } from 'lucide-react';
+import { CheckCircle2, Loader2, MessageSquare, CalendarIcon } from 'lucide-react';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm } from 'react-hook-form';
@@ -23,8 +23,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/components/common/auth-provider';
+import { formatDate } from '@/lib/date-utils';
+import { cn } from '@/lib/utils';
 
 import { TODO_PRIORITIES, TODO_STATUSES, type TodoItem } from '@/lib/db/todos';
 import {
@@ -42,7 +46,7 @@ const formSchema = z.object({
   description: z.string().max(4000).nullable(),
   status: z.enum(TODO_STATUSES),
   priority: z.enum(TODO_PRIORITIES),
-  dueDate: z.string().nullable(),
+  dueDate: z.date().nullable(),
   assignedTo: z.string().uuid().nullable(),
   watchers: z.array(z.string().uuid()),
   contextPath: z.string().max(255).nullable(),
@@ -115,7 +119,7 @@ export function TodoDetailDialog({ todoId, open, onOpenChange }: TodoDetailDialo
         description: todo.description ?? null,
         status: todo.status,
         priority: todo.priority,
-        dueDate: todo.dueAt ? todo.dueAt.slice(0, 10) : null,
+        dueDate: todo.dueAt ? parseISO(todo.dueAt) : null,
         assignedTo: todo.assignedTo ?? null,
         watchers: todo.watchers.map(w => w.userId),
         contextPath: todo.contextPath ?? null,
@@ -157,7 +161,9 @@ export function TodoDetailDialog({ todoId, open, onOpenChange }: TodoDetailDialo
         description: values.description,
         status: values.status,
         priority: values.priority,
-        dueAt: values.dueDate ? new Date(`${values.dueDate}T23:59:59Z`).toISOString() : null,
+        dueAt: values.dueDate
+          ? new Date(new Date(values.dueDate).setHours(23, 59, 59, 999)).toISOString()
+          : null,
         assignedTo: values.assignedTo ?? undefined,
         watchers: values.watchers,
         contextPath: selectedLink?.path ?? null,
@@ -299,7 +305,30 @@ export function TodoDetailDialog({ todoId, open, onOpenChange }: TodoDetailDialo
                   <Controller
                     control={control}
                     name="dueDate"
-                    render={({ field }) => <Input type="date" {...field} value={field.value ?? ''} />}
+                    render={({ field }) => (
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            className={cn(
+                              'justify-start text-left font-normal',
+                              !field.value && 'text-muted-foreground'
+                            )}
+                          >
+                            <CalendarIcon className="mr-2 h-4 w-4" />
+                            {field.value ? formatDate(field.value) : <span>Pick a date</span>}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <Calendar
+                            mode="single"
+                            selected={field.value || undefined}
+                            onSelect={field.onChange}
+                            initialFocus
+                          />
+                        </PopoverContent>
+                      </Popover>
+                    )}
                   />
                 </div>
 

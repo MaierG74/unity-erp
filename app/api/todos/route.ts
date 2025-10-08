@@ -100,6 +100,12 @@ export async function POST(req: NextRequest) {
   const payload = parsedBody.data;
   const assignedTo = payload.assignedTo ?? ctx.user.id;
 
+  console.log('[todos][POST] Attempting insert with:', {
+    userId: ctx.user.id,
+    assignedTo,
+    hasAccessToken: !!ctx.accessToken,
+  });
+
   try {
     const { data: inserted, error: insertError } = await ctx.supabase
       .from('todo_items')
@@ -120,8 +126,16 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (insertError || !inserted) {
+      console.error('[todos][POST] Insert error:', {
+        message: insertError?.message,
+        code: insertError?.code,
+        details: insertError?.details,
+        hint: insertError?.hint,
+        userId: ctx.user.id,
+        assignedTo,
+      });
       return NextResponse.json(
-        { error: insertError?.message ?? 'Failed to create task' },
+        { error: insertError?.message ?? 'Failed to create task', details: insertError?.details, hint: insertError?.hint },
         { status: insertError?.code === '42501' ? 403 : 500 }
       );
     }
