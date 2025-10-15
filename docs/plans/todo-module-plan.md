@@ -170,8 +170,36 @@ Link the task to any ERP record without hard-coding each table per feature.
 - What is the minimal entity metadata required for a useful snapshot (status, reference number, customer)?
 - Should comments support attachments from day one?
 
-## Next Steps
-1. Align on entity reference approach (`app_entities` vs enum fallback) and document population strategy.
-2. Validate dashboard UX with stakeholders; confirm priority/due-date fields satisfy workflows.
-3. Draft Supabase migration scripts and RLS policies; schedule review with security owner.
-4. Spike on entity search experience to ensure linking is fast for large datasets.
+## Implementation Status
+
+### Completed (2025-10-08)
+✅ Core todo module implementation with dashboard, creation, and detail views
+✅ RLS policies for secure multi-user access
+✅ Profile backfilling for existing users
+✅ South African date format (dd/MM/yyyy)
+✅ Form validation with nullable context fields
+
+**See**: [Todo Module Fixes Changelog](../changelogs/todo-module-fixes-20251008.md)
+
+### Completed (2025-10-09)
+✅ Entity link picker search functionality
+✅ API route fixes for orders, quotes, supplier orders
+✅ Proper Supabase join syntax and relationship paths
+✅ CommandItem clickability fixes
+
+**See**: [Entity Link Picker Fix Changelog](../changelogs/todo-entity-link-picker-fix-20251009.md)
+
+### Known Issues & Limitations
+- Supplier orders are not searchable by order_id (numeric field limitation)
+- Search only supports order_number and quote_number (not customer/supplier names)
+- Results limited to 20 per entity type by default
+
+### Next Steps
+1. ~~Align on entity reference approach~~ ✅ Using context_type/context_id/context_path fallback
+2. ~~Validate dashboard UX with stakeholders~~ ✅ Dashboard implemented and functional
+3. ~~Draft Supabase migration scripts and RLS policies~~ ✅ Migrations created and applied
+4. ~~Spike on entity search experience~~ ✅ Command palette search implemented
+5. **NEW**: Consider adding customer/supplier name search to entity links
+6. **NEW**: Add pagination or infinite scroll for >20 results per entity type
+7. **NEW**: Implement comments feed and watchers functionality
+8. **NEW**: Add real-time updates via Supabase subscriptions

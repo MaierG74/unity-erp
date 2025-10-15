@@ -40,6 +40,7 @@
   - Primary entry point for override mapping; includes shortcuts to attach sets if none are present.
   - Displays reusable groups/values with status summaries (configured / pending) and supports bulk apply across selected BOM rows.
   - Remains the single modal used while editing the Bill of Materials, avoiding context switching to the Options tab.
+  - When a linked option set provides defaults (component, supplier, quantity delta, cutlist flags), the dialog auto-seeds corresponding `bom_option_overrides` rows so product authors don’t have to click **Save** for every value. Any edits overwrite the seeded data; clearing removes the override.
 - **Quoting / Ordering Flows**
   - `AddQuoteItemDialog` and upcoming order editors load merged option definitions (global set + product overlays) and persist `selected_options` JSON for resolvers.
 

@@ -121,10 +121,10 @@ export default function CutlistTool({
 
   type CostingSectionKey = 'backer' | 'primary' | 'palette' | 'edgebanding';
   const [costingSections, setCostingSections] = React.useState<Record<CostingSectionKey, boolean>>({
-    backer: true,
-    primary: true,
-    palette: true,
-    edgebanding: true,
+    backer: false,
+    primary: false,
+    palette: false,
+    edgebanding: false,
   });
   const toggleCostingSection = React.useCallback((section: CostingSectionKey) => {
     setCostingSections((prev) => ({ ...prev, [section]: !prev[section] }));
@@ -802,6 +802,21 @@ export default function CutlistTool({
     );
   };
 
+  type CurrencyInputProps = React.ComponentProps<typeof Input>;
+  const CurrencyInput = ({ className, onFocus, ...rest }: CurrencyInputProps) => (
+    <div className="relative">
+      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">R</span>
+      <Input
+        {...rest}
+        className={cn('w-full pl-7', className)}
+        onFocus={(event) => {
+          onFocus?.(event);
+          event.currentTarget.select();
+        }}
+      />
+    </div>
+  );
+
   const handleCalculate = () => {
     // Ensure kerf from options applied to stock sheet
     const normalized: StockSheetSpec[] = [{ ...stock[0], kerf_mm: Math.max(0, kerf) }];
@@ -1253,14 +1268,12 @@ export default function CutlistTool({
               </div>
               <div className="space-y-2">
                 <Label htmlFor="cost-backer-price">Price per sheet</Label>
-                <Input
+                <CurrencyInput
                   id="cost-backer-price"
                   type="number"
                   value={backerPricePerSheet}
                   onChange={(e) => setBackerPricePerSheet(e.target.value === '' ? '' : Number(e.target.value))}
-                  onFocus={(e) => e.target.select()}
                   placeholder={backerComponent?.unit_cost != null ? String(backerComponent.unit_cost) : undefined}
-                  className="w-full"
                 />
               </div>
             </div>
@@ -1333,13 +1346,11 @@ export default function CutlistTool({
                         </div>
                         <div className="space-y-2">
                           <Label htmlFor={`material-price-${mat.id}`}>Price per sheet</Label>
-                          <Input
+                          <CurrencyInput
                             id={`material-price-${mat.id}`}
                             type="number"
                             value={mat.pricePerSheet}
                             onChange={(e) => updateMaterial(mat.id, { pricePerSheet: e.target.value === '' ? '' : Number(e.target.value) })}
-                            onFocus={(e) => e.target.select()}
-                            className="w-full"
                           />
                         </div>
                         <div className="space-y-2">
@@ -1354,13 +1365,11 @@ export default function CutlistTool({
                         </div>
                         <div className="space-y-2">
                           <Label htmlFor={`material-band16-price-${mat.id}`}>Edgebanding 16mm price / meter</Label>
-                          <Input
+                          <CurrencyInput
                             id={`material-band16-price-${mat.id}`}
                             type="number"
                             value={mat.band16Price}
                             onChange={(e) => updateMaterial(mat.id, { band16Price: e.target.value === '' ? '' : Number(e.target.value) })}
-                            onFocus={(e) => e.target.select()}
-                            className="w-full"
                           />
                         </div>
                         <div className="space-y-2">
@@ -1375,13 +1384,11 @@ export default function CutlistTool({
                         </div>
                         <div className="space-y-2">
                           <Label htmlFor={`material-band32-price-${mat.id}`}>Edgebanding 32mm price / meter</Label>
-                          <Input
+                          <CurrencyInput
                             id={`material-band32-price-${mat.id}`}
                             type="number"
                             value={mat.band32Price}
                             onChange={(e) => updateMaterial(mat.id, { band32Price: e.target.value === '' ? '' : Number(e.target.value) })}
-                            onFocus={(e) => e.target.select()}
-                            className="w-full"
                           />
                         </div>
                       </div>
@@ -1439,14 +1446,12 @@ export default function CutlistTool({
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="primary-sheet-price">Price per sheet</Label>
-                    <Input
+                    <CurrencyInput
                       id="primary-sheet-price"
                       type="number"
                       value={primaryPricePerSheet}
                       onChange={(e) => setPrimaryPricePerSheet(e.target.value === '' ? '' : Number(e.target.value))}
-                      onFocus={(e) => e.target.select()}
                       placeholder={primaryComponent?.unit_cost != null ? String(primaryComponent.unit_cost) : undefined}
-                      className="w-full"
                     />
                   </div>
                 </div>
@@ -1478,14 +1483,12 @@ export default function CutlistTool({
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="band16-price">Edgebanding 16mm price / meter</Label>
-                      <Input
+                      <CurrencyInput
                         id="band16-price"
                         type="number"
                         value={bandingPrice16}
                         onChange={(e) => setBandingPrice16(e.target.value === '' ? '' : Number(e.target.value))}
-                        onFocus={(e) => e.target.select()}
                         placeholder={band16Component?.unit_cost != null ? String(band16Component.unit_cost) : undefined}
-                        className="w-full"
                       />
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -1508,14 +1511,12 @@ export default function CutlistTool({
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="band32-price">Edgebanding 32mm price / meter</Label>
-                      <Input
+                      <CurrencyInput
                         id="band32-price"
                         type="number"
                         value={bandingPrice32}
                         onChange={(e) => setBandingPrice32(e.target.value === '' ? '' : Number(e.target.value))}
-                        onFocus={(e) => e.target.select()}
                         placeholder={band32Component?.unit_cost != null ? String(band32Component.unit_cost) : undefined}
-                        className="w-full"
                       />
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -1531,8 +1532,13 @@ export default function CutlistTool({
           )}
 
           {showCostingTab && (onExport || quoteItemId) && (
-            <div className="flex justify-end pt-2">
-              <Button onClick={handleExport} disabled={isExporting}>
+            <div className="flex flex-col items-end gap-2 pt-2">
+              {!result && (
+                <p className="text-sm text-muted-foreground">
+                  Calculate the cutlist first (Inputs tab) before exporting
+                </p>
+              )}
+              <Button onClick={handleExport} disabled={isExporting || !result}>
                 {isExporting ? 'Exporting…' : 'Export to Quote'}
               </Button>
             </div>

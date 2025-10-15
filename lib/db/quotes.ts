@@ -602,12 +602,40 @@ export async function fetchProductLabor(productId: number): Promise<ProductLabor
 export interface EffectiveBOMItem {
   component_id: number;
   quantity_required: number;
+  supplier_component_id?: number | null;
   suppliercomponents?: { price?: number } | null;
+  configuration_scope?: string | null;
+  option_group_code?: string | null;
+  option_value_code?: string | null;
+  quantity_source?: string | null;
+  notes?: string | null;
+  is_cutlist_item?: boolean | null;
+  cutlist_category?: string | null;
+  cutlist_dimensions?: Record<string, unknown> | null;
+  attributes?: Record<string, unknown> | null;
+  component_description?: string | null;
 }
 
-export async function fetchEffectiveBOM(productId: number): Promise<EffectiveBOMItem[]> {
+export async function fetchEffectiveBOM(
+  productId: number,
+  selectedOptions: ProductOptionSelection = {}
+): Promise<EffectiveBOMItem[]> {
   try {
-    const res = await fetch(`/api/products/${productId}/effective-bom`, { cache: 'no-store' });
+    const params = new URLSearchParams();
+    const normalizedEntries = Object.entries(selectedOptions).filter(
+      ([, value]) => typeof value === 'string' && value.length > 0
+    );
+
+    if (normalizedEntries.length > 0) {
+      params.set('selected_options', JSON.stringify(Object.fromEntries(normalizedEntries)));
+    }
+
+    const query = params.toString();
+    const url = query
+      ? `/api/products/${productId}/effective-bom?${query}`
+      : `/api/products/${productId}/effective-bom`;
+
+    const res = await fetch(url, { cache: 'no-store' });
     if (!res.ok) return [];
     const json = (await res.json()) as { items?: any[] };
     const items = Array.isArray(json?.items) ? json!.items! : [];
