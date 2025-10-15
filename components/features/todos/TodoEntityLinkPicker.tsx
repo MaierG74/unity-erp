@@ -78,7 +78,7 @@ export function TodoEntityLinkPicker({ open, onOpenChange, onSelect }: TodoEntit
   }, [data]);
 
   return (
-    <CommandDialog open={open} onOpenChange={onOpenChange}>
+    <CommandDialog open={open} onOpenChange={onOpenChange} shouldFilter={false}>
       <CommandInput
         placeholder="Search orders, supplier orders, quotes..."
         value={query}
@@ -101,17 +101,26 @@ export function TodoEntityLinkPicker({ open, onOpenChange, onSelect }: TodoEntit
                 return (
                   <CommandItem
                     key={`${link.type}-${link.id}`}
+                    value={`${link.type}-${link.id}-${link.label}`}
+                    disabled={false}
                     onSelect={() => {
+                      console.log('[TodoEntityLinkPicker] onSelect fired for:', link);
+                      onSelect(link);
+                      onOpenChange(false);
+                    }}
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      console.log('[TodoEntityLinkPicker] onPointerDown fired for:', link);
                       onSelect(link);
                       onOpenChange(false);
                     }}
                   >
-                    <div className="flex flex-col">
+                    <div className="flex flex-col pointer-events-none">
                       <span className="font-medium">{link.label}</span>
                       {meta ? <span className="text-sm text-muted-foreground">{meta}</span> : null}
                       <span className="text-xs text-muted-foreground">{link.path}</span>
                     </div>
-                    <Badge variant="outline" className="ml-auto capitalize">
+                    <Badge variant="outline" className="ml-auto capitalize pointer-events-none">
                       {group.type.replace('_', ' ')}
                     </Badge>
                   </CommandItem>

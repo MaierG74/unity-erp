@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Loader2 } from 'lucide-react';
 import { fetchProducts, type Product } from '@/lib/db/quotes';
 import {
   fetchProductOptionGroups,
@@ -18,7 +19,7 @@ import {
 interface AddQuoteItemDialogProps {
   open: boolean;
   onClose: () => void;
-  onCreateManual: (payload: { description: string; qty: number; unit_price: number }) => void;
+  onCreateManual: (payload: { description: string; qty: number; unit_price: number }) => void | Promise<void>;
   onCreateProduct: (payload: {
     product_id: number;
     name: string;
@@ -27,7 +28,7 @@ interface AddQuoteItemDialogProps {
     include_labour?: boolean;
     attach_image?: boolean;
     selected_options?: ProductOptionSelection;
-  }) => void;
+  }) => void | Promise<void>;
 }
 
 export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCreateProduct }: AddQuoteItemDialogProps) {
@@ -50,6 +51,7 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
   const [attachImage, setAttachImage] = React.useState(true);
   const [productsLoading, setProductsLoading] = React.useState(false);
   const [optionsLoading, setOptionsLoading] = React.useState(false);
+  const [submitting, setSubmitting] = React.useState(false);
 
   React.useEffect(() => {
     if (open && tab === 'product') {
@@ -116,13 +118,13 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
     };
   }, [selectedProduct?.product_id]);
 
-  const handleClose = () => {
-    // reset
+  const resetForm = React.useCallback(() => {
     setTab('manual');
     setDescription('');
     setQty('1');
     setUnitPrice('0');
     setProducts([]);
+    setProductsLoading(false);
     setProductQuery('');
     setSelectedProduct(null);
     setOptionGroups([]);
@@ -131,30 +133,67 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
     setAttachImage(true);
     setIncludeLabor(true);
     setOptionsLoading(false);
+  }, []);
+
+  const handleClose = React.useCallback(() => {
+    resetForm();
     onClose();
+  }, [onClose, resetForm]);
+
+  const handleOpenChange = (next: boolean) => {
+    if (!next) {
+      if (submitting) return;
+      handleClose();
+    }
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
+    if (submitting) return;
     if (tab === 'manual') {
       if (!description.trim()) return;
-      onCreateManual({ description: description.trim(), qty: Number(qty) || 1, unit_price: Math.round((Number(unitPrice) || 0) * 100) / 100 });
+      setSubmitting(true);
+      let success = false;
+      try {
+        await Promise.resolve(
+          onCreateManual({
+            description: description.trim(),
+            qty: Number(qty) || 1,
+            unit_price: Math.round((Number(unitPrice) || 0) * 100) / 100,
+          })
+        );
+        success = true;
+      } catch (error) {
+        console.error('Failed to add manual quote item:', error);
+      } finally {
+        setSubmitting(false);
+        if (success) handleClose();
+      }
     } else if (tab === 'product') {
       if (!selectedProduct) return;
+      setSubmitting(true);
       const normalizedOptions = Object.fromEntries(
         Object.entries(selectedOptions).filter(([, value]) => typeof value === 'string' && value.length > 0)
       );
-      // Always import as quantity 1; user can set the final quantity on the line item afterwards
-      onCreateProduct({
-        product_id: selectedProduct.product_id,
-        name: selectedProduct.name,
-        qty: 1,
-        explode,
-        include_labour: includeLabor as boolean,
-        attach_image: attachImage as boolean,
-        selected_options: Object.keys(normalizedOptions).length ? normalizedOptions : undefined,
-      });
+      try {
+        // Always import as quantity 1; user can set the final quantity on the line item afterwards
+        await Promise.resolve(
+          onCreateProduct({
+            product_id: selectedProduct.product_id,
+            name: selectedProduct.name,
+            qty: 1,
+            explode,
+            include_labour: includeLabor as boolean,
+            attach_image: attachImage as boolean,
+            selected_options: Object.keys(normalizedOptions).length ? normalizedOptions : undefined,
+          })
+        );
+        handleClose();
+      } catch (error) {
+        console.error('Failed to add product quote item:', error);
+      } finally {
+        setSubmitting(false);
+      }
     }
-    handleClose();
   };
 
   const filteredProducts = products.filter(p =>
@@ -163,7 +202,7 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
   );
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-2xl sm:rounded-xl">
         <DialogHeader>
           <DialogTitle>Add Item</DialogTitle>
@@ -287,8 +326,28 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
         </Tabs>
 
         <DialogFooter className="mt-4">
-          <Button variant="outline" size="sm" className="h-9" onClick={handleClose}>Cancel</Button>
-          <Button size="sm" className="h-9" onClick={handleCreate} disabled={(tab === 'manual' && !description.trim()) || (tab === 'product' && !selectedProduct)}>Add Item</Button>
+          <Button variant="outline" size="sm" className="h-9" onClick={handleClose} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            className="h-9"
+            onClick={handleCreate}
+            disabled={
+              submitting ||
+              (tab === 'manual' && !description.trim()) ||
+              (tab === 'product' && !selectedProduct)
+            }
+          >
+            {submitting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Adding…
+              </>
+            ) : (
+              'Add Item'
+            )}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

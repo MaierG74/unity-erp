@@ -116,6 +116,7 @@ Types referenced:
 - Mixed imports: `@/lib/supabase` vs `@/lib/supabaseClient`. Standardize.
 - `components/ui/data-table.tsx` and `features/inventory/DataGrid.tsx` overlap. Consider consolidating to one table abstraction.
 - Supplier filter only exists in `page.tsx` variant; replicate in `InventoryFilters` if needed.
+- Product option override regression tracked at `docs/issues/options-issues.md` (updated 2025-10-10) — follow this thread for the effective BOM resolver status.
 
 ### Units Standardization (2025-09-07)
 - Problem: Duplicate units existed due to case variants (EA/ea, M/m, KG/kg).
@@ -223,3 +224,5 @@ Types referenced:
 ```
 
 Keep this document updated with structural changes, decisions, and TODOs.
+
+

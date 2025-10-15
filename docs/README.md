@@ -14,6 +14,7 @@ Welcome to the Unity ERP knowledge base. The documentation is now organized by t
 - `operations/` – Cross-cutting operational procedures such as the Bill of Labor system, sidebar updates, and logging guidance.
 - `plans/` – Implementation plans and project briefs (`*-plan.md` / `*-plan.txt`).
 - `changelogs/` – Historical release notes and change summaries.
+- `technical/` – Technical guides and troubleshooting documentation for developers.
 - `../migrations/` – Database migration files (see [`../migrations/README.md`](../migrations/README.md) for details)
 
 ## Quick links
@@ -40,6 +41,9 @@ Welcome to the Unity ERP knowledge base. The documentation is now organized by t
 - Completed: [`plans/quote-email-plan.md`](plans/quote-email-plan.md) – Quote PDF email integration plan (see [`operations/quote-email-implementation.md`](operations/quote-email-implementation.md) for implementation)
 - Changelogs: [`changelogs/`](changelogs/)
   - [`changelogs/todo-module-fixes-20251008.md`](changelogs/todo-module-fixes-20251008.md) – Todo module fixes: date format, RLS, profiles backfill
+  - [`changelogs/todo-entity-link-picker-fix-20251009.md`](changelogs/todo-entity-link-picker-fix-20251009.md) – Entity link picker API and UI fixes
+- Technical Guides: [`technical/`](technical/)
+  - [`technical/supabase-query-patterns.md`](technical/supabase-query-patterns.md) – Supabase query patterns, common errors, and troubleshooting
 - Migrations: [`../migrations/README.md`](../migrations/README.md) – Database migration files and instructions
 
 Use relative links when creating new docs so that navigation remains stable across moves. When referencing plans, prefer `docs/plans/...` paths to keep the directory consistent.

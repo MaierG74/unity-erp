@@ -51,9 +51,9 @@ export default function SupplierBrowseModal({ open, onOpenChange, onSelect }: Su
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="fixed left-auto right-0 top-0 translate-x-0 translate-y-0 h-screen max-w-[90vw] w-[1200px] sm:rounded-none p-0 overflow-hidden border-l shadow-2xl">
-        <div className="flex h-full">
+        <div className="flex h-full min-h-0">
           {/* Suppliers list */}
-          <div className="w-64 shrink-0 border-r bg-card flex flex-col">
+          <div className="w-64 shrink-0 border-r bg-card flex flex-col min-h-0">
             <div className="p-4 border-b">
               <div className="text-sm font-medium mb-2">Suppliers</div>
               <div className="relative">
@@ -84,7 +84,7 @@ export default function SupplierBrowseModal({ open, onOpenChange, onSelect }: Su
           </div>
 
           {/* Components for selected supplier */}
-          <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex-1 flex flex-col min-w-0 min-h-0">
             <div className="p-4 border-b flex items-center gap-4">
               <div className="text-sm font-medium">{selectedSupplierId ? 'Components' : 'Select a supplier'}</div>
               {selectedSupplierId && (

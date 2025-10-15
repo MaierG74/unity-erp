@@ -344,7 +344,7 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
       if (explode) {
         // Prefer Effective BOM when available (includes linked sub-products)
         const bomPromise = (async () => {
-          const eff = await fetchEffectiveBOM(product_id);
+          const eff = await fetchEffectiveBOM(product_id, optionSelections);
           if (Array.isArray(eff) && eff.length > 0) {
             const ids = eff.map(it => Number((it as any).component_id)).filter(Boolean);
             const components = await fetchComponentsByIds(ids);

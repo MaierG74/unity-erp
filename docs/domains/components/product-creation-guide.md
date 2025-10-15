@@ -128,6 +128,7 @@ CREATE TABLE public.billoflabour (
   - If no option set is attached, the dialog prompts to attach an existing set or create a new one inline before override editing.
   - Map option values to replacement components, quantity deltas, cutlist metadata, and notes (persisted in `bom_option_overrides`).
   - UI uses collapsible groups/values with summaries showing configuration status, includes a search picker for replacement components, and supports copying overrides to additional BOM rows.
+  - Option-set defaults (component, supplier, quantity, cutlist flags) now write to `bom_option_overrides` automatically when the dialog loads, so authors only need to save when deviating from the defaults.
   - “Save” remains disabled when there are no changes and displays a spinner during persistence; clearing shows a spinner as well. Inline toasts surface success/destructive states.
 - Edit Product button reserved for future full‑form editing.
 - Consistent styling across tabs:

@@ -240,10 +240,76 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Failed to load overrides' }, { status: 500 });
     }
 
+    let overrides = overridesData ?? [];
+
+    // Auto-seed overrides from option set defaults when no explicit override exists
+    try {
+      const existingSetOverrides = new Set(
+        (overrides ?? [])
+          .filter((row: any) => row.option_set_value_id != null)
+          .map((row: any) => Number(row.option_set_value_id))
+      );
+
+      const defaultRows: any[] = [];
+      for (const link of productSets ?? []) {
+        const groups = link.option_set?.groups ?? [];
+        for (const group of groups) {
+          for (const value of group.values ?? []) {
+            const valueId = Number(value.option_set_value_id);
+            if (existingSetOverrides.has(valueId)) continue;
+
+            const hasDefault =
+              value.default_component_id != null ||
+              value.default_supplier_component_id != null ||
+              value.default_quantity_delta != null ||
+              (typeof value.default_notes === 'string' && value.default_notes.length > 0) ||
+              value.default_is_cutlist !== null && value.default_is_cutlist !== undefined ||
+              (typeof value.default_cutlist_category === 'string' && value.default_cutlist_category.length > 0) ||
+              (value.default_cutlist_dimensions !== null && value.default_cutlist_dimensions !== undefined);
+
+            if (!hasDefault) continue;
+
+            defaultRows.push({
+              bom_id: bomId,
+              option_value_id: null,
+              option_set_value_id: valueId,
+              replace_component_id: value.default_component_id ?? null,
+              replace_supplier_component_id: value.default_supplier_component_id ?? null,
+              quantity_delta: value.default_quantity_delta ?? null,
+              notes: value.default_notes ?? null,
+              is_cutlist_item:
+                value.default_is_cutlist === null || value.default_is_cutlist === undefined
+                  ? null
+                  : Boolean(value.default_is_cutlist),
+              cutlist_category: value.default_cutlist_category ?? null,
+              cutlist_dimensions: value.default_cutlist_dimensions ?? null,
+              attributes: null,
+              updated_at: new Date().toISOString(),
+            });
+          }
+        }
+      }
+
+      if (defaultRows.length > 0) {
+        const { data: seeded, error: seedError } = await supabase
+          .from('bom_option_overrides')
+          .upsert(defaultRows, { onConflict: 'bom_id,option_set_value_id' })
+          .select('*');
+
+        if (seedError) {
+          console.error('[bom-overrides] failed seeding default overrides', seedError);
+        } else if (seeded && seeded.length > 0) {
+          overrides = [...overrides, ...seeded];
+        }
+      }
+    } catch (seedError) {
+      console.error('[bom-overrides] unexpected error while seeding defaults', seedError);
+    }
+
     return NextResponse.json({
       product_groups: productGroups,
       option_sets: productSets,
-      overrides: overridesData ?? [],
+      overrides,
     });
   } catch (error: any) {
     if (error?.message === 'GROUPS_FAILED') {

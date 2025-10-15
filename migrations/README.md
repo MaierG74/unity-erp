@@ -37,6 +37,26 @@ WHERE p.id IS NULL;
 
 ---
 
+### 20251009_fix_get_product_components.sql
+Located at: `db/migrations/20251009_fix_get_product_components.sql`
+**Created:** 2025-10-09
+**Purpose:** Fix `get_product_components` RPC parameter ambiguity so PostgREST and direct SQL calls honour option-set overrides.
+
+**What it does:**
+- Drops the existing `public.get_product_components(integer, jsonb)` function.
+- Recreates it with parameter names `_product_id` and `_selected_options` to avoid ambiguous column references.
+- Ensures the function returns base BOM rows plus option and option-set overrides when provided selections.
+
+**Safe to re-run:** Yes (drops and recreates the function each time).
+
+**Verification:** After running, execute:
+```sql
+SELECT * FROM get_product_components(55, '{"HS":"BOWH"}');
+```
+Expected output includes both the base `96mm Bar handle (Stainless)` component and the Bow handle override row.
+
+---
+
 ### 20250930_quote_totals_triggers.sql
 **Created:** 2025-09-30
 **Purpose:** Automatic totals calculation for quotes system

@@ -65,6 +65,7 @@ This document summarizes algorithm, UI, integration, and performance suggestions
 - Prices default from selected supplier component; can be overridden manually.
 - Export uses selected components and meters/sheets calculated by the tool.
 - Standalone `/cutlist` runs the full material palette (per-part material selector + palette persistence); the Quote modal keeps the legacy costing layout without the palette to preserve the established workflow.
+- Cards default to a collapsed state so operators can expand only the sections they need; price fields show a leading `R` to match local currency.
 
 ## UX / Feature Ideas
 
