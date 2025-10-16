@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { validateCutlistDimensions } from '@/lib/cutlist/cutlistDimensions';
 
 interface RouteParams {
   params: {
@@ -24,17 +25,36 @@ function getSupabaseAdmin() {
   return createClient(url, key);
 }
 
-async function ensureValueBelongs(client: any, setId: number, groupId: number, valueId: number) {
+async function fetchValueForUpdate(client: ReturnType<typeof createClient>, setId: number, groupId: number, valueId: number) {
   const { data, error } = await client
     .from('option_set_values')
-    .select('option_set_groups(option_set_id, option_set_group_id)')
+    .select(
+      `
+        option_set_value_id,
+        option_set_group_id,
+        default_is_cutlist,
+        default_cutlist_dimensions,
+        option_set_groups(option_set_id)
+      `
+    )
     .eq('option_set_value_id', valueId)
     .single();
 
-  const group = data ? (data as any).option_set_groups : null;
-  if (error || !group || Number(group.option_set_group_id) !== groupId || Number(group.option_set_id) !== setId) {
+  if (error || !data) {
     throw new Error('Not found');
   }
+
+  const group = (data as any).option_set_groups;
+  if (
+    !group ||
+    Number(data.option_set_group_id) !== groupId ||
+    Number(group.option_set_group_id) !== groupId ||
+    Number(group.option_set_id) !== setId
+  ) {
+    throw new Error('Not found');
+  }
+
+  return data;
 }
 
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
@@ -49,6 +69,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   if (!body || typeof body !== 'object') {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
+
+  const hasCutlistDimensionsUpdate = Object.prototype.hasOwnProperty.call(body, 'default_cutlist_dimensions');
 
   const updates: Record<string, unknown> = {};
   if (typeof body.code === 'string') {
@@ -101,21 +123,68 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   } else if (body.default_cutlist_category === null) {
     updates.default_cutlist_category = null;
   }
-  if (body.default_cutlist_dimensions && typeof body.default_cutlist_dimensions === 'object') {
-    updates.default_cutlist_dimensions = body.default_cutlist_dimensions;
-  } else if (body.default_cutlist_dimensions === null) {
-    updates.default_cutlist_dimensions = null;
-  }
-
-  if (Object.keys(updates).length === 0) {
-    return NextResponse.json({ error: 'No fields provided to update' }, { status: 400 });
-  }
 
   const supabase = getSupabaseAdmin();
 
+  let existingValue: any;
   try {
-    await ensureValueBelongs(supabase, setId, groupId, valueId);
+    existingValue = await fetchValueForUpdate(supabase, setId, groupId, valueId);
+  } catch (error: any) {
+    if (error?.message === 'Not found') {
+      return NextResponse.json({ error: 'Option value not found for set/group' }, { status: 404 });
+    }
+    console.error('[option-set-values] unexpected preflight error', error);
+    return NextResponse.json({ error: 'Unexpected error while loading option value' }, { status: 500 });
+  }
 
+  const currentIsCutlist = existingValue?.default_is_cutlist ?? null;
+  const currentDimensions = existingValue?.default_cutlist_dimensions ?? null;
+
+  const nextIsCutlist =
+    typeof body.default_is_cutlist === 'boolean'
+      ? body.default_is_cutlist
+      : body.default_is_cutlist === null
+        ? null
+        : (currentIsCutlist as boolean | null);
+
+  let normalizedCutlistDimensions: Record<string, unknown> | null | undefined;
+  if (hasCutlistDimensionsUpdate) {
+    const raw = body.default_cutlist_dimensions;
+    if (raw === null) {
+      if (nextIsCutlist === true) {
+        return NextResponse.json({ error: 'Default cutlist dimensions cannot be null when forcing a cutlist item' }, { status: 400 });
+      }
+      normalizedCutlistDimensions = null;
+    } else if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+      const validation = validateCutlistDimensions(raw, { requireDimensions: nextIsCutlist === true });
+      if (!validation.valid || !validation.value) {
+        const message = validation.errors[0] ?? 'Provided cutlist dimensions are invalid';
+        return NextResponse.json({ error: message }, { status: 400 });
+      }
+      normalizedCutlistDimensions = validation.value as Record<string, unknown>;
+    } else {
+      return NextResponse.json({ error: 'Default cutlist dimensions must be a JSON object' }, { status: 400 });
+    }
+  }
+
+  if (nextIsCutlist === true) {
+    const effectiveDimensions = hasCutlistDimensionsUpdate
+      ? normalizedCutlistDimensions
+      : (currentDimensions as Record<string, unknown> | null);
+    if (!effectiveDimensions) {
+      return NextResponse.json({ error: 'Default cutlist dimensions are required when forcing a cutlist item' }, { status: 400 });
+    }
+  }
+
+  if (hasCutlistDimensionsUpdate) {
+    updates.default_cutlist_dimensions = normalizedCutlistDimensions ?? null;
+  }
+
+  if (Object.keys(updates).length === 0 && !hasCutlistDimensionsUpdate) {
+    return NextResponse.json({ error: 'No fields provided to update' }, { status: 400 });
+  }
+
+  try {
     if (updates.is_default === true) {
       const { error: resetError } = await supabase
         .from('option_set_values')
@@ -162,7 +231,7 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   const supabase = getSupabaseAdmin();
 
   try {
-    await ensureValueBelongs(supabase, setId, groupId, valueId);
+    await fetchValueForUpdate(supabase, setId, groupId, valueId);
 
     const { error } = await supabase
       .from('option_set_values')
