@@ -113,7 +113,8 @@ CREATE TABLE public.billoflabour (
   - **Details** – Basic product information
   - **Images** – Image management with gallery
   - **Categories** – Category assignment management
-  - **Bill of Materials** – Component requirements (inline editing, supplier-aware tooling)
+- **Bill of Materials** – Component requirements (inline editing, supplier-aware tooling)
+  - Inline editor now includes a **Cutlist** section so authors can capture base panel dimensions, edging sides, laminate/backer components, and material notes directly on the BOM row. These defaults seed overrides when option sets are attached and keep quote/order cutlists aligned without requiring JSON edits.
   - **Bill of Labor** – Labor requirements
   - **Options** – Manage configurable attributes (option groups + values) and hook BOM overrides
   - **Costing** – Combined materials + labor unit cost summary (see `docs/plans/product-costing-plan.md`)

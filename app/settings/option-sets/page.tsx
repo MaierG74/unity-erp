@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   useOptionSets,
@@ -32,6 +32,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
+import { CUTLIST_DIMENSIONS_TEMPLATE, validateCutlistDimensions } from '@/lib/cutlist/cutlistDimensions';
 
 interface SetFormState {
   code: string;
@@ -74,6 +75,12 @@ function createEmptyValueForm(isDefault = false): ValueFormState {
     default_cutlist_category: '',
     default_cutlist_dimensions: '',
   };
+}
+
+interface CutlistValidationState {
+  status: 'idle' | 'valid' | 'error';
+  errors: string[];
+  warnings: string[];
 }
 
 interface ComponentOption {
@@ -296,6 +303,42 @@ export default function OptionSetLibraryPage() {
   const [supplierPickerOpen, setSupplierPickerOpen] = useState(false);
   const [componentSearchTerm, setComponentSearchTerm] = useState('');
   const [supplierSearchTerm, setSupplierSearchTerm] = useState('');
+  const [cutlistValidation, setCutlistValidation] = useState<CutlistValidationState>({
+    status: 'idle',
+    errors: [],
+    warnings: [],
+  });
+
+  const evaluateCutlistDimensions = useCallback(
+    (jsonText: string, requireDimensions: boolean) => {
+      const trimmed = jsonText.trim();
+      if (!trimmed) {
+        if (requireDimensions) {
+          const message = 'Provide cutlist dimensions when forcing a cutlist default.';
+          setCutlistValidation({ status: 'error', errors: [message], warnings: [] });
+          return { valid: false, value: null, errors: [message], warnings: [] };
+        }
+        setCutlistValidation({ status: 'idle', errors: [], warnings: [] });
+        return { valid: true, value: null, errors: [], warnings: [] };
+      }
+
+      try {
+        const parsed = JSON.parse(trimmed);
+        const validation = validateCutlistDimensions(parsed, { requireDimensions });
+        setCutlistValidation({
+          status: validation.valid ? 'valid' : 'error',
+          errors: validation.errors,
+          warnings: validation.warnings,
+        });
+        return validation;
+      } catch (error) {
+        const message = 'Cutlist dimensions must be valid JSON.';
+        setCutlistValidation({ status: 'error', errors: [message], warnings: [] });
+        return { valid: false, value: null, errors: [message], warnings: [] };
+      }
+    },
+    []
+  );
 
   const {
     data: componentSearchResults = [],
@@ -360,6 +403,11 @@ export default function OptionSetLibraryPage() {
 
   useEffect(() => {
     if (!valueDialogOpen) return;
+    evaluateCutlistDimensions(valueForm.default_cutlist_dimensions ?? '', valueForm.default_is_cutlist === true);
+  }, [valueDialogOpen, valueForm.default_cutlist_dimensions, valueForm.default_is_cutlist, evaluateCutlistDimensions]);
+
+  useEffect(() => {
+    if (!valueDialogOpen) return;
     const supplierId = valueForm.default_supplier_component_id;
     if (!supplierId) {
       if (supplierSelection) {
@@ -403,6 +451,42 @@ export default function OptionSetLibraryPage() {
     setSupplierPickerOpen(false);
     setComponentSearchTerm('');
     setSupplierSearchTerm('');
+    setCutlistValidation({ status: 'idle', errors: [], warnings: [] });
+  };
+
+  const handleApplyCutlistTemplate = () => {
+    setValueForm((prev) => ({
+      ...prev,
+      default_cutlist_dimensions: CUTLIST_DIMENSIONS_TEMPLATE,
+    }));
+    evaluateCutlistDimensions(CUTLIST_DIMENSIONS_TEMPLATE, valueForm.default_is_cutlist === true);
+  };
+
+  const handleFormatCutlistJson = () => {
+    const current = valueForm.default_cutlist_dimensions ?? '';
+    if (!current.trim()) {
+      setValueForm((prev) => ({ ...prev, default_cutlist_dimensions: '' }));
+      evaluateCutlistDimensions('', valueForm.default_is_cutlist === true);
+      return;
+    }
+    const validation = evaluateCutlistDimensions(current, valueForm.default_is_cutlist === true);
+    if (!validation.valid) {
+      const message = validation.errors[0] ?? 'Fix cutlist validation errors before formatting.';
+      toast({ variant: 'destructive', title: 'Cannot format cutlist JSON', description: message });
+      return;
+    }
+    if (!validation.value) {
+      setValueForm((prev) => ({ ...prev, default_cutlist_dimensions: '' }));
+      setCutlistValidation({ status: 'idle', errors: [], warnings: [] });
+      return;
+    }
+    const formatted = JSON.stringify(validation.value, null, 2);
+    setValueForm((prev) => ({ ...prev, default_cutlist_dimensions: formatted }));
+    setCutlistValidation({
+      status: 'valid',
+      errors: [],
+      warnings: validation.warnings,
+    });
   };
 
   const openCreateSet = () => {
@@ -583,10 +667,14 @@ export default function OptionSetLibraryPage() {
     setComponentPickerOpen(false);
     setSupplierPickerOpen(false);
     setValueDialogOpen(true);
+    setCutlistValidation({ status: 'idle', errors: [], warnings: [] });
   };
 
   const openEditValue = (setId: number, group: OptionSetGroup, value: OptionSetValue) => {
     setValueTarget({ setId, group, value });
+    const dimensionsString = value.default_cutlist_dimensions
+      ? JSON.stringify(value.default_cutlist_dimensions, null, 2)
+      : '';
     setValueForm({
       code: value.code,
       label: value.label,
@@ -598,9 +686,7 @@ export default function OptionSetLibraryPage() {
       default_notes: value.default_notes ?? '',
       default_is_cutlist: value.default_is_cutlist ?? null,
       default_cutlist_category: value.default_cutlist_category ?? '',
-      default_cutlist_dimensions: value.default_cutlist_dimensions
-        ? JSON.stringify(value.default_cutlist_dimensions, null, 2)
-        : '',
+      default_cutlist_dimensions: dimensionsString,
     });
     setComponentSelection(null);
     setSupplierSelection(null);
@@ -609,21 +695,22 @@ export default function OptionSetLibraryPage() {
     setComponentPickerOpen(false);
     setSupplierPickerOpen(false);
     setValueDialogOpen(true);
+    evaluateCutlistDimensions(dimensionsString, value.default_is_cutlist === true);
   };
 
   const handleSaveValue = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!valueTarget) return;
 
-    let parsedDimensions: Record<string, unknown> | null = null;
-    if (valueForm.default_cutlist_dimensions && valueForm.default_cutlist_dimensions.trim() !== '') {
-      try {
-        parsedDimensions = JSON.parse(valueForm.default_cutlist_dimensions);
-      } catch (err) {
-        toast({ variant: 'destructive', title: 'Invalid cutlist dimensions', description: 'Provide valid JSON or leave blank.' });
-        return;
-      }
+    const requireDimensions = valueForm.default_is_cutlist === true;
+    const validation = evaluateCutlistDimensions(valueForm.default_cutlist_dimensions ?? '', requireDimensions);
+    if (!validation.valid) {
+      const message = validation.errors[0] ?? 'Cutlist dimensions are invalid.';
+      toast({ variant: 'destructive', title: 'Invalid cutlist dimensions', description: message });
+      return;
     }
+
+    const parsedDimensions = validation.value as Record<string, unknown> | null;
 
     const payload = {
       code: valueForm.code.trim(),
@@ -1338,10 +1425,12 @@ export default function OptionSetLibraryPage() {
                 <Select
                   value={valueForm.default_is_cutlist === null || valueForm.default_is_cutlist === undefined ? 'auto' : valueForm.default_is_cutlist ? 'true' : 'false'}
                   onValueChange={(val) => {
+                    const nextIsCutlist = val === 'auto' ? null : val === 'true';
                     setValueForm((prev) => ({
                       ...prev,
-                      default_is_cutlist: val === 'auto' ? null : val === 'true',
+                      default_is_cutlist: nextIsCutlist,
                     }));
+                    evaluateCutlistDimensions(valueForm.default_cutlist_dimensions ?? '', nextIsCutlist === true);
                   }}
                 >
                   <SelectTrigger id="value-default-is-cutlist">
@@ -1375,13 +1464,58 @@ export default function OptionSetLibraryPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="value-default-dimensions">Default cutlist dimensions (JSON)</Label>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Label htmlFor="value-default-dimensions">Default cutlist dimensions (JSON)</Label>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2 text-xs"
+                      onClick={handleApplyCutlistTemplate}
+                    >
+                      Insert template
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2 text-xs"
+                      onClick={handleFormatCutlistJson}
+                      disabled={!valueForm.default_cutlist_dimensions || valueForm.default_cutlist_dimensions.trim() === ''}
+                    >
+                      Format JSON
+                    </Button>
+                  </div>
+                </div>
                 <Textarea
                   id="value-default-dimensions"
                   value={valueForm.default_cutlist_dimensions ?? ''}
-                  onChange={(event) => setValueForm((prev) => ({ ...prev, default_cutlist_dimensions: event.target.value }))}
-                  placeholder='{ "length": 0, "width": 0, "thickness": 0 }'
+                  onChange={(event) => {
+                    const text = event.target.value;
+                    setValueForm((prev) => ({ ...prev, default_cutlist_dimensions: text }));
+                    evaluateCutlistDimensions(text, valueForm.default_is_cutlist === true);
+                  }}
+                  placeholder='Use "Insert template" to add the canonical payload'
+                  className={cn(
+                    'min-h-[220px] font-mono text-xs',
+                    cutlistValidation.status === 'error' ? 'border-destructive focus-visible:ring-destructive' : ''
+                  )}
                 />
+                {cutlistValidation.errors.length > 0 ? (
+                  <ul className="space-y-1 text-xs text-destructive">
+                    {cutlistValidation.errors.map((message, index) => (
+                      <li key={`${message}-${index}`}>• {message}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                {cutlistValidation.errors.length === 0 && cutlistValidation.warnings.length > 0 ? (
+                  <ul className="space-y-1 text-xs text-amber-600">
+                    {cutlistValidation.warnings.map((message, index) => (
+                      <li key={`${message}-${index}`}>• {message}</li>
+                    ))}
+                  </ul>
+                ) : null}
               </div>
             </div>
             <DialogFooter>

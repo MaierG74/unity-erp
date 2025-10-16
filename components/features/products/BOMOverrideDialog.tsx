@@ -20,6 +20,14 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Loader2, Search, X, ChevronDown } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
+import {
+  CUTLIST_DIMENSIONS_TEMPLATE,
+  validateCutlistDimensions,
+  summariseCutlistDimensions,
+  cloneCutlistDimensions,
+  areCutlistDimensionsEqual,
+} from '@/lib/cutlist/cutlistDimensions';
+import type { CutlistDimensions } from '@/lib/cutlist/cutlistDimensions';
 
 interface ComponentSummary {
   component_id: number;
@@ -34,7 +42,7 @@ interface OverrideRecord {
   notes: string | null;
   is_cutlist_item: boolean | null;
   cutlist_category: string | null;
-  cutlist_dimensions: Record<string, unknown> | null;
+  cutlist_dimensions: CutlistDimensions | null;
   attributes: Record<string, unknown> | null;
 }
 
@@ -58,7 +66,7 @@ interface OptionValueDraft extends OverrideRecord {
   default_notes?: string | null;
   default_is_cutlist?: boolean | null;
   default_cutlist_category?: string | null;
-  default_cutlist_dimensions?: Record<string, unknown> | null;
+  default_cutlist_dimensions?: CutlistDimensions | null;
 }
 
 interface OptionGroupDraft {
@@ -80,6 +88,13 @@ interface OverridesResponse {
   product_groups: any[];
   option_sets: any[];
   overrides: any[];
+}
+
+interface CutlistEditorState {
+  open: boolean;
+  text: string;
+  errors: string[];
+  warnings: string[];
 }
 
 interface BOMOverrideDialogProps {
@@ -117,6 +132,7 @@ export function BOMOverrideDialog({
   const [openPickerFor, setOpenPickerFor] = useState<string | null>(null);
   const [pendingSaveId, setPendingSaveId] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [cutlistEditors, setCutlistEditors] = useState<Record<string, CutlistEditorState>>({});
 
   const enabled = open && typeof bomId === 'number';
 
@@ -158,6 +174,7 @@ useEffect(() => {
     setDraftGroups([]);
     setExpandedGroups({});
     setExpandedValues({});
+    setCutlistEditors({});
     return;
   }
 
@@ -173,6 +190,13 @@ useEffect(() => {
     display_order: Number(group.display_order ?? 0),
     values: (group.product_option_values ?? []).map((value: any) => {
       const override = productOverrides.get(Number(value.option_value_id));
+      const overrideNotes =
+        typeof override?.notes === 'string' && override.notes.trim().length > 0 ? override.notes.trim() : null;
+      const overrideCategory =
+        typeof override?.cutlist_category === 'string' && override.cutlist_category.trim().length > 0
+          ? override.cutlist_category.trim()
+          : null;
+      const overrideCutlistDimensions = cloneCutlistDimensions(override?.cutlist_dimensions);
       return {
         id: `product:${value.option_value_id}`,
         source: 'product',
@@ -187,10 +211,10 @@ useEffect(() => {
         replace_component_id: override?.replace_component_id ?? null,
         replace_supplier_component_id: override?.replace_supplier_component_id ?? null,
         quantity_delta: override?.quantity_delta != null ? Number(override.quantity_delta) : null,
-        notes: override?.notes ?? null,
+        notes: overrideNotes,
         is_cutlist_item: override?.is_cutlist_item ?? null,
-        cutlist_category: override?.cutlist_category ?? null,
-        cutlist_dimensions: override?.cutlist_dimensions ?? null,
+        cutlist_category: overrideCategory ?? null,
+        cutlist_dimensions: overrideCutlistDimensions,
         attributes: override?.attributes ?? null,
       } as OptionValueDraft;
     }),
@@ -217,6 +241,40 @@ useEffect(() => {
         const displayValueLabel = valueOverlay?.alias_label?.length ? valueOverlay.alias_label : value.label;
         const valueHidden = valueOverlay?.hide ?? false;
         const override = optionSetOverrides.get(Number(value.option_set_value_id));
+
+        const normalizedDefaultNotes =
+          typeof value.default_notes === 'string' && value.default_notes.trim().length > 0
+            ? value.default_notes.trim()
+            : null;
+        const normalizedDefaultCategory =
+          typeof value.default_cutlist_category === 'string' && value.default_cutlist_category.trim().length > 0
+            ? value.default_cutlist_category.trim()
+            : null;
+        const defaultCutlistDimensions = cloneCutlistDimensions(value.default_cutlist_dimensions);
+        const overrideCutlistDimensions = cloneCutlistDimensions(override?.cutlist_dimensions);
+        const resolvedCutlistDimensions =
+          overrideCutlistDimensions ?? (defaultCutlistDimensions ? cloneCutlistDimensions(defaultCutlistDimensions) : null);
+        const resolvedQuantityDelta =
+          override?.quantity_delta != null
+            ? Number(override.quantity_delta)
+            : value.default_quantity_delta != null
+            ? Number(value.default_quantity_delta)
+            : null;
+        const overrideNotesNormalized =
+          typeof override?.notes === 'string' && override.notes.trim().length > 0 ? override.notes.trim() : null;
+        const resolvedNotes = overrideNotesNormalized ?? normalizedDefaultNotes;
+        const overrideCategoryNormalized =
+          typeof override?.cutlist_category === 'string' && override.cutlist_category.trim().length > 0
+            ? override.cutlist_category.trim()
+            : null;
+        const resolvedCutlistCategory = overrideCategoryNormalized ?? normalizedDefaultCategory ?? null;
+        const resolvedIsCutlist =
+          override?.is_cutlist_item != null
+            ? override.is_cutlist_item
+            : value.default_is_cutlist != null
+            ? Boolean(value.default_is_cutlist)
+            : null;
+
         return {
           id: `set:${value.option_set_value_id}`,
           source: 'set',
@@ -230,28 +288,18 @@ useEffect(() => {
           display_order: Number(value.display_order ?? 0),
           replace_component_id: override?.replace_component_id ?? value.default_component_id ?? null,
           replace_supplier_component_id: override?.replace_supplier_component_id ?? value.default_supplier_component_id ?? null,
-          quantity_delta:
-            override?.quantity_delta != null
-              ? Number(override.quantity_delta)
-              : value.default_quantity_delta != null
-              ? Number(value.default_quantity_delta)
-              : null,
-          notes: override?.notes ?? value.default_notes ?? null,
-          is_cutlist_item:
-            override?.is_cutlist_item != null
-              ? override.is_cutlist_item
-              : value.default_is_cutlist != null
-              ? Boolean(value.default_is_cutlist)
-              : null,
-          cutlist_category: override?.cutlist_category ?? value.default_cutlist_category ?? null,
-          cutlist_dimensions: override?.cutlist_dimensions ?? value.default_cutlist_dimensions ?? null,
+          quantity_delta: resolvedQuantityDelta,
+          notes: resolvedNotes,
+          is_cutlist_item: resolvedIsCutlist,
+          cutlist_category: resolvedCutlistCategory,
+          cutlist_dimensions: resolvedCutlistDimensions,
           default_component_id: value.default_component_id ?? null,
           default_supplier_component_id: value.default_supplier_component_id ?? null,
-          default_quantity_delta: value.default_quantity_delta ?? null,
-          default_notes: value.default_notes ?? null,
+          default_quantity_delta: value.default_quantity_delta != null ? Number(value.default_quantity_delta) : null,
+          default_notes: normalizedDefaultNotes,
           default_is_cutlist: value.default_is_cutlist ?? null,
-          default_cutlist_category: value.default_cutlist_category ?? null,
-          default_cutlist_dimensions: value.default_cutlist_dimensions ?? null,
+          default_cutlist_category: normalizedDefaultCategory,
+          default_cutlist_dimensions: defaultCutlistDimensions,
         } as OptionValueDraft;
       });
 
@@ -304,11 +352,12 @@ useEffect(() => {
 }, [data, productOverrides, optionSetOverrides]);
 
   useEffect(() => {
-    if (!open) {
-      setComponentQuery('');
-      setOpenPickerFor(null);
-    }
-  }, [open]);
+  if (!open) {
+    setComponentQuery('');
+    setOpenPickerFor(null);
+    setCutlistEditors({});
+  }
+}, [open]);
 
   const saveMutation = useMutation({
     mutationFn: async ({ value, componentLabel }: { value: OptionValueDraft; componentLabel: string }) => {
@@ -455,7 +504,8 @@ useEffect(() => {
         value.quantity_delta != null ||
         value.notes ||
         value.is_cutlist_item != null ||
-        value.cutlist_category
+        value.cutlist_category ||
+        value.cutlist_dimensions != null
       );
     }
     return (
@@ -464,18 +514,22 @@ useEffect(() => {
       Number(current.quantity_delta ?? null) !== (value.quantity_delta ?? null) ||
       (current.notes ?? null) !== (value.notes ?? null) ||
       (current.is_cutlist_item ?? null) !== (value.is_cutlist_item ?? null) ||
-      (current.cutlist_category ?? null) !== (value.cutlist_category ?? null)
+      (current.cutlist_category ?? null) !== (value.cutlist_category ?? null) ||
+      !areCutlistDimensionsEqual(
+        (current.cutlist_dimensions as CutlistDimensions | null | undefined) ?? null,
+        value.cutlist_dimensions ?? null
+      )
     );
   };
 
   const renderComponentPicker = (value: OptionValueDraft) => {
     const selected = value.replace_component_id ? components.find((c) => c.component_id === value.replace_component_id) : null;
     const popoverOpen = openPickerFor === value.id;
-    return (
-      <Popover
-        open={popoverOpen}
-        onOpenChange={(next) => {
-          if (next) {
+  return (
+    <Popover
+      open={popoverOpen}
+      onOpenChange={(next) => {
+        if (next) {
             setComponentQuery('');
             setOpenPickerFor(value.id);
           } else if (openPickerFor === value.id) {
@@ -546,6 +600,167 @@ useEffect(() => {
     );
   };
 
+  const getCutlistEditorState = (valueId: string): CutlistEditorState => {
+    const existing = cutlistEditors[valueId];
+    return existing ?? { open: false, text: '', errors: [], warnings: [] };
+  };
+
+  const openCutlistEditor = (value: OptionValueDraft) => {
+    const current = getCutlistEditorState(value.id);
+    const nextText =
+      value.cutlist_dimensions && Object.keys(value.cutlist_dimensions).length > 0
+        ? JSON.stringify(value.cutlist_dimensions, null, 2)
+        : '';
+    setCutlistEditors((prev) => ({
+      ...prev,
+      [value.id]: { ...current, open: true, text: nextText, errors: [], warnings: [] },
+    }));
+  };
+
+  const closeCutlistEditor = (valueId: string) => {
+    const current = getCutlistEditorState(valueId);
+    if (!current.open && current.errors.length === 0 && current.warnings.length === 0 && current.text === '') {
+      setCutlistEditors((prev) => {
+        if (!prev[valueId]) return prev;
+        const next = { ...prev };
+        delete next[valueId];
+        return next;
+      });
+      return;
+    }
+    setCutlistEditors((prev) => ({
+      ...prev,
+      [valueId]: { ...current, open: false },
+    }));
+  };
+
+  const setCutlistEditorText = (valueId: string, text: string) => {
+    const current = getCutlistEditorState(valueId);
+    setCutlistEditors((prev) => ({
+      ...prev,
+      [valueId]: { ...current, text, errors: [], warnings: [] },
+    }));
+  };
+
+  const setCutlistEditorErrors = (valueId: string, errors: string[], warnings: string[] = []) => {
+    const current = getCutlistEditorState(valueId);
+    setCutlistEditors((prev) => ({
+      ...prev,
+      [valueId]: { ...current, errors, warnings },
+    }));
+  };
+
+  const insertCutlistTemplate = (valueId: string) => {
+    const current = getCutlistEditorState(valueId);
+    setCutlistEditors((prev) => ({
+      ...prev,
+      [valueId]: { ...current, open: true, text: CUTLIST_DIMENSIONS_TEMPLATE, errors: [], warnings: [] },
+    }));
+  };
+
+  const formatCutlistJson = (value: OptionValueDraft) => {
+    const editor = getCutlistEditorState(value.id);
+    const trimmed = editor.text.trim();
+    if (!trimmed) {
+      setCutlistEditorErrors(value.id, ['Nothing to format.']);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(trimmed);
+      setCutlistEditors((prev) => ({
+        ...prev,
+        [value.id]: {
+          ...editor,
+          text: JSON.stringify(parsed, null, 2),
+          errors: [],
+          warnings: [],
+        },
+      }));
+    } catch (error: any) {
+      setCutlistEditorErrors(value.id, ['Cutlist JSON must be valid before formatting.']);
+    }
+  };
+
+  const applyCutlistEditor = (value: OptionValueDraft) => {
+    const editor = getCutlistEditorState(value.id);
+    const trimmed = editor.text.trim();
+    const requireDimensions =
+      value.is_cutlist_item === true || (value.is_cutlist_item === null && value.default_is_cutlist === true);
+
+    if (!trimmed) {
+      if (requireDimensions) {
+        setCutlistEditorErrors(value.id, ['Cutlist dimensions are required when this override is marked as cutlist.']);
+        return;
+      }
+      setDraftValue(value.id, (prev) => ({
+        ...prev,
+        cutlist_dimensions: null,
+      }));
+      setCutlistEditors((prev) => ({
+        ...prev,
+        [value.id]: { open: false, text: '', errors: [], warnings: [] },
+      }));
+      toast({
+        title: 'Cutlist cleared',
+        description: `${value.display_label} no longer has custom cutlist dimensions.`,
+      });
+      return;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch (error: any) {
+      setCutlistEditorErrors(value.id, ['Cutlist JSON is invalid. Fix the syntax before saving.']);
+      return;
+    }
+
+    const validation = validateCutlistDimensions(parsed, { requireDimensions });
+    if (!validation.valid || !validation.value) {
+      const errors = validation.errors.length > 0 ? validation.errors : ['Cutlist JSON is invalid.'];
+      setCutlistEditorErrors(value.id, errors, validation.warnings);
+      return;
+    }
+
+    const cloned = cloneCutlistDimensions(validation.value);
+    setDraftValue(value.id, (prev) => ({
+      ...prev,
+      cutlist_dimensions: cloned,
+    }));
+    setCutlistEditors((prev) => ({
+      ...prev,
+      [value.id]: {
+        open: false,
+        text: JSON.stringify(validation.value, null, 2),
+        errors: [],
+        warnings: validation.warnings,
+      },
+    }));
+    toast({
+      title: 'Cutlist details updated',
+      description: `${value.display_label} now uses the updated cutlist payload.`,
+    });
+  };
+
+  const clearCutlistDimensions = (value: OptionValueDraft) => {
+    setDraftValue(value.id, (prev) => ({
+      ...prev,
+      cutlist_dimensions: null,
+    }));
+    setCutlistEditors((prev) => ({
+      ...prev,
+      [value.id]: { open: false, text: '', errors: [], warnings: [] },
+    }));
+    const requireDimensions =
+      value.is_cutlist_item === true || (value.is_cutlist_item === null && value.default_is_cutlist === true);
+    toast({
+      title: 'Cutlist cleared',
+      description: requireDimensions
+        ? `${value.display_label} is still marked as cutlist—add dimensions before exporting.`
+        : `${value.display_label} no longer has custom cutlist dimensions.`,
+    });
+  };
+
   const toggleGroup = (groupId: string) => {
     setExpandedGroups((prev) => ({
       ...prev,
@@ -554,10 +769,16 @@ useEffect(() => {
   };
 
   const toggleValue = (valueId: string) => {
-    setExpandedValues((prev) => ({
-      ...prev,
-      [valueId]: !(prev[valueId] ?? false),
-    }));
+    setExpandedValues((prev) => {
+      const currentlyOpen = prev[valueId] ?? false;
+      if (currentlyOpen) {
+        closeCutlistEditor(valueId);
+      }
+      return {
+        ...prev,
+        [valueId]: !currentlyOpen,
+      };
+    });
   };
 
   const valueSummary = (value: OptionValueDraft) => {
@@ -573,6 +794,10 @@ useEffect(() => {
     }
     if (value.is_cutlist_item) {
       parts.push('Cutlist');
+    }
+    const currentCutlistSummary = summariseCutlistDimensions(value.cutlist_dimensions ?? null);
+    if (currentCutlistSummary.headline) {
+      parts.push(currentCutlistSummary.headline);
     }
     return parts.length > 0 ? parts.join(' • ') : 'Uses base BOM row';
   };
@@ -649,6 +874,123 @@ useEffect(() => {
                     <div className="space-y-3 border-t border-border bg-muted/20 px-3 py-3">
                       {group.values.map((value) => {
                         const valueOpen = expandedValues[value.id] ?? false;
+                        const defaultOverrideSnapshot = {
+                          replace_component_id: value.default_component_id ?? null,
+                          replace_supplier_component_id: value.default_supplier_component_id ?? null,
+                          quantity_delta: value.default_quantity_delta ?? null,
+                          notes: value.default_notes ?? null,
+                          is_cutlist_item: value.default_is_cutlist ?? null,
+                          cutlist_category: value.default_cutlist_category ?? null,
+                          cutlist_dimensions: value.default_cutlist_dimensions ?? null,
+                        };
+                        const defaultCutlistDimensions = defaultOverrideSnapshot.cutlist_dimensions;
+                        const defaultCutlistSummary = summariseCutlistDimensions(defaultCutlistDimensions);
+                        const defaultComponent =
+                          value.default_component_id != null
+                            ? components.find((c) => c.component_id === value.default_component_id) ?? null
+                            : null;
+                        const defaultComponentLabel =
+                          value.default_component_id != null
+                            ? defaultComponent
+                              ? `${defaultComponent.internal_code || `Component #${value.default_component_id}`}${
+                                  defaultComponent.description ? ` – ${defaultComponent.description}` : ''
+                                }`
+                              : `Component #${value.default_component_id}`
+                            : 'Base BOM component';
+                        const defaultSupplierLabel =
+                          value.default_supplier_component_id != null
+                            ? `Supplier component #${value.default_supplier_component_id}`
+                            : null;
+                        const defaultCutlistCategoryLabel = defaultOverrideSnapshot.cutlist_category ?? null;
+                        const defaultNotesNormalized = defaultOverrideSnapshot.notes ?? null;
+                        const defaultWarnings: string[] = [];
+                        if (defaultOverrideSnapshot.is_cutlist_item === true) {
+                          if (
+                            !defaultCutlistDimensions ||
+                            defaultCutlistDimensions.length_mm == null ||
+                            defaultCutlistDimensions.width_mm == null
+                          ) {
+                            defaultWarnings.push(
+                              'Option-set default marks this value as a cutlist item but length and width are missing.'
+                            );
+                          }
+                        }
+                        const hasDefaultMetadata =
+                          value.default_component_id != null ||
+                          value.default_supplier_component_id != null ||
+                          defaultOverrideSnapshot.quantity_delta != null ||
+                          !!defaultNotesNormalized ||
+                          !!defaultCutlistCategoryLabel ||
+                          defaultOverrideSnapshot.is_cutlist_item != null ||
+                          (defaultCutlistDimensions && Object.keys(defaultCutlistDimensions).length > 0);
+                        const normalizedDraftNotes =
+                          typeof value.notes === 'string' && value.notes.trim().length > 0
+                            ? value.notes.trim()
+                            : null;
+                        const normalizedDraftCategory =
+                          typeof value.cutlist_category === 'string' && value.cutlist_category.trim().length > 0
+                            ? value.cutlist_category.trim()
+                            : null;
+                        const isAtDefaults =
+                          (value.replace_component_id ?? null) === defaultOverrideSnapshot.replace_component_id &&
+                          (value.replace_supplier_component_id ?? null) ===
+                            defaultOverrideSnapshot.replace_supplier_component_id &&
+                          (value.quantity_delta ?? null) === defaultOverrideSnapshot.quantity_delta &&
+                          normalizedDraftNotes === defaultNotesNormalized &&
+                          (value.is_cutlist_item ?? null) === defaultOverrideSnapshot.is_cutlist_item &&
+                          normalizedDraftCategory === defaultCutlistCategoryLabel &&
+                          areCutlistDimensionsEqual(value.cutlist_dimensions ?? null, defaultCutlistDimensions ?? null);
+                        const restoreDisabled = isAtDefaults;
+                        const cutlistModeLabel =
+                          defaultOverrideSnapshot.is_cutlist_item === true
+                            ? 'Force cutlist'
+                            : defaultOverrideSnapshot.is_cutlist_item === false
+                            ? 'Force component'
+                            : 'Inherit from BOM';
+                        const editorState = getCutlistEditorState(value.id);
+                        const overrideRequireDimensions =
+                          value.is_cutlist_item === true || (value.is_cutlist_item === null && value.default_is_cutlist === true);
+                        let overrideValidation: ReturnType<typeof validateCutlistDimensions> | null = null;
+                        if (value.cutlist_dimensions) {
+                          overrideValidation = validateCutlistDimensions(value.cutlist_dimensions, {
+                            requireDimensions: overrideRequireDimensions,
+                          });
+                        }
+                        const overrideSummary = summariseCutlistDimensions(value.cutlist_dimensions ?? null);
+                        const overrideWarnings = overrideValidation?.warnings ?? [];
+                        const overrideErrors =
+                          overrideValidation && !overrideValidation.valid ? overrideValidation.errors : [];
+                        const handleRestoreDefaults = () => {
+                          const restoredCutlist = cloneCutlistDimensions(defaultCutlistDimensions);
+                          setDraftValue(value.id, (prev) => ({
+                            ...prev,
+                            replace_component_id: defaultOverrideSnapshot.replace_component_id,
+                            replace_supplier_component_id: defaultOverrideSnapshot.replace_supplier_component_id,
+                            quantity_delta: defaultOverrideSnapshot.quantity_delta,
+                            notes: defaultNotesNormalized,
+                            is_cutlist_item: defaultOverrideSnapshot.is_cutlist_item,
+                            cutlist_category: defaultCutlistCategoryLabel,
+                            cutlist_dimensions: restoredCutlist,
+                          }));
+                          toast({
+                            title: 'Defaults restored',
+                            description: `${value.display_label} now matches the option-set defaults.`,
+                          });
+                          setCutlistEditors((prev) => ({
+                            ...prev,
+                            [value.id]: {
+                              open: prev[value.id]?.open ?? false,
+                              text:
+                                restoredCutlist && Object.keys(restoredCutlist).length > 0
+                                  ? JSON.stringify(restoredCutlist, null, 2)
+                                  : '',
+                              errors: [],
+                              warnings: [],
+                            },
+                          }));
+                        };
+                        const cutlistDefaultStatus = isAtDefaults ? 'In sync' : 'Override differs';
+
                         return (
                           <div key={value.id} className="rounded-md border bg-muted/10">
                             <button
@@ -674,6 +1016,240 @@ useEffect(() => {
 
                         {valueOpen && (
                           <div className="space-y-4 border-t border-border bg-card/80 px-4 py-4">
+                            {value.source === 'set' && (
+                              <div className="space-y-3 rounded-md border border-dashed border-muted-foreground/40 bg-muted/15 p-4 text-xs">
+                                <div className="flex flex-wrap items-center justify-between gap-3">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                      Option-set defaults
+                                    </span>
+                                    <Badge variant={isAtDefaults ? 'secondary' : 'outline'}>{cutlistDefaultStatus}</Badge>
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={handleRestoreDefaults}
+                                    disabled={restoreDisabled}
+                                  >
+                                    Restore defaults
+                                  </Button>
+                                </div>
+                                <p
+                                  className={cn(
+                                    'text-xs',
+                                    isAtDefaults ? 'text-muted-foreground' : 'text-amber-600'
+                                  )}
+                                >
+                                  {isAtDefaults
+                                    ? 'Draft matches the option-set defaults.'
+                                    : 'Draft overrides one or more option-set defaults.'}
+                                </p>
+                                {hasDefaultMetadata ? (
+                                  <div className="grid gap-2 text-xs sm:grid-cols-2">
+                                    <div>
+                                      <div className="text-muted-foreground">Component</div>
+                                      <div className="text-foreground">{defaultComponentLabel}</div>
+                                    </div>
+                                    {defaultSupplierLabel ? (
+                                      <div>
+                                        <div className="text-muted-foreground">Supplier component</div>
+                                        <div className="text-foreground">{defaultSupplierLabel}</div>
+                                      </div>
+                                    ) : null}
+                                    {defaultOverrideSnapshot.quantity_delta != null ? (
+                                      <div>
+                                        <div className="text-muted-foreground">Quantity delta</div>
+                                        <div className="text-foreground">
+                                          {defaultOverrideSnapshot.quantity_delta > 0
+                                            ? `+${defaultOverrideSnapshot.quantity_delta}`
+                                            : defaultOverrideSnapshot.quantity_delta}
+                                        </div>
+                                      </div>
+                                    ) : null}
+                                    <div>
+                                      <div className="text-muted-foreground">Cutlist flag</div>
+                                      <div className="text-foreground">{cutlistModeLabel}</div>
+                                    </div>
+                                    {defaultCutlistCategoryLabel ? (
+                                      <div>
+                                        <div className="text-muted-foreground">Cutlist category</div>
+                                        <div className="text-foreground">{defaultCutlistCategoryLabel}</div>
+                                      </div>
+                                    ) : null}
+                                    {defaultNotesNormalized ? (
+                                      <div className="sm:col-span-2">
+                                        <div className="text-muted-foreground">Default notes</div>
+                                        <div className="text-foreground">{defaultNotesNormalized}</div>
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-muted-foreground">
+                                    No option-set defaults configured for this value yet.
+                                  </p>
+                                )}
+                                <div className="space-y-1">
+                                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                    Cutlist defaults
+                                  </div>
+                                  {defaultCutlistSummary.headline ? (
+                                    <div className="font-medium text-foreground">{defaultCutlistSummary.headline}</div>
+                                  ) : null}
+                                  {defaultCutlistSummary.details.length > 0 ? (
+                                    <ul className="space-y-1 text-xs text-muted-foreground">
+                                      {defaultCutlistSummary.details.map((line, index) => (
+                                        <li key={`${line}-${index}`}>• {line}</li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <p className="text-xs text-muted-foreground">No cutlist dimensions provided.</p>
+                                  )}
+                                </div>
+                                {defaultWarnings.map((warning, index) => (
+                                  <div
+                                    key={`${warning}-${index}`}
+                                    className="rounded border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive"
+                                  >
+                                    {warning}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <div className="space-y-3 rounded-md border border-muted-foreground/30 bg-muted/10 p-4 text-xs">
+                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div className="space-y-1">
+                                  <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                    Current cutlist override
+                                  </span>
+                                  <div className="text-sm font-medium text-foreground">
+                                    {overrideSummary.headline ?? 'No cutlist dimensions set'}
+                                  </div>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={() => openCutlistEditor(value)}
+                                  >
+                                    Edit JSON
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={() => clearCutlistDimensions(value)}
+                                    disabled={!value.cutlist_dimensions}
+                                  >
+                                    Clear
+                                  </Button>
+                                </div>
+                              </div>
+                              {overrideRequireDimensions && !value.cutlist_dimensions ? (
+                                <div className="rounded border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
+                                  This override is marked as a cutlist item but has no dimensions stored. Add length/width before exporting.
+                                </div>
+                              ) : null}
+                              {overrideSummary.details.length > 0 ? (
+                                <ul className="space-y-1 text-xs text-muted-foreground">
+                                  {overrideSummary.details.map((line, index) => (
+                                    <li key={`${line}-${index}`}>• {line}</li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <p className="text-xs text-muted-foreground">
+                                  Configure cutlist length/width, grain, or banding to ensure this override feeds the cutlist tool.
+                                </p>
+                              )}
+                              {overrideErrors.length > 0 ? (
+                                <ul className="space-y-1 text-xs text-destructive">
+                                  {overrideErrors.map((message, index) => (
+                                    <li key={`${message}-${index}`}>• {message}</li>
+                                  ))}
+                                </ul>
+                              ) : null}
+                              {overrideErrors.length === 0 && overrideWarnings.length > 0 ? (
+                                <ul className="space-y-1 text-xs text-amber-600">
+                                  {overrideWarnings.map((message, index) => (
+                                    <li key={`${message}-${index}`}>• {message}</li>
+                                  ))}
+                                </ul>
+                              ) : null}
+                              {editorState.open && (
+                                <div className="space-y-2 rounded-md border border-border bg-background/80 p-3">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="text-xs font-medium text-muted-foreground">Cutlist payload (JSON)</div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-7 px-2 text-xs"
+                                        onClick={() => insertCutlistTemplate(value.id)}
+                                      >
+                                        Insert template
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-7 px-2 text-xs"
+                                        onClick={() => formatCutlistJson(value)}
+                                        disabled={!editorState.text.trim()}
+                                      >
+                                        Format JSON
+                                      </Button>
+                                    </div>
+                                  </div>
+                                  <Textarea
+                                    value={editorState.text}
+                                    onChange={(event) => setCutlistEditorText(value.id, event.target.value)}
+                                    className={cn(
+                                      'min-h-[200px] font-mono text-xs',
+                                      editorState.errors.length > 0 ? 'border-destructive focus-visible:ring-destructive' : ''
+                                    )}
+                                    placeholder='{"length_mm": 0, "width_mm": 0}'
+                                  />
+                                  {editorState.errors.length > 0 ? (
+                                    <ul className="space-y-1 text-xs text-destructive">
+                                      {editorState.errors.map((message, index) => (
+                                        <li key={`${message}-${index}`}>• {message}</li>
+                                      ))}
+                                    </ul>
+                                  ) : null}
+                                  {editorState.errors.length === 0 && editorState.warnings.length > 0 ? (
+                                    <ul className="space-y-1 text-xs text-amber-600">
+                                      {editorState.warnings.map((message, index) => (
+                                        <li key={`${message}-${index}`}>• {message}</li>
+                                      ))}
+                                    </ul>
+                                  ) : null}
+                                  <div className="flex flex-wrap items-center justify-end gap-2">
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-8 px-3 text-xs"
+                                      onClick={() => closeCutlistEditor(value.id)}
+                                    >
+                                      Cancel
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      className="h-8 px-3 text-xs"
+                                      onClick={() => applyCutlistEditor(value)}
+                                    >
+                                      Apply
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                             <div className="flex flex-wrap items-center justify-end gap-2">
                               <Button
                                 size="sm"
@@ -762,12 +1338,20 @@ useEffect(() => {
                                 <Checkbox
                                   id={`cutlist-${value.id}`}
                                   checked={Boolean(value.is_cutlist_item)}
-                                  onCheckedChange={(checked) =>
+                                  onCheckedChange={(checked) => {
+                                    const nextChecked = Boolean(checked);
                                     setDraftValue(value.id, (prev) => ({
                                       ...prev,
-                                      is_cutlist_item: Boolean(checked),
-                                    }))
-                                  }
+                                      is_cutlist_item: nextChecked,
+                                    }));
+                                    if (
+                                      nextChecked &&
+                                      (!value.cutlist_dimensions ||
+                                        Object.keys(value.cutlist_dimensions ?? {}).length === 0)
+                                    ) {
+                                      openCutlistEditor(value);
+                                    }
+                                  }}
                                 />
                                 <Label htmlFor={`cutlist-${value.id}`} className="text-sm">
                                   Treat override as cutlist item

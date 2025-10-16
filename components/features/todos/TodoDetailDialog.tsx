@@ -414,15 +414,22 @@ export function TodoDetailDialog({ todoId, open, onOpenChange }: TodoDetailDialo
 
                 {selectedLink ? (
                   <div className="rounded-md border bg-muted/30 p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-medium leading-tight">{selectedLink.label}</p>
-                        <p className="text-sm text-muted-foreground">{selectedLink.path}</p>
+                    <a
+                      href={selectedLink.path}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block hover:opacity-80 transition-opacity"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-medium leading-tight hover:underline">{selectedLink.label}</p>
+                          <p className="text-sm text-muted-foreground">{selectedLink.path}</p>
+                        </div>
+                        <Badge variant="outline" className="capitalize">
+                          {selectedLink.type.replace('_', ' ')}
+                        </Badge>
                       </div>
-                      <Badge variant="outline" className="capitalize">
-                        {selectedLink.type.replace('_', ' ')}
-                      </Badge>
-                    </div>
+                    </a>
                     {selectedLink.meta && Object.keys(selectedLink.meta).length > 0 ? (
                       <p className="mt-2 text-xs text-muted-foreground">
                         {Object.entries(selectedLink.meta)

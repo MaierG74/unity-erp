@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { validateCutlistDimensions } from '@/lib/cutlist/cutlistDimensions';
 
 interface RouteParams {
   params: {
@@ -81,12 +82,31 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     : body.default_cutlist_category === null
       ? null
       : undefined;
-  const defaultCutlistDimensions =
-    body.default_cutlist_dimensions && typeof body.default_cutlist_dimensions === 'object'
-      ? body.default_cutlist_dimensions
-      : body.default_cutlist_dimensions === null
-        ? null
-        : undefined;
+
+  const rawCutlistDimensions = body.default_cutlist_dimensions;
+  const requireCutlistDimensions = defaultIsCutlist === true;
+  let defaultCutlistDimensions: Record<string, unknown> | null | undefined;
+
+  if (rawCutlistDimensions === undefined) {
+    if (requireCutlistDimensions) {
+      return NextResponse.json({ error: 'Default cutlist dimensions are required when forcing a cutlist item' }, { status: 400 });
+    }
+    defaultCutlistDimensions = undefined;
+  } else if (rawCutlistDimensions === null) {
+    if (requireCutlistDimensions) {
+      return NextResponse.json({ error: 'Default cutlist dimensions cannot be null when forcing a cutlist item' }, { status: 400 });
+    }
+    defaultCutlistDimensions = null;
+  } else if (typeof rawCutlistDimensions === 'object' && rawCutlistDimensions !== null && !Array.isArray(rawCutlistDimensions)) {
+    const validation = validateCutlistDimensions(rawCutlistDimensions, { requireDimensions: requireCutlistDimensions });
+    if (!validation.valid || !validation.value) {
+      const message = validation.errors[0] ?? 'Provided cutlist dimensions are invalid';
+      return NextResponse.json({ error: message }, { status: 400 });
+    }
+    defaultCutlistDimensions = validation.value as Record<string, unknown>;
+  } else {
+    return NextResponse.json({ error: 'Default cutlist dimensions must be a JSON object' }, { status: 400 });
+  }
 
   if (!code) {
     return NextResponse.json({ error: 'Option value code is required' }, { status: 400 });

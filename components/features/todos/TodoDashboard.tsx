@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { isBefore, parseISO } from 'date-fns';
-import { CheckCircle, Clock, Loader2, Plus, Search, Users as UsersIcon } from 'lucide-react';
+import { CheckCircle2, Clock, Loader2, Plus, Search, Users as UsersIcon } from 'lucide-react';
 import { formatDate, formatDateTime } from '@/lib/date-utils';
 
 import { Button } from '@/components/ui/button';
@@ -41,32 +41,78 @@ const statusOptions: { value: StatusFilter; label: string }[] = [
 
 function statusBadge(status: string) {
   const normalized = status.toLowerCase();
-  switch (normalized) {
-    case 'done':
-      return <Badge variant="success">Done</Badge>;
-    case 'blocked':
-      return <Badge variant="destructive">Blocked</Badge>;
-    case 'in_progress':
-      return <Badge variant="secondary">In Progress</Badge>;
-    case 'archived':
-      return <Badge variant="outline">Archived</Badge>;
-    default:
-      return <Badge variant="outline">Open</Badge>;
-  }
+
+  const statusConfig = {
+    done: {
+      variant: 'success' as const,
+      label: 'Done',
+      icon: <CheckCircle2 className="h-3 w-3" />
+    },
+    blocked: {
+      variant: 'destructive' as const,
+      label: 'Blocked',
+      icon: <span className="text-xs">🚫</span>
+    },
+    in_progress: {
+      variant: 'secondary' as const,
+      label: 'In Progress',
+      icon: <Loader2 className="h-3 w-3 animate-spin" />
+    },
+    archived: {
+      variant: 'outline' as const,
+      label: 'Archived',
+      icon: <span className="text-xs">📦</span>
+    },
+    open: {
+      variant: 'outline' as const,
+      label: 'Open',
+      icon: <span className="text-xs">⚪</span>
+    }
+  };
+
+  const config = statusConfig[normalized as keyof typeof statusConfig] || statusConfig.open;
+
+  return (
+    <Badge variant={config.variant} className="inline-flex items-center gap-1.5 font-medium">
+      {config.icon}
+      {config.label}
+    </Badge>
+  );
 }
 
 function priorityBadge(priority: string) {
   const normalized = priority.toLowerCase();
-  switch (normalized) {
-    case 'urgent':
-      return <Badge variant="destructive">Urgent</Badge>;
-    case 'high':
-      return <Badge variant="secondary">High</Badge>;
-    case 'low':
-      return <Badge variant="outline">Low</Badge>;
-    default:
-      return <Badge variant="outline">Medium</Badge>;
-  }
+
+  const priorityConfig = {
+    urgent: {
+      variant: 'destructive' as const,
+      label: 'Urgent',
+      className: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200'
+    },
+    high: {
+      variant: 'secondary' as const,
+      label: 'High',
+      className: 'bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-200'
+    },
+    medium: {
+      variant: 'outline' as const,
+      label: 'Medium',
+      className: 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200'
+    },
+    low: {
+      variant: 'outline' as const,
+      label: 'Low',
+      className: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200'
+    }
+  };
+
+  const config = priorityConfig[normalized as keyof typeof priorityConfig] || priorityConfig.medium;
+
+  return (
+    <Badge variant={config.variant} className={`font-medium ${config.className}`}>
+      {config.label}
+    </Badge>
+  );
 }
 
 function formatDueDate(dueAt: string | null) {
@@ -235,78 +281,97 @@ export function TodoDashboard() {
               <TableBody>
                 {todos.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
-                      No tasks yet. Create one to get started.
+                    <TableCell colSpan={6} className="py-16 text-center text-muted-foreground">
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="text-4xl">📋</div>
+                        <p className="text-lg font-medium">No tasks yet</p>
+                        <p className="text-sm">Create one to get started</p>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ) : (
-                  todos.map(todo => (
-                    <TableRow
-                      key={todo.id}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => setSelectedId(todo.id)}
-                    >
-                      <TableCell>
-                        <div className="flex flex-col gap-2">
-                          {statusBadge(todo.status)}
-                          <span className="text-xs text-muted-foreground">
-                            {todo.updatedAt ? `Updated ${formatDateTime(todo.updatedAt)}` : ''}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-1">
-                          <div className="font-medium leading-tight text-foreground">{todo.title}</div>
-                          {todo.description ? (
-                            <p className="text-sm text-muted-foreground line-clamp-2">{todo.description}</p>
-                          ) : null}
-                          {todo.contextPath ? (
-                            <p className="text-xs text-blue-600">{todo.contextPath}</p>
-                          ) : null}
-                        </div>
-                      </TableCell>
-                      <TableCell className="hidden md:table-cell">
-                        {todo.assignee ? (
-                          <div className="flex items-center gap-2">
-                            <Avatar className="h-8 w-8">
-                              {todo.assignee?.avatarUrl ? (
-                                <AvatarImage src={todo.assignee.avatarUrl} alt={todo.assignee.username ?? 'Assignee'} />
-                              ) : null}
-                              <AvatarFallback>{initials(todo.assignee?.username)}</AvatarFallback>
-                            </Avatar>
-                            <div>
-                              <div className="text-sm font-medium">{todo.assignee?.username ?? 'Assigned'}</div>
-                              <p className="text-xs text-muted-foreground">Owner</p>
-                            </div>
+                  todos.map(todo => {
+                    const priorityColor = {
+                      high: 'border-l-red-500',
+                      medium: 'border-l-orange-500',
+                      low: 'border-l-gray-400'
+                    }[todo.priority] || 'border-l-gray-400';
+
+                    return (
+                      <TableRow
+                        key={todo.id}
+                        className={`cursor-pointer border-l-4 ${priorityColor} transition-all hover:bg-muted/70 hover:shadow-sm`}
+                        onClick={() => setSelectedId(todo.id)}
+                      >
+                        <TableCell className="py-5">
+                          <div className="flex flex-col gap-2">
+                            {statusBadge(todo.status)}
+                            <span className="text-xs text-muted-foreground">
+                              {todo.updatedAt ? `Updated ${formatDateTime(todo.updatedAt)}` : ''}
+                            </span>
                           </div>
-                        ) : (
-                          <span className="text-sm text-muted-foreground">Unassigned</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="hidden xl:table-cell">{priorityBadge(todo.priority)}</TableCell>
-                      <TableCell className="hidden lg:table-cell">
-                        <div className="flex items-center gap-2">
-                          <Clock className="h-4 w-4 text-muted-foreground" />
-                          <span className={isOverdue(todo) ? 'text-destructive font-medium' : ''}>{formatDueDate(todo.dueAt)}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="hidden xl:table-cell">
-                        <div className="flex -space-x-2">
-                          {todo.watchers.slice(0, 5).map(watcher => (
-                            <Avatar key={watcher.userId} className="h-8 w-8 border-2 border-background">
-                              {watcher.profile?.avatarUrl ? (
-                                <AvatarImage src={watcher.profile.avatarUrl} alt={watcher.profile.username ?? 'Watcher'} />
-                              ) : null}
+                        </TableCell>
+                        <TableCell className="py-5">
+                          <div className="space-y-2">
+                            <div className="font-semibold text-base leading-tight text-foreground">{todo.title}</div>
+                            {todo.description ? (
+                              <p className="text-sm text-muted-foreground line-clamp-2">{todo.description}</p>
+                            ) : null}
+                            {todo.contextPath ? (
+                              <div className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 dark:bg-blue-950 px-2.5 py-1 text-xs font-medium text-blue-700 dark:text-blue-300">
+                                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                                </svg>
+                                {todo.contextPath}
+                              </div>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell py-5">
+                          {todo.assignee ? (
+                            <div className="flex items-center gap-3">
+                              <Avatar className="h-9 w-9 ring-2 ring-background">
+                                {todo.assignee?.avatarUrl ? (
+                                  <AvatarImage src={todo.assignee.avatarUrl} alt={todo.assignee.username ?? 'Assignee'} />
+                                ) : null}
+                                <AvatarFallback className="text-sm font-semibold">{initials(todo.assignee?.username)}</AvatarFallback>
+                              </Avatar>
+                              <div>
+                                <div className="text-sm font-medium">{todo.assignee?.username ?? 'Assigned'}</div>
+                                <p className="text-xs text-muted-foreground">Owner</p>
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-sm text-muted-foreground italic">Unassigned</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="hidden xl:table-cell py-5">{priorityBadge(todo.priority)}</TableCell>
+                        <TableCell className="hidden lg:table-cell py-5">
+                          <div className="flex items-center gap-2">
+                            <Clock className="h-4 w-4 text-muted-foreground" />
+                            <span className={isOverdue(todo) ? 'text-destructive font-semibold' : 'text-sm'}>{formatDueDate(todo.dueAt)}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="hidden xl:table-cell py-5">
+                          <div className="flex -space-x-2">
+                            {todo.watchers.slice(0, 5).map(watcher => (
+                              <Avatar key={watcher.userId} className="h-9 w-9 border-2 border-background ring-1 ring-gray-200 dark:ring-gray-700">
+                                {watcher.profile?.avatarUrl ? (
+                                  <AvatarImage src={watcher.profile.avatarUrl} alt={watcher.profile.username ?? 'Watcher'} />
+                                ) : null}
                               <AvatarFallback>{initials(watcher.profile?.username)}</AvatarFallback>
                             </Avatar>
                           ))}
                           {todo.watchers.length > 5 ? (
-                            <span className="ml-2 text-xs text-muted-foreground">+{todo.watchers.length - 5}</span>
+                            <div className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-background bg-muted text-xs font-medium ring-1 ring-gray-200 dark:ring-gray-700">
+                              +{todo.watchers.length - 5}
+                            </div>
                           ) : null}
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))
+                    );
+                  })
                 )}
               </TableBody>
             </Table>

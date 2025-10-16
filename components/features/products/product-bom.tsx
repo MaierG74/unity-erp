@@ -51,6 +51,7 @@ import {
   CommandSeparator,
 } from '@/components/ui/command';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Plus, Trash2, Edit, Save, X, Search, Loader2, Building2, SlidersHorizontal, XCircle } from 'lucide-react';
@@ -62,6 +63,11 @@ import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import { useDebounce } from '@/hooks/use-debounce';
 import React from 'react';
+import {
+  cloneCutlistDimensions,
+  summariseCutlistDimensions,
+  CutlistDimensions,
+} from '@/lib/cutlist/cutlistDimensions';
 
 // Dynamically import dialogs on the client only to avoid server bundling issues
 const AddFromCollectionDialog = dynamic(() => import('./AddFromCollectionDialog'), { ssr: false });
@@ -107,6 +113,9 @@ interface BOMItem {
       name: string;
     };
   };
+  is_cutlist_item: boolean;
+  cutlist_category: string | null;
+  cutlist_dimensions: CutlistDimensions | null;
 }
 
 // Effective BOM unified item type (server aggregate)
@@ -119,6 +128,9 @@ interface EffectiveBOMItem {
   _source?: 'direct' | 'link';
   _sub_product_id?: number;
   _editable?: boolean;
+  is_cutlist_item?: boolean | null;
+  cutlist_category?: string | null;
+  cutlist_dimensions?: CutlistDimensions | null;
 }
 
 // Linked sub-product record for badge list
@@ -130,6 +142,27 @@ interface ProductLink {
 }
 
 // Form schema for adding/editing BOM items
+const preprocessOptionalNumber = (value: unknown) => {
+  if (value === '' || value === null || value === undefined) return undefined;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '') return undefined;
+    const num = Number(trimmed);
+    return Number.isNaN(num) ? value : num;
+  }
+  return value;
+};
+
+const optionalNumber = (message: string, { allowZero = false }: { allowZero?: boolean } = {}) =>
+  z
+    .preprocess(
+      preprocessOptionalNumber,
+      z
+        .number({ invalid_type_error: message })
+        .refine((num) => (allowZero ? num >= 0 : num > 0), { message })
+    )
+    .optional();
+
 const bomItemSchema = z.object({
   component_id: z.string().min(1, 'Component is required'),
   // Allow any positive decimal
@@ -137,6 +170,24 @@ const bomItemSchema = z.object({
     .number()
     .positive('Quantity must be greater than 0'),
   supplier_component_id: z.string().optional(),
+  is_cutlist_item: z.boolean().optional(),
+  cutlist_category: z.string().max(120, 'Category is too long').optional(),
+  cutlist_length_mm: optionalNumber('Length must be greater than 0'),
+  cutlist_width_mm: optionalNumber('Width must be greater than 0'),
+  cutlist_thickness_mm: optionalNumber('Thickness must be greater than 0'),
+  cutlist_quantity_per: optionalNumber('Quantity per must be greater than 0'),
+  cutlist_grain: z.enum(['any', 'length', 'width']).optional(),
+  cutlist_edge_top: z.boolean().optional(),
+  cutlist_edge_right: z.boolean().optional(),
+  cutlist_edge_bottom: z.boolean().optional(),
+  cutlist_edge_left: z.boolean().optional(),
+  cutlist_laminate_enabled: z.boolean().optional(),
+  cutlist_laminate_backer_component_id: z.string().optional(),
+  cutlist_material_code: z.string().optional(),
+  cutlist_material_label: z.string().optional(),
+  cutlist_colour_family: z.string().optional(),
+  cutlist_finish_side: z.enum(['single', 'double', 'none']).optional(),
+  cutlist_notes: z.string().optional(),
 });
 
 type BOMItemFormValues = z.infer<typeof bomItemSchema>;
@@ -145,10 +196,65 @@ interface ProductBOMProps {
   productId: number;
 }
 
+const defaultFormValues: BOMItemFormValues = {
+  component_id: '',
+  quantity_required: 1,
+  supplier_component_id: '',
+  is_cutlist_item: false,
+  cutlist_category: '',
+  cutlist_length_mm: undefined,
+  cutlist_width_mm: undefined,
+  cutlist_thickness_mm: undefined,
+  cutlist_quantity_per: undefined,
+  cutlist_grain: undefined,
+  cutlist_edge_top: false,
+  cutlist_edge_right: false,
+  cutlist_edge_bottom: false,
+  cutlist_edge_left: false,
+  cutlist_laminate_enabled: false,
+  cutlist_laminate_backer_component_id: '',
+  cutlist_material_code: '',
+  cutlist_material_label: '',
+  cutlist_colour_family: '',
+  cutlist_finish_side: undefined,
+  cutlist_notes: '',
+};
+
+const mapItemToFormValues = (item: BOMItem): BOMItemFormValues => {
+  const dims = item.cutlist_dimensions ?? null;
+  const bandEdges = dims?.band_edges ?? {};
+  return {
+    component_id: item.component_id.toString(),
+    quantity_required: Number(item.quantity_required ?? 1),
+    supplier_component_id: item.supplier_component_id ? item.supplier_component_id.toString() : '',
+    is_cutlist_item: Boolean(item.is_cutlist_item),
+    cutlist_category: item.cutlist_category ?? '',
+    cutlist_length_mm: dims?.length_mm ?? undefined,
+    cutlist_width_mm: dims?.width_mm ?? undefined,
+    cutlist_thickness_mm: dims?.thickness_mm ?? undefined,
+    cutlist_quantity_per: dims?.quantity_per ?? undefined,
+    cutlist_grain: dims?.grain ?? undefined,
+    cutlist_edge_top: Boolean(bandEdges.top),
+    cutlist_edge_right: Boolean(bandEdges.right),
+    cutlist_edge_bottom: Boolean(bandEdges.bottom),
+    cutlist_edge_left: Boolean(bandEdges.left),
+    cutlist_laminate_enabled: Boolean(dims?.laminate?.enabled),
+    cutlist_laminate_backer_component_id:
+      dims?.laminate?.backer_component_id != null ? String(dims.laminate.backer_component_id) : '',
+    cutlist_material_code: dims?.material_code ?? '',
+    cutlist_material_label: dims?.material_label ?? '',
+    cutlist_colour_family: dims?.colour_family ?? '',
+    cutlist_finish_side: dims?.finish_side ?? undefined,
+    cutlist_notes: dims?.notes ?? '',
+  };
+};
+
 export function ProductBOM({ productId }: ProductBOMProps) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [componentSearch, setComponentSearch] = useState('');
   const [supplierSearch, setSupplierSearch] = useState('');
+  const [cutlistBackerSearch, setCutlistBackerSearch] = useState('');
+  const [cutlistBackerPickerOpen, setCutlistBackerPickerOpen] = useState(false);
   const [supplierFilter, setSupplierFilter] = useState('');
   const [selectedComponentId, setSelectedComponentId] = useState<string | null>(null);
   const [showComponentDropdown, setShowComponentDropdown] = useState(false);
@@ -178,11 +284,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
   // Initialize form
   const form = useForm<BOMItemFormValues>({
     resolver: zodResolver(bomItemSchema),
-    defaultValues: {
-      component_id: '',
-      quantity_required: 1,
-      supplier_component_id: '',
-    },
+    defaultValues: defaultFormValues,
   });
 
   // Watch the component_id to fetch suppliers when it changes
@@ -230,6 +332,9 @@ export function ProductBOM({ productId }: ProductBOMProps) {
           product_id,
           component_id,
           quantity_required,
+          is_cutlist_item,
+          cutlist_category,
+          cutlist_dimensions,
           components (
             component_id,
             internal_code,
@@ -247,6 +352,9 @@ export function ProductBOM({ productId }: ProductBOMProps) {
             component_id,
             quantity_required,
             supplier_component_id,
+            is_cutlist_item,
+            cutlist_category,
+            cutlist_dimensions,
             components (
               component_id,
               internal_code,
@@ -282,7 +390,10 @@ export function ProductBOM({ productId }: ProductBOMProps) {
         quantity_required: item.quantity_required,
         supplier_component_id: item.supplier_component_id || null,
         component: item.components,
-        supplierComponent: item.supplierComponent || undefined
+        supplierComponent: item.supplierComponent || undefined,
+        is_cutlist_item: Boolean(item.is_cutlist_item),
+        cutlist_category: item.cutlist_category ?? null,
+        cutlist_dimensions: cloneCutlistDimensions(item.cutlist_dimensions) ?? null,
       }));
     },
   });
@@ -660,17 +771,38 @@ export function ProductBOM({ productId }: ProductBOMProps) {
   // Get filtered lists directly when rendering
   const filteredComponents = getFilteredComponents();
   const filteredSuppliers = getFilteredSupplierComponents();
+  const filteredBackerComponents = React.useMemo(() => {
+    if (!componentsList || componentsList.length === 0) return [] as typeof componentsList;
+    const search = cutlistBackerSearch.trim().toLowerCase();
+    if (!search) return componentsList;
+    return componentsList.filter((component: any) => {
+      if (!component) return false;
+      const code = (component.internal_code || '').toLowerCase();
+      const desc = (component.description || '').toLowerCase();
+      return code.includes(search) || desc.includes(search);
+    });
+  }, [componentsList, cutlistBackerSearch]);
 
   // Add BOM item mutation
   const addBOMItem = useMutation({
     mutationFn: async (values: BOMItemFormValues) => {
       try {
+        let cutlistPayload: CutlistDimensions | null = null;
+        try {
+          cutlistPayload = buildCutlistPayloadFromValues(values);
+        } catch (error: any) {
+          throw new Error(error?.message ?? 'Cutlist configuration invalid');
+        }
+
         // Build the insert object
         const insertData: any = {
           product_id: productId,
           component_id: parseInt(values.component_id),
           // Store quantity as a decimal
           quantity_required: Number(values.quantity_required),
+          is_cutlist_item: Boolean(values.is_cutlist_item),
+          cutlist_category: values.cutlist_category?.trim() || null,
+          cutlist_dimensions: cutlistPayload,
         };
         
         // Only include supplier_component_id if the feature is available and a value is provided
@@ -703,11 +835,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
       // Also refresh Effective BOM (explicit + linked) and any consumers like Costing
       queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
       queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] });
-      form.reset({
-        component_id: '',
-        quantity_required: 1,
-        supplier_component_id: '',
-      });
+      form.reset(defaultFormValues);
       handleComponentSearchChange('');  // Reset search term
       handleSupplierSearchChange('');  // Reset supplier search term
       toast({
@@ -737,13 +865,16 @@ export function ProductBOM({ productId }: ProductBOMProps) {
   
   // Update BOM item mutation
   const updateBOMItem = useMutation({
-    mutationFn: async (values: BOMItemFormValues & { bom_id: number }) => {
+    mutationFn: async (values: BOMItemFormValues & { bom_id: number; cutlist_payload: CutlistDimensions | null }) => {
       try {
         // Build the update object
         const updateData: any = {
           component_id: parseInt(values.component_id),
           // Store quantity as a decimal
           quantity_required: Number(values.quantity_required),
+          is_cutlist_item: Boolean(values.is_cutlist_item),
+          cutlist_category: values.cutlist_category?.trim() || null,
+          cutlist_dimensions: values.cutlist_payload ?? null,
         };
         
         // Only include supplier_component_id if the feature is available and a value is provided
@@ -776,6 +907,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
       queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
       queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] });
       setEditingId(null);
+      form.reset(defaultFormValues);
       toast({
         title: 'Success',
         description: 'BOM item updated',
@@ -853,30 +985,550 @@ export function ProductBOM({ productId }: ProductBOMProps) {
   };
   
   // Start editing a BOM item
-  const startEditing = (item: BOMItem) => {
-    setEditingId(item.bom_id);
-    form.setValue('component_id', item.component_id.toString());
-    form.setValue('quantity_required', item.quantity_required);
-    form.setValue('supplier_component_id', item.supplier_component_id?.toString() || '');
-  };
-  
-  // Cancel editing
-  const cancelEditing = () => {
-    setEditingId(null);
-    setSelectedComponentId(null);
-    handleComponentSearchChange('');
-    handleSupplierSearchChange('');
-    form.reset();
-  };
-  
-  // Save edited BOM item
-  const saveEdit = (bomId: number) => {
-    const values = form.getValues();
-    updateBOMItem.mutate({
-      ...values,
-      bom_id: bomId,
+const startEditing = (item: BOMItem) => {
+  setEditingId(item.bom_id);
+  form.reset(mapItemToFormValues(item));
+  setCutlistBackerSearch('');
+  setCutlistBackerPickerOpen(false);
+};
+
+// Cancel editing
+const cancelEditing = () => {
+  setEditingId(null);
+  setSelectedComponentId(null);
+  handleComponentSearchChange('');
+  handleSupplierSearchChange('');
+  form.reset(defaultFormValues);
+  setCutlistBackerSearch('');
+  setCutlistBackerPickerOpen(false);
+};
+
+const buildCutlistPayloadFromValues = (values: BOMItemFormValues): CutlistDimensions | null => {
+  const isCutlist = Boolean(values.is_cutlist_item);
+  const payload: CutlistDimensions = {};
+  let hasData = false;
+
+  if (values.cutlist_length_mm !== undefined) {
+    payload.length_mm = values.cutlist_length_mm;
+    hasData = true;
+  }
+  if (values.cutlist_width_mm !== undefined) {
+    payload.width_mm = values.cutlist_width_mm;
+    hasData = true;
+  }
+  if (values.cutlist_thickness_mm !== undefined) {
+    payload.thickness_mm = values.cutlist_thickness_mm;
+    hasData = true;
+  }
+  if (values.cutlist_quantity_per !== undefined) {
+    payload.quantity_per = values.cutlist_quantity_per;
+    hasData = true;
+  }
+  if (values.cutlist_grain) {
+    payload.grain = values.cutlist_grain;
+    hasData = true;
+  }
+
+  const bandEdges: Required<CutlistDimensions>['band_edges'] = {};
+  if (values.cutlist_edge_top) bandEdges.top = true;
+  if (values.cutlist_edge_right) bandEdges.right = true;
+  if (values.cutlist_edge_bottom) bandEdges.bottom = true;
+  if (values.cutlist_edge_left) bandEdges.left = true;
+  if (Object.keys(bandEdges).length > 0) {
+    payload.band_edges = bandEdges;
+    hasData = true;
+  }
+
+  const laminateEnabled = Boolean(values.cutlist_laminate_enabled);
+  const backerId = values.cutlist_laminate_backer_component_id?.trim();
+  if (laminateEnabled || (backerId && backerId.length > 0)) {
+    payload.laminate = {
+      enabled: laminateEnabled,
+      backer_component_id: backerId && !Number.isNaN(Number(backerId)) ? Number(backerId) : null,
+    };
+    hasData = true;
+  }
+
+  const materialCode = values.cutlist_material_code?.trim();
+  if (materialCode) {
+    payload.material_code = materialCode;
+    hasData = true;
+  }
+  const materialLabel = values.cutlist_material_label?.trim();
+  if (materialLabel) {
+    payload.material_label = materialLabel;
+    hasData = true;
+  }
+  const colourFamily = values.cutlist_colour_family?.trim();
+  if (colourFamily) {
+    payload.colour_family = colourFamily;
+    hasData = true;
+  }
+  if (values.cutlist_finish_side) {
+    payload.finish_side = values.cutlist_finish_side;
+    hasData = true;
+  }
+  const notes = values.cutlist_notes?.trim();
+  if (notes) {
+    payload.notes = notes;
+    hasData = true;
+  }
+
+  if (!hasData) {
+    return null;
+  }
+
+  if (isCutlist) {
+    if (payload.length_mm === undefined || payload.width_mm === undefined) {
+      throw new Error('Length and width are required for cutlist items.');
+    }
+    if (payload.quantity_per === undefined) {
+      payload.quantity_per = 1;
+    }
+  }
+
+  return cloneCutlistDimensions(payload);
+};
+
+// Save edited BOM item
+const saveEdit = (bomId: number) => {
+  const values = form.getValues();
+  let cutlistPayload: CutlistDimensions | null = null;
+  try {
+    cutlistPayload = buildCutlistPayloadFromValues(values);
+  } catch (error: any) {
+    toast({
+      title: 'Cutlist incomplete',
+      description: error?.message ?? 'Provide required cutlist dimensions before saving.',
+      variant: 'destructive',
     });
-  };
+    return;
+  }
+
+  updateBOMItem.mutate({
+    ...values,
+    bom_id: bomId,
+    cutlist_payload: cutlistPayload,
+  });
+};
+
+const renderCutlistEditor = () => {
+  const isCutlist = form.watch('is_cutlist_item');
+  const laminateEnabled = form.watch('cutlist_laminate_enabled');
+  const backerValue = form.watch('cutlist_laminate_backer_component_id');
+  const lengthValue = form.watch('cutlist_length_mm');
+  const widthValue = form.watch('cutlist_width_mm');
+  const backerComponent = backerValue ? componentsById.get(Number(backerValue)) : undefined;
+  const showMissingDimensions = Boolean(isCutlist) && (!lengthValue || !widthValue);
+
+  return (
+    <div className="flex flex-col gap-3 text-xs">
+      <FormField
+        control={form.control}
+        name="is_cutlist_item"
+        render={({ field }) => (
+          <FormItem className="flex items-center gap-2">
+            <FormControl>
+              <Checkbox
+                id="cutlist-toggle"
+                checked={Boolean(field.value)}
+                onCheckedChange={(checked) => field.onChange(Boolean(checked))}
+              />
+            </FormControl>
+            <FormLabel htmlFor="cutlist-toggle" className="text-xs font-medium">
+              Cutlist item
+            </FormLabel>
+          </FormItem>
+        )}
+      />
+
+      <FormField
+        control={form.control}
+        name="cutlist_category"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel className="text-[11px] text-muted-foreground">Cutlist category</FormLabel>
+            <FormControl>
+              <Input
+                placeholder="e.g., Panels"
+                value={field.value ?? ''}
+                onChange={(event) => field.onChange(event.target.value)}
+              />
+            </FormControl>
+          </FormItem>
+        )}
+      />
+
+      <div className="grid grid-cols-2 gap-2">
+        <FormField
+          control={form.control}
+          name="cutlist_length_mm"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel className="text-[11px] text-muted-foreground">Length (mm)</FormLabel>
+              <FormControl>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={field.value === undefined ? '' : field.value}
+                  onChange={(event) =>
+                    field.onChange(event.target.value === '' ? undefined : Number(event.target.value))
+                  }
+                />
+              </FormControl>
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="cutlist_width_mm"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel className="text-[11px] text-muted-foreground">Width (mm)</FormLabel>
+              <FormControl>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={field.value === undefined ? '' : field.value}
+                  onChange={(event) =>
+                    field.onChange(event.target.value === '' ? undefined : Number(event.target.value))
+                  }
+                />
+              </FormControl>
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="cutlist_thickness_mm"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel className="text-[11px] text-muted-foreground">Thickness (mm)</FormLabel>
+              <FormControl>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={field.value === undefined ? '' : field.value}
+                  onChange={(event) =>
+                    field.onChange(event.target.value === '' ? undefined : Number(event.target.value))
+                  }
+                />
+              </FormControl>
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="cutlist_quantity_per"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel className="text-[11px] text-muted-foreground">Quantity per</FormLabel>
+              <FormControl>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={field.value === undefined ? '' : field.value}
+                  onChange={(event) =>
+                    field.onChange(event.target.value === '' ? undefined : Number(event.target.value))
+                  }
+                />
+              </FormControl>
+            </FormItem>
+          )}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <FormField
+          control={form.control}
+          name="cutlist_grain"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel className="text-[11px] text-muted-foreground">Grain</FormLabel>
+              <Select
+                value={field.value ?? 'any'}
+                onValueChange={(value) => field.onChange(value as BOMItemFormValues['cutlist_grain'])}
+              >
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select grain" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  <SelectItem value="any">Any</SelectItem>
+                  <SelectItem value="length">Length</SelectItem>
+                  <SelectItem value="width">Width</SelectItem>
+                </SelectContent>
+              </Select>
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="cutlist_finish_side"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel className="text-[11px] text-muted-foreground">Finish side</FormLabel>
+              <Select
+                value={field.value ?? 'none'}
+                onValueChange={(value) => field.onChange(value as BOMItemFormValues['cutlist_finish_side'])}
+              >
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select finish" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  <SelectItem value="single">Single</SelectItem>
+                  <SelectItem value="double">Double</SelectItem>
+                </SelectContent>
+              </Select>
+            </FormItem>
+          )}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <FormField
+          control={form.control}
+          name="cutlist_edge_top"
+          render={({ field }) => (
+            <FormItem className="flex items-center gap-2">
+              <FormControl>
+                <Checkbox
+                  id="edge-top"
+                  checked={Boolean(field.value)}
+                  onCheckedChange={(checked) => field.onChange(Boolean(checked))}
+                />
+              </FormControl>
+              <FormLabel htmlFor="edge-top" className="text-xs">Edge band top</FormLabel>
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="cutlist_edge_bottom"
+          render={({ field }) => (
+            <FormItem className="flex items-center gap-2">
+              <FormControl>
+                <Checkbox
+                  id="edge-bottom"
+                  checked={Boolean(field.value)}
+                  onCheckedChange={(checked) => field.onChange(Boolean(checked))}
+                />
+              </FormControl>
+              <FormLabel htmlFor="edge-bottom" className="text-xs">Edge band bottom</FormLabel>
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="cutlist_edge_left"
+          render={({ field }) => (
+            <FormItem className="flex items-center gap-2">
+              <FormControl>
+                <Checkbox
+                  id="edge-left"
+                  checked={Boolean(field.value)}
+                  onCheckedChange={(checked) => field.onChange(Boolean(checked))}
+                />
+              </FormControl>
+              <FormLabel htmlFor="edge-left" className="text-xs">Edge band left</FormLabel>
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="cutlist_edge_right"
+          render={({ field }) => (
+            <FormItem className="flex items-center gap-2">
+              <FormControl>
+                <Checkbox
+                  id="edge-right"
+                  checked={Boolean(field.value)}
+                  onCheckedChange={(checked) => field.onChange(Boolean(checked))}
+                />
+              </FormControl>
+              <FormLabel htmlFor="edge-right" className="text-xs">Edge band right</FormLabel>
+            </FormItem>
+          )}
+        />
+      </div>
+
+      <FormField
+        control={form.control}
+        name="cutlist_laminate_enabled"
+        render={({ field }) => (
+          <FormItem className="flex items-center gap-2">
+            <FormControl>
+              <Checkbox
+                id="laminate-enabled"
+                checked={Boolean(field.value)}
+                onCheckedChange={(checked) => field.onChange(Boolean(checked))}
+              />
+            </FormControl>
+            <FormLabel htmlFor="laminate-enabled" className="text-xs">
+              Laminate / backer required
+            </FormLabel>
+          </FormItem>
+        )}
+      />
+
+      <FormField
+        control={form.control}
+        name="cutlist_laminate_backer_component_id"
+        render={({ field }) => (
+          <FormItem className="space-y-2">
+            <FormLabel className="text-[11px] text-muted-foreground">Backer component</FormLabel>
+            <Popover
+              open={cutlistBackerPickerOpen}
+              onOpenChange={(open) => {
+                setCutlistBackerPickerOpen(open);
+                if (!open) setCutlistBackerSearch('');
+              }}
+            >
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full justify-between"
+                  disabled={!laminateEnabled}
+                >
+                  {field.value && backerComponent ? (
+                    <span>
+                      {backerComponent.internal_code || `Component #${backerComponent.component_id}`}
+                      {backerComponent.description ? (
+                        <span className="ml-2 text-[11px] text-muted-foreground">{backerComponent.description}</span>
+                      ) : null}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">Select backer component</span>
+                  )}
+                  <Search className="ml-2 h-4 w-4 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[360px] p-3" align="start">
+                <div className="space-y-2">
+                  <Input
+                    autoFocus
+                    placeholder="Search components..."
+                    value={cutlistBackerSearch}
+                    onChange={(event) => setCutlistBackerSearch(event.target.value)}
+                    className="h-8"
+                  />
+                  <div className="max-h-56 overflow-y-auto space-y-1">
+                    {filteredBackerComponents.length === 0 ? (
+                      <div className="py-4 text-center text-xs text-muted-foreground">No components found</div>
+                    ) : (
+                      filteredBackerComponents.map((component: any) => (
+                        <button
+                          key={component.component_id}
+                          type="button"
+                          className="w-full rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
+                          onClick={() => {
+                            field.onChange(String(component.component_id));
+                            setCutlistBackerPickerOpen(false);
+                            setCutlistBackerSearch('');
+                          }}
+                        >
+                          <div className="font-medium text-foreground">
+                            {component.internal_code || `Component #${component.component_id}`}
+                          </div>
+                          {component.description && (
+                            <div className="text-[11px] text-muted-foreground">{component.description}</div>
+                          )}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+            {field.value && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => field.onChange('')}
+              >
+                Clear backer
+              </Button>
+            )}
+          </FormItem>
+        )}
+      />
+
+      <div className="grid grid-cols-2 gap-2">
+        <FormField
+          control={form.control}
+          name="cutlist_material_code"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel className="text-[11px] text-muted-foreground">Material code</FormLabel>
+              <FormControl>
+                <Input value={field.value ?? ''} onChange={(event) => field.onChange(event.target.value)} />
+              </FormControl>
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="cutlist_material_label"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel className="text-[11px] text-muted-foreground">Material label</FormLabel>
+              <FormControl>
+                <Input value={field.value ?? ''} onChange={(event) => field.onChange(event.target.value)} />
+              </FormControl>
+            </FormItem>
+          )}
+        />
+      </div>
+
+      <FormField
+        control={form.control}
+        name="cutlist_colour_family"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel className="text-[11px] text-muted-foreground">Colour family</FormLabel>
+            <FormControl>
+              <Input value={field.value ?? ''} onChange={(event) => field.onChange(event.target.value)} />
+            </FormControl>
+          </FormItem>
+        )}
+      />
+
+      <FormField
+        control={form.control}
+        name="cutlist_notes"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel className="text-[11px] text-muted-foreground">Notes</FormLabel>
+            <FormControl>
+              <Textarea
+                rows={2}
+                value={field.value ?? ''}
+                onChange={(event) => field.onChange(event.target.value)}
+              />
+            </FormControl>
+          </FormItem>
+        )}
+      />
+
+      {showMissingDimensions && (
+        <div className="rounded border border-destructive/40 bg-destructive/10 p-2 text-[11px] text-destructive">
+          Provide length and width when marking a component as a cutlist item.
+        </div>
+      )}
+    </div>
+  );
+};
   
   // Show total cost of all components in the BOM
   const totalBOMCost = (() => {
@@ -1062,6 +1714,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                       )}
                       <TableHead>Quantity</TableHead>
                       {supplierFeatureAvailable && <TableHead>Total</TableHead>}
+                      <TableHead>Cutlist</TableHead>
                       <TableHead>Source</TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>
@@ -1081,7 +1734,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                       if (rows.length === 0) {
                         return (
                           <TableRow>
-                            <TableCell colSpan={supplierFeatureAvailable ? 8 : 5} className="text-center py-4">
+                            <TableCell colSpan={supplierFeatureAvailable ? 9 : 6} className="text-center py-4">
                               No components added yet
                             </TableCell>
                           </TableRow>
@@ -1102,7 +1755,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                       if (filteredRows.length === 0) {
                         return (
                           <TableRow key="no-filter-results">
-                            <TableCell colSpan={supplierFeatureAvailable ? 8 : 5} className="text-center py-4 text-sm text-muted-foreground">
+                            <TableCell colSpan={supplierFeatureAvailable ? 9 : 6} className="text-center py-4 text-sm text-muted-foreground">
                               No components match the current supplier filter.
                             </TableCell>
                           </TableRow>
@@ -1121,6 +1774,16 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                         const unitPrice = (directUnitPrice != null ? directUnitPrice : (linkedPrice != null ? Number(linkedPrice) : null))
                         const total = unitPrice != null ? unitPrice * qty : null
                         const fromCode = typeof it._sub_product_id === 'number' ? linkProductMap.get(Number(it._sub_product_id))?.internal_code : undefined
+                        const resolvedCutlistDimensions = cloneCutlistDimensions(
+                          direct?.cutlist_dimensions ?? (it as any)?.cutlist_dimensions ?? null
+                        );
+                        const resolvedCutlistCategory = direct?.cutlist_category ?? (it as any)?.cutlist_category ?? null;
+                        const resolvedIsCutlist = Boolean(
+                          direct?.is_cutlist_item ?? (it as any)?.is_cutlist_item ?? false
+                        );
+                        const cutlistSummary = summariseCutlistDimensions(resolvedCutlistDimensions);
+                        const hasCutlistDetails =
+                          resolvedCutlistDimensions != null && Object.keys(resolvedCutlistDimensions).length > 0;
 
                         if (direct && editingId === direct.bom_id) {
                           // Inline edit mode for direct row
@@ -1256,6 +1919,9 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                                       ).toFixed(2) : ''}
                                     </TableCell>
                                   )}
+                                  <TableCell className="align-top">
+                                    {renderCutlistEditor()}
+                                  </TableCell>
                                   <TableCell><span className="text-xs text-muted-foreground">Direct</span></TableCell>
                                   <TableCell>
                                     <div className="flex items-center gap-2">
@@ -1288,6 +1954,47 @@ export function ProductBOM({ productId }: ProductBOMProps) {
                             {supplierFeatureAvailable && (
                               <TableCell>{total != null ? `R${total.toFixed(2)}` : '-'}</TableCell>
                             )}
+                            <TableCell className="align-top">
+                              {resolvedIsCutlist ? (
+                                <div className="space-y-1">
+                                  <div className="text-xs font-medium text-foreground">
+                                    {cutlistSummary.headline ?? 'Cutlist item'}
+                                  </div>
+                                  {resolvedCutlistCategory ? (
+                                    <div className="text-[11px] text-muted-foreground">
+                                      Category: {resolvedCutlistCategory}
+                                    </div>
+                                  ) : null}
+                                  {cutlistSummary.details.length > 0 ? (
+                                    <>
+                                      {cutlistSummary.details.slice(0, 2).map((detail, detailIndex) => (
+                                        <div key={`${detail}-${detailIndex}`} className="text-[11px] text-muted-foreground">
+                                          • {detail}
+                                        </div>
+                                      ))}
+                                      {cutlistSummary.details.length > 2 && (
+                                        <div className="text-[11px] text-muted-foreground italic">
+                                          +{cutlistSummary.details.length - 2} more
+                                        </div>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <div className="text-[11px] text-amber-600">Dimensions not specified</div>
+                                  )}
+                                </div>
+                              ) : hasCutlistDetails ? (
+                                <div className="space-y-1">
+                                  <div className="text-xs font-medium text-foreground">Dimensions captured</div>
+                                  {cutlistSummary.details.slice(0, 2).map((detail, detailIndex) => (
+                                    <div key={`${detail}-${detailIndex}`} className="text-[11px] text-muted-foreground">
+                                      • {detail}
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
                             <TableCell>
                               {it._source === 'link' ? (
                                 <div className="flex items-center gap-2">

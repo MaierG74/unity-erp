@@ -1,16 +1,15 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { Search } from 'lucide-react';
 
 import {
-  CommandDialog,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-} from '@/components/ui/command';
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useEntityLinks } from '@/hooks/useEntityLinks';
@@ -78,59 +77,73 @@ export function TodoEntityLinkPicker({ open, onOpenChange, onSelect }: TodoEntit
   }, [data]);
 
   return (
-    <CommandDialog open={open} onOpenChange={onOpenChange} shouldFilter={false}>
-      <CommandInput
-        placeholder="Search orders, supplier orders, quotes..."
-        value={query}
-        onValueChange={setQuery}
-      />
-      <CommandList>
-        {isLoading ? (
-          <div className="space-y-3 p-4">
-            {Array.from({ length: 3 }).map((_, index) => (
-              <Skeleton key={index} className="h-10 w-full" />
-            ))}
-          </div>
-        ) : null}
-        <CommandEmpty>No results found.</CommandEmpty>
-        {groups.map((group, index) => (
-          <div key={group.type}>
-            <CommandGroup heading={typeLabels[group.type]}>
-              {group.links.map(link => {
-                const meta = formatMeta(link);
-                return (
-                  <CommandItem
-                    key={`${link.type}-${link.id}`}
-                    value={`${link.type}-${link.id}-${link.label}`}
-                    disabled={false}
-                    onSelect={() => {
-                      console.log('[TodoEntityLinkPicker] onSelect fired for:', link);
-                      onSelect(link);
-                      onOpenChange(false);
-                    }}
-                    onPointerDown={(e) => {
-                      e.preventDefault();
-                      console.log('[TodoEntityLinkPicker] onPointerDown fired for:', link);
-                      onSelect(link);
-                      onOpenChange(false);
-                    }}
-                  >
-                    <div className="flex flex-col pointer-events-none">
-                      <span className="font-medium">{link.label}</span>
-                      {meta ? <span className="text-sm text-muted-foreground">{meta}</span> : null}
-                      <span className="text-xs text-muted-foreground">{link.path}</span>
-                    </div>
-                    <Badge variant="outline" className="ml-auto capitalize pointer-events-none">
-                      {group.type.replace('_', ' ')}
-                    </Badge>
-                  </CommandItem>
-                );
-              })}
-            </CommandGroup>
-            {index < groups.length - 1 ? <CommandSeparator /> : null}
-          </div>
-        ))}
-      </CommandList>
-    </CommandDialog>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Select Record</DialogTitle>
+        </DialogHeader>
+
+        <div className="flex items-center border-b px-3 py-2">
+          <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
+          <Input
+            placeholder="Search orders, supplier orders, quotes..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
+          />
+        </div>
+
+        <div className="max-h-[400px] overflow-y-auto">
+          {isLoading ? (
+            <div className="space-y-3 p-4">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <Skeleton key={index} className="h-16 w-full" />
+              ))}
+            </div>
+          ) : groups.length === 0 ? (
+            <div className="py-6 text-center text-sm text-muted-foreground">
+              No results found.
+            </div>
+          ) : (
+            <div className="space-y-4 p-4">
+              {groups.map((group) => (
+                <div key={group.type}>
+                  <h3 className="mb-2 px-2 text-xs font-medium text-muted-foreground">
+                    {typeLabels[group.type]}
+                  </h3>
+                  <div className="space-y-1">
+                    {group.links.map(link => {
+                      const meta = formatMeta(link);
+                      return (
+                        <button
+                          key={`${link.type}-${link.id}`}
+                          onClick={() => {
+                            console.log('[TodoEntityLinkPicker] Clicked:', link);
+                            onSelect(link);
+                            onOpenChange(false);
+                          }}
+                          className="flex w-full items-center gap-3 rounded-md px-2 py-3 text-left transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none"
+                        >
+                          <div className="flex flex-1 flex-col gap-1">
+                            <span className="font-medium">{link.label}</span>
+                            {meta ? (
+                              <span className="text-sm text-muted-foreground">{meta}</span>
+                            ) : null}
+                            <span className="text-xs text-muted-foreground">{link.path}</span>
+                          </div>
+                          <Badge variant="outline" className="capitalize">
+                            {group.type.replace('_', ' ')}
+                          </Badge>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
