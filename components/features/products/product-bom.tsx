@@ -52,6 +52,7 @@ import {
 } from '@/components/ui/command';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Plus, Trash2, Edit, Save, X, Search, Loader2, Building2, SlidersHorizontal, XCircle } from 'lucide-react';
@@ -250,13 +251,13 @@ const mapItemToFormValues = (item: BOMItem): BOMItemFormValues => {
 };
 
 export function ProductBOM({ productId }: ProductBOMProps) {
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingItem, setEditingItem] = useState<BOMItem | null>(null);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [componentSearch, setComponentSearch] = useState('');
   const [supplierSearch, setSupplierSearch] = useState('');
   const [cutlistBackerSearch, setCutlistBackerSearch] = useState('');
   const [cutlistBackerPickerOpen, setCutlistBackerPickerOpen] = useState(false);
   const [supplierFilter, setSupplierFilter] = useState('');
-  const [selectedComponentId, setSelectedComponentId] = useState<string | null>(null);
   const [showComponentDropdown, setShowComponentDropdown] = useState(false);
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
   const { toast } = useToast();
@@ -906,7 +907,8 @@ export function ProductBOM({ productId }: ProductBOMProps) {
       queryClient.invalidateQueries({ queryKey: ['productBOM', productId] });
       queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
       queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] });
-      setEditingId(null);
+      setEditingItem(null);
+      setEditDialogOpen(false);
       form.reset(defaultFormValues);
       toast({
         title: 'Success',
@@ -985,23 +987,24 @@ export function ProductBOM({ productId }: ProductBOMProps) {
   };
   
   // Start editing a BOM item
-const startEditing = (item: BOMItem) => {
-  setEditingId(item.bom_id);
-  form.reset(mapItemToFormValues(item));
-  setCutlistBackerSearch('');
-  setCutlistBackerPickerOpen(false);
-};
+  const startEditing = (item: BOMItem) => {
+    setEditingItem(item);
+    form.reset(mapItemToFormValues(item));
+    setCutlistBackerSearch('');
+    setCutlistBackerPickerOpen(false);
+    setEditDialogOpen(true);
+  };
 
 // Cancel editing
-const cancelEditing = () => {
-  setEditingId(null);
-  setSelectedComponentId(null);
-  handleComponentSearchChange('');
-  handleSupplierSearchChange('');
-  form.reset(defaultFormValues);
-  setCutlistBackerSearch('');
-  setCutlistBackerPickerOpen(false);
-};
+  const cancelEditing = () => {
+    setEditingItem(null);
+    setEditDialogOpen(false);
+    handleComponentSearchChange('');
+    handleSupplierSearchChange('');
+    form.reset(defaultFormValues);
+    setCutlistBackerSearch('');
+    setCutlistBackerPickerOpen(false);
+  };
 
 const buildCutlistPayloadFromValues = (values: BOMItemFormValues): CutlistDimensions | null => {
   const isCutlist = Boolean(values.is_cutlist_item);
@@ -1091,7 +1094,16 @@ const buildCutlistPayloadFromValues = (values: BOMItemFormValues): CutlistDimens
 };
 
 // Save edited BOM item
-const saveEdit = (bomId: number) => {
+const saveEdit = (overrideBomId?: number) => {
+  const bomId = overrideBomId ?? editingItem?.bom_id;
+  if (!bomId) {
+    toast({
+      title: 'Nothing to save',
+      description: 'No BOM row is currently selected for editing.',
+      variant: 'destructive',
+    });
+    return;
+  }
   const values = form.getValues();
   let cutlistPayload: CutlistDimensions | null = null;
   try {
@@ -1785,160 +1797,6 @@ const renderCutlistEditor = () => {
                         const hasCutlistDetails =
                           resolvedCutlistDimensions != null && Object.keys(resolvedCutlistDimensions).length > 0;
 
-                        if (direct && editingId === direct.bom_id) {
-                          // Inline edit mode for direct row
-                          return (
-                            <TableRow key={`row-${idx}`}>
-                              <Form {...form}>
-                                <>
-                                  <TableCell colSpan={2}>
-                                    <FormField
-                                      control={form.control}
-                                      name="component_id"
-                                      render={({ field }) => (
-                                        <Popover>
-                                          <PopoverTrigger asChild>
-                                            <FormControl>
-                                              <Button
-                                                variant="outline"
-                                                role="combobox"
-                                                className={cn(
-                                                  'w-full justify-between',
-                                                  !field.value && 'text-muted-foreground'
-                                                )}
-                                              >
-                                                {field.value
-                                                  ? componentsList.find((c) => c?.component_id?.toString() === field.value)?.internal_code || 'Select component'
-                                                  : 'Select component'}
-                                                <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                              </Button>
-                                            </FormControl>
-                                          </PopoverTrigger>
-                                          <PopoverContent className="w-[400px] p-0">
-                                            <Command>
-                                              <CommandInput placeholder="Search components..." className="h-9" onValueChange={handleComponentSearchChange} value={componentSearch} />
-                                              <CommandList>
-                                                <CommandEmpty>No components found</CommandEmpty>
-                                                <CommandGroup>
-                                                  {filteredComponents.map((c) => (
-                                                    <div key={c.component_id} className="px-2 py-1.5 text-sm rounded-sm cursor-pointer hover:bg-accent hover:text-accent-foreground" onClick={() => {
-                                                      form.setValue('component_id', c.component_id.toString());
-                                                      handleComponentSearchChange('');
-                                                      handleSupplierSearchChange('');
-                                                      if (supplierFeatureAvailable) form.setValue('supplier_component_id', '');
-                                                      const el = document.querySelector('[data-state="open"][role="dialog"]');
-                                                      if (el) (el as HTMLElement).click();
-                                                    }}>
-                                                      <div className="flex flex-col w-full cursor-pointer">
-                                                        <div className="flex items-center">
-                                                          <span className="font-medium">{c.internal_code || 'No code'}</span>
-                                                        </div>
-                                                        {c.description && <span className="text-xs text-muted-foreground">{c.description}</span>}
-                                                      </div>
-                                                    </div>
-                                                  ))}
-                                                </CommandGroup>
-                                              </CommandList>
-                                            </Command>
-                                          </PopoverContent>
-                                        </Popover>
-                                      )}
-                                    />
-                                  </TableCell>
-                                  {supplierFeatureAvailable && (
-                                    <>
-                                      <TableCell>
-                                        <FormField
-                                          control={form.control}
-                                          name="supplier_component_id"
-                                          render={({ field }) => (
-                                            <FormItem>
-                                              <FormLabel>Supplier</FormLabel>
-                                              <div className="relative" ref={formSupplierDropdownRef}>
-                                                <Input placeholder="Search suppliers..." value={supplierSearch} onChange={(e) => handleSupplierSearchChange(e.target.value)} className="mb-1 focus-visible:ring-1" disabled={!form.getValues().component_id || suppliersLoading} onFocus={() => setShowSupplierDropdown(true)} />
-                                                {form.getValues().component_id && showSupplierDropdown && (
-                                                  <div className="absolute z-10 w-full bg-background border rounded-md mt-1 max-h-[300px] overflow-y-auto" data-supplier-dropdown>
-                                                    {supplierSearch && getFilteredSupplierComponents().length === 0 ? (
-                                                      <div className="px-2 py-4 text-sm text-center text-muted-foreground">No suppliers found</div>
-                                                    ) : (
-                                                      <div>
-                                                        <div className="p-2 text-xs text-muted-foreground font-semibold border-b">Suppliers (sorted by lowest price first)</div>
-                                                        {getFilteredSupplierComponents().sort((a, b) => {
-                                                          const priceA = parseFloat(a?.price?.toString() || '0');
-                                                          const priceB = parseFloat(b?.price?.toString() || '0');
-                                                          return priceA - priceB;
-                                                        }).map((sc) => (
-                                                          <div key={sc.supplier_component_id} className="px-2 py-1.5 text-sm rounded-sm cursor-pointer hover:bg-accent hover:text-accent-foreground" onClick={() => { form.setValue('supplier_component_id', sc.supplier_component_id.toString()); handleSupplierSearchChange(''); setShowSupplierDropdown(false); }}>
-                                                            <div className="flex justify-between w-full cursor-pointer">
-                                                              <span>{sc?.supplier?.name || 'Unknown'}</span>
-                                                              <span className="font-medium">R{parseFloat(sc?.price?.toString() || '0').toFixed(2)}</span>
-                                                            </div>
-                                                          </div>
-                                                        ))}
-                                                      </div>
-                                                    )}
-                                                  </div>
-                                                )}
-                                                <div className="mt-2">
-                                                  {field.value && (
-                                                    <div className="text-sm p-2.5 border rounded-md bg-accent/10">
-                                                      <div className="flex justify-between items-center">
-                                                        <span>
-                                                          <span className="text-muted-foreground mr-1">Selected:</span>
-                                                          <span className="font-medium">{supplierComponents.find(sc => sc.supplier_component_id.toString() === field.value)?.supplier?.name || 'Unknown'}</span>
-                                                        </span>
-                                                        <span className="font-medium text-primary">R{parseFloat(supplierComponents.find(sc => sc.supplier_component_id.toString() === field.value)?.price?.toString() || '0').toFixed(2)}</span>
-                                                      </div>
-                                                    </div>
-                                                  )}
-                                                </div>
-                                              </div>
-                                              <FormMessage />
-                                            </FormItem>
-                                          )}
-                                        />
-                                      </TableCell>
-                                      <TableCell>
-                                        {form.getValues().supplier_component_id && 'R' + parseFloat(supplierComponents.find(sc => sc.supplier_component_id.toString() === form.getValues().supplier_component_id)?.price.toString() || '0').toFixed(2)}
-                                      </TableCell>
-                                    </>
-                                  )}
-                                  <TableCell>
-                                    <FormField control={form.control} name="quantity_required" render={({ field }) => (
-                                      <FormControl>
-                                        <Input type="number" min="0.0001" step="any" className="w-20" placeholder="e.g., 0.05" title="Enter quantity (decimals allowed; supports < 0.1)" {...field} />
-                                      </FormControl>
-                                    )} />
-                                    <FormMessage />
-                                    <p className="text-xs text-muted-foreground mt-1">Decimal values allowed (e.g., 1.5, 2.75)</p>
-                                  </TableCell>
-                                  {supplierFeatureAvailable && (
-                                    <TableCell>
-                                      {(form.getValues().supplier_component_id && form.getValues().quantity_required) ? 'R' + (
-                                        parseFloat(supplierComponents.find(sc => sc.supplier_component_id.toString() === form.getValues().supplier_component_id)?.price.toString() || '0') * form.getValues().quantity_required
-                                      ).toFixed(2) : ''}
-                                    </TableCell>
-                                  )}
-                                  <TableCell className="align-top">
-                                    {renderCutlistEditor()}
-                                  </TableCell>
-                                  <TableCell><span className="text-xs text-muted-foreground">Direct</span></TableCell>
-                                  <TableCell>
-                                    <div className="flex items-center gap-2">
-                                      <Button variant="ghost" size="icon" onClick={() => saveEdit(direct.bom_id)}>
-                                        <Save className="h-4 w-4" />
-                                      </Button>
-                                      <Button variant="ghost" size="icon" onClick={cancelEditing}>
-                                        <X className="h-4 w-4" />
-                                      </Button>
-                                    </div>
-                                  </TableCell>
-                                </>
-                              </Form>
-                            </TableRow>
-                          )
-                        }
-
                         // Read-only row (either direct not editing or linked)
                         return (
                           <TableRow key={`row-${idx}`}>
@@ -2042,6 +1900,282 @@ const renderCutlistEditor = () => {
           )}
         </CardContent>
       </Card>
+      <Dialog open={editDialogOpen} onOpenChange={(open) => (open ? setEditDialogOpen(true) : cancelEditing())}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Edit BOM Component</DialogTitle>
+            <DialogDescription>
+              Update component details, supplier information, and cutlist metadata for this BOM row.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-6">
+            <Form {...form}>
+              <div className="space-y-6">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-foreground">
+                      {editingItem?.component?.internal_code || 'Component'}
+                      {editingItem?.component?.description ? (
+                        <span className="text-muted-foreground"> – {editingItem.component.description}</span>
+                      ) : null}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      BOM ID: {editingItem?.bom_id ?? '—'}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" onClick={cancelEditing}>
+                      Cancel
+                    </Button>
+                    <Button onClick={() => saveEdit()}>
+                      Save changes
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+                  <div className="space-y-6">
+                    <FormField
+                      control={form.control}
+                      name="component_id"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-sm font-medium text-foreground">Component</FormLabel>
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <FormControl>
+                                <Button
+                                  variant="outline"
+                                  role="combobox"
+                                  className={cn('w-full justify-between', !field.value && 'text-muted-foreground')}
+                                >
+                                  {field.value
+                                    ? componentsList.find((c) => c?.component_id?.toString() === field.value)?.internal_code || 'Select component'
+                                    : 'Select component'}
+                                  <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                </Button>
+                              </FormControl>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[420px] p-0">
+                              <Command>
+                                <CommandInput
+                                  placeholder="Search components..."
+                                  className="h-9"
+                                  onValueChange={handleComponentSearchChange}
+                                  value={componentSearch}
+                                />
+                                <CommandList>
+                                  <CommandEmpty>No components found</CommandEmpty>
+                                  <CommandGroup>
+                                    {filteredComponents.map((component) => (
+                                      <div
+                                        key={component.component_id}
+                                        className="px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+                                        onClick={() => {
+                                          form.setValue('component_id', component.component_id.toString());
+                                          handleComponentSearchChange('');
+                                          handleSupplierSearchChange('');
+                                          setShowSupplierDropdown(false);
+                                          const el = document.querySelector('[data-state="open"][role="dialog"]');
+                                          if (el) (el as HTMLElement).click();
+                                        }}
+                                      >
+                                        <div className="flex flex-col">
+                                          <span className="font-medium">{component.internal_code || 'No code'}</span>
+                                          {component.description && (
+                                            <span className="text-xs text-muted-foreground">{component.description}</span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </CommandGroup>
+                                </CommandList>
+                              </Command>
+                            </PopoverContent>
+                          </Popover>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    {supplierFeatureAvailable ? (
+                      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,220px)]">
+                        <FormField
+                          control={form.control}
+                          name="supplier_component_id"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="text-sm font-medium text-foreground">Supplier</FormLabel>
+                              <div className="relative" ref={formSupplierDropdownRef}>
+                                <Input
+                                  placeholder="Search suppliers..."
+                                  value={supplierSearch}
+                                  onChange={(event) => handleSupplierSearchChange(event.target.value)}
+                                  className="mb-1 focus-visible:ring-1"
+                                  disabled={!form.getValues().component_id || suppliersLoading}
+                                  onFocus={() => setShowSupplierDropdown(true)}
+                                />
+                                {form.getValues().component_id && showSupplierDropdown && (
+                                  <div className="absolute z-10 mt-1 max-h-72 w-full overflow-y-auto rounded-md border bg-background shadow" data-supplier-dropdown>
+                                    {supplierSearch && getFilteredSupplierComponents().length === 0 ? (
+                                      <div className="px-2 py-4 text-center text-sm text-muted-foreground">
+                                        No suppliers found
+                                      </div>
+                                    ) : (
+                                      <div>
+                                        <div className="border-b p-2 text-xs font-semibold text-muted-foreground">
+                                          Suppliers (sorted by lowest price first)
+                                        </div>
+                                        {getFilteredSupplierComponents()
+                                          .sort((a, b) => {
+                                            const priceA = parseFloat(a?.price?.toString() || '0');
+                                            const priceB = parseFloat(b?.price?.toString() || '0');
+                                            return priceA - priceB;
+                                          })
+                                          .map((sc) => (
+                                            <div
+                                              key={sc.supplier_component_id}
+                                              className="px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+                                              onClick={() => {
+                                                form.setValue('supplier_component_id', sc.supplier_component_id.toString());
+                                                handleSupplierSearchChange('');
+                                                setShowSupplierDropdown(false);
+                                              }}
+                                            >
+                                              <div className="flex items-center justify-between">
+                                                <span>{sc?.supplier?.name || 'Unknown'}</span>
+                                                <span className="font-medium">R{parseFloat(sc?.price?.toString() || '0').toFixed(2)}</span>
+                                              </div>
+                                            </div>
+                                          ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                {field.value && (
+                                  <div className="mt-2 rounded-md border bg-accent/10 p-2.5 text-xs">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span>
+                                        <span className="text-muted-foreground mr-1">Selected:</span>
+                                        <span className="font-medium">
+                                          {supplierComponents.find((sc) => sc.supplier_component_id.toString() === field.value)?.supplier?.name || 'Unknown'}
+                                        </span>
+                                      </span>
+                                      <span className="font-medium text-primary">
+                                        R{parseFloat(supplierComponents.find((sc) => sc.supplier_component_id.toString() === field.value)?.price?.toString() || '0').toFixed(2)}
+                                      </span>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
+                        {(() => {
+                          const quantityValue = form.watch('quantity_required');
+                          const supplierComponentValue = form.watch('supplier_component_id');
+                          const supplierRecord = supplierComponentValue
+                            ? supplierComponents.find(
+                                (sc) => sc.supplier_component_id.toString() === supplierComponentValue
+                              )
+                            : undefined;
+                          const unitPrice = supplierRecord ? Number(supplierRecord.price || 0) : null;
+                          const total = unitPrice != null && quantityValue
+                            ? unitPrice * Number(quantityValue)
+                            : null;
+
+                          return (
+                            <div className="space-y-3">
+                              <FormField
+                                control={form.control}
+                                name="quantity_required"
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel className="text-sm font-medium text-foreground">
+                                      Quantity required
+                                    </FormLabel>
+                                    <FormControl>
+                                      <Input
+                                        type="number"
+                                        min="0.0001"
+                                        step="any"
+                                        placeholder="e.g., 0.05"
+                                        title="Enter quantity (decimals allowed; supports < 0.1)"
+                                        {...field}
+                                      />
+                                    </FormControl>
+                                    <FormMessage />
+                                    <p className="mt-1 text-[11px] text-muted-foreground">
+                                      Decimal values allowed (e.g., 1.5, 2.75)
+                                    </p>
+                                  </FormItem>
+                                )}
+                              />
+                              <div className="rounded-md border bg-background p-3 text-xs text-muted-foreground">
+                                <div className="flex items-center justify-between">
+                                  <span>Unit price</span>
+                                  <span className="font-semibold text-foreground">
+                                    {unitPrice != null ? `R${unitPrice.toFixed(2)}` : '—'}
+                                  </span>
+                                </div>
+                                <div className="mt-1 flex items-center justify-between">
+                                  <span>Total</span>
+                                  <span className="font-semibold text-foreground">
+                                    {total != null ? `R${total.toFixed(2)}` : '—'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    ) : (
+                      <FormField
+                        control={form.control}
+                        name="quantity_required"
+                        render={({ field }) => (
+                          <FormItem className="md:max-w-xs">
+                            <FormLabel className="text-sm font-medium text-foreground">Quantity required</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="number"
+                                min="0.0001"
+                                step="any"
+                                placeholder="e.g., 0.05"
+                                title="Enter quantity (decimals allowed; supports < 0.1)"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                            <p className="mt-1 text-[11px] text-muted-foreground">
+                              Decimal values allowed (e.g., 1.5, 2.75)
+                            </p>
+                          </FormItem>
+                        )}
+                      />
+                    )}
+                  </div>
+
+                  <div className="rounded-md border bg-muted/20 p-4">
+                    <div className="mb-2 flex items-center justify-between">
+                      <h4 className="text-sm font-semibold text-foreground">Cutlist</h4>
+                      {form.watch('is_cutlist_item') ? (
+                        <Badge variant="secondary">Enabled</Badge>
+                      ) : (
+                        <Badge variant="outline">Optional</Badge>
+                      )}
+                    </div>
+                    {renderCutlistEditor()}
+                  </div>
+                </div>
+              </div>
+            </Form>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <BOMOverrideDialog
         productId={productId}
         bomId={overrideDialog?.bomId ?? null}
