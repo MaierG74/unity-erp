@@ -2,6 +2,8 @@
 
 Welcome to the Unity ERP knowledge base. The documentation is now organized by topic so that product, design, and engineering contributors can quickly find the right starting point.
 
+Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggregates open items from domain docs, changelogs, and technical references so you know which source to consult next.
+
 ## Directory structure
 
 - `overview/` – High-level orientation docs. Start here for the overall roadmap (`master-plan.md`), platform style guide, auth overview, and the AI assistant vision.

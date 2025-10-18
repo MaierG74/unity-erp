@@ -1,0 +1,38 @@
+---
+title: TODO Index
+last_updated: 2025-02-14
+---
+
+Unity ERP's documentation spreads TODOs and open questions across domain guides, changelogs, and technical references. Use this index as a single starting point to see what still needs attention and where the authoritative source of truth lives.
+
+## How to Use This Index
+- Scan the area that matches your current project or release scope.
+- Follow the "Source" link for full context, acceptance criteria, and historical notes before making changes.
+- Update the status/owner placeholders as work is planned or completed so downstream readers know who is driving each item.
+
+## Purchasing
+- **Seed missing supplier order statuses** — Status: _Backlog_, Owner: _Unassigned_. Ensure `supplier_order_statuses` includes Approved, Partially Received, and Fully Received so UI logic aligns with database values. Source: [purchasing-known gaps](../domains/purchasing/purchasing-master.md#known-gaps--todos).
+- **Define receiving RPC coverage** — Status: _Needs design_, Owner: _Unassigned_. Add or replace the `increment_total_received` and `increment_inventory_quantity` RPCs referenced by the PO detail page to keep receiving flow transactional. Source: [purchasing-known gaps](../domains/purchasing/purchasing-master.md#known-gaps--todos).
+- **Backfill schema snapshot** — Status: _Open_, Owner: _Unassigned_. Bring `schema.txt` up to date with the `purchase_orders.purchase_order_id` relationship to prevent drift between docs and migrations. Source: [purchasing-known gaps](../domains/purchasing/purchasing-master.md#known-gaps--todos).
+- **Harden receiving validation** — Status: _Open_, Owner: _Unassigned_. Add server-side checks to prevent receiving more than the remaining quantity even if UI max values are bypassed. Source: [purchasing-known gaps](../domains/purchasing/purchasing-master.md#known-gaps--todos).
+
+## AI Assistant
+- **Deliver Phase 1 read-only assistant** — Status: _In refinement_, Owner: _Unassigned_. Build the NLQ + RAG tooling, chat dock, and logging required for the initial assistant rollout. Source: [AI assistant plan – Phase 1](AI%20Assistant.md#phase-1-%E2%80%94-read-only-nlq-%2B-rag).
+- **Document cost rollups for quote insights** — Status: _Backlog_, Owner: _Unassigned_. Replace placeholder cost calculations in the quote metrics view with exploded BOM and labor rollups. Source: [AI assistant metrics SQL TODO](AI%20Assistant.md#phase-1-%E2%80%94-read-only-nlq-%2B-rag).
+- **Derive job duration actuals** — Status: _Backlog_, Owner: _Unassigned_. Implement actual-minute capture for job variance reporting by wiring attendance or job logs into the view. Source: [AI assistant metrics SQL TODO](AI%20Assistant.md#phase-1-%E2%80%94-read-only-nlq-%2B-rag).
+
+## Operations
+- **Finalize user activity logging rollout** — Status: _Planning_, Owner: _Unassigned_. Resolve open questions around retention, masking, and SIEM integrations before implementation proceeds. Source: [user logging plan open questions](../operations/user-logging.md#open-questions).
+- **Design sidebar personalization experiments** — Status: _Ideas_, Owner: _Unassigned_. Evaluate theme toggles, quick shortcuts, and section dividers for future sidebar iterations. Source: [sidebar enhancements ideas](../operations/sidebar-enhancements.md#ideas-for-future-iterations).
+
+## Cross-Cutting / Historical Follow-Ups
+- **Tighten todo module RLS** — Status: _Follow-up_, Owner: _Unassigned_. Revisit the permissive insert policy once JWT-based checks are validated for server routes. Source: [todo module fixes future improvements](../changelogs/todo-module-fixes-20251008.md#future-improvements).
+- **Standardize date utilities across modules** — Status: _Follow-up_, Owner: _Unassigned_. Apply the new date formatting helpers to Labor/Staff, Purchasing, and Inventory workflows for consistent locale support. Source: [todo module fixes future improvements](../changelogs/todo-module-fixes-20251008.md#future-improvements).
+
+## Maintenance Checklist (Optional)
+Before major releases, run the following quick audit to keep this index accurate:
+
+1. `rg --heading --line-number "TODO" docs | tee /tmp/docs-todo-scan.txt` to capture raw TODO references.
+2. Review `/tmp/docs-todo-scan.txt` for new or resolved items; update `docs/overview/todo-index.md` entries accordingly.
+3. Confirm each bullet still points to a valid source section and adjust anchors if headings move.
+4. Commit updates alongside the relevant feature work so the index reflects the latest state.
