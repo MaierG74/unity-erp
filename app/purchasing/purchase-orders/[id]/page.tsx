@@ -283,72 +283,140 @@ async function receiveStock(purchaseOrderId: string, receipts: ReceiptFormData) 
     for (const [orderId, quantityReceived] of Object.entries(receipts)) {
       if (quantityReceived <= 0) continue;
 
-      // 1. Create inventory transaction
+      // 1. Fetch supplier order details for validation and component lookup
+      const { data: orderRow, error: orderFetchError } = await supabase
+        .from('supplier_orders')
+        .select('supplier_component_id, order_quantity, total_received')
+        .eq('order_id', orderId)
+        .single();
+
+      if (orderFetchError || !orderRow?.supplier_component_id) {
+        throw new Error(`Failed to get supplier order info: ${orderFetchError?.message || 'Order not found'}`);
+      }
+
+      // 1a. Validate quantity does not exceed remaining
+      const remaining = Math.max((orderRow.order_quantity || 0) - (orderRow.total_received || 0), 0);
+      if (quantityReceived > remaining) {
+        throw new Error(`Quantity exceeds remaining to receive (remaining: ${remaining}) for order ${orderId}`);
+      }
+
+      // 2. Resolve component from supplier component
+      const { data: componentData, error: componentError } = await supabase
+        .from('suppliercomponents')
+        .select('component_id')
+        .eq('supplier_component_id', orderRow.supplier_component_id)
+        .single();
+      if (componentError || !componentData?.component_id) {
+        throw new Error(`Failed to get component info: ${componentError?.message || 'Component not found'}`);
+      }
+      const componentId = componentData.component_id as number;
+
+      // 3. Ensure PURCHASE transaction type exists and get its ID
+      let purchaseTypeId: number | null = null;
+      const { data: typeData, error: typeError } = await supabase
+        .from('transaction_types')
+        .select('transaction_type_id')
+        .eq('type_name', 'PURCHASE')
+        .single();
+      if (typeError) {
+        const { data: insertData, error: insertError } = await supabase
+          .from('transaction_types')
+          .insert({ type_name: 'PURCHASE' })
+          .select('transaction_type_id')
+          .single();
+        if (insertError) {
+          throw new Error(`Failed to ensure PURCHASE transaction type: ${insertError.message}`);
+        }
+        purchaseTypeId = insertData.transaction_type_id as number;
+      } else {
+        purchaseTypeId = typeData.transaction_type_id as number;
+      }
+
+      // 4. Create inventory transaction (omit order_id; it refers to sales orders)
       const { data: transactionData, error: transactionError } = await supabase
         .from('inventory_transactions')
         .insert({
-          component_id: null, // We'll update this from the supplier order
+          component_id: componentId,
           quantity: quantityReceived,
-          transaction_type_id: 1, // Assuming 1 is for stock receipt
-          order_id: parseInt(orderId)
+          transaction_type_id: purchaseTypeId,
+          transaction_date: new Date().toISOString()
         })
-        .select()
+        .select('transaction_id')
         .single();
+      if (transactionError) {
+        throw new Error(`Failed to create inventory transaction: ${transactionError.message}`);
+      }
 
-      if (transactionError) throw new Error(`Failed to create inventory transaction: ${transactionError.message}`);
-
-      // 2. Create receipt record
+      // 5. Create receipt record
       const { error: receiptError } = await supabase
         .from('supplier_order_receipts')
         .insert({
           order_id: parseInt(orderId),
           transaction_id: transactionData.transaction_id,
-          quantity_received: quantityReceived
+          quantity_received: quantityReceived,
+          receipt_date: new Date().toISOString()
         });
-
       if (receiptError) throw new Error(`Failed to create receipt record: ${receiptError.message}`);
 
-      // 3. Update supplier order total_received
-      const { error: updateError } = await supabase
-        .rpc('increment_total_received', {
-          p_order_id: parseInt(orderId),
-          p_quantity: quantityReceived
-        });
-
-      if (updateError) throw new Error(`Failed to update supplier order: ${updateError.message}`);
-
-      // 4. Update inventory quantity
-      const { data: orderData, error: orderError } = await supabase
-        .from('supplier_orders')
-        .select('supplier_component_id')
-        .eq('order_id', orderId)
+      // 6. Update inventory on-hand table
+      const { data: existingInventory, error: inventorySelectError } = await supabase
+        .from('inventory')
+        .select('inventory_id, quantity_on_hand')
+        .eq('component_id', componentId)
         .single();
-
-      if (orderError || !orderData?.supplier_component_id) {
-        throw new Error(`Failed to get supplier component info: ${orderError?.message || 'Component not found'}`);
+      if (inventorySelectError && (inventorySelectError as any).code !== 'PGRST116') {
+        throw new Error(`Failed to check inventory: ${inventorySelectError.message}`);
+      }
+      if (existingInventory) {
+        const newQty = (existingInventory.quantity_on_hand || 0) + quantityReceived;
+        const { error: invUpdateError } = await supabase
+          .from('inventory')
+          .update({ quantity_on_hand: newQty })
+          .eq('inventory_id', existingInventory.inventory_id);
+        if (invUpdateError) throw new Error(`Failed to update inventory quantity: ${invUpdateError.message}`);
+      } else {
+        const { error: invInsertError } = await supabase
+          .from('inventory')
+          .insert({ component_id: componentId, quantity_on_hand: quantityReceived, location: null, reorder_level: 0 });
+        if (invInsertError) throw new Error(`Failed to create inventory record: ${invInsertError.message}`);
       }
 
-      // Get component ID from supplier component
-      const { data: componentData, error: componentError } = await supabase
-        .from('suppliercomponents')
-        .select('component_id')
-        .eq('supplier_component_id', orderData.supplier_component_id)
-        .single();
+      // 7. Recompute total_received and status via existing RPC; fallback to manual if unavailable
+      const { error: recomputeError } = await supabase.rpc('update_order_received_quantity', { order_id_param: parseInt(orderId) });
+      if (recomputeError) {
+        // Fallback: manual recompute (mirrors components/features/purchasing/order-detail.tsx)
+        const { data: receiptsData, error: receiptsError } = await supabase
+          .from('supplier_order_receipts')
+          .select('quantity_received')
+          .eq('order_id', parseInt(orderId));
+        if (receiptsError) throw new Error(`Failed to fetch receipts: ${receiptsError.message}`);
+        const totalReceived = (receiptsData || []).reduce((sum: number, r: any) => sum + (r.quantity_received || 0), 0);
 
-      if (componentError || !componentData?.component_id) {
-        throw new Error(`Failed to get component info: ${componentError?.message || 'Component not found'}`);
+        const { data: soData, error: soError } = await supabase
+          .from('supplier_orders')
+          .select('order_quantity, status_id')
+          .eq('order_id', parseInt(orderId))
+          .single();
+        if (soError) throw new Error(`Failed to fetch order for status update: ${soError.message}`);
+
+        const { data: statusRows, error: statusErr } = await supabase
+          .from('supplier_order_statuses')
+          .select('status_id, status_name');
+        if (statusErr) throw new Error(`Failed to fetch status IDs: ${statusErr.message}`);
+        const statusMap = (statusRows || []).reduce((m: Record<string, number>, s: any) => {
+          m[s.status_name] = s.status_id; return m;
+        }, {} as Record<string, number>);
+
+        let newStatusId = soData.status_id;
+        if (totalReceived >= (soData.order_quantity || 0)) newStatusId = statusMap['Completed'] ?? newStatusId;
+        else if (totalReceived > 0) newStatusId = statusMap['Partially Delivered'] ?? newStatusId;
+
+        const { error: manualUpdateError } = await supabase
+          .from('supplier_orders')
+          .update({ total_received: totalReceived, status_id: newStatusId })
+          .eq('order_id', parseInt(orderId));
+        if (manualUpdateError) throw new Error(`Failed to update order totals: ${manualUpdateError.message}`);
       }
-
-      const componentId = componentData.component_id;
-
-      // Use RPC for inventory update
-      const { error: inventoryError } = await supabase
-        .rpc('increment_inventory_quantity', {
-          p_component_id: componentId,
-          p_quantity: quantityReceived
-        });
-
-      if (inventoryError) throw new Error(`Failed to update inventory: ${inventoryError.message}`);
     }
 
     return true;

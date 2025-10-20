@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { formatDistanceToNow, parseISO, format } from 'date-fns';
-import { CheckCircle2, Loader2, MessageSquare, CalendarIcon } from 'lucide-react';
+import { CheckCircle2, Loader2, MessageSquare, CalendarIcon, Paperclip, Upload, X, Download, FileIcon } from 'lucide-react';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm } from 'react-hook-form';
@@ -37,6 +37,8 @@ import {
   useAddTodoComment,
   useTodoDetail,
   useUpdateTodo,
+  useUploadTodoAttachment,
+  useDeleteTodoAttachment,
 } from '@/hooks/useTodosApi';
 import { useProfiles } from '@/hooks/useProfiles';
 import { TodoEntityLinkPicker } from './TodoEntityLinkPicker';
@@ -80,9 +82,12 @@ export function TodoDetailDialog({ todoId, open, onOpenChange }: TodoDetailDialo
   const updateMutation = useUpdateTodo(todoId);
   const commentMutation = useAddTodoComment(todoId);
   const acknowledgeMutation = useAcknowledgeTodo(todoId);
+  const uploadAttachmentMutation = useUploadTodoAttachment(todoId);
+  const deleteAttachmentMutation = useDeleteTodoAttachment(todoId);
 
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
   const [selectedLink, setSelectedLink] = useState<EntityLink | null>(null);
+  const [uploadingFile, setUploadingFile] = useState(false);
 
   const {
     register,
@@ -112,6 +117,7 @@ export function TodoDetailDialog({ todoId, open, onOpenChange }: TodoDetailDialo
   const todo = data?.todo ?? null;
   const activities = data?.activities ?? [];
   const comments = data?.comments ?? [];
+  const attachments = data?.attachments ?? [];
 
   useEffect(() => {
     if (todo) {
@@ -211,6 +217,61 @@ export function TodoDetailDialog({ todoId, open, onOpenChange }: TodoDetailDialo
       console.error('Failed to acknowledge', error);
       toast({
         title: 'Acknowledge failed',
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !todoId) return;
+
+    setUploadingFile(true);
+    try {
+      await uploadAttachmentMutation.mutateAsync(file);
+      toast({ title: 'Attachment uploaded successfully' });
+      // Reset the input
+      event.target.value = '';
+    } catch (error) {
+      console.error('Failed to upload attachment', error);
+      toast({
+        title: 'Upload failed',
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
+  const handleDeleteAttachment = async (attachmentId: string) => {
+    if (!todoId) return;
+    try {
+      await deleteAttachmentMutation.mutateAsync(attachmentId);
+      toast({ title: 'Attachment deleted' });
+    } catch (error) {
+      console.error('Failed to delete attachment', error);
+      toast({
+        title: 'Delete failed',
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const downloadAttachment = async (attachmentId: string, fileName: string) => {
+    try {
+      const response = await fetch(`/api/todos/${todoId}/attachments/${attachmentId}`);
+      if (!response.ok) throw new Error('Failed to get download URL');
+      const { url } = await response.json();
+
+      // Open in new tab for download
+      window.open(url, '_blank');
+    } catch (error) {
+      console.error('Failed to download attachment', error);
+      toast({
+        title: 'Download failed',
         description: error instanceof Error ? error.message : 'Unknown error',
         variant: 'destructive',
       });
@@ -609,6 +670,94 @@ export function TodoDetailDialog({ todoId, open, onOpenChange }: TodoDetailDialo
                         Clear
                       </Button>
                     </div>
+                  </div>
+                </div>
+              </details>
+
+              <details className="group" open>
+                <summary className="flex cursor-pointer items-center justify-between rounded-lg border bg-muted/20 px-4 py-3 hover:bg-muted/30 transition-colors">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">Attachments</span>
+                    <Badge variant="outline" className="ml-2">
+                      <Paperclip className="mr-1 h-3 w-3" /> {attachments.length}
+                    </Badge>
+                  </div>
+                  <svg className="h-4 w-4 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </summary>
+
+                <div className="mt-2 px-1">
+                  <div className="space-y-4">
+                    {attachments.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No attachments yet.</p>
+                    ) : (
+                      attachments.map(attachment => (
+                        <div key={attachment.id} className="flex items-start gap-3 rounded-lg border p-3">
+                          <div className="flex-shrink-0">
+                            <FileIcon className="h-8 w-8 text-muted-foreground" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium truncate">{attachment.fileName}</p>
+                                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                  <span>{attachment.uploader?.username ?? 'Unknown'}</span>
+                                  <span>•</span>
+                                  <span>{attachment.fileSize ? `${(attachment.fileSize / 1024).toFixed(1)} KB` : 'Unknown size'}</span>
+                                  <span>•</span>
+                                  <span>{formatDistanceToNow(parseISO(attachment.createdAt), { addSuffix: true })}</span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => downloadAttachment(attachment.id, attachment.fileName)}
+                                >
+                                  <Download className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleDeleteAttachment(attachment.id)}
+                                  disabled={deleteAttachmentMutation.isPending}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="mt-4">
+                    <label htmlFor="file-upload" className="cursor-pointer">
+                      <div className="flex items-center justify-center gap-2 rounded-lg border-2 border-dashed bg-muted/30 p-4 hover:bg-muted/50 transition-colors">
+                        {uploadingFile ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span className="text-sm text-muted-foreground">Uploading...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm text-muted-foreground">Click to upload file</span>
+                          </>
+                        )}
+                      </div>
+                    </label>
+                    <input
+                      id="file-upload"
+                      type="file"
+                      className="hidden"
+                      onChange={handleFileUpload}
+                      disabled={uploadingFile}
+                    />
                   </div>
                 </div>
               </details>
