@@ -84,3 +84,40 @@ export function useAcknowledgeTodo(todoId: string | null) {
     },
   });
 }
+
+export function useUploadTodoAttachment(todoId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (file: File) => {
+      if (!todoId) throw new Error('Missing todo id');
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await fetch(`/api/todos/${todoId}/attachments`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (!response.ok) throw new Error('Failed to upload attachment');
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: detailKey(todoId) });
+    },
+  });
+}
+
+export function useDeleteTodoAttachment(todoId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (attachmentId: string) => {
+      if (!todoId) throw new Error('Missing todo id');
+      const response = await fetch(`/api/todos/${todoId}/attachments/${attachmentId}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) throw new Error('Failed to delete attachment');
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: detailKey(todoId) });
+    },
+  });
+}

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { getRouteClient } from '@/lib/supabase-route';
-import { TODO_PRIORITIES, TODO_STATUSES, fetchTodo, fetchTodoActivities, fetchTodoComments, type TodoItem } from '@/lib/db/todos';
+import { TODO_PRIORITIES, TODO_STATUSES, fetchTodo, fetchTodoActivities, fetchTodoComments, fetchTodoAttachments, type TodoItem } from '@/lib/db/todos';
 
 const paramsSchema = z.object({
   todoId: z.string().uuid(),
@@ -35,17 +35,18 @@ export async function GET(_req: NextRequest, context: { params: { todoId: string
   }
 
   try {
-    const [todo, activities, comments] = await Promise.all([
+    const [todo, activities, comments, attachments] = await Promise.all([
       fetchTodo(ctx.supabase, parsedParams.data.todoId),
       fetchTodoActivities(ctx.supabase, parsedParams.data.todoId),
       fetchTodoComments(ctx.supabase, parsedParams.data.todoId),
+      fetchTodoAttachments(ctx.supabase, parsedParams.data.todoId),
     ]);
 
     if (!todo) {
       return NextResponse.json({ error: 'Task not found or access denied' }, { status: 404 });
     }
 
-    return NextResponse.json({ todo, activities, comments });
+    return NextResponse.json({ todo, activities, comments, attachments });
   } catch (error) {
     console.error('[todo-detail][GET] Failed to fetch todo', error);
     return NextResponse.json({ error: 'Failed to load task detail' }, { status: 500 });
@@ -205,13 +206,14 @@ export async function PATCH(req: NextRequest, context: { params: { todoId: strin
       }
     }
 
-    const [updatedTodo, activities, comments] = await Promise.all([
+    const [updatedTodo, activities, comments, attachments] = await Promise.all([
       fetchTodo(ctx.supabase, todoId),
       fetchTodoActivities(ctx.supabase, todoId),
       fetchTodoComments(ctx.supabase, todoId),
+      fetchTodoAttachments(ctx.supabase, todoId),
     ]);
 
-    return NextResponse.json({ todo: updatedTodo, activities, comments });
+    return NextResponse.json({ todo: updatedTodo, activities, comments, attachments });
   } catch (error) {
     console.error('[todo-detail][PATCH] Unexpected error', error);
     return NextResponse.json({ error: 'Failed to update task' }, { status: 500 });

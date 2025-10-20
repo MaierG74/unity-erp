@@ -131,12 +131,13 @@
 
 **Known Gaps & TODOs**
 
-- Status seeds: Ensure `Approved`, `Partially Received`, and `Fully Received` exist in `supplier_order_statuses`. Current seed scripts add Draft/Pending Approval and legacy Open/In Progress/Completed/Cancelled; add the missing three for parity with UI logic.
+- Status seeds: Ensure `Approved`, `Partially Received`, and `Fully Received` exist in `supplier_order_statuses`. The setup script now seeds these alongside legacy names (Open/In Progress/Partially Delivered/Completed/Cancelled) for parity with UI logic.
 - RPCs for receiving: `increment_total_received` and `increment_inventory_quantity` are called by the PO details page but are not defined in the repo SQL. Either:
   - Add these RPC functions, or
   - Replace calls with `update_order_received_quantity` and direct updates, plus `inventory` adjustments via a single `exec_sql`/RPC.
 - `schema.txt` may be out of sync with `supplier_orders.purchase_order_id` addition; the script adds it, but `schema.txt` does not show it in the first definition block. Align schema snapshot.
 - Validation: Prevent receiving quantities > remaining; UI enforces `max` but add server-side checks in RPCs.
+- Resolved — Receiving insert bug: `receiveStock` in `app/purchasing/purchase-orders/[id]/page.tsx` now mirrors the working `OrderDetail` logic. It looks up the component first, omits the sales‑order FK when inserting into `inventory_transactions`, records the receipt, updates on‑hand inventory, and recomputes `total_received` via `update_order_received_quantity` (with manual fallback).
 - Email routing: If a supplier has no primary email, API logs and skips. Consider fallback to any email or flag PO for manual follow-up.
 - Multi-supplier PO header: We currently store a `supplier_id` on `purchase_orders` for manual PO path; multi-supplier POs (from sales order grouping) still compute supplier lists from lines. Confirm whether `supplier_id` should be optional or represent a “primary supplier”.
 - Q number uniqueness: DB constraint exists; add graceful handling when collision occurs (e.g., toast with retry).

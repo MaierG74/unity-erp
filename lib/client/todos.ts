@@ -1,7 +1,7 @@
 'use client';
 
 import { supabase } from '@/lib/supabase';
-import type { TodoItem, TodoStatus, TodoPriority, TodoActivity, TodoComment } from '@/lib/db/todos';
+import type { TodoItem, TodoStatus, TodoPriority, TodoActivity, TodoComment, TodoAttachment } from '@/lib/db/todos';
 
 type ListScope = 'assigned' | 'created' | 'watching' | 'all';
 
@@ -78,6 +78,7 @@ export interface TodoDetailResponse {
   todo: TodoItem | null;
   activities: TodoActivity[];
   comments: TodoComment[];
+  attachments: TodoAttachment[];
 }
 
 export async function createTodo(payload: CreateTodoPayload): Promise<TodoDetailResponse> {
@@ -96,6 +97,7 @@ export async function createTodo(payload: CreateTodoPayload): Promise<TodoDetail
     todo: json?.todo ?? null,
     activities: Array.isArray(json?.activities) ? (json.activities as TodoActivity[]) : [],
     comments: Array.isArray(json?.comments) ? (json.comments as TodoComment[]) : [],
+    attachments: Array.isArray(json?.attachments) ? (json.attachments as TodoAttachment[]) : [],
   };
 }
 
@@ -113,6 +115,7 @@ export async function fetchTodoDetail(todoId: string): Promise<TodoDetailRespons
     todo: json?.todo ?? null,
     activities: Array.isArray(json?.activities) ? (json.activities as TodoActivity[]) : [],
     comments: Array.isArray(json?.comments) ? (json.comments as TodoComment[]) : [],
+    attachments: Array.isArray(json?.attachments) ? (json.attachments as TodoAttachment[]) : [],
   };
 }
 
@@ -147,6 +150,7 @@ export async function updateTodo(todoId: string, payload: UpdateTodoPayload): Pr
     todo: json?.todo ?? null,
     activities: Array.isArray(json?.activities) ? (json.activities as TodoActivity[]) : [],
     comments: Array.isArray(json?.comments) ? (json.comments as TodoComment[]) : [],
+    attachments: Array.isArray(json?.attachments) ? (json.attachments as TodoAttachment[]) : [],
   };
 }
 
@@ -184,6 +188,7 @@ export async function acknowledgeTodo(todoId: string, note?: string) {
     todo: json?.todo ?? null,
     activities: Array.isArray(json?.activities) ? (json.activities as TodoActivity[]) : [],
     comments: Array.isArray(json?.comments) ? (json.comments as TodoComment[]) : [],
+    attachments: Array.isArray(json?.attachments) ? (json.attachments as TodoAttachment[]) : [],
   };
 }
 

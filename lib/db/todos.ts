@@ -38,6 +38,11 @@ export const TODO_COMMENT_QUERY = `
   author:profiles!todo_comments_created_by_fkey ( id, username, avatar_url )
 `;
 
+export const TODO_ATTACHMENT_QUERY = `
+  *,
+  uploader:profiles!todo_attachments_uploaded_by_fkey ( id, username, avatar_url )
+`;
+
 export interface ProfileSummary {
   id: string;
   username?: string | null;
@@ -93,6 +98,18 @@ export interface TodoComment {
   createdBy: string;
   createdAt: string;
   author?: ProfileSummary | null;
+}
+
+export interface TodoAttachment {
+  id: string;
+  todoId: string;
+  fileName: string;
+  filePath: string;
+  mimeType: string;
+  fileSize: number | null;
+  uploadedBy: string;
+  createdAt: string;
+  uploader?: ProfileSummary | null;
 }
 
 const toProfile = (row: any | null | undefined): ProfileSummary | null => {
@@ -163,6 +180,18 @@ const toComment = (row: any): TodoComment => ({
   createdBy: String(row.created_by),
   createdAt: row.created_at,
   author: toProfile(row.author),
+});
+
+const toAttachment = (row: any): TodoAttachment => ({
+  id: String(row.id),
+  todoId: String(row.todo_id),
+  fileName: row.file_name ?? '',
+  filePath: row.file_path ?? '',
+  mimeType: row.mime_type ?? '',
+  fileSize: row.file_size ?? null,
+  uploadedBy: String(row.uploaded_by),
+  createdAt: row.created_at,
+  uploader: toProfile(row.uploader),
 });
 
 export interface TodoListFilters {
@@ -291,4 +320,18 @@ export async function listWatcherIds(client: SupabaseClient, todoId: string): Pr
   return (data ?? [])
     .map(row => row?.user_id)
     .filter((id): id is string => typeof id === 'string');
+}
+
+export async function fetchTodoAttachments(
+  client: SupabaseClient,
+  todoId: string
+): Promise<TodoAttachment[]> {
+  const { data, error } = await client
+    .from('todo_attachments')
+    .select(TODO_ATTACHMENT_QUERY)
+    .eq('todo_id', todoId)
+    .order('created_at', { ascending: true });
+
+  if (error) throw error;
+  return (data ?? []).map(toAttachment);
 }
