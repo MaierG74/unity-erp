@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { formatDistanceToNow, parseISO } from 'date-fns';
+import { formatDistanceToNow, parseISO, format } from 'date-fns';
 import { CheckCircle2, Loader2, MessageSquare, CalendarIcon } from 'lucide-react';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -25,6 +25,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/components/common/auth-provider';
 import { formatDate } from '@/lib/date-utils';
@@ -218,10 +219,9 @@ export function TodoDetailDialog({ todoId, open, onOpenChange }: TodoDetailDialo
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Task detail</DialogTitle>
-          <DialogDescription>Review status, adjust metadata, and keep the discussion going.</DialogDescription>
+          <DialogTitle>Task Details</DialogTitle>
         </DialogHeader>
 
         {isLoading ? (
@@ -237,27 +237,42 @@ export function TodoDetailDialog({ todoId, open, onOpenChange }: TodoDetailDialo
               <input type="hidden" {...register('contextType')} />
               <input type="hidden" {...register('contextId')} />
 
-              <div className="grid gap-2">
-                <Label htmlFor="title">Title</Label>
+              <div>
                 <Controller
                   control={control}
                   name="title"
-                  render={({ field }) => <Input id="title" {...field} />}
+                  render={({ field }) => (
+                    <Input
+                      id="title"
+                      {...field}
+                      className="text-2xl font-semibold border-0 px-0 shadow-none focus-visible:ring-0"
+                      placeholder="Task title..."
+                    />
+                  )}
                 />
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="description">Description</Label>
+                <Label htmlFor="description" className="text-sm text-muted-foreground">Description</Label>
                 <Controller
                   control={control}
                   name="description"
-                  render={({ field }) => <Textarea id="description" rows={4} {...field} value={field.value ?? ''} />}
+                  render={({ field }) => (
+                    <Textarea
+                      id="description"
+                      rows={5}
+                      {...field}
+                      value={field.value ?? ''}
+                      placeholder="Add more details..."
+                      className="resize-none"
+                    />
+                  )}
                 />
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="grid gap-2">
-                  <Label>Status</Label>
+                  <Label className="text-xs text-muted-foreground">Status</Label>
                   <Controller
                     control={control}
                     name="status"
@@ -279,7 +294,7 @@ export function TodoDetailDialog({ todoId, open, onOpenChange }: TodoDetailDialo
                 </div>
 
                 <div className="grid gap-2">
-                  <Label>Priority</Label>
+                  <Label className="text-xs text-muted-foreground">Priority</Label>
                   <Controller
                     control={control}
                     name="priority"
@@ -301,7 +316,7 @@ export function TodoDetailDialog({ todoId, open, onOpenChange }: TodoDetailDialo
                 </div>
 
                 <div className="grid gap-2">
-                  <Label>Due date</Label>
+                  <Label className="text-xs text-muted-foreground">Due date</Label>
                   <Controller
                     control={control}
                     name="dueDate"
@@ -333,7 +348,7 @@ export function TodoDetailDialog({ todoId, open, onOpenChange }: TodoDetailDialo
                 </div>
 
                 <div className="grid gap-2">
-                  <Label>Assignee</Label>
+                  <Label className="text-xs text-muted-foreground">Assignee</Label>
                   <Controller
                     control={control}
                     name="assignedTo"
@@ -362,8 +377,15 @@ export function TodoDetailDialog({ todoId, open, onOpenChange }: TodoDetailDialo
                 </div>
               </div>
 
-              <div className="grid gap-2">
-                <Label>Watchers</Label>
+              <details className="group">
+                <summary className="flex cursor-pointer items-center justify-between rounded-lg border bg-muted/20 px-4 py-3 hover:bg-muted/30 transition-colors">
+                  <span className="text-sm font-medium">Watchers</span>
+                  <svg className="h-4 w-4 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </summary>
+                <div className="mt-2 px-1">
+                  <Label className="text-xs text-muted-foreground">Select watchers</Label>
                 <Controller
                   control={control}
                   name="watchers"
@@ -395,7 +417,8 @@ export function TodoDetailDialog({ todoId, open, onOpenChange }: TodoDetailDialo
                     </div>
                   )}
                 />
-              </div>
+                </div>
+              </details>
 
               <Separator />
 
@@ -414,22 +437,15 @@ export function TodoDetailDialog({ todoId, open, onOpenChange }: TodoDetailDialo
 
                 {selectedLink ? (
                   <div className="rounded-md border bg-muted/30 p-3">
-                    <a
-                      href={selectedLink.path}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block hover:opacity-80 transition-opacity"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-medium leading-tight hover:underline">{selectedLink.label}</p>
-                          <p className="text-sm text-muted-foreground">{selectedLink.path}</p>
-                        </div>
-                        <Badge variant="outline" className="capitalize">
-                          {selectedLink.type.replace('_', ' ')}
-                        </Badge>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-medium leading-tight">{selectedLink.label}</p>
+                        <p className="text-sm text-muted-foreground">{selectedLink.path}</p>
                       </div>
-                    </a>
+                      <Badge variant="outline" className="capitalize">
+                        {selectedLink.type.replace('_', ' ')}
+                      </Badge>
+                    </div>
                     {selectedLink.meta && Object.keys(selectedLink.meta).length > 0 ? (
                       <p className="mt-2 text-xs text-muted-foreground">
                         {Object.entries(selectedLink.meta)
@@ -474,93 +490,128 @@ export function TodoDetailDialog({ todoId, open, onOpenChange }: TodoDetailDialo
               </div>
             </form>
 
-            <div className="space-y-6">
-              <section className="space-y-4">
-                <div>
-                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Activity</h3>
-                </div>
-                <div className="space-y-4">
-                  {activities.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No activity logged yet.</p>
-                  ) : (
-                    activities.map(activity => (
-                      <div key={activity.id} className="flex items-start gap-3">
-                        <Avatar className="h-8 w-8">
-                          {activity.actor?.avatarUrl ? (
-                            <AvatarImage src={activity.actor.avatarUrl} alt={activity.actor.username ?? 'actor'} />
-                          ) : null}
-                          <AvatarFallback>{initials(activity.actor?.username)}</AvatarFallback>
-                        </Avatar>
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium">{activity.actor?.username ?? 'Someone'}</span>
-                            <span className="text-xs text-muted-foreground">
-                              {formatDistanceToNow(parseISO(activity.createdAt), { addSuffix: true })}
-                            </span>
-                          </div>
-                          <p className="text-sm text-muted-foreground">
-                            {activity.eventType.replace(/_/g, ' ')}
-                            {activity.note ? ` – ${activity.note}` : ''}
-                          </p>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </section>
+            <div className="space-y-4">
+              <details className="group">
+                <summary className="flex cursor-pointer items-center justify-between rounded-lg border bg-muted/20 px-4 py-3 hover:bg-muted/30 transition-colors">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">Activity</span>
+                    <Badge variant="outline" className="ml-2">
+                      {activities.length}
+                    </Badge>
+                  </div>
+                  <svg className="h-4 w-4 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </summary>
 
-              <Separator />
-
-              <section className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Comments</h3>
-                  <Badge variant="outline">
-                    <MessageSquare className="mr-1 h-3 w-3" /> {comments.length}
-                  </Badge>
-                </div>
-                <div className="space-y-4">
-                  {comments.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">Be the first to leave a note.</p>
-                  ) : (
-                    comments.map(comment => (
-                      <div key={comment.id} className="rounded-lg border p-3">
-                        <div className="mb-2 flex items-center gap-2">
-                          <Avatar className="h-8 w-8">
-                            {comment.author?.avatarUrl ? (
-                              <AvatarImage src={comment.author.avatarUrl} alt={comment.author.username ?? 'Author'} />
-                            ) : null}
-                            <AvatarFallback>{initials(comment.author?.username)}</AvatarFallback>
-                          </Avatar>
-                          <div>
-                            <div className="text-sm font-medium">{comment.author?.username ?? 'User'}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {formatDistanceToNow(parseISO(comment.createdAt), { addSuffix: true })}
+                <div className="mt-2 px-1">
+                  <TooltipProvider>
+                    <div className="space-y-4">
+                      {activities.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No activity logged yet.</p>
+                      ) : (
+                        activities.map(activity => (
+                          <div key={activity.id} className="flex items-start gap-3">
+                            <Avatar className="h-8 w-8">
+                              {activity.actor?.avatarUrl ? (
+                                <AvatarImage src={activity.actor.avatarUrl} alt={activity.actor.username ?? 'actor'} />
+                              ) : null}
+                              <AvatarFallback>{initials(activity.actor?.username)}</AvatarFallback>
+                            </Avatar>
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium">{activity.actor?.username ?? 'Someone'}</span>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="text-xs text-muted-foreground cursor-help">
+                                      {formatDistanceToNow(parseISO(activity.createdAt), { addSuffix: true })}
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>{format(parseISO(activity.createdAt), 'PPpp')}</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </div>
+                              <p className="text-sm text-muted-foreground">
+                                {activity.eventType.replace(/_/g, ' ')}
+                                {activity.note ? ` – ${activity.note}` : ''}
+                              </p>
                             </div>
                           </div>
-                        </div>
-                        <p className="text-sm text-foreground">{comment.body}</p>
-                      </div>
-                    ))
-                  )}
+                        ))
+                      )}
+                    </div>
+                  </TooltipProvider>
                 </div>
+              </details>
 
-                <div className="space-y-2">
-                  <Textarea
-                    placeholder="Leave a comment"
-                    value={commentBody}
-                    onChange={event => setCommentBody(event.target.value)}
-                    rows={3}
-                  />
+              <details className="group" open>
+                <summary className="flex cursor-pointer items-center justify-between rounded-lg border bg-muted/20 px-4 py-3 hover:bg-muted/30 transition-colors">
                   <div className="flex items-center gap-2">
-                    <Button type="button" onClick={submitComment} disabled={commentMutation.isPending || !commentBody.trim()}>
-                      {commentMutation.isPending ? 'Posting...' : 'Add comment'}
-                    </Button>
-                    <Button type="button" variant="ghost" onClick={() => setCommentBody('')}>
-                      Clear
-                    </Button>
+                    <span className="text-sm font-medium">Comments</span>
+                    <Badge variant="outline" className="ml-2">
+                      <MessageSquare className="mr-1 h-3 w-3" /> {comments.length}
+                    </Badge>
+                  </div>
+                  <svg className="h-4 w-4 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </summary>
+
+                <div className="mt-2 px-1">
+                  <TooltipProvider>
+                    <div className="space-y-4">
+                      {comments.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">Be the first to leave a note.</p>
+                      ) : (
+                        comments.map(comment => (
+                          <div key={comment.id} className="rounded-lg border p-3">
+                            <div className="mb-2 flex items-center gap-2">
+                              <Avatar className="h-8 w-8">
+                                {comment.author?.avatarUrl ? (
+                                  <AvatarImage src={comment.author.avatarUrl} alt={comment.author.username ?? 'Author'} />
+                                ) : null}
+                                <AvatarFallback>{initials(comment.author?.username)}</AvatarFallback>
+                              </Avatar>
+                              <div>
+                                <div className="text-sm font-medium">{comment.author?.username ?? 'User'}</div>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <div className="text-xs text-muted-foreground cursor-help">
+                                      {formatDistanceToNow(parseISO(comment.createdAt), { addSuffix: true })}
+                                    </div>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>{format(parseISO(comment.createdAt), 'PPpp')}</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </div>
+                            </div>
+                            <p className="text-sm text-foreground">{comment.body}</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </TooltipProvider>
+
+                  <div className="space-y-2 mt-4">
+                    <Textarea
+                      placeholder="Leave a comment"
+                      value={commentBody}
+                      onChange={event => setCommentBody(event.target.value)}
+                      rows={3}
+                    />
+                    <div className="flex items-center gap-2">
+                      <Button type="button" onClick={submitComment} disabled={commentMutation.isPending || !commentBody.trim()}>
+                        {commentMutation.isPending ? 'Posting...' : 'Add comment'}
+                      </Button>
+                      <Button type="button" variant="ghost" onClick={() => setCommentBody('')}>
+                        Clear
+                      </Button>
+                    </div>
                   </div>
                 </div>
-              </section>
+              </details>
             </div>
           </div>
         )}

@@ -23,9 +23,16 @@ import {
   CheckSquare,
   Ruler,
   Layers,
+  LayoutGrid,
 } from 'lucide-react';
 import { useState, useEffect, createContext, useContext } from 'react';
 import { Button } from '@/components/ui/button';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 
 const navigation = [
   { 
@@ -46,7 +53,7 @@ const navigation = [
   { 
     name: 'Collections', 
     href: '/collections',
-    icon: Box 
+    icon: LayoutGrid 
   },
   { 
     name: 'Inventory', 
@@ -214,16 +221,13 @@ export function Sidebar() {
         </div>
         
         <nav className="flex-1 overflow-y-auto overflow-x-visible py-4">
-          <ul className="flex flex-col gap-1 px-2">
-            {navigation.map((item) => {
-              const Icon = item.icon;
-              const isActive = pathname === item.href;
+          <TooltipProvider delayDuration={100} skipDelayDuration={0}>
+            <ul className="flex flex-col gap-1 px-2">
+              {navigation.map((item) => {
+                const Icon = item.icon;
+                const isActive = pathname === item.href;
 
-              return (
-                <li
-                  key={item.name}
-                  className={cn('relative', collapsed && 'group')}
-                >
+                const linkContent = (
                   <Link
                     href={item.href}
                     className={cn(
@@ -233,8 +237,7 @@ export function Sidebar() {
                         : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground hover:shadow-sm',
                       collapsed ? 'justify-center' : 'justify-start gap-3'
                     )}
-                    title={collapsed ? item.name : undefined}
-                    aria-label={collapsed ? item.name : undefined}
+                    aria-label={item.name}
                     onClick={() => isMobile && handleSetCollapsed(true)}
                   >
                     <Icon className="h-5 w-5 flex-shrink-0 transition-transform duration-200 group-hover:scale-110" />
@@ -244,21 +247,34 @@ export function Sidebar() {
                       </span>
                     )}
                   </Link>
-                  {collapsed && (
-                    <div className="pointer-events-none absolute left-full top-1/2 z-50 ml-3 hidden -translate-y-1/2 whitespace-nowrap rounded-md bg-popover px-3 py-1 text-xs font-semibold text-popover-foreground shadow-lg shadow-black/5 group-focus-within:block group-hover:block">
-                      <span
-                        className="absolute left-[-6px] top-1/2 h-3 w-3 -translate-y-1/2 rotate-45 rounded-sm bg-popover shadow-lg shadow-black/5"
-                        aria-hidden="true"
-                      />
-                      <span className="relative">
-                        {item.name}
-                      </span>
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+                );
+
+                return (
+                  <li key={item.name}>
+                    {collapsed ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          {linkContent}
+                        </TooltipTrigger>
+                        <TooltipContent 
+                          side="right" 
+                          className="px-4 py-2.5 text-sm font-medium"
+                          sideOffset={12}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Icon className="h-4 w-4 opacity-70" />
+                            <span>{item.name}</span>
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      linkContent
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </TooltipProvider>
         </nav>
       </aside>
     </SidebarContext.Provider>

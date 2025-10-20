@@ -78,7 +78,6 @@ const columns = [
   {
     accessorKey: 'category.categoryname',
     header: 'Category',
-    cell: (row: Component) => row.category?.categoryname || 'Uncategorized',
     enableFiltering: true,
     editable: true
   },

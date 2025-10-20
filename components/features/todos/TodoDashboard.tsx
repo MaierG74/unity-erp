@@ -16,10 +16,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useToast } from '@/components/ui/use-toast';
+import { cn } from '@/lib/utils';
 
 import { TODO_PRIORITIES, TODO_STATUSES, type TodoItem } from '@/lib/db/todos';
-import { useTodoList } from '@/hooks/useTodosApi';
+import { useTodoList, useCreateTodo } from '@/hooks/useTodosApi';
 import { useDebounce } from '@/hooks/use-debounce';
+import { useAuth } from '@/components/common/auth-provider';
 
 import { TodoCreateDialog } from './TodoCreateDialog';
 import { TodoDetailDialog } from './TodoDetailDialog';
@@ -147,8 +149,11 @@ export function TodoDashboard() {
   const [searchInput, setSearchInput] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [quickTaskTitle, setQuickTaskTitle] = useState('');
   const debouncedSearch = useDebounce(searchInput, 250);
   const { toast } = useToast();
+  const { user } = useAuth();
+  const createMutation = useCreateTodo();
 
   const filters = useMemo(
     () => ({
@@ -173,6 +178,30 @@ export function TodoDashboard() {
   }, [error, toast]);
 
   const todos = data?.todos ?? [];
+
+  const handleQuickCreate = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && quickTaskTitle.trim()) {
+      try {
+        await createMutation.mutateAsync({
+          title: quickTaskTitle.trim(),
+          priority: 'medium',
+          assignedTo: user?.id,
+        });
+        setQuickTaskTitle('');
+        toast({ title: 'Task created' });
+        refetch();
+      } catch (error) {
+        console.error('Failed to create task', error);
+        toast({
+          title: 'Failed to create task',
+          description: error instanceof Error ? error.message : 'Unknown error',
+          variant: 'destructive',
+        });
+      }
+    } else if (e.key === 'Escape') {
+      setQuickTaskTitle('');
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -279,6 +308,22 @@ export function TodoDashboard() {
                 </TableRow>
               </TableHeader>
               <TableBody>
+                {/* Quick Add Row */}
+                <TableRow className="bg-muted/30 hover:bg-muted/50">
+                  <TableCell colSpan={6} className="py-3">
+                    <div className="flex items-center gap-3">
+                      <Plus className="h-4 w-4 text-muted-foreground" />
+                      <Input
+                        value={quickTaskTitle}
+                        onChange={(e) => setQuickTaskTitle(e.target.value)}
+                        onKeyDown={handleQuickCreate}
+                        placeholder="Quick add task (press Enter to save, Esc to cancel)"
+                        className="border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0"
+                      />
+                    </div>
+                  </TableCell>
+                </TableRow>
+
                 {todos.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={6} className="py-16 text-center text-muted-foreground">
@@ -300,18 +345,56 @@ export function TodoDashboard() {
                     return (
                       <TableRow
                         key={todo.id}
-                        className={`cursor-pointer border-l-4 ${priorityColor} transition-all hover:bg-muted/70 hover:shadow-sm`}
-                        onClick={() => setSelectedId(todo.id)}
+                        className={`border-l-4 ${priorityColor} transition-all hover:bg-muted/70 hover:shadow-sm`}
                       >
                         <TableCell className="py-5">
-                          <div className="flex flex-col gap-2">
-                            {statusBadge(todo.status)}
-                            <span className="text-xs text-muted-foreground">
-                              {todo.updatedAt ? `Updated ${formatDateTime(todo.updatedAt)}` : ''}
-                            </span>
+                          <div className="flex items-center gap-3">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                // Toggle between open and done
+                                const newStatus = todo.status === 'done' ? 'open' : 'done';
+                                // Call update mutation
+                                fetch(`/api/todos/${todo.id}`, {
+                                  method: 'PATCH',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ status: newStatus }),
+                                })
+                                  .then(() => refetch())
+                                  .catch(err => {
+                                    console.error('Failed to update status', err);
+                                    toast({
+                                      title: 'Failed to update status',
+                                      description: 'Please try again',
+                                      variant: 'destructive',
+                                    });
+                                  });
+                              }}
+                              className={cn(
+                                "group relative h-5 w-5 rounded-md border-2 transition-all duration-200 flex items-center justify-center",
+                                todo.status === 'done'
+                                  ? "bg-primary border-primary"
+                                  : "border-muted-foreground/30 hover:border-primary/50"
+                              )}
+                            >
+                              {todo.status === 'done' && (
+                                <svg
+                                  className="h-3.5 w-3.5 text-primary-foreground"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                  strokeWidth={3}
+                                >
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                              )}
+                            </button>
+                            <div className="cursor-pointer" onClick={() => setSelectedId(todo.id)}>
+                              {statusBadge(todo.status)}
+                            </div>
                           </div>
                         </TableCell>
-                        <TableCell className="py-5">
+                        <TableCell className="py-5 cursor-pointer" onClick={() => setSelectedId(todo.id)}>
                           <div className="space-y-2">
                             <div className="font-semibold text-base leading-tight text-foreground">{todo.title}</div>
                             {todo.description ? (
@@ -327,7 +410,7 @@ export function TodoDashboard() {
                             ) : null}
                           </div>
                         </TableCell>
-                        <TableCell className="hidden md:table-cell py-5">
+                        <TableCell className="hidden md:table-cell py-5 cursor-pointer" onClick={() => setSelectedId(todo.id)}>
                           {todo.assignee ? (
                             <div className="flex items-center gap-3">
                               <Avatar className="h-9 w-9 ring-2 ring-background">
@@ -345,14 +428,14 @@ export function TodoDashboard() {
                             <span className="text-sm text-muted-foreground italic">Unassigned</span>
                           )}
                         </TableCell>
-                        <TableCell className="hidden xl:table-cell py-5">{priorityBadge(todo.priority)}</TableCell>
-                        <TableCell className="hidden lg:table-cell py-5">
+                        <TableCell className="hidden xl:table-cell py-5 cursor-pointer" onClick={() => setSelectedId(todo.id)}>{priorityBadge(todo.priority)}</TableCell>
+                        <TableCell className="hidden lg:table-cell py-5 cursor-pointer" onClick={() => setSelectedId(todo.id)}>
                           <div className="flex items-center gap-2">
                             <Clock className="h-4 w-4 text-muted-foreground" />
                             <span className={isOverdue(todo) ? 'text-destructive font-semibold' : 'text-sm'}>{formatDueDate(todo.dueAt)}</span>
                           </div>
                         </TableCell>
-                        <TableCell className="hidden xl:table-cell py-5">
+                        <TableCell className="hidden xl:table-cell py-5 cursor-pointer" onClick={() => setSelectedId(todo.id)}>
                           <div className="flex -space-x-2">
                             {todo.watchers.slice(0, 5).map(watcher => (
                               <Avatar key={watcher.userId} className="h-9 w-9 border-2 border-background ring-1 ring-gray-200 dark:ring-gray-700">

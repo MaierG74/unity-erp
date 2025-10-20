@@ -604,6 +604,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['productBOMLinks', productId] })
       queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
+      queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] })
       toast({ title: 'Detached', description: 'Sub-product link removed' })
     },
     onError: () => {
@@ -836,6 +837,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
       // Also refresh Effective BOM (explicit + linked) and any consumers like Costing
       queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
       queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] });
+      queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] });
       form.reset(defaultFormValues);
       handleComponentSearchChange('');  // Reset search term
       handleSupplierSearchChange('');  // Reset supplier search term
@@ -907,6 +909,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
       queryClient.invalidateQueries({ queryKey: ['productBOM', productId] });
       queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
       queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] });
+      queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] });
       setEditingItem(null);
       setEditDialogOpen(false);
       form.reset(defaultFormValues);
@@ -939,6 +942,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
       queryClient.invalidateQueries({ queryKey: ['productBOM', productId] });
       queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
       queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] });
+      queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] });
       toast({
         title: 'Success',
         description: 'Component removed from BOM',
@@ -1621,6 +1625,7 @@ const renderCutlistEditor = () => {
                   queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] })
                   queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
                   queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] })
+                  queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] })
                 }}
               />
               {/* Browse by supplier (opens right-side panel) */}
@@ -1635,6 +1640,7 @@ const renderCutlistEditor = () => {
                   queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] })
                   queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
                   queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] })
+                  queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] })
                 }}
               />
               {/* Add Product (explode/copy its BOM) */}
@@ -1646,6 +1652,7 @@ const renderCutlistEditor = () => {
                   queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] })
                   queryClient.invalidateQueries({ queryKey: ['productBOMLinks', productId] })
                   queryClient.invalidateQueries({ queryKey: ['productBOL', productId] })
+                  queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] })
                 }}
               />
             </div>
@@ -2344,6 +2351,7 @@ const renderCutlistEditor = () => {
           queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] })
           queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
           queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] })
+          queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] })
         }}
       />
 
