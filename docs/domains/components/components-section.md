@@ -39,6 +39,53 @@ Manage components, stock levels, locations, supplier links, and images. Provide 
 - `hooks/use-change-category.ts` — Get-or-create `component_categories` entry by name, then update `components.category_id`.
 - `hooks/use-update-inventory.ts` — Update `inventory` row fields.
 
+### Bulk Categorization Features (Updated 2025-10-19)
+The category cells in the inventory table now support multiple efficient workflows for bulk categorization:
+
+#### 1. Single-Click Editing
+- **Usage**: Click any category cell to immediately open the dropdown selector
+- **When to use**: For one-off category changes
+- **Keyboard shortcut**: Press **Esc** to close the dropdown without saving
+- **Create new categories**: Click "Create new category..." at the bottom of the dropdown
+  - Type the category name and press **Enter** or click the checkmark
+  - The new category is created and immediately applied
+  - Press **Esc** to cancel
+
+#### 2. Copy/Paste
+- **Usage**: 
+  - Click a category cell to focus it
+  - Press `Ctrl+C` (or `Cmd+C` on Mac) to copy the category value
+  - Click another component's category cell
+  - Press `Ctrl+V` (or `Cmd+V` on Mac) to paste and immediately save
+- **When to use**: For applying a category to a few scattered items
+- **Visual feedback**: Toast notifications confirm copy and paste actions
+
+#### 3. Quick Apply Mode (Sticky Category)
+- **Usage**:
+  - Hover over a category cell with the category you want to apply to multiple items
+  - Click the **Pin icon** (📌) that appears on hover
+  - The cell highlights with a blue border and a toast confirms "Quick Apply enabled"
+  - Click on any other component's category cell to instantly apply the pinned category
+  - Cells that will receive the pinned category show a green highlight with "← will apply [category]" hint
+  - Press **Esc** or click the Pin icon again to disable Quick Apply mode
+- **When to use**: For categorizing many items with the same category (e.g., marking 20+ items as "Melamine Boards")
+- **Visual feedback**:
+  - Pinned category cell: Blue highlight with ring border
+  - Target cells: Green background with inline hint text
+  - Toast notifications for enable/disable actions
+- **Keyboard shortcut**: Press **Esc** to cancel Quick Apply mode from anywhere
+
+#### 4. Hover Actions
+All category cells show two action buttons on hover:
+- **Copy button** (📄): Quick copy without keyboard shortcuts
+- **Pin button** (📌): Toggle Quick Apply mode
+
+#### Technical Implementation
+- `CategoryCell` component uses global state for sticky mode coordination across all cells
+- Keyboard event listeners attached to individual cells with proper cleanup
+- Subscribe/unsubscribe pattern ensures all cells react to sticky mode changes
+- Single-click replaces previous double-click interaction for faster access
+
 ### Data Model (as used in UI)
 - `components`
   - `component_id`, `internal_code` (unique), `description`, `image_url`, `category_id`, `unit_id`.

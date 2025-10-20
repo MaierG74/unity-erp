@@ -27,6 +27,7 @@ import { ProductBOM } from '@/components/features/products/product-bom';
 import { ProductBOL } from '@/components/features/products/product-bol';
 import ProductCosting from '@/components/features/products/product-costing';
 import { ProductOptionsTab } from '@/components/features/products/ProductOptionsTab';
+import { ProductCutlistTab } from '@/components/features/products/ProductCutlistTab';
 import { useToast } from '@/components/ui/use-toast';
 
 interface ProductDetailPageProps {
@@ -357,6 +358,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
           <TabsTrigger value="images">Images</TabsTrigger>
           <TabsTrigger value="categories">Categories</TabsTrigger>
           <TabsTrigger value="bom">Bill of Materials</TabsTrigger>
+          <TabsTrigger value="cutlist">Cutlist</TabsTrigger>
           <TabsTrigger value="bol">Bill of Labor</TabsTrigger>
           <TabsTrigger value="options">Options</TabsTrigger>
           <TabsTrigger value="costing">Costing</TabsTrigger>
@@ -616,6 +618,10 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
         
         <TabsContent value="bom" className="space-y-4">
           <ProductBOM productId={product.product_id} />
+        </TabsContent>
+
+        <TabsContent value="cutlist" className="space-y-4">
+          <ProductCutlistTab productId={product.product_id} />
         </TabsContent>
         
         <TabsContent value="bol" className="space-y-4">

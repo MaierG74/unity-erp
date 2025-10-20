@@ -35,6 +35,7 @@
 - Surface cutlist defaults within the BOM override dialog UI (e.g., badges or tooltips) so authors can spot inherited metadata before editing.
 - Add safeguards to prevent auto-seeded cutlist rows from being deleted unintentionally when authors clear overrides.
 - Product BOM editor now captures cutlist size/backer/edging metadata directly on the row, providing the base payload that option-set overrides inherit.
+- The Product Cutlist tab (`components/features/products/ProductCutlistTab.tsx`) aggregates those rows, lets authors assign melamine boards sourced from the `Melamine` component category, and exposes a toggle to include/exclude linked sub-products when reviewing cutlist payloads.
 
 ### 4. Resolver & Runtime Flows
 - Extend `get_product_components` assertions to guarantee cutlist metadata is present whenever option-linked BOM rows are resolved, logging gaps for debugging.

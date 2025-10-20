@@ -115,9 +115,13 @@ CREATE TABLE public.billoflabour (
   - **Categories** – Category assignment management
 - **Bill of Materials** – Component requirements (inline editing, supplier-aware tooling)
   - Inline editor now includes a **Cutlist** section so authors can capture base panel dimensions, edging sides, laminate/backer components, and material notes directly on the BOM row. These defaults seed overrides when option sets are attached and keep quote/order cutlists aligned without requiring JSON edits.
-  - **Bill of Labor** – Labor requirements
-  - **Options** – Manage configurable attributes (option groups + values) and hook BOM overrides
-  - **Costing** – Combined materials + labor unit cost summary (see `docs/plans/product-costing-plan.md`)
+- **Cutlist** – Aggregated view of every BOM row flagged as a cutlist item. Shows per-part dimension summaries, total part counts, and material groupings. Authors can:
+  - Toggle linked sub‑products on/off to focus on direct rows or include phantom assemblies.
+  - Assign or clear melamine materials via a searchable picker that sources boards from the **Melamine** component category (updates persist back to the originating BOM row).
+  - Review the current melamine palette pulled from the component catalogue for quick reference; the palette card is collapsible so it stays out of the way when you do not need it.
+- **Bill of Labor** – Labor requirements
+- **Options** – Manage configurable attributes (option groups + values) and hook BOM overrides
+- **Costing** – Combined materials + labor unit cost summary (see `docs/plans/product-costing-plan.md`)
 - Options tab specifics:
   - Focuses on attaching **Option Sets** from the global library (see `docs/domains/components/bom-option-cut.md`).
   - Displays attached sets in order; each group shows usage badges indicating which BOM rows reference it.

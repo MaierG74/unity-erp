@@ -167,9 +167,9 @@ This guide documents how we style the app: Tailwind CSS utilities + shadcn/ui pr
 ## Patterns & Examples
 ### Dialogs / Modals
 - Structure: `Dialog` → `DialogContent` → `DialogHeader` + body + `DialogFooter`.
-- Content: use `p-6` built-in padding; keep inner body `space-y-3` and constrain long content with `max-h-[70vh] overflow-y-auto`.
-- Avoid ring clipping: when a focusable control sits near the left/right edge inside a scrollable modal body, add `overflow-x-visible` to the scroll container so focus rings are not clipped.
-- If rings still clip: ensure the modal root allows overflow. Our `DialogContent` includes `overflow-visible` so focus rings can extend past rounded corners.
+- Content container: wrap the body with `max-h-[min(calc(100vh-8rem),90vh)] overflow-y-auto` so tall modals scroll while keeping padding consistent.
+- Outer shell: `DialogContent` already sets `sm:max-h-[90vh]` and allows overflow, so focus rings render correctly; avoid overriding to `overflow-hidden`.
+- Keep inner sections `space-y-3`. When you need horizontal tabs/forms, rely on CSS grid/flex but keep the scroll container around them.
 - Footer: actions on the right; use `Button size="sm" className="h-9"` for compact density.
 - Inputs: reuse standard `Input`, `Select`, `Label`; keep placeholder color `placeholder:text-muted-foreground`.
 - Borders: prefer `border-input` inside lists; avoid mixed border tokens.
@@ -180,7 +180,7 @@ This guide documents how we style the app: Tailwind CSS utilities + shadcn/ui pr
     <DialogHeader>
       <DialogTitle>Add Thing</DialogTitle>
     </DialogHeader>
-    <div className="space-y-3 max-h-[70vh] overflow-y-auto">
+    <div className="space-y-3 max-h-[min(calc(100vh-8rem),90vh)] overflow-y-auto">
       <Label>Name</Label>
       <Input className="h-9" />
     </div>
@@ -189,7 +189,7 @@ This guide documents how we style the app: Tailwind CSS utilities + shadcn/ui pr
       <Button size="sm" className="h-9">Save</Button>
     </DialogFooter>
   </DialogContent>
-  </Dialog>
+</Dialog>
 ```
 
 - Edge cases: When a control sits very close to a modal edge, prefer an inset ring to avoid clipping: add `focus:ring-inset focus:ring-offset-0` on the control. If still tight, add a small container padding `px-1`.
