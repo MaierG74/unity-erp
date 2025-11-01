@@ -106,6 +106,21 @@ const columns = [
     header: 'Reorder Level',
     cell: (row: Component) => row.inventory?.[0]?.reorder_level || 0,
     editable: true
+  },
+  {
+    accessorKey: 'on_order_quantity',
+    header: 'On Order',
+    cell: (row: Component) => {
+      const quantity = (row as any).on_order_quantity || 0;
+      return (
+        <span className={cn(
+          quantity > 0 && "text-blue-600 font-medium"
+        )}>
+          {quantity}
+        </span>
+      );
+    },
+    editable: false
   }
 ]
 
@@ -170,13 +185,49 @@ export default function InventoryPage() {
           console.error('Supabase error:', error);
           throw new Error(`Failed to fetch components: ${error.message}`);
         }
+
+        // Fetch on-order quantities from open purchase orders
+        const { data: onOrderData, error: onOrderError } = await supabase
+          .from('supplier_orders')
+          .select(`
+            supplier_component_id,
+            order_quantity,
+            total_received,
+            suppliercomponents!inner (
+              component_id
+            ),
+            status:supplier_order_statuses!inner (
+              status_name
+            )
+          `)
+          .in('status.status_name', ['Open', 'In Progress', 'Approved', 'Partially Received', 'Pending Approval']);
+
+        if (onOrderError) {
+          console.error('Error fetching on-order data:', onOrderError);
+        }
+
+        // Calculate on-order quantity per component
+        const onOrderByComponent = new Map<number, number>();
+        if (onOrderData) {
+          onOrderData.forEach((so: any) => {
+            const componentId = so.suppliercomponents?.component_id;
+            if (componentId) {
+              const pending = (so.order_quantity || 0) - (so.total_received || 0);
+              const current = onOrderByComponent.get(componentId) || 0;
+              onOrderByComponent.set(componentId, current + pending);
+            }
+          });
+        }
         
-        // Process inventory data to ensure numeric values
+        // Process inventory data to ensure numeric values and add on_order_quantity
         const processedData = data?.map(component => {
+          const onOrderQty = onOrderByComponent.get(component.component_id) || 0;
+          
           if (component.inventory && component.inventory.length > 0) {
             // Ensure inventory array items have numeric values
             return {
               ...component,
+              on_order_quantity: onOrderQty,
               inventory: component.inventory.map((inv: any) => ({
                 ...inv,
                 quantity_on_hand: inv.quantity_on_hand !== null && 
@@ -188,7 +239,10 @@ export default function InventoryPage() {
               }))
             };
           }
-          return component;
+          return {
+            ...component,
+            on_order_quantity: onOrderQty
+          };
         });
         
         return processedData || [];
@@ -749,6 +803,8 @@ export default function InventoryPage() {
                     selectedComponent.inventory[0]?.reorder_level !== undefined 
                     ? Number(selectedComponent.inventory[0]?.reorder_level) 
                     : 0,
+                  on_order_quantity: (selectedComponent as any).on_order_quantity || 0,
+                  required_for_orders: null,
                   component: {
                     component_id: selectedComponent.component_id || 0,
                     internal_code: selectedComponent.internal_code || "",

@@ -51,7 +51,9 @@
 ### 2025-09-22 – UX polish
 - Quote items now prefer the first costing cluster that actually contains lines, falling back to an empty shell when no lines exist. Cluster lists and their lines are sorted by `position`/`created_at` and `sort_order` respectively so re-fetching data no longer hides valid cost entries when Supabase returns rows in a different order.
 - Creating a Costing Cluster with the “+ Cluster” button no longer reloads the page. The cluster is created and added to the item state optimistically, keeping the user on the Line Items tab.
+- Empty clusters are now surfaced immediately in the UI so the estimator can add costing lines without the button feeling like a no-op.
 - Cutlist “Export to Quote” now updates the affected item’s cluster lines in place and closes the dialog, without a full page reload. The active tab remains on Line Items.
+- When multiple clusters exist for a line item (e.g., legacy manual lines plus cutlist-generated lines), the Line Items view now flattens the data so the costing table always shows the manual entries and cutlist rows together after a refresh.
 - Add Component dialog: component list stays hidden until the user types in the search field, preventing the dialog from resizing on open. “Browse by supplier” moved to the top-right header.
 
 ### 2025-09-07 – Phase 2 Progress (Products as Items)

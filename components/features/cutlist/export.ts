@@ -20,7 +20,14 @@ export async function exportCutlistToQuote(params: {
   band16Line?: CutlistLineInput | null;
   band32Line?: CutlistLineInput | null;
 }): Promise<CutlistLineRefs> {
-  const { quoteItemId, existingLineRefs = {}, primaryLine, backerLine, band16Line, band32Line } = params;
+  const {
+    quoteItemId,
+    existingLineRefs = {},
+    primaryLine,
+    backerLine,
+    band16Line,
+    band32Line,
+  } = params;
 
   const response = await fetch(`/api/quote-items/${quoteItemId}/cutlist/export`, {
     method: 'POST',

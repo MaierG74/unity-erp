@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { formatDistanceToNow, parseISO, format } from 'date-fns';
-import { CheckCircle2, Loader2, MessageSquare, CalendarIcon, Paperclip, Upload, X, Download, FileIcon } from 'lucide-react';
+import { CheckCircle2, Loader2, MessageSquare, CalendarIcon, Paperclip, Upload, X, Download, FileIcon, ExternalLink } from 'lucide-react';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm } from 'react-hook-form';
@@ -76,6 +77,7 @@ function initials(name?: string | null) {
 }
 
 export function TodoDetailDialog({ todoId, open, onOpenChange }: TodoDetailDialogProps) {
+  const router = useRouter();
   const { toast } = useToast();
   const { user } = useAuth();
   const profilesQuery = useProfiles();
@@ -282,7 +284,20 @@ export function TodoDetailDialog({ todoId, open, onOpenChange }: TodoDetailDialo
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Task Details</DialogTitle>
+          <div className="flex items-center justify-between">
+            <DialogTitle>Task Details</DialogTitle>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                router.push(`/todos/${todoId}`);
+                onOpenChange(false);
+              }}
+            >
+              <ExternalLink className="mr-2 h-4 w-4" />
+              Open in full view
+            </Button>
+          </div>
         </DialogHeader>
 
         {isLoading ? (

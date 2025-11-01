@@ -86,15 +86,20 @@
   - Validates Q number against `/^Q\d{2}-\d{3}$/`.
   - Sets `purchase_orders.q_number`, status “Approved”, stamps `approved_at/by`, cascades SO statuses to “Approved”. See `app/purchasing/purchase-orders/[id]/page.tsx:201`.
   - Triggers email dispatch to suppliers (non-blocking).
+- Manual re-send is available via "Send Supplier Emails" in the PO action bar (visible once approved).
 
 **Email Sending**
 
 - API route: `app/api/send-purchase-order-email/route.ts:1`.
-  - Loads PO + supplier order detail, groups by supplier, resolves primary supplier email from `supplier_emails`, renders HTML with `@react-email`, sends via Resend.
-  - Request shape: `{ purchaseOrderId }`.
+  - Loads PO + supplier order detail, groups by supplier, resolves the primary supplier email from `supplier_emails` (or falls back to any available), renders HTML with `@react-email`, sends via Resend.
+  - Request shape: `{ purchaseOrderId, overrides?, cc? }`.
+  - Success/failure summaries surface as toasts; partial sends list supplier names that failed.
+  - “Send Supplier Emails” opens a review dialog so operators can inspect recipient addresses, override them, and add CC recipients before dispatching.
 - Templating: `emails/purchase-order-email.tsx:1`.
+- The PO template uses a supplier-focused layout (branded header, spacious zebra table, footer) and automatically injects the company logo, addresses, website, and contact details from Settings so suppliers get a consistent experience without the customer-only summary or terms blocks. Messages still send from the `EMAIL_FROM` identity for deliverability, while the body shows the Settings contact details.
+- Manual re-send button: `Send Supplier Emails` (bottom action bar) calls the same API for already-approved POs.
 - Low-level utility (not used by API route directly): `lib/email.ts:11`.
-- Env required: `RESEND_API_KEY`, `EMAIL_FROM`, and optional company identity (`COMPANY_NAME`, `COMPANY_LOGO`, `COMPANY_ADDRESS`, `COMPANY_PHONE`).
+- Branding fields (logo, address, and contact details) are sourced from `quote_company_settings` (Settings → Company). Environment variables such as `COMPANY_NAME`/`COMPANY_ADDRESS` only act as fallbacks for development.
 
 **Receiving Flow**
 
@@ -126,7 +131,7 @@
 **Environment**
 
 - Required: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (client), `SUPABASE_SERVICE_ROLE_KEY` (server/API, scripts), `RESEND_API_KEY` (email).
-- Optional identity: `EMAIL_FROM`, `COMPANY_NAME`, `COMPANY_LOGO`, `COMPANY_ADDRESS`, `COMPANY_PHONE`.
+- Optional identity: `EMAIL_FROM`, `COMPANY_NAME`, `COMPANY_LOGO`, `COMPANY_ADDRESS`, `COMPANY_PHONE`, `NEXT_PUBLIC_PO_EMAIL_CC` (default CC list for the Send Supplier Emails dialog).
 - Scripts: `npm run init-purchasing` runs `scripts/init-purchasing-data.ts` to seed basics (statuses, transaction types, function installer).
 
 **Known Gaps & TODOs**
@@ -155,6 +160,8 @@
 
 - Create a PO via Purchasing → New. Confirm a PO per-supplier is created and SO lines exist.
 - Submit for approval, then approve with a valid Q number. Check supplier email(s) are sent (API logs/results returned).
+- Optionally open “Send Supplier Emails” to confirm recipients/CCs and manually resend; toast output will note any suppliers that failed.
+- Optional: use “Send Supplier Emails” to manually resend and confirm toast feedback (success vs partial failure).
 - Receive partial quantities, verify SO `total_received` increments, PO derived status becomes “Partially Received”.
 - Receive the balance, verify status becomes “Fully Received” and inventory increases correctly.
 

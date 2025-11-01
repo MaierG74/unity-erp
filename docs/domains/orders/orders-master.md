@@ -111,6 +111,7 @@
 - When generating POs from an order, each supplier order line is linked via junction `supplier_order_customer_orders` containing:
   - `supplier_order_id` (SO), `order_id` (sales order), `component_id`, `quantity_for_order`, `quantity_for_stock`.
   - Schema: `sql/create_junction_table.sql`.
+- Component requirement functions (`get_order_component_status`, `get_detailed_component_status`, `get_global_component_requirements`) treat every order status except **Completed** and **Cancelled** as "active". Newly created orders stay visible to purchasing immediately, without needing a status transition.
 
 **Cleanup Considerations**
 
@@ -120,6 +121,7 @@
   - Delete `order_details` rows before deleting the `orders` headers.
   - Refresh component views if you use them to compute requirements: `SELECT refresh_component_views();`.
 - Purchasing can be cleaned independently (see `docs/domains/purchasing/purchasing-reset-guide.md`). If you do not also delete POs, the POs and supplier orders remain but will no longer be linked to any order.
+- After inserting, updating, or deleting supplier orders directly (outside the UI workflow), run `SELECT refresh_component_views();` so the materialized views feeding the order component dashboards pick up the latest "On Order" quantities.
 
 **Recommended Status Workflow**
 

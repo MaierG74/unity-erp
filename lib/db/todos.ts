@@ -78,6 +78,11 @@ export interface TodoItem {
   assignee?: ProfileSummary | null;
   completer?: ProfileSummary | null;
   watchers: TodoWatcher[];
+  statusLabel: string | null;
+  statusColor: string | null;
+  reminderOffsetMinutes: number | null;
+  notifyEmail: boolean;
+  notifyInApp: boolean;
 }
 
 export interface TodoActivity {
@@ -159,6 +164,16 @@ const toTodo = (row: any): TodoItem => {
     watchers: Array.isArray(row.watchers)
       ? (row.watchers.map(toWatcher).filter(Boolean) as TodoWatcher[])
       : [],
+    statusLabel: row.status_label ?? null,
+    statusColor: row.status_color ?? null,
+    reminderOffsetMinutes:
+      typeof row.reminder_offset_minutes === 'number'
+        ? row.reminder_offset_minutes
+        : row.reminder_offset_minutes === null
+          ? null
+          : null,
+    notifyEmail: Boolean(row.notify_email),
+    notifyInApp: Boolean(row.notify_in_app),
   };
 };
 

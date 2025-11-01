@@ -1,21 +1,29 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useToast } from '@/components/ui/use-toast';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { EmailOverrideDialog, EmailRecipientRow, EmailOverride, EmailOption } from './EmailOverrideDialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Textarea } from '@/components/ui/textarea';
 import { AlertCircle, ArrowLeft, Loader2, CheckCircle2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { sendPurchaseOrderEmail } from '@/lib/email';
-import { useToast } from "@/components/ui/use-toast";
+// import { sendPurchaseOrderEmail } from '@/lib/email'; // not used here; email is sent via API route
 
 // Status badge component
 function StatusBadge({ status, className }: { status: string; className?: string }) {
@@ -92,7 +100,9 @@ interface SupplierOrder {
       description: string;
     };
     supplier: {
+      supplier_id: number;
       name: string;
+      emails?: { email: string; is_primary: boolean }[];
     };
   };
   receipts?: Receipt[];
@@ -125,7 +135,9 @@ async function fetchPurchaseOrderById(id: string) {
             description
           ),
           supplier:suppliers(
-            name
+            supplier_id,
+            name,
+            emails:supplier_emails(email, is_primary)
           )
         ),
         receipts:supplier_order_receipts(
@@ -145,7 +157,9 @@ async function fetchPurchaseOrderById(id: string) {
 }
 
 // Update approvePurchaseOrder function to call the email API
-async function approvePurchaseOrder(id: string, qNumber: string) {
+type EmailResult = { supplier: string; success: boolean; error?: string; messageId?: string };
+
+async function approvePurchaseOrder(id: string, qNumber: string): Promise<{ id: string; emailResults?: EmailResult[]; emailError?: string }> {
   try {
     // 1. Get the approved status ID
     const { data: statusData, error: statusError } = await supabase
@@ -205,18 +219,23 @@ async function approvePurchaseOrder(id: string, qNumber: string) {
         },
         body: JSON.stringify({ purchaseOrderId: id }),
       });
+
+  const handleOpenEmailDialog = () => {}
       
+      const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         // Don't throw error, just log it - we don't want to fail the approval if email fails
-        const errorData = await response.json();
-        console.error('Error sending emails:', errorData);
+        console.error('Error sending emails:', payload);
+        return { id, emailError: payload?.error || 'Email dispatch failed' };
       }
+      return { id, emailResults: payload?.results as EmailResult[] | undefined };
     } catch (emailError) {
       // Log the error but don't fail the approval process
       console.error('Error calling email API:', emailError);
+      return { id, emailError: (emailError as Error).message };
     }
-
-    return id;
+    // Fallback return if early path didn't return
+    return { id };
   } catch (error) {
     console.error('Error in approvePurchaseOrder:', error);
     throw error;
@@ -450,6 +469,10 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
   const [error, setError] = useState<string | null>(null);
   const [receiptQuantities, setReceiptQuantities] = useState<ReceiptFormData>({});
   const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [emailDialogOpen, setEmailDialogOpen] = useState(false);
+  const [emailDialogLoading, setEmailDialogLoading] = useState(false);
+  const [emailRows, setEmailRows] = useState<EmailRecipientRow[]>([]);
   
   // Fetch purchase order data
   const { 
@@ -472,15 +495,98 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
       setQNumber(`Q${year}-${params.id.padStart(3, '0')}`);
     }
   }, [purchaseOrder, params.id]);
+
+  const baseEmailRows = useMemo<EmailRecipientRow[]>(() => {
+    if (!purchaseOrder?.supplier_orders?.length) return [];
+    const rows = new Map<number, EmailRecipientRow>();
+    for (const order of purchaseOrder.supplier_orders) {
+      const rawSupplier = order.supplier_component?.supplier as any;
+      const supplierRecord = Array.isArray(rawSupplier) ? rawSupplier[0] : rawSupplier;
+      if (!supplierRecord?.supplier_id || !supplierRecord?.name) continue;
+      if (rows.has(supplierRecord.supplier_id)) continue;
+
+      const uniqueEmailMap = new Map<string, EmailOption>();
+      (Array.isArray(supplierRecord.emails) ? supplierRecord.emails : []).forEach((email: any) => {
+        if (email?.email) {
+          uniqueEmailMap.set(email.email, { email: email.email, is_primary: !!email.is_primary });
+        }
+      });
+
+      const options = Array.from(uniqueEmailMap.values()).sort(
+        (a, b) => Number(b.is_primary) - Number(a.is_primary)
+      );
+
+      rows.set(supplierRecord.supplier_id, {
+        supplierId: supplierRecord.supplier_id,
+        supplierName: supplierRecord.name,
+        options,
+        selectedEmail: options[0]?.email ?? '',
+      });
+    }
+    return Array.from(rows.values());
+  }, [purchaseOrder]);
+
+  const handleOpenEmailDialog = () => {
+    if (!baseEmailRows.length) {
+      toast({
+        title: 'No suppliers found',
+        description: 'Add supplier components with email contacts before sending.',
+      });
+      return;
+    }
+    const clonedRows = baseEmailRows.map((row) => ({
+      supplierId: row.supplierId,
+      supplierName: row.supplierName,
+      options: [...row.options],
+      selectedEmail: row.selectedEmail,
+    }));
+    setEmailRows(clonedRows);
+    setEmailDialogOpen(true);
+  };
+
+  const handleSendEmails = (payload: { overrides: EmailOverride[]; cc: string[] }) => {
+    setEmailDialogLoading(true);
+    sendEmailMutation.mutate(payload, {
+      onSuccess: () => {
+        setEmailDialogOpen(false);
+      },
+      onSettled: () => {
+        setEmailDialogLoading(false);
+      },
+    });
+  };
   
   // Approve purchase order mutation
   const approveMutation = useMutation({
     mutationFn: (data: { qNumber: string }) =>
       approvePurchaseOrder(params.id, data.qNumber),
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['purchaseOrder', params.id] });
-      // Use alert instead of toast
-      alert('Purchase Order approved! Email notifications have been sent to suppliers.');
+      const successes = result?.emailResults?.filter(r => r.success).length ?? 0;
+      const failures = result?.emailResults?.filter(r => !r.success).length ?? 0;
+      const baseTitle = 'Purchase Order approved';
+      if (failures > 0) {
+        toast({
+          title: baseTitle,
+          description: `Emails sent: ${successes}, failed: ${failures}. Check supplier emails or server logs.`,
+          variant: 'destructive',
+          duration: 6000,
+        });
+      } else if (successes > 0) {
+        toast({
+          title: baseTitle,
+          description: `Emails sent to ${successes} supplier${successes === 1 ? '' : 's'}.`,
+        });
+      } else if (result?.emailError) {
+        toast({
+          title: baseTitle,
+          description: `Email dispatch error: ${result.emailError}`,
+          variant: 'destructive',
+          duration: 6000,
+        });
+      } else {
+        toast({ title: baseTitle, description: 'Approved without email results.' });
+      }
     },
     onError: (error: Error) => {
       setError(error.message);
@@ -515,6 +621,77 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
     },
     onError: (error: Error) => {
       setError(`Failed to receive stock: ${error.message}`);
+    },
+  });
+  
+  // Inline per-row receipt mutation
+  const receiveOneMutation = useMutation({
+    mutationFn: (payload: { orderId: string; qty: number }) =>
+      receiveStock(params.id, { [payload.orderId]: payload.qty }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrder', params.id] });
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
+      setReceiptQuantities({});
+      setError(null);
+    },
+    onError: (error: Error) => {
+      setError(`Failed to receive stock: ${error.message}`);
+    },
+  });
+
+  const sendEmailMutation = useMutation<EmailResult[] | undefined, Error, { overrides?: { supplierId: number; email: string }[]; cc?: string[] } | undefined>({
+    mutationFn: async (payload) => {
+      const response = await fetch('/api/send-purchase-order-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          purchaseOrderId: params.id,
+          overrides: payload?.overrides,
+          cc: payload?.cc,
+        })
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(json?.error || 'Failed to send purchase order emails');
+      }
+      return json?.results as EmailResult[] | undefined;
+    },
+    onSuccess: (results) => {
+      const successes = results?.filter((r) => r.success).length ?? 0;
+      const failures = results?.filter((r) => !r.success).length ?? 0;
+      if (failures > 0) {
+        const failedSuppliers = results
+          ?.filter((r) => !r.success && r.supplier)
+          .map((r) => r.supplier)
+          .join(', ');
+        const failureSuffix = failedSuppliers ? ` (${failedSuppliers})` : '';
+        toast({
+          title: 'Supplier emails partially sent',
+          description: `Sent: ${successes}, failed: ${failures}${failureSuffix}.`,
+          variant: 'destructive',
+          duration: 6000,
+        });
+      } else if (successes > 0) {
+        toast({
+          title: 'Supplier emails sent',
+          description: `Sent to ${successes} supplier${successes === 1 ? '' : 's'}.`,
+        });
+      } else {
+        toast({
+          title: 'Supplier emails queued',
+          description: 'Request completed. Check server logs for details.',
+        });
+      }
+    },
+    onError: (error: Error) => {
+      toast({
+        title: 'Failed to send supplier emails',
+        description: error.message,
+        variant: 'destructive',
+        duration: 6000,
+      });
     },
   });
   
@@ -602,10 +779,13 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
   const totalAmount = purchaseOrder.supplier_orders?.reduce((sum, order) => {
     return sum + (order.supplier_component?.price || 0) * order.order_quantity;
   }, 0) || 0;
+  const totalReceived = purchaseOrder.supplier_orders?.reduce((sum, order) => {
+    return sum + (order.total_received || 0);
+  }, 0) || 0;
   
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="sticky top-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b shadow-sm py-3 px-2 sm:px-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center">
           <Link href="/purchasing/purchase-orders" className="mr-4">
             <Button variant="outline" size="icon">
@@ -613,52 +793,24 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
             </Button>
           </Link>
           <div>
-            <h1 className="text-2xl font-bold flex items-center">
-              Purchase Order {purchaseOrder.q_number || `#${purchaseOrder.purchase_order_id}`}
-              <StatusBadge status={getOrderStatus(purchaseOrder)} className="ml-3" />
-            </h1>
-            <p className="text-muted-foreground">
-              Created on {format(new Date(purchaseOrder.created_at), 'PPP')}
-            </p>
+            <div className="text-xs sm:text-sm text-muted-foreground">Purchasing / Purchase Orders</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight">
+                {purchaseOrder.q_number || `PO #${purchaseOrder.purchase_order_id}`}
+              </h1>
+              <StatusBadge status={getOrderStatus(purchaseOrder)} />
+              <span className="text-muted-foreground">•</span>
+              <span className="text-sm font-medium text-muted-foreground">
+                {Array.from(new Set(
+                  purchaseOrder.supplier_orders?.map(o => o.supplier_component?.supplier?.name).filter(Boolean) || []
+                )).join(', ') || 'Supplier'}
+              </span>
+            </div>
+            <p className="text-muted-foreground text-sm">Created {format(new Date(purchaseOrder.created_at), 'PPP')}</p>
           </div>
         </div>
-        
-        {isDraft && (
-          <Button 
-            onClick={handleSubmit} 
-            disabled={submitMutation.isPending}
-            className="w-full sm:w-auto"
-          >
-            {submitMutation.isPending && (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            )}
-            Submit for Approval
-          </Button>
-        )}
-        
-        {isPendingApproval && (
-          <Button 
-            onClick={handleApprove} 
-            disabled={approveMutation.isPending}
-            className="w-full sm:w-auto"
-          >
-            {approveMutation.isPending && (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            )}
-            Approve Order
-          </Button>
-        )}
-        
-        {isApproved && (
-          <div className="flex items-center text-green-600">
-            <CheckCircle2 className="h-5 w-5 mr-2" />
-            <span>
-              Approved on {purchaseOrder.approved_at 
-                ? format(new Date(purchaseOrder.approved_at), 'PPP') 
-                : 'Unknown'}
-            </span>
-          </div>
-        )}
+        {/* Actions are shown in the bottom action bar */}
+        <div className="hidden sm:block" />
       </div>
       
       {error && (
@@ -671,30 +823,9 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
-            <CardTitle>Order Details</CardTitle>
+            <CardTitle>Order Summary</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {isPendingApproval && (
-              <div>
-                <label htmlFor="qNumber" className="block text-sm font-medium mb-1">
-                  Q Number *
-                </label>
-                <div className="flex flex-col gap-2">
-                  <input
-                    id="qNumber"
-                    value={qNumber}
-                    onChange={(e) => setQNumber(e.target.value)}
-                    className="w-full max-w-[200px] px-3 py-2 border rounded-md"
-                    placeholder="Q23-001"
-                    disabled={approveMutation.isPending}
-                    pattern="Q\d{2}-\d{3}"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Format: Q + year + hyphen + 3-digit number (e.g., Q23-001)
-                  </p>
-                </div>
-              </div>
-            )}
             
             <div>
               <p className="text-sm font-medium mb-1">Order Date</p>
@@ -717,21 +848,9 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
         
         <Card>
           <CardHeader>
-            <CardTitle>Order Summary</CardTitle>
+            <CardTitle>Supplier Info</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-sm font-medium mb-1">Total Items</p>
-                <p className="text-xl font-bold">{totalItems}</p>
-              </div>
-              
-              <div>
-                <p className="text-sm font-medium mb-1">Total Amount</p>
-                <p className="text-xl font-bold">R{totalAmount.toFixed(2)}</p>
-              </div>
-            </div>
-            
             <div>
               <p className="text-sm font-medium mb-1">Suppliers</p>
               <div className="flex flex-wrap gap-2">
@@ -742,10 +861,17 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
                 ))}
               </div>
             </div>
+            {isApproved && (
+              <div className="text-sm text-muted-foreground">
+                Approved on {purchaseOrder.approved_at ? format(new Date(purchaseOrder.approved_at), 'PPP') : 'Unknown'}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
       
+      {/* Summary card moved above; removing duplicate compact bar */}
+
       <Card>
         <CardHeader>
           <CardTitle>Order Items</CardTitle>
@@ -765,44 +891,67 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
               </TableRow>
             </TableHeader>
             <TableBody>
-              {purchaseOrder.supplier_orders?.map((order) => {
-                const component = order.supplier_component?.component;
-                const supplier = order.supplier_component?.supplier;
-                const price = order.supplier_component?.price || 0;
-                const total = price * order.order_quantity;
-                const remainingToReceive = order.order_quantity - (order.total_received || 0);
-                
-                return (
-                  <TableRow key={order.order_id}>
-                    <TableCell className="font-medium">
-                      {component?.internal_code || 'Unknown'}
-                    </TableCell>
-                    <TableCell>{component?.description || 'No description'}</TableCell>
-                    <TableCell>{supplier?.name || 'Unknown'}</TableCell>
-                    <TableCell className="text-right">R{price.toFixed(2)}</TableCell>
-                    <TableCell className="text-right">{order.order_quantity}</TableCell>
-                    <TableCell className="text-right">{order.total_received || 0}</TableCell>
-                    {isApproved && (
-                      <TableCell className="text-right">
-                        <input
-                          type="number"
-                          min="0"
-                          max={remainingToReceive}
-                          value={receiptQuantities[order.order_id] || ''}
-                          onChange={(e) => handleReceiptQuantityChange(order.order_id.toString(), e.target.value)}
-                          className="w-20 px-2 py-1 text-right border rounded"
-                          placeholder="0"
-                        />
-                      </TableCell>
-                    )}
-                    <TableCell className="text-right font-medium">R{total.toFixed(2)}</TableCell>
+              {purchaseOrder.supplier_orders && purchaseOrder.supplier_orders.length > 0 ? (
+                <>
+                  {purchaseOrder.supplier_orders.map((order) => {
+                    const component = order.supplier_component?.component;
+                    const supplier = order.supplier_component?.supplier;
+                    const price = order.supplier_component?.price || 0;
+                    const lineTotal = price * order.order_quantity;
+                    const remainingToReceive = order.order_quantity - (order.total_received || 0);
+
+                    return (
+                      <TableRow key={order.order_id} className="odd:bg-muted/30">
+                        <TableCell className="font-medium">{component?.internal_code || 'Unknown'}</TableCell>
+                        <TableCell>{component?.description || 'No description'}</TableCell>
+                        <TableCell>{supplier?.name || 'Unknown'}</TableCell>
+                        <TableCell className="text-right">R{price.toFixed(2)}</TableCell>
+                        <TableCell className="text-right">{order.order_quantity}</TableCell>
+                        <TableCell className="text-right">{order.total_received || 0}</TableCell>
+                        {isApproved && (
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <input
+                                type="number"
+                                min="0"
+                                max={remainingToReceive}
+                                value={receiptQuantities[order.order_id] || ''}
+                                onChange={(e) => handleReceiptQuantityChange(order.order_id.toString(), e.target.value)}
+                                className="w-20 px-2 py-1 text-right border rounded"
+                                placeholder="0"
+                              />
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  const qty = receiptQuantities[order.order_id] || 0;
+                                  if (qty > 0) receiveOneMutation.mutate({ orderId: order.order_id.toString(), qty });
+                                }}
+                                disabled={receiveOneMutation.isPending || (receiptQuantities[order.order_id] || 0) <= 0}
+                              >
+                                {receiveOneMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Receive'}
+                              </Button>
+                            </div>
+                          </TableCell>
+                        )}
+                        <TableCell className="text-right font-medium">R{lineTotal.toFixed(2)}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  <TableRow className="bg-muted/30">
+                    <TableCell colSpan={4} className="text-right text-sm font-medium text-muted-foreground">Totals</TableCell>
+                    <TableCell className="text-right text-sm font-medium">{totalItems}</TableCell>
+                    <TableCell className="text-right text-sm font-medium">{totalReceived}</TableCell>
+                    {isApproved && <TableCell />}
+                    <TableCell className="text-right font-semibold">R{totalAmount.toFixed(2)}</TableCell>
                   </TableRow>
-                );
-              })}
-              
-              {(!purchaseOrder.supplier_orders || purchaseOrder.supplier_orders.length === 0) && (
+                </>
+              ) : (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-4 text-muted-foreground">
+                  <TableCell
+                    colSpan={isApproved ? 8 : 7}
+                    className="text-center py-6 text-muted-foreground"
+                  >
                     No items in this purchase order
                   </TableCell>
                 </TableRow>
@@ -810,20 +959,7 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
             </TableBody>
           </Table>
 
-          {isApproved && (
-            <div className="mt-4 flex justify-end">
-              <Button
-                onClick={handleSubmitReceipts}
-                disabled={receiptMutation.isPending || Object.keys(receiptQuantities).length === 0}
-              >
-                {receiptMutation.isPending && (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                )}
-                Receive Stock
-              </Button>
-            </div>
-          )}
-        </CardContent>
+          </CardContent>
       </Card>
 
       {purchaseOrder && (
@@ -887,14 +1023,74 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
               })}
               
               {purchaseOrder.supplier_orders.every(order => !order.receipts?.length) && (
-                <div className="text-center py-4 text-muted-foreground">
-                  No items have been received yet.
-                </div>
+                <Card className="bg-muted/40">
+                  <CardContent className="py-10 text-center">
+                    <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-full bg-muted mb-3">📦</div>
+                    <div className="font-medium">No receipts yet</div>
+                    <div className="text-sm text-muted-foreground">Use the Receive controls in the items table to record deliveries.</div>
+                  </CardContent>
+                </Card>
               )}
             </div>
           </CardContent>
         </Card>
       )}
+      {/* Bottom action bar */}
+      <div className="sticky bottom-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-t shadow-sm px-4 py-3 flex items-center justify-end gap-3">
+        {isDraft && (
+          <Button onClick={handleSubmit} disabled={submitMutation.isPending}>
+            {submitMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            Submit for Approval
+          </Button>
+        )}
+        {isPendingApproval && (
+          <div className="flex items-center gap-2">
+            <input
+              id="qNumber"
+              value={qNumber}
+              onChange={(e) => setQNumber(e.target.value)}
+              className="w-[140px] px-3 py-2 border rounded-md"
+              placeholder="Q23-001"
+              disabled={approveMutation.isPending}
+              pattern="Q\\d{2}-\\d{3}"
+            />
+            <Button onClick={handleApprove} disabled={approveMutation.isPending}>
+              {approveMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Approve Order
+            </Button>
+          </div>
+        )}
+        {isApproved && (
+          <>
+            <Button
+              variant="outline"
+              onClick={handleOpenEmailDialog}
+              disabled={sendEmailMutation.isPending || emailDialogLoading}
+            >
+              {sendEmailMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Send Supplier Emails
+            </Button>
+            <Button
+              onClick={handleSubmitReceipts}
+              disabled={receiptMutation.isPending || Object.keys(receiptQuantities).length === 0}
+            >
+              {receiptMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Receive Stock
+            </Button>
+          </>
+        )}
+      </div>
+
+      {emailDialogOpen && (
+        <EmailOverrideDialog
+          open={emailDialogOpen}
+          onClose={() => setEmailDialogOpen(false)}
+          rows={emailRows}
+          cc={process.env.NEXT_PUBLIC_PO_EMAIL_CC || ''}
+          loading={emailDialogLoading || sendEmailMutation.isPending}
+          onConfirm={handleSendEmails}
+        />
+      )}
     </div>
   );
-} 
+}

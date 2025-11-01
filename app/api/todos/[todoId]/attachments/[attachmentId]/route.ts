@@ -1,20 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase-server';
+import { getRouteClient } from '@/lib/supabase-route';
 
 export async function DELETE(
   request: NextRequest,
   { params }: { params: { todoId: string; attachmentId: string } }
 ) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const ctx = await getRouteClient(request);
+    if ('error' in ctx) {
+      return NextResponse.json({ error: ctx.error }, { status: ctx.status ?? 401 });
     }
 
     // Get attachment details
-    const { data: attachment, error: fetchError } = await supabase
+    const { data: attachment, error: fetchError } = await ctx.supabase
       .from('todo_attachments')
       .select('file_path, uploaded_by')
       .eq('id', params.attachmentId)
@@ -26,23 +24,23 @@ export async function DELETE(
     }
 
     // Check if user is the uploader or todo manager
-    const { data: todo } = await supabase
+    const { data: todo } = await ctx.supabase
       .from('todo_items')
       .select('created_by, assigned_to')
       .eq('id', params.todoId)
       .single();
 
     const canDelete =
-      attachment.uploaded_by === user.id ||
-      todo?.created_by === user.id ||
-      todo?.assigned_to === user.id;
+      attachment.uploaded_by === ctx.user.id ||
+      todo?.created_by === ctx.user.id ||
+      todo?.assigned_to === ctx.user.id;
 
     if (!canDelete) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     // Delete from storage
-    const { error: storageError } = await supabase.storage
+    const { error: storageError } = await ctx.supabase.storage
       .from('QButton')
       .remove([attachment.file_path]);
 
@@ -51,7 +49,7 @@ export async function DELETE(
     }
 
     // Delete from database
-    const { error: deleteError } = await supabase
+    const { error: deleteError } = await ctx.supabase
       .from('todo_attachments')
       .delete()
       .eq('id', params.attachmentId);
@@ -78,15 +76,13 @@ export async function GET(
   { params }: { params: { todoId: string; attachmentId: string } }
 ) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const ctx = await getRouteClient(request);
+    if ('error' in ctx) {
+      return NextResponse.json({ error: ctx.error }, { status: ctx.status ?? 401 });
     }
 
     // Get attachment details
-    const { data: attachment, error: fetchError } = await supabase
+    const { data: attachment, error: fetchError } = await ctx.supabase
       .from('todo_attachments')
       .select('file_path')
       .eq('id', params.attachmentId)
@@ -98,7 +94,7 @@ export async function GET(
     }
 
     // Get signed URL for download
-    const { data, error } = await supabase.storage
+    const { data, error } = await ctx.supabase.storage
       .from('QButton')
       .createSignedUrl(attachment.file_path, 60); // 60 seconds expiry
 

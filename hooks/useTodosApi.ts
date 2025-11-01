@@ -1,6 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/lib/supabase';
 
 import type { TodoListFilters } from '@/lib/client/todos';
 import {
@@ -90,13 +91,26 @@ export function useUploadTodoAttachment(todoId: string | null) {
   return useMutation({
     mutationFn: async (file: File) => {
       if (!todoId) throw new Error('Missing todo id');
+
+      // Get auth token
+      const { data, error } = await supabase.auth.getSession();
+      if (error) throw error;
+      const token = data?.session?.access_token;
+      if (!token) throw new Error('Not authenticated');
+
       const formData = new FormData();
       formData.append('file', file);
       const response = await fetch(`/api/todos/${todoId}/attachments`, {
         method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
         body: formData,
       });
-      if (!response.ok) throw new Error('Failed to upload attachment');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || 'Failed to upload attachment');
+      }
       return response.json();
     },
     onSuccess: () => {
@@ -110,8 +124,18 @@ export function useDeleteTodoAttachment(todoId: string | null) {
   return useMutation({
     mutationFn: async (attachmentId: string) => {
       if (!todoId) throw new Error('Missing todo id');
+
+      // Get auth token
+      const { data, error } = await supabase.auth.getSession();
+      if (error) throw error;
+      const token = data?.session?.access_token;
+      if (!token) throw new Error('Not authenticated');
+
       const response = await fetch(`/api/todos/${todoId}/attachments/${attachmentId}`, {
         method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
       });
       if (!response.ok) throw new Error('Failed to delete attachment');
       return response.json();

@@ -1,125 +1,122 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { isBefore, parseISO } from 'date-fns';
-import { CheckCircle2, Clock, Loader2, Plus, Search, Users as UsersIcon } from 'lucide-react';
-import { formatDate, formatDateTime } from '@/lib/date-utils';
+import { useRouter } from 'next/navigation';
+import { isBefore, parseISO, format } from 'date-fns';
+import { CheckCircle2, Clock, Loader2, Plus, Search, AlertCircle, Circle, Flag, CalendarIcon, User, MoreVertical, Trash2 } from 'lucide-react';
+import { formatDate } from '@/lib/date-utils';
 
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 
 import { TODO_PRIORITIES, TODO_STATUSES, type TodoItem } from '@/lib/db/todos';
-import { useTodoList, useCreateTodo } from '@/hooks/useTodosApi';
+import { useTodoList, useCreateTodo, useUpdateTodo } from '@/hooks/useTodosApi';
 import { useDebounce } from '@/hooks/use-debounce';
 import { useAuth } from '@/components/common/auth-provider';
+import { useProfiles } from '@/hooks/useProfiles';
 
 import { TodoCreateDialog } from './TodoCreateDialog';
-import { TodoDetailDialog } from './TodoDetailDialog';
 
 type Scope = 'assigned' | 'created' | 'watching' | 'all';
 type StatusFilter = 'all' | typeof TODO_STATUSES[number];
+type SortBy = 'dueDate' | 'priority' | 'status' | 'assignee';
 
 const scopeOptions: { value: Scope; label: string }[] = [
   { value: 'assigned', label: 'Assigned to me' },
   { value: 'created', label: 'Created by me' },
   { value: 'watching', label: 'Watching' },
-  { value: 'all', label: 'All visibility' },
+  { value: 'all', label: 'All tasks' },
 ];
 
-const statusOptions: { value: StatusFilter; label: string }[] = [
-  { value: 'all', label: 'All statuses' },
-  ...TODO_STATUSES.map(status => ({ value: status, label: status.replace(/_/g, ' ') })),
-];
-
-function statusBadge(status: string) {
+function statusBadgeConfig(status: string) {
   const normalized = status.toLowerCase();
 
-  const statusConfig = {
+  const configs = {
     done: {
-      variant: 'success' as const,
+      variant: 'default' as const,
       label: 'Done',
-      icon: <CheckCircle2 className="h-3 w-3" />
+      className: 'bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200 border-green-200 dark:border-green-800',
+      icon: CheckCircle2,
     },
     blocked: {
       variant: 'destructive' as const,
       label: 'Blocked',
-      icon: <span className="text-xs">🚫</span>
+      className: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200 border-red-200 dark:border-red-800',
+      icon: AlertCircle,
     },
     in_progress: {
       variant: 'secondary' as const,
       label: 'In Progress',
-      icon: <Loader2 className="h-3 w-3 animate-spin" />
+      className: 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200 border-blue-200 dark:border-blue-800',
+      icon: Loader2,
     },
     archived: {
       variant: 'outline' as const,
       label: 'Archived',
-      icon: <span className="text-xs">📦</span>
+      className: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border-gray-200 dark:border-gray-700',
+      icon: Circle,
     },
     open: {
       variant: 'outline' as const,
       label: 'Open',
-      icon: <span className="text-xs">⚪</span>
+      className: 'bg-gray-50 text-gray-700 dark:bg-gray-900 dark:text-gray-300 border-gray-200 dark:border-gray-700',
+      icon: Circle,
     }
   };
 
-  const config = statusConfig[normalized as keyof typeof statusConfig] || statusConfig.open;
-
-  return (
-    <Badge variant={config.variant} className="inline-flex items-center gap-1.5 font-medium">
-      {config.icon}
-      {config.label}
-    </Badge>
-  );
+  return configs[normalized as keyof typeof configs] || configs.open;
 }
 
-function priorityBadge(priority: string) {
+function priorityConfig(priority: string) {
   const normalized = priority.toLowerCase();
 
-  const priorityConfig = {
+  const configs = {
     urgent: {
-      variant: 'destructive' as const,
       label: 'Urgent',
-      className: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200'
+      className: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200 border-red-300',
+      dotColor: 'bg-red-500',
+      icon: '🔥'
     },
     high: {
-      variant: 'secondary' as const,
       label: 'High',
-      className: 'bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-200'
+      className: 'bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-200 border-orange-300',
+      dotColor: 'bg-orange-500',
+      icon: '⬆️'
     },
     medium: {
-      variant: 'outline' as const,
       label: 'Medium',
-      className: 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200'
+      className: 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200 border-blue-300',
+      dotColor: 'bg-blue-500',
+      icon: '➡️'
     },
     low: {
-      variant: 'outline' as const,
       label: 'Low',
-      className: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200'
+      className: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 border-gray-300',
+      dotColor: 'bg-gray-400',
+      icon: '⬇️'
     }
   };
 
-  const config = priorityConfig[normalized as keyof typeof priorityConfig] || priorityConfig.medium;
-
-  return (
-    <Badge variant={config.variant} className={`font-medium ${config.className}`}>
-      {config.label}
-    </Badge>
-  );
+  return configs[normalized as keyof typeof configs] || configs.medium;
 }
 
-function formatDueDate(dueAt: string | null) {
-  if (!dueAt) return 'No due date';
-  return formatDate(dueAt);
+function initials(name: string | null | undefined): string {
+  if (!name) return '?';
+  return name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map(part => part[0]?.toUpperCase() ?? '')
+    .join('');
 }
 
 function isOverdue(todo: TodoItem) {
@@ -132,28 +129,28 @@ function isOverdue(todo: TodoItem) {
   }
 }
 
-function initials(name?: string | null) {
-  if (!name) return '?';
-  const parts = name.split(' ').filter(Boolean);
-  if (parts.length === 0) return name.slice(0, 2).toUpperCase();
-  return parts
-    .slice(0, 2)
-    .map(part => part[0]?.toUpperCase() ?? '')
-    .join('');
-}
-
 export function TodoDashboard() {
+  const router = useRouter();
   const [scope, setScope] = useState<Scope>('assigned');
   const [status, setStatus] = useState<StatusFilter>('all');
   const [includeCompleted, setIncludeCompleted] = useState(false);
   const [searchInput, setSearchInput] = useState('');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<SortBy>('dueDate');
   const [createOpen, setCreateOpen] = useState(false);
-  const [quickTaskTitle, setQuickTaskTitle] = useState('');
+
+  // Quick add state
+  const [quickTitle, setQuickTitle] = useState('');
+  const [quickDueDate, setQuickDueDate] = useState<Date | null>(null);
+  const [quickPriority, setQuickPriority] = useState<string>('medium');
+  const [quickAssignee, setQuickAssignee] = useState<string | null>(null);
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
+
   const debouncedSearch = useDebounce(searchInput, 250);
   const { toast } = useToast();
   const { user } = useAuth();
   const createMutation = useCreateTodo();
+  const profilesQuery = useProfiles();
+  const profiles = profilesQuery.data ?? [];
 
   const filters = useMemo(
     () => ({
@@ -179,298 +176,434 @@ export function TodoDashboard() {
 
   const todos = data?.todos ?? [];
 
-  const handleQuickCreate = async (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && quickTaskTitle.trim()) {
-      try {
-        await createMutation.mutateAsync({
-          title: quickTaskTitle.trim(),
-          priority: 'medium',
-          assignedTo: user?.id,
-        });
-        setQuickTaskTitle('');
-        toast({ title: 'Task created' });
-        refetch();
-      } catch (error) {
-        console.error('Failed to create task', error);
-        toast({
-          title: 'Failed to create task',
-          description: error instanceof Error ? error.message : 'Unknown error',
-          variant: 'destructive',
-        });
+  // Sort todos
+  const sortedTodos = useMemo(() => {
+    return [...todos].sort((a, b) => {
+      switch (sortBy) {
+        case 'dueDate':
+          if (!a.dueAt) return 1;
+          if (!b.dueAt) return -1;
+          return new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime();
+        case 'priority':
+          const priorityOrder = { urgent: 0, high: 1, medium: 2, low: 3 };
+          return (priorityOrder[a.priority as keyof typeof priorityOrder] ?? 2) - (priorityOrder[b.priority as keyof typeof priorityOrder] ?? 2);
+        case 'status':
+          return a.status.localeCompare(b.status);
+        case 'assignee':
+          return (a.assignee?.username ?? '').localeCompare(b.assignee?.username ?? '');
+        default:
+          return 0;
       }
-    } else if (e.key === 'Escape') {
-      setQuickTaskTitle('');
+    });
+  }, [todos, sortBy]);
+
+  // Quick add task
+  const handleQuickAdd = async () => {
+    if (!quickTitle.trim()) return;
+
+    try {
+      await createMutation.mutateAsync({
+        title: quickTitle.trim(),
+        description: null,
+        priority: quickPriority as any,
+        status: 'open',
+        dueAt: quickDueDate?.toISOString() ?? null,
+        assignedTo: quickAssignee === '__unassigned__' ? null : quickAssignee,
+        watchers: [],
+        contextPath: null,
+        contextType: null,
+        contextId: null,
+      });
+
+      // Clear form
+      setQuickTitle('');
+      setQuickDueDate(null);
+      setQuickPriority('medium');
+      setQuickAssignee(null);
+
+      toast({ title: 'Task created successfully' });
+    } catch (err) {
+      console.error('Failed to create task:', err);
+      toast({
+        title: 'Failed to create task',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      });
     }
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">To-Do Dashboard</h1>
-          <p className="text-muted-foreground">Assign, track, and close out cross-team tasks.</p>
+    <div className="min-h-screen bg-background">
+      <div className="container max-w-6xl mx-auto px-4 py-4 space-y-4">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Tasks</h1>
+            <p className="text-sm text-muted-foreground mt-1">Manage and track your team's work</p>
+          </div>
+          <Button
+            onClick={() => setCreateOpen(true)}
+            size="lg"
+            className="shadow-sm"
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            New Task
+          </Button>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" /> New Task
-        </Button>
-      </div>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg font-medium">Filters</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <Tabs value={scope} onValueChange={value => setScope(value as Scope)}>
-              <TabsList>
-                {scopeOptions.map(option => (
-                  <TabsTrigger key={option.value} value={option.value}>
-                    {option.label}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
+        {/* Quick Add Bar */}
+        <Card className="shadow-sm">
+          <CardContent className="p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                placeholder="Add new task..."
+                value={quickTitle}
+                onChange={(e) => setQuickTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && quickTitle.trim()) {
+                    handleQuickAdd();
+                  }
+                }}
+                className="flex-1 min-w-[200px] text-sm h-9"
+              />
 
-            <div className="flex flex-1 flex-col gap-3 md:flex-row md:items-center md:justify-end">
-              <div className="relative md:w-64">
-                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  value={searchInput}
-                  onChange={event => setSearchInput(event.target.value)}
-                  placeholder="Search title, description, link..."
-                  className="pl-9"
-                />
-              </div>
+              {/* Date Picker */}
+              <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-9 text-xs">
+                    <CalendarIcon className="mr-1.5 h-3.5 w-3.5" />
+                    {quickDueDate ? format(quickDueDate, 'MMM d') : 'Due date'}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="end">
+                  <Calendar
+                    mode="single"
+                    selected={quickDueDate ?? undefined}
+                    onSelect={(date) => {
+                      setQuickDueDate(date ?? null);
+                      setDatePickerOpen(false);
+                    }}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
 
-              <Select value={status} onValueChange={value => setStatus(value as StatusFilter)}>
-                <SelectTrigger className="w-full md:w-48">
-                  <SelectValue placeholder="Status" />
+              {/* Priority Select */}
+              <Select value={quickPriority} onValueChange={setQuickPriority}>
+                <SelectTrigger className="h-9 w-[110px] text-xs">
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {statusOptions.map(option => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
+                  {TODO_PRIORITIES.map((p) => (
+                    <SelectItem key={p} value={p} className="text-xs">
+                      <Badge variant="outline" className={cn('text-xs', priorityConfig(p).className)}>
+                        {p}
+                      </Badge>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
 
+              {/* Assignee Select */}
               <Select
-                value={includeCompleted ? 'with-completed' : 'active-only'}
-                onValueChange={value => setIncludeCompleted(value === 'with-completed')}
+                value={quickAssignee ?? '__unassigned__'}
+                onValueChange={(value) => setQuickAssignee(value === '__unassigned__' ? null : value)}
               >
-                <SelectTrigger className="w-full md:w-40">
-                  <SelectValue />
+                <SelectTrigger className="h-9 w-[140px] text-xs">
+                  <SelectValue placeholder="Assignee" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="active-only">Active only</SelectItem>
-                  <SelectItem value="with-completed">Include done</SelectItem>
+                  <SelectItem value="__unassigned__" className="text-xs">Unassigned</SelectItem>
+                  {profiles.map((p) => (
+                    <SelectItem key={p.id} value={p.id} className="text-xs">
+                      {p.username ?? p.email}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
+
+              <Button
+                size="sm"
+                onClick={handleQuickAdd}
+                disabled={!quickTitle.trim() || createMutation.isPending}
+                className="h-9"
+              >
+                {createMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Add'}
+              </Button>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
 
-      {isLoading ? (
-        <Card>
-          <CardContent className="space-y-4 p-6">
-            {Array.from({ length: 5 }).map((_, index) => (
-              <div key={index} className="flex items-center space-x-4">
-                <Skeleton className="h-10 w-10 rounded-full" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-1/3" />
-                  <Skeleton className="h-4 w-2/3" />
-                </div>
-                <Skeleton className="h-4 w-20" />
-              </div>
+        {/* Filters & Sort */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* Scope Filters */}
+          <div className="flex flex-wrap gap-2">
+            {scopeOptions.map(option => (
+              <Button
+                key={option.value}
+                variant={scope === option.value ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setScope(option.value)}
+                className="rounded-full h-8 text-xs"
+              >
+                {option.label}
+              </Button>
             ))}
-          </CardContent>
-        </Card>
-      ) : error ? (
-        <Alert variant="destructive">
-          <AlertDescription>
-            Could not load tasks. <button className="underline" onClick={() => refetch()}>Try again</button>
-          </AlertDescription>
-        </Alert>
-      ) : (
-        <Card>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[140px]">Status</TableHead>
-                  <TableHead>Task</TableHead>
-                  <TableHead className="hidden md:table-cell">Assignee</TableHead>
-                  <TableHead className="hidden xl:table-cell">Priority</TableHead>
-                  <TableHead className="hidden lg:table-cell">Due</TableHead>
-                  <TableHead className="hidden xl:table-cell">Watchers</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {/* Quick Add Row */}
-                <TableRow className="bg-muted/30 hover:bg-muted/50">
-                  <TableCell colSpan={6} className="py-3">
-                    <div className="flex items-center gap-3">
-                      <Plus className="h-4 w-4 text-muted-foreground" />
-                      <Input
-                        value={quickTaskTitle}
-                        onChange={(e) => setQuickTaskTitle(e.target.value)}
-                        onKeyDown={handleQuickCreate}
-                        placeholder="Quick add task (press Enter to save, Esc to cancel)"
-                        className="border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0"
-                      />
-                    </div>
-                  </TableCell>
-                </TableRow>
+          </div>
 
-                {todos.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="py-16 text-center text-muted-foreground">
-                      <div className="flex flex-col items-center gap-2">
-                        <div className="text-4xl">📋</div>
-                        <p className="text-lg font-medium">No tasks yet</p>
-                        <p className="text-sm">Create one to get started</p>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  todos.map(todo => {
-                    const priorityColor = {
-                      high: 'border-l-red-500',
-                      medium: 'border-l-orange-500',
-                      low: 'border-l-gray-400'
-                    }[todo.priority] || 'border-l-gray-400';
+          {/* Sort & Active Filter */}
+          <div className="flex items-center gap-2">
+            <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortBy)}>
+              <SelectTrigger className="h-8 w-[140px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="dueDate" className="text-xs">Sort by: Due date</SelectItem>
+                <SelectItem value="priority" className="text-xs">Sort by: Priority</SelectItem>
+                <SelectItem value="status" className="text-xs">Sort by: Status</SelectItem>
+                <SelectItem value="assignee" className="text-xs">Sort by: Assignee</SelectItem>
+              </SelectContent>
+            </Select>
 
-                    return (
-                      <TableRow
-                        key={todo.id}
-                        className={`border-l-4 ${priorityColor} transition-all hover:bg-muted/70 hover:shadow-sm`}
-                      >
-                        <TableCell className="py-5">
-                          <div className="flex items-center gap-3">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                // Toggle between open and done
-                                const newStatus = todo.status === 'done' ? 'open' : 'done';
-                                // Call update mutation
-                                fetch(`/api/todos/${todo.id}`, {
-                                  method: 'PATCH',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ status: newStatus }),
-                                })
-                                  .then(() => refetch())
-                                  .catch(err => {
-                                    console.error('Failed to update status', err);
-                                    toast({
-                                      title: 'Failed to update status',
-                                      description: 'Please try again',
-                                      variant: 'destructive',
-                                    });
-                                  });
-                              }}
-                              className={cn(
-                                "group relative h-5 w-5 rounded-md border-2 transition-all duration-200 flex items-center justify-center",
-                                todo.status === 'done'
-                                  ? "bg-primary border-primary"
-                                  : "border-muted-foreground/30 hover:border-primary/50"
-                              )}
-                            >
-                              {todo.status === 'done' && (
-                                <svg
-                                  className="h-3.5 w-3.5 text-primary-foreground"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke="currentColor"
-                                  strokeWidth={3}
-                                >
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                </svg>
-                              )}
-                            </button>
-                            <div className="cursor-pointer" onClick={() => setSelectedId(todo.id)}>
-                              {statusBadge(todo.status)}
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell className="py-5 cursor-pointer" onClick={() => setSelectedId(todo.id)}>
-                          <div className="space-y-2">
-                            <div className="font-semibold text-base leading-tight text-foreground">{todo.title}</div>
-                            {todo.description ? (
-                              <p className="text-sm text-muted-foreground line-clamp-2">{todo.description}</p>
-                            ) : null}
-                            {todo.contextPath ? (
-                              <div className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 dark:bg-blue-950 px-2.5 py-1 text-xs font-medium text-blue-700 dark:text-blue-300">
-                                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                                </svg>
-                                {todo.contextPath}
-                              </div>
-                            ) : null}
-                          </div>
-                        </TableCell>
-                        <TableCell className="hidden md:table-cell py-5 cursor-pointer" onClick={() => setSelectedId(todo.id)}>
-                          {todo.assignee ? (
-                            <div className="flex items-center gap-3">
-                              <Avatar className="h-9 w-9 ring-2 ring-background">
-                                {todo.assignee?.avatarUrl ? (
-                                  <AvatarImage src={todo.assignee.avatarUrl} alt={todo.assignee.username ?? 'Assignee'} />
-                                ) : null}
-                                <AvatarFallback className="text-sm font-semibold">{initials(todo.assignee?.username)}</AvatarFallback>
-                              </Avatar>
-                              <div>
-                                <div className="text-sm font-medium">{todo.assignee?.username ?? 'Assigned'}</div>
-                                <p className="text-xs text-muted-foreground">Owner</p>
-                              </div>
-                            </div>
-                          ) : (
-                            <span className="text-sm text-muted-foreground italic">Unassigned</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="hidden xl:table-cell py-5 cursor-pointer" onClick={() => setSelectedId(todo.id)}>{priorityBadge(todo.priority)}</TableCell>
-                        <TableCell className="hidden lg:table-cell py-5 cursor-pointer" onClick={() => setSelectedId(todo.id)}>
-                          <div className="flex items-center gap-2">
-                            <Clock className="h-4 w-4 text-muted-foreground" />
-                            <span className={isOverdue(todo) ? 'text-destructive font-semibold' : 'text-sm'}>{formatDueDate(todo.dueAt)}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="hidden xl:table-cell py-5 cursor-pointer" onClick={() => setSelectedId(todo.id)}>
-                          <div className="flex -space-x-2">
-                            {todo.watchers.slice(0, 5).map(watcher => (
-                              <Avatar key={watcher.userId} className="h-9 w-9 border-2 border-background ring-1 ring-gray-200 dark:ring-gray-700">
-                                {watcher.profile?.avatarUrl ? (
-                                  <AvatarImage src={watcher.profile.avatarUrl} alt={watcher.profile.username ?? 'Watcher'} />
-                                ) : null}
-                              <AvatarFallback>{initials(watcher.profile?.username)}</AvatarFallback>
-                            </Avatar>
-                          ))}
-                          {todo.watchers.length > 5 ? (
-                            <div className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-background bg-muted text-xs font-medium ring-1 ring-gray-200 dark:ring-gray-700">
-                              +{todo.watchers.length - 5}
-                            </div>
-                          ) : null}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
+            <Button
+              variant={includeCompleted ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setIncludeCompleted(!includeCompleted)}
+              className="h-8 text-xs rounded-full"
+            >
+              {includeCompleted ? 'All' : 'Active Only'}
+            </Button>
+          </div>
+        </div>
+
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            value={searchInput}
+            onChange={event => setSearchInput(event.target.value)}
+            placeholder="Search tasks by title or description..."
+            className="pl-10 h-9 text-sm"
+          />
+        </div>
+
+        {/* Task Cards */}
+        {isLoading ? (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Card key={i} className="animate-pulse">
+                <CardContent className="p-3 space-y-2">
+                  <div className="h-4 bg-muted rounded w-2/3" />
+                  <div className="h-3 bg-muted rounded w-full" />
+                  <div className="h-3 bg-muted rounded w-4/5" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : sortedTodos.length === 0 ? (
+          <Card className="border-dashed">
+            <CardContent className="py-12">
+              <div className="text-center space-y-3">
+                <div className="text-5xl">📋</div>
+                <div>
+                  <h3 className="text-base font-semibold">No tasks found</h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {searchInput ? 'Try adjusting your search or filters' : 'Create your first task to get started'}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {sortedTodos.map(todo => (
+              <TaskCard key={todo.id} todo={todo} profiles={profiles} onNavigate={() => router.push(`/todos/${todo.id}`)} />
+            ))}
+          </div>
+        )}
+      </div>
 
       <TodoCreateDialog open={createOpen} onOpenChange={setCreateOpen} />
-
-      <TodoDetailDialog
-        todoId={selectedId}
-        open={Boolean(selectedId)}
-        onOpenChange={open => {
-          if (!open) setSelectedId(null);
-        }}
-      />
     </div>
+  );
+}
+
+// Task Card Component
+function TaskCard({ todo, profiles, onNavigate }: { todo: TodoItem; profiles: any[]; onNavigate: () => void }) {
+  const updateMutation = useUpdateTodo(todo.id);
+  const { toast } = useToast();
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+  const prioConfig = priorityConfig(todo.priority);
+  const overdue = isOverdue(todo);
+
+  const toggleStatus = async (checked: boolean) => {
+    try {
+      await updateMutation.mutateAsync({
+        status: checked ? 'done' : 'open',
+      } as any);
+    } catch (err) {
+      toast({ title: 'Failed to update status', variant: 'destructive' });
+    }
+  };
+
+  const updateDueDate = async (date: Date | undefined) => {
+    try {
+      await updateMutation.mutateAsync({
+        dueAt: date?.toISOString() ?? null,
+      } as any);
+      setDatePickerOpen(false);
+    } catch (err) {
+      toast({ title: 'Failed to update date', variant: 'destructive' });
+    }
+  };
+
+  const updateAssignee = async (assigneeId: string) => {
+    try {
+      await updateMutation.mutateAsync({
+        assignedTo: assigneeId === '__unassigned__' ? null : assigneeId,
+      } as any);
+    } catch (err) {
+      toast({ title: 'Failed to update assignee', variant: 'destructive' });
+    }
+  };
+
+  const confirmArchive = async () => {
+    try {
+      await updateMutation.mutateAsync({
+        status: 'archived',
+      } as any);
+      toast({ title: 'Task archived successfully' });
+      setArchiveDialogOpen(false);
+    } catch (err) {
+      toast({ title: 'Failed to archive task', variant: 'destructive' });
+    }
+  };
+
+  return (
+    <Card className="p-3 text-sm flex flex-col gap-1 hover:bg-muted/50 transition group">
+      {/* Title & Actions Row */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start gap-2 flex-1 min-w-0">
+          <Checkbox
+            checked={todo.status === 'done'}
+            onCheckedChange={toggleStatus}
+            className="mt-0.5"
+          />
+          <div className="flex-1 min-w-0 cursor-pointer" onClick={onNavigate}>
+            <p className="font-medium leading-tight truncate">{todo.title}</p>
+          </div>
+          <Badge variant="outline" className={cn('text-xs flex-shrink-0', prioConfig.className)}>
+            {prioConfig.label}
+          </Badge>
+        </div>
+
+        {/* Inline Actions */}
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+          {/* Date Picker */}
+          <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+            <PopoverTrigger asChild>
+              <Button size="icon" variant="ghost" className="h-7 w-7">
+                <CalendarIcon className="h-3.5 w-3.5" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <Calendar
+                mode="single"
+                selected={todo.dueAt ? parseISO(todo.dueAt) : undefined}
+                onSelect={updateDueDate}
+                initialFocus
+              />
+            </PopoverContent>
+          </Popover>
+
+          {/* Assignee Selector */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button size="icon" variant="ghost" className="h-7 w-7">
+                <User className="h-3.5 w-3.5" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-48 p-2" align="end">
+              <div className="space-y-1">
+                <button
+                  onClick={() => updateAssignee('__unassigned__')}
+                  className={cn(
+                    "w-full text-left px-2 py-1.5 text-xs rounded hover:bg-muted transition-colors",
+                    (!todo.assignedTo) && "bg-muted font-medium"
+                  )}
+                >
+                  Unassigned
+                </button>
+                {profiles.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => updateAssignee(p.id)}
+                    className={cn(
+                      "w-full text-left px-2 py-1.5 text-xs rounded hover:bg-muted transition-colors",
+                      (todo.assignedTo === p.id) && "bg-muted font-medium"
+                    )}
+                  >
+                    {p.username ?? p.email}
+                  </button>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {/* Archive Button */}
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7 text-muted-foreground hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
+            onClick={(e) => {
+              e.stopPropagation();
+              setArchiveDialogOpen(true);
+            }}
+            title="Archive task"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Description */}
+      {todo.description && (
+        <p className="text-muted-foreground text-xs truncate leading-tight pl-6">{todo.description}</p>
+      )}
+
+      {/* Footer: Assignee & Due Date */}
+      <div className="flex items-center gap-2 text-xs text-muted-foreground pl-6 mt-1">
+        {todo.assignee && (
+          <>
+            <Avatar className="h-4 w-4">
+              {todo.assignee.avatarUrl && <AvatarImage src={todo.assignee.avatarUrl} />}
+              <AvatarFallback className="text-[8px]">{initials(todo.assignee.username)}</AvatarFallback>
+            </Avatar>
+            <span className="truncate max-w-[100px]">{todo.assignee.username ?? 'Assigned'}</span>
+            <span>•</span>
+          </>
+        )}
+        <span className={cn(overdue && 'text-red-600 font-medium')}>
+          {todo.dueAt ? format(parseISO(todo.dueAt), 'dd/MM/yyyy') : 'No due date'}
+        </span>
+      </div>
+
+      {/* Archive Confirmation Dialog */}
+      <AlertDialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Archive task?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will archive "{todo.title}". You can restore it later from archived tasks.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmArchive}>Archive</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Card>
   );
 }
