@@ -106,6 +106,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
   const updatedRefs: Record<string, string | null> = { ...existingLineRefs };
 
+  const managedSlots: Array<keyof typeof lines> = ['primary', 'backer', 'band16', 'band32'];
+
   async function upsertLine(refKey: keyof typeof lines, line: LineInput | null | undefined) {
     const existingId = existingLineRefs?.[refKey] ?? null;
 
@@ -136,6 +138,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       include_in_markup: true,
       sort_order: 0,
       line_type: isComponent ? 'component' : 'manual',
+      cutlist_slot: refKey,
     } as const;
 
     if (existingId) {

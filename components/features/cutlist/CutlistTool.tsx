@@ -341,7 +341,7 @@ export default function CutlistTool({
   type SnapshotBilling = {
     globalFullBoard: boolean;
     sheetOverrides: Record<string, { mode: 'auto' | 'full' | 'manual'; manualPct: number }>;
-    lineRefs?: CutlistLineRefs;
+    lineRefs?: CutlistLineRefs; // legacy; preserved for backwards compatibility
   };
 
   const buildSnapshotPayload = React.useCallback(
@@ -403,7 +403,6 @@ export default function CutlistTool({
       const billing: SnapshotBilling = {
         globalFullBoard: snapshotGlobalFullBoard,
         sheetOverrides: snapshotSheetOverrides,
-        lineRefs: snapshotLineRefs,
       };
 
       const optionsHash = JSON.stringify({
@@ -414,7 +413,7 @@ export default function CutlistTool({
         singleSheetOnly,
       });
 
-      return { layout, billing, optionsHash } as const;
+      return { layout, billing, optionsHash, lineRefs: snapshotLineRefs } as const;
     },
     [
       allowRotation,
@@ -447,7 +446,7 @@ export default function CutlistTool({
   const persistSnapshot = React.useCallback(
     async (
       payload: ReturnType<typeof buildSnapshotPayload>,
-      reason: 'manual' | 'auto' | 'export' = 'manual'
+      _reason: 'manual' | 'auto' | 'export' = 'manual'
     ) => {
       if (!quoteItemId || !payload) return;
       setIsSavingSnapshot(true);
@@ -460,6 +459,7 @@ export default function CutlistTool({
             layout: payload.layout,
             billingOverrides: payload.billing,
             optionsHash: payload.optionsHash,
+            lineRefs: payload.lineRefs ?? null,
           }),
         });
         if (!res.ok) {
@@ -479,7 +479,7 @@ export default function CutlistTool({
       } finally {
         setIsSavingSnapshot(false);
       }
-    },
+  },
     [buildSnapshotPayload, quoteItemId]
   );
 
@@ -904,7 +904,9 @@ export default function CutlistTool({
         });
         setLineRefs(updatedRefs);
         const payload = buildSnapshotPayload({ lineRefs: updatedRefs });
-        if (payload) persistSnapshot(payload, 'export');
+        if (payload) {
+          persistSnapshot(payload, 'export');
+        }
         onExportSuccess?.();
       } catch (e) {
         console.error('Cutlist export failed:', e);

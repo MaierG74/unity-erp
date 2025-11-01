@@ -30,6 +30,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - Orders: [`domains/orders/orders-master.md`](domains/orders/orders-master.md)
   - Purchasing: [`domains/purchasing/purchasing-master.md`](domains/purchasing/purchasing-master.md)
   - Components: [`domains/components/components-section.md`](domains/components/components-section.md)
+  - Inventory: [`domains/components/inventory-master.md`](domains/components/inventory-master.md), [`domains/components/inventory-transactions.md`](domains/components/inventory-transactions.md)
   - Timekeeping: [`domains/timekeeping/labor-section.md`](domains/timekeeping/labor-section.md)
   - Suppliers: [`domains/suppliers/suppliers-master.md`](domains/suppliers/suppliers-master.md)
 - Operations:
@@ -44,8 +45,10 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
 - Changelogs: [`changelogs/`](changelogs/)
   - [`changelogs/todo-module-fixes-20251008.md`](changelogs/todo-module-fixes-20251008.md) – Todo module fixes: date format, RLS, profiles backfill
   - [`changelogs/todo-entity-link-picker-fix-20251009.md`](changelogs/todo-entity-link-picker-fix-20251009.md) – Entity link picker API and UI fixes
+  - [`changelogs/quotes-cutlist-display-20251028.md`](changelogs/quotes-cutlist-display-20251028.md) – Cutlist export costing rows now display alongside manual lines in quotes
 - Technical Guides: [`technical/`](technical/)
   - [`technical/supabase-query-patterns.md`](technical/supabase-query-patterns.md) – Supabase query patterns, common errors, and troubleshooting
+  - [`technical/smoke-tests.md`](technical/smoke-tests.md) – How to run the Purchasing smoke test
 - Migrations: [`../migrations/README.md`](../migrations/README.md) – Database migration files and instructions
 
 Use relative links when creating new docs so that navigation remains stable across moves. When referencing plans, prefer `docs/plans/...` paths to keep the directory consistent.

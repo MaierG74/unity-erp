@@ -177,11 +177,11 @@ function QuoteItemRow({
   React.useEffect(() => { setUnitPrice(String(Math.round((item.unit_price || 0) * 100) / 100)); }, [item.unit_price]);
   React.useEffect(() => { setBpText(item.bullet_points || ''); }, [item.bullet_points]);
 
-  const cluster = React.useMemo(() => {
+  const sortedClusters = React.useMemo(() => {
     if (!Array.isArray(item.quote_item_clusters) || item.quote_item_clusters.length === 0) {
-      return undefined;
+      return [] as QuoteItemCluster[];
     }
-    const sorted = [...item.quote_item_clusters].sort((a, b) => {
+    return [...item.quote_item_clusters].sort((a, b) => {
       const posA = a.position ?? 0;
       const posB = b.position ?? 0;
       if (posA !== posB) return posA - posB;
@@ -189,17 +189,79 @@ function QuoteItemRow({
       const timeB = new Date(b.created_at).getTime();
       return timeA - timeB;
     });
-    return (
-      sorted.find((c) => (c.quote_cluster_lines?.length ?? 0) > 0) ?? sorted[0]
-    );
   }, [item.quote_item_clusters]);
+
+  const clustersWithLines = React.useMemo(() =>
+    sortedClusters
+      .map((cluster) => ({
+        ...cluster,
+        quote_cluster_lines: (cluster.quote_cluster_lines || []).filter(Boolean),
+      }))
+      .filter((cluster) => (cluster.quote_cluster_lines?.length ?? 0) > 0),
+    [sortedClusters]
+  );
+
+  const cutlistLines = React.useMemo(
+    () => clustersWithLines.flatMap((cluster) => (cluster.quote_cluster_lines || []).filter((line) => Boolean(line.cutlist_slot))),
+    [clustersWithLines]
+  );
+
+  const manualClusters = React.useMemo(() =>
+    clustersWithLines
+      .map((cluster) => ({
+        ...cluster,
+        quote_cluster_lines: (cluster.quote_cluster_lines || []).filter((line) => !line.cutlist_slot),
+      }))
+      .filter((cluster) => (cluster.quote_cluster_lines?.length ?? 0) > 0),
+    [clustersWithLines]
+  );
+
+  const displayClusters = React.useMemo(() => {
+    if (manualClusters.length > 0) {
+      const [primaryManual, ...restManual] = manualClusters;
+      return [
+        {
+          ...primaryManual,
+          quote_cluster_lines: [
+            ...(primaryManual.quote_cluster_lines || []),
+            ...cutlistLines,
+          ],
+        },
+        ...restManual,
+      ];
+    }
+
+    if (cutlistLines.length > 0 && clustersWithLines.length > 0) {
+      const cutlistBase = clustersWithLines[0];
+      return [
+        {
+          ...cutlistBase,
+          quote_cluster_lines: cutlistLines,
+        },
+      ];
+    }
+
+    if (clustersWithLines.length > 0) {
+      return clustersWithLines;
+    }
+
+    return sortedClusters.length > 0 ? [sortedClusters[0]] : [];
+  }, [clustersWithLines, manualClusters, cutlistLines, sortedClusters]);
+
+  const hasClusterLines = displayClusters.length > 0;
 
   return (
     <React.Fragment>
       <TableRow key={item.id}>
         <TableCell>
-          {cluster ? (
-            <Button variant="ghost" size="sm" onClick={() => setIsExpanded(!isExpanded)}>
+          {displayClusters.length > 0 ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsExpanded(!isExpanded)}
+              disabled={!hasClusterLines}
+              title={hasClusterLines ? 'Toggle costing clusters' : 'No costing lines yet'}
+            >
               {isExpanded ? '▼' : '▶'}
             </Button>
           ) : (
@@ -269,8 +331,8 @@ function QuoteItemRow({
           </div>
         </DialogContent>
       </Dialog>
-      {isExpanded && cluster && (
-        <TableRow key={`${item.id}-cluster`}>
+      {isExpanded && displayClusters.map((cluster) => (
+        <TableRow key={`${item.id}-cluster-${cluster.id}`}>
           <TableCell colSpan={7} className="p-0">
             <QuoteItemClusterGrid
               cluster={cluster}
@@ -283,7 +345,7 @@ function QuoteItemRow({
             />
           </TableCell>
         </TableRow>
-      )}
+      ))}
     </React.Fragment>
   );
 }

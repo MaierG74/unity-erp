@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase-server';
+import { getRouteClient } from '@/lib/supabase-route';
 import { fetchTodoAttachments } from '@/lib/db/todos';
 
 export async function GET(
@@ -7,14 +7,12 @@ export async function GET(
   { params }: { params: { todoId: string } }
 ) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const ctx = await getRouteClient(request);
+    if ('error' in ctx) {
+      return NextResponse.json({ error: ctx.error }, { status: ctx.status ?? 401 });
     }
 
-    const attachments = await fetchTodoAttachments(supabase, params.todoId);
+    const attachments = await fetchTodoAttachments(ctx.supabase, params.todoId);
     return NextResponse.json(attachments);
   } catch (error) {
     console.error('Error fetching attachments:', error);
@@ -30,11 +28,9 @@ export async function POST(
   { params }: { params: { todoId: string } }
 ) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const ctx = await getRouteClient(request);
+    if ('error' in ctx) {
+      return NextResponse.json({ error: ctx.error }, { status: ctx.status ?? 401 });
     }
 
     const formData = await request.formData();
@@ -49,7 +45,7 @@ export async function POST(
     const fileName = `${params.todoId}/${Date.now()}.${fileExt}`;
     const filePath = `todos/${fileName}`;
 
-    const { error: uploadError, data } = await supabase.storage
+    const { error: uploadError, data } = await ctx.supabase.storage
       .from('QButton')
       .upload(filePath, file, {
         cacheControl: '3600',
@@ -65,7 +61,7 @@ export async function POST(
     }
 
     // Save attachment record to database
-    const { data: attachment, error: dbError } = await supabase
+    const { data: attachment, error: dbError } = await ctx.supabase
       .from('todo_attachments')
       .insert({
         todo_id: params.todoId,
@@ -73,7 +69,7 @@ export async function POST(
         file_path: filePath,
         mime_type: file.type,
         file_size: file.size,
-        uploaded_by: user.id,
+        uploaded_by: ctx.user.id,
       })
       .select('*, uploader:profiles!todo_attachments_uploaded_by_fkey(id, username, avatar_url)')
       .single();
@@ -81,7 +77,7 @@ export async function POST(
     if (dbError) {
       console.error('Database error:', dbError);
       // Clean up uploaded file
-      await supabase.storage.from('QButton').remove([filePath]);
+      await ctx.supabase.storage.from('QButton').remove([filePath]);
       return NextResponse.json(
         { error: 'Failed to save attachment' },
         { status: 500 }

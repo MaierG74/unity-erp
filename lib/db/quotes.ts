@@ -31,6 +31,7 @@ export interface QuoteItemCutlist {
   options_hash?: string | null;
   layout_json: unknown;
   billing_overrides?: unknown;
+  line_refs?: Record<string, string | null> | null;
   created_by?: string | null;
   created_at: string;
   updated_at: string;
@@ -62,6 +63,7 @@ export interface QuoteClusterLine {
   hours?: number | null;
   rate?: number | null;
   sort_order: number;
+  cutlist_slot?: 'primary' | 'backer' | 'band16' | 'band32' | null;
   created_at: string;
   updated_at: string;
 }
@@ -454,7 +456,7 @@ export async function createQuoteClusterLine(
 ): Promise<QuoteClusterLine> {
   const { data, error } = await supabase
     .from('quote_cluster_lines')
-    .insert([line])
+    .insert([{ ...line, cutlist_slot: line.cutlist_slot ?? null }])
     .select('*')
     .single();
   if (error) throw error;
@@ -467,7 +469,7 @@ export async function updateQuoteClusterLine(
 ): Promise<QuoteClusterLine> {
   const { data, error } = await supabase
     .from('quote_cluster_lines')
-    .update(updates)
+    .update({ ...updates, cutlist_slot: updates.cutlist_slot ?? null })
     .eq('id', id)
     .select('*')
     .single();

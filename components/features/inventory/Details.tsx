@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import type { InventoryItem } from '@/types/inventory'
 
 type InventoryDetailsProps = {
-  selectedItem?: InventoryItem
+  selectedItem?: InventoryItem & { on_order_quantity?: number }
 }
 
 export function InventoryDetails({ selectedItem }: InventoryDetailsProps) {
@@ -47,9 +47,9 @@ export function InventoryDetails({ selectedItem }: InventoryDetailsProps) {
     
   const stockStatusColor = {
     "Out of Stock": "destructive",
-    "Low Stock": "warning",
+    "Low Stock": "destructive",
     "In Stock": "success"
-  }[stockStatus] as "destructive" | "warning" | "success"
+  }[stockStatus] as "destructive" | "success"
 
   return (
     <Card>
@@ -85,6 +85,18 @@ export function InventoryDetails({ selectedItem }: InventoryDetailsProps) {
           <div>
             <p className="text-sm font-medium">Reorder Level</p>
             <p className="text-2xl font-bold">{reorderLevel}</p>
+          </div>
+          <div>
+            <p className="text-sm font-medium">On Order</p>
+            <p className="text-2xl font-bold text-blue-600">{selectedItem.on_order_quantity || 0}</p>
+          </div>
+          <div>
+            <p className="text-sm font-medium">Required for Orders</p>
+            <p className="text-2xl font-bold text-muted-foreground">
+              {selectedItem.required_for_orders !== null && selectedItem.required_for_orders !== undefined 
+                ? selectedItem.required_for_orders 
+                : '—'}
+            </p>
           </div>
         </div>
 

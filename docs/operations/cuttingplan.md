@@ -48,6 +48,8 @@ This document summarizes algorithm, UI, integration, and performance suggestions
   - Primary sheet × fractional primary sheets used.
   - Backer sheet × fractional backer sheets used (only when lamination present).
   - Edgebanding 16mm (m) and Edgebanding 32mm (m) as separate lines based on calculated meters.
+  - Each export slot (primary/backer/band16/band32) is tagged via `quote_cluster_lines.cutlist_slot` so subsequent exports only upsert/delete the calculator-managed rows and never touch manually added lines in the cluster.
+  - Quote UI merges the cutlist-managed lines with the quote item's existing costing cluster(s) so estimators always see their manual entries and the generated sheet/banding rows together after an export.
 - Hook into `lib/db/quotes.ts` helpers:
   - `ensureCostingCluster(quoteId)`
   - `insertLines(clusterId, lines)`
