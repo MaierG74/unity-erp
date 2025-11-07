@@ -97,6 +97,21 @@ async function processReceipt(
   componentId: number, 
   data: ReceiveItemsFormValues
 ): Promise<void> {
+  const receiptTimestamp = data.receipt_date || new Date().toISOString();
+
+  // Prefer the transactional RPC; fall back to legacy manual flow if unavailable
+  const { error: rpcError } = await supabase.rpc('process_supplier_order_receipt', {
+    p_order_id: orderId,
+    p_quantity: data.quantity_received,
+    p_receipt_date: receiptTimestamp,
+  });
+
+  if (!rpcError) {
+    return;
+  }
+
+  console.warn('process_supplier_order_receipt RPC failed, using manual fallback:', rpcError);
+
   // First, get or create the PURCHASE transaction type
   let purchaseTypeId: number;
   
@@ -137,7 +152,7 @@ async function processReceipt(
       component_id: componentId,
       quantity: data.quantity_received,
       transaction_type_id: purchaseTypeId,
-      transaction_date: data.receipt_date || new Date().toISOString(),
+      transaction_date: receiptTimestamp,
       // Removed order_id: orderId because it expects a customer order ID, not a supplier order ID
     })
     .select('transaction_id')
@@ -155,7 +170,7 @@ async function processReceipt(
       order_id: orderId,
       transaction_id: transactionData.transaction_id,
       quantity_received: data.quantity_received,
-      receipt_date: data.receipt_date || new Date().toISOString(),
+      receipt_date: receiptTimestamp,
     });
 
   if (receiptError) {

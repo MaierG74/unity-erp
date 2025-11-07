@@ -696,7 +696,14 @@ export async function fetchSupplierComponentsForComponent(componentId: number): 
   const { data, error } = await supabase
     .from('suppliercomponents')
     .select(`
-      *,
+      supplier_component_id,
+      component_id,
+      supplier_id,
+      supplier_code,
+      price,
+      lead_time,
+      min_order_quantity,
+      description,
       supplier:suppliers(
         supplier_id,
         name,
@@ -705,13 +712,49 @@ export async function fetchSupplierComponentsForComponent(componentId: number): 
     `)
     .eq('component_id', componentId)
     .order('price');
-  
+
   if (error) {
     console.error('Error fetching supplier components:', error);
     return [];
   }
-  
-  return data || [];
+
+  if (!data) return [];
+
+  return data.map((item) => {
+    const record = item as unknown as {
+      supplier_component_id: number;
+      component_id: number;
+      supplier_id: number | null;
+      supplier_code: string;
+      price?: number | null;
+      lead_time?: number | null;
+      min_order_quantity?: number | null;
+      description?: string | null;
+      supplier?: {
+        supplier_id: number;
+        name: string;
+        contact_info?: string | null;
+      } | null;
+    };
+
+    return {
+      supplier_component_id: record.supplier_component_id,
+      component_id: record.component_id,
+      supplier_id: record.supplier_id ?? record.supplier?.supplier_id ?? undefined,
+      supplier_code: record.supplier_code,
+      price: typeof record.price === 'number' ? record.price : undefined,
+      lead_time: record.lead_time ?? undefined,
+      min_order_quantity: record.min_order_quantity ?? undefined,
+      description: record.description ?? undefined,
+      supplier: record.supplier
+        ? {
+            supplier_id: record.supplier.supplier_id,
+            name: record.supplier.name,
+            contact_info: record.supplier.contact_info ?? undefined,
+          }
+        : undefined,
+    } as SupplierComponent;
+  });
 }
 
 // ---- Supplier browse helpers for quotes ----

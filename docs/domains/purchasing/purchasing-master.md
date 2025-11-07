@@ -75,8 +75,10 @@
 
 **Create POs From Sales Order**
 
-- Groups selected components by supplier, creates a PO per supplier, inserts SO lines, then links each SO to the customer order via junction table.
-  - See `app/orders/[orderId]/page.tsx:655` (grouping), `app/orders/[orderId]/page.tsx:692` (create PO), `app/orders/[orderId]/page.tsx:732` (insert SO with `purchase_order_id`), `app/orders/[orderId]/page.tsx:743` (insert into `supplier_order_customer_orders`).
+- Groups selected components by supplier, builds a batched payload per supplier, and calls the transactional RPC `create_purchase_order_with_lines`.
+  - The RPC handles PO header creation, inserts all supplier order lines in a single `INSERT ... VALUES (...)` call, and links them to the customer order inside the same transaction so any failure rolls everything back.
+  - UI hook (grouping, payload shaping, error surfacing): `app/orders/[orderId]/page.tsx:573`.
+  - User feedback lists the supplier names that failed so operators can retry only the affected groups.
 
 **Approval & Q Numbers**
 
@@ -103,21 +105,23 @@
 
 **Receiving Flow**
 
-- UI: Receive inputs are enabled when PO is “Approved”. See `app/purchasing/purchase-orders/[id]/page.tsx:528` and table inputs at `app/purchasing/purchase-orders/[id]/page.tsx:695`.
+- UI: Receive inputs are enabled when PO is "Approved". See `app/purchasing/purchase-orders/[id]/page.tsx:528` and table inputs at `app/purchasing/purchase-orders/[id]/page.tsx:695`.
+- Order Items table displays: Component, Description, Supplier, Unit Price, **Ordered**, **Received**, **Owing** (highlighted in orange when > 0), Receive Now (input + button), and Total. The "Owing" column shows `order_quantity - total_received` to clearly indicate remaining stock to receive.
 - On submit (per line with quantity > 0):
-  - Insert `inventory_transactions` row (type = receipt).
-  - Insert `supplier_order_receipts` row referencing the transaction.
-  - Update `supplier_orders.total_received` and status via RPC (see “DB functions”).
-  - Increment on-hand inventory via RPC. See `app/purchasing/purchase-orders/[id]/page.tsx:313` and `:346`.
-- Receipt history renders under the PO with all receipts per line: `app/purchasing/purchase-orders/[id]/page.tsx:760`.
+  - Call the transactional RPC `process_supplier_order_receipt` to insert the inventory transaction, create the receipt record, update `inventory`, and recompute `supplier_orders.total_received`/status in one transaction.
+  - Legacy fallback: if the RPC is missing, the UI falls back to the pre-RPC manual inserts/updates (still in the code until every environment is migrated).
+- **Auto-refresh:** After receiving stock, the page automatically updates without manual refresh. The mutation invalidates and refetches queries with `refetchOnMount: true` and `staleTime: 0` configured on the purchase order query. Both inline per-row receipts (`receiveOneMutation`) and bulk receipts (`receiptMutation`) trigger immediate refetch of active queries.
+- Receipt history renders under the PO with all receipts per line: `app/purchasing/purchase-orders/[id]/page.tsx:760`. Detail page implementation lives in `components/features/purchasing/order-detail.tsx`.
+- Deployment: apply `supabase/migrations/20251107_process_supplier_receipt.sql` via the Supabase CLI (`supabase db push` after linking the project) or run the script directly in SQL to enable the RPC before deploying updated UI.
+- Component picker: `components/features/purchasing/new-purchase-order-form.tsx` now uses an async-friendly search box powered by `react-select`. Typing filters by component code or description, selecting a result resets the supplier dropdown to avoid stale matches, and the input supports clearing selections.
 
 **DB Functions & Views**
 
+- `process_supplier_order_receipt(order_id int, quantity int, receipt_date timestamptz default now())` — transactional RPC defined in `supabase/migrations/20251107_process_supplier_receipt.sql`. Handles receipt insertion, inventory updates, and status recompute atomically. Granted to `authenticated` and `service_role`.
 - `create_update_order_received_quantity_function` RPC installer creates `update_order_received_quantity(order_id int)` to recompute `total_received` and set status based on sums. See `scripts/create-rpc-function.sql:2`.
-- The UI calls the following RPCs for receiving (ensure they exist in DB):
-  - `increment_total_received(p_order_id int, p_quantity int)` → update SO `total_received` and status.
-  - `increment_inventory_quantity(p_component_id int, p_quantity int)` → bump inventory on-hand.
-  - If your DB does not have these RPCs yet, either add them or switch to the installed `update_order_received_quantity` function used in legacy component: `components/features/purchasing/order-detail.tsx:215`.
+- Creation RPCs:
+  - `create_purchase_order_with_lines(supplier_id int, customer_order_id int, line_items jsonb, status_id int, order_date timestamptz, notes text)` — inserts PO + SO rows atomically and updates the junction table.
+- Legacy components still call `update_order_received_quantity` directly if the new RPC is unavailable. Keep the fallback until all environments have the migration applied.
 - Component requirement/stock views and helpers: `sql/create_component_views.sql:1` (materialized views + `get_*` functions) used by ordering workflows.
 
 **Types**
@@ -137,15 +141,17 @@
 **Known Gaps & TODOs**
 
 - Status seeds: Ensure `Approved`, `Partially Received`, and `Fully Received` exist in `supplier_order_statuses`. The setup script now seeds these alongside legacy names (Open/In Progress/Partially Delivered/Completed/Cancelled) for parity with UI logic.
-- RPCs for receiving: `increment_total_received` and `increment_inventory_quantity` are called by the PO details page but are not defined in the repo SQL. Either:
-  - Add these RPC functions, or
-  - Replace calls with `update_order_received_quantity` and direct updates, plus `inventory` adjustments via a single `exec_sql`/RPC.
+- Deploy `process_supplier_order_receipt` everywhere so we can eventually remove the manual fallback logic from the UI.
 - `schema.txt` may be out of sync with `supplier_orders.purchase_order_id` addition; the script adds it, but `schema.txt` does not show it in the first definition block. Align schema snapshot.
 - Validation: Prevent receiving quantities > remaining; UI enforces `max` but add server-side checks in RPCs.
 - Resolved — Receiving insert bug: `receiveStock` in `app/purchasing/purchase-orders/[id]/page.tsx` now mirrors the working `OrderDetail` logic. It looks up the component first, omits the sales‑order FK when inserting into `inventory_transactions`, records the receipt, updates on‑hand inventory, and recomputes `total_received` via `update_order_received_quantity` (with manual fallback).
+- Resolved — Purchase order detail page auto-refresh: Added `refetchOnMount: true` and `staleTime: 0` to the purchase order query, and updated receipt mutations to use `refetchQueries` with `type: 'active'` to ensure the page updates immediately after receiving stock without manual refresh.
+- Resolved — "Owing" column added: The Order Items table now displays Ordered, Received, and Owing columns. Owing shows `order_quantity - total_received` with orange highlighting when > 0, making it easy to see remaining stock to receive.
 - Email routing: If a supplier has no primary email, API logs and skips. Consider fallback to any email or flag PO for manual follow-up.
-- Multi-supplier PO header: We currently store a `supplier_id` on `purchase_orders` for manual PO path; multi-supplier POs (from sales order grouping) still compute supplier lists from lines. Confirm whether `supplier_id` should be optional or represent a “primary supplier”.
+- Multi-supplier PO header: We currently store a `supplier_id` on `purchase_orders` for manual PO path; multi-supplier POs (from sales order grouping) still compute supplier lists from lines. Confirm whether `supplier_id` should be optional or represent a "primary supplier".
 - Q number uniqueness: DB constraint exists; add graceful handling when collision occurs (e.g., toast with retry).
+- **Stock Issuance:** ✅ Implemented (January 2025). Stock issuance functionality is available on the Order Detail page ("Issue Stock" tab) rather than the Purchase Order page. This allows issuing stock OUT of inventory against customer orders with full BOM integration, PDF generation, and issuance tracking. Uses SALE transaction type (ID: 2) for OUT transactions. See [`../changelogs/stock-issuance-implementation-20250104.md`](../changelogs/stock-issuance-implementation-20250104.md) for implementation details and [`../domains/components/inventory-transactions.md`](../domains/components/inventory-transactions.md) for transaction specifications.
+- **Supplier Returns:** Need to implement returning goods to suppliers (OUT transactions). This handles both immediate rejections on delivery and later returns of previously received stock. Requires `supplier_order_returns` table, RPC function `process_supplier_order_return`, and UI on purchase order detail page. See `docs/plans/supplier-returns-plan.md` for full specification.
 
 **Quick Reference**
 

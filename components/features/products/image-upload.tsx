@@ -100,7 +100,8 @@ export function ImageUpload({ productCode, productId, onUploadComplete, classNam
     accept: {
       'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.webp']
     },
-    multiple: true
+    multiple: true,
+    noClick: false
   });
 
   return (
@@ -113,7 +114,7 @@ export function ImageUpload({ productCode, productId, onUploadComplete, classNam
           ${isDragActive ? 'border-primary bg-primary/10' : 'border-border'}
         `}
       >
-        <input {...getInputProps()} />
+        <input {...getInputProps()} className="hidden" />
         <Upload className="h-8 w-8 mx-auto mb-4 text-muted-foreground" />
         {isDragActive ? (
           <p>Drop the files here...</p>

@@ -4,9 +4,6 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
   // Ensure server bundling of ESM packages like tailwind-merge to avoid missing vendor-chunk errors
   transpilePackages: ['tailwind-merge'],
   // Allow Supabase Storage images in <Image>

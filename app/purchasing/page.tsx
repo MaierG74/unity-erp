@@ -33,6 +33,9 @@ interface PurchaseOrderSummary {
 // Define filter types
 type FilterType = 'recent' | 'pending' | 'approved';
 
+const PENDING_STATUS_NAMES = ['Draft', 'Pending Approval'] as const;
+const APPROVED_STATUS_NAMES = ['Approved', 'Partially Received'] as const;
+
 export default function PurchasingPage() {
   // Add state for active filter
   const [activeFilter, setActiveFilter] = useState<FilterType>('recent');
@@ -73,10 +76,16 @@ export default function PurchasingPage() {
       
       // Apply filters based on activeFilter
       if (activeFilter === 'pending') {
-        query = query.in('status_id', [5, 6]); // Draft and Pending Approval
+        query = query.in(
+          'supplier_order_statuses.status_name',
+          [...PENDING_STATUS_NAMES]
+        ); // Draft and Pending Approval
         query = query.limit(10); // Show more orders when filtered
       } else if (activeFilter === 'approved') {
-        query = query.in('status_id', [7, 8]); // Approved and Partially Received
+        query = query.in(
+          'supplier_order_statuses.status_name',
+          [...APPROVED_STATUS_NAMES]
+        ); // Approved and Partially Received
         query = query.limit(10); // Show more orders when filtered
       } else {
         // Default "recent" filter - just show the most recent 5 orders
@@ -120,8 +129,8 @@ export default function PurchasingPage() {
         .from('purchase_orders')
         .select(`
           purchase_order_id,
-          status_id,
           created_at,
+          supplier_order_statuses:supplier_order_statuses!purchase_orders_status_id_fkey(status_name),
           supplier_orders(
             order_quantity,
             total_received
@@ -135,14 +144,19 @@ export default function PurchasingPage() {
 
   // Calculate metrics based on the loaded data
   const metrics = allOrderData ? {
-    // Pending orders count - includes "Pending Approval" (6) and "Draft" (5)
-    pending: allOrderData.filter(order => [5, 6].includes(order.status_id)).length,
+    // Pending orders count - includes "Pending Approval" and "Draft"
+    pending: allOrderData.filter(order => {
+      const statusName = order.supplier_order_statuses?.status_name;
+      if (!statusName) return false;
+      return PENDING_STATUS_NAMES.includes(statusName);
+    }).length,
     
-    // Approved orders count - includes "Approved" (7) and "Partially Received" (8), 
+    // Approved orders count - includes "Approved" and "Partially Received", 
     // but EXCLUDE fully received orders
     approved: allOrderData.filter(order => {
       // Check if order is in approved or partially received status
-      if (![7, 8].includes(order.status_id)) return false;
+      const statusName = order.supplier_order_statuses?.status_name;
+      if (!statusName || !APPROVED_STATUS_NAMES.includes(statusName)) return false;
       
       // Exclude fully received orders
       const isFullyReceived = order.supplier_orders?.length > 0 && 

@@ -77,19 +77,37 @@ export function SupplierList() {
 
   if (isLoading) {
     return (
-      <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
-        <div className="p-3 border-b bg-muted/40">
-          <div className="h-9 w-full rounded-md bg-muted animate-pulse" />
+      <div className="space-y-6">
+        {/* Toolbar skeleton */}
+        <div className="flex flex-col gap-3 p-3 bg-card rounded-xl border shadow-sm md:flex-row md:items-center md:justify-between">
+          <div className="flex w-full items-center gap-3 md:max-w-2xl">
+            <div className="h-9 w-full md:w-96 bg-muted animate-pulse rounded-lg" />
+            <div className="h-9 w-32 bg-muted animate-pulse rounded-md" />
+          </div>
+          <div className="h-9 w-32 bg-muted animate-pulse rounded-lg md:shrink-0" />
         </div>
-        <div className="divide-y">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="flex items-center gap-4 px-4 py-4 animate-pulse">
-              <div className="h-8 w-8 rounded-full bg-muted" />
-              <div className="h-4 w-40 bg-muted rounded" />
-              <div className="ml-auto h-4 w-24 bg-muted rounded" />
+        {/* Table skeleton */}
+        <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+          <div className="p-3 border-b bg-muted/40">
+            <div className="grid grid-cols-4 gap-4">
+              <div className="h-4 w-24 bg-muted animate-pulse rounded" />
+              <div className="h-4 w-32 bg-muted animate-pulse rounded" />
+              <div className="h-4 w-28 bg-muted animate-pulse rounded" />
+              <div className="h-4 w-24 bg-muted animate-pulse rounded" />
             </div>
-          ))}
+          </div>
+          <div className="divide-y">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-4 px-4 py-4 animate-pulse">
+                <div className="h-8 w-8 rounded-full bg-muted" />
+                <div className="h-4 w-40 bg-muted rounded" />
+                <div className="h-4 w-48 bg-muted rounded" />
+                <div className="ml-auto h-4 w-24 bg-muted rounded" />
+              </div>
+            ))}
+          </div>
         </div>
+        <div className="h-4 w-48 bg-muted animate-pulse rounded" />
       </div>
     );
   }
@@ -104,18 +122,10 @@ export function SupplierList() {
 
   return (
     <div className="space-y-6">
-      {/* Toolbar (Add + Filters) */}
+      {/* Toolbar (Search + Filters + Add) */}
       <div className="flex flex-col gap-3 p-3 bg-card rounded-xl border shadow-sm md:flex-row md:items-center md:justify-between">
-        <Link
-          href="/suppliers/new"
-          className="inline-flex items-center justify-center gap-2 h-9 px-4 rounded-lg bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring"
-        >
-          <Plus className="h-4 w-4" />
-          Add Supplier
-        </Link>
-
-        {/* Right controls */}
-        <div className="flex w-full items-center gap-3 md:max-w-2xl md:justify-end">
+        {/* Left controls - Search and filters */}
+        <div className="flex w-full items-center gap-3 md:max-w-2xl">
           <div className="relative w-full md:w-96">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
@@ -146,6 +156,15 @@ export function SupplierList() {
             <span>Has price list</span>
           </label>
         </div>
+
+        {/* Right controls - Primary action */}
+        <Link
+          href="/suppliers/new"
+          className="inline-flex items-center justify-center gap-2 h-9 px-4 rounded-lg bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring md:shrink-0"
+        >
+          <Plus className="h-4 w-4" />
+          Add Supplier
+        </Link>
       </div>
 
       {/* Table */}

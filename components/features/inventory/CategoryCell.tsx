@@ -401,13 +401,19 @@ export function CategoryCell({
           className="max-h-[300px] z-[100]"
         >
           <SelectItem value="Uncategorized">Uncategorized</SelectItem>
-          {categories.map((category) => (
-            <SelectItem 
-              key={category.cat_id} 
-              value={category.categoryname || "Uncategorized"}>
-              {category.categoryname || "Uncategorized"}
-            </SelectItem>
-          ))}
+          {categories
+            .filter((category) => 
+              category.categoryname && 
+              category.categoryname.trim() !== "" &&
+              category.categoryname.trim() !== "Uncategorized"
+            )
+            .map((category) => (
+              <SelectItem 
+                key={category.cat_id} 
+                value={category.categoryname}>
+                {category.categoryname}
+              </SelectItem>
+            ))}
           <div className="relative flex items-center">
             <div className="flex-1 h-px bg-border my-1" />
           </div>

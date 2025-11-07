@@ -112,4 +112,25 @@ export type NewSupplierOrderFormValues = {
 export type ReceiveItemsFormValues = {
   quantity_received: number;
   receipt_date?: string;
+};
+
+export type SupplierOrderReturn = {
+  return_id: number;
+  supplier_order_id: number;
+  transaction_id: number;
+  quantity_returned: number;
+  return_date: string;
+  reason: string;
+  return_type: 'rejection' | 'later_return';
+  receipt_id: number | null;
+  user_id: string | null;
+  notes: string | null;
+  created_at: string;
+};
+
+export type ReturnGoodsFormValues = {
+  quantity_returned: number;
+  reason: string;
+  return_type: 'rejection' | 'later_return';
+  notes?: string;
 }; 
