@@ -30,6 +30,11 @@
 ## Core Operations
 - Receive stock (Purchasing)
   - On PO receipt: insert `inventory_transactions` (IN), insert `supplier_order_receipts`, recompute SO `total_received`, increment `inventory.quantity_on_hand`.
+- Issue stock (Customer Orders)
+  - Via `process_stock_issuance` RPC: creates OUT transaction (SALE type), decrements `inventory.quantity_on_hand`, records issuance in `stock_issuances` table.
+  - UI: Order Detail page → "Issue Stock" tab with BOM integration, component selection, and PDF generation.
+  - Supports partial issuance, multiple products, and component aggregation.
+  - Reversible via `reverse_stock_issuance` RPC.
 - Issue/consume stock (Production/Orders)
   - OUT transactions are created by job/issue flows; they reduce on‑hand.
 - Adjust stock (Counts/Corrections)
@@ -46,6 +51,7 @@
 - Reads and writes enforced by Supabase RLS.
 - Image uploads (component images) require authenticated session.
 - Receiving and adjustments should be performed via server-side RPCs/endpoints to validate roles and invariants.
+- Track implementation details in [`permissions-and-logging-plan.md`](../plans/permissions-and-logging-plan.md) as the access-control work progresses.
 
 ## Performance Notes
 - Current list uses client-side pagination/filtering; consider server-side for large datasets.

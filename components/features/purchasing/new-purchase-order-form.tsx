@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm, Controller, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -16,6 +16,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Loader2, Plus, Trash2, AlertCircle } from 'lucide-react';
 import { PurchaseOrderFormData } from '@/types/purchasing';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import ReactSelect from 'react-select';
 
 // Form validation schema
 const formSchema = z.object({
@@ -71,6 +72,11 @@ type SupplierComponentFromAPI = {
   supplier: {
     name: string;
   };
+};
+
+type ComponentOption = {
+  value: number;
+  label: string;
 };
 
 // Fetch components
@@ -161,7 +167,11 @@ async function fetchDraftStatusId() {
 }
 
 // Create purchase order
-async function createPurchaseOrder(formData: PurchaseOrderFormData, statusId: number) {
+async function createPurchaseOrder(
+  formData: PurchaseOrderFormData,
+  statusId: number,
+  supplierComponentsCache: Map<number, SupplierComponentFromAPI[]> = new Map()
+) {
   // Group items by supplier
   const itemsBySupplier = new Map<number, Array<{
     supplier_component_id: number;
@@ -169,32 +179,32 @@ async function createPurchaseOrder(formData: PurchaseOrderFormData, statusId: nu
     component_id: number;
   }>>();
 
-  // First, fetch all supplier components to get supplier IDs
-  const supplierComponentsData = await Promise.all(
-    formData.items.map(async (item) => {
-      const { data, error } = await supabase
-        .from('suppliercomponents')
-        .select('supplier_id, supplier_component_id')
-        .eq('supplier_component_id', item.supplier_component_id)
-        .single();
+  formData.items.forEach((item) => {
+    const supplierOptions = supplierComponentsCache.get(item.component_id) || [];
+    const supplierComponent = supplierOptions.find(
+      (candidate) => candidate.supplier_component_id === item.supplier_component_id
+    );
 
-      if (error) throw new Error(`Failed to fetch supplier info for component ${item.component_id}`);
-      return {
-        ...item,
-        supplier_id: data.supplier_id
-      };
-    })
-  );
-
-  // Group items by supplier_id
-  supplierComponentsData.forEach(item => {
-    if (!itemsBySupplier.has(item.supplier_id)) {
-      itemsBySupplier.set(item.supplier_id, []);
+    if (!supplierComponent) {
+      throw new Error(
+        `Missing supplier data for component ${item.component_id}. Refresh suppliers and try again.`
+      );
     }
-    itemsBySupplier.get(item.supplier_id)?.push({
+
+    if (!supplierComponent.supplier_id) {
+      throw new Error(
+        `Supplier selection is missing its supplier reference for component ${item.component_id}.`
+      );
+    }
+
+    if (!itemsBySupplier.has(supplierComponent.supplier_id)) {
+      itemsBySupplier.set(supplierComponent.supplier_id, []);
+    }
+
+    itemsBySupplier.get(supplierComponent.supplier_id)?.push({
       supplier_component_id: item.supplier_component_id,
       quantity: item.quantity,
-      component_id: item.component_id
+      component_id: item.component_id,
     });
   });
 
@@ -257,6 +267,7 @@ export function NewPurchaseOrderForm() {
     control,
     handleSubmit,
     watch,
+    setValue,
     formState: { errors },
   } = useForm<PurchaseOrderFormData>({
     resolver: zodResolver(formSchema) as Resolver<PurchaseOrderFormData>,
@@ -278,6 +289,15 @@ export function NewPurchaseOrderForm() {
     queryFn: fetchComponents,
   });
 
+  const componentOptions = useMemo<ComponentOption[]>(
+    () =>
+      (components ?? []).map((component) => ({
+        value: component.component_id,
+        label: `${component.internal_code}${component.description ? ` - ${component.description}` : ''}`,
+      })),
+    [components]
+  );
+
   // Get draft status ID
   const { data: draftStatusId, isLoading: statusLoading } = useQuery({
     queryKey: ['draftStatusId'],
@@ -288,28 +308,31 @@ export function NewPurchaseOrderForm() {
   const watchedItems = watch('items');
 
   // Create a single query for all supplier components
-  const { data: supplierComponentsMap, isLoading: suppliersLoading } = useQuery({
-    queryKey: ['supplierComponents', watchedItems.map(item => item.component_id).join(',')],
+  const { data: supplierComponentsMap, isLoading: suppliersLoading } = useQuery<Map<number, SupplierComponentFromAPI[]>>({
+    queryKey: ['supplierComponents', watchedItems.map((item) => item.component_id).join(',')],
     queryFn: async () => {
-      const results = new Map();
+      const results = new Map<number, SupplierComponentFromAPI[]>();
+      const componentIds = Array.from(
+        new Set(watchedItems.filter((item) => item.component_id > 0).map((item) => item.component_id))
+      );
+
       await Promise.all(
-        watchedItems.map(async (item) => {
-          if (item.component_id > 0) {
-            const suppliers = await fetchSupplierComponentsForComponent(item.component_id);
-            results.set(item.component_id, suppliers);
-          }
+        componentIds.map(async (componentId) => {
+          const suppliers = await fetchSupplierComponentsForComponent(componentId);
+          results.set(componentId, suppliers);
         })
       );
+
       return results;
     },
-    enabled: watchedItems.some(item => item.component_id > 0),
+    enabled: watchedItems.some((item) => item.component_id > 0),
   });
 
   // Create purchase order mutation
   const createOrderMutation = useMutation({
     mutationFn: async (data: PurchaseOrderFormData) => {
       if (!draftStatusId) throw new Error('Failed to get draft status');
-      return createPurchaseOrder(data, draftStatusId);
+      return createPurchaseOrder(data, draftStatusId, supplierComponentsMap ?? new Map());
     },
     onSuccess: (purchaseOrderIds) => {
       queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
@@ -423,22 +446,78 @@ export function NewPurchaseOrderForm() {
                     control={control}
                     name={`items.${index}.component_id`}
                     render={({ field }) => (
-                      <Select
-                        value={field.value?.toString() || ''}
-                        onValueChange={(value) => field.onChange(parseInt(value) || 0)}
-                        disabled={componentsLoading || createOrderMutation.isPending}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select a component" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {components?.map((component) => (
-                            <SelectItem key={component.component_id} value={component.component_id.toString()}>
-                              {component.internal_code} - {component.description}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <ReactSelect<ComponentOption, false>
+                        inputId={`component-select-${index}`}
+                        isClearable
+                        isDisabled={componentsLoading || createOrderMutation.isPending}
+                        isLoading={componentsLoading}
+                        options={componentOptions}
+                        value={componentOptions.find((option) => option.value === field.value) ?? null}
+                        onChange={(option: ComponentOption | null) => {
+                          const selectedId = option?.value ?? 0;
+                          field.onChange(selectedId);
+                          setValue(`items.${index}.supplier_component_id`, 0, {
+                            shouldValidate: true,
+                            shouldDirty: true,
+                          });
+                        }}
+                        onBlur={field.onBlur}
+                        placeholder="Search for a component"
+                        menuPlacement="auto"
+                        classNamePrefix="component-select"
+                        styles={{
+                          control: (base, state) => ({
+                            ...base,
+                            minHeight: '2.5rem',
+                            borderRadius: '0.375rem',
+                            borderColor: state.isFocused
+                              ? 'hsl(var(--ring))'
+                              : errors.items?.[index]?.component_id
+                                ? 'hsl(var(--destructive))'
+                                : 'hsl(var(--input))',
+                            boxShadow: state.isFocused
+                              ? '0 0 0 1px hsl(var(--ring))'
+                              : 'none',
+                            '&:hover': {
+                              borderColor: state.isFocused
+                                ? 'hsl(var(--ring))'
+                                : 'hsl(var(--input))',
+                            },
+                            backgroundColor: 'hsl(var(--background))',
+                          }),
+                          menu: (base) => ({
+                            ...base,
+                            zIndex: 50,
+                            marginTop: 4,
+                          }),
+                          menuPortal: (base) => ({
+                            ...base,
+                            zIndex: 60,
+                          }),
+                          option: (base, state) => ({
+                            ...base,
+                            backgroundColor: state.isFocused
+                              ? 'hsl(var(--accent))'
+                              : 'transparent',
+                            color: state.isFocused
+                              ? 'hsl(var(--accent-foreground))'
+                              : 'inherit',
+                            cursor: 'pointer',
+                          }),
+                          singleValue: (base) => ({
+                            ...base,
+                            color: 'hsl(var(--foreground))',
+                          }),
+                          placeholder: (base) => ({
+                            ...base,
+                            color: 'hsl(var(--muted-foreground))',
+                          }),
+                        }}
+                        menuPortalTarget={typeof document !== 'undefined' ? document.body : undefined}
+                        noOptionsMessage={() =>
+                          componentsLoading ? 'Loading components...' : 'No component found.'
+                        }
+                      />
                     )}
                   />
                   {errors.items?.[index]?.component_id && (

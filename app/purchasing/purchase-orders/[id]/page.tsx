@@ -27,20 +27,20 @@ import { cn } from '@/lib/utils';
 
 // Status badge component
 function StatusBadge({ status, className }: { status: string; className?: string }) {
-  let variant: 'default' | 'outline' | 'secondary' | 'destructive' | 'success' | 'warning' = 'default';
+  let variant: 'default' | 'outline' | 'secondary' | 'destructive' | 'success' = 'default';
   
   switch (status.toLowerCase()) {  // Make case-insensitive
     case 'draft':
       variant = 'secondary';  // Gray
       break;
     case 'pending approval':
-      variant = 'warning';    // Yellow/Orange
+      variant = 'secondary';    // Gray
       break;
     case 'approved':
-      variant = 'warning';    // Yellow/Orange (changed from success)
+      variant = 'secondary';    // Gray
       break;
     case 'partially received':
-      variant = 'warning';    // Yellow/Orange
+      variant = 'secondary';    // Gray
       break;
     case 'fully received':
       variant = 'success';    // Green
@@ -88,6 +88,18 @@ interface Receipt {
   receipt_date: string;
 }
 
+interface Return {
+  return_id: number;
+  supplier_order_id: number;
+  transaction_id: number;
+  quantity_returned: number;
+  return_date: string;
+  reason: string;
+  return_type: 'rejection' | 'later_return';
+  receipt_id: number | null;
+  notes: string | null;
+}
+
 interface SupplierOrder {
   order_id: number;
   order_quantity: number;
@@ -106,11 +118,22 @@ interface SupplierOrder {
     };
   };
   receipts?: Receipt[];
+  returns?: Return[];
 }
 
 // Add new interfaces for receipt handling
 interface ReceiptFormData {
   [key: string]: number;  // order_id -> quantity mapping
+}
+
+// Interface for return form data
+interface ReturnFormData {
+  [key: string]: {
+    quantity: number;
+    reason: string;
+    return_type: 'rejection' | 'later_return';
+    notes?: string;
+  };
 }
 
 // Fetch purchase order by ID
@@ -146,6 +169,17 @@ async function fetchPurchaseOrderById(id: string) {
           transaction_id,
           quantity_received,
           receipt_date
+        ),
+        returns:supplier_order_returns(
+          return_id,
+          supplier_order_id,
+          transaction_id,
+          quantity_returned,
+          return_date,
+          reason,
+          return_type,
+          receipt_id,
+          notes
         )
       )
     `)
@@ -153,8 +187,26 @@ async function fetchPurchaseOrderById(id: string) {
     .single();
 
   if (error) throw error;
-  return purchaseOrder as PurchaseOrder;
+  return purchaseOrder as any;
 }
+
+// Type for purchase order with supplier orders
+type PurchaseOrder = {
+  purchase_order_id: number;
+  q_number: string | null;
+  order_date: string;
+  status_id: number;
+  notes: string | null;
+  created_by: string | null;
+  approved_by: string | null;
+  created_at: string;
+  approved_at: string | null;
+  status: {
+    status_id: number;
+    status_name: string;
+  };
+  supplier_orders?: SupplierOrder[];
+};
 
 // Update approvePurchaseOrder function to call the email API
 type EmailResult = { supplier: string; success: boolean; error?: string; messageId?: string };
@@ -330,6 +382,21 @@ async function receiveStock(purchaseOrderId: string, receipts: ReceiptFormData) 
       }
       const componentId = componentData.component_id as number;
 
+      const receiptTimestamp = new Date().toISOString();
+
+      // Try the transactional RPC first; fall back to manual inserts if it is unavailable
+      const { error: rpcError } = await supabase.rpc('process_supplier_order_receipt', {
+        p_order_id: parseInt(orderId),
+        p_quantity: quantityReceived,
+        p_receipt_date: receiptTimestamp,
+      });
+
+      if (!rpcError) {
+        continue;
+      }
+
+      console.warn('process_supplier_order_receipt RPC failed, using manual fallback:', rpcError);
+
       // 3. Ensure PURCHASE transaction type exists and get its ID
       let purchaseTypeId: number | null = null;
       const { data: typeData, error: typeError } = await supabase
@@ -358,7 +425,7 @@ async function receiveStock(purchaseOrderId: string, receipts: ReceiptFormData) 
           component_id: componentId,
           quantity: quantityReceived,
           transaction_type_id: purchaseTypeId,
-          transaction_date: new Date().toISOString()
+          transaction_date: receiptTimestamp
         })
         .select('transaction_id')
         .single();
@@ -373,7 +440,7 @@ async function receiveStock(purchaseOrderId: string, receipts: ReceiptFormData) 
           order_id: parseInt(orderId),
           transaction_id: transactionData.transaction_id,
           quantity_received: quantityReceived,
-          receipt_date: new Date().toISOString()
+          receipt_date: receiptTimestamp
         });
       if (receiptError) throw new Error(`Failed to create receipt record: ${receiptError.message}`);
 
@@ -445,6 +512,41 @@ async function receiveStock(purchaseOrderId: string, receipts: ReceiptFormData) 
   }
 }
 
+// Add return function
+async function returnStock(purchaseOrderId: string, returns: ReturnFormData) {
+  try {
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError) throw new Error('Could not get current user');
+
+    for (const [orderId, returnData] of Object.entries(returns)) {
+      if (returnData.quantity <= 0) continue;
+      if (!returnData.reason || returnData.reason.trim() === '') {
+        throw new Error(`Reason is required for order ${orderId}`);
+      }
+
+      // Try the transactional RPC first
+      const { error: rpcError } = await supabase.rpc('process_supplier_order_return', {
+        p_supplier_order_id: parseInt(orderId),
+        p_quantity: returnData.quantity,
+        p_reason: returnData.reason.trim(),
+        p_return_type: returnData.return_type || 'later_return',
+        p_return_date: new Date().toISOString(),
+        p_receipt_id: null, // Could be enhanced to link to specific receipt
+        p_notes: returnData.notes || null,
+      });
+
+      if (rpcError) {
+        throw new Error(`Failed to return stock for order ${orderId}: ${rpcError.message}`);
+      }
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error in returnStock:', error);
+    throw error;
+  }
+}
+
 function getOrderStatus(order: PurchaseOrder) {
   if (!order.supplier_orders?.length) return order.status?.status_name || 'Unknown';
 
@@ -468,6 +570,7 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
   const [qNumber, setQNumber] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [receiptQuantities, setReceiptQuantities] = useState<ReceiptFormData>({});
+  const [returnQuantities, setReturnQuantities] = useState<ReturnFormData>({});
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
@@ -483,6 +586,8 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
   } = useQuery({
     queryKey: ['purchaseOrder', params.id],
     queryFn: () => fetchPurchaseOrderById(params.id),
+    refetchOnMount: true,
+    staleTime: 0, // Always consider data stale so it refetches when invalidated
   });
   
   // Set initial Q number if available
@@ -608,12 +713,26 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
   // Add receipt mutation
   const receiptMutation = useMutation({
     mutationFn: () => receiveStock(params.id, receiptQuantities),
-    onSuccess: () => {
-      // Invalidate all relevant queries to trigger updates
-      queryClient.invalidateQueries({ queryKey: ['purchaseOrder', params.id] });
-      queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
-      queryClient.invalidateQueries({ queryKey: ['inventory'] });
-      queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
+    onSuccess: async () => {
+      // Invalidate all relevant queries first
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['purchaseOrder', params.id] }),
+        queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] }),
+        queryClient.invalidateQueries({ queryKey: ['purchase-orders'] }),
+        queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] }),
+        queryClient.invalidateQueries({ queryKey: ['inventory'] }),
+        queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] }),
+      ]);
+      // Force immediate refetch of the current purchase order - this is critical for the page to update
+      await queryClient.refetchQueries({ 
+        queryKey: ['purchaseOrder', params.id],
+        type: 'active' // Only refetch active queries
+      });
+      // Also refetch list queries if they're active
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ['purchaseOrders'], type: 'active' }),
+        queryClient.refetchQueries({ queryKey: ['purchase-orders'], type: 'active' }),
+      ]);
       // Reset the receipt quantities
       setReceiptQuantities({});
       // Clear any errors
@@ -628,16 +747,81 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
   const receiveOneMutation = useMutation({
     mutationFn: (payload: { orderId: string; qty: number }) =>
       receiveStock(params.id, { [payload.orderId]: payload.qty }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['purchaseOrder', params.id] });
-      queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
-      queryClient.invalidateQueries({ queryKey: ['inventory'] });
-      queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
-      setReceiptQuantities({});
+    onSuccess: async () => {
+      // Invalidate all relevant queries first
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['purchaseOrder', params.id] }),
+        queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] }),
+        queryClient.invalidateQueries({ queryKey: ['purchase-orders'] }),
+        queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] }),
+        queryClient.invalidateQueries({ queryKey: ['inventory'] }),
+        queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] }),
+      ]);
+      // Force immediate refetch of the current purchase order - this is critical for the page to update
+      await queryClient.refetchQueries({ 
+        queryKey: ['purchaseOrder', params.id],
+        type: 'active' // Only refetch active queries
+      });
+      // Also refetch list queries if they're active
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ['purchaseOrders'], type: 'active' }),
+        queryClient.refetchQueries({ queryKey: ['purchase-orders'], type: 'active' }),
+      ]);
+      // Clear the receipt quantity for this specific order
+      setReceiptQuantities(prev => {
+        const updated = { ...prev };
+        const orderIdToClear = Object.keys(prev).find(key => prev[key] > 0);
+        if (orderIdToClear) {
+          delete updated[orderIdToClear];
+        }
+        return updated;
+      });
       setError(null);
     },
     onError: (error: Error) => {
       setError(`Failed to receive stock: ${error.message}`);
+    },
+  });
+
+  // Return mutation
+  const returnMutation = useMutation({
+    mutationFn: () => returnStock(params.id, returnQuantities),
+    onSuccess: async () => {
+      // Invalidate all relevant queries first
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['purchaseOrder', params.id] }),
+        queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] }),
+        queryClient.invalidateQueries({ queryKey: ['purchase-orders'] }),
+        queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] }),
+        queryClient.invalidateQueries({ queryKey: ['inventory'] }),
+        queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] }),
+      ]);
+      // Force immediate refetch of the current purchase order
+      await queryClient.refetchQueries({ 
+        queryKey: ['purchaseOrder', params.id],
+        type: 'active'
+      });
+      // Also refetch list queries if they're active
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ['purchaseOrders'], type: 'active' }),
+        queryClient.refetchQueries({ queryKey: ['purchase-orders'], type: 'active' }),
+      ]);
+      // Reset the return quantities
+      setReturnQuantities({});
+      // Clear any errors
+      setError(null);
+      toast({
+        title: 'Stock returned successfully',
+        description: 'Return has been processed and inventory updated.',
+      });
+    },
+    onError: (error: Error) => {
+      setError(`Failed to return stock: ${error.message}`);
+      toast({
+        title: 'Failed to return stock',
+        description: error.message,
+        variant: 'destructive',
+      });
     },
   });
 
@@ -729,6 +913,74 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
   const handleSubmitReceipts = () => {
     setError(null);
     receiptMutation.mutate();
+  };
+
+  // Handle return quantity change
+  const handleReturnQuantityChange = (orderId: string, quantity: string) => {
+    setReturnQuantities(prev => ({
+      ...prev,
+      [orderId]: {
+        ...prev[orderId],
+        quantity: parseInt(quantity) || 0,
+        reason: prev[orderId]?.reason || '',
+        return_type: prev[orderId]?.return_type || 'later_return',
+        notes: prev[orderId]?.notes || '',
+      }
+    }));
+  };
+
+  // Handle return reason change
+  const handleReturnReasonChange = (orderId: string, reason: string) => {
+    setReturnQuantities(prev => ({
+      ...prev,
+      [orderId]: {
+        ...prev[orderId],
+        quantity: prev[orderId]?.quantity || 0,
+        reason,
+        return_type: prev[orderId]?.return_type || 'later_return',
+        notes: prev[orderId]?.notes || '',
+      }
+    }));
+  };
+
+  // Handle return type change
+  const handleReturnTypeChange = (orderId: string, returnType: 'rejection' | 'later_return') => {
+    setReturnQuantities(prev => ({
+      ...prev,
+      [orderId]: {
+        ...prev[orderId],
+        quantity: prev[orderId]?.quantity || 0,
+        reason: prev[orderId]?.reason || '',
+        return_type: returnType,
+        notes: prev[orderId]?.notes || '',
+      }
+    }));
+  };
+
+  // Handle submit returns
+  const handleSubmitReturns = () => {
+    // Validate that all returns have reasons
+    const invalidReturns = Object.entries(returnQuantities).filter(
+      ([_, data]) => data.quantity > 0 && (!data.reason || data.reason.trim() === '')
+    );
+    
+    if (invalidReturns.length > 0) {
+      setError('Please provide a reason for all returns');
+      return;
+    }
+
+    // Validate quantities don't exceed received
+    for (const [orderId, returnData] of Object.entries(returnQuantities)) {
+      if (returnData.quantity <= 0) continue;
+      const order = purchaseOrder?.supplier_orders?.find(o => o.order_id.toString() === orderId);
+      if (order && returnData.quantity > (order.total_received || 0)) {
+        setError(`Return quantity exceeds received quantity for ${order.supplier_component?.component?.internal_code || 'component'}`);
+        return;
+      }
+    }
+
+    setError(null);
+    returnMutation.mutate();
   };
   
   if (isLoading) {
@@ -857,7 +1109,7 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
                 {Array.from(new Set(purchaseOrder.supplier_orders?.map(
                   order => order.supplier_component?.supplier?.name
                 ) || [])).map((supplier, i) => (
-                  <Badge key={i} variant="outline">{supplier}</Badge>
+                  <Badge key={i} variant="outline">{String(supplier)}</Badge>
                 ))}
               </div>
             </div>
@@ -886,6 +1138,7 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
                 <TableHead className="text-right">Unit Price</TableHead>
                 <TableHead className="text-right">Ordered</TableHead>
                 <TableHead className="text-right">Received</TableHead>
+                <TableHead className="text-right">Owing</TableHead>
                 {isApproved && <TableHead className="text-right">Receive Now</TableHead>}
                 <TableHead className="text-right">Total</TableHead>
               </TableRow>
@@ -898,7 +1151,7 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
                     const supplier = order.supplier_component?.supplier;
                     const price = order.supplier_component?.price || 0;
                     const lineTotal = price * order.order_quantity;
-                    const remainingToReceive = order.order_quantity - (order.total_received || 0);
+                    const remainingToReceive = Math.max(0, order.order_quantity - (order.total_received || 0));
 
                     return (
                       <TableRow key={order.order_id} className="odd:bg-muted/30">
@@ -908,6 +1161,11 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
                         <TableCell className="text-right">R{price.toFixed(2)}</TableCell>
                         <TableCell className="text-right">{order.order_quantity}</TableCell>
                         <TableCell className="text-right">{order.total_received || 0}</TableCell>
+                        <TableCell className="text-right">
+                          <span className={remainingToReceive > 0 ? 'font-medium text-orange-600' : 'text-muted-foreground'}>
+                            {remainingToReceive}
+                          </span>
+                        </TableCell>
                         {isApproved && (
                           <TableCell className="text-right">
                             <div className="flex items-center justify-end gap-2">
@@ -942,6 +1200,11 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
                     <TableCell colSpan={4} className="text-right text-sm font-medium text-muted-foreground">Totals</TableCell>
                     <TableCell className="text-right text-sm font-medium">{totalItems}</TableCell>
                     <TableCell className="text-right text-sm font-medium">{totalReceived}</TableCell>
+                    <TableCell className="text-right text-sm font-medium">
+                      <span className="font-medium text-orange-600">
+                        {Math.max(0, totalItems - totalReceived)}
+                      </span>
+                    </TableCell>
                     {isApproved && <TableCell />}
                     <TableCell className="text-right font-semibold">R{totalAmount.toFixed(2)}</TableCell>
                   </TableRow>
@@ -949,7 +1212,7 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
               ) : (
                 <TableRow>
                   <TableCell
-                    colSpan={isApproved ? 8 : 7}
+                    colSpan={isApproved ? 9 : 8}
                     className="text-center py-6 text-muted-foreground"
                   >
                     No items in this purchase order
@@ -980,10 +1243,10 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
                     <div className="flex items-center justify-between">
                       <div>
                         <h3 className="text-lg font-semibold">
-                          {order.supplier_component.component.internal_code}
+                          {order.supplier_component?.component?.internal_code || 'Unknown'}
                         </h3>
                         <p className="text-sm text-muted-foreground">
-                          {order.supplier_component.component.description}
+                          {order.supplier_component?.component?.description || 'No description'}
                         </p>
                       </div>
                       <div className="text-right">
@@ -1028,6 +1291,223 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
                     <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-full bg-muted mb-3">📦</div>
                     <div className="font-medium">No receipts yet</div>
                     <div className="text-sm text-muted-foreground">Use the Receive controls in the items table to record deliveries.</div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Return Goods Section */}
+      {purchaseOrder && isApproved && (
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle>Return Goods</CardTitle>
+            <CardDescription>
+              Return goods to suppliers. Select components and quantities to return.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {purchaseOrder.supplier_orders && purchaseOrder.supplier_orders.length > 0 ? (
+                <>
+                  {purchaseOrder.supplier_orders
+                    .filter(order => (order.total_received || 0) > 0)
+                    .map((order) => {
+                      const component = order.supplier_component?.component;
+                      const maxReturnable = order.total_received || 0;
+                      const returnData = returnQuantities[order.order_id.toString()] || {
+                        quantity: 0,
+                        reason: '',
+                        return_type: 'later_return' as const,
+                        notes: '',
+                      };
+
+                      return (
+                        <div key={order.order_id} className="border rounded-lg p-4 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h3 className="font-medium">{component?.internal_code || 'Unknown'}</h3>
+                              <p className="text-sm text-muted-foreground">{component?.description || 'No description'}</p>
+                              <p className="text-sm text-muted-foreground">
+                                Received: {order.total_received} / Ordered: {order.order_quantity}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className="text-sm font-medium mb-1 block">Quantity to Return</label>
+                              <input
+                                type="number"
+                                min="0"
+                                max={maxReturnable}
+                                value={returnData.quantity || ''}
+                                onChange={(e) => handleReturnQuantityChange(order.order_id.toString(), e.target.value)}
+                                className="w-full px-3 py-2 border rounded-md"
+                                placeholder="0"
+                              />
+                              <p className="text-xs text-muted-foreground mt-1">
+                                Max: {maxReturnable}
+                              </p>
+                            </div>
+                            <div>
+                              <label className="text-sm font-medium mb-1 block">Return Type</label>
+                              <select
+                                value={returnData.return_type}
+                                onChange={(e) => handleReturnTypeChange(order.order_id.toString(), e.target.value as 'rejection' | 'later_return')}
+                                className="w-full px-3 py-2 border rounded-md"
+                              >
+                                <option value="later_return">Later Return</option>
+                                <option value="rejection">Rejection on Delivery</option>
+                              </select>
+                            </div>
+                            <div className="md:col-span-2">
+                              <label className="text-sm font-medium mb-1 block">Reason <span className="text-red-500">*</span></label>
+                              <select
+                                value={returnData.reason}
+                                onChange={(e) => handleReturnReasonChange(order.order_id.toString(), e.target.value)}
+                                className="w-full px-3 py-2 border rounded-md"
+                                required
+                              >
+                                <option value="">Select a reason</option>
+                                <option value="Damage">Damage</option>
+                                <option value="Wrong Item">Wrong Item</option>
+                                <option value="Quality Issue">Quality Issue</option>
+                                <option value="Over-supplied">Over-supplied</option>
+                                <option value="Customer Cancellation">Customer Cancellation</option>
+                                <option value="Defective">Defective</option>
+                                <option value="Other">Other</option>
+                              </select>
+                            </div>
+                            {returnData.reason === 'Other' && (
+                              <div className="md:col-span-2">
+                                <label className="text-sm font-medium mb-1 block">Additional Notes</label>
+                                <textarea
+                                  value={returnData.notes || ''}
+                                  onChange={(e) => {
+                                    setReturnQuantities(prev => ({
+                                      ...prev,
+                                      [order.order_id.toString()]: {
+                                        ...prev[order.order_id.toString()],
+                                        notes: e.target.value,
+                                      }
+                                    }));
+                                  }}
+                                  className="w-full px-3 py-2 border rounded-md"
+                                  rows={2}
+                                  placeholder="Provide additional details..."
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  {purchaseOrder.supplier_orders.filter(order => (order.total_received || 0) > 0).length === 0 && (
+                    <div className="text-center py-8 text-muted-foreground">
+                      No items have been received yet. Receive stock before returning.
+                    </div>
+                  )}
+                  {purchaseOrder.supplier_orders.filter(order => (order.total_received || 0) > 0).length > 0 && (
+                    <div className="flex justify-end pt-4">
+                      <Button
+                        onClick={handleSubmitReturns}
+                        disabled={returnMutation.isPending || Object.keys(returnQuantities).length === 0 || 
+                          !Object.values(returnQuantities).some(r => r.quantity > 0)}
+                        variant="destructive"
+                      >
+                        {returnMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                        Return Goods
+                      </Button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  No items in this purchase order
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Return History Section */}
+      {purchaseOrder && (
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle>Return History</CardTitle>
+            <CardDescription>
+              Record of all returned items for this purchase order
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-6">
+              {purchaseOrder.supplier_orders.map((order) => {
+                if (!order.returns || order.returns.length === 0) return null;
+                
+                return (
+                  <div key={order.order_id} className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-lg font-semibold">
+                          {order.supplier_component?.component?.internal_code || 'Unknown'}
+                        </h3>
+                        <p className="text-sm text-muted-foreground">
+                          {order.supplier_component?.component?.description || 'No description'}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-medium">
+                          Total Returned: {order.returns.reduce((sum, r) => sum + r.quantity_returned, 0)}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          From {order.supplier_component.supplier.name}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Return ID</TableHead>
+                          <TableHead>Quantity</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Reason</TableHead>
+                          <TableHead>Date Returned</TableHead>
+                          <TableHead>Transaction ID</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {order.returns.map((returnItem) => (
+                          <TableRow key={returnItem.return_id}>
+                            <TableCell>#{returnItem.return_id}</TableCell>
+                            <TableCell>{returnItem.quantity_returned}</TableCell>
+                            <TableCell>
+                              <Badge variant={returnItem.return_type === 'rejection' ? 'destructive' : 'outline'}>
+                                {returnItem.return_type === 'rejection' ? 'Rejection' : 'Later Return'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>{returnItem.reason}</TableCell>
+                            <TableCell>
+                              {format(new Date(returnItem.return_date), 'MMM d, yyyy h:mm a')}
+                            </TableCell>
+                            <TableCell>#{returnItem.transaction_id}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                );
+              })}
+              
+              {purchaseOrder.supplier_orders.every(order => !order.returns?.length) && (
+                <Card className="bg-muted/40">
+                  <CardContent className="py-10 text-center">
+                    <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-full bg-muted mb-3">↩️</div>
+                    <div className="font-medium">No returns yet</div>
+                    <div className="text-sm text-muted-foreground">Use the Return Goods section above to record returns.</div>
                   </CardContent>
                 </Card>
               )}

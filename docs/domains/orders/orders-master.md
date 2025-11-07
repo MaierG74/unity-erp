@@ -63,6 +63,18 @@
 **Order Detail & Purchasing Linkage**
 
 - Detail page `app/orders/[orderId]/page.tsx` loads header (`orders` with `order_statuses`, `customers`, and `quotes`) plus `order_details(product:products)`. For configurable products, extend the line editor to surface option selectors sourced from attached **Option Sets** (global + product overlays), persist `selected_options`, and call the shared resolver so FG reservations and purchasing respect the chosen configuration even when an order is created directly (no quote).
+- **Stock Issuance** (✅ Implemented January 2025):
+  - "Issue Stock" tab on Order Detail page (`IssueStockTab` component)
+  - BOM-integrated component selection and aggregation
+  - Product-level selection with independent order detail control
+  - Automatic quantity prepopulation based on BOM requirements
+  - Real-time inventory availability checking
+  - "All components issued" visual indicators (badges and card highlighting)
+  - PDF generation with signature fields for physical signing
+  - Issuance history tracking via `stock_issuances` table
+  - Supports partial issuance, multiple products, and component aggregation
+  - Reversible via `reverse_stock_issuance` RPC (database function exists; UI pending)
+  - See [`../changelogs/stock-issuance-implementation-20250104.md`](../changelogs/stock-issuance-implementation-20250104.md) for details
 - Component requirements pipeline:
   - RPC: `get_all_component_requirements` to compute global totals.
   - RPC: `get_detailed_component_status(p_order_id)` for per-order requirements with stock/on-order and global fields.

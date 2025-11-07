@@ -25,8 +25,6 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  console.log("Root layout rendering with simplified structure");
-  
   return (
     <html lang="en" className={`dark ${inter.className}`} suppressHydrationWarning>
       <body className="antialiased min-h-screen bg-background">

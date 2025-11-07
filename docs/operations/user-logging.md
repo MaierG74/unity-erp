@@ -2,6 +2,8 @@
 
 > Working document for adding per-action user logging across Unity ERP. Treat as the authoritative plan until implementation ships.
 
+> **See also:** [`permissions-and-logging-plan.md`](../plans/permissions-and-logging-plan.md) for the coordinated roadmap covering role management, permissions UI, and RLS integration.
+
 ### Objectives
 - Capture a durable audit trail for every meaningful user action (CRUD, auth, workflow transitions).
 - Centralize logs in Supabase/Postgres so downstream analytics, compliance, and incident review share a single source of truth.

@@ -167,6 +167,7 @@ export default function TodoDetailPage() {
   const [commentsOpen, setCommentsOpen] = useState(true);
   const [attachmentsOpen, setAttachmentsOpen] = useState(true);
   const [isScrolled, setIsScrolled] = useState(false);
+  const [isDueDatePickerOpen, setIsDueDatePickerOpen] = useState(false);
 
   const {
     control,
@@ -613,10 +614,8 @@ export default function TodoDetailPage() {
             control={control}
             name="dueDate"
             render={({ field }) => {
-              const [datePickerOpen, setDatePickerOpen] = useState(false);
-
               return (
-                <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+                <Popover open={isDueDatePickerOpen} onOpenChange={setIsDueDatePickerOpen}>
                   <PopoverTrigger asChild>
                     <Button variant="outline" size="sm" className="h-8 text-sm rounded-md border-none bg-muted/50 hover:bg-muted">
                       <CalendarIcon className="mr-1.5 h-3.5 w-3.5" />
@@ -628,7 +627,7 @@ export default function TodoDetailPage() {
                       mode="single"
                       selected={field.value ?? undefined}
                       onSelect={async (date) => {
-                        setDatePickerOpen(false); // Close the popover first
+                        setIsDueDatePickerOpen(false); // Close the popover first
                         await updateField({ dueDate: date ?? null }); // Save directly
                         // Don't call field.onChange - let the refetch update the form
                       }}

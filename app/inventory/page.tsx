@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/common/auth-provider';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -30,6 +30,7 @@ import { QueryError } from '@/components/ui/query-error';
 import { useToast } from "@/components/ui/use-toast";
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useDebounce } from '@/hooks/use-debounce';
 
 type Component = {
   component_id: number;
@@ -131,6 +132,7 @@ export default function InventoryPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [filterText, setFilterText] = useState('');
+  const debouncedFilterText = useDebounce(filterText, 300);
   const [selectedCategory, setSelectedCategory] = useState<string>('_all');
   const [selectedSupplier, setSelectedSupplier] = useState<string>('_all');
   const [categorySearch, setCategorySearch] = useState('');
@@ -218,16 +220,76 @@ export default function InventoryPage() {
             }
           });
         }
+
+        // Fetch required quantities across all active orders
+        // First get all active order IDs
+        const { data: activeOrders, error: ordersError } = await supabase
+          .from('orders')
+          .select(`
+            order_id,
+            status:order_statuses!inner (
+              status_name
+            )
+          `)
+          .not('status.status_name', 'in', '(Completed,Cancelled)');
+
+        const activeOrderIds = activeOrders?.map(o => o.order_id) || [];
+
+        // Then fetch order details for active orders
+        let requiredData: any[] = [];
+        if (activeOrderIds.length > 0) {
+          const { data: odData, error: requiredError } = await supabase
+            .from('order_details')
+            .select(`
+              quantity,
+              product_id,
+              product:products (
+                billofmaterials (
+                  component_id,
+                  quantity_required
+                )
+              )
+            `)
+            .in('order_id', activeOrderIds);
+
+          if (requiredError) {
+            console.error('Error fetching required-for-orders data:', requiredError);
+          } else {
+            requiredData = odData || [];
+          }
+        }
+
+        // Calculate required quantity per component across all active orders
+        const requiredByComponent = new Map<number, number>();
+        if (requiredData.length > 0) {
+          requiredData.forEach((od: any) => {
+            const orderQty = Number(od.quantity || 0);
+            const bomRows = od.product?.billofmaterials || [];
+            if (Array.isArray(bomRows)) {
+              bomRows.forEach((bom: any) => {
+                const componentId = bom.component_id;
+                const qtyRequired = Number(bom.quantity_required || 0);
+                if (componentId && qtyRequired > 0) {
+                  const totalRequired = orderQty * qtyRequired;
+                  const current = requiredByComponent.get(componentId) || 0;
+                  requiredByComponent.set(componentId, current + totalRequired);
+                }
+              });
+            }
+          });
+        }
         
-        // Process inventory data to ensure numeric values and add on_order_quantity
+        // Process inventory data to ensure numeric values and add on_order_quantity and required_for_orders
         const processedData = data?.map(component => {
           const onOrderQty = onOrderByComponent.get(component.component_id) || 0;
+          const requiredQty = requiredByComponent.get(component.component_id) || 0;
           
           if (component.inventory && component.inventory.length > 0) {
             // Ensure inventory array items have numeric values
             return {
               ...component,
               on_order_quantity: onOrderQty,
+              required_for_orders: requiredQty > 0 ? requiredQty : null,
               inventory: component.inventory.map((inv: any) => ({
                 ...inv,
                 quantity_on_hand: inv.quantity_on_hand !== null && 
@@ -241,7 +303,8 @@ export default function InventoryPage() {
           }
           return {
             ...component,
-            on_order_quantity: onOrderQty
+            on_order_quantity: onOrderQty,
+            required_for_orders: requiredQty > 0 ? requiredQty : null
           };
         });
         
@@ -273,10 +336,7 @@ export default function InventoryPage() {
     if (selectedComponent && components.length > 0) {
       const updatedComponent = components.find(c => c.component_id === selectedComponent.component_id);
       if (updatedComponent) {
-        console.log('Updating selected component with new data:', updatedComponent);
         setSelectedComponent(updatedComponent);
-      } else {
-        console.log('Selected component not found in updated data');
       }
     }
   }, [components, selectedComponent?.component_id]);
@@ -307,7 +367,7 @@ export default function InventoryPage() {
   const filteredComponents = useMemo(() => {
     const filtered = components
       .filter(component => {
-        const searchTerm = filterText.toLowerCase();
+        const searchTerm = debouncedFilterText.toLowerCase();
         const matchesFilter = (
           (component.internal_code?.toLowerCase() ?? '').includes(searchTerm) ||
           (component.description?.toLowerCase() ?? '').includes(searchTerm)
@@ -329,7 +389,7 @@ export default function InventoryPage() {
         return (a.internal_code || '').localeCompare(b.internal_code || '');
       });
     return filtered;
-  }, [components, filterText, selectedCategory, selectedSupplier]);
+  }, [components, debouncedFilterText, selectedCategory, selectedSupplier]);
 
   // Filter categories based on search
   const filteredCategories = useMemo(() => {
@@ -349,7 +409,17 @@ export default function InventoryPage() {
 
   // Removed unused getStockStatusColor; table cell renders semantic text colors inline
 
-  const handleDelete = async () => {
+  // Function to manually refresh data
+  const refreshData = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['inventory'] });
+    queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
+    toast({
+      title: "Data refreshed",
+      description: "The inventory data has been refreshed from the database."
+    });
+  }, [queryClient, toast]);
+
+  const handleDelete = useCallback(async () => {
     if (!selectedComponent) return;
 
     try {
@@ -394,20 +464,10 @@ export default function InventoryPage() {
       console.error('Error deleting component:', e);
       alert('Error deleting component. Please try again.');
     }
-  };
-
-  // Function to manually refresh data
-  const refreshData = () => {
-    queryClient.invalidateQueries({ queryKey: ['inventory'] });
-    queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
-    toast({
-      title: "Data refreshed",
-      description: "The inventory data has been refreshed from the database."
-    });
-  };
+  }, [selectedComponent, refreshData]);
 
   // Function to manually refresh the selected component
-  const refreshSelectedComponent = async () => {
+  const refreshSelectedComponent = useCallback(async () => {
     if (!selectedComponent) return;
     
     try {
@@ -452,7 +512,6 @@ export default function InventoryPage() {
       if (error) throw error;
       
       if (data) {
-        console.log('Manually refreshed component data:', data);
         setSelectedComponent(data);
         toast({
           title: "Component refreshed",
@@ -467,15 +526,13 @@ export default function InventoryPage() {
         variant: "destructive"
       });
     }
-  };
+  }, [selectedComponent, toast]);
 
   // Function to verify UI data against Supabase data
-  const verifyUIDataAgainstSupabase = async () => {
+  const verifyUIDataAgainstSupabase = useCallback(async () => {
     if (!selectedComponent) return;
     
     try {
-      console.log('🔍 Verifying UI data against Supabase data');
-      console.log('🔍 Current UI component data:', selectedComponent);
       
       // Fetch the latest data from Supabase
       const { data, error } = await supabase
@@ -511,11 +568,9 @@ export default function InventoryPage() {
         .single();
       
       if (error) {
-        console.error('❌ Failed to fetch Supabase data for comparison:', error);
+        console.error('Failed to fetch Supabase data for comparison:', error);
         return;
       }
-      
-      console.log('✅ Supabase component data:', data);
       
       // Compare key fields
       const uiData = {
@@ -543,9 +598,6 @@ export default function InventoryPage() {
         } : null,
         supplierComponents: data.supplierComponents?.length || 0
       };
-      
-      console.log('🔍 UI data summary:', uiData);
-      console.log('🔍 Supabase data summary:', supabaseData);
       
       // Check for differences
       const differences = [];
@@ -588,17 +640,12 @@ export default function InventoryPage() {
       }
       
       if (differences.length > 0) {
-        console.log('❌ Differences found between UI and Supabase data:');
-        differences.forEach(diff => console.log(`  - ${diff}`));
-        
         toast({
           title: "Data inconsistency detected",
           description: "The UI is not showing the latest data from the database. Click refresh to update.",
           variant: "destructive"
         });
       } else {
-        console.log('✅ UI data matches Supabase data');
-        
         toast({
           title: "Data verification",
           description: "UI data matches database data."
@@ -607,9 +654,9 @@ export default function InventoryPage() {
       
       return { uiData, supabaseData, differences };
     } catch (error) {
-      console.error('❌ Error verifying UI data against Supabase:', error);
+      console.error('Error verifying UI data against Supabase:', error);
     }
-  };
+  }, [selectedComponent, toast]);
 
   if (isLoading) {
     return (
@@ -663,9 +710,9 @@ export default function InventoryPage() {
 
       {/* Filter row (single centered line) */}
       <div className="p-3 bg-card rounded-xl border shadow-sm mb-6">
-        <div className="mx-auto flex max-w-5xl items-center justify-center gap-4">
+        <div className="mx-auto flex flex-col md:flex-row max-w-5xl items-center justify-center gap-4">
           {/* Search */}
-          <div className="relative w-[520px]">
+          <div className="relative w-full md:w-[520px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
@@ -687,8 +734,8 @@ export default function InventoryPage() {
           </div>
 
           {/* Category */}
-          <div className="inline-flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Category</span>
+          <div className="inline-flex items-center gap-2 w-full md:w-auto">
+            <span className="text-sm text-muted-foreground whitespace-nowrap">Category</span>
             <Select 
               value={selectedCategory} 
               onValueChange={(value) => {
@@ -696,7 +743,7 @@ export default function InventoryPage() {
                 setCategorySearch('');
               }}
             >
-              <SelectTrigger className="h-9 w-44">
+              <SelectTrigger className="h-9 w-full md:w-44">
                 <SelectValue placeholder="Select category" />
               </SelectTrigger>
               <SelectContent>
@@ -725,8 +772,8 @@ export default function InventoryPage() {
           </div>
 
           {/* Supplier */}
-          <div className="inline-flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Supplier</span>
+          <div className="inline-flex items-center gap-2 w-full md:w-auto">
+            <span className="text-sm text-muted-foreground whitespace-nowrap">Supplier</span>
             <Select 
               value={selectedSupplier} 
               onValueChange={(value) => {
@@ -734,7 +781,7 @@ export default function InventoryPage() {
                 setSupplierSearch('');
               }}
             >
-              <SelectTrigger className="h-9 w-48">
+              <SelectTrigger className="h-9 w-full md:w-48">
                 <SelectValue placeholder="Select supplier" />
               </SelectTrigger>
               <SelectContent>
@@ -764,15 +811,14 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      <div className="flex flex-row gap-4">
+      <div className="flex flex-col lg:flex-row gap-4">
         {/* Left side - Component list */}
         <div className="flex-1 overflow-auto">
           <div className="rounded-xl border bg-card shadow-sm overflow-auto">
             <DataTable
               columns={columns}
               data={filteredComponents}
-              onRowClick={(component) => {
-                console.log("Setting selected component:", component);
+              onRowClick={(component: Component) => {
                 setSelectedComponent(component);
               }}
               selectedId={selectedComponent?.component_id}
@@ -782,7 +828,7 @@ export default function InventoryPage() {
         </div>
 
         {/* Right side - Component details */}
-        <div className="w-[400px] shrink-0">
+        <div className="w-full lg:w-[400px] lg:shrink-0">
           <div className="sticky top-4">
             <div className="rounded-xl border bg-card shadow-sm p-3">
               <InventoryDetails 
@@ -804,7 +850,7 @@ export default function InventoryPage() {
                     ? Number(selectedComponent.inventory[0]?.reorder_level) 
                     : 0,
                   on_order_quantity: (selectedComponent as any).on_order_quantity || 0,
-                  required_for_orders: null,
+                  required_for_orders: (selectedComponent as any).required_for_orders ?? null,
                   component: {
                     component_id: selectedComponent.component_id || 0,
                     internal_code: selectedComponent.internal_code || "",
@@ -828,12 +874,13 @@ export default function InventoryPage() {
             </div>
             
             {selectedComponent && (
-              <div className="flex gap-2 mt-4 justify-end">
+              <div className="flex gap-2 mt-4 justify-end flex-wrap">
                 <Button
                   variant="outline"
                   size="icon"
                   onClick={verifyUIDataAgainstSupabase}
                   title="Verify Data"
+                  className="min-w-[44px] min-h-[44px]"
                 >
                   <Check className="h-4 w-4" />
                 </Button>
@@ -842,6 +889,7 @@ export default function InventoryPage() {
                   size="icon"
                   onClick={refreshSelectedComponent}
                   title="Refresh"
+                  className="min-w-[44px] min-h-[44px]"
                 >
                   <RefreshCw className="h-4 w-4" />
                 </Button>
@@ -850,12 +898,13 @@ export default function InventoryPage() {
                   size="icon"
                   onClick={() => setDialogOpen(true)}
                   title="Edit"
+                  className="min-w-[44px] min-h-[44px]"
                 >
                   <Pencil className="h-4 w-4" />
                 </Button>
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
-                    <Button variant="outline" size="icon">
+                    <Button variant="outline" size="icon" className="min-w-[44px] min-h-[44px]">
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </AlertDialogTrigger>

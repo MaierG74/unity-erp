@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { ArrowLeft, File, Download, Paperclip, Package, Layers, Wrench, Cog, Search, PaintBucket, PlusCircle, Check, Plus, Loader2, AlertCircle, ShoppingCart, ChevronDown, CheckCircle, Trash, FilePlus, Terminal, ChevronRight, Info, ShoppingBag, Users, RotateCcw } from 'lucide-react';
+import { ArrowLeft, File, Download, Paperclip, Package, Layers, Wrench, Cog, Search, PaintBucket, PlusCircle, Check, Plus, Loader2, AlertCircle, ShoppingCart, ChevronDown, CheckCircle, Trash, FilePlus, Terminal, ChevronRight, Info, ShoppingBag, Users, RotateCcw, ChevronUp, Warehouse, Printer } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
@@ -27,6 +27,8 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { clsx } from 'clsx';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { IssueStockTab } from '@/components/features/orders/IssueStockTab';
 
 type OrderDetailPageProps = {
   params: {
@@ -384,8 +386,7 @@ async function fetchComponentSuppliers(orderId: number) {
         supplier:suppliers(
           supplier_id,
           name,
-          contact_person,
-          phone
+          contact_info
         )
       `)
       .in('component_id', componentIds);
@@ -448,9 +449,9 @@ async function fetchComponentSuppliers(orderId: number) {
       const supplierInfo: SupplierInfo = existingGroup?.supplier ?? {
         supplier_id: supplier.supplier_id,
         name: supplier.name,
-        contact_person: supplier.contact_person ?? '',
+        contact_person: supplier.contact_info ?? '',
         emails: emailMap.get(supplier.supplier_id) ?? [],
-        phone: supplier.phone ?? '',
+        phone: supplier.contact_info ?? '', // Using contact_info for phone as well since phone column doesn't exist
       };
 
       const option: SupplierOption = {
@@ -533,6 +534,43 @@ type SupplierGroup = {
   components: SupplierComponent[];
 };
 
+type SupplierOrderLinePayload = {
+  supplier_component_id: number;
+  order_quantity: number;
+  component_id: number;
+  quantity_for_order: number;
+  quantity_for_stock: number;
+};
+
+type SupplierOrderCreationSuccess = {
+  supplierId: number;
+  supplierName: string;
+  purchaseOrderId: number;
+  supplierOrderIds: number[];
+};
+
+type SupplierOrderCreationFailure = {
+  supplierId: number;
+  supplierName: string;
+  reason: string;
+};
+
+type SupplierOrderCreationSummary = {
+  successes: SupplierOrderCreationSuccess[];
+};
+
+class SupplierOrderCreationError extends Error {
+  public readonly failures: SupplierOrderCreationFailure[];
+  public readonly successes: SupplierOrderCreationSuccess[];
+
+  constructor(failures: SupplierOrderCreationFailure[], successes: SupplierOrderCreationSuccess[]) {
+    super('Failed to create purchase orders for one or more suppliers');
+    this.name = 'SupplierOrderCreationError';
+    this.failures = failures;
+    this.successes = successes;
+  }
+}
+
 // Implement the real purchase order creation function
 async function createComponentPurchaseOrders(
   selectedComponents: Record<number, boolean>,
@@ -556,90 +594,100 @@ async function createComponentPurchaseOrders(
     
     const draftStatusId = statusData.status_id;
     const today = new Date().toISOString();
-    const purchaseOrderIds: number[] = [];
-    
-    // Process each supplier group that has selected components
-    await Promise.all(
-      supplierGroups
-        .filter(group => 
-          group.components.some(c => selectedComponents[c.component.component_id])
-        )
-        .map(async (group) => {
-          // Filter to only selected components
-          const selectedComponentsForSupplier = group.components
-            .filter(c => selectedComponents[c.component.component_id]);
-          
-          if (selectedComponentsForSupplier.length === 0) return;
-          
-          // 1. Create the purchase order
-          const { data: purchaseOrder, error: purchaseOrderError } = await supabase
-            .from('purchase_orders')
-            .insert({
-              order_date: today,
-              status_id: draftStatusId,
-              notes: notes[group.supplier.supplier_id] || '',
-              supplier_id: group.supplier.supplier_id,
-            })
-            .select('purchase_order_id')
-            .single();
+    const purchaseOrderSummaries: SupplierOrderCreationSuccess[] = [];
+    const supplierFailures: SupplierOrderCreationFailure[] = [];
 
-          if (purchaseOrderError) {
-            throw new Error(`Failed to create purchase order for ${group.supplier.name}`);
-          }
-          
-          purchaseOrderIds.push(purchaseOrder.purchase_order_id);
-          
-          // 2. Create supplier orders for each selected component
-          await Promise.all(
-            selectedComponentsForSupplier.map(async (component) => {
-              const componentId = component.component.component_id;
-              // Use orderQuantities if available, otherwise use shortfall
-              const orderQuantity = orderQuantities[componentId] || component.shortfall;
-              
-              // Get allocation or calculate default allocation
-              const componentAllocation = allocation[componentId] || {
-                forThisOrder: Math.min(orderQuantity, component.shortfall),
-                forStock: Math.max(0, orderQuantity - component.shortfall)
-              };
-              
-              // Create supplier order
-              const { data: supplierOrder, error: orderError } = await supabase
-                .from('supplier_orders')
-                .insert({
-                  supplier_component_id: component.selectedSupplier.supplier_component_id,
-                  order_quantity: orderQuantity, // Removed Math.round to keep decimal quantities
-                  order_date: today,
-                  status_id: draftStatusId,
-                  total_received: 0,
-                  purchase_order_id: purchaseOrder.purchase_order_id,
-                })
-                .select('order_id')
-                .single();
-              
-              if (orderError) {
-                throw new Error(`Failed to create order for component ${component.component.internal_code}`);
-              }
-              
-              // 3. Create junction record to link this supplier order to the customer order
-              const { error: junctionError } = await supabase
-                .from('supplier_order_customer_orders')
-                .insert({
-                  supplier_order_id: supplierOrder.order_id,
-                  order_id: parseInt(orderId), // Parse string to number for the database
-                  component_id: componentId,
-                  quantity_for_order: componentAllocation.forThisOrder, // Removed Math.round to keep decimal quantities
-                  quantity_for_stock: componentAllocation.forStock // Removed Math.round to keep decimal quantities
-                });
-              
-              if (junctionError) {
-                throw new Error(`Failed to link component order to customer order: ${junctionError.message}`);
-              }
-            })
-          );
-        })
-    );
-    
-    return purchaseOrderIds;
+    const suppliersToProcess = supplierGroups
+      .filter(group =>
+        group.components.some(c => selectedComponents[c.component.component_id])
+      )
+      .map(group => {
+        const selectedComponentsForSupplier = group.components
+          .filter(c => selectedComponents[c.component.component_id]);
+
+        if (selectedComponentsForSupplier.length === 0) {
+          return null;
+        }
+
+        const lineItems: SupplierOrderLinePayload[] = selectedComponentsForSupplier.map(component => {
+          const componentId = component.component.component_id;
+          const orderQuantity = orderQuantities[componentId] ?? component.shortfall;
+          const componentAllocation = allocation[componentId] || {
+            forThisOrder: Math.min(orderQuantity, component.shortfall),
+            forStock: Math.max(0, orderQuantity - component.shortfall)
+          };
+
+          return {
+            supplier_component_id: component.selectedSupplier.supplier_component_id,
+            order_quantity: orderQuantity,
+            component_id: componentId,
+            quantity_for_order: componentAllocation.forThisOrder,
+            quantity_for_stock: componentAllocation.forStock
+          };
+        });
+
+        return {
+          supplierId: group.supplier.supplier_id,
+          supplierName: group.supplier.name,
+          note: notes[group.supplier.supplier_id] || '',
+          lineItems
+        };
+      })
+      .filter((payload): payload is {
+        supplierId: number;
+        supplierName: string;
+        note: string;
+        lineItems: SupplierOrderLinePayload[];
+      } => payload !== null);
+
+    for (const payload of suppliersToProcess) {
+      try {
+        const { data, error: rpcError } = await supabase.rpc('create_purchase_order_with_lines', {
+          supplier_id: payload.supplierId,
+          customer_order_id: parseInt(orderId, 10),
+          line_items: payload.lineItems,
+          status_id: draftStatusId,
+          order_date: today,
+          notes: payload.note
+        });
+
+        if (rpcError) {
+          throw rpcError;
+        }
+
+        const rpcResult = Array.isArray(data) ? data?.[0] : data;
+
+        if (!rpcResult || typeof rpcResult.purchase_order_id !== 'number') {
+          throw new Error('Unexpected response when creating purchase order');
+        }
+
+        purchaseOrderSummaries.push({
+          supplierId: payload.supplierId,
+          supplierName: payload.supplierName,
+          purchaseOrderId: rpcResult.purchase_order_id,
+          supplierOrderIds: rpcResult.supplier_order_ids ?? []
+        });
+      } catch (rpcError) {
+        console.error(
+          `[purchase-orders] Failed to create purchase order for supplier ${payload.supplierName}`,
+          rpcError
+        );
+
+        supplierFailures.push({
+          supplierId: payload.supplierId,
+          supplierName: payload.supplierName,
+          reason: rpcError instanceof Error ? rpcError.message : 'Unknown error'
+        });
+      }
+    }
+
+    if (supplierFailures.length > 0) {
+      throw new SupplierOrderCreationError(supplierFailures, purchaseOrderSummaries);
+    }
+
+    return {
+      successes: purchaseOrderSummaries
+    } satisfies SupplierOrderCreationSummary;
   } catch (error) {
     console.error('Error creating purchase orders:', error);
     throw error;
@@ -664,12 +712,25 @@ const OrderComponentsDialog = ({
   const [orderQuantities, setOrderQuantities] = useState<Record<number, number>>({});
   const [allocation, setAllocation] = useState<Record<number, { forThisOrder: number; forStock: number }>>({});
   const [apparentShortfallExists, setApparentShortfallExists] = useState(false);
+  const [creationFailures, setCreationFailures] = useState<SupplierOrderCreationFailure[] | null>(null);
+  const queryClient = useQueryClient();
   
   // Group components by supplier
   const { data, isLoading, isError, error, refetch } = useQuery<SupplierGroup[]>({
     queryKey: ['component-suppliers', orderId],
     queryFn: () => fetchComponentSuppliers(Number(orderId)),
+    // Refetch when dialog opens to ensure fresh data
+    refetchOnMount: true,
+    staleTime: 0, // Always consider data stale so it refetches when dialog opens
+    enabled: open, // Only fetch when dialog is open
   });
+
+  // Force refetch when dialog opens
+  useEffect(() => {
+    if (open) {
+      refetch();
+    }
+  }, [open, refetch]);
 
   useEffect(() => {
     if (data) {
@@ -712,6 +773,7 @@ const OrderComponentsDialog = ({
     setStep('select');
     setNotes({});
     setSelectedComponents({});
+    setCreationFailures(null);
     
     if (data) {
       const quantities: Record<number, number> = {};
@@ -832,26 +894,88 @@ const OrderComponentsDialog = ({
     }));
   };
 
-  const handleCreatePurchaseOrders = async () => {
-    try {
-      await createComponentPurchaseOrders(
-        selectedComponents, 
-        data || [], 
-        notes, 
+  const createPurchaseOrdersMutation = useMutation<
+    SupplierOrderCreationSummary,
+    Error,
+    void,
+    { toastId: string }
+  >({
+    mutationFn: async () => {
+      setCreationFailures(null);
+      return createComponentPurchaseOrders(
+        selectedComponents,
+        data || [],
+        notes,
         orderQuantities,
         allocation,
         orderId
       );
-      
-      // Reset form and close dialog
+    },
+    onMutate: () => {
+      const toastId = toast.loading('Creating purchase orders…');
+      return { toastId };
+    },
+    onSuccess: async (result, _, context) => {
+      const createdCount = result.successes.length;
+      const toastMessage =
+        createdCount === 1
+          ? 'Purchase order created successfully!'
+          : `${createdCount} purchase orders created successfully!`;
+
+      if (context?.toastId) {
+        toast.success(toastMessage, { id: context.toastId });
+      } else {
+        toast.success(toastMessage);
+      }
+
       handleReset();
       onOpenChange(false);
       if (onCreated) onCreated();
-      toast.success("Purchase orders created successfully!");
-    } catch (error) {
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['component-suppliers', orderId] }),
+        queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] }),
+        queryClient.invalidateQueries({ queryKey: ['order', orderId] }),
+        // Invalidate all purchase order queries to ensure the new order appears everywhere
+        queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] }),
+        queryClient.invalidateQueries({ queryKey: ['purchase-orders'] }),
+        queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] }),
+      ]);
+    },
+    onError: (error, _, context) => {
       console.error('Error creating purchase orders:', error);
-      toast.error("Failed to create purchase orders. Please try again.");
-    }
+
+       if (error instanceof SupplierOrderCreationError) {
+         setCreationFailures(error.failures);
+
+         const supplierList = error.failures.map(failure => failure.supplierName).join(', ');
+         const partialMessage = error.successes.length
+           ? ` Created ${error.successes.length} supplier${error.successes.length > 1 ? 's' : ''} before failing.`
+           : '';
+
+         if (context?.toastId) {
+           toast.error(
+             `Purchase orders failed for: ${supplierList}.${partialMessage}`,
+             { id: context.toastId }
+           );
+         } else {
+           toast.error(`Purchase orders failed for: ${supplierList}.${partialMessage}`);
+         }
+
+         return;
+       }
+
+      if (context?.toastId) {
+        toast.error('Failed to create purchase orders. Please try again.', { id: context.toastId });
+      } else {
+        toast.error('Failed to create purchase orders. Please try again.');
+      }
+    },
+  });
+
+  const handleCreatePurchaseOrders = () => {
+    if (createPurchaseOrdersMutation.isPending) return;
+    createPurchaseOrdersMutation.mutate();
   };
 
   if (isLoading) {
@@ -899,6 +1023,23 @@ const OrderComponentsDialog = ({
               : 'Review and confirm your order'}
           </DialogDescription>
         </DialogHeader>
+
+        {creationFailures && creationFailures.length > 0 && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertTitle>Some purchase orders failed</AlertTitle>
+            <AlertDescription>
+              <div className="space-y-1">
+                <p>Please review and retry the following suppliers:</p>
+                {creationFailures.map((failure) => (
+                  <div key={failure.supplierId} className="text-sm">
+                    <span className="font-medium">{failure.supplierName}:</span>{' '}
+                    <span>{failure.reason}</span>
+                  </div>
+                ))}
+              </div>
+            </AlertDescription>
+          </Alert>
+        )}
 
         {step === 'select' && (
           <div className="space-y-6 max-h-[600px] overflow-y-auto">
@@ -1200,8 +1341,18 @@ const OrderComponentsDialog = ({
               <Button variant="ghost" onClick={() => setStep('select')}>
                 Back
               </Button>
-              <Button onClick={handleCreatePurchaseOrders}>
-                Create Purchase Orders
+              <Button
+                onClick={handleCreatePurchaseOrders}
+                disabled={createPurchaseOrdersMutation.isPending}
+              >
+                {createPurchaseOrdersMutation.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Creating…
+                  </>
+                ) : (
+                  'Create Purchase Orders'
+                )}
               </Button>
             </>
           )}
@@ -1863,6 +2014,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   const [applyFgCoverage, setApplyFgCoverage] = useState<boolean>(true);
   const [showGlobalContext, setShowGlobalContext] = useState<boolean>(true);
+  const [fgReservationsOpen, setFgReservationsOpen] = useState<boolean>(false);
 
   // Add toggle function for product row expansion
   const toggleRowExpansion = (productId: string) => {
@@ -2234,6 +2386,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
         <TabsList>
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="components">Components</TabsTrigger>
+          <TabsTrigger value="issue-stock">Issue Stock</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
         </TabsList>
         
@@ -2246,6 +2399,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
               onSuccess={() => {
                 queryClient.invalidateQueries({ queryKey: ['order', orderId] });
                 queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
+                queryClient.invalidateQueries({ queryKey: ['component-suppliers', orderId] });
                 toast.success("Products added successfully");
               }} 
             />
@@ -2293,53 +2447,64 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
         </Card>
 
           {/* Finished-Good Reservations */}
-          <Card>
-            <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-              <div>
-                <CardTitle className="text-lg">Finished-Good Reservations</CardTitle>
-                <CardDescription>
-                  Reserve available finished goods to reduce component demand before issuing stock.
-                </CardDescription>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  onClick={() => reserveFgMutation.mutate()}
-                  disabled={reserveFgMutation.isPending || orderLoading}
-                >
-                  {reserveFgMutation.isPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Package className="mr-2 h-4 w-4" />
-                  )}
-                  Reserve FG
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => releaseFgMutation.mutate()}
-                  disabled={!hasFgReservations || releaseFgMutation.isPending}
-                >
-                  {releaseFgMutation.isPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <RotateCcw className="mr-2 h-4 w-4" />
-                  )}
-                  Release
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => consumeFgMutation.mutate()}
-                  disabled={!hasFgReservations || consumeFgMutation.isPending}
-                >
-                  {consumeFgMutation.isPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <CheckCircle className="mr-2 h-4 w-4" />
-                  )}
-                  Consume (Ship)
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
+          <Collapsible open={fgReservationsOpen} onOpenChange={setFgReservationsOpen}>
+            <Card>
+              <CollapsibleTrigger asChild>
+                <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between cursor-pointer hover:bg-muted/50 transition-colors">
+                  <div className="flex items-center gap-2">
+                    {fgReservationsOpen ? (
+                      <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    )}
+                    <div>
+                      <CardTitle className="text-lg">Finished-Good Reservations</CardTitle>
+                      <CardDescription>
+                        Reserve available finished goods to reduce component demand before issuing stock.
+                      </CardDescription>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      onClick={() => reserveFgMutation.mutate()}
+                      disabled={reserveFgMutation.isPending || orderLoading}
+                    >
+                      {reserveFgMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Package className="mr-2 h-4 w-4" />
+                      )}
+                      Reserve FG
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => releaseFgMutation.mutate()}
+                      disabled={!hasFgReservations || releaseFgMutation.isPending}
+                    >
+                      {releaseFgMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RotateCcw className="mr-2 h-4 w-4" />
+                      )}
+                      Release
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => consumeFgMutation.mutate()}
+                      disabled={!hasFgReservations || consumeFgMutation.isPending}
+                    >
+                      {consumeFgMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <CheckCircle className="mr-2 h-4 w-4" />
+                      )}
+                      Consume (Ship)
+                    </Button>
+                  </div>
+                </CardHeader>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <CardContent>
               {applyFgCoverage && (
                 <Badge variant="outline" className="mb-3 bg-blue-50 text-blue-700">
                   FG coverage applied
@@ -2404,8 +2569,10 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                   Reserving finished goods will automatically reduce the component quantities required for this order.
                 </div>
               )}
-            </CardContent>
-          </Card>
+                </CardContent>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
 
           {/* Products List */}
           <Card>
@@ -2863,6 +3030,10 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
               })()}
             </>
           )}
+        </TabsContent>
+        
+        <TabsContent value="issue-stock" className="space-y-4">
+          <IssueStockTab orderId={orderId} order={order} componentRequirements={componentRequirements} />
         </TabsContent>
         
         <TabsContent value="documents" className="space-y-4">

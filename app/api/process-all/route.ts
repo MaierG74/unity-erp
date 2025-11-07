@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { processAllClockEvents } from '@/lib/utils/attendance';
 
 export const dynamic = 'force-dynamic';
-export const runtime = 'edge';
+// Removed edge runtime as attendance utils require Node.js APIs
 
 export async function GET() {
   try {

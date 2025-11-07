@@ -1,16 +1,24 @@
 import { supabase } from '@/lib/supabase';
 import type { Supplier, SupplierEmail, SupplierComponent, SupplierWithDetails, SupplierPricelist } from '@/types/suppliers';
 
+// Extended SupplierComponent type that includes component details
+export type SupplierComponentWithDetails = SupplierComponent & {
+  component: {
+    internal_code: string;
+    description: string | null;
+    category: {
+      cat_id: number;
+      categoryname: string;
+    } | null;
+  };
+};
+
 export async function getSuppliers() {
   const { data, error } = await supabase
     .from('suppliers')
     .select(`
       *,
       emails:supplier_emails(*),
-      components:suppliercomponents(
-        *,
-        component:components(internal_code, description)
-      ),
       pricelists:supplier_pricelists(*)
     `)
     .order('name');
@@ -25,10 +33,6 @@ export async function getSupplier(id: number) {
     .select(`
       *,
       emails:supplier_emails(*),
-      components:suppliercomponents(
-        *,
-        component:components(internal_code, description)
-      ),
       pricelists:supplier_pricelists(*)
     `)
     .eq('supplier_id', id)
@@ -36,6 +40,25 @@ export async function getSupplier(id: number) {
 
   if (error) throw error;
   return data as SupplierWithDetails;
+}
+
+// Fetch supplier components separately (optimized - only loads when Components tab is opened)
+export async function getSupplierComponents(supplierId: number) {
+  const { data, error } = await supabase
+    .from('suppliercomponents')
+    .select(`
+      *,
+      component:components(
+        internal_code, 
+        description,
+        category:component_categories(cat_id, categoryname)
+      )
+    `)
+    .eq('supplier_id', supplierId)
+    .order('supplier_component_id');
+
+  if (error) throw error;
+  return data as SupplierComponentWithDetails[];
 }
 
 export async function createSupplier(supplier: Omit<Supplier, 'supplier_id'>) {
@@ -68,6 +91,17 @@ export async function deleteSupplier(id: number) {
     .eq('supplier_id', id);
 
   if (error) throw error;
+}
+
+// Lightweight function to get just supplier names and IDs for dropdowns
+export async function getSuppliersList() {
+  const { data, error } = await supabase
+    .from('suppliers')
+    .select('supplier_id, name')
+    .order('name');
+
+  if (error) throw error;
+  return data as Array<{ supplier_id: number; name: string }>;
 }
 
 // Email management

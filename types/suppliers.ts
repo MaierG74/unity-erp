@@ -34,7 +34,7 @@ export type SupplierComponent = {
 // Extended type that includes related data
 export type SupplierWithDetails = Supplier & {
   emails: SupplierEmail[];
-  components: (SupplierComponent & {
+  components?: (SupplierComponent & {
     component: {
       internal_code: string;
       description: string;

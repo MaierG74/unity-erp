@@ -14,9 +14,11 @@ Canonical specification for `inventory_transactions` and how movements affect on
 
 ## Types & Sources
 - IN
-  - Purchasing receipts — from `supplier_order_receipts`
+  - Purchasing receipts — from `supplier_order_receipts` via `process_supplier_order_receipt`
+  - Stock issuance reversals — from `reverse_stock_issuance` (brings stock back into inventory)
   - Returns/corrections
 - OUT
+  - Stock issuance to customer orders — from `process_stock_issuance` (SALE type, negative quantity)
   - Production issues / order consumption
   - Returns to supplier
 - ADJUST
@@ -35,6 +37,21 @@ Canonical specification for `inventory_transactions` and how movements affect on
   - Insert receipt row
   - Recompute supplier order `total_received` and status
   - Increment `inventory.quantity_on_hand`
+
+## Stock Issuance Contract (Server)
+- RPC: `process_stock_issuance(p_order_id, p_component_id, p_quantity, p_purchase_order_id, p_notes, p_issuance_date)`
+- Input: `order_id` (customer order), `component_id`, `quantity`, optional `purchase_order_id`, optional `notes`
+- Behavior:
+  - Validate inventory availability
+  - Insert OUT transaction (SALE type, negative quantity)
+  - Decrement `inventory.quantity_on_hand`
+  - Insert `stock_issuances` record
+  - Record `user_id` from auth context
+  - Return `issuance_id`, `transaction_id`, updated `quantity_on_hand`, `success`, `message`
+- Reversal: `reverse_stock_issuance(p_issuance_id, p_quantity_to_reverse, p_reason, p_reversal_date)`
+  - Creates IN transaction (PURCHASE type, positive quantity)
+  - Increments `inventory.quantity_on_hand`
+  - Updates `stock_issuances` record
 
 ## Adjustment Contract (Server)
 - Input: `component_id`, `delta_quantity`, `reason` (enum/string), optional `note`

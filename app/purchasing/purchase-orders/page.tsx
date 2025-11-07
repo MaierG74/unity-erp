@@ -10,6 +10,8 @@ import { PlusCircle, ArrowLeft, Search, CalendarIcon, X, ExternalLink, FilterX }
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableCell, TableHead, TableRow } from '@/components/ui/table';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Skeleton } from '@/components/ui/skeleton';
 import { format, isAfter, isBefore, isValid, parseISO } from 'date-fns';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -173,13 +175,13 @@ export default function PurchaseOrdersPage() {
   const [activeTab, setActiveTab] = useState<OrderTab>('inProgress');
   const [qNumberSearch, setQNumberSearch] = useState<string>('');
   const [supplierSearch, setSupplierSearch] = useState<string>('all');
-  const [startDate, setStartDate] = useState<Date | null>(null);
-  const [endDate, setEndDate] = useState<Date | null>(null);
+  const [startDate, setStartDate] = useState<Date | undefined>(undefined);
+  const [endDate, setEndDate] = useState<Date | undefined>(undefined);
   
   // Fetch all suppliers for the dropdown
   const [uniqueSuppliers, setUniqueSuppliers] = useState<string[]>([]);
 
-  const { data: purchaseOrders } = useQuery({
+  const { data: purchaseOrders, isLoading, error, refetch } = useQuery({
     queryKey: ['purchaseOrders'],
     queryFn: fetchPurchaseOrders,
   });
@@ -202,8 +204,8 @@ export default function PurchaseOrdersPage() {
     setStatusFilter('all');
     setQNumberSearch('');
     setSupplierSearch('all');
-    setStartDate(null);
-    setEndDate(null);
+    setStartDate(undefined);
+    setEndDate(undefined);
   };
 
   // Filter orders based on all filters
@@ -331,8 +333,9 @@ export default function PurchaseOrdersPage() {
           <Select
             value={statusFilter}
             onValueChange={setStatusFilter}
+            disabled={isLoading}
           >
-            <SelectTrigger>
+            <SelectTrigger disabled={isLoading}>
               <SelectValue placeholder={`All ${activeTab === 'inProgress' ? 'In-Progress' : 'Completed'} Statuses`} />
             </SelectTrigger>
             <SelectContent>
@@ -352,6 +355,7 @@ export default function PurchaseOrdersPage() {
               value={qNumberSearch}
               onChange={(e) => setQNumberSearch(e.target.value)}
               className="pl-8"
+              disabled={isLoading}
             />
           </div>
         </div>
@@ -362,8 +366,9 @@ export default function PurchaseOrdersPage() {
           <Select
             value={supplierSearch}
             onValueChange={setSupplierSearch}
+            disabled={isLoading}
           >
-            <SelectTrigger>
+            <SelectTrigger disabled={isLoading}>
               <SelectValue placeholder="All Suppliers" />
             </SelectTrigger>
             <SelectContent>
@@ -387,6 +392,7 @@ export default function PurchaseOrdersPage() {
               <Button
                 variant="outline"
                 className="w-full justify-start text-left font-normal"
+                disabled={isLoading}
               >
                 <CalendarIcon className="mr-2 h-4 w-4" />
                 {startDate ? format(startDate, 'PPP') : <span>Pick a date</span>}
@@ -410,6 +416,7 @@ export default function PurchaseOrdersPage() {
               <Button
                 variant="outline"
                 className="w-full justify-start text-left font-normal"
+                disabled={isLoading}
               >
                 <CalendarIcon className="mr-2 h-4 w-4" />
                 {endDate ? format(endDate, 'PPP') : <span>Pick a date</span>}
@@ -435,6 +442,7 @@ export default function PurchaseOrdersPage() {
             size="sm" 
             onClick={resetFilters}
             className="flex items-center gap-1"
+            disabled={isLoading}
           >
             <FilterX className="h-4 w-4" />
             Reset Filters
@@ -442,6 +450,47 @@ export default function PurchaseOrdersPage() {
         </div>
       )}
     </div>
+  );
+
+  const renderLoadingTable = () => (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Q Number</TableHead>
+          <TableHead>Items</TableHead>
+          <TableHead>Suppliers</TableHead>
+          <TableHead>Created</TableHead>
+          <TableHead>Status</TableHead>
+          <TableHead className="text-right">Actions</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <TableRow key={`sk-${i}`}>
+            <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+            <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+            <TableCell><Skeleton className="h-6 w-48" /></TableCell>
+            <TableCell><Skeleton className="h-4 w-28" /></TableCell>
+            <TableCell><Skeleton className="h-6 w-20 rounded-full" /></TableCell>
+            <TableCell className="text-right"><Skeleton className="h-8 w-24 ml-auto" /></TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+
+  const renderErrorAlert = () => (
+    <Alert variant="destructive">
+      <AlertTitle>Failed to load purchase orders</AlertTitle>
+      <AlertDescription>
+        There was an error fetching purchase orders. Please try again.
+        <div className="mt-3">
+          <Button variant="outline" size="sm" onClick={() => refetch?.()}>
+            Retry
+          </Button>
+        </div>
+      </AlertDescription>
+    </Alert>
   );
 
   // Render table with clickable rows for both tabs
@@ -540,7 +589,7 @@ export default function PurchaseOrdersPage() {
             <CardContent className="pt-6">
               {renderFilters()}
               <div className="mt-6">
-                {renderTable()}
+                {isLoading ? renderLoadingTable() : error ? renderErrorAlert() : renderTable()}
               </div>
             </CardContent>
           </Card>
@@ -551,7 +600,7 @@ export default function PurchaseOrdersPage() {
             <CardContent className="pt-6">
               {renderFilters()}
               <div className="mt-6">
-                {renderTable()}
+                {isLoading ? renderLoadingTable() : error ? renderErrorAlert() : renderTable()}
               </div>
             </CardContent>
           </Card>
