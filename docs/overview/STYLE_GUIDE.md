@@ -308,6 +308,91 @@ This guide documents how we style the app: Tailwind CSS utilities + shadcn/ui pr
 - Feature UIs live under `components/features/<feature>/`.
 - Shared primitives only in `components/ui/*`.
 
+## Page-Level Sticky Headers
+
+**Feature Name:** "Page-Level Sticky Header" or "Sticky Page Header"
+
+**Purpose:** A sticky header bar that appears below the main navbar (64px from viewport top) and remains visible while scrolling page content. Used on detail pages to keep breadcrumbs, page title, and key metadata accessible.
+
+**Implementation Pattern:**
+
+1. **Create a CSS module** (`page.module.css`) with the sticky header styles:
+```css
+.stickyHeader {
+  margin-left: -1rem;
+  margin-right: -1rem;
+  transform: translateY(calc(64px - var(--po-header-offset, 64px)));
+}
+
+@media (min-width: 768px) {
+  .stickyHeader {
+    margin-left: -1.5rem;
+    margin-right: -1.5rem;
+  }
+}
+```
+
+2. **In your page component**, use `useLayoutEffect` to measure and set the offset:
+```tsx
+import { useLayoutEffect, useRef } from 'react';
+import styles from './page.module.css';
+import { cn } from '@/lib/utils';
+
+export default function DetailPage() {
+  const headerRef = useRef<HTMLDivElement | null>(null);
+  
+  useLayoutEffect(() => {
+    const headerEl = headerRef.current;
+    if (!headerEl) return;
+
+    const updateOffset = () => {
+      headerEl.style.setProperty('--po-header-offset', `${headerEl.offsetTop}px`);
+    };
+
+    updateOffset();
+    window.addEventListener('resize', updateOffset);
+    return () => {
+      window.removeEventListener('resize', updateOffset);
+      headerEl.style.removeProperty('--po-header-offset');
+    };
+  }, []);
+
+  return (
+    <div className="space-y-6">
+      <div
+        ref={headerRef}
+        className={cn(
+          "sticky top-16 z-40 bg-blue-500 border-b shadow-sm py-3 px-4 md:px-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4",
+          styles.stickyHeader
+        )}
+      >
+        {/* Header content: breadcrumbs, title, actions */}
+      </div>
+      {/* Page content */}
+    </div>
+  );
+}
+```
+
+**Key Requirements:**
+- **Position:** `sticky top-16` (64px = navbar height) so it sits flush below the navbar
+- **Z-index:** `z-40` (navbar is `z-30`, so header sits above content but below modals)
+- **Full-width:** Use negative margins (`-mx-4 md:-mx-6`) to extend edge-to-edge, matching container padding
+- **Dynamic offset:** Measure `offsetTop` at render and use CSS custom property `--po-header-offset` to translate the header upward, compensating for container padding
+- **Responsive:** Negative margins adjust for mobile (`-1rem`) vs desktop (`-1.5rem`) container padding
+
+**Why This Pattern:**
+- The header naturally renders with container padding (`p-4 md:p-6`), creating a gap
+- Measuring `offsetTop` and translating via CSS ensures the header sits flush at 64px from viewport top
+- Works across all screen sizes without hard-coded magic numbers
+- Content below maintains proper spacing
+
+**Reference Implementation:**
+- Purchase Order Detail: `app/purchasing/purchase-orders/[id]/page.tsx:1078` (header), `app/purchasing/purchase-orders/[id]/page.module.css:1` (styles)
+
+**Future Consistency:**
+- Other detail pages (e.g., Todo Detail at `app/todos/[id]/page.tsx:454`) currently use `sticky top-0` which overlaps the navbar. These should be migrated to this pattern for consistency.
+
 ---
 
 This guide will evolve. When introducing a new pattern, add a short snippet here and prefer extending existing primitives/variants over introducing ad-hoc styles.

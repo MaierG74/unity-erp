@@ -7,16 +7,43 @@
         "@modelcontextprotocol/server-postgres"
       ],
       "env": {
-        "POSTGRES_CONNECTION_STRING": "postgresql://postgres.ttlyfhkrsjjrzxiagzpb:ke6tOTxvv45TRNVp@aws-0-us-east-1.pooler.supabase.com:6543/postgres"
-      }
+        "POSTGRES_CONNECTION_STRING": "postgresql://postgres.ttlyfhkrsjjrzxiagzpb:ke6tOTxvv45TRNVp@aws-0-us-east-1.pooler.supabase.com:5432/postgres"
+      },
+      "autoapprove": ["query"]
     },
     "chrome-devtools": {
       "command": "npx",
       "args": [
         "-y",
-        "chrome-devtools-mcp@latest",
-        "--headless=true",
-        "--isolated=true"
+        "chrome-devtools-mcp@latest"
+      ],
+      "autoapprove": [
+        "navigate_page",
+        "take_snapshot",
+        "take_screenshot",
+        "click",
+        "fill",
+        "fill_form",
+        "press_key",
+        "hover",
+        "drag",
+        "evaluate_script",
+        "get_console_message",
+        "list_console_messages",
+        "get_network_request",
+        "list_network_requests",
+        "list_pages",
+        "select_page",
+        "new_page",
+        "close_page",
+        "resize_page",
+        "emulate",
+        "wait_for",
+        "upload_file",
+        "handle_dialog",
+        "performance_start_trace",
+        "performance_stop_trace",
+        "performance_analyze_insight"
       ]
     }
   }

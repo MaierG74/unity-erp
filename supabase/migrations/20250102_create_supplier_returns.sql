@@ -225,13 +225,13 @@ begin
   select status_id
   into v_completed_status_id
   from supplier_order_statuses
-  where lower(status_name) = 'completed'
+  where lower(status_name) = 'fully received'
   limit 1;
 
   select status_id
   into v_partial_status_id
   from supplier_order_statuses
-  where lower(status_name) = 'partially delivered'
+  where lower(status_name) = 'partially received'
   limit 1;
 
   -- Determine new status based on total_received
