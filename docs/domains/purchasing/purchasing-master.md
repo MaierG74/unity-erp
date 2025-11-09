@@ -20,6 +20,7 @@
   - Page: `app/purchasing/purchase-orders/page.tsx:1` (page), `app/purchasing/purchase-orders/page.tsx:19` (status badge), `app/purchasing/purchase-orders/page.tsx:28` (fetch & joins), `app/purchasing/purchase-orders/page.tsx:96` (derived status logic).
 - **PO Details:** Review items, totals, suppliers; submit for approval; approve with Q number; receive items; view receipt history.
   - Page: `app/purchasing/purchase-orders/[id]/page.tsx:1` (page), `app/purchasing/purchase-orders/[id]/page.tsx:115` (fetch with joins), `app/purchasing/purchase-orders/[id]/page.tsx:201` (approve → send emails), `app/purchasing/purchase-orders/[id]/page.tsx:232` (submit for approval), `app/purchasing/purchase-orders/[id]/page.tsx:313` (receipt: total_received), `app/purchasing/purchase-orders/[id]/page.tsx:346` (receipt: inventory), `app/purchasing/purchase-orders/[id]/page.tsx:528` (status flags, UI state), `app/purchasing/purchase-orders/[id]/page.tsx:720` (receipt history section).
+  - **Sticky Header:** Uses the "Page-Level Sticky Header" pattern (see `docs/overview/STYLE_GUIDE.md`) with dynamic offset calculation to position the blue header bar flush below the navbar. Implementation: `app/purchasing/purchase-orders/[id]/page.tsx:1078` (header), `app/purchasing/purchase-orders/[id]/page.module.css:1` (styles), `app/purchasing/purchase-orders/[id]/page.tsx:584` (offset calculation).
 - **Create PO (manual):** Multi-line form to select components, pick supplier per-line, and set quantities/notes.
   - Page: `app/purchasing/purchase-orders/new/page.tsx:1` (page wrapper)
   - Form: `components/features/purchasing/new-purchase-order-form.tsx:147` (fetch Draft status), `components/features/purchasing/new-purchase-order-form.tsx:180` (supplier component fetch), `components/features/purchasing/new-purchase-order-form.tsx:210` (createPurchaseOrder), `components/features/purchasing/new-purchase-order-form.tsx:284` (mutation, redirect).
@@ -68,10 +69,11 @@
 
 **Create PO (Manual)**
 
-- Form groups items by supplier and creates one PO per supplier, then inserts SO lines.
-  - Create PO: `purchase_orders.insert({ order_date, status_id: Draft, notes, supplier_id })`.
-  - Create SOs: one insert per item with `purchase_order_id` set to the new PO ID.
-  - Entry points: `components/features/purchasing/new-purchase-order-form.tsx:210`.
+- Form groups items by supplier and uses the transactional RPC `create_purchase_order_with_lines` so the purchase order header
+  and supplier order rows are inserted atomically.
+  - Payload: `{ supplier_id, customer_order_id: null, line_items: [{ supplier_component_id, order_quantity, component_id, quantity_for_order: 0, quantity_for_stock }] }`.
+  - UI builds one payload per supplier, setting `quantity_for_stock` to the entered quantity and leaving `customer_order_id` null so no junction rows are created.
+  - Entry point: `components/features/purchasing/new-purchase-order-form.tsx:210`.
 
 **Create POs From Sales Order**
 

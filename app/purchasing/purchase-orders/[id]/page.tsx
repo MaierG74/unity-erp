@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { use, useState, useEffect, useMemo, useLayoutEffect, useRef } from 'react';
 import { useToast } from '@/components/ui/use-toast';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -23,6 +23,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle, ArrowLeft, Loader2, CheckCircle2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import styles from './page.module.css';
 // import { sendPurchaseOrderEmail } from '@/lib/email'; // not used here; email is sent via API route
 
 // Status badge component
@@ -494,8 +495,8 @@ async function receiveStock(purchaseOrderId: string, receipts: ReceiptFormData) 
         }, {} as Record<string, number>);
 
         let newStatusId = soData.status_id;
-        if (totalReceived >= (soData.order_quantity || 0)) newStatusId = statusMap['Completed'] ?? newStatusId;
-        else if (totalReceived > 0) newStatusId = statusMap['Partially Delivered'] ?? newStatusId;
+        if (totalReceived >= (soData.order_quantity || 0)) newStatusId = statusMap['Fully Received'] ?? newStatusId;
+        else if (totalReceived > 0) newStatusId = statusMap['Partially Received'] ?? newStatusId;
 
         const { error: manualUpdateError } = await supabase
           .from('supplier_orders')
@@ -566,7 +567,10 @@ function getOrderStatus(order: PurchaseOrder) {
   return order.status?.status_name || 'Unknown';
 }
 
-export default function PurchaseOrderPage({ params }: { params: { id: string } }) {
+export default function PurchaseOrderPage({ params }: { params: Promise<{ id: string }> }) {
+  // Unwrap the params Promise (Next.js 15 requirement)
+  const { id } = use(params);
+
   const [qNumber, setQNumber] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [receiptQuantities, setReceiptQuantities] = useState<ReceiptFormData>({});
@@ -576,19 +580,49 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
   const [emailDialogLoading, setEmailDialogLoading] = useState(false);
   const [emailRows, setEmailRows] = useState<EmailRecipientRow[]>([]);
-  
+  const headerRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const headerEl = headerRef.current;
+
+    if (!headerEl) {
+      return;
+    }
+
+    const updateOffset = () => {
+      headerEl.style.setProperty('--po-header-offset', `${headerEl.offsetTop}px`);
+    };
+
+    updateOffset();
+    window.addEventListener('resize', updateOffset);
+
+    return () => {
+      window.removeEventListener('resize', updateOffset);
+      headerEl.style.removeProperty('--po-header-offset');
+    };
+  }, []);
+
   // Fetch purchase order data
-  const { 
-    data: purchaseOrder, 
-    isLoading, 
+  const {
+    data: purchaseOrder,
+    isLoading,
     isError,
-    error: queryError 
+    error: queryError
   } = useQuery({
-    queryKey: ['purchaseOrder', params.id],
-    queryFn: () => fetchPurchaseOrderById(params.id),
+    queryKey: ['purchaseOrder', id],
+    queryFn: () => fetchPurchaseOrderById(id),
     refetchOnMount: true,
     staleTime: 0, // Always consider data stale so it refetches when invalidated
   });
+
+  useEffect(() => {
+    const headerEl = headerRef.current;
+
+    if (!headerEl) {
+      return;
+    }
+
+    headerEl.style.setProperty('--po-header-offset', `${headerEl.offsetTop}px`);
+  }, [purchaseOrder]);
   
   // Set initial Q number if available
   useEffect(() => {
@@ -597,9 +631,9 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
     } else {
       // Generate a suggested Q number (e.g., Q + current year + sequential number)
       const year = new Date().getFullYear().toString().slice(2);
-      setQNumber(`Q${year}-${params.id.padStart(3, '0')}`);
+      setQNumber(`Q${year}-${id.padStart(3, '0')}`);
     }
-  }, [purchaseOrder, params.id]);
+  }, [purchaseOrder, id]);
 
   const baseEmailRows = useMemo<EmailRecipientRow[]>(() => {
     if (!purchaseOrder?.supplier_orders?.length) return [];
@@ -664,9 +698,12 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
   // Approve purchase order mutation
   const approveMutation = useMutation({
     mutationFn: (data: { qNumber: string }) =>
-      approvePurchaseOrder(params.id, data.qNumber),
+      approvePurchaseOrder(id, data.qNumber),
     onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ['purchaseOrder', params.id] });
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrder', id] });
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
+      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] });
       const successes = result?.emailResults?.filter(r => r.success).length ?? 0;
       const failures = result?.emailResults?.filter(r => !r.success).length ?? 0;
       const baseTitle = 'Purchase Order approved';
@@ -700,9 +737,9 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
   
   // Submit for approval mutation
   const submitMutation = useMutation({
-    mutationFn: () => submitForApproval(params.id),
+    mutationFn: () => submitForApproval(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['purchaseOrder', params.id] });
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrder', id] });
       queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
     },
     onError: (error: Error) => {
@@ -712,11 +749,11 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
   
   // Add receipt mutation
   const receiptMutation = useMutation({
-    mutationFn: () => receiveStock(params.id, receiptQuantities),
+    mutationFn: () => receiveStock(id, receiptQuantities),
     onSuccess: async () => {
       // Invalidate all relevant queries first
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['purchaseOrder', params.id] }),
+        queryClient.invalidateQueries({ queryKey: ['purchaseOrder', id] }),
         queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] }),
         queryClient.invalidateQueries({ queryKey: ['purchase-orders'] }),
         queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] }),
@@ -724,8 +761,8 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
         queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] }),
       ]);
       // Force immediate refetch of the current purchase order - this is critical for the page to update
-      await queryClient.refetchQueries({ 
-        queryKey: ['purchaseOrder', params.id],
+      await queryClient.refetchQueries({
+        queryKey: ['purchaseOrder', id],
         type: 'active' // Only refetch active queries
       });
       // Also refetch list queries if they're active
@@ -746,11 +783,11 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
   // Inline per-row receipt mutation
   const receiveOneMutation = useMutation({
     mutationFn: (payload: { orderId: string; qty: number }) =>
-      receiveStock(params.id, { [payload.orderId]: payload.qty }),
+      receiveStock(id, { [payload.orderId]: payload.qty }),
     onSuccess: async () => {
       // Invalidate all relevant queries first
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['purchaseOrder', params.id] }),
+        queryClient.invalidateQueries({ queryKey: ['purchaseOrder', id] }),
         queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] }),
         queryClient.invalidateQueries({ queryKey: ['purchase-orders'] }),
         queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] }),
@@ -758,8 +795,8 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
         queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] }),
       ]);
       // Force immediate refetch of the current purchase order - this is critical for the page to update
-      await queryClient.refetchQueries({ 
-        queryKey: ['purchaseOrder', params.id],
+      await queryClient.refetchQueries({
+        queryKey: ['purchaseOrder', id],
         type: 'active' // Only refetch active queries
       });
       // Also refetch list queries if they're active
@@ -785,11 +822,11 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
 
   // Return mutation
   const returnMutation = useMutation({
-    mutationFn: () => returnStock(params.id, returnQuantities),
+    mutationFn: () => returnStock(id, returnQuantities),
     onSuccess: async () => {
       // Invalidate all relevant queries first
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['purchaseOrder', params.id] }),
+        queryClient.invalidateQueries({ queryKey: ['purchaseOrder', id] }),
         queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] }),
         queryClient.invalidateQueries({ queryKey: ['purchase-orders'] }),
         queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] }),
@@ -797,8 +834,8 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
         queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] }),
       ]);
       // Force immediate refetch of the current purchase order
-      await queryClient.refetchQueries({ 
-        queryKey: ['purchaseOrder', params.id],
+      await queryClient.refetchQueries({
+        queryKey: ['purchaseOrder', id],
         type: 'active'
       });
       // Also refetch list queries if they're active
@@ -831,7 +868,7 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          purchaseOrderId: params.id,
+          purchaseOrderId: id,
           overrides: payload?.overrides,
           cc: payload?.cc,
         })
@@ -1037,7 +1074,11 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
   
   return (
     <div className="space-y-6">
-      <div className="sticky top-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b shadow-sm py-3 px-2 sm:px-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      {/* Sticky header - sticks right below navbar with no gap */}
+      <div className={cn(
+        "sticky top-16 z-40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b shadow-sm py-3 px-4 md:px-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4",
+        styles.stickyHeader
+      )} ref={headerRef}>
         <div className="flex items-center">
           <Link href="/purchasing/purchase-orders" className="mr-4">
             <Button variant="outline" size="icon">
@@ -1064,15 +1105,17 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
         {/* Actions are shown in the bottom action bar */}
         <div className="hidden sm:block" />
       </div>
-      
-      {error && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+      {/* Content area with padding */}
+      <div className={cn("space-y-6", styles.contentWrapper)}>
+        {error && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
             <CardTitle>Order Summary</CardTitle>
@@ -1559,6 +1602,7 @@ export default function PurchaseOrderPage({ params }: { params: { id: string } }
             </Button>
           </>
         )}
+        </div>
       </div>
 
       {emailDialogOpen && (

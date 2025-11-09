@@ -44,26 +44,6 @@ type ComponentFromAPI = {
   description: string | null;
 };
 
-type SupplierComponentWithSupplier = {
-  supplier_component_id: number;
-  component_id: number;
-  supplier_id: number;
-  price: number;
-  suppliers: {
-    name: string;
-  }[];
-};
-
-type SupplierComponentRawResponse = {
-  supplier_component_id: number;
-  component_id: number;
-  supplier_id: number;
-  price: number;
-  supplier: {
-    name: string;
-  } | null;
-};
-
 type SupplierComponentFromAPI = {
   supplier_component_id: number;
   component_id: number;
@@ -72,6 +52,19 @@ type SupplierComponentFromAPI = {
   supplier: {
     name: string;
   };
+};
+
+type SupplierOrderLinePayload = {
+  supplier_component_id: number;
+  order_quantity: number;
+  component_id: number;
+  quantity_for_order: number;
+  quantity_for_stock: number;
+};
+
+type PurchaseOrderCreationResult = {
+  purchase_order_id: number;
+  supplier_order_ids: number[] | null;
 };
 
 type ComponentOption = {
@@ -171,7 +164,7 @@ async function createPurchaseOrder(
   formData: PurchaseOrderFormData,
   statusId: number,
   supplierComponentsCache: Map<number, SupplierComponentFromAPI[]> = new Map()
-) {
+): Promise<PurchaseOrderCreationResult[]> {
   // Group items by supplier
   const itemsBySupplier = new Map<number, Array<{
     supplier_component_id: number;
@@ -208,52 +201,50 @@ async function createPurchaseOrder(
     });
   });
 
-  // Create a purchase order for each supplier
-  const purchaseOrderIds = await Promise.all(
-    Array.from(itemsBySupplier.entries()).map(async ([supplierId, items]) => {
-      // 1. Create the purchase order
-      const { data: purchaseOrder, error: purchaseOrderError } = await supabase
-        .from('purchase_orders')
-        .insert({
-          order_date: formData.order_date || new Date().toISOString(),
-          status_id: statusId,
-          notes: formData.notes,
-          supplier_id: supplierId, // Add supplier_id to purchase_orders
-        })
-        .select('purchase_order_id')
-        .single();
+  const orderDateISO = formData.order_date
+    ? new Date(formData.order_date).toISOString()
+    : new Date().toISOString();
 
-      if (purchaseOrderError) {
-        console.error('Error creating purchase order:', purchaseOrderError);
+  // Create a purchase order for each supplier via RPC so the header and lines are inserted atomically
+  const purchaseOrders = await Promise.all(
+    Array.from(itemsBySupplier.entries()).map(async ([supplierId, items]) => {
+      const lineItems: SupplierOrderLinePayload[] = items.map((item) => ({
+        supplier_component_id: item.supplier_component_id,
+        order_quantity: item.quantity,
+        component_id: item.component_id,
+        quantity_for_order: 0,
+        quantity_for_stock: item.quantity,
+      }));
+
+      const { data, error: rpcError } = await supabase.rpc('create_purchase_order_with_lines', {
+        supplier_id: supplierId,
+        customer_order_id: null,
+        line_items: lineItems,
+        status_id: statusId,
+        order_date: orderDateISO,
+        notes: formData.notes ?? '',
+      });
+
+      if (rpcError) {
+        console.error('Error creating purchase order via RPC:', rpcError);
         throw new Error('Failed to create purchase order');
       }
 
-      // 2. Create supplier orders for this supplier's items
-      await Promise.all(
-        items.map(async (item) => {
-          const { error } = await supabase
-            .from('supplier_orders')
-            .insert({
-              supplier_component_id: item.supplier_component_id,
-              order_quantity: item.quantity,
-              order_date: formData.order_date || new Date().toISOString(),
-              status_id: statusId,
-              total_received: 0,
-              purchase_order_id: purchaseOrder.purchase_order_id,
-            });
-          
-          if (error) {
-            console.error('Error creating supplier order:', error);
-            throw new Error(`Failed to create order for component ${item.component_id}`);
-          }
-        })
-      );
+      const rpcResult = Array.isArray(data) ? data?.[0] : data;
 
-      return purchaseOrder.purchase_order_id;
+      if (!rpcResult || typeof rpcResult.purchase_order_id !== 'number') {
+        console.error('Unexpected RPC response when creating purchase order:', data);
+        throw new Error('Failed to create purchase order');
+      }
+
+      return {
+        purchase_order_id: rpcResult.purchase_order_id,
+        supplier_order_ids: rpcResult.supplier_order_ids ?? [],
+      } satisfies PurchaseOrderCreationResult;
     })
   );
 
-  return purchaseOrderIds;
+  return purchaseOrders;
 }
 
 export function NewPurchaseOrderForm() {
@@ -334,11 +325,15 @@ export function NewPurchaseOrderForm() {
       if (!draftStatusId) throw new Error('Failed to get draft status');
       return createPurchaseOrder(data, draftStatusId, supplierComponentsMap ?? new Map());
     },
-    onSuccess: (purchaseOrderIds) => {
+    onSuccess: (results) => {
       queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
+      const firstPurchaseOrderId = Array.isArray(results) && results.length > 0
+        ? results[0]?.purchase_order_id
+        : undefined;
+
       // Redirect to the first purchase order created
-      if (Array.isArray(purchaseOrderIds) && purchaseOrderIds.length > 0) {
-        router.push(`/purchasing/purchase-orders/${purchaseOrderIds[0]}`);
+      if (typeof firstPurchaseOrderId === 'number') {
+        router.push(`/purchasing/purchase-orders/${firstPurchaseOrderId}`);
       } else {
         router.push('/purchasing/purchase-orders');
       }

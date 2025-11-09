@@ -2,7 +2,7 @@
   "permissions": {
     "allow": [
       "Edit",
-      "Write", 
+      "Write",
       "MultiEdit",
       "Read",
       "Glob",
@@ -16,7 +16,9 @@
       "Task",
       "ExitPlanMode",
       "BashOutput",
-      "KillBash"
+      "KillBash",
+      "mcp__chrome-devtools",
+      "mcp__supabase"
     ]
   }
 }
