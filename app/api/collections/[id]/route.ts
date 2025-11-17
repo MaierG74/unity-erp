@@ -8,10 +8,11 @@ function admin() {
   )
 }
 
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
+    const { id: idParam } = await context.params
     const supabase = admin()
-    const id = Number(params.id)
+    const id = Number(idParam)
     if (!Number.isFinite(id)) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 })
     }

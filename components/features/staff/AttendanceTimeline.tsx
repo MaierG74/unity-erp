@@ -356,22 +356,22 @@ export function AttendanceTimeline({
   return (
     <div className="space-y-4">
       {/* Staff info and timeline toggle */}
-      <div className="flex justify-between items-center bg-gray-800 p-4 rounded-lg">
-        <div className="flex items-center space-x-4">
+      <div className="flex flex-col gap-4 rounded-xl border bg-card p-4 text-card-foreground shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-4">
           <div className="flex-shrink-0">
-            <div className="w-12 h-12 rounded-full bg-gray-700 flex items-center justify-center">
-              <User className="w-6 h-6 text-gray-400" />
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
+              <User className="h-6 w-6" />
             </div>
           </div>
           <div>
-            <h3 className="text-lg font-medium text-white">{staffName}</h3>
+            <h3 className="text-lg font-medium">{staffName}</h3>
             {/* Conditionally render job description if available as a prop */}
-            {/* Example: {props.jobDescription && <p className="text-sm text-gray-400">{props.jobDescription}</p>} */}
+            {/* Example: {props.jobDescription && <p className="text-sm text-muted-foreground">{props.jobDescription}</p>} */}
           </div>
           <Button
             variant="ghost"
             size="sm"
-            className="text-gray-400 hover:text-white"
+            className="text-muted-foreground hover:text-foreground"
             onClick={async () => {
               console.log(`[AttendanceTimeline] Processing staff: ${staffName} (ID: ${staffId})`);
               setIsProcessing(true);
@@ -385,65 +385,71 @@ export function AttendanceTimeline({
             title="Process this staff member's time segments"
           >
             {isProcessing ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className="h-4 w-4" />
             )}
           </Button>
         </div>
-        <button
-          className="text-xs px-2 py-1 rounded bg-gray-700 text-white hover:bg-gray-600 transition"
+        <Button
+          variant="secondary"
+          size="sm"
+          className="h-8 px-3 text-xs font-semibold"
           onClick={() => setShowTimeline(!showTimeline)}
         >
           {showTimeline ? (
-            <div className="flex items-center space-x-1">
+            <div className="flex items-center gap-1">
               <span>Hide Timeline</span>
-              <ChevronUp className="w-4 h-4" />
+              <ChevronUp className="h-4 w-4" />
             </div>
           ) : (
-            <div className="flex items-center space-x-1">
+            <div className="flex items-center gap-1">
               <span>Show Timeline</span>
-              <ChevronDown className="w-4 h-4" />
+              <ChevronDown className="h-4 w-4" />
             </div>
           )}
-        </button>
+        </Button>
       </div>
 
       {/* Timeline content */}
       {showTimeline && (
         <div className="space-y-4">
           {/* Hours summary */}
-          <div className="grid grid-cols-4 gap-4 p-4 bg-gray-800 rounded-md">
+          <div className="grid grid-cols-4 gap-4 rounded-xl border bg-muted/60 p-4">
             <div>
-              <div className="text-xs text-gray-400">Status</div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">Status</div>
               {staffEvents.length > 0 ? (
-                <span className="inline-flex items-center align-middle px-2 py-1 text-xs font-semibold rounded bg-green-600 text-white">Present</span>
+                <span className="inline-flex items-center align-middle rounded-full bg-emerald-500/15 px-2 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-100">
+                  Present
+                </span>
               ) : (
-                <span className="inline-block px-2 py-1 text-xs font-semibold rounded bg-gray-600 text-gray-300">Absent</span>
+                <span className="inline-flex items-center align-middle rounded-full border px-2 py-1 text-xs font-semibold text-muted-foreground">
+                  Absent
+                </span>
               )}
               {missingClockOut && (
-                <span className="ml-2 inline-flex items-center align-middle px-2 py-1 text-xs font-semibold rounded bg-yellow-600 text-white animate-pulse">
+                <span className="ml-2 inline-flex items-center align-middle rounded-full bg-amber-500/15 px-2 py-1 text-xs font-semibold text-amber-700 dark:text-amber-100 animate-pulse">
                   <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                   Missing clock-out
                 </span>
               )}
             </div>
             <div>
-              <div className="text-xs text-gray-400">Total</div>
-              <div className="text-xl text-white flex items-center space-x-1">
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">Total</div>
+              <div className="flex items-center space-x-1 text-2xl font-semibold text-foreground">
                 <span>{displayHours.total_hours.toFixed(2)}</span>
                 {('unpaid_break_minutes' in displayHours && displayHours.unpaid_break_minutes > 0) && (
-                  <span className="text-xs text-gray-400">(-{(displayHours.unpaid_break_minutes/60).toFixed(1)}h tea)</span>
+                  <span className="text-xs text-muted-foreground">(-{(displayHours.unpaid_break_minutes/60).toFixed(1)}h tea)</span>
                 )}
               </div>
             </div>
             <div>
-              <div className="text-xs text-gray-400">Regular</div>
-              <div className="text-xl text-white">{displayHours.regular_hours.toFixed(2)}</div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">Regular</div>
+              <div className="text-2xl font-semibold text-foreground">{displayHours.regular_hours.toFixed(2)}</div>
             </div>
             <div>
-              <div className="text-xs text-gray-400">Overtime</div>
-              <div className="text-xl text-white">{displayHours.overtime_hours ? displayHours.overtime_hours.toFixed(2) : '0.00'}</div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">Overtime</div>
+              <div className="text-2xl font-semibold text-foreground">{displayHours.overtime_hours ? displayHours.overtime_hours.toFixed(2) : '0.00'}</div>
             </div>
 
           </div>
@@ -454,22 +460,24 @@ export function AttendanceTimeline({
               variant="outline"
               size="sm"
               onClick={() => setShowSegments(!showSegments)}
-              className="flex items-center text-white border-gray-700 hover:bg-gray-800 h-9 rounded-md px-3"
+              className="flex h-9 items-center gap-2 rounded-md px-3"
             >
-              <ChevronDown className="w-4 h-4 mr-1" />
-              {showSegments ? 'Hide Events & Segments' : 'Show Events & Segments'}
+              <ChevronDown className={`h-4 w-4 transition-transform ${showSegments ? 'rotate-180' : ''}`} />
+              <span className="text-sm font-medium">
+                {showSegments ? 'Hide Events & Segments' : 'Show Events & Segments'}
+              </span>
             </Button>
             
             {showSegments && (
               <div className="mt-4 space-y-4">
                 {/* Clock Events Section */}
                 <div className="space-y-2">
-                  <h4 className="text-sm font-medium text-gray-400">Clock Events</h4>
+                  <h4 className="text-sm font-medium text-muted-foreground">Clock Events</h4>
                   <div className="space-y-2">
                     {staffEvents.map((event) => (
                       <div 
                         key={event.id} 
-                        className="p-3 bg-gray-800 rounded-lg group"
+                        className="group rounded-lg border bg-card/80 p-3"
                       >
                         <div className="flex justify-between items-start">
                           {/* Event details on the left */}
@@ -477,11 +485,11 @@ export function AttendanceTimeline({
                             <div className={`mt-1 w-3 h-3 rounded-full ${getEventColor(event.event_type)}`} />
                             <div>
                               <div className="flex items-center">
-                                <span className="text-sm font-medium text-white capitalize">
+                                <span className="text-sm font-medium text-foreground capitalize">
                                   {event.event_type.replace('_', ' ')} - {format(new Date(event.event_time), 'HH:mm')}
                                 </span>
                               </div>
-                              <div className="text-xs text-gray-400">
+                              <div className="text-xs text-muted-foreground">
                                 {getVerificationMethod(event.verification_method)}
                                 {event.event_type.includes('break') && event.break_type && ` (${event.break_type})`}
                               </div>
@@ -492,7 +500,7 @@ export function AttendanceTimeline({
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="w-7 h-7 text-gray-400 hover:text-white"
+                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
                               onClick={() => openEditDialog(event)}
                             >
                               <Edit3 className="w-4 h-4" />
@@ -514,12 +522,12 @@ export function AttendanceTimeline({
 
                 {/* Work Segments Section */}
                 <div className="space-y-2">
-                  <h4 className="text-sm font-medium text-gray-400">Work Segments</h4>
+                  <h4 className="text-sm font-medium text-muted-foreground">Work Segments</h4>
                   <div className="space-y-2">
                     {validSegments.map((segment, index) => (
                       <div
                         key={`${segment.staff_id}-${segment.start_time}-${index}`}
-                        className="flex items-center justify-between p-3 bg-gray-800 rounded-lg"
+                        className="flex items-center justify-between rounded-lg border bg-card/80 p-3"
                       >
                         <div className="flex items-center space-x-3">
                           <div
@@ -528,16 +536,16 @@ export function AttendanceTimeline({
                             }`}
                           />
                           <div>
-                            <div className="text-sm font-medium text-white">
+                            <div className="text-sm font-medium text-foreground">
                               {format(new Date(segment.start_time), 'h:mm a')} - {format(new Date(segment.end_time), 'h:mm a')}
                             </div>
-                            <div className="text-xs text-gray-400">
+                            <div className="text-xs text-muted-foreground">
                               {segment.segment_type === 'work' ? 'Work' : 'Break'}
                               {segment.segment_type === 'break' && segment.break_type && ` (${segment.break_type})`}
                             </div>
                           </div>
                         </div>
-                        <div className="text-sm text-white">
+                        <div className="text-sm text-foreground">
                           {Math.round((new Date(segment.end_time).getTime() - new Date(segment.start_time).getTime()) / (1000 * 60))} min
                         </div>
                       </div>
@@ -546,7 +554,7 @@ export function AttendanceTimeline({
                 </div>
                 
                 {staffEvents.length === 0 && staffSegments.length === 0 && (
-                  <div className="text-center text-gray-400 py-4">
+                  <div className="py-4 text-center text-muted-foreground">
                     No clock events or work segments found for this date.
                   </div>
                 )}
@@ -558,77 +566,76 @@ export function AttendanceTimeline({
 
       {/* Add event form */}
       {isAddingEvent && (
-  <div className="mt-4 p-4 bg-gray-800 rounded-md">
-    <div className="space-y-2">
-      <div className="grid grid-cols-3 gap-4">
-        <Select
-          value={eventType}
-          onValueChange={setEventType}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder="Event Type" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="clock_in">Clock In</SelectItem>
-            <SelectItem value="clock_out">Clock Out</SelectItem>
-            <SelectItem value="break_start">Break Start</SelectItem>
-            <SelectItem value="break_end">Break End</SelectItem>
-          </SelectContent>
-        </Select>
-        <Input
-          type="time"
-          value={eventTime}
-          onChange={(e) => setEventTime(e.target.value)}
-          lang="en-GB"
-          step={60}
-          className="bg-gray-700 border-gray-600 text-white"
-        />
-        {(eventType === 'break_start' || eventType === 'break_end') && (
-          <Select
-            value={breakType || ''}
-            onValueChange={setBreakType}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Break Type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="lunch">Lunch</SelectItem>
-              <SelectItem value="coffee">Coffee</SelectItem>
-              <SelectItem value="other">Other</SelectItem>
-            </SelectContent>
-          </Select>
-        )}
-      </div>
-      <div className="mt-2 text-xs text-gray-400">
-        <b>Clock In</b> and <b>Clock Out</b> are for work. <b>Break Start</b> and <b>Break End</b> are for breaks.<br />
-        Enter times in <b>24-hour format</b> (e.g. 07:00, 17:30) to avoid AM/PM mistakes and keep records accurate.
-      </div>
-    </div>
-    <div className="mt-4 flex justify-end gap-2">
-      <Button
-        variant="outline"
-        onClick={() => {
-          setIsAddingEvent(false);
-          setEventType('clock_in');
-          setEventTime('');
-          setBreakType(null);
-        }}
-      >
-        Cancel
-      </Button>
-      <Button onClick={handleAddEvent} disabled={isProcessing}>
-        {isProcessing ? (
-          <>
-            <Loader2 className="w-4 h-4 animate-spin mr-2" />
-            Adding...
-          </>
-        ) : (
-          'Add Event'
-        )}
-      </Button>
-    </div>
-  </div>
-)}
+        <div className="mt-4 rounded-xl border bg-card p-4 shadow-sm">
+          <div className="space-y-2">
+            <div className="grid grid-cols-3 gap-4">
+              <Select
+                value={eventType}
+                onValueChange={setEventType}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Event Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="clock_in">Clock In</SelectItem>
+                  <SelectItem value="clock_out">Clock Out</SelectItem>
+                  <SelectItem value="break_start">Break Start</SelectItem>
+                  <SelectItem value="break_end">Break End</SelectItem>
+                </SelectContent>
+              </Select>
+              <Input
+                type="time"
+                value={eventTime}
+                onChange={(e) => setEventTime(e.target.value)}
+                lang="en-GB"
+                step={60}
+              />
+              {(eventType === 'break_start' || eventType === 'break_end') && (
+                <Select
+                  value={breakType || ''}
+                  onValueChange={setBreakType}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Break Type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="lunch">Lunch</SelectItem>
+                    <SelectItem value="coffee">Coffee</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+            <div className="mt-2 text-xs text-muted-foreground">
+              <b>Clock In</b> and <b>Clock Out</b> are for work. <b>Break Start</b> and <b>Break End</b> are for breaks.<br />
+              Enter times in <b>24-hour format</b> (e.g. 07:00, 17:30) to avoid AM/PM mistakes and keep records accurate.
+            </div>
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsAddingEvent(false);
+                setEventType('clock_in');
+                setEventTime('');
+                setBreakType(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleAddEvent} disabled={isProcessing}>
+              {isProcessing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Adding...
+                </>
+              ) : (
+                'Add Event'
+              )}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Add event button */}
       {!isAddingEvent && (
@@ -639,9 +646,9 @@ export function AttendanceTimeline({
               // console.log('Add Event button clicked, setting isAddingEvent to true');
               setIsAddingEvent(true);
             }}
-            className="flex items-center bg-[#F26B3A] hover:bg-[#E25A29] text-white px-4 py-2 rounded-md"
+            className="flex items-center gap-1"
           >
-            <Plus className="w-4 h-4 mr-1" />
+            <Plus className="h-4 w-4" />
             Add Event
           </Button>
         </div>
@@ -649,17 +656,17 @@ export function AttendanceTimeline({
       
       {/* Custom Time Edit Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="bg-gray-800 border-gray-700 text-white">
+        <DialogContent className="border bg-card text-card-foreground">
           <DialogHeader>
-            <DialogTitle className="text-white">Edit time (24-hour format)</DialogTitle>
-            <DialogDescription className="text-gray-400">
+            <DialogTitle>Edit time (24-hour format)</DialogTitle>
+            <DialogDescription>
               Enter the new time for this clock event.
             </DialogDescription>
           </DialogHeader>
           
           <div className="grid grid-cols-2 gap-4 py-4">
             <div className="space-y-2">
-              <label htmlFor="hour" className="text-sm font-medium text-gray-300">Hour (0-23)</label>
+              <label htmlFor="hour" className="text-sm font-medium text-foreground">Hour (0-23)</label>
               <Input
                 id="hour"
                 type="number"
@@ -674,11 +681,10 @@ export function AttendanceTimeline({
                     setTimeError(null);
                   }
                 }}
-                className="bg-gray-700 border-gray-600 text-white"
               />
             </div>
             <div className="space-y-2">
-              <label htmlFor="minute" className="text-sm font-medium text-gray-300">Minute (0-59)</label>
+              <label htmlFor="minute" className="text-sm font-medium text-foreground">Minute (0-59)</label>
               <Input
                 id="minute"
                 type="number"
@@ -693,7 +699,6 @@ export function AttendanceTimeline({
                     setTimeError(null);
                   }
                 }}
-                className="bg-gray-700 border-gray-600 text-white"
               />
             </div>
           </div>
@@ -702,15 +707,14 @@ export function AttendanceTimeline({
             <div className="text-red-500 text-sm mb-4">{timeError}</div>
           )}
           
-          <DialogFooter className="flex justify-end space-x-2">
+          <DialogFooter>
             <DialogClose asChild>
-              <Button variant="outline" className="border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white">
+              <Button variant="outline">
                 Cancel
               </Button>
             </DialogClose>
             <Button 
               onClick={handleEditSubmit}
-              className="bg-[#F26B3A] hover:bg-[#E25A29] text-white"
             >
               OK
             </Button>
@@ -720,23 +724,23 @@ export function AttendanceTimeline({
       
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="bg-gray-800 border-gray-700 text-white">
+        <DialogContent className="border bg-card text-card-foreground">
           <DialogHeader>
-            <DialogTitle className="text-white">Confirm Deletion</DialogTitle>
-            <DialogDescription className="text-gray-400">
+            <DialogTitle>Confirm Deletion</DialogTitle>
+            <DialogDescription>
               Are you sure you want to delete this clock event? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           
           {deletingEvent && (
-            <div className="py-4 border border-gray-700 rounded-md p-3 bg-gray-900 my-2">
+            <div className="my-2 rounded-md border bg-muted/70 p-3">
               <div className="flex items-center space-x-3">
                 <div className={`w-3 h-3 rounded-full ${getEventColor(deletingEvent.event_type)}`} />
                 <div>
-                  <div className="text-sm font-medium text-white">
+                  <div className="text-sm font-medium text-foreground">
                     {deletingEvent.event_type === 'clock_in' ? 'Clock in' : 'Clock out'} - {format(new Date(deletingEvent.event_time), 'HH:mm')}
                   </div>
-                  <div className="text-xs text-gray-400">
+                  <div className="text-xs text-muted-foreground">
                     {getVerificationMethod(deletingEvent.verification_method)}
                     {deletingEvent.break_type && ` (${deletingEvent.break_type} break)`}
                   </div>
@@ -745,15 +749,15 @@ export function AttendanceTimeline({
             </div>
           )}
           
-          <DialogFooter className="flex justify-end space-x-2">
+          <DialogFooter>
             <DialogClose asChild>
-              <Button variant="outline" className="border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white">
+              <Button variant="outline">
                 Cancel
               </Button>
             </DialogClose>
             <Button 
               onClick={handleDeleteConfirm}
-              className="bg-red-600 hover:bg-red-700 text-white"
+              variant="destructive"
             >
               Delete
             </Button>

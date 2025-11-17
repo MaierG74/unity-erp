@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Image from "next/image"
 import { ImageUpload } from "./image-upload"
 import { Button } from "@/components/ui/button"
@@ -28,16 +28,35 @@ export function ImageGallery({
   images,
   onImagesChange,
 }: ImageGalleryProps) {
-  const [selectedImage, setSelectedImage] = useState<ProductImage | null>(
-    images.find((img) => img.is_primary) || images[0] || null
-  )
+  const [localImages, setLocalImages] = useState<ProductImage[]>(images)
+  const [selectedImage, setSelectedImage] = useState<ProductImage | null>(null)
   const { toast } = useToast()
 
-  const handleImageUpload = (url: string) => {
-    setSelectedImage({ id: "", product_id: productId, image_url: url, is_primary: false })
-    if (onImagesChange) {
-      onImagesChange()
+  useEffect(() => {
+    setLocalImages(images)
+  }, [images])
+
+  useEffect(() => {
+    if (localImages.length === 0) {
+      setSelectedImage(null)
+      return
     }
+    if (!selectedImage || !localImages.some((img) => img.id === selectedImage.id)) {
+      const primary = localImages.find((img) => img.is_primary) || localImages[0]
+      setSelectedImage(primary)
+    }
+  }, [localImages, selectedImage])
+
+  const handleImageUpload = (url: string) => {
+    const tempImage: ProductImage = {
+      id: `temp-${Date.now()}`,
+      product_id: productId,
+      image_url: url,
+      is_primary: false,
+    }
+    setLocalImages((prev) => [tempImage, ...prev])
+    setSelectedImage(tempImage)
+    onImagesChange?.()
   }
 
   const handleSetPrimary = async (image: ProductImage) => {
@@ -55,6 +74,16 @@ export function ImageGallery({
         .eq("id", image.id)
 
       if (error) throw error
+
+      setLocalImages((prev) =>
+        prev.map((img) => ({
+          ...img,
+          is_primary: img.id === image.id,
+        }))
+      )
+      setSelectedImage((prev) =>
+        prev && prev.id === image.id ? { ...prev, is_primary: true } : image
+      )
 
       toast({
         title: "Success",
@@ -83,9 +112,9 @@ export function ImageGallery({
 
       if (error) throw error
 
-      // If the deleted image was selected, select another image
+      setLocalImages((prev) => prev.filter((img) => img.id !== image.id))
       if (selectedImage?.id === image.id) {
-        const remainingImages = images.filter((img) => img.id !== image.id)
+        const remainingImages = localImages.filter((img) => img.id !== image.id)
         setSelectedImage(remainingImages[0] || null)
       }
 
@@ -127,7 +156,7 @@ export function ImageGallery({
 
       {/* Thumbnail grid */}
       <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-4">
-        {images.map((image) => (
+        {localImages.map((image) => (
           <div
             key={image.id}
             className={`group relative aspect-square cursor-pointer overflow-hidden rounded-md bg-card dark:bg-white/5 ${

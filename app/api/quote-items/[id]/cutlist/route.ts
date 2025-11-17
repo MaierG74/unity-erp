@@ -14,8 +14,9 @@ const payloadSchema = z.object({
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const params = await context.params;
   const parsed = paramSchema.safeParse(params);
   if (!parsed.success) {
     return NextResponse.json(
@@ -51,8 +52,9 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const params = await context.params;
   const parsedParams = paramSchema.safeParse(params);
   if (!parsedParams.success) {
     return NextResponse.json(
@@ -110,4 +112,3 @@ export async function PUT(
 
   return NextResponse.json({ cutlist: data });
 }
-

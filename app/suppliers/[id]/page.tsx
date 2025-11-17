@@ -14,6 +14,8 @@ const SupplierForm = lazy(() => import('@/components/features/suppliers/supplier
 const SupplierEmails = lazy(() => import('@/components/features/suppliers/supplier-emails').then(m => ({ default: m.SupplierEmails })));
 const SupplierComponents = lazy(() => import('@/components/features/suppliers/supplier-components').then(m => ({ default: m.SupplierComponents })));
 const SupplierPricelists = lazy(() => import('@/components/features/suppliers/supplier-pricelists').then(m => ({ default: m.SupplierPricelists })));
+const SupplierOrders = lazy(() => import('@/components/features/suppliers/supplier-orders').then(m => ({ default: m.SupplierOrders })));
+const SupplierReports = lazy(() => import('@/components/features/suppliers/supplier-reports').then(m => ({ default: m.SupplierReports })));
 
 // Loading skeleton for tabs
 const TabSkeleton = () => (
@@ -135,6 +137,8 @@ export default function SupplierDetailPage() {
           <TabsTrigger value="emails">Emails</TabsTrigger>
           <TabsTrigger value="components">Components</TabsTrigger>
           <TabsTrigger value="pricelists">Price Lists</TabsTrigger>
+          <TabsTrigger value="orders">Orders</TabsTrigger>
+          <TabsTrigger value="reports">Reports</TabsTrigger>
         </TabsList>
 
         <TabsContent value="details" className="space-y-4">
@@ -165,6 +169,18 @@ export default function SupplierDetailPage() {
         <TabsContent value="pricelists" className="space-y-4">
           <Suspense fallback={<TabSkeleton />}>
             <SupplierPricelists supplier={supplier} />
+          </Suspense>
+        </TabsContent>
+
+        <TabsContent value="orders" className="space-y-4">
+          <Suspense fallback={<TabSkeleton />}>
+            <SupplierOrders supplier={supplier} />
+          </Suspense>
+        </TabsContent>
+
+        <TabsContent value="reports" className="space-y-4">
+          <Suspense fallback={<TabSkeleton />}>
+            <SupplierReports supplier={supplier} />
           </Suspense>
         </TabsContent>
       </Tabs>

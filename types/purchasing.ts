@@ -111,6 +111,8 @@ export type NewSupplierOrderFormValues = {
 
 export type ReceiveItemsFormValues = {
   quantity_received: number;
+  quantity_rejected?: number;
+  rejection_reason?: string;
   receipt_date?: string;
 };
 

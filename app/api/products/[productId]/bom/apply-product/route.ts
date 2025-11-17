@@ -11,9 +11,10 @@ function admin() {
 // Apply a sub-product's BOM to a parent product by copying its BOM rows
 // Also copies Bill of Labour rows, scaling quantities by the same factor.
 // Body: { sub_product_id: number, quantity?: number }
-export async function POST(req: NextRequest, { params }: { params: { productId: string } }) {
+export async function POST(req: NextRequest, context: { params: Promise<{ productId: string }> }) {
   try {
-    const parentProductId = Number(params.productId)
+    const { productId } = await context.params
+    const parentProductId = Number(productId)
     if (!Number.isFinite(parentProductId)) {
       return NextResponse.json({ error: 'Invalid productId' }, { status: 400 })
     }

@@ -12,8 +12,9 @@ const acknowledgeSchema = z.object({
   note: z.string().max(2000).optional(),
 });
 
-export async function POST(req: NextRequest, context: { params: { todoId: string } }) {
-  const parsedParams = paramsSchema.safeParse(context.params);
+export async function POST(req: NextRequest, context: { params: Promise<{ todoId: string }> }) {
+  const params = await context.params;
+  const parsedParams = paramsSchema.safeParse(params);
   if (!parsedParams.success) {
     return NextResponse.json({ error: 'Invalid todo id' }, { status: 400 });
   }

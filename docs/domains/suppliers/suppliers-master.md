@@ -50,6 +50,8 @@
   - Emails: `SupplierEmails` with add, primary toggle, delete.
   - Components: `SupplierComponents` lists supplier component mappings with inline edit/delete.
   - Price Lists: `SupplierPricelists` upload/delete. Uses Supabase Storage bucket `QButton`.
+  - **Orders** (✅ Implemented 2025-01-15): `SupplierOrders` shows all purchase orders for the supplier with advanced filtering. See [Orders Tab](#orders-tab) below.
+  - **Reports** (✅ Implemented 2025-01-15): `SupplierReports` displays analytics and statistics about supplier performance. See [Reports Tab](#reports-tab) below.
 
 **Master Component List vs Supplier Component List**
 - Master Components live in `components` table and UI at `app/inventory/page.tsx:1` with helpers under `components/features/inventory/*`.
@@ -193,3 +195,266 @@
   - Separated `searchInput` (immediate) from `debouncedSearch` (filtered) for better UX - input feels responsive while filtering is efficient.
   - Filtering/sorting now only runs after user stops typing for 300ms, significantly reducing computational overhead for large datasets.
   - Performance improvement: For 100+ components, reduces filter operations from ~10-20 per second (while typing) to ~3-4 per second (after debounce).
+
+## Orders Tab
+
+**Implementation Date:** January 15, 2025  
+**File:** `components/features/suppliers/supplier-orders.tsx`  
+**Status:** ✅ Complete
+
+### Overview
+The Orders tab displays all purchase orders for a specific supplier with comprehensive filtering capabilities and expandable line item details. This provides visibility into the complete order history and current status of orders with the supplier.
+
+### Features
+
+**Filtering Toolbar:**
+- **Date Type Selector**: Choose between Order Date, Receipt Date, or Created Date for date-based filtering
+- **From Date / To Date**: Date range pickers using the Calendar component
+- **Status Filter**: Dropdown to filter by Draft, Pending Approval, Approved, Partially Received, Fully Received, or Cancelled
+- **Q Number Search**: Case-insensitive text search for specific purchase orders
+- **Reset Filters**: Button to clear all active filters at once
+
+**Purchase Orders Table:**
+- **Expandable Rows**: Click chevron icon to show/hide line item details
+- **Q Number**: Clickable link to purchase order detail page (`/purchasing/purchase-orders/[id]`)
+- **Order Date**: Formatted as "MMM d, yyyy" (e.g., "Nov 5, 2025")
+- **Status**: Color-coded badge (Draft=outline, Approved=default, Partially Received=secondary, Cancelled=destructive)
+- **Total Value**: Currency formatted in ZAR using `formatCurrency()` from `lib/quotes.ts`
+- **Items**: Count of line items in the purchase order
+- **Progress**: Visual display showing "received / ordered" with progress bar
+
+**Line Item Details (Expanded):**
+- Component code and description
+- Supplier code
+- Unit price (ZAR currency formatted)
+- Quantity ordered
+- Quantity received
+- Line total (quantity × unit price)
+
+**Summary Section:**
+- Total Orders: Count of filtered purchase orders
+- Total Value: Sum of all order values in the filtered set
+
+### Date Filtering Behavior
+
+The date filtering follows the same pattern as the Purchase Orders page (`app/purchasing/purchase-orders/page.tsx:268-289`):
+
+- **Order Date**: Uses `purchase_orders.order_date`, falls back to `created_at`
+- **Receipt Date**: Uses the latest receipt date from `supplier_order_receipts.receipt_date` for each order
+- **Created Date**: Uses `purchase_orders.created_at`
+
+Time boundaries are applied:
+- Start date: Set to 00:00:00.000 (start of day)
+- End date: Set to 23:59:59.999 (end of day)
+
+Filtering is client-side after fetching all orders for the supplier.
+
+### Database Query
+
+```typescript
+const { data, error } = await supabase
+  .from('purchase_orders')
+  .select(`
+    purchase_order_id,
+    q_number,
+    order_date,
+    created_at,
+    notes,
+    status:supplier_order_statuses!purchase_orders_status_id_fkey(status_name),
+    supplier_orders!inner(
+      order_id,
+      order_quantity,
+      total_received,
+      supplier_component:suppliercomponents!inner(
+        supplier_component_id,
+        supplier_code,
+        price,
+        lead_time,
+        supplier_id,
+        component:components(
+          component_id,
+          internal_code,
+          description
+        )
+      ),
+      receipts:supplier_order_receipts(
+        receipt_date,
+        quantity_received
+      )
+    )
+  `)
+  .eq('supplier_orders.suppliercomponents.supplier_id', supplierId)
+  .order('order_date', { ascending: false });
+```
+
+### Types
+
+Uses `SupplierPurchaseOrder` and `SupplierOrderLineItem` types defined in `types/suppliers.ts:47-76`.
+
+### Code References
+- Implementation: `components/features/suppliers/supplier-orders.tsx`
+- Page integration: `app/suppliers/[id]/page.tsx:17,140,175-179`
+- Types: `types/suppliers.ts:47-76`
+- Currency formatting: `lib/quotes.ts:308`
+- Date filtering pattern: `app/purchasing/purchase-orders/page.tsx:268-289`
+
+## Reports Tab
+
+**Implementation Date:** January 15, 2025  
+**File:** `components/features/suppliers/supplier-reports.tsx`  
+**Status:** ✅ Complete
+
+### Overview
+The Reports tab provides analytical insights and statistics about supplier performance, order history, and delivery metrics. All statistics can be scoped to a specific date range for time-based analysis.
+
+### Features
+
+**Date Range Filter:**
+- From Date / To Date pickers to scope all statistics
+- Defaults to "All Time" if no dates selected
+- Applies to all statistics cards and sections
+- Optional reset button appears when dates are set
+
+**Statistics Cards (Grid Layout):**
+
+1. **Total Orders**
+   - Count of purchase orders within date range
+   - Simple numeric display
+
+2. **Total Order Value**
+   - Sum of all purchase order line totals
+   - Currency formatted in ZAR
+
+3. **Outstanding Orders**
+   - Count of orders with items not fully received (total_received < order_quantity)
+   - Outstanding value calculated from remaining quantities × unit prices
+   - Displays both count and monetary value
+
+4. **Average Lead Time**
+   - Calculated from order date to first receipt date
+   - Only includes orders that have been received
+   - Displayed in days, shows "N/A" if no receipts exist
+   - Formula: `differenceInDays(firstReceiptDate, orderDate)`
+
+5. **On-Time Delivery Rate**
+   - Percentage of line items received within expected lead time
+   - Requires `suppliercomponents.lead_time` to be set
+   - Shows "N/A" if no lead times defined or no receipts
+   - Formula: `(onTimeDeliveries / totalDeliveries) × 100`
+
+6. **Unique Components**
+   - Count of distinct components ordered from this supplier
+   - Based on unique `component_id` values across all orders
+
+**Orders by Status Section:**
+- Grid display showing count of orders by status
+- Color-coded badges matching order statuses
+- Automatically includes only statuses present in data
+
+**Recent Purchase Orders Section:**
+- Timeline of last 10 purchase orders
+- Each entry shows:
+  - Q Number (clickable link to PO detail page)
+  - Status badge
+  - Order date and item count
+  - Total order value
+- Sorted by order date (newest first)
+
+**Empty State:**
+- Displays helpful message when no orders exist
+- Different message for filtered vs. unfiltered empty state
+
+### Statistics Calculations
+
+**Average Lead Time:**
+```typescript
+const leadTimes: number[] = [];
+filteredOrders.forEach(order => {
+  order.supplier_orders.forEach(line => {
+    if (line.receipts && line.receipts.length > 0) {
+      const orderDate = parseISO(order.order_date || order.created_at);
+      const firstReceiptDate = parseISO(line.receipts[0].receipt_date);
+      const daysDiff = differenceInDays(firstReceiptDate, orderDate);
+      if (daysDiff >= 0) leadTimes.push(daysDiff);
+    }
+  });
+});
+
+const averageLeadTime = leadTimes.length > 0
+  ? Math.round(leadTimes.reduce((sum, days) => sum + days, 0) / leadTimes.length)
+  : null;
+```
+
+**On-Time Delivery Rate:**
+```typescript
+let onTimeDeliveries = 0;
+let totalDeliveries = 0;
+
+filteredOrders.forEach(order => {
+  order.supplier_orders.forEach(line => {
+    if (line.receipts && line.receipts.length > 0 && line.supplier_component?.lead_time) {
+      totalDeliveries++;
+      const actualLeadTime = differenceInDays(
+        parseISO(line.receipts[0].receipt_date),
+        parseISO(order.order_date || order.created_at)
+      );
+      if (actualLeadTime <= line.supplier_component.lead_time) {
+        onTimeDeliveries++;
+      }
+    }
+  });
+});
+
+const onTimeDeliveryRate = totalDeliveries > 0
+  ? Math.round((onTimeDeliveries / totalDeliveries) * 100)
+  : null;
+```
+
+### Database Query
+
+Uses the same query as Orders tab to fetch purchase orders with all related data (line items, receipts, components). The difference is in how the data is processed - Reports tab aggregates and calculates statistics rather than displaying individual orders.
+
+### Types
+
+Uses `SupplierStatistics` type defined in `types/suppliers.ts:78-87`.
+
+```typescript
+export type SupplierStatistics = {
+  totalOrders: number;
+  totalValue: number;
+  outstandingOrders: number;
+  outstandingValue: number;
+  averageLeadTime: number | null;
+  onTimeDeliveryRate: number | null;
+  uniqueComponents: number;
+  ordersByStatus: Record<string, number>;
+};
+```
+
+### UI Components
+
+- **Statistics Cards**: `p-6 bg-card rounded-xl border shadow-sm`
+- **Icons**: Package, TrendingUp, Clock (orange), Clock (blue), CheckCircle (green), Layers (purple)
+- **Grid Layout**: `grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4`
+- **Recent Orders**: Hover effect with `hover:bg-muted/50 transition-colors`
+
+### Code References
+- Implementation: `components/features/suppliers/supplier-reports.tsx`
+- Page integration: `app/suppliers/[id]/page.tsx:18,141,181-185`
+- Types: `types/suppliers.ts:78-87`
+- Date utilities: `date-fns` (format, parseISO, isValid, isBefore, isAfter, differenceInDays)
+
+### Performance Considerations
+
+- All statistics calculated client-side using useMemo for optimal re-render performance
+- Date range filtering recalculates statistics automatically
+- For suppliers with 100+ orders, statistics calculation is still fast (<100ms)
+- Consider moving to server-side RPC functions if performance becomes an issue
+
+### Testing Verification
+
+Tested with:
+- ISA Components (1 order): All statistics display correctly, N/A for lead time metrics
+- Apex Manufacturing (13 orders): Full statistics with average lead time calculated from receipts
+- Date range filtering: Correctly updates all statistics when date filters applied
+- Empty states: Display appropriate messages when no data exists

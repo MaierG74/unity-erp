@@ -2,13 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { validateCutlistDimensions } from '@/lib/cutlist/cutlistDimensions';
 
-interface RouteParams {
-  params: {
-    setId?: string;
-    groupId?: string;
-    valueId?: string;
-  };
-}
+type RouteParams = {
+  setId?: string;
+  groupId?: string;
+  valueId?: string;
+};
 
 function parseId(value?: string): number | null {
   if (!value) return null;
@@ -25,7 +23,7 @@ function getSupabaseAdmin() {
   return createClient(url, key);
 }
 
-async function fetchValueForUpdate(client: ReturnType<typeof createClient>, setId: number, groupId: number, valueId: number) {
+async function fetchValueForUpdate(client: any, setId: number, groupId: number, valueId: number) {
   const { data, error } = await client
     .from('option_set_values')
     .select(
@@ -40,24 +38,27 @@ async function fetchValueForUpdate(client: ReturnType<typeof createClient>, setI
     .eq('option_set_value_id', valueId)
     .single();
 
-  if (error || !data) {
+  const record = data as any;
+
+  if (error || !record) {
     throw new Error('Not found');
   }
 
-  const group = (data as any).option_set_groups;
+  const group = record.option_set_groups;
   if (
     !group ||
-    Number(data.option_set_group_id) !== groupId ||
+    Number(record.option_set_group_id) !== groupId ||
     Number(group.option_set_group_id) !== groupId ||
     Number(group.option_set_id) !== setId
   ) {
     throw new Error('Not found');
   }
 
-  return data;
+  return record;
 }
 
-export async function PATCH(request: NextRequest, { params }: RouteParams) {
+export async function PATCH(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const params = await context.params;
   const setId = parseId(params.setId);
   const groupId = parseId(params.groupId);
   const valueId = parseId(params.valueId);
@@ -220,7 +221,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   }
 }
 
-export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+export async function DELETE(_request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const params = await context.params;
   const setId = parseId(params.setId);
   const groupId = parseId(params.groupId);
   const valueId = parseId(params.valueId);

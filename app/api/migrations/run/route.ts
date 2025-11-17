@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
       .map(s => s.trim())
       .filter(s => s.length > 0 && !s.startsWith('--'));
 
-    const results = [];
+    const results: { statement: string; success: boolean }[] = [];
 
     // Execute each statement
     for (const statement of statements) {

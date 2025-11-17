@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-interface RouteParams {
-  params: {
-    productId?: string;
-    linkId?: string;
-    groupId?: string;
-  };
-}
+type RouteParams = {
+  productId?: string;
+  linkId?: string;
+  groupId?: string;
+};
 
 function parseId(value?: string): number | null {
   if (!value) return null;
@@ -24,33 +22,38 @@ function getSupabaseAdmin() {
   return createClient(url, key);
 }
 
-async function ensureLink(client: ReturnType<typeof createClient>, productId: number, linkId: number) {
+async function ensureLink(client: any, productId: number, linkId: number) {
   const { data, error } = await client
     .from('product_option_set_links')
     .select('product_id, option_set_id')
     .eq('link_id', linkId)
     .maybeSingle();
 
-  if (error || !data || Number(data.product_id) !== productId) {
+  const record = data as any;
+
+  if (error || !record || Number(record.product_id) !== productId) {
     throw new Error('LinkNotFound');
   }
 
-  return Number(data.option_set_id);
+  return Number(record.option_set_id);
 }
 
-async function ensureGroup(optionSetId: number, groupId: number, client: ReturnType<typeof createClient>) {
+async function ensureGroup(optionSetId: number, groupId: number, client: any) {
   const { data, error } = await client
     .from('option_set_groups')
     .select('option_set_id')
     .eq('option_set_group_id', groupId)
     .maybeSingle();
 
-  if (error || !data || Number(data.option_set_id) !== optionSetId) {
+  const record = data as any;
+
+  if (error || !record || Number(record.option_set_id) !== optionSetId) {
     throw new Error('GroupNotFound');
   }
 }
 
-export async function PATCH(request: NextRequest, { params }: RouteParams) {
+export async function PATCH(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const params = await context.params;
   const productId = parseId(params.productId);
   const linkId = parseId(params.linkId);
   const groupId = parseId(params.groupId);
@@ -140,7 +143,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   }
 }
 
-export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+export async function DELETE(_request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const params = await context.params;
   const productId = parseId(params.productId);
   const linkId = parseId(params.linkId);
   const groupId = parseId(params.groupId);

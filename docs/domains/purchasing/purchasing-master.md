@@ -18,6 +18,7 @@
   - Page: `app/purchasing/page.tsx:49` (fetch), `app/purchasing/page.tsx:170` (derived status), `app/purchasing/page.tsx:220` (section title, list).
 - **All Purchase Orders:** Tabbed list (In Progress/Completed) with filtering by status, Q number, supplier, date range.
   - Page: `app/purchasing/purchase-orders/page.tsx:1` (page), `app/purchasing/purchase-orders/page.tsx:19` (status badge), `app/purchasing/purchase-orders/page.tsx:28` (fetch & joins), `app/purchasing/purchase-orders/page.tsx:96` (derived status logic).
+  - **Date Filtering:** The date range filter uses `order_date` if available, falling back to `created_at` for filtering. Filtering is done client-side after fetching all orders. The "From Date" and "To Date" pickers allow selecting a date range, and orders are filtered to show only those within the selected range. See `app/purchasing/purchase-orders/page.tsx:268-289` for the filtering logic.
 - **PO Details:** Review items, totals, suppliers; submit for approval; approve with Q number; receive items; view receipt history.
   - Page: `app/purchasing/purchase-orders/[id]/page.tsx:1` (page), `app/purchasing/purchase-orders/[id]/page.tsx:115` (fetch with joins), `app/purchasing/purchase-orders/[id]/page.tsx:201` (approve → send emails), `app/purchasing/purchase-orders/[id]/page.tsx:232` (submit for approval), `app/purchasing/purchase-orders/[id]/page.tsx:313` (receipt: total_received), `app/purchasing/purchase-orders/[id]/page.tsx:346` (receipt: inventory), `app/purchasing/purchase-orders/[id]/page.tsx:528` (status flags, UI state), `app/purchasing/purchase-orders/[id]/page.tsx:720` (receipt history section).
   - **Sticky Header:** Uses the "Page-Level Sticky Header" pattern (see `docs/overview/STYLE_GUIDE.md`) with dynamic offset calculation to position the blue header bar flush below the navbar. Implementation: `app/purchasing/purchase-orders/[id]/page.tsx:1078` (header), `app/purchasing/purchase-orders/[id]/page.module.css:1` (styles), `app/purchasing/purchase-orders/[id]/page.tsx:584` (offset calculation).
@@ -107,11 +108,15 @@
 
 **Receiving Flow**
 
-- UI: Receive inputs are enabled when PO is "Approved". See `app/purchasing/purchase-orders/[id]/page.tsx:528` and table inputs at `app/purchasing/purchase-orders/[id]/page.tsx:695`.
-- Order Items table displays: Component, Description, Supplier, Unit Price, **Ordered**, **Received**, **Owing** (highlighted in orange when > 0), Receive Now (input + button), and Total. The "Owing" column shows `order_quantity - total_received` to clearly indicate remaining stock to receive.
-- On submit (per line with quantity > 0):
+- **Enhanced Receive Modal (January 2025):** 🚧 IN PROGRESS - Purchase order detail page now uses a comprehensive modal dialog for receiving items with inspection and rejection capabilities. The "Receive" button opens a modal where operators can record both received quantities AND rejected quantities (gate inspection failures) in a single form. See `app/purchasing/purchase-orders/[id]/ReceiveItemsModal.tsx` and changelog [`purchase-order-receive-modal-20250115.md`](../../changelogs/purchase-order-receive-modal-20250115.md).
+- **Current Status:** Modal component created and integrated, but not yet appearing in browser (cache/build issue being investigated).
+- UI: Receive inputs are enabled when PO is "Approved". See `app/purchasing/purchase-orders/[id]/page.tsx:528` and table inputs at `app/purchasing/purchase-orders/[id]/page.tsx:1231`.
+- Order Items table displays: Component, Description, Supplier, Unit Price, **Ordered**, **Received**, **Owing** (highlighted in orange when > 0), Receive Now (button that opens modal), and Total. The "Owing" column shows `order_quantity - total_received` to clearly indicate remaining stock to receive.
+- On submit (via modal):
   - Call the transactional RPC `process_supplier_order_receipt` to insert the inventory transaction, create the receipt record, update `inventory`, and recompute `supplier_orders.total_received`/status in one transaction.
-  - Legacy fallback: if the RPC is missing, the UI falls back to the pre-RPC manual inserts/updates (still in the code until every environment is migrated).
+  - If items are rejected, also call `process_supplier_order_return` with type='rejection' to record gate rejections (no inventory impact).
+  - Generate GRN (Goods Return Number) for any rejections.
+  - Show success state with PDF download and email notification options.
 - **Auto-refresh:** After receiving stock, the page automatically updates without manual refresh. The mutation invalidates and refetches queries with `refetchOnMount: true` and `staleTime: 0` configured on the purchase order query. Both inline per-row receipts (`receiveOneMutation`) and bulk receipts (`receiptMutation`) trigger immediate refetch of active queries.
 - Receipt history renders under the PO with all receipts per line: `app/purchasing/purchase-orders/[id]/page.tsx:760`. Detail page implementation lives in `components/features/purchasing/order-detail.tsx`.
 - Deployment: apply `supabase/migrations/20251107_process_supplier_receipt.sql` via the Supabase CLI (`supabase db push` after linking the project) or run the script directly in SQL to enable the RPC before deploying updated UI.
@@ -120,6 +125,7 @@
 **DB Functions & Views**
 
 - `process_supplier_order_receipt(order_id int, quantity int, receipt_date timestamptz default now())` — transactional RPC defined in `supabase/migrations/20251107_process_supplier_receipt.sql`. Handles receipt insertion, inventory updates, and status recompute atomically. Granted to `authenticated` and `service_role`.
+- `process_supplier_order_return(p_supplier_order_id int, p_quantity numeric, p_reason text, p_return_type text, p_return_timestamp timestamptz, p_returned_by bigint, p_notes text, p_goods_return_number text, p_batch_id bigint, p_signature_status text)` — transactional RPC for supplier returns (both immediate rejections and later returns from stock). Fixed in migration `20250113_fix_rpc_overload_conflict_v6.sql` to resolve function overload conflicts and schema mismatches. Handles inventory OUT transactions, GRN generation, and return tracking. See [`../../changelogs/supplier-returns-rpc-overload-fix-20250113.md`](../../changelogs/supplier-returns-rpc-overload-fix-20250113.md).
 - `create_update_order_received_quantity_function` RPC installer creates `update_order_received_quantity(order_id int)` to recompute `total_received` and set status based on sums. See `scripts/create-rpc-function.sql:2`.
 - Creation RPCs:
   - `create_purchase_order_with_lines(supplier_id int, customer_order_id int, line_items jsonb, status_id int, order_date timestamptz, notes text)` — inserts PO + SO rows atomically and updates the junction table.
@@ -153,12 +159,12 @@
 - Multi-supplier PO header: We currently store a `supplier_id` on `purchase_orders` for manual PO path; multi-supplier POs (from sales order grouping) still compute supplier lists from lines. Confirm whether `supplier_id` should be optional or represent a "primary supplier".
 - Q number uniqueness: DB constraint exists; add graceful handling when collision occurs (e.g., toast with retry).
 - **Stock Issuance:** ✅ Implemented (January 2025). Stock issuance functionality is available on the Order Detail page ("Issue Stock" tab) rather than the Purchase Order page. This allows issuing stock OUT of inventory against customer orders with full BOM integration, PDF generation, and issuance tracking. Uses SALE transaction type (ID: 2) for OUT transactions. See [`../changelogs/stock-issuance-implementation-20250104.md`](../changelogs/stock-issuance-implementation-20250104.md) for implementation details and [`../domains/components/inventory-transactions.md`](../domains/components/inventory-transactions.md) for transaction specifications.
-- **Supplier Returns:** Need to implement returning goods to suppliers (OUT transactions). This handles both immediate rejections on delivery and later returns of previously received stock. Requires `supplier_order_returns` table, RPC function `process_supplier_order_return`, and UI on purchase order detail page. See `docs/plans/supplier-returns-plan.md` for full specification.
+- **Supplier Returns:** 🚧 IN PROGRESS (January 2025). Enhanced receiving modal with gate rejection capability being implemented. The `process_supplier_order_return` RPC function exists and is fixed (v6 migration), `supplier_order_returns` table exists, GRN generation works, PDF and email integrations ready. UI modal component created but not yet appearing in browser (cache/build issue). See [`../../changelogs/purchase-order-receive-modal-20250115.md`](../../changelogs/purchase-order-receive-modal-20250115.md) for current status.
 
 **Quick Reference**
 
 - Dashboard metrics query: `app/purchasing/page.tsx:117`.
-- All orders filters (status/Q/supplier/date): `app/purchasing/purchase-orders/page.tsx:260`.
+- All orders filters (status/Q/supplier/date): `app/purchasing/purchase-orders/page.tsx:214` (filtering logic), `app/purchasing/purchase-orders/page.tsx:268-289` (date range filtering).
 - Approve PO + email: `app/purchasing/purchase-orders/[id]/page.tsx:201` and `app/api/send-purchase-order-email/route.ts:1`.
 - Receive flow: `app/purchasing/purchase-orders/[id]/page.tsx:313`, `:346`, and history at `:760`.
 - Manual PO create: `components/features/purchasing/new-purchase-order-form.tsx:210`.

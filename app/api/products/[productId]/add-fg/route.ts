@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-type RouteParams = { params: { productId: string } }
+type RouteParams = { productId: string }
 
 function parseProductId(id: string | undefined): number | null {
   const n = Number(id)
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
-export async function POST(req: NextRequest, { params }: RouteParams) {
-  const productId = parseProductId(params?.productId)
+export async function POST(req: NextRequest, context: { params: Promise<RouteParams> }) {
+  const { productId: productIdParam } = await context.params
+  const productId = parseProductId(productIdParam)
   if (!productId) return NextResponse.json({ error: 'Invalid product id' }, { status: 400 })
 
   const body = (await req.json().catch(() => ({}))) as { quantity?: number | string; location?: string | null }
@@ -101,4 +102,3 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: e?.message || 'Unexpected error while adding finished goods' }, { status: 500 })
   }
 }
-

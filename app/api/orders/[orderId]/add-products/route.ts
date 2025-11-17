@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { orderId: string } }
+  context: { params: Promise<{ orderId: string }> }
 ) {
   // Initialize Supabase client lazily to avoid build-time env issues
   const supabaseAdmin = createClient(
@@ -13,7 +13,8 @@ export async function POST(
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
   try {
-    const orderId = parseInt(params.orderId, 10);
+    const { orderId: orderIdParam } = await context.params;
+    const orderId = parseInt(orderIdParam, 10);
     const body = await request.json();
     const { products } = body;
 

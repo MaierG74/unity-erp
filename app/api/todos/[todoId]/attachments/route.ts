@@ -4,15 +4,16 @@ import { fetchTodoAttachments } from '@/lib/db/todos';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { todoId: string } }
+  context: { params: Promise<{ todoId: string }> }
 ) {
   try {
+    const { todoId } = await context.params;
     const ctx = await getRouteClient(request);
     if ('error' in ctx) {
       return NextResponse.json({ error: ctx.error }, { status: ctx.status ?? 401 });
     }
 
-    const attachments = await fetchTodoAttachments(ctx.supabase, params.todoId);
+    const attachments = await fetchTodoAttachments(ctx.supabase, todoId);
     return NextResponse.json(attachments);
   } catch (error) {
     console.error('Error fetching attachments:', error);
@@ -25,9 +26,10 @@ export async function GET(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { todoId: string } }
+  context: { params: Promise<{ todoId: string }> }
 ) {
   try {
+    const { todoId } = await context.params;
     const ctx = await getRouteClient(request);
     if ('error' in ctx) {
       return NextResponse.json({ error: ctx.error }, { status: ctx.status ?? 401 });
@@ -42,7 +44,7 @@ export async function POST(
 
     // Upload to Supabase storage
     const fileExt = file.name.split('.').pop();
-    const fileName = `${params.todoId}/${Date.now()}.${fileExt}`;
+    const fileName = `${todoId}/${Date.now()}.${fileExt}`;
     const filePath = `todos/${fileName}`;
 
     const { error: uploadError, data } = await ctx.supabase.storage
@@ -64,7 +66,7 @@ export async function POST(
     const { data: attachment, error: dbError } = await ctx.supabase
       .from('todo_attachments')
       .insert({
-        todo_id: params.todoId,
+        todo_id: todoId,
         file_name: file.name,
         file_path: filePath,
         mime_type: file.type,

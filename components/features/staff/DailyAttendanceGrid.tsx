@@ -178,8 +178,10 @@ export function DailyAttendanceGrid() {
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isMassDialogOpen, setIsMassDialogOpen] = useState(false);
+  const [nameFilter, setNameFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'present' | 'absent'>('all');
+  const [clockIssueFilter, setClockIssueFilter] = useState<'all' | 'missingClockOut'>('all');
 
-  
   const [sortField, setSortField] = useState<string>('staff_name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [viewMode, setViewMode] = useState<'legacy' | 'timeline'>('timeline');
@@ -829,6 +831,8 @@ export function DailyAttendanceGrid() {
       const summary = dailySummaries.find(s => s.staff_id === staff.staff_id);
       const staffClockEvents = clockEvents.filter(e => e.staff_id === staff.staff_id);
       const firstClockInEvent = staffClockEvents.find(e => e.event_type === 'clock_in');
+      const sortedEvents = [...staffClockEvents].sort((a, b) => new Date(a.event_time).getTime() - new Date(b.event_time).getTime());
+      const hasOpenClock = sortedEvents.length > 0 && sortedEvents[sortedEvents.length - 1].event_type === 'clock_in';
 
       const isPresent = !!summary || !!firstClockInEvent;
 
@@ -840,6 +844,7 @@ export function DailyAttendanceGrid() {
         date_worked: dateStr,
         is_holiday: !!holiday,
         overtime_rate: 1.5, // Default, should be from staff data
+        has_open_clock: hasOpenClock,
       };
 
       if (!isPresent) {
@@ -848,6 +853,7 @@ export function DailyAttendanceGrid() {
         return {
           ...baseRecord,
           present: false,
+          has_open_clock: false,
           hours_worked: defaultTimes.hoursWorked,
           start_time: defaultTimes.startTime,
           end_time: defaultTimes.endTime,
@@ -864,6 +870,7 @@ export function DailyAttendanceGrid() {
       return {
         ...baseRecord,
         present: true,
+        has_open_clock: hasOpenClock,
         hours_id: summary?.id,
         hours_worked: summary ? summary.total_work_minutes / 60 : 0,
         // Use summary time if available, otherwise fall back to the first clock-in event
@@ -1483,7 +1490,23 @@ export function DailyAttendanceGrid() {
   };
   
   // Get sorted records
-  const sortedRecords = useMemo(() => sortRecords(attendanceRecords), [attendanceRecords]);
+  const sortedRecords = useMemo(
+    () => sortRecords(attendanceRecords),
+    [attendanceRecords, sortField, sortDirection]
+  );
+
+  const filteredRecords = useMemo(() => {
+    const normalizedFilter = nameFilter.trim().toLowerCase();
+    return sortedRecords.filter((record) => {
+      if (normalizedFilter && !record.staff_name.toLowerCase().includes(normalizedFilter)) {
+        return false;
+      }
+      if (statusFilter === 'present' && !record.present) return false;
+      if (statusFilter === 'absent' && record.present) return false;
+      if (clockIssueFilter === 'missingClockOut' && !record.has_open_clock) return false;
+      return true;
+    });
+  }, [sortedRecords, nameFilter, statusFilter, clockIssueFilter]);
 
   // Handle overtime hours change
   const handleOvertimeChange = (staffId: number, hours: number) => {
@@ -1589,8 +1612,8 @@ export function DailyAttendanceGrid() {
       </CardHeader>
       <CardContent>
         {/* Action buttons */}
-        <div className="flex justify-between mb-4">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-3 mb-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
             <Button 
               variant="outline" 
               size="sm"
@@ -1638,12 +1661,40 @@ export function DailyAttendanceGrid() {
               )}
             </Button>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              value={nameFilter}
+              onChange={(e) => setNameFilter(e.target.value)}
+              placeholder="Search staff..."
+              className="h-9 w-full min-w-[160px] sm:w-48"
+              aria-label="Filter by staff name"
+            />
+            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as typeof statusFilter)}>
+              <SelectTrigger className="h-9 w-full min-w-[150px] sm:w-40 text-sm">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="present">Clocked in</SelectItem>
+                <SelectItem value="absent">Not clocked in</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={clockIssueFilter} onValueChange={(value) => setClockIssueFilter(value as typeof clockIssueFilter)}>
+              <SelectTrigger className="h-9 w-full min-w-[170px] sm:w-48 text-sm">
+                <SelectValue placeholder="Attention" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All records</SelectItem>
+                <SelectItem value="missingClockOut">Missing clock-out</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
         
         {/* View content based on selected view mode */}
         {viewMode === 'timeline' ? (
           <div className="space-y-4">
-            {sortedRecords.map((record) => {
+            {filteredRecords.map((record) => {
               const staffSegments = timeSegments.filter(seg => seg.staff_id === record.staff_id);
               
               // Using OptimizedAttendanceTimeline with staff-specific queries
@@ -1710,7 +1761,7 @@ export function DailyAttendanceGrid() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortedRecords.map((record) => (
+              {filteredRecords.map((record) => (
                 <TableRow key={record.staff_id}>
                   <TableCell>
                     <Button

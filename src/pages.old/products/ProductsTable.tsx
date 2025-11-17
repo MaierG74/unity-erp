@@ -31,6 +31,7 @@ import {
 import { ProductsRowActions } from './ProductsRowActions';
 import { ProductRow } from './ProductsPage';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 
 interface ProductsTableProps {
   data: ProductRow[];
@@ -59,6 +60,7 @@ export function ProductsTable({
   onSortChange,
   onActionError,
 }: ProductsTableProps) {
+  const router = useRouter();
   const [sorting, setSorting] = useState<SortingState>([
     { id: sortKey, desc: sortDirection === 'desc' },
   ]);
@@ -138,7 +140,16 @@ export function ProductsTable({
             {table.getRowModel().rows.map((row) => (
               <TableRow
                 key={row.id}
-                className="group cursor-default bg-background transition-colors hover:bg-muted/40"
+                role="button"
+                tabIndex={0}
+                onClick={() => router.push(`/products/${row.original.product_id}`)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    router.push(`/products/${row.original.product_id}`);
+                  }
+                }}
+                className="group cursor-pointer bg-background transition-colors hover:bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
               >
                 {row.getVisibleCells().map((cell) => (
                   <TableCell
@@ -274,4 +285,3 @@ function tableColumns({ onActionError }: TableColumnConfig): ColumnDef<ProductRo
     },
   ];
 }
-

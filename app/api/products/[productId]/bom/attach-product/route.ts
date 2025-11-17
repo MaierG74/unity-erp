@@ -9,9 +9,10 @@ function admin() {
 }
 
 // Create an Attach link (phantom, single-level)
-export async function POST(req: NextRequest, { params }: { params: { productId: string } }) {
+export async function POST(req: NextRequest, context: { params: Promise<{ productId: string }> }) {
   try {
-    const parentProductId = Number(params.productId)
+    const { productId } = await context.params
+    const parentProductId = Number(productId)
     if (!Number.isFinite(parentProductId)) {
       return NextResponse.json({ error: 'Invalid productId' }, { status: 400 })
     }
@@ -64,11 +65,12 @@ export async function POST(req: NextRequest, { params }: { params: { productId: 
 }
 
 // Detach link
-export async function DELETE(req: NextRequest, { params }: { params: { productId: string } }) {
+export async function DELETE(req: NextRequest, context: { params: Promise<{ productId: string }> }) {
   try {
     const url = new URL(req.url)
     const subIdParam = url.searchParams.get('sub_product_id')
-    const parentProductId = Number(params.productId)
+    const { productId } = await context.params
+    const parentProductId = Number(productId)
     const subProductId = Number(subIdParam)
     if (!Number.isFinite(parentProductId) || !Number.isFinite(subProductId)) {
       return NextResponse.json({ error: 'Invalid productId or sub_product_id' }, { status: 400 })
@@ -86,4 +88,3 @@ export async function DELETE(req: NextRequest, { params }: { params: { productId
     return NextResponse.json({ error: 'Failed to detach product' }, { status: 500 })
   }
 }
-

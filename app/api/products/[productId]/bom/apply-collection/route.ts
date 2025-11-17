@@ -8,9 +8,10 @@ function admin() {
   )
 }
 
-export async function POST(req: NextRequest, { params }: { params: { productId: string } }) {
+export async function POST(req: NextRequest, context: { params: Promise<{ productId: string }> }) {
   try {
-    const productId = Number(params.productId)
+    const { productId: productIdParam } = await context.params
+    const productId = Number(productIdParam)
     if (!Number.isFinite(productId)) {
       return NextResponse.json({ error: 'Invalid productId' }, { status: 400 })
     }
@@ -61,4 +62,3 @@ export async function POST(req: NextRequest, { params }: { params: { productId: 
     return NextResponse.json({ error: 'Failed to apply collection' }, { status: 500 })
   }
 }
-

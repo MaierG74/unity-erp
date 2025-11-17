@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, use } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import {
@@ -29,11 +29,12 @@ import ProductCosting from '@/components/features/products/product-costing';
 import { ProductOptionsTab } from '@/components/features/products/ProductOptionsTab';
 import { ProductCutlistTab } from '@/components/features/products/ProductCutlistTab';
 import { useToast } from '@/components/ui/use-toast';
+import { ProductTransactionsTab } from '@/components/features/products/ProductTransactionsTab';
 
 interface ProductDetailPageProps {
-  params: {
+  params: Promise<{
     productId: string;
-  };
+  }>;
 }
 
 interface Product {
@@ -123,7 +124,9 @@ async function fetchProduct(productId: number): Promise<Product | null> {
 }
 
 export default function ProductDetailPage({ params }: ProductDetailPageProps) {
-  const productId = parseInt(params.productId, 10);
+  // Unwrap the params Promise (Next.js 16 requirement)
+  const { productId: productIdParam } = use(params);
+  const productId = parseInt(productIdParam, 10);
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('details');
   const { toast } = useToast();
@@ -362,6 +365,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
           <TabsTrigger value="bol">Bill of Labor</TabsTrigger>
           <TabsTrigger value="options">Options</TabsTrigger>
           <TabsTrigger value="costing">Costing</TabsTrigger>
+          <TabsTrigger value="transactions">Transactions</TabsTrigger>
         </TabsList>
         
         <TabsContent value="details" className="space-y-4">
@@ -634,6 +638,18 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
 
         <TabsContent value="costing" className="space-y-4">
           <ProductCosting productId={product.product_id} />
+        </TabsContent>
+
+        <TabsContent value="transactions" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Product Transactions</CardTitle>
+              <CardDescription>Per-product finished-good activity feed.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ProductTransactionsTab productId={product.product_id} />
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>

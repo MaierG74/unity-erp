@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, use } from 'react';
 import { QuotePDFDownload } from '@/components/quotes/QuotePDF';
 import { formatCurrency } from '@/lib/quotes';
 
@@ -41,7 +41,9 @@ interface QuoteAttachment {
   display_order: number;
 }
 
-export default function WorkingQuotePage({ params }: { params: { id: string } }) {
+export default function WorkingQuotePage({ params }: { params: Promise<{ id: string }> }) {
+  // Unwrap the params Promise (Next.js 16 requirement)
+  const { id } = use(params);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [items, setItems] = useState<QuoteItem[]>([]);
   const [attachments, setAttachments] = useState<QuoteAttachment[]>([]);
@@ -59,9 +61,9 @@ export default function WorkingQuotePage({ params }: { params: { id: string } })
   useEffect(() => {
     const fetchQuoteData = async () => {
       try {
-        console.log('Fetching quote via API with ID:', params.id);
+        console.log('Fetching quote via API with ID:', id);
         
-        const response = await fetch(`/api/quotes/${params.id}`);
+        const response = await fetch(`/api/quotes/${id}`);
         
         if (!response.ok) {
           const errorData = await response.json();
@@ -83,7 +85,7 @@ export default function WorkingQuotePage({ params }: { params: { id: string } })
         // Fallback to mock data for demonstration
         console.log('Using fallback mock data');
         const mockQuote: Quote = {
-          id: params.id,
+          id: id,
           quote_number: 'DEMO-001',
           customer_id: '134',
           status: 'draft',
@@ -100,7 +102,7 @@ export default function WorkingQuotePage({ params }: { params: { id: string } })
         const mockItems: QuoteItem[] = [
           {
             id: '1',
-            quote_id: params.id,
+            quote_id: id,
             description: 'Premium Widget - High Quality Component with Advanced Features',
             qty: 2,
             unit_price: 625.00,
@@ -111,7 +113,7 @@ export default function WorkingQuotePage({ params }: { params: { id: string } })
         const mockAttachments: QuoteAttachment[] = [
           {
             id: '1',
-            quote_id: params.id,
+            quote_id: id,
             quote_item_id: '1',
             scope: 'item',
             file_url: '/placeholder-image.jpg',
@@ -132,7 +134,7 @@ export default function WorkingQuotePage({ params }: { params: { id: string } })
     };
 
     fetchQuoteData();
-  }, [params.id]);
+  }, [id]);
 
   if (loading) {
     return (
@@ -140,7 +142,7 @@ export default function WorkingQuotePage({ params }: { params: { id: string } })
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
           <h2 className="text-xl font-semibold text-foreground">Loading Quote...</h2>
-          <p className="text-muted-foreground">Quote ID: {params.id}</p>
+          <p className="text-muted-foreground">Quote ID: {id}</p>
         </div>
       </div>
     );
@@ -151,7 +153,7 @@ export default function WorkingQuotePage({ params }: { params: { id: string } })
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
           <h2 className="text-xl font-semibold text-red-600">Error Loading Quote</h2>
-          <p className="text-muted-foreground">Quote ID: {params.id}</p>
+          <p className="text-muted-foreground">Quote ID: {id}</p>
           {error && <p className="text-red-500 mt-2">Error: {error}</p>}
           <button 
             onClick={() => window.location.href = '/quotes'}

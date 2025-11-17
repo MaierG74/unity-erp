@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-interface RouteParams {
-  params: {
-    productId?: string;
-  };
-}
+type RouteParams = {
+  productId?: string;
+};
 
 function parseProductId(productId?: string): number | null {
   if (!productId) return null;
@@ -22,7 +20,8 @@ function getSupabaseAdmin() {
   return createClient(url, key);
 }
 
-export async function GET(_request: NextRequest, { params }: RouteParams) {
+export async function GET(_request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const params = await context.params;
   const productId = parseProductId(params.productId);
   if (!productId) {
     return NextResponse.json({ error: 'Invalid product id' }, { status: 400 });
@@ -212,7 +211,8 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
   }
 }
 
-export async function POST(request: NextRequest, { params }: RouteParams) {
+export async function POST(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const params = await context.params;
   const productId = parseProductId(params.productId);
   if (!productId) {
     return NextResponse.json({ error: 'Invalid product id' }, { status: 400 });

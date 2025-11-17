@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-interface RouteParams {
-  params: {
-    productId?: string;
-    groupId?: string;
-    valueId?: string;
-  };
-}
+type RouteParams = {
+  productId?: string;
+  groupId?: string;
+  valueId?: string;
+};
 
 function parseId(value?: string): number | null {
   if (!value) return null;
@@ -24,7 +22,8 @@ function getSupabaseAdmin() {
   return createClient(url, key);
 }
 
-export async function PATCH(request: NextRequest, { params }: RouteParams) {
+export async function PATCH(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const params = await context.params;
   const productId = parseId(params.productId);
   const groupId = parseId(params.groupId);
   const valueId = parseId(params.valueId);
@@ -130,7 +129,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   }
 }
 
-export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+export async function DELETE(_request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const params = await context.params;
   const productId = parseId(params.productId);
   const groupId = parseId(params.groupId);
   const valueId = parseId(params.valueId);

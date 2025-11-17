@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { EmailOverrideDialog, EmailRecipientRow, EmailOverride, EmailOption } from './EmailOverrideDialog';
+import { ReceiveItemsModal } from './ReceiveItemsModal';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -121,6 +122,13 @@ interface SupplierOrder {
   receipts?: Receipt[];
   returns?: Return[];
 }
+
+type SupplierOrderWithParent = SupplierOrder & {
+  purchase_order: {
+    purchase_order_id: number;
+    q_number: string | null;
+  };
+};
 
 // Add new interfaces for receipt handling
 interface ReceiptFormData {
@@ -580,6 +588,14 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
   const [emailDialogLoading, setEmailDialogLoading] = useState(false);
   const [emailRows, setEmailRows] = useState<EmailRecipientRow[]>([]);
+  const [receiveModalOpen, setReceiveModalOpen] = useState(false);
+  const [selectedOrderForReceive, setSelectedOrderForReceive] = useState<SupplierOrderWithParent | null>(null);
+  const handleReceiveModalChange = (open: boolean) => {
+    setReceiveModalOpen(open);
+    if (!open) {
+      setSelectedOrderForReceive(null);
+    }
+  };
   const headerRef = useRef<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
     const headerEl = headerRef.current;
@@ -694,6 +710,18 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
       },
     });
   };
+
+  const handleOpenReceiveModal = (order: SupplierOrder) => {
+    if (!purchaseOrder) return;
+    setSelectedOrderForReceive({
+      ...order,
+      purchase_order: {
+        purchase_order_id: purchaseOrder.purchase_order_id,
+        q_number: purchaseOrder.q_number,
+      },
+    });
+    setReceiveModalOpen(true);
+  };
   
   // Approve purchase order mutation
   const approveMutation = useMutation({
@@ -706,28 +734,36 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
       queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] });
       const successes = result?.emailResults?.filter(r => r.success).length ?? 0;
       const failures = result?.emailResults?.filter(r => !r.success).length ?? 0;
-      const baseTitle = 'Purchase Order approved';
       if (failures > 0) {
+        const failedSuppliers = result?.emailResults
+          ?.filter((r) => !r.success && r.supplier)
+          .map((r) => r.supplier)
+          .join(', ');
         toast({
-          title: baseTitle,
-          description: `Emails sent: ${successes}, failed: ${failures}. Check supplier emails or server logs.`,
-          variant: 'destructive',
-          duration: 6000,
+          title: '✅ Purchase Order Approved',
+          description: `⚠️ Emails: ${successes} sent successfully, ${failures} failed (${failedSuppliers}). Please resend or contact suppliers manually.`,
+          variant: 'default',
+          duration: 8000,
         });
       } else if (successes > 0) {
         toast({
-          title: baseTitle,
-          description: `Emails sent to ${successes} supplier${successes === 1 ? '' : 's'}.`,
+          title: '✅ Purchase Order Approved & Emails Sent',
+          description: `Successfully emailed to ${successes} supplier${successes === 1 ? '' : 's'}.`,
+          duration: 5000,
         });
       } else if (result?.emailError) {
         toast({
-          title: baseTitle,
-          description: `Email dispatch error: ${result.emailError}`,
-          variant: 'destructive',
-          duration: 6000,
+          title: '✅ Purchase Order Approved',
+          description: `⚠️ Email error: ${result.emailError}. Please send emails manually using "Send Supplier Emails" button.`,
+          variant: 'default',
+          duration: 8000,
         });
       } else {
-        toast({ title: baseTitle, description: 'Approved without email results.' });
+        toast({
+          title: '✅ Purchase Order Approved',
+          description: 'Order approved. No email status available.',
+          duration: 5000,
+        });
       }
     },
     onError: (error: Error) => {
@@ -887,31 +923,37 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           ?.filter((r) => !r.success && r.supplier)
           .map((r) => r.supplier)
           .join(', ');
-        const failureSuffix = failedSuppliers ? ` (${failedSuppliers})` : '';
+        const failedErrors = results
+          ?.filter((r) => !r.success && r.error)
+          .map((r) => r.error)
+          .join('; ');
         toast({
-          title: 'Supplier emails partially sent',
-          description: `Sent: ${successes}, failed: ${failures}${failureSuffix}.`,
+          title: '⚠️ Emails Partially Sent',
+          description: `Successfully sent: ${successes} | Failed: ${failures} (${failedSuppliers})${failedErrors ? `\nError: ${failedErrors}` : ''}`,
           variant: 'destructive',
-          duration: 6000,
+          duration: 8000,
         });
       } else if (successes > 0) {
         toast({
-          title: 'Supplier emails sent',
-          description: `Sent to ${successes} supplier${successes === 1 ? '' : 's'}.`,
+          title: '✅ Emails Sent Successfully',
+          description: `Purchase order emailed to ${successes} supplier${successes === 1 ? '' : 's'}.`,
+          duration: 5000,
         });
       } else {
         toast({
-          title: 'Supplier emails queued',
-          description: 'Request completed. Check server logs for details.',
+          title: 'ℹ️ No Emails Sent',
+          description: 'Request completed but no emails were dispatched. Check supplier email configuration.',
+          variant: 'destructive',
+          duration: 6000,
         });
       }
     },
     onError: (error: Error) => {
       toast({
-        title: 'Failed to send supplier emails',
-        description: error.message,
+        title: '❌ Failed to Send Emails',
+        description: `Error: ${error.message}`,
         variant: 'destructive',
-        duration: 6000,
+        duration: 8000,
       });
     },
   });
@@ -1211,28 +1253,14 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                         </TableCell>
                         {isApproved && (
                           <TableCell className="text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <input
-                                type="number"
-                                min="0"
-                                max={remainingToReceive}
-                                value={receiptQuantities[order.order_id] || ''}
-                                onChange={(e) => handleReceiptQuantityChange(order.order_id.toString(), e.target.value)}
-                                className="w-20 px-2 py-1 text-right border rounded"
-                                placeholder="0"
-                              />
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  const qty = receiptQuantities[order.order_id] || 0;
-                                  if (qty > 0) receiveOneMutation.mutate({ orderId: order.order_id.toString(), qty });
-                                }}
-                                disabled={receiveOneMutation.isPending || (receiptQuantities[order.order_id] || 0) <= 0}
-                              >
-                                {receiveOneMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Receive'}
-                              </Button>
-                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleOpenReceiveModal(order)}
+                              disabled={remainingToReceive <= 0}
+                            >
+                              Receive
+                            </Button>
                           </TableCell>
                         )}
                         <TableCell className="text-right font-medium">R{lineTotal.toFixed(2)}</TableCell>
@@ -1317,7 +1345,15 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                             <TableCell>#{receipt.receipt_id}</TableCell>
                             <TableCell>{receipt.quantity_received}</TableCell>
                             <TableCell>
-                              {format(new Date(receipt.receipt_date), 'MMM d, yyyy h:mm a')}
+                              {new Date(receipt.receipt_date).toLocaleString('en-ZA', {
+                                timeZone: 'Africa/Johannesburg',
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric',
+                                hour: 'numeric',
+                                minute: '2-digit',
+                                hour12: true
+                              })}
                             </TableCell>
                             <TableCell>#{receipt.transaction_id}</TableCell>
                           </TableRow>
@@ -1534,7 +1570,15 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                             </TableCell>
                             <TableCell>{returnItem.reason}</TableCell>
                             <TableCell>
-                              {format(new Date(returnItem.return_date), 'MMM d, yyyy h:mm a')}
+                              {new Date(returnItem.return_date).toLocaleString('en-ZA', {
+                                timeZone: 'Africa/Johannesburg',
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric',
+                                hour: 'numeric',
+                                minute: '2-digit',
+                                hour12: true
+                              })}
                             </TableCell>
                             <TableCell>#{returnItem.transaction_id}</TableCell>
                           </TableRow>
@@ -1613,6 +1657,22 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           cc={process.env.NEXT_PUBLIC_PO_EMAIL_CC || ''}
           loading={emailDialogLoading || sendEmailMutation.isPending}
           onConfirm={handleSendEmails}
+        />
+      )}
+
+      {selectedOrderForReceive && (
+        <ReceiveItemsModal
+          open={receiveModalOpen}
+          onOpenChange={handleReceiveModalChange}
+          supplierOrder={selectedOrderForReceive}
+          onSuccess={() => {
+            // Invalidate queries to refresh the page data
+            queryClient.invalidateQueries({ queryKey: ['purchaseOrder', id] });
+            toast({
+              title: 'Success',
+              description: 'Receipt recorded successfully',
+            });
+          }}
         />
       )}
     </div>

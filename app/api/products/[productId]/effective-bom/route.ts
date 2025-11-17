@@ -118,9 +118,10 @@ export async function resolveEffectiveBom(
 }
 
 // Returns an effective BOM: explicit rows + attached sub-product rows (scaled). Single-level, phantom.
-export async function GET(req: NextRequest, { params }: { params: { productId: string } }) {
+export async function GET(req: NextRequest, context: { params: Promise<{ productId: string }> }) {
   try {
-    const productId = Number(params.productId)
+    const { productId: productIdParam } = await context.params
+    const productId = Number(productIdParam)
     if (!Number.isFinite(productId)) {
       return NextResponse.json({ error: 'Invalid productId' }, { status: 400 })
     }

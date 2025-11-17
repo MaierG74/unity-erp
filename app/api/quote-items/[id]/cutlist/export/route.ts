@@ -37,7 +37,8 @@ const payloadSchema = z.object({
 type LineInput = z.infer<typeof lineSchema>;
 type LineRefs = z.infer<typeof refsSchema>;
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const params = await context.params;
   const parsedParams = paramSchema.safeParse(params);
   if (!parsedParams.success) {
     return NextResponse.json(

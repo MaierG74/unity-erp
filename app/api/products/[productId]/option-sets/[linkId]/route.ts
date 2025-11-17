@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-interface RouteParams {
-  params: {
-    productId?: string;
-    linkId?: string;
-  };
-}
+type RouteParams = {
+  productId?: string;
+  linkId?: string;
+};
 
 function parseId(value?: string): number | null {
   if (!value) return null;
@@ -23,19 +21,22 @@ function getSupabaseAdmin() {
   return createClient(url, key);
 }
 
-async function ensureLinkBelongsToProduct(client: ReturnType<typeof createClient>, productId: number, linkId: number) {
+async function ensureLinkBelongsToProduct(client: any, productId: number, linkId: number) {
   const { data, error } = await client
     .from('product_option_set_links')
     .select('product_id')
     .eq('link_id', linkId)
     .single();
 
-  if (error || !data || Number(data.product_id) !== productId) {
+  const record = data as any;
+
+  if (error || !record || Number(record.product_id) !== productId) {
     throw new Error('Not found');
   }
 }
 
-export async function PATCH(request: NextRequest, { params }: RouteParams) {
+export async function PATCH(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const params = await context.params;
   const productId = parseId(params.productId);
   const linkId = parseId(params.linkId);
   if (!productId || !linkId) {
@@ -86,7 +87,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   }
 }
 
-export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+export async function DELETE(_request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const params = await context.params;
   const productId = parseId(params.productId);
   const linkId = parseId(params.linkId);
   if (!productId || !linkId) {

@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-interface RouteParams {
-  params: {
-    productId?: string;
-    linkId?: string;
-    groupId?: string;
-  };
-}
+type RouteParams = {
+  productId?: string;
+  linkId?: string;
+  groupId?: string;
+};
 
 function parseId(value?: string): number | null {
   if (!value) return null;
@@ -39,19 +37,22 @@ async function resolveLink(context: { productId: number; linkId: number }) {
   return { client, optionSetId: Number(data.option_set_id) };
 }
 
-async function ensureGroupBelongs(client: ReturnType<typeof createClient>, optionSetId: number, groupId: number) {
+async function ensureGroupBelongs(client: any, optionSetId: number, groupId: number) {
   const { data, error } = await client
     .from('option_set_groups')
     .select('option_set_id')
     .eq('option_set_group_id', groupId)
     .single();
 
-  if (error || !data || Number(data.option_set_id) !== optionSetId) {
+  const record = data as any;
+
+  if (error || !record || Number(record.option_set_id) !== optionSetId) {
     throw new Error('group_not_found');
   }
 }
 
-export async function PATCH(request: NextRequest, { params }: RouteParams) {
+export async function PATCH(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const params = await context.params;
   const productId = parseId(params.productId);
   const linkId = parseId(params.linkId);
   const groupId = parseId(params.groupId);
@@ -138,7 +139,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   }
 }
 
-export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+export async function DELETE(_request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const params = await context.params;
   const productId = parseId(params.productId);
   const linkId = parseId(params.linkId);
   const groupId = parseId(params.groupId);

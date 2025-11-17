@@ -30,6 +30,19 @@ type Component = {
   }> | null;
 };
 
+type CriticalComponent = {
+  component_id: number;
+  internal_code: string;
+  description: string | null;
+  currentStock: number;
+  onOrder: number;
+  required: number;
+  immediateShortage: number;
+  projectedShortage: number;
+  severity: 'critical' | 'immediate';
+  affectedOrders: string[]; // order numbers
+};
+
 export function ReportsTab() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -87,22 +100,68 @@ export function ReportsTab() {
     return { outOfStock, lowStock, inStock };
   }, [components]);
 
-  // Calculate category distribution
-  const categoryDistribution = useMemo(() => {
-    const distribution = new Map<string, number>();
+  // Fetch critical components data using RPC that accounts for FG coverage
+  const { data: criticalComponents = [], isLoading: isLoadingCritical } = useQuery({
+    queryKey: ['inventory', 'critical-components'],
+    queryFn: async () => {
+      try {
+        // Use the RPC function that properly accounts for FG reservations and calculates global shortfalls
+        const { data, error } = await supabase.rpc('get_global_component_requirements');
+        
+        if (error) {
+          console.error('Error fetching critical components:', error);
+          throw error;
+        }
+        
+        if (!data || data.length === 0) return [];
 
-    components.forEach((component) => {
-      const categoryName = component.category?.categoryname || 'Uncategorized';
-      distribution.set(categoryName, (distribution.get(categoryName) || 0) + 1);
-    });
+        // Filter to only components with actual shortfalls (global or per-order)
+        const critical: CriticalComponent[] = (data || [])
+          .filter((item: any) => {
+            const globalShortfall = Number(item.global_real_shortfall || 0);
+            const apparentShortfall = Number(item.global_apparent_shortfall || 0);
+            // Include if there's any shortfall (apparent or real)
+            return apparentShortfall > 0 || globalShortfall > 0;
+          })
+          .map((item: any) => {
+            const globalShortfall = Number(item.global_real_shortfall || 0);
+            const apparentShortfall = Number(item.global_apparent_shortfall || 0);
+            
+            return {
+              component_id: item.component_id,
+              internal_code: item.internal_code,
+              description: item.description,
+              currentStock: Number(item.in_stock || 0),
+              onOrder: Number(item.on_order || 0),
+              required: Number(item.total_required || 0),
+              immediateShortage: apparentShortfall,
+              projectedShortage: globalShortfall,
+              severity: (globalShortfall > 0 ? 'critical' : 'immediate') as 'critical' | 'immediate',
+              affectedOrders: [] // RPC doesn't provide order list, but we can enhance if needed
+            };
+          });
 
-    return Array.from(distribution.entries())
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count);
-  }, [components]);
+        // Sort: critical first, then by shortage amount
+        critical.sort((a, b) => {
+          if (a.severity !== b.severity) {
+            return a.severity === 'critical' ? -1 : 1;
+          }
+          return b.projectedShortage - a.projectedShortage || b.immediateShortage - a.immediateShortage;
+        });
+
+        return critical;
+      } catch (error) {
+        console.error('Error fetching critical components:', error);
+        throw error;
+      }
+    },
+    staleTime: 30 * 1000,
+    refetchOnWindowFocus: true,
+  });
 
   const refreshData = () => {
     queryClient.invalidateQueries({ queryKey: ['inventory', 'components', 'reports'] });
+    queryClient.invalidateQueries({ queryKey: ['inventory', 'critical-components'] });
     toast({
       title: 'Data refreshed',
       description: 'Reports have been refreshed.',
@@ -294,44 +353,105 @@ export function ReportsTab() {
         </Card>
       </div>
 
-      {/* Category Distribution */}
+      {/* Critical Components to Order */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <BarChart3 className="h-5 w-5" />
-            Category Distribution
+            <AlertTriangle className="h-5 w-5 text-red-600" />
+            Critical Components to Order
           </CardTitle>
           <CardDescription>
-            Number of components by category
+            Components needed for active orders with insufficient stock
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-3">
-            {categoryDistribution.map((item) => {
-              const percentage = totalComponents > 0
-                ? ((item.count / totalComponents) * 100).toFixed(1)
-                : '0';
-
-              return (
-                <div key={item.name} className="flex items-center gap-4">
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-medium">{item.name}</span>
-                      <span className="text-sm text-muted-foreground">
-                        {item.count} ({percentage}%)
-                      </span>
-                    </div>
-                    <div className="h-2 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-primary rounded-full"
-                        style={{ width: `${percentage}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          {isLoadingCritical ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="text-sm text-muted-foreground">Loading critical components...</div>
+            </div>
+          ) : criticalComponents.length === 0 ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="text-center">
+                <Package className="h-12 w-12 text-green-600 mx-auto mb-2" />
+                <p className="text-sm font-medium text-green-600">All Good!</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  All components needed for active orders are sufficiently stocked
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="max-h-[500px] overflow-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Code</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead className="text-right">Current</TableHead>
+                    <TableHead className="text-right">On Order</TableHead>
+                    <TableHead className="text-right">Required</TableHead>
+                    <TableHead className="text-right">Shortage</TableHead>
+                    <TableHead>Affected Orders</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {criticalComponents.map((component) => {
+                    const shortage = component.severity === 'critical' 
+                      ? component.projectedShortage 
+                      : component.immediateShortage;
+                    
+                    return (
+                      <TableRow
+                        key={component.component_id}
+                        className={
+                          component.severity === 'critical'
+                            ? 'bg-red-50 hover:bg-red-100'
+                            : 'bg-amber-50 hover:bg-amber-100'
+                        }
+                      >
+                        <TableCell className="font-medium">
+                          <a
+                            href={`/inventory/components/${component.component_id}`}
+                            className="text-blue-600 hover:underline"
+                          >
+                            {component.internal_code}
+                          </a>
+                        </TableCell>
+                        <TableCell className="text-sm max-w-[200px] truncate">
+                          {component.description || '-'}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold">
+                          {component.currentStock}
+                        </TableCell>
+                        <TableCell className="text-right text-blue-600">
+                          {component.onOrder}
+                        </TableCell>
+                        <TableCell className="text-right text-purple-600 font-semibold">
+                          {component.required}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Badge
+                            variant={component.severity === 'critical' ? 'destructive' : 'default'}
+                            className={
+                              component.severity === 'critical'
+                                ? ''
+                                : 'bg-amber-600 hover:bg-amber-700'
+                            }
+                          >
+                            -{shortage}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs max-w-[200px]">
+                          <div className="truncate" title={component.affectedOrders.join(', ')}>
+                            {component.affectedOrders.join(', ')}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

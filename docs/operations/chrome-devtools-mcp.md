@@ -11,11 +11,12 @@ server for Unity ERP agents.
 
 ## Configuration files
 
-We keep two MCP configuration files in sync so that both repo-scoped and
-workspace-wide tooling can launch the server:
+We keep three configuration surfaces in sync so that repo-local tooling,
+Claude, and Codex CLI share the same server definition:
 
 - Project scope: `.mcp.json`
 - Global Claude scope: `~/Library/Application Support/Claude/mcp.json`
+- Codex CLI: `~/.codex/config.toml`
 
 Ensure both files contain the following server entry:
 
@@ -29,6 +30,21 @@ Ensure both files contain the following server entry:
     "--isolated=true"
   ]
 }
+```
+
+When working inside Codex, add the same `chrome-devtools` block to your
+`~/.codex/config.toml` under `[mcp_servers.chrome-devtools]` so the CLI can
+launch the MCP server directly.
+
+```toml
+[mcp_servers.chrome-devtools]
+command = "npx"
+args = [
+  "-y",
+  "chrome-devtools-mcp@latest",
+  "--headless=true",
+  "--isolated=true"
+]
 ```
 
 `config.toml` mirrors these settings for Codex CLI usage. Update all three

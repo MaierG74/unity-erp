@@ -36,6 +36,7 @@ interface SupplierOrder {
 interface PurchaseOrder {
   purchase_order_id: number;
   q_number?: string;
+  order_date?: string;
   created_at: string;
   status: {
     status_id: number;
@@ -54,6 +55,7 @@ async function fetchPurchaseOrders() {
     .select(`
       purchase_order_id,
       q_number,
+      order_date,
       created_at,
       status_id,
       supplier_order_statuses!purchase_orders_status_id_fkey(
@@ -263,9 +265,9 @@ export default function PurchaseOrdersPage() {
       }
     }
     
-    // Filter by date range
+    // Filter by date range (using order_date instead of created_at)
     if (startDate && isValid(startDate)) {
-      const orderDate = parseISO(order.created_at);
+      const orderDate = parseISO(order.order_date || order.created_at);
       // Set time to beginning of day for comparison
       const startDateWithoutTime = new Date(startDate);
       startDateWithoutTime.setHours(0, 0, 0, 0);
@@ -276,7 +278,7 @@ export default function PurchaseOrdersPage() {
     }
     
     if (endDate && isValid(endDate)) {
-      const orderDate = parseISO(order.created_at);
+      const orderDate = parseISO(order.order_date || order.created_at);
       // Set time to end of day for comparison
       const endDateWithoutTime = new Date(endDate);
       endDateWithoutTime.setHours(23, 59, 59, 999);

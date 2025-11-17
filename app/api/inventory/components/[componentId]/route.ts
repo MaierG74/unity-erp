@@ -3,9 +3,10 @@ import { supabaseAdmin } from '@/lib/supabase-admin'
 
 export async function DELETE(
   _req: Request,
-  { params }: { params: { componentId: string } }
+  context: { params: Promise<{ componentId: string }> }
 ) {
-  const idNum = Number(params.componentId)
+  const { componentId } = await context.params
+  const idNum = Number(componentId)
   if (!idNum || Number.isNaN(idNum)) {
     return new NextResponse('Invalid component id', { status: 400 })
   }
@@ -54,4 +55,3 @@ export async function DELETE(
     return new NextResponse(message, { status: 500 })
   }
 }
-

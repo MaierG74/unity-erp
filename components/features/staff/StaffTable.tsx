@@ -42,15 +42,18 @@ export function StaffTable() {
   queryFn: async () => {
     let builder = supabase.from('staff').select('*');
     if (search) {
-      const q = `%${search}%`;
-      builder = builder.or(`first_name.ilike.${q},last_name.ilike.${q},phone.ilike.${q},job_description.ilike.${q}`);
+      const searchPattern = `%${search}%`;
+      builder = builder.or(`first_name.ilike.${searchPattern},last_name.ilike.${searchPattern},phone.ilike.${searchPattern},job_description.ilike.${searchPattern}`);
     }
     if (statusFilter === 'current') builder = builder.eq('current_staff', true);
     if (activeFilter === 'active') builder = builder.eq('is_active', true);
     if (activeFilter === 'inactive') builder = builder.eq('is_active', false);
     builder = builder.order(sortField, { ascending: sortDir === 'asc' });
     const { data, error } = await builder;
-    if (error) throw error;
+    if (error) {
+      console.error('Staff query error:', error);
+      throw error;
+    }
     return data || [];
   },
 });
@@ -59,10 +62,20 @@ export function StaffTable() {
   const { data: registeredStaffIds = [] } = useQuery({
   queryKey: ['facialProfiles'],
   queryFn: async () => {
-    const { data, error } = await supabase.rpc('get_facial_profiles_for_active_staff');
-    if (error) throw error;
-    return (data as any[]).map((p) => p.staff_id);
+    try {
+      const { data, error } = await supabase.rpc('get_facial_profiles_for_active_staff');
+      if (error) {
+        console.error('RPC error:', error);
+        // Return empty array if RPC fails (function might not exist)
+        return [];
+      }
+      return (data as any[]).map((p) => p.staff_id);
+    } catch (err) {
+      console.error('Facial profiles fetch error:', err);
+      return [];
+    }
   },
+  retry: false,
 });
 
   // Mutation for updates
