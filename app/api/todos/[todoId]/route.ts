@@ -23,8 +23,9 @@ const updateSchema = z.object({
   watchers: z.array(z.string().uuid()).optional(),
 });
 
-export async function GET(_req: NextRequest, context: { params: { todoId: string } }) {
-  const parsedParams = paramsSchema.safeParse(context.params);
+export async function GET(_req: NextRequest, context: { params: Promise<{ todoId: string }> }) {
+  const params = await context.params;
+  const parsedParams = paramsSchema.safeParse(params);
   if (!parsedParams.success) {
     return NextResponse.json({ error: 'Invalid todo id' }, { status: 400 });
   }
@@ -57,8 +58,9 @@ function watchedIds(todo: TodoItem): Set<string> {
   return new Set(todo.watchers.map(w => w.userId));
 }
 
-export async function PATCH(req: NextRequest, context: { params: { todoId: string } }) {
-  const parsedParams = paramsSchema.safeParse(context.params);
+export async function PATCH(req: NextRequest, context: { params: Promise<{ todoId: string }> }) {
+  const params = await context.params;
+  const parsedParams = paramsSchema.safeParse(params);
   if (!parsedParams.success) {
     return NextResponse.json({ error: 'Invalid todo id' }, { status: 400 });
   }

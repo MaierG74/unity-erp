@@ -984,13 +984,23 @@ export default function OrdersPage() {
                 setIsDeleting(true);
                 try {
                   const res = await fetch(`/api/orders/${deleteTargetId}`, { method: 'DELETE' });
-                  if (!res.ok) throw new Error(await res.text());
+                  const responseText = await res.text();
+                  if (!res.ok) {
+                    let errorMessage = 'Failed to delete order';
+                    try {
+                      const errorData = JSON.parse(responseText);
+                      errorMessage = errorData.error || errorMessage;
+                    } catch {
+                      errorMessage = responseText || errorMessage;
+                    }
+                    throw new Error(errorMessage);
+                  }
                   setDeleteTargetId(null);
                   // Refresh any orders query regardless of filters
                   queryClient.invalidateQueries({ queryKey: ['orders'] });
-                } catch (e) {
+                } catch (e: any) {
                   console.error('Delete failed', e);
-                  alert('Failed to delete order. Check console for details.');
+                  alert(`Failed to delete order: ${e.message || 'Unknown error'}. Check console for details.`);
                 } finally {
                   setIsDeleting(false);
                 }

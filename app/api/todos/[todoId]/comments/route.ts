@@ -12,8 +12,9 @@ const commentSchema = z.object({
   body: z.string().min(1).max(4000),
 });
 
-export async function GET(req: NextRequest, context: { params: { todoId: string } }) {
-  const parsedParams = paramsSchema.safeParse(context.params);
+export async function GET(req: NextRequest, context: { params: Promise<{ todoId: string }> }) {
+  const params = await context.params;
+  const parsedParams = paramsSchema.safeParse(params);
   if (!parsedParams.success) {
     return NextResponse.json({ error: 'Invalid todo id' }, { status: 400 });
   }
@@ -32,8 +33,9 @@ export async function GET(req: NextRequest, context: { params: { todoId: string 
   }
 }
 
-export async function POST(req: NextRequest, context: { params: { todoId: string } }) {
-  const parsedParams = paramsSchema.safeParse(context.params);
+export async function POST(req: NextRequest, context: { params: Promise<{ todoId: string }> }) {
+  const params = await context.params;
+  const parsedParams = paramsSchema.safeParse(params);
   if (!parsedParams.success) {
     return NextResponse.json({ error: 'Invalid todo id' }, { status: 400 });
   }

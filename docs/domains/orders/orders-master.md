@@ -82,7 +82,13 @@
 - Suppliers & PO creation:
   - Suppliers fetched from `suppliercomponents` (with supplier emails joined from `supplier_emails`).
   - Components grouped by supplier; user selects components and quantities, and can allocate between "For this order" vs "For stock".
+  - **Global Shortfall Ordering**: Component ordering is available when either per-order OR global shortfalls exist. When a component has only a global shortfall (no per-order shortfall due to FG coverage), the "Order Components" dialog displays it with a "For Stock" badge and defaults allocation to stock rather than the current order.
+  - **Smart Allocation Defaults**:
+    - Components with per-order shortfall: Default allocation to "For this order" (quantity_for_order)
+    - Components with only global shortfall: Default allocation to "For stock" (quantity_for_stock)
+    - All allocations are user-adjustable before creating the purchase order
   - PO creation looks up `Draft` in `supplier_order_statuses`, inserts into `purchase_orders` and `supplier_orders`, then links each supplier order line to the sales order via `supplier_order_customer_orders` with `quantity_for_order` and `quantity_for_stock`.
+  - **Future Enhancement**: Track allocation/earmarking of ordered stock to specific orders for better visibility into what stock is intended for which orders.
 
 **API Routes**
 

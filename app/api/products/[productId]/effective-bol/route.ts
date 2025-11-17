@@ -21,9 +21,10 @@ type DirectBolRow = {
 }
 
 // Returns Effective BOL: explicit rows for the product + attached sub-products' BOL scaled
-export async function GET(req: NextRequest, { params }: { params: { productId: string } }) {
+export async function GET(req: NextRequest, context: { params: Promise<{ productId: string }> }) {
   try {
-    const productId = Number(params.productId)
+    const { productId: productIdParam } = await context.params
+    const productId = Number(productIdParam)
     if (!Number.isFinite(productId)) {
       return NextResponse.json({ error: 'Invalid productId' }, { status: 400 })
     }
@@ -151,4 +152,3 @@ export async function GET(req: NextRequest, { params }: { params: { productId: s
     return NextResponse.json({ error: 'Failed to compute effective BOL' }, { status: 500 })
   }
 }
-

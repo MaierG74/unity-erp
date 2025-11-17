@@ -9,10 +9,11 @@ import { QuoteEmailProps } from '@/emails/quote-email';
  */
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await context.params;
+  const quoteId = id;
   try {
-    const quoteId = params.id;
     const body = await req.json();
     const {
       recipientEmail,
@@ -188,7 +189,7 @@ export async function POST(
     // Log failed email attempt
     try {
       await supabaseAdmin.from('quote_email_log').insert({
-        quote_id: params.id,
+        quote_id: quoteId,
         recipient_email: 'unknown',
         status: 'failed',
         error_message: error.message,

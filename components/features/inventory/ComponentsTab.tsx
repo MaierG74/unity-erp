@@ -1,27 +1,17 @@
 'use client';
 
 import { useState, useMemo, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { ComponentDialog } from '@/components/features/inventory/ComponentDialog';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { DataTable } from '@/components/ui/data-table';
-import { InventoryDetails } from "@/components/features/inventory/Details"
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useToast } from "@/components/ui/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useDebounce } from '@/hooks/use-debounce';
 import { cn } from "@/lib/utils";
-import { Plus, RefreshCw, Check, Search, X, Pencil, Trash2 } from 'lucide-react';
+import { Plus, RefreshCw, Search, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 
 type Component = {
@@ -118,9 +108,8 @@ const columns = [
 ]
 
 export function ComponentsTab() {
-  const [selectedComponent, setSelectedComponent] = useState<Component | null>(null);
+  const router = useRouter();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [filterText, setFilterText] = useState('');
   const debouncedFilterText = useDebounce(filterText, 300);
   const [selectedCategory, setSelectedCategory] = useState<string>('_all');
@@ -183,6 +172,9 @@ export function ComponentsTab() {
             supplier_component_id,
             order_quantity,
             total_received,
+            purchase_order:purchase_orders!inner (
+              purchase_order_id
+            ),
             suppliercomponents!inner (
               component_id
             ),
@@ -378,117 +370,6 @@ export function ComponentsTab() {
     });
   }, [queryClient, toast]);
 
-  const handleDelete = useCallback(async () => {
-    if (!selectedComponent) return;
-
-    try {
-      const { error: transactionsError } = await supabase
-        .from('inventory_transactions')
-        .delete()
-        .eq('component_id', selectedComponent.component_id);
-
-      if (transactionsError) throw transactionsError;
-
-      const { error: inventoryError } = await supabase
-        .from('inventory')
-        .delete()
-        .eq('component_id', selectedComponent.component_id);
-
-      if (inventoryError) throw inventoryError;
-
-      const { error: supplierComponentsError } = await supabase
-        .from('suppliercomponents')
-        .delete()
-        .eq('component_id', selectedComponent.component_id);
-
-      if (supplierComponentsError) throw supplierComponentsError;
-
-      const { error: componentError } = await supabase
-        .from('components')
-        .delete()
-        .eq('component_id', selectedComponent.component_id);
-
-      if (componentError) throw componentError;
-
-      refreshData();
-      setSelectedComponent(null);
-      setDeleteDialogOpen(false);
-      
-      toast({
-        title: "Component deleted",
-        description: "The component has been successfully deleted."
-      });
-    } catch (e) {
-      console.error('Error deleting component:', e);
-      toast({
-        title: "Delete failed",
-        description: "Error deleting component. Please try again.",
-        variant: "destructive"
-      });
-    }
-  }, [selectedComponent, refreshData, toast]);
-
-  const refreshSelectedComponent = useCallback(async () => {
-    if (!selectedComponent) return;
-    
-    try {
-      const { data, error } = await supabase
-        .from('components')
-        .select(`
-          *,
-          category:component_categories (
-            cat_id,
-            categoryname
-          ),
-          unit:unitsofmeasure (
-            unit_id,
-            unit_code,
-            unit_name
-          ),
-          inventory:inventory (
-            inventory_id,
-            quantity_on_hand,
-            location,
-            reorder_level
-          ),
-          transactions:inventory_transactions (
-            transaction_id,
-            quantity,
-            transaction_type,
-            transaction_date
-          ),
-          supplierComponents:suppliercomponents (
-            supplier_component_id,
-            supplier_id,
-            supplier_code,
-            price,
-            supplier:suppliers (
-              name
-            )
-          )
-        `)
-        .eq('component_id', selectedComponent.component_id)
-        .single();
-      
-      if (error) throw error;
-      
-      if (data) {
-        setSelectedComponent(data);
-        toast({
-          title: "Component refreshed",
-          description: `${data.internal_code} data has been refreshed.`
-        });
-      }
-    } catch (error) {
-      console.error('Error refreshing component:', error);
-      toast({
-        title: "Refresh failed",
-        description: "Could not refresh component data. Please try again.",
-        variant: "destructive"
-      });
-    }
-  }, [selectedComponent, toast]);
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -513,16 +394,13 @@ export function ComponentsTab() {
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
         </Button>
-        <Button
-          className="h-9"
-          onClick={() => {
-            setSelectedComponent(null)
-            setDialogOpen(true)
-          }}
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Add Component
-        </Button>
+          <Button
+            className="h-9"
+            onClick={() => setDialogOpen(true)}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Add Component
+          </Button>
       </div>
 
       {/* Filter row */}
@@ -628,153 +506,22 @@ export function ComponentsTab() {
         </div>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-4">
-        {/* Left side - Component list */}
-        <div className="flex-1 overflow-auto">
-          <div className="rounded-xl border bg-card shadow-sm overflow-auto">
-            <DataTable
-              columns={columns}
-              data={filteredComponents}
-              onRowClick={(component: Component) => {
-                setSelectedComponent(component);
-              }}
-              selectedId={selectedComponent?.component_id}
-              hideFilters={true}
-            />
-          </div>
-        </div>
-
-        {/* Right side - Component details */}
-        <div className="w-full lg:w-[400px] lg:shrink-0">
-          <div className="sticky top-4">
-            <div className="rounded-xl border bg-card shadow-sm p-3">
-              <InventoryDetails 
-                selectedItem={selectedComponent ? {
-                  inventory_id: selectedComponent.inventory && selectedComponent.inventory.length > 0 
-                    ? selectedComponent.inventory[0]?.inventory_id || null 
-                    : null,
-                  quantity_on_hand: selectedComponent.inventory && selectedComponent.inventory.length > 0 && 
-                    selectedComponent.inventory[0]?.quantity_on_hand !== null && 
-                    selectedComponent.inventory[0]?.quantity_on_hand !== undefined 
-                    ? Number(selectedComponent.inventory[0]?.quantity_on_hand) 
-                    : 0,
-                  location: selectedComponent.inventory && selectedComponent.inventory.length > 0 
-                    ? selectedComponent.inventory[0]?.location || "" 
-                    : "",
-                  reorder_level: selectedComponent.inventory && selectedComponent.inventory.length > 0 && 
-                    selectedComponent.inventory[0]?.reorder_level !== null && 
-                    selectedComponent.inventory[0]?.reorder_level !== undefined 
-                    ? Number(selectedComponent.inventory[0]?.reorder_level) 
-                    : 0,
-                  on_order_quantity: (selectedComponent as any).on_order_quantity || 0,
-                  required_for_orders: (selectedComponent as any).required_for_orders ?? null,
-                  component: {
-                    component_id: selectedComponent.component_id || 0,
-                    internal_code: selectedComponent.internal_code || "",
-                    description: selectedComponent.description || "",
-                    image_url: selectedComponent.image_url,
-                    category: selectedComponent.category || { cat_id: 0, categoryname: "Uncategorized" },
-                    unit: selectedComponent.unit || { unit_id: 0, unit_name: "N/A" }
-                  },
-                  supplierComponents: Array.isArray(selectedComponent.supplierComponents) 
-                    ? selectedComponent.supplierComponents.map(sc => ({
-                        supplier_id: sc?.supplier_id || 0,
-                        supplier_code: sc?.supplier_code || "",
-                        price: sc?.price || 0,
-                        supplier: {
-                          name: sc?.supplier?.name || "Unknown Supplier"
-                        }
-                      }))
-                    : []
-                } : undefined}
-              />
-            </div>
-            
-            {selectedComponent && (
-              <div className="flex gap-2 mt-4 justify-end flex-wrap">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={refreshSelectedComponent}
-                  title="Refresh"
-                  className="min-w-[44px] min-h-[44px]"
-                >
-                  <RefreshCw className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setDialogOpen(true)}
-                  title="Edit"
-                  className="min-w-[44px] min-h-[44px]"
-                >
-                  <Pencil className="h-4 w-4" />
-                </Button>
-                <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-                  <Button 
-                    variant="outline" 
-                    size="icon" 
-                    className="min-w-[44px] min-h-[44px]"
-                    onClick={() => setDeleteDialogOpen(true)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Delete Component</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        Are you sure you want to delete this component? This action cannot be undone.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </div>
-            )}
-          </div>
-        </div>
+      {/* Component list - full width */}
+      <div className="rounded-xl border bg-card shadow-sm overflow-auto">
+        <DataTable
+          columns={columns}
+          data={filteredComponents}
+          onRowClick={(component: Component) => {
+            router.push(`/inventory/components/${component.component_id}`);
+          }}
+          hideFilters={true}
+        />
       </div>
 
       <ComponentDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        selectedItem={selectedComponent ? {
-          inventory_id: selectedComponent.inventory && selectedComponent.inventory.length > 0 
-            ? selectedComponent.inventory[0]?.inventory_id || null 
-            : null,
-          quantity_on_hand: selectedComponent.inventory && selectedComponent.inventory.length > 0 && 
-            selectedComponent.inventory[0]?.quantity_on_hand !== null && 
-            selectedComponent.inventory[0]?.quantity_on_hand !== undefined 
-            ? Number(selectedComponent.inventory[0]?.quantity_on_hand) 
-            : 0,
-          location: selectedComponent.inventory && selectedComponent.inventory.length > 0 
-            ? selectedComponent.inventory[0]?.location || "" 
-            : "",
-          reorder_level: selectedComponent.inventory && selectedComponent.inventory.length > 0 && 
-            selectedComponent.inventory[0]?.reorder_level !== null && 
-            selectedComponent.inventory[0]?.reorder_level !== undefined
-            ? Number(selectedComponent.inventory[0]?.reorder_level)
-            : 0,
-          component: {
-            component_id: selectedComponent.component_id,
-            internal_code: selectedComponent.internal_code,
-            description: selectedComponent.description || "",
-            image_url: selectedComponent.image_url,
-            category: selectedComponent.category || { cat_id: 0, categoryname: "Uncategorized" },
-            unit: selectedComponent.unit || { unit_id: 0, unit_name: "N/A" }
-          },
-          supplierComponents: selectedComponent.supplierComponents?.map(sc => ({
-            supplier_id: sc.supplier_id,
-            supplier_code: sc.supplier_code,
-            price: sc.price,
-            supplier: {
-              name: sc.supplier?.name || "Unknown Supplier"
-            }
-          })) || []
-        } : undefined}
+        selectedItem={undefined}
       />
     </div>
   );

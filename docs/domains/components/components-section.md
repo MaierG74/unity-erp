@@ -6,7 +6,8 @@ This is a living document describing the current implementation of the Component
 Manage components, stock levels, locations, supplier links, and images. Provide search, filtering, inline editing, and details with recent transactions.
 
 ### Primary UI Entrypoints
-- `app/inventory/page.tsx` — current inventory page using a custom `DataTable` and `InventoryDetails`.
+- `app/inventory/page.tsx` — main inventory page with tabbed interface (Components, Categories, On Order, Transactions, Reports) using `DataTable`.
+- `app/inventory/components/[id]/page.tsx` — dedicated component detail page with tabbed layout (Overview, Edit, Inventory, Suppliers, Transactions, Orders, Analytics).
 - `app/inventory/inventory-client.tsx` — alternative client layout that composes `InventoryFilters`, `DataGrid`, `InventoryDetails`, and `TransactionHistory`.
 
 ### Key Feature Components
@@ -33,6 +34,19 @@ Manage components, stock levels, locations, supplier links, and images. Provide 
 
 - `components/ui/data-table.tsx`
   - Generic table with inline editing support, column filters, sorting, pagination. Used by `app/inventory/page.tsx`.
+
+- `components/features/inventory/component-detail/AddSupplierDialog.tsx` (2025-01-15)
+  - Dialog for linking supplier components to a component.
+  - Shows searchable table of available unlinked supplier components.
+  - Visual row selection with checkmark indicator.
+  - Optional price override when linking.
+  - Filters out already-linked components automatically.
+
+- `components/features/inventory/component-detail/EditSupplierDialog.tsx`
+  - Edit existing supplier component links (price, supplier code, etc.).
+
+- `components/features/inventory/component-detail/DeleteSupplierDialog.tsx`
+  - Remove supplier component links with confirmation.
 
 ### Hooks (Mutations)
 - `hooks/use-update-component.ts` — Update `components` table fields; invalidates `['inventory','components']` query and toasts.
@@ -186,33 +200,29 @@ Types referenced:
 - Image management: background uploads, progress, thumbnail generation.
 - Role-based capabilities (view-only vs edit).
 
-### Component Detail View (Planning — 2025-09-26)
-- **Goal**: move beyond the narrow side panel and provide a dedicated component detail surface that mirrors the richer tabbed layout used on product detail pages.
-- **Entry**: add a `View` button on each DataTable row (or double-click) that routes to `app/inventory/components/[componentId]/page.tsx`. Keep the existing side panel for quick context so list navigation remains fast.
-- **Page Shell**: reuse the `Tabs` pattern from product detail. Top header shows code, description, status pill (based on stock state), and quick actions (`Edit`, `Adjust Stock`, `Delete`). A secondary toolbar offers `Refresh` and deep links to purchase orders / work orders.
+### Component Detail View (Implemented — 2025-01-15)
+- **Status**: ✅ Implemented
+- **Entry**: Clicking a component row in the inventory list navigates to `app/inventory/components/[componentId]/page.tsx`.
+- **Page Structure**: Tabbed layout with Overview, Edit, Inventory, Suppliers, Transactions, Orders, and Analytics tabs.
 
-#### Proposed Tabs
-- `Overview`
-  - Hero block with primary image (fallback icon), core metadata (code, description, unit, category, default location).
-  - Stock summary cards: On-hand, Reserved, Available, Reorder level (per location if tracking multiples). Pull from `inventory`, `inventory_reservations` (if/when introduced), and open MO/WO allocations.
-  - Supplier panel with preferred supplier, last PO price, lead time (join `suppliercomponents`, `purchase_order_lines`).
-  - Quick links to edit metadata and manage suppliers (reuse `ComponentDialog` sections inline).
-- `Inventory Activity`
-  - Timeline/table showing `inventory_transactions` with quantity, type (IN/OUT/ADJUST), reference (purchase order, order consumption, manual adjustment), user, and notes.
-  - Filters: date range, transaction type. Expose “Expected” rows by combining pending PO receipts (lines with `expected_delivery_date` in future) and open production issues that will consume the component.
-  - Provide export (`CSV`) and `Load more` pagination using infinite query.
-- `Purchasing`
-  - List of open purchase orders that include this component with status, supplier, expected receipt, ordered qty, received qty. Source tables: `purchase_orders`, `purchase_order_lines` filtered by `component_id`.
-  - Section for historical receipts (last 5) with cost trend chart (optional stretch).
-  - Actions: `Create PO` prefilled with this component, `Email supplier` (link to existing flow).
-- `Usage / Where Used`
-  - “Bill of Materials” usage: query `product_bom` and upcoming `bom_collections` links to show which products and collections depend on the component (quantity per). Add badges for `active` vs `archived` products.
-  - “Open Orders” usage: gather current sales/work orders that reserve the component via `order_requirements` / `work_order_components`. Show qty reserved/issued.
-  - “Historical” drill-down: optionally link to analytics dashboard once available.
-- `Images`
-  - Port over `ImageGallery` from products but scoped to components (storage bucket `QButton`). Allow upload, set primary image, delete. Show crop guidance for consistent 1:1 squares.
-- `Files` *(optional follow-up)*
-  - Placeholder for spec sheets, MSDS PDFs stored in Supabase Storage `component-files/`.
+#### Implemented Tabs
+- `Overview` (`components/features/inventory/component-detail/OverviewTab.tsx`)
+  - Component image, stock status, key metrics, and supplier list summary.
+- `Edit` (`components/features/inventory/component-detail/EditTab.tsx`)
+  - Form for editing component details (extracted from `ComponentDialog`).
+- `Inventory` (`components/features/inventory/component-detail/InventoryTab.tsx`)
+  - Stock levels, reorder levels, and location management.
+- `Suppliers` (`components/features/inventory/component-detail/SuppliersTab.tsx`)
+  - Price statistics, supplier list table with Add/Edit/Delete actions.
+  - **Add Supplier Dialog** (`AddSupplierDialog.tsx`): Searchable table of available supplier components. Select from existing catalog instead of manual code entry. Optional price override.
+  - **Edit Supplier Dialog** (`EditSupplierDialog.tsx`): Edit existing supplier links.
+  - **Delete Supplier Dialog** (`DeleteSupplierDialog.tsx`): Remove supplier links with confirmation.
+- `Transactions` (`components/features/inventory/component-detail/TransactionsTab.tsx`)
+  - Component-specific transaction history.
+- `Orders` (`components/features/inventory/component-detail/OrdersTab.tsx`)
+  - Where component is used (BOM) and required by active orders.
+- `Analytics` (`components/features/inventory/component-detail/AnalyticsTab.tsx`)
+  - Component-specific analytics and statistics.
 
 #### Data & API Considerations
 - Create React Query hook `useComponentDetail(componentId)` that assembles:
@@ -249,7 +259,10 @@ Types referenced:
 
 ### Key Files Index
 ```1:20:app/inventory/page.tsx
-// Inventory page rendering Components list and details
+// Inventory page with tabbed interface (Components, Categories, On Order, Transactions, Reports)
+```
+```1:40:app/inventory/components/[id]/page.tsx
+// Component detail page with tabbed layout
 ```
 ```1:40:app/inventory/inventory-client.tsx
 // Alternative modular client for inventory
@@ -268,6 +281,12 @@ Types referenced:
 ```
 ```1:20:components/features/inventory/TransactionHistory.tsx
 // Recent transactions list
+```
+```1:40:components/features/inventory/component-detail/AddSupplierDialog.tsx
+// Add supplier dialog with searchable supplier component table
+```
+```1:40:components/features/inventory/component-detail/SuppliersTab.tsx
+// Suppliers tab with CRUD operations for supplier links
 ```
 
 Keep this document updated with structural changes, decisions, and TODOs.

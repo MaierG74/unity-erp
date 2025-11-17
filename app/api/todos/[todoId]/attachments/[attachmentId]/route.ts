@@ -3,9 +3,10 @@ import { getRouteClient } from '@/lib/supabase-route';
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { todoId: string; attachmentId: string } }
+  context: { params: Promise<{ todoId: string; attachmentId: string }> }
 ) {
   try {
+    const { todoId, attachmentId } = await context.params;
     const ctx = await getRouteClient(request);
     if ('error' in ctx) {
       return NextResponse.json({ error: ctx.error }, { status: ctx.status ?? 401 });
@@ -15,8 +16,8 @@ export async function DELETE(
     const { data: attachment, error: fetchError } = await ctx.supabase
       .from('todo_attachments')
       .select('file_path, uploaded_by')
-      .eq('id', params.attachmentId)
-      .eq('todo_id', params.todoId)
+      .eq('id', attachmentId)
+      .eq('todo_id', todoId)
       .single();
 
     if (fetchError || !attachment) {
@@ -27,7 +28,7 @@ export async function DELETE(
     const { data: todo } = await ctx.supabase
       .from('todo_items')
       .select('created_by, assigned_to')
-      .eq('id', params.todoId)
+      .eq('id', todoId)
       .single();
 
     const canDelete =
@@ -52,7 +53,7 @@ export async function DELETE(
     const { error: deleteError } = await ctx.supabase
       .from('todo_attachments')
       .delete()
-      .eq('id', params.attachmentId);
+      .eq('id', attachmentId);
 
     if (deleteError) {
       return NextResponse.json(
@@ -73,9 +74,10 @@ export async function DELETE(
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { todoId: string; attachmentId: string } }
+  context: { params: Promise<{ todoId: string; attachmentId: string }> }
 ) {
   try {
+    const { todoId, attachmentId } = await context.params;
     const ctx = await getRouteClient(request);
     if ('error' in ctx) {
       return NextResponse.json({ error: ctx.error }, { status: ctx.status ?? 401 });
@@ -85,8 +87,8 @@ export async function GET(
     const { data: attachment, error: fetchError } = await ctx.supabase
       .from('todo_attachments')
       .select('file_path')
-      .eq('id', params.attachmentId)
-      .eq('todo_id', params.todoId)
+      .eq('id', attachmentId)
+      .eq('todo_id', todoId)
       .single();
 
     if (fetchError || !attachment) {

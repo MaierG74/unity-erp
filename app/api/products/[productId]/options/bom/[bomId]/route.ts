@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-interface RouteParams {
-  params: {
-    productId?: string;
-    bomId?: string;
-  };
-}
+type RouteParams = {
+  productId?: string;
+  bomId?: string;
+};
 
 function parseId(value?: string): number | null {
   if (!value) return null;
@@ -20,22 +18,24 @@ function getSupabaseAdmin() {
   if (!url || !key) {
     throw new Error('Supabase environment variables are not configured');
   }
-  return createClient(url, key);
+  return createClient(url, key) as any;
 }
 
-async function ensureBomBelongsToProduct(client: ReturnType<typeof createClient>, productId: number, bomId: number) {
+async function ensureBomBelongsToProduct(client: any, productId: number, bomId: number) {
   const { data, error } = await client
     .from('billofmaterials')
     .select('product_id')
     .eq('bom_id', bomId)
     .single();
 
-  if (error || !data || Number(data.product_id) !== productId) {
+  const record = data as any;
+
+  if (error || !record || Number(record.product_id) !== productId) {
     throw new Error('Not found');
   }
 }
 
-async function loadProductOptionGroups(client: ReturnType<typeof createClient>, productId: number) {
+async function loadProductOptionGroups(client: any, productId: number) {
   const { data, error } = await client
     .from('product_option_groups')
     .select(`
@@ -60,7 +60,7 @@ async function loadProductOptionGroups(client: ReturnType<typeof createClient>, 
 
   if (error) throw error;
 
-  return (data ?? []).map((group: any) => ({
+  return (data as any[] | null ?? []).map((group: any) => ({
     option_group_id: Number(group.option_group_id),
     product_id: Number(group.product_id),
     code: group.code,
@@ -81,7 +81,7 @@ async function loadProductOptionGroups(client: ReturnType<typeof createClient>, 
   }));
 }
 
-async function loadProductOptionSets(client: ReturnType<typeof createClient>, productId: number) {
+async function loadProductOptionSets(client: any, productId: number) {
   const { data, error } = await client
     .from('product_option_set_links')
     .select(`
@@ -140,7 +140,7 @@ async function loadProductOptionSets(client: ReturnType<typeof createClient>, pr
 
   if (error) throw error;
 
-  return (data ?? []).map((link: any) => {
+  return (data as any[] | null ?? []).map((link: any) => {
     const optionSetRecord = Array.isArray(link.option_sets) ? link.option_sets[0] : link.option_sets;
     const rawGroups = optionSetRecord?.option_set_groups ?? [];
 
@@ -207,7 +207,8 @@ async function loadProductOptionSets(client: ReturnType<typeof createClient>, pr
 }
 
 
-export async function GET(_req: NextRequest, { params }: RouteParams) {
+export async function GET(_req: NextRequest, context: { params: Promise<RouteParams> }) {
+  const params = await context.params;
   const productId = parseId(params.productId);
   const bomId = parseId(params.bomId);
   if (!productId || !bomId) {
@@ -326,7 +327,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
   }
 }
 
-export async function PATCH(request: NextRequest, { params }: RouteParams) {
+export async function PATCH(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const params = await context.params;
   const productId = parseId(params.productId);
   const bomId = parseId(params.bomId);
   if (!productId || !bomId) {
@@ -355,11 +357,12 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     let conflictTarget = 'bom_id,option_value_id';
 
     if (optionValueId) {
-      const { data: ownership, error: ownershipError } = await supabase
+      const { data: ownershipRaw, error: ownershipError } = await supabase
         .from('product_option_values')
         .select('option_group_id, product_option_groups(product_id)')
         .eq('option_value_id', optionValueId)
         .maybeSingle();
+      const ownership = ownershipRaw as any;
 
       if (ownershipError || !ownership || Number(ownership.product_option_groups?.product_id) !== productId) {
         return NextResponse.json({ error: 'Option value does not belong to this product' }, { status: 400 });
@@ -368,23 +371,25 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
     if (optionSetValueId) {
       conflictTarget = 'bom_id,option_set_value_id';
-      const { data: valueRow, error: valueError } = await supabase
+      const { data: valueRowRaw, error: valueError } = await supabase
         .from('option_set_values')
         .select('option_set_groups(option_set_id)')
         .eq('option_set_value_id', optionSetValueId)
         .maybeSingle();
+      const valueRow = valueRowRaw as any;
 
       if (valueError || !valueRow) {
         return NextResponse.json({ error: 'Option set value not found' }, { status: 400 });
       }
 
       const optionSetId = Number(valueRow.option_set_groups?.option_set_id);
-      const { data: linkRow, error: linkError } = await supabase
+      const { data: linkRowRaw, error: linkError } = await supabase
         .from('product_option_set_links')
         .select('link_id')
         .eq('product_id', productId)
         .eq('option_set_id', optionSetId)
         .maybeSingle();
+      const linkRow = linkRowRaw as any;
 
       if (linkError || !linkRow) {
         return NextResponse.json({ error: 'Option set value is not attached to this product' }, { status: 400 });
@@ -430,7 +435,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: RouteParams) {
+export async function DELETE(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const params = await context.params;
   const productId = parseId(params.productId);
   const bomId = parseId(params.bomId);
   if (!productId || !bomId) {

@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-interface RouteParams {
-  params: {
-    productId?: string;
-    linkId?: string;
-    valueId?: string;
-  };
-}
+type RouteParams = {
+  productId?: string;
+  linkId?: string;
+  valueId?: string;
+};
 
 function parseId(value?: string): number | null {
   if (!value) return null;
@@ -39,20 +37,22 @@ async function resolveLink(context: { productId: number; linkId: number }) {
   return { client, optionSetId: Number(data.option_set_id) };
 }
 
-async function ensureValueBelongs(client: ReturnType<typeof createClient>, optionSetId: number, valueId: number) {
+async function ensureValueBelongs(client: any, optionSetId: number, valueId: number) {
   const { data, error } = await client
     .from('option_set_values')
     .select('option_set_groups(option_set_id)')
     .eq('option_set_value_id', valueId)
     .single();
 
-  const group = data?.option_set_groups;
+  const record = data as any;
+  const group = record?.option_set_groups;
   if (error || !group || Number(group.option_set_id) !== optionSetId) {
     throw new Error('value_not_found');
   }
 }
 
-export async function PATCH(request: NextRequest, { params }: RouteParams) {
+export async function PATCH(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const params = await context.params;
   const productId = parseId(params.productId);
   const linkId = parseId(params.linkId);
   const valueId = parseId(params.valueId);
@@ -139,7 +139,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   }
 }
 
-export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+export async function DELETE(_request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const params = await context.params;
   const productId = parseId(params.productId);
   const linkId = parseId(params.linkId);
   const valueId = parseId(params.valueId);

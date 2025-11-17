@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-interface RouteParams {
-  params: {
-    setId?: string;
-    groupId?: string;
-  };
-}
+type RouteParams = {
+  setId?: string;
+  groupId?: string;
+};
 
 function parseId(value?: string): number | null {
   if (!value) return null;
@@ -23,19 +21,22 @@ function getSupabaseAdmin() {
   return createClient(url, key);
 }
 
-async function ensureGroupBelongsToSet(client: ReturnType<typeof createClient>, setId: number, groupId: number) {
+async function ensureGroupBelongsToSet(client: any, setId: number, groupId: number) {
   const { data, error } = await client
     .from('option_set_groups')
     .select('option_set_id')
     .eq('option_set_group_id', groupId)
     .single();
 
-  if (error || !data || Number(data.option_set_id) !== setId) {
+  const record = data as any;
+
+  if (error || !record || Number(record.option_set_id) !== setId) {
     throw new Error('Not found');
   }
 }
 
-export async function PATCH(request: NextRequest, { params }: RouteParams) {
+export async function PATCH(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const params = await context.params;
   const setId = parseId(params.setId);
   const groupId = parseId(params.groupId);
   if (!setId || !groupId) {
@@ -97,7 +98,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   }
 }
 
-export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+export async function DELETE(_request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const params = await context.params;
   const setId = parseId(params.setId);
   const groupId = parseId(params.groupId);
   if (!setId || !groupId) {

@@ -179,12 +179,26 @@ export default function QuotesPage() {
     if (!deleteId) return;
     try {
       const res = await fetch(`/api/quotes/${deleteId}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(await res.text());
+      const responseText = await res.text();
+      if (!res.ok) {
+        let errorMessage = 'Failed to delete quote';
+        try {
+          const errorData = JSON.parse(responseText);
+          errorMessage = errorData.error || errorData.details || errorMessage;
+        } catch {
+          errorMessage = responseText || errorMessage;
+        }
+        throw new Error(errorMessage);
+      }
       setQuotes((prev) => prev.filter((q) => q.id !== deleteId));
       toast({ title: 'Quote deleted', description: 'The quote was removed successfully.' });
     } catch (err: any) {
       console.error('Delete failed', err);
-      toast({ title: 'Delete failed', description: 'Could not delete the quote.', variant: 'destructive' });
+      toast({ 
+        title: 'Delete failed', 
+        description: err.message || 'Could not delete the quote.', 
+        variant: 'destructive' 
+      });
     } finally {
       setConfirmOpen(false);
       setDeleteId(null);

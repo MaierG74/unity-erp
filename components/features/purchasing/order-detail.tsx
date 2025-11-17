@@ -10,6 +10,7 @@ import { format } from 'date-fns';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { ReturnGoodsPDFDownload } from '@/components/features/purchasing/ReturnGoodsPDFDownload';
 import {
   Card,
   CardContent,
@@ -38,8 +39,24 @@ const receiveItemsSchema = z.object({
     required_error: 'Quantity is required',
     invalid_type_error: 'Quantity must be a number',
   }).positive('Quantity must be positive'),
+  quantity_rejected: z.number({
+    invalid_type_error: 'Quantity must be a number',
+  }).nonnegative('Quantity cannot be negative').optional(),
+  rejection_reason: z.string().optional(),
   receipt_date: z.string().optional(),
-});
+}).refine(
+  (data) => {
+    // If rejection quantity is provided, rejection reason is required
+    if (data.quantity_rejected && data.quantity_rejected > 0 && !data.rejection_reason) {
+      return false;
+    }
+    return true;
+  },
+  {
+    message: 'Rejection reason is required when rejecting items',
+    path: ['rejection_reason'],
+  }
+);
 
 // After the receiveItemsSchema, add this new schema
 const qNumberSchema = z.object({
@@ -48,9 +65,29 @@ const qNumberSchema = z.object({
   }).min(1, 'Q number is required').transform(val => val.trim()),
 });
 
+// Stock return schema for Phase 7
+const stockReturnSchema = z.object({
+  quantity_returned: z.number({
+    required_error: 'Quantity is required',
+    invalid_type_error: 'Quantity must be a number',
+  }).positive('Quantity must be positive'),
+  reason: z.string({
+    required_error: 'Reason is required',
+  }).min(1, 'Reason is required'),
+  notes: z.string().optional(),
+  return_date: z.string().optional(),
+});
+
 // Define the type explicitly to ensure q_number is always a string
 type QNumberFormValues = {
   q_number: string;
+};
+
+type StockReturnFormValues = {
+  quantity_returned: number;
+  reason: string;
+  notes?: string;
+  return_date?: string;
 };
 
 type OrderDetailProps = {
@@ -92,23 +129,53 @@ async function fetchOrderDetails(orderId: number): Promise<SupplierOrderWithDeta
 }
 
 // Process receipt function - creates inventory transaction and receipt record
+// Also handles rejections by calling process_supplier_order_return RPC
 async function processReceipt(
-  orderId: number, 
-  componentId: number, 
+  orderId: number,
+  componentId: number,
   data: ReceiveItemsFormValues
-): Promise<void> {
+): Promise<{ grn?: string; returnId?: number }> {
   const receiptTimestamp = data.receipt_date || new Date().toISOString();
+  let generatedGrn: string | undefined;
+  let returnId: number | undefined;
 
-  // Prefer the transactional RPC; fall back to legacy manual flow if unavailable
-  const { error: rpcError } = await supabase.rpc('process_supplier_order_receipt', {
-    p_order_id: orderId,
-    p_quantity: data.quantity_received,
-    p_receipt_date: receiptTimestamp,
-  });
+  // Process rejections first (if any)
+  if (data.quantity_rejected && data.quantity_rejected > 0) {
+    if (!data.rejection_reason) {
+      throw new Error('Rejection reason is required when rejecting items');
+    }
 
-  if (!rpcError) {
-    return;
+    const { data: returnData, error: returnError } = await supabase.rpc('process_supplier_order_return', {
+      p_supplier_order_id: orderId,
+      p_quantity: data.quantity_rejected,
+      p_reason: data.rejection_reason,
+      p_return_type: 'rejection',
+      p_return_date: receiptTimestamp,
+    });
+
+    if (returnError) {
+      console.error('Error processing rejection:', returnError);
+      throw new Error(`Failed to process rejection: ${returnError.message}`);
+    }
+
+    // Extract GRN and return_id from the return result (returnData is an array with the result)
+    if (returnData && Array.isArray(returnData) && returnData.length > 0) {
+      generatedGrn = returnData[0].goods_return_number || returnData[0];
+      returnId = returnData[0].return_id;
+    }
   }
+
+  // Process receipt for accepted items (if any)
+  if (data.quantity_received && data.quantity_received > 0) {
+    const { error: rpcError } = await supabase.rpc('process_supplier_order_receipt', {
+      p_order_id: orderId,
+      p_quantity: data.quantity_received,
+      p_receipt_date: receiptTimestamp,
+    });
+
+    if (!rpcError) {
+      return { grn: generatedGrn, returnId };
+    }
 
   console.warn('process_supplier_order_receipt RPC failed, using manual fallback:', rpcError);
 
@@ -301,6 +368,8 @@ async function processReceipt(
       throw new Error('Failed to update order');
     }
   }
+
+  return { grn: generatedGrn, returnId };
 }
 
 // Fix the updateOrderQNumber function to handle the string type correctly
@@ -378,6 +447,40 @@ async function updateOrderStatus(orderId: number, newStatusName: string): Promis
   }
 }
 
+// Phase 7: Process stock return function
+async function processStockReturn(
+  orderId: number,
+  data: StockReturnFormValues
+): Promise<{ grn?: string; returnId?: number }> {
+  const returnTimestamp = data.return_date || new Date().toISOString();
+
+  // Call the process_supplier_order_return RPC with return_type='later_return'
+  const { data: returnData, error: returnError } = await supabase.rpc('process_supplier_order_return', {
+    p_supplier_order_id: orderId,
+    p_quantity: data.quantity_returned,
+    p_reason: data.reason,
+    p_return_type: 'later_return',
+    p_return_date: returnTimestamp,
+    p_notes: data.notes || null,
+  });
+
+  if (returnError) {
+    console.error('Error processing stock return:', returnError);
+    throw new Error(`Failed to process stock return: ${returnError.message}`);
+  }
+
+  // Extract GRN and return_id from the return result
+  let generatedGrn: string | undefined;
+  let returnId: number | undefined;
+
+  if (returnData && Array.isArray(returnData) && returnData.length > 0) {
+    generatedGrn = returnData[0].goods_return_number || returnData[0];
+    returnId = returnData[0].return_id;
+  }
+
+  return { grn: generatedGrn, returnId };
+}
+
 // Status badge component
 function StatusBadge({ status }: { status: string }) {
   let variant: 'default' | 'destructive' | 'outline' | 'secondary' | null = null;
@@ -409,6 +512,19 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [qNumberError, setQNumberError] = useState<string | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [lastGeneratedGrn, setLastGeneratedGrn] = useState<string | null>(null);
+  const [lastReturnId, setLastReturnId] = useState<number | null>(null);
+  const [emailStatus, setEmailStatus] = useState<'idle' | 'sending' | 'sent' | 'skipped' | 'error'>('idle');
+  const [emailError, setEmailError] = useState<string | null>(null);
+
+  // Phase 7: Stock return state management
+  const [showStockReturnForm, setShowStockReturnForm] = useState(false);
+  const [stockReturnError, setStockReturnError] = useState<string | null>(null);
+  const [lastStockReturnGrn, setLastStockReturnGrn] = useState<string | null>(null);
+  const [lastStockReturnId, setLastStockReturnId] = useState<number | null>(null);
+  const [stockReturnEmailStatus, setStockReturnEmailStatus] = useState<'idle' | 'sending' | 'sent' | 'skipped' | 'error'>('idle');
+  const [stockReturnEmailError, setStockReturnEmailError] = useState<string | null>(null);
+
   const queryClient = useQueryClient();
 
   // Fetch order details
@@ -423,13 +539,20 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
     handleSubmit,
     formState: { errors },
     reset,
+    watch,
   } = useForm<ReceiveItemsFormValues>({
     resolver: zodResolver(receiveItemsSchema),
     defaultValues: {
       quantity_received: undefined,
+      quantity_rejected: undefined,
+      rejection_reason: undefined,
       receipt_date: format(new Date(), 'yyyy-MM-dd'),
     },
   });
+
+  // Watch form values for running totals
+  const quantityReceived = watch('quantity_received') || 0;
+  const quantityRejected = watch('quantity_rejected') || 0;
 
   // Add Q Number form setup
   const {
@@ -441,11 +564,32 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
     resolver: zodResolver(qNumberSchema),
   });
 
+  // Phase 7: Stock return form setup
+  const {
+    register: registerStockReturn,
+    handleSubmit: handleSubmitStockReturn,
+    formState: { errors: stockReturnErrors },
+    reset: resetStockReturn,
+  } = useForm<StockReturnFormValues>({
+    resolver: zodResolver(stockReturnSchema),
+    defaultValues: {
+      return_date: format(new Date(), 'yyyy-MM-dd'),
+    },
+  });
+
   // Process receipt mutation
   const receiptMutation = useMutation({
-    mutationFn: (data: ReceiveItemsFormValues) => 
+    mutationFn: (data: ReceiveItemsFormValues) =>
       processReceipt(orderId, order?.supplierComponent.component.component_id as number, data),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      // Store the GRN and return ID if one was generated
+      if (result?.grn) {
+        setLastGeneratedGrn(result.grn);
+      }
+      if (result?.returnId) {
+        setLastReturnId(result.returnId);
+        setEmailStatus('idle'); // Reset email status for new return
+      }
       // Add forced status update for order #2
       if (orderId === 2) {
         console.log('Forcing status update for order #2');
@@ -504,6 +648,8 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
       // Reset form
       reset({
         quantity_received: undefined,
+        quantity_rejected: undefined,
+        rejection_reason: undefined,
         receipt_date: format(new Date(), 'yyyy-MM-dd'),
       });
       setSubmissionError(null);
@@ -549,6 +695,30 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
     },
   });
 
+  // Phase 7: Stock return mutation
+  const stockReturnMutation = useMutation({
+    mutationFn: (data: StockReturnFormValues) => processStockReturn(orderId, data),
+    onSuccess: (result) => {
+      // Store the GRN and return ID if one was generated
+      if (result?.grn) {
+        setLastStockReturnGrn(result.grn);
+      }
+      if (result?.returnId) {
+        setLastStockReturnId(result.returnId);
+        setStockReturnEmailStatus('idle'); // Reset email status for new return
+      }
+      // Invalidate queries to refresh data
+      queryClient.invalidateQueries({ queryKey: ['supplierOrder', orderId] });
+      setStockReturnError(null);
+      resetStockReturn();
+      // Keep form visible to show GRN and email options
+    },
+    onError: (error) => {
+      setStockReturnError(error instanceof Error ? error.message : 'Failed to process stock return');
+      console.error('Stock return mutation error:', error);
+    },
+  });
+
   // Handle form submission
   const onSubmit = (data: ReceiveItemsFormValues) => {
     setSubmissionError(null);
@@ -565,6 +735,95 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
   const handleStatusChange = (newStatus: string) => {
     setStatusError(null);
     statusMutation.mutate(newStatus);
+  };
+
+  // Handle email sending
+  const handleSendEmail = async () => {
+    if (!lastReturnId) {
+      setEmailError('No return ID available');
+      return;
+    }
+
+    try {
+      setEmailStatus('sending');
+      setEmailError(null);
+
+      const response = await fetch('/api/send-supplier-return-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          returnId: lastReturnId,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to send email');
+      }
+
+      setEmailStatus('sent');
+      // Invalidate queries to refresh data
+      queryClient.invalidateQueries({ queryKey: ['supplierOrder', orderId] });
+    } catch (error: any) {
+      console.error('Error sending email:', error);
+      setEmailStatus('error');
+      setEmailError(error.message || 'Failed to send email');
+    }
+  };
+
+  // Handle skip email
+  const handleSkipEmail = () => {
+    setEmailStatus('skipped');
+    setEmailError(null);
+  };
+
+  // Phase 7: Stock return handlers
+  const onSubmitStockReturn = (data: StockReturnFormValues) => {
+    setStockReturnError(null);
+    stockReturnMutation.mutate(data);
+  };
+
+  const handleSendStockReturnEmail = async () => {
+    if (!lastStockReturnId) {
+      setStockReturnEmailError('No return ID available');
+      return;
+    }
+
+    try {
+      setStockReturnEmailStatus('sending');
+      setStockReturnEmailError(null);
+
+      const response = await fetch('/api/send-supplier-return-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          returnId: lastStockReturnId,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to send email');
+      }
+
+      setStockReturnEmailStatus('sent');
+      queryClient.invalidateQueries({ queryKey: ['supplierOrder', orderId] });
+    } catch (error: any) {
+      console.error('Error sending stock return email:', error);
+      setStockReturnEmailStatus('error');
+      setStockReturnEmailError(error.message || 'Failed to send email');
+    }
+  };
+
+  const handleSkipStockReturnEmail = () => {
+    setStockReturnEmailStatus('skipped');
+    setStockReturnEmailError(null);
   };
 
   // Calculate remaining quantity
@@ -813,6 +1072,29 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                   </div>
                 )}
 
+                {/* Running Totals */}
+                <div className="p-4 bg-muted rounded-md space-y-2">
+                  <h4 className="text-sm font-medium mb-2">Running Totals</h4>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div>
+                      <span className="text-muted-foreground">Ordered:</span>
+                      <span className="ml-2 font-medium">{order.order_quantity}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Receiving:</span>
+                      <span className="ml-2 font-medium text-green-600">{quantityReceived}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Rejecting:</span>
+                      <span className="ml-2 font-medium text-red-600">{quantityRejected}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Balance:</span>
+                      <span className="ml-2 font-medium">{remainingQuantity - quantityReceived - quantityRejected}</span>
+                    </div>
+                  </div>
+                </div>
+
                 <div>
                   <label htmlFor="quantity_received" className="block text-sm font-medium mb-1">
                     Quantity Received
@@ -823,7 +1105,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                     className={`h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ${
                       errors.quantity_received ? 'border-destructive' : ''
                     }`}
-                    min="1"
+                    min="0"
                     max={remainingQuantity}
                     disabled={receiptMutation.isPending}
                     {...register('quantity_received', {
@@ -836,9 +1118,66 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                     </p>
                   )}
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Maximum: {remainingQuantity} (remaining)
+                    Good items to receive into inventory
                   </p>
                 </div>
+
+                <div>
+                  <label htmlFor="quantity_rejected" className="block text-sm font-medium mb-1">
+                    Quantity Rejected <span className="text-muted-foreground font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="number"
+                    id="quantity_rejected"
+                    className={`h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ${
+                      errors.quantity_rejected ? 'border-destructive' : ''
+                    }`}
+                    min="0"
+                    max={remainingQuantity}
+                    disabled={receiptMutation.isPending}
+                    {...register('quantity_rejected', {
+                      setValueAs: (value) => (value === '' ? undefined : parseInt(value, 10)),
+                    })}
+                  />
+                  {errors.quantity_rejected && (
+                    <p className="mt-1 text-sm text-destructive">
+                      {errors.quantity_rejected.message}
+                    </p>
+                  )}
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Rejected at gate - will NOT enter inventory
+                  </p>
+                </div>
+
+                {quantityRejected > 0 && (
+                  <div>
+                    <label htmlFor="rejection_reason" className="block text-sm font-medium mb-1">
+                      Rejection Reason <span className="text-destructive">*</span>
+                    </label>
+                    <select
+                      id="rejection_reason"
+                      className={`h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ${
+                        errors.rejection_reason ? 'border-destructive' : ''
+                      }`}
+                      disabled={receiptMutation.isPending}
+                      {...register('rejection_reason')}
+                    >
+                      <option value="">Select a reason...</option>
+                      <option value="Damaged on arrival">Damaged on arrival</option>
+                      <option value="Wrong part received">Wrong part received</option>
+                      <option value="Incorrect quantity">Incorrect quantity</option>
+                      <option value="Poor quality">Poor quality</option>
+                      <option value="Missing documentation">Missing documentation</option>
+                      <option value="Late delivery">Late delivery</option>
+                      <option value="Other">Other</option>
+                    </select>
+                    {errors.rejection_reason && (
+                      <p className="mt-1 text-sm text-destructive">
+                        {errors.rejection_reason.message}
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 <div>
                   <label htmlFor="receipt_date" className="block text-sm font-medium mb-1">
@@ -870,11 +1209,334 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                     'Record Receipt'
                   )}
                 </Button>
+
+                {/* Show PDF download button if GRN was generated */}
+                {lastGeneratedGrn && order.q_number && (
+                  <div className="mt-6 pt-6 border-t">
+                    <h4 className="text-sm font-medium mb-3">Goods Returned Document</h4>
+                    <p className="text-sm text-muted-foreground mb-3">
+                      GRN: <span className="font-mono font-medium">{lastGeneratedGrn}</span>
+                    </p>
+                    <ReturnGoodsPDFDownload
+                      goodsReturnNumber={lastGeneratedGrn}
+                      purchaseOrderNumber={order.q_number}
+                      purchaseOrderId={order.purchase_order_id || 0}
+                      returnDate={new Date().toISOString()}
+                      items={[
+                        {
+                          component_code: order.supplierComponent.component.internal_code,
+                          component_name: order.supplierComponent.component.description || '',
+                          quantity_returned: quantityRejected,
+                          reason: watch('rejection_reason') || 'Rejected at gate',
+                          return_type: 'rejection',
+                        },
+                      ]}
+                      supplierInfo={{
+                        supplier_name: order.supplierComponent.supplier.name,
+                      }}
+                      returnType="rejection"
+                    />
+
+                    {/* Email notification section */}
+                    <div className="mt-6 pt-6 border-t">
+                      <h4 className="text-sm font-medium mb-2">Supplier Notification</h4>
+
+                      {emailStatus === 'idle' && (
+                        <>
+                          <p className="text-sm text-muted-foreground mb-3">
+                            Would you like to send an email notification to the supplier?
+                          </p>
+                          <div className="flex gap-2">
+                            <Button onClick={handleSendEmail} className="flex-1">
+                              Send Email
+                            </Button>
+                            <Button variant="outline" onClick={handleSkipEmail} className="flex-1">
+                              Skip Email
+                            </Button>
+                          </div>
+                        </>
+                      )}
+
+                      {emailStatus === 'sending' && (
+                        <div className="flex items-center gap-2 text-sm">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span>Sending email notification...</span>
+                        </div>
+                      )}
+
+                      {emailStatus === 'sent' && (
+                        <div className="p-3 bg-green-50 border border-green-200 text-green-700 rounded-md text-sm">
+                          Email notification sent successfully to supplier
+                        </div>
+                      )}
+
+                      {emailStatus === 'skipped' && (
+                        <div className="p-3 bg-gray-50 border border-gray-200 text-gray-700 rounded-md text-sm">
+                          Email notification skipped
+                        </div>
+                      )}
+
+                      {emailStatus === 'error' && (
+                        <div className="p-3 bg-destructive/10 border border-destructive/20 text-destructive rounded-md text-sm">
+                          <p className="font-medium mb-1">Failed to send email</p>
+                          <p>{emailError}</p>
+                          <Button onClick={handleSendEmail} variant="outline" size="sm" className="mt-2">
+                            Retry
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </form>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Phase 7: Return Goods Section */}
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle>Return Goods</CardTitle>
+            <CardDescription>
+              Return items from stock to the supplier
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {order.total_received === 0 ? (
+              <div className="p-4 bg-gray-50 border border-gray-200 text-gray-700 rounded-md text-center">
+                <div className="font-medium mb-1">No items received yet.</div>
+                <div className="text-sm">You must receive items before you can return them.</div>
+              </div>
+            ) : !showStockReturnForm && !lastStockReturnGrn ? (
+              <Button
+                type="button"
+                onClick={() => setShowStockReturnForm(true)}
+                variant="outline"
+              >
+                Return Items to Supplier
+              </Button>
+            ) : (
+              <div className="space-y-4">
+                {!lastStockReturnGrn && (
+                  <form onSubmit={handleSubmitStockReturn(onSubmitStockReturn)} className="space-y-4">
+                    {stockReturnError && (
+                      <div className="p-4 bg-destructive/10 text-destructive rounded-md">
+                        {stockReturnError}
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium mb-2">
+                          Quantity to Return <span className="text-red-500">*</span>
+                        </label>
+                        <Input
+                          type="number"
+                          {...registerStockReturn('quantity_returned', { valueAsNumber: true })}
+                          min="1"
+                          max={order.total_received}
+                          placeholder="Enter quantity"
+                        />
+                        {stockReturnErrors.quantity_returned && (
+                          <p className="text-sm text-destructive mt-1">
+                            {stockReturnErrors.quantity_returned.message}
+                          </p>
+                        )}
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Available in stock: {order.total_received}
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium mb-2">
+                          Return Date
+                        </label>
+                        <Input
+                          type="date"
+                          {...registerStockReturn('return_date')}
+                        />
+                        {stockReturnErrors.return_date && (
+                          <p className="text-sm text-destructive mt-1">
+                            {stockReturnErrors.return_date.message}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium mb-2">
+                        Reason for Return <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        {...registerStockReturn('reason')}
+                        className="w-full border border-gray-300 rounded-md p-2"
+                      >
+                        <option value="">Select reason...</option>
+                        <option value="Defective">Defective</option>
+                        <option value="Wrong item">Wrong item</option>
+                        <option value="Damaged">Damaged</option>
+                        <option value="Not as described">Not as described</option>
+                        <option value="Quality issue">Quality issue</option>
+                        <option value="Overstock">Overstock</option>
+                        <option value="Other">Other</option>
+                      </select>
+                      {stockReturnErrors.reason && (
+                        <p className="text-sm text-destructive mt-1">
+                          {stockReturnErrors.reason.message}
+                        </p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium mb-2">
+                        Notes (Optional)
+                      </label>
+                      <textarea
+                        {...registerStockReturn('notes')}
+                        className="w-full border border-gray-300 rounded-md p-2"
+                        rows={3}
+                        placeholder="Additional details about the return..."
+                      />
+                      {stockReturnErrors.notes && (
+                        <p className="text-sm text-destructive mt-1">
+                          {stockReturnErrors.notes.message}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex gap-2">
+                      <Button
+                        type="submit"
+                        disabled={stockReturnMutation.isPending}
+                      >
+                        {stockReturnMutation.isPending ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Processing Return...
+                          </>
+                        ) : (
+                          'Process Return'
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setShowStockReturnForm(false);
+                          resetStockReturn();
+                          setStockReturnError(null);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </form>
+                )}
+
+                {/* Show GRN and PDF download after successful return */}
+                {lastStockReturnGrn && (
+                  <div className="space-y-4 border-t pt-4">
+                    <div className="p-4 bg-green-50 border border-green-200 rounded-md">
+                      <div className="font-medium text-green-800 mb-2">
+                        Return processed successfully!
+                      </div>
+                      <div className="text-sm text-green-700">
+                        Goods Return Number: <span className="font-mono font-bold">{lastStockReturnGrn}</span>
+                      </div>
+                    </div>
+
+                    {/* PDF Download Section */}
+                    <div className="space-y-3">
+                      <h4 className="font-medium text-sm">Download Return Document</h4>
+                      <ReturnGoodsPDFDownload
+                        goodsReturnNumber={lastStockReturnGrn}
+                        purchaseOrderNumber={order.purchase_order?.q_number || 'N/A'}
+                        purchaseOrderId={order.purchase_order?.purchase_order_id || 0}
+                        returnDate={new Date().toISOString()}
+                        items={[
+                          {
+                            component_code: order.supplierComponent.component?.internal_code || order.supplierComponent.supplier_code,
+                            component_name: order.supplierComponent.component?.description || 'N/A',
+                            quantity_returned: order.total_received, // This will be the actual quantity from the form
+                            reason: 'Stock return', // This will be the actual reason from the form
+                            return_type: 'later_return',
+                          },
+                        ]}
+                        supplierInfo={{
+                          supplier_name: order.supplierComponent.supplier.name,
+                          contact_person: undefined,
+                          phone: undefined,
+                          email: undefined,
+                        }}
+                        returnType="later_return"
+                      />
+                    </div>
+
+                    {/* Email Notification Section */}
+                    <div className="space-y-3 border-t pt-4">
+                      <h4 className="font-medium text-sm">Notify Supplier</h4>
+
+                      {stockReturnEmailStatus === 'idle' && (
+                        <div className="flex gap-2">
+                          <Button
+                            onClick={handleSendStockReturnEmail}
+                            disabled={!lastStockReturnId}
+                            size="sm"
+                          >
+                            Send Email to Supplier
+                          </Button>
+                          <Button
+                            onClick={handleSkipStockReturnEmail}
+                            variant="outline"
+                            size="sm"
+                          >
+                            Skip Email
+                          </Button>
+                        </div>
+                      )}
+
+                      {stockReturnEmailStatus === 'sending' && (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span>Sending email notification...</span>
+                        </div>
+                      )}
+
+                      {stockReturnEmailStatus === 'sent' && (
+                        <div className="p-3 bg-green-50 border border-green-200 text-green-700 rounded-md text-sm">
+                          Email notification sent successfully to supplier
+                        </div>
+                      )}
+
+                      {stockReturnEmailStatus === 'skipped' && (
+                        <div className="p-3 bg-gray-50 border border-gray-200 text-gray-700 rounded-md text-sm">
+                          Email notification skipped
+                        </div>
+                      )}
+
+                      {stockReturnEmailStatus === 'error' && (
+                        <div className="p-3 bg-destructive/10 border border-destructive/20 text-destructive rounded-md">
+                          <p className="font-medium text-sm mb-1">Failed to send email</p>
+                          <p className="text-sm">{stockReturnEmailError}</p>
+                          <Button
+                            onClick={handleSendStockReturnEmail}
+                            variant="outline"
+                            size="sm"
+                            className="mt-2"
+                          >
+                            Retry
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </CardContent>
         </Card>
       </div>
     </div>
   );
-} 
+}
+}

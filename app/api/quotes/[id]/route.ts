@@ -3,10 +3,10 @@ import { supabaseAdmin } from '@/lib/supabase-admin';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const quoteId = params.id;
+    const { id: quoteId } = await context.params;
     console.log('Fetching quote via API with ID:', quoteId);
 
     // Use admin client to bypass RLS
@@ -86,31 +86,52 @@ export async function GET(
 // DELETE /api/quotes/[id] - deletes a quote and cascades related rows
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const quoteId = params.id;
+    const { id: quoteId } = await context.params;
 
+    console.log(`[DELETE /quotes/${quoteId}] Starting deletion process`);
+
+    // First, verify the quote exists
+    const { data: quoteExists, error: checkErr } = await supabaseAdmin
+      .from('quotes')
+      .select('id, quote_number')
+      .eq('id', quoteId)
+      .single();
+
+    if (checkErr || !quoteExists) {
+      console.error(`[DELETE /quotes/${quoteId}] Quote not found`, checkErr);
+      return NextResponse.json(
+        { error: 'Quote not found', details: checkErr?.message },
+        { status: 404 }
+      );
+    }
+
+    console.log(`[DELETE /quotes/${quoteId}] Quote found: ${quoteExists.quote_number || quoteId}`);
+
+    // Delete the quote (cascade will handle related rows: quote_items, quote_attachments, quote_email_log)
+    // Note: orders.quote_id will be set to NULL due to ON DELETE SET NULL
     const { error } = await supabaseAdmin
       .from('quotes')
       .delete()
       .eq('id', quoteId);
 
     if (error) {
-      console.error('Quote delete error:', error);
+      console.error('[DELETE /quotes] Quote delete error:', error);
       return NextResponse.json(
         { error: 'Failed to delete quote', details: error.message },
-        { status: 400 }
+        { status: 500 }
       );
     }
 
+    console.log(`[DELETE /quotes/${quoteId}] Successfully deleted quote`);
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('API error deleting quote:', error);
+    console.error('[DELETE /quotes] API error deleting quote:', error);
     return NextResponse.json(
       { error: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     );
   }
 }
-

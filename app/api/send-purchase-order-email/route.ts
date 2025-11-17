@@ -106,7 +106,7 @@ export async function POST(request: Request) {
     const fromAddress = process.env.EMAIL_FROM || companyInfo.email || 'purchasing@example.com';
 
     // Extract unique suppliers from the order (handle array/object shapes from Supabase)
-    const uniqueSuppliers = purchaseOrder.supplier_orders
+    const uniqueSuppliers = (purchaseOrder.supplier_orders || [])
       .map((order: any) => {
         const sc = Array.isArray(order.supplier_component)
           ? order.supplier_component[0]
@@ -115,13 +115,13 @@ export async function POST(request: Request) {
         if (!sup) return null;
         return { supplier_id: sup.supplier_id, name: sup.name };
       })
-      .filter((s: any) => !!s)
-      .filter((supplier: any, index: number, self: any[]) =>
-        index === self.findIndex((t: any) => t.supplier_id === supplier.supplier_id)
+      .filter((s: any): s is { supplier_id: number; name: string } => !!s)
+      .filter((supplier, index, self) =>
+        index === self.findIndex((t) => t.supplier_id === supplier.supplier_id)
       );
     
     // Send email to each supplier
-    const emailResults = [];
+    const emailResults: { supplier: string; success: boolean; error?: string; messageId?: string }[] = [];
     
     for (const supplier of uniqueSuppliers) {
       // Resolve recipient email (override -> primary -> any)

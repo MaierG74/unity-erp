@@ -1,19 +1,20 @@
 'use client';
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, use } from 'react';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { type Order, type Product, type OrderDetail, type Customer, type OrderAttachment, type OrderStatus, type FinishedGoodReservation } from '@/types/orders';
 import { ComponentRequirement, ProductRequirement, SupplierInfo, SupplierOption } from '@/types/components';
+import { fetchCustomers } from '@/lib/db/customers';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { ArrowLeft, File, Download, Paperclip, Package, Layers, Wrench, Cog, Search, PaintBucket, PlusCircle, Check, Plus, Loader2, AlertCircle, ShoppingCart, ChevronDown, CheckCircle, Trash, FilePlus, Terminal, ChevronRight, Info, ShoppingBag, Users, RotateCcw, ChevronUp, Warehouse, Printer } from 'lucide-react';
+import { ArrowLeft, File, Download, Paperclip, Package, Layers, Wrench, Cog, Search, PaintBucket, PlusCircle, Check, Plus, Loader2, AlertCircle, ShoppingCart, ChevronDown, CheckCircle, Trash, FilePlus, Terminal, ChevronRight, Info, ShoppingBag, Users, RotateCcw, ChevronUp, Warehouse, Printer, Edit, Save, X, ChevronsUpDown } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
@@ -31,9 +32,9 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { IssueStockTab } from '@/components/features/orders/IssueStockTab';
 
 type OrderDetailPageProps = {
-  params: {
+  params: Promise<{
     orderId: string;
-  };
+  }>;
 };
 
 // Format currency function
@@ -361,7 +362,9 @@ async function fetchComponentSuppliers(orderId: number) {
     }
 
     const componentsWithShortfall = (statusData ?? []).filter(
-      (item: any) => Number(item?.real_shortfall ?? 0) > 0
+      (item: any) => 
+        Number(item?.real_shortfall ?? 0) > 0 || 
+        Number(item?.global_real_shortfall ?? 0) > 0
     );
 
     if (componentsWithShortfall.length === 0) {
@@ -713,6 +716,7 @@ const OrderComponentsDialog = ({
   const [allocation, setAllocation] = useState<Record<number, { forThisOrder: number; forStock: number }>>({});
   const [apparentShortfallExists, setApparentShortfallExists] = useState(false);
   const [creationFailures, setCreationFailures] = useState<SupplierOrderCreationFailure[] | null>(null);
+  const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({});
   const queryClient = useQueryClient();
   
   // Group components by supplier
@@ -756,11 +760,26 @@ const OrderComponentsDialog = ({
       data.forEach(group => {
         group.components.forEach(component => {
           const componentId = component.component.component_id;
-          quantities[componentId] = component.shortfall;
-          newAllocation[componentId] = {
-            forThisOrder: component.shortfall,
-            forStock: 0
-          };
+          const perOrderShortfall = component.shortfall;
+          const globalShortfall = component.global_real_shortfall || 0;
+          
+          // Default quantity: use global shortfall if no per-order shortfall
+          const defaultQuantity = perOrderShortfall > 0 ? perOrderShortfall : globalShortfall;
+          quantities[componentId] = defaultQuantity;
+          
+          // Smart allocation: per-order shortfall goes to "forThisOrder", global-only goes to "forStock"
+          if (perOrderShortfall > 0) {
+            newAllocation[componentId] = {
+              forThisOrder: perOrderShortfall,
+              forStock: 0
+            };
+          } else {
+            // Global-only shortfall: allocate to stock
+            newAllocation[componentId] = {
+              forThisOrder: 0,
+              forStock: globalShortfall
+            };
+          }
         });
       });
       
@@ -782,11 +801,26 @@ const OrderComponentsDialog = ({
       data.forEach(group => {
         group.components.forEach(component => {
           const componentId = component.component.component_id;
-          quantities[componentId] = component.shortfall;
-          newAllocation[componentId] = {
-            forThisOrder: component.shortfall,
-            forStock: 0
-          };
+          const perOrderShortfall = component.shortfall;
+          const globalShortfall = component.global_real_shortfall || 0;
+          
+          // Default quantity: use global shortfall if no per-order shortfall
+          const defaultQuantity = perOrderShortfall > 0 ? perOrderShortfall : globalShortfall;
+          quantities[componentId] = defaultQuantity;
+          
+          // Smart allocation: per-order shortfall goes to "forThisOrder", global-only goes to "forStock"
+          if (perOrderShortfall > 0) {
+            newAllocation[componentId] = {
+              forThisOrder: perOrderShortfall,
+              forStock: 0
+            };
+          } else {
+            // Global-only shortfall: allocate to stock
+            newAllocation[componentId] = {
+              forThisOrder: 0,
+              forStock: globalShortfall
+            };
+          }
         });
       });
       
@@ -799,6 +833,13 @@ const OrderComponentsDialog = ({
     setSelectedComponents(prev => ({
       ...prev,
       [componentId]: selected,
+    }));
+  };
+
+  const toggleRowExpansion = (componentId: number) => {
+    setExpandedRows(prev => ({
+      ...prev,
+      [componentId]: !prev[componentId],
     }));
   };
 
@@ -1014,7 +1055,7 @@ const OrderComponentsDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[900px]">
+      <DialogContent className="sm:max-w-[1200px] max-h-[85vh]">
         <DialogHeader>
           <DialogTitle>Order Components</DialogTitle>
           <DialogDescription>
@@ -1059,122 +1100,181 @@ const OrderComponentsDialog = ({
                       <TableHeader>
                         <TableRow>
                           <TableHead className="w-[50px]"></TableHead>
-                          <TableHead>Component</TableHead>
-                          <TableHead>Shortfall</TableHead>
-                          <TableHead>Order Quantity</TableHead>
-                          <TableHead>Allocation</TableHead>
-                          <TableHead className="text-right">Price</TableHead>
+                          <TableHead className="w-[35%]">Component</TableHead>
+                          <TableHead className="w-[12%]">Shortfall</TableHead>
+                          <TableHead className="w-[12%]">Order Quantity</TableHead>
+                          <TableHead className="w-[20%]">Allocation</TableHead>
+                          <TableHead className="w-[10%] text-right">Price</TableHead>
+                          <TableHead className="w-[50px]"></TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {group.components.map((component) => (
-                          <TableRow key={component.component.component_id}>
-                            <TableCell>
-                              <Checkbox
-                                checked={selectedComponents[component.component.component_id] === true}
-                                onCheckedChange={(checked) =>
-                                  handleSelectComponent(
-                                    component.component.component_id,
-                                    checked === true
-                                  )
-                                }
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <div className="font-medium">
-                                {component.component.internal_code}
-                                {component.total_required_all_orders > component.shortfall && (
-                                  <span className="ml-2 inline-flex items-center text-xs font-medium text-blue-500">
-                                    <Users className="h-3 w-3 mr-1" />
-                                    <span className="sr-only">Required in multiple orders</span>
+                        {group.components.map((component) => {
+                          const isExpanded = expandedRows[component.component.component_id];
+                          const hasGlobalContext = component.total_required_all_orders > component.shortfall;
+                          const isForStock = component.shortfall === 0 && component.global_real_shortfall > 0;
+                          
+                          return (
+                            <React.Fragment key={component.component.component_id}>
+                              <TableRow className="hover:bg-muted/50">
+                                <TableCell className="py-4">
+                                  <Checkbox
+                                    checked={selectedComponents[component.component.component_id] === true}
+                                    onCheckedChange={(checked) =>
+                                      handleSelectComponent(
+                                        component.component.component_id,
+                                        checked === true
+                                      )
+                                    }
+                                  />
+                                </TableCell>
+                                <TableCell className="py-4">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium text-base">
+                                      {component.component.internal_code}
+                                    </span>
+                                    {isForStock && (
+                                      <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-50 text-amber-700 border border-amber-200">
+                                        For Stock
+                                      </span>
+                                    )}
+                                    {hasGlobalContext && (
+                                      <span className="inline-flex items-center text-xs font-medium text-blue-500" title="Required in multiple orders">
+                                        <Users className="h-3 w-3" />
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-sm text-muted-foreground mt-1">
+                                    {component.component.description}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="py-4">
+                                  <div className="flex flex-col gap-0.5">
+                                    <div className="flex items-center gap-1">
+                                      <span className={component.shortfall > 0 ? "text-red-600 font-medium text-base" : "text-base"}>
+                                        {component.shortfall}
+                                      </span>
+                                      <span className="text-xs text-muted-foreground">(this order)</span>
+                                    </div>
+                                    {component.global_real_shortfall > 0 && (
+                                      <div className="flex items-center gap-1 text-amber-600">
+                                        <span className="text-xs font-medium">Global:</span>
+                                        <span className="text-sm font-medium">{component.global_real_shortfall}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="py-4">
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    value={orderQuantities[component.component.component_id] || 0}
+                                    onChange={(e) => 
+                                      handleQuantityChange(
+                                        component.component.component_id, 
+                                        parseInt(e.target.value || '0')
+                                      )
+                                    }
+                                    className="w-24 h-10"
+                                    disabled={!selectedComponents[component.component.component_id]}
+                                  />
+                                </TableCell>
+                                <TableCell className="py-4">
+                                  {selectedComponents[component.component.component_id] ? (
+                                    <div className="flex items-center gap-3">
+                                      <div className="flex items-center gap-1.5">
+                                        <Label htmlFor={`forOrder-${component.component.component_id}`} className="text-xs font-medium whitespace-nowrap">
+                                          Order:
+                                        </Label>
+                                        <Input
+                                          id={`forOrder-${component.component.component_id}`}
+                                          type="number"
+                                          min="0"
+                                          value={allocation[component.component.component_id]?.forThisOrder || 0}
+                                          onChange={(e) => 
+                                            handleAllocationChange(
+                                              component.component.component_id,
+                                              'forThisOrder',
+                                              parseInt(e.target.value || '0')
+                                            )
+                                          }
+                                          className="w-20 h-9"
+                                        />
+                                      </div>
+                                      <div className="flex items-center gap-1.5">
+                                        <Label htmlFor={`forStock-${component.component.component_id}`} className="text-xs font-medium whitespace-nowrap">
+                                          Stock:
+                                        </Label>
+                                        <Input
+                                          id={`forStock-${component.component.component_id}`}
+                                          type="number"
+                                          min="0"
+                                          value={allocation[component.component.component_id]?.forStock || 0}
+                                          onChange={(e) => 
+                                            handleAllocationChange(
+                                              component.component.component_id,
+                                              'forStock',
+                                              parseInt(e.target.value || '0')
+                                            )
+                                          }
+                                          className="w-20 h-9"
+                                        />
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <span className="text-sm text-muted-foreground">—</span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right py-4">
+                                  <span className="text-base font-medium">
+                                    {formatCurrency(component.selectedSupplier.price)}
                                   </span>
-                                )}
-                              </div>
-                              <div className="text-sm text-muted-foreground">
-                                {component.component.description}
-                              </div>
-                              {component.total_required_all_orders > component.shortfall && (
-                                <div className="text-xs text-blue-600 mt-1">
-                                  Total needed across all orders: {component.total_required_all_orders} 
-                                  <span className="mx-1">•</span>
-                                  Global shortfall: {component.global_real_shortfall}
-                                </div>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <span className={component.shortfall > 0 ? "text-red-600 font-medium" : ""}>
-                                {component.shortfall}
-                              </span>
-                              {component.global_real_shortfall > component.shortfall && (
-                                <div className="text-xs text-amber-600">
-                                  +{component.global_real_shortfall - component.shortfall} in other orders
-                                </div>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <Input
-                                type="number"
-                                min="0"
-                                value={orderQuantities[component.component.component_id] || 0}
-                                onChange={(e) => 
-                                  handleQuantityChange(
-                                    component.component.component_id, 
-                                    parseInt(e.target.value || '0')
-                                  )
-                                }
-                                className="w-20"
-                                disabled={!selectedComponents[component.component.component_id]}
-                              />
-                            </TableCell>
-                            <TableCell>
-                              {selectedComponents[component.component.component_id] && (
-                                <div className="flex flex-col space-y-2">
-                                  <div className="flex items-center space-x-2">
-                                    <Label htmlFor={`forOrder-${component.component.component_id}`} className="w-20 text-xs">
-                                      For Order:
-                                    </Label>
-                                    <Input
-                                      id={`forOrder-${component.component.component_id}`}
-                                      type="number"
-                                      min="0"
-                                      value={allocation[component.component.component_id]?.forThisOrder || 0}
-                                      onChange={(e) => 
-                                        handleAllocationChange(
-                                          component.component.component_id,
-                                          'forThisOrder',
-                                          parseInt(e.target.value || '0')
-                                        )
-                                      }
-                                      className="w-16 h-8"
+                                </TableCell>
+                                <TableCell className="py-4">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 p-0"
+                                    onClick={() => toggleRowExpansion(component.component.component_id)}
+                                    disabled={!hasGlobalContext && !isForStock}
+                                  >
+                                    <ChevronDown 
+                                      className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
                                     />
-                                  </div>
-                                  <div className="flex items-center space-x-2">
-                                    <Label htmlFor={`forStock-${component.component.component_id}`} className="w-20 text-xs">
-                                      For Stock:
-                                    </Label>
-                                    <Input
-                                      id={`forStock-${component.component.component_id}`}
-                                      type="number"
-                                      min="0"
-                                      value={allocation[component.component.component_id]?.forStock || 0}
-                                      onChange={(e) => 
-                                        handleAllocationChange(
-                                          component.component.component_id,
-                                          'forStock',
-                                          parseInt(e.target.value || '0')
-                                        )
-                                      }
-                                      className="w-16 h-8"
-                                    />
-                                  </div>
-                                </div>
+                                    <span className="sr-only">
+                                      {isExpanded ? 'Collapse' : 'Expand'} details
+                                    </span>
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                              
+                              {isExpanded && (hasGlobalContext || isForStock) && (
+                                <TableRow>
+                                  <TableCell colSpan={7} className="bg-muted/30 py-4 px-6">
+                                    <div className="space-y-2 text-sm">
+                                      {hasGlobalContext && (
+                                        <div className="flex items-start gap-2 text-blue-600">
+                                          <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                                          <div>
+                                            <span className="font-medium">Global Context:</span> Total needed across all orders: {component.total_required_all_orders} • Global shortfall: {component.global_real_shortfall}
+                                          </div>
+                                        </div>
+                                      )}
+                                      {isForStock && (
+                                        <div className="flex items-start gap-2 text-amber-600">
+                                          <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                                          <div>
+                                            This order is covered by finished goods, but other orders need this component.
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
                               )}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {formatCurrency(component.selectedSupplier.price)}
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                            </React.Fragment>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </CardContent>
@@ -1195,6 +1295,9 @@ const OrderComponentsDialog = ({
             ) : (
               <div className="text-center p-8">
                 <p>No component suppliers found or all components are in stock.</p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  Either no components have shortfalls, or components with shortfalls don't have configured suppliers.
+                </p>
                 {apparentShortfallExists && (
                   <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-md">
                     <p className="text-amber-800">
@@ -2002,7 +2105,9 @@ interface SupplierOrder {
 
 // Update the component requirements table to use the new tooltips
 export default function OrderDetailPage({ params }: OrderDetailPageProps) {
-  const orderId = parseInt(params.orderId, 10);
+  // Unwrap the params Promise (Next.js 16 requirement)
+  const { orderId: orderIdParam } = use(params);
+  const orderId = parseInt(orderIdParam, 10);
   // Set initial tab back to details
   const [activeTab, setActiveTab] = useState<string>('details');
   const [searchQuery, setSearchQuery] = useState('');
@@ -2015,6 +2120,23 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   const [applyFgCoverage, setApplyFgCoverage] = useState<boolean>(true);
   const [showGlobalContext, setShowGlobalContext] = useState<boolean>(true);
   const [fgReservationsOpen, setFgReservationsOpen] = useState<boolean>(false);
+
+  // Edit mode state
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editCustomerId, setEditCustomerId] = useState<string>('');
+  const [editOrderNumber, setEditOrderNumber] = useState<string>('');
+  const [editDeliveryDate, setEditDeliveryDate] = useState<string>('');
+  const [customerOpen, setCustomerOpen] = useState(false);
+  const [customerSearchTerm, setCustomerSearchTerm] = useState('');
+
+  // Product editing state
+  const [editingDetailId, setEditingDetailId] = useState<number | null>(null);
+  const [editQuantity, setEditQuantity] = useState<string>('');
+  const [editUnitPrice, setEditUnitPrice] = useState<string>('');
+
+  // Delete confirmation dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [productToDelete, setProductToDelete] = useState<{ id: number; name: string } | null>(null);
 
   // Add toggle function for product row expansion
   const toggleRowExpansion = (productId: string) => {
@@ -2055,6 +2177,182 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
   });
+
+  // Fetch customers for edit mode
+  const { data: customers, isLoading: customersLoading } = useQuery<Customer[], Error>({
+    queryKey: ['customers'],
+    queryFn: () => fetchCustomers(),
+    enabled: isEditMode, // Only fetch when in edit mode
+  });
+
+  const customersSorted = useMemo(
+    () => (customers || []).slice().sort((a, b) => a.name.localeCompare(b.name)),
+    [customers]
+  );
+
+  const filteredCustomers = useMemo(
+    () => customersSorted.filter(c =>
+      c.name.toLowerCase().startsWith(customerSearchTerm.toLowerCase())
+    ),
+    [customersSorted, customerSearchTerm]
+  );
+
+  // Mutation for updating order
+  const updateOrderMutation = useMutation({
+    mutationFn: async (data: { customer_id?: number; order_number?: string | null; delivery_date?: string | null }) => {
+      const response = await fetch(`/api/orders/${orderId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to update order');
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+      toast.success('Order updated successfully');
+      setIsEditMode(false);
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to update order: ${error.message}`);
+    },
+  });
+
+  // Initialize edit form when entering edit mode
+  useEffect(() => {
+    if (isEditMode && order) {
+      setEditCustomerId(order.customer_id?.toString() || '');
+      setEditOrderNumber(order.order_number || '');
+      setEditDeliveryDate(order.delivery_date || '');
+    }
+  }, [isEditMode, order]);
+
+  // Handle save
+  const handleSaveOrder = () => {
+    const updates: { customer_id?: number; order_number?: string | null; delivery_date?: string | null } = {};
+    if (editCustomerId && editCustomerId !== order?.customer_id?.toString()) {
+      updates.customer_id = Number(editCustomerId);
+    }
+    if (editOrderNumber !== order?.order_number) {
+      updates.order_number = editOrderNumber || null;
+    }
+    if (editDeliveryDate !== order?.delivery_date) {
+      updates.delivery_date = editDeliveryDate || null;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      toast.info('No changes to save');
+      setIsEditMode(false);
+      return;
+    }
+
+    updateOrderMutation.mutate(updates);
+  };
+
+  // Handle cancel
+  const handleCancelEdit = () => {
+    setIsEditMode(false);
+    setCustomerSearchTerm('');
+  };
+
+  // Mutation for updating order detail
+  const updateDetailMutation = useMutation({
+    mutationFn: async ({ detailId, quantity, unit_price }: { detailId: number; quantity?: number; unit_price?: number }) => {
+      const response = await fetch(`/api/order-details/${detailId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quantity, unit_price }),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to update product');
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] });
+      toast.success('Product updated successfully');
+      setEditingDetailId(null);
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to update product: ${error.message}`);
+    },
+  });
+
+  // Mutation for deleting order detail
+  const deleteDetailMutation = useMutation({
+    mutationFn: async (detailId: number) => {
+      const response = await fetch(`/api/order-details/${detailId}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to delete product');
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] });
+      toast.success('Product removed from order');
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to delete product: ${error.message}`);
+    },
+  });
+
+  // Handlers for product editing
+  const handleStartEditDetail = (detail: OrderDetail) => {
+    setEditingDetailId(detail.order_detail_id);
+    setEditQuantity(detail.quantity?.toString() || '0');
+    setEditUnitPrice(detail.unit_price?.toString() || '0');
+  };
+
+  const handleSaveDetail = (detailId: number) => {
+    const quantity = parseFloat(editQuantity);
+    const unit_price = parseFloat(editUnitPrice);
+
+    if (isNaN(quantity) || quantity < 0) {
+      toast.error('Please enter a valid quantity');
+      return;
+    }
+    if (isNaN(unit_price) || unit_price < 0) {
+      toast.error('Please enter a valid unit price');
+      return;
+    }
+
+    updateDetailMutation.mutate({ detailId, quantity, unit_price });
+  };
+
+  const handleCancelDetailEdit = () => {
+    setEditingDetailId(null);
+    setEditQuantity('');
+    setEditUnitPrice('');
+  };
+
+  const handleDeleteDetail = (detailId: number, productName: string) => {
+    setProductToDelete({ id: detailId, name: productName });
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDeleteProduct = () => {
+    if (productToDelete) {
+      deleteDetailMutation.mutate(productToDelete.id);
+      setDeleteDialogOpen(false);
+      setProductToDelete(null);
+    }
+  };
+
+  const cancelDeleteProduct = () => {
+    setDeleteDialogOpen(false);
+    setProductToDelete(null);
+  };
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -2407,40 +2705,169 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
 
           {/* Order Summary Card */}
           <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-lg">Order Summary</CardTitle>
+              {!isEditMode ? (
+                <Button variant="outline" size="sm" onClick={() => setIsEditMode(true)}>
+                  <Edit className="h-4 w-4 mr-2" />
+                  Edit Order
+                </Button>
+              ) : (
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCancelEdit}
+                    disabled={updateOrderMutation.isPending}
+                  >
+                    <X className="h-4 w-4 mr-2" />
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={handleSaveOrder}
+                    disabled={updateOrderMutation.isPending || !editCustomerId}
+                  >
+                    {updateOrderMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4 mr-2" />
+                    )}
+                    Save
+                  </Button>
+                </div>
+              )}
           </CardHeader>
           <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <h3 className="font-medium mb-2">Customer Details</h3>
-                  <p className="text-sm">
-                    <span className="font-medium">Customer:</span> {order?.customer?.name || 'N/A'}
-                  </p>
-                  <p className="text-sm">
-                    <span className="font-medium">Contact:</span> {order?.customer?.contact_person || 'N/A'}
-                  </p>
-                  <p className="text-sm">
-                    <span className="font-medium">Email:</span> {order?.customer?.email || 'N/A'}
-                  </p>
-                  <p className="text-sm">
-                    <span className="font-medium">Phone:</span> {order?.customer?.phone || 'N/A'}
-                  </p>
+                  {!isEditMode ? (
+                    <>
+                      <p className="text-sm">
+                        <span className="font-medium">Customer:</span> {order?.customer?.name || 'N/A'}
+                      </p>
+                      <p className="text-sm">
+                        <span className="font-medium">Contact:</span> {order?.customer?.contact_person || 'N/A'}
+                      </p>
+                      <p className="text-sm">
+                        <span className="font-medium">Email:</span> {order?.customer?.email || 'N/A'}
+                      </p>
+                      <p className="text-sm">
+                        <span className="font-medium">Phone:</span> {order?.customer?.phone || 'N/A'}
+                      </p>
+                    </>
+                  ) : (
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-customer">Customer</Label>
+                      <Popover open={customerOpen} onOpenChange={setCustomerOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            role="combobox"
+                            aria-expanded={customerOpen}
+                            className="w-full justify-between"
+                            disabled={customersLoading}
+                          >
+                            {customersLoading
+                              ? 'Loading...'
+                              : (customers?.find((c) => c.id.toString() === editCustomerId)?.name || 'Select a customer')}
+                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
+                          <div className="flex h-full w-full flex-col overflow-hidden rounded-md bg-popover text-popover-foreground">
+                            <div className="flex items-center border-b px-3">
+                              <input
+                                className="flex h-11 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                placeholder="Search customers..."
+                                value={customerSearchTerm}
+                                onChange={(e) => setCustomerSearchTerm(e.target.value)}
+                              />
+                            </div>
+                            <div className="max-h-[300px] overflow-y-auto overflow-x-hidden">
+                              {filteredCustomers.length === 0 ? (
+                                <div className="py-6 text-center text-sm">No customer found.</div>
+                              ) : (
+                                <div className="overflow-hidden p-1 text-foreground">
+                                  {filteredCustomers.map((c) => (
+                                  <div
+                                    key={c.id}
+                                    className="relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+                                    onClick={() => {
+                                      setEditCustomerId(String(c.id));
+                                      setCustomerOpen(false);
+                                      setCustomerSearchTerm('');
+                                    }}
+                                  >
+                                    <Check
+                                      className={cn(
+                                        'mr-2 h-4 w-4',
+                                        editCustomerId === c.id.toString() ? 'opacity-100' : 'opacity-0'
+                                      )}
+                                    />
+                                    {c.name}
+                                  </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                      {editCustomerId && customers?.find(c => c.id.toString() === editCustomerId) && (
+                        <div className="text-xs text-muted-foreground space-y-1 mt-2">
+                          <p><span className="font-medium">Contact:</span> {customers.find(c => c.id.toString() === editCustomerId)?.contact_person || 'N/A'}</p>
+                          <p><span className="font-medium">Email:</span> {customers.find(c => c.id.toString() === editCustomerId)?.email || 'N/A'}</p>
+                          <p><span className="font-medium">Phone:</span> {customers.find(c => c.id.toString() === editCustomerId)?.phone || 'N/A'}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div>
                   <h3 className="font-medium mb-2">Order Information</h3>
-                  <p className="text-sm">
-                    <span className="font-medium">Order Date:</span> {order?.created_at && format(new Date(order.created_at), 'MMMM d, yyyy')}
-                  </p>
-                  <p className="text-sm">
-                    <span className="font-medium">Delivery Date:</span> {order?.delivery_date && format(new Date(order.delivery_date), 'MMMM d, yyyy')}
-                  </p>
-                  <p className="text-sm">
-                    <span className="font-medium">Status:</span> <StatusBadge status={order?.status?.status_name || 'Unknown'} />
-                  </p>
-                  <p className="text-sm">
-                    <span className="font-medium">Reference:</span> {order?.customer_reference || 'N/A'}
-                  </p>
+                  {!isEditMode ? (
+                    <>
+                      <p className="text-sm">
+                        <span className="font-medium">Order Date:</span> {order?.created_at && format(new Date(order.created_at), 'MMMM d, yyyy')}
+                      </p>
+                      <p className="text-sm">
+                        <span className="font-medium">Delivery Date:</span> {order?.delivery_date && format(new Date(order.delivery_date), 'MMMM d, yyyy')}
+                      </p>
+                      <p className="text-sm">
+                        <span className="font-medium">Status:</span> <StatusBadge status={order?.status?.status_name || 'Unknown'} />
+                      </p>
+                      <p className="text-sm">
+                        <span className="font-medium">Reference:</span> {order?.customer_reference || 'N/A'}
+                      </p>
+                    </>
+                  ) : (
+                    <div className="space-y-3">
+                      <div>
+                        <Label htmlFor="edit-order-number">Order Number</Label>
+                        <Input
+                          id="edit-order-number"
+                          value={editOrderNumber}
+                          onChange={(e) => setEditOrderNumber(e.target.value)}
+                          placeholder="Optional"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="edit-delivery-date">Delivery Date</Label>
+                        <Input
+                          id="edit-delivery-date"
+                          type="date"
+                          value={editDeliveryDate}
+                          onChange={(e) => setEditDeliveryDate(e.target.value)}
+                        />
+                      </div>
+                      <p className="text-sm">
+                        <span className="font-medium">Status:</span> <StatusBadge status={order?.status?.status_name || 'Unknown'} />
+                      </p>
+                    </div>
+                  )}
                 </div>
                 </div>
           </CardContent>
@@ -2585,47 +3012,126 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Product</TableHead>
-                      <TableHead className="text-right">Ordered</TableHead>
+                      <TableHead className="text-right">Quantity</TableHead>
                       <TableHead className="text-right">Reserved FG</TableHead>
                       <TableHead className="text-right">Remain to Explode</TableHead>
                       <TableHead className="text-right">Unit Price</TableHead>
                       <TableHead className="text-right">Total</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {order.details.map((detail: any) => (
-                      <TableRow key={detail.order_detail_id}>
-                        <TableCell>
-                          <div>
-                            <p className="font-medium">{detail.product?.name}</p>
-                            <p className="text-sm text-muted-foreground truncate max-w-md">
-                              {detail.product?.description || 'No description available'}
-                            </p>
-                          </div>
-                        </TableCell>
-                        {(() => {
-                          const coverage = coverageByProduct.get(detail.product_id) ?? {
-                            ordered: Number(detail.quantity ?? 0),
-                            reserved: 0,
-                            remain: Number(detail.quantity ?? 0),
-                            factor: 1,
-                          };
-                          return (
-                            <>
-                              <TableCell className="text-right">{formatQuantity(coverage.ordered)}</TableCell>
-                              <TableCell className="text-right">{formatQuantity(coverage.reserved)}</TableCell>
-                              <TableCell className="text-right">{formatQuantity(coverage.remain)}</TableCell>
-                            </>
-                          );
-                        })()}
-                        <TableCell className="text-right">{formatCurrency(detail.unit_price || 0)}</TableCell>
-                        <TableCell className="text-right">{formatCurrency((detail.quantity || 0) * (detail.unit_price || 0))}</TableCell>
-                      </TableRow>
-                    ))}
+                    {order.details.map((detail: any) => {
+                      const isEditing = editingDetailId === detail.order_detail_id;
+                      const coverage = coverageByProduct.get(detail.product_id) ?? {
+                        ordered: Number(detail.quantity ?? 0),
+                        reserved: 0,
+                        remain: Number(detail.quantity ?? 0),
+                        factor: 1,
+                      };
+
+                      return (
+                        <TableRow key={detail.order_detail_id}>
+                          <TableCell>
+                            <div>
+                              <p className="font-medium">{detail.product?.name}</p>
+                              <p className="text-sm text-muted-foreground truncate max-w-md">
+                                {detail.product?.description || 'No description available'}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {isEditing ? (
+                              <Input
+                                type="number"
+                                value={editQuantity}
+                                onChange={(e) => setEditQuantity(e.target.value)}
+                                className="w-24 text-right"
+                                min="0"
+                                step="0.01"
+                              />
+                            ) : (
+                              formatQuantity(coverage.ordered)
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">{formatQuantity(coverage.reserved)}</TableCell>
+                          <TableCell className="text-right">{formatQuantity(coverage.remain)}</TableCell>
+                          <TableCell className="text-right">
+                            {isEditing ? (
+                              <Input
+                                type="number"
+                                value={editUnitPrice}
+                                onChange={(e) => setEditUnitPrice(e.target.value)}
+                                className="w-28 text-right"
+                                min="0"
+                                step="0.01"
+                              />
+                            ) : (
+                              formatCurrency(detail.unit_price || 0)
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {isEditing ? (
+                              formatCurrency(parseFloat(editQuantity || '0') * parseFloat(editUnitPrice || '0'))
+                            ) : (
+                              formatCurrency((detail.quantity || 0) * (detail.unit_price || 0))
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {isEditing ? (
+                              <div className="flex gap-1 justify-end">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleSaveDetail(detail.order_detail_id)}
+                                  disabled={updateDetailMutation.isPending}
+                                >
+                                  {updateDetailMutation.isPending ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Check className="h-4 w-4" />
+                                  )}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={handleCancelDetailEdit}
+                                  disabled={updateDetailMutation.isPending}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="flex gap-1 justify-end">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleStartEditDetail(detail)}
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleDeleteDetail(detail.order_detail_id, detail.product?.name || 'this product')}
+                                  disabled={deleteDetailMutation.isPending}
+                                >
+                                  {deleteDetailMutation.isPending ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Trash className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              </div>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                   <TableFooter>
                     <TableRow>
-                      <TableCell colSpan={5}>Total</TableCell>
+                      <TableCell colSpan={6}>Total</TableCell>
                       <TableCell className="text-right">{formatCurrency(order.total_amount || 0)}</TableCell>
                     </TableRow>
                   </TableFooter>
@@ -3040,6 +3546,42 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
           {/* Content for documents tab */}
         </TabsContent>
       </Tabs>
+
+      {/* Delete Product Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove Product from Order</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to remove "{productToDelete?.name}" from this order?
+              This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={cancelDeleteProduct}
+              disabled={deleteDetailMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDeleteProduct}
+              disabled={deleteDetailMutation.isPending}
+            >
+              {deleteDetailMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Removing...
+                </>
+              ) : (
+                'Remove Product'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 } 

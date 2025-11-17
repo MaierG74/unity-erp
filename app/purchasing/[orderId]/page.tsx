@@ -5,19 +5,21 @@ import { ArrowLeft } from 'lucide-react';
 import { Metadata } from 'next';
 
 type OrderDetailPageProps = {
-  params: {
+  params: Promise<{
     orderId: string;
-  };
+  }>;
 };
 
-export function generateMetadata({ params }: OrderDetailPageProps): Metadata {
+export async function generateMetadata({ params }: OrderDetailPageProps): Promise<Metadata> {
+  const { orderId } = await params;
   return {
-    title: `Purchase Order #${params.orderId} | Unity ERP`,
+    title: `Purchase Order #${orderId} | Unity ERP`,
   };
 }
 
-export default function OrderDetailPage({ params }: OrderDetailPageProps) {
-  const orderId = parseInt(params.orderId, 10);
+export default async function OrderDetailPage({ params }: OrderDetailPageProps) {
+  const { orderId: orderIdParam } = await params;
+  const orderId = parseInt(orderIdParam, 10);
 
   return (
     <div className="space-y-6">

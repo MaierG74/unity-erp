@@ -21,6 +21,9 @@ Unity ERP's documentation spreads TODOs and open questions across domain guides,
 - **Implement stock issuance** — Status: _Completed_, Owner: _Unassigned_. ✅ Stock issuance functionality implemented on Order Detail page with BOM integration, PDF generation, and issuance tracking. Includes `process_stock_issuance` and `reverse_stock_issuance` RPC functions, `IssueStockTab` UI component, and `StockIssuancePDF` component. Source: [stock issuance plan](../plans/stock-issuance-plan.md), [implementation changelog](../changelogs/stock-issuance-implementation-20250104.md).
 - **Implement supplier returns** — Status: _Planning_, Owner: _Unassigned_. Build functionality to return goods to suppliers, handling both immediate rejections on delivery and later returns. Requires `supplier_order_returns` table, RPC function, and UI components. Source: [supplier returns plan](../plans/supplier-returns-plan.md).
 
+## Timekeeping
+- **Ensure double-time minutes are persisted** — Status: _Open_, Owner: _Unassigned_. Update `add_manual_clock_event_v2` (and any other summary writers) so inserts/updates to `time_daily_summary` always set `dt_minutes` (default 0 for non-Sunday days) to satisfy the new NOT NULL constraint and keep manual event entry unblocked. Also backfill existing rows. Source: [time & attendance working doc](../domains/timekeeping/time-attendance-working.md#database-tables-supabase).
+
 ## UI Tech Debt
 - **Avoid hard‑coded status IDs in dashboard** — Status: _Backlog_, Owner: _Unassigned_. Replace numeric `status_id` filters with name‑based joins to `supplier_order_statuses` in `app/purchasing/page.tsx` to avoid environment ID drift.
 

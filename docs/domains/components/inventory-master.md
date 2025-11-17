@@ -11,7 +11,8 @@
 - Reorder policies surface low stock and suggested quantities; purchasing converts these into POs.
 
 ## Primary UI Entrypoints
-- Inventory list: `app/inventory/page.tsx` (current canonical) — search, filters, inline edits, details pane.
+- Inventory list: `app/inventory/page.tsx` (current canonical) — tabbed interface with Components, Categories, On Order, Transactions, and Reports tabs.
+- Component detail: `app/inventory/components/[id]/page.tsx` — dedicated detail page with Overview, Edit, Inventory, Suppliers, Transactions, Orders, and Analytics tabs.
 - Alternative (modular) client: `app/inventory/inventory-client.tsx` — `DataGrid` + `InventoryFilters`.
 - Supplier view: `app/suppliers/[id]/page.tsx` → Components tab shows supplier-specific mappings.
 - Purchasing: `app/purchasing/purchase-orders/[id]/page.tsx` — receipts create movements and increase on‑hand.
@@ -44,8 +45,8 @@
 - Below Reorder: `inventory.quantity_on_hand < inventory.reorder_level` with joins to components and location.
 - Movement History: recent `inventory_transactions` for a component with IN/OUT/ADJUST totals.
 - Where Used: BOM/collections usage via `billofmaterials` and `bom_collections` (for shortages and planning).
-- On Order: Calculated from open purchase orders (`supplier_orders` where status is Open/In Progress/Approved/Partially Received/Pending Approval), showing `order_quantity - total_received` per component.
-- Required for Orders: Placeholder for future feature showing component demand from open customer orders.
+- On Order: Calculated from open purchase orders (`supplier_orders` where status is Open/In Progress/Approved/Partially Received/Pending Approval), showing `order_quantity - total_received` per component. Only includes `supplier_orders` linked to *existing* `purchase_orders` (via INNER JOIN), ensuring consistency with the Purchase Orders table display and excluding orphaned rows from deleted purchase orders.
+- Critical Components to Order: Shows components with global shortfalls across all active orders. Uses `get_global_component_requirements()` RPC to calculate shortfalls, ensuring consistency with order detail page calculations. Displays components where `global_real_shortfall > 0` or `global_apparent_shortfall > 0`.
 
 ## Permissions & RLS
 - Reads and writes enforced by Supabase RLS.

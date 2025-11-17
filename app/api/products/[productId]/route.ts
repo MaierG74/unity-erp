@@ -3,10 +3,11 @@ import { createClient } from '@supabase/supabase-js';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { productId: string } }
+  context: { params: Promise<{ productId: string }> }
 ) {
   try {
-    const productId = parseInt(params.productId, 10);
+    const { productId: productIdParam } = await context.params;
+    const productId = parseInt(productIdParam, 10);
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -69,10 +70,11 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { productId: string } }
+  context: { params: Promise<{ productId: string }> }
 ) {
   try {
-    const productId = parseInt(params.productId, 10);
+    const { productId: productIdParam } = await context.params;
+    const productId = parseInt(productIdParam, 10);
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -166,10 +168,11 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { productId: string } }
+  context: { params: Promise<{ productId: string }> }
 ) {
   try {
-    const productId = parseInt(params.productId, 10);
+    const { productId: productIdParam } = await context.params;
+    const productId = parseInt(productIdParam, 10);
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!

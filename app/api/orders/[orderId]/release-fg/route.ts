@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 type RouteParams = {
-  params: {
-    orderId: string;
-  };
+  orderId: string;
 };
 
 function parseOrderId(orderId: string | undefined): number | null {
@@ -16,8 +14,9 @@ function parseOrderId(orderId: string | undefined): number | null {
   return parsed;
 }
 
-export async function POST(_request: NextRequest, { params }: RouteParams) {
-  const orderId = parseOrderId(params?.orderId);
+export async function POST(_request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const { orderId: orderIdParam } = await context.params;
+  const orderId = parseOrderId(orderIdParam);
   if (!orderId) {
     return NextResponse.json({ error: 'Invalid order id' }, { status: 400 });
   }

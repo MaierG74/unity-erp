@@ -3,16 +3,20 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { ArrowLeft } from 'lucide-react';
-import { useState } from 'react';
+import { ArrowLeft, ChevronsUpDown, Check } from 'lucide-react';
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchQuotes } from '@/lib/db/quotes';
+import { fetchCustomers } from '@/lib/db/customers';
+import type { Customer } from '@/lib/db/customers';
 import { createOrder } from '@/lib/db/orders';
 import { useMutation } from '@tanstack/react-query';
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { useRouter } from 'next/navigation';
 import { Input } from '@/components/ui/input';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { cn } from '@/lib/utils';
 
 export default function NewOrderPage() {
   const router = useRouter();
@@ -40,6 +44,8 @@ export default function NewOrderPage() {
   };
 
   const [customerId, setCustomerId] = useState<string>('');
+  const [customerOpen, setCustomerOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
   const [orderNumber, setOrderNumber] = useState<string>('');
   const [deliveryDate, setDeliveryDate] = useState<string>('');
 
@@ -55,6 +61,23 @@ export default function NewOrderPage() {
     queryKey: ['quotes'],
     queryFn: () => fetchQuotes(),
   });
+
+  const { data: customers, isLoading: customersLoading } = useQuery<Customer[], Error>({
+    queryKey: ['customers'],
+    queryFn: () => fetchCustomers(),
+  });
+
+  const customersSorted = useMemo(
+    () => (customers || []).slice().sort((a, b) => a.name.localeCompare(b.name)),
+    [customers]
+  );
+
+  const filteredCustomers = useMemo(
+    () => customersSorted.filter(c =>
+      c.name.toLowerCase().startsWith(searchTerm.toLowerCase())
+    ),
+    [customersSorted, searchTerm]
+  );
 
   return (
     <div className="space-y-6">
@@ -108,8 +131,63 @@ export default function NewOrderPage() {
                   <h3 className="text-sm font-semibold text-muted-foreground">Create from Scratch</h3>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="sm:col-span-2">
-                      <Label htmlFor="customer-id">Customer ID</Label>
-                      <Input id="customer-id" placeholder="e.g. 12" value={customerId} onChange={(e) => setCustomerId(e.target.value)} />
+                      <Label htmlFor="customer-select">Customer</Label>
+                      <Popover open={customerOpen} onOpenChange={setCustomerOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            role="combobox"
+                            aria-expanded={customerOpen}
+                            className="w-full justify-between"
+                            disabled={customersLoading}
+                          >
+                            {customersLoading
+                              ? 'Loading...'
+                              : (customers?.find((c) => c.id.toString() === customerId)?.name || 'Select a customer')}
+                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
+                          <div className="flex h-full w-full flex-col overflow-hidden rounded-md bg-popover text-popover-foreground">
+                            <div className="flex items-center border-b px-3">
+                              <input
+                                className="flex h-11 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                placeholder="Search customers..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                              />
+                            </div>
+                            <div className="max-h-[300px] overflow-y-auto overflow-x-hidden">
+                              {filteredCustomers.length === 0 ? (
+                                <div className="py-6 text-center text-sm">No customer found.</div>
+                              ) : (
+                                <div className="overflow-hidden p-1 text-foreground">
+                                  {filteredCustomers.map((c) => (
+                                  <div
+                                    key={c.id}
+                                    className="relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+                                    onClick={() => {
+                                      setCustomerId(String(c.id));
+                                      setCustomerOpen(false);
+                                      setSearchTerm('');
+                                    }}
+                                  >
+                                    <Check
+                                      className={cn(
+                                        'mr-2 h-4 w-4',
+                                        customerId === c.id.toString() ? 'opacity-100' : 'opacity-0'
+                                      )}
+                                    />
+                                    {c.name}
+                                  </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
                     </div>
                     <div>
                       <Label htmlFor="order-number">Order Number (optional)</Label>
@@ -120,7 +198,7 @@ export default function NewOrderPage() {
                       <Input id="delivery-date" type="date" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} />
                     </div>
                   </div>
-                  <Button variant="secondary" onClick={handleCreateFromScratch} disabled={isCreating}>
+                  <Button variant="secondary" onClick={handleCreateFromScratch} disabled={isCreating || !customerId}>
                     {isCreating ? 'Creating...' : 'Create Empty Order'}
                   </Button>
                 </div>

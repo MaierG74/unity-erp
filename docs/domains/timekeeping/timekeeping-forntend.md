@@ -25,6 +25,7 @@ This document describes the current frontend implementation of Time & Attendance
     - Date picker and view mode (Legacy vs Timeline)
     - Loads staff, clock events, segments, daily summaries (React Query)
     - Mass actions dialog and processing buttons
+    - Inline filters (search by name, clocked in vs not clocked in, missing clock-out attention) share the same toolbar row as Mass Actions so the layout stays compact
     - Save attendance in legacy mode (`staff_hours`) and inline edits
     - Targeted cache refresh for a single staff member after edits
   - Important callbacks:
@@ -43,6 +44,7 @@ This document describes the current frontend implementation of Time & Attendance
   - Displays status, hours summary, clock events list, and computed segments
   - Provides add/edit/delete manual events; triggers staff-scoped processing
   - Shows “Missing clock-out” hint if last event is a `clock_in`
+  - Uses design tokens (`bg-card`, `bg-muted`, `text-foreground`, shadcn `Button` variants) so the entire timeline stays legible in both light and dark mode; avoid reintroducing hard-coded gray/white values when tweaking the UI.
 
 - `components/features/staff/MassClockActionDialog.tsx`
   - UI to apply a clock in/out time to multiple staff at once for the selected date
@@ -146,4 +148,3 @@ See additional detail in:
 - Add weekly summary view and payroll-ready exports directly in the frontend.
 - Re-enable realtime sync when performance allows, scoped to per-staff channels.
 - Consolidate legacy `staff_hours` with `time_daily_summary` write path or add reconciliation.
-

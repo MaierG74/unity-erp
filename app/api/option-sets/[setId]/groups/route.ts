@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-interface RouteParams {
-  params: {
-    setId?: string;
-  };
-}
+type RouteParams = {
+  setId?: string;
+};
 
 function parseId(value?: string): number | null {
   if (!value) return null;
@@ -22,7 +20,8 @@ function getSupabaseAdmin() {
   return createClient(url, key);
 }
 
-export async function POST(request: NextRequest, { params }: RouteParams) {
+export async function POST(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const params = await context.params;
   const setId = parseId(params.setId);
   if (!setId) {
     return NextResponse.json({ error: 'Invalid option set id' }, { status: 400 });

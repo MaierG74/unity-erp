@@ -75,6 +75,10 @@ export function OnOrderTab() {
             total_received,
             purchase_order_id,
             q_number,
+            purchase_order:purchase_orders!inner (
+              purchase_order_id,
+              q_number
+            ),
             suppliercomponents!inner (
               component_id
             ),
@@ -287,6 +291,8 @@ export function OnOrderTab() {
                           <Link
                             key={idx}
                             href={`/purchasing/purchase-orders/${po.po_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
                             className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline"
                           >
                             PO {po.order_number} ({po.pending_quantity} units)
