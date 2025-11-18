@@ -70,8 +70,14 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - [`technical/smoke-tests.md`](technical/smoke-tests.md) – How to run the Purchasing smoke test
   - See also: [`changelogs/nextjs-server-build-fix-20251107.md`](changelogs/nextjs-server-build-fix-20251107.md) for Next.js build troubleshooting
 - Migrations: [`../migrations/README.md`](../migrations/README.md) – Database migration files and instructions
-- Scope Documents:
+ - Scope Documents:
   - [`scopes/Unity_ERP_Scope.md`](scopes/Unity_ERP_Scope.md) – High-level Unity ERP system overview
   - [`scopes/scope_authentication.md`](scopes/scope_authentication.md) – Authentication and User Roles mini scope
+  - [`scopes/scope_inventory_stock_control.md`](scopes/scope_inventory_stock_control.md) – Inventory & Stock Control mini scope
+  - [`scopes/scope_procurement_supplier_management.md`](scopes/scope_procurement_supplier_management.md) – Procurement & Supplier Management mini scope
+  - [`scopes/scope_job_cards_work_orders.md`](scopes/scope_job_cards_work_orders.md) – Job Cards & Work Orders mini scope
+  - [`scopes/scope_dashboard_reporting.md`](scopes/scope_dashboard_reporting.md) – Dashboard & Reporting mini scope
+  - [`scopes/scope_invoicing_payments.md`](scopes/scope_invoicing_payments.md) – Invoicing & Payments mini scope
+  - [`scopes/scope_integrations_automation.md`](scopes/scope_integrations_automation.md) – Integrations & Automation mini scope
 
 Use relative links when creating new docs so that navigation remains stable across moves. When referencing plans, prefer `docs/plans/...` paths to keep the directory consistent.
