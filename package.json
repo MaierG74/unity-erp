@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "npx next dev",
-    "build": "npx next build",
-    "start": "npx next start",
-    "lint": "npx next lint",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
     "schema": "tsx scripts/get-schema.ts",
     "seed": "tsx scripts/seed-test-data.ts",
     "init-purchasing": "tsx scripts/init-purchasing-data.ts",
@@ -18,6 +18,7 @@
     "smoke:cleanup": "tsx scripts/cleanup-smoke.ts"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.2.8",
     "@hookform/resolvers": "^4.1.0",
     "@radix-ui/react-alert-dialog": "^1.1.6",
     "@radix-ui/react-avatar": "^1.1.3",

@@ -134,16 +134,16 @@ const styles = StyleSheet.create({
     minHeight: 40,
   },
   signatureSection: {
-    marginTop: 40,
+    marginTop: 20,
     borderTopWidth: 1,
     borderTopColor: '#CCCCCC',
     borderTopStyle: 'solid',
-    paddingTop: 20,
+    paddingTop: 10,
   },
   signatureRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 30,
+    marginBottom: 20,
   },
   signatureBox: {
     width: 220,
@@ -151,7 +151,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#000000',
     borderBottomStyle: 'solid',
     paddingBottom: 5,
-    marginTop: 40,
+    marginTop: 20,
   },
   signatureLabel: {
     fontSize: 9,
@@ -418,7 +418,7 @@ export const ReturnGoodsPDFDocument: React.FC<ReturnGoodsPDFProps> = ({
         )}
 
         {/* Signature Section */}
-        <View style={styles.signatureSection}>
+        <View style={styles.signatureSection} wrap={false}>
           <View style={styles.signatureRow}>
             <View style={styles.signatureBox}>
               <Text style={styles.signatureLabel}>Operator (Name & Signature)</Text>
@@ -440,7 +440,7 @@ export const ReturnGoodsPDFDocument: React.FC<ReturnGoodsPDFProps> = ({
         </View>
 
         {/* Footer */}
-        <View style={styles.footer}>
+        <View style={styles.footer} fixed>
           <Text style={{ marginBottom: 3 }}>
             This document confirms the return of goods to supplier.
           </Text>

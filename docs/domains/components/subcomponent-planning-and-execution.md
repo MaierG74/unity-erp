@@ -3,20 +3,11 @@
 This document proposes a complete approach for reusable, composable sets of components and labor that can be attached to a product’s Bill of Materials (BOM) and Bill of Labor (BOL). These sets are called collections and enable faster product setup, consistency, and reliable costing.
 
 ## Current Status (collections)
-- Status field: `status` shows `draft | published | archived`. Today it is informational only.
-- Using a draft: You can Apply (copy) a draft collection to a product’s BOM; no publish required.
-- Publish workflow: Not wired in the UI yet. When we add the Publish action it will bump `version` and set `status='published'`, so products can pin a version when using Attach (dynamic).
+- Status field: `status` shows `draft | published | archived`.
+- Using a draft: You can Apply (copy) a draft collection to a product’s BOM.
+- Publish workflow: **Implemented.** The "Publish" action bumps `version` and sets `status='published'`.
 - Attach (dynamic): Not implemented yet; Phase 2. Until then, Apply (copy) is the supported flow.
 - Merge-on-apply: Not enforced yet; applying adds rows as-is. A follow-up will sum duplicates by `component_id`.
-
-Temporary manual publish (until UI exists):
-```
--- Bump version and mark published for one collection
-update public.bom_collections
-set version = version + 1,
-    status = 'published'
-where collection_id = :id;
-```
 
 ## Decisions Pending
 - Apply: merge duplicates on apply (sum by `component_id`) vs keep separate rows; potentially make it a toggle.
@@ -271,15 +262,16 @@ We can implement via Supabase client calls or dedicated API routes. A pragmatic 
 If fully implemented, the following files/directories will be touched or added:
 
 - New
-  - `app/api/collections/route.ts` and `app/api/collections/[id]/route.ts`
+  - `app/api/collections/route.ts` and `app/api/collections/[id]/route.ts` **(Implemented)**
+  - `app/api/collections/[id]/publish/route.ts` **(Implemented)**
+  - `components/features/collections/CollectionsList.tsx` **(Implemented)**
+  - `components/features/collections/CollectionEditor.tsx` **(Implemented)**
   - `app/api/products/[productId]/bom/attach-collection/route.ts`
   - `app/api/products/[productId]/bom/apply-collection/route.ts`
-  - `components/features/collections/CollectionsList.tsx`
-  - `components/features/collections/CollectionEditor.tsx`
   - `components/features/products/AddFromCollectionDialog.tsx` (BOM)
   - `components/features/products/AddLaborCollectionDialog.tsx` (BOL, later)
   - `lib/collections.ts` — helpers (resolve effective BOM, merge rules)
-  - `migrations/XXXX_create_bom_collections.sql`
+  - `migrations/XXXX_create_bom_collections.sql` **(Implemented)**
 
 - Updated
   - `components/features/products/product-bom.tsx` — add button + preview + post attach/apply

@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Suspense, lazy, useState, useEffect } from 'react';
+import { Suspense, lazy } from 'react';
 
 // Lazy load tab components
 const SupplierForm = lazy(() => import('@/components/features/suppliers/supplier-form').then(m => ({ default: m.SupplierForm })));
@@ -38,13 +38,7 @@ export default function SupplierDetailPage() {
   const queryClient = useQueryClient();
   const supplierId = Number(params.id);
   const defaultTab = searchParams?.get('tab') || 'details';
-  const [activeTab, setActiveTab] = useState(defaultTab);
-
-  // Update active tab when URL param changes
-  useEffect(() => {
-    const tab = searchParams?.get('tab') || 'details';
-    setActiveTab(tab);
-  }, [searchParams]);
+  const activeTab = searchParams?.get('tab') || 'details';
 
   const { data: supplier, isLoading, error } = useQuery({
     queryKey: ['supplier', supplierId],
@@ -131,7 +125,13 @@ export default function SupplierDetailPage() {
         <h1 className="text-3xl font-bold">{supplier.name}</h1>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => {
+          router.push(`/suppliers/${supplierId}?tab=${value}`);
+        }}
+        className="space-y-4"
+      >
         <TabsList>
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="emails">Emails</TabsTrigger>

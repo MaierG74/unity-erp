@@ -1,11 +1,11 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState, Fragment } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
-import { RefreshCw, AlertTriangle, Package, TrendingDown, BarChart3 } from 'lucide-react';
+import { RefreshCw, AlertTriangle, Package, TrendingDown, BarChart3, ChevronDown, ChevronRight } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { AffectedOrders } from './AffectedOrders';
 
 type Component = {
   component_id: number;
@@ -46,6 +47,11 @@ type CriticalComponent = {
 export function ReportsTab() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [expandedComponentId, setExpandedComponentId] = useState<number | null>(null);
+
+  const toggleExpand = (componentId: number) => {
+    setExpandedComponentId(expandedComponentId === componentId ? null : componentId);
+  };
 
   // Fetch all components with inventory
   const { data: components = [], isLoading, error } = useQuery({
@@ -107,12 +113,12 @@ export function ReportsTab() {
       try {
         // Use the RPC function that properly accounts for FG reservations and calculates global shortfalls
         const { data, error } = await supabase.rpc('get_global_component_requirements');
-        
+
         if (error) {
           console.error('Error fetching critical components:', error);
           throw error;
         }
-        
+
         if (!data || data.length === 0) return [];
 
         // Filter to only components with actual shortfalls (global or per-order)
@@ -126,7 +132,7 @@ export function ReportsTab() {
           .map((item: any) => {
             const globalShortfall = Number(item.global_real_shortfall || 0);
             const apparentShortfall = Number(item.global_apparent_shortfall || 0);
-            
+
             return {
               component_id: item.component_id,
               internal_code: item.internal_code,
@@ -384,68 +390,86 @@ export function ReportsTab() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-[50px]"></TableHead>
                     <TableHead>Code</TableHead>
                     <TableHead>Description</TableHead>
                     <TableHead className="text-right">Current</TableHead>
                     <TableHead className="text-right">On Order</TableHead>
                     <TableHead className="text-right">Required</TableHead>
                     <TableHead className="text-right">Shortage</TableHead>
-                    <TableHead>Affected Orders</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {criticalComponents.map((component) => {
-                    const shortage = component.severity === 'critical' 
-                      ? component.projectedShortage 
+                    const shortage = component.severity === 'critical'
+                      ? component.projectedShortage
                       : component.immediateShortage;
-                    
+                    const isExpanded = expandedComponentId === component.component_id;
+
                     return (
-                      <TableRow
-                        key={component.component_id}
-                        className={
-                          component.severity === 'critical'
-                            ? 'bg-red-50 hover:bg-red-100'
-                            : 'bg-amber-50 hover:bg-amber-100'
-                        }
-                      >
-                        <TableCell className="font-medium">
-                          <a
-                            href={`/inventory/components/${component.component_id}`}
-                            className="text-blue-600 hover:underline"
-                          >
-                            {component.internal_code}
-                          </a>
-                        </TableCell>
-                        <TableCell className="text-sm max-w-[200px] truncate">
-                          {component.description || '-'}
-                        </TableCell>
-                        <TableCell className="text-right font-semibold">
-                          {component.currentStock}
-                        </TableCell>
-                        <TableCell className="text-right text-blue-600">
-                          {component.onOrder}
-                        </TableCell>
-                        <TableCell className="text-right text-purple-600 font-semibold">
-                          {component.required}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Badge
-                            variant={component.severity === 'critical' ? 'destructive' : 'default'}
-                            className={
-                              component.severity === 'critical'
-                                ? ''
-                                : 'bg-amber-600 hover:bg-amber-700'
-                            }
-                          >
-                            -{shortage}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-xs max-w-[200px]">
-                          <div className="truncate" title={component.affectedOrders.join(', ')}>
-                            {component.affectedOrders.join(', ')}
-                          </div>
-                        </TableCell>
-                      </TableRow>
+                      <Fragment key={component.component_id}>
+                        <TableRow
+                          className={
+                            component.severity === 'critical'
+                              ? 'bg-red-50 hover:bg-red-100'
+                              : 'bg-amber-50 hover:bg-amber-100'
+                          }
+                        >
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              onClick={() => toggleExpand(component.component_id)}
+                            >
+                              {isExpanded ? (
+                                <ChevronDown className="h-4 w-4" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            <a
+                              href={`/inventory/components/${component.component_id}`}
+                              className="text-blue-600 hover:underline"
+                            >
+                              {component.internal_code}
+                            </a>
+                          </TableCell>
+                          <TableCell className="text-sm max-w-[200px] truncate">
+                            {component.description || '-'}
+                          </TableCell>
+                          <TableCell className="text-right font-semibold">
+                            {component.currentStock}
+                          </TableCell>
+                          <TableCell className="text-right text-blue-600">
+                            {component.onOrder}
+                          </TableCell>
+                          <TableCell className="text-right text-purple-600 font-semibold">
+                            {component.required}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Badge
+                              variant={component.severity === 'critical' ? 'destructive' : 'default'}
+                              className={
+                                component.severity === 'critical'
+                                  ? ''
+                                  : 'bg-amber-600 hover:bg-amber-700'
+                              }
+                            >
+                              -{shortage}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                        {isExpanded && (
+                          <TableRow className="bg-muted/20">
+                            <TableCell colSpan={7} className="p-4">
+                              <AffectedOrders componentId={component.component_id} />
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
                     );
                   })}
                 </TableBody>
@@ -457,4 +481,3 @@ export function ReportsTab() {
     </div>
   );
 }
-

@@ -2,19 +2,24 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Plus, Search } from 'lucide-react'
 
 type CollectionRow = {
   collection_id: number
   code: string
   name: string
-  status: string
+  status: 'draft' | 'published' | 'archived'
   version: number
   updated_at: string
 }
 
 export default function CollectionsList() {
+  const router = useRouter()
   const [q, setQ] = useState('')
   const [loading, setLoading] = useState(false)
   const [rows, setRows] = useState<CollectionRow[]>([])
@@ -36,63 +41,83 @@ export default function CollectionsList() {
     load()
   }, [])
 
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'published': return 'default' // primary
+      case 'draft': return 'secondary'
+      case 'archived': return 'outline'
+      default: return 'secondary'
+    }
+  }
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div className="flex gap-2 items-center">
+        <div className="relative w-72">
+          <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search collections..."
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            className="w-64"
+            onKeyDown={(e) => e.key === 'Enter' && load(q)}
+            className="pl-8"
           />
-          <Button variant="outline" onClick={() => load(q)} disabled={loading}>
-            Search
-          </Button>
         </div>
         <Link href="/collections/new">
-          <Button>New Collection</Button>
+          <Button>
+            <Plus className="mr-2 h-4 w-4" />
+            New Collection
+          </Button>
         </Link>
       </div>
 
-      <div className="rounded-md border">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left">
-              <th className="p-3">Code</th>
-              <th className="p-3">Name</th>
-              <th className="p-3">Status</th>
-              <th className="p-3">Version</th>
-              <th className="p-3">Updated</th>
-              <th className="p-3">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr>
-                <td className="p-4 text-muted-foreground" colSpan={6}>
-                  {loading ? 'Loading…' : 'No collections found'}
-                </td>
-              </tr>
-            ) : (
-              rows.map((r) => (
-                <tr key={r.collection_id} className="border-t">
-                  <td className="p-3 font-mono">{r.code}</td>
-                  <td className="p-3">{r.name}</td>
-                  <td className="p-3">{r.status}</td>
-                  <td className="p-3">{r.version}</td>
-                  <td className="p-3">{new Date(r.updated_at).toLocaleString()}</td>
-                  <td className="p-3">
-                    <Link href={`/collections/${r.collection_id}`} className="underline">
-                      Edit
-                    </Link>
-                  </td>
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg font-medium">All Collections</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="rounded-md border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr className="text-left">
+                  <th className="p-3 font-medium text-muted-foreground">Code</th>
+                  <th className="p-3 font-medium text-muted-foreground">Name</th>
+                  <th className="p-3 font-medium text-muted-foreground">Status</th>
+                  <th className="p-3 font-medium text-muted-foreground">Version</th>
+                  <th className="p-3 font-medium text-muted-foreground">Updated</th>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              </thead>
+              <tbody>
+                {rows.length === 0 ? (
+                  <tr>
+                    <td className="p-8 text-center text-muted-foreground" colSpan={5}>
+                      {loading ? 'Loading collections…' : 'No collections found'}
+                    </td>
+                  </tr>
+                ) : (
+                  rows.map((r) => (
+                    <tr
+                      key={r.collection_id}
+                      className="border-t hover:bg-muted/50 transition-colors cursor-pointer"
+                      onClick={() => router.push(`/collections/${r.collection_id}`)}
+                    >
+                      <td className="p-3 font-mono font-medium">{r.code}</td>
+                      <td className="p-3">{r.name}</td>
+                      <td className="p-3">
+                        <Badge variant={getStatusColor(r.status) as any}>
+                          {r.status}
+                        </Badge>
+                      </td>
+                      <td className="p-3 text-muted-foreground">v{r.version}</td>
+                      <td className="p-3 text-muted-foreground">{new Date(r.updated_at).toLocaleDateString()}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }

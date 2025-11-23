@@ -199,10 +199,11 @@ export async function GET(
     const primaryEmail = emailRecords.find(e => e.is_primary)?.email || emailRecords[0]?.email;
 
     // Fetch company info for PDF header
+    // Fetch company info for PDF header
     const { data: settings } = await supabaseAdmin
       .from('quote_company_settings')
       .select('*')
-      .eq('setting_id', 1)
+      .limit(1)
       .single();
 
     const companyAddressParts = [
