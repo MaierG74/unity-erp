@@ -77,6 +77,7 @@ export type PurchaseOrderFormData = {
     component_id: number;
     supplier_component_id: number;
     quantity: number;
+    customer_order_id?: number | null;
   }[];
 };
 

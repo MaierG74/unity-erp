@@ -19,6 +19,26 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { supabase } from '@/lib/supabase';
 import { ReturnGoodsPDFDownload } from '@/components/features/purchasing/ReturnGoodsPDFDownload';
+import { useQuery } from '@tanstack/react-query';
+
+// Helper to format company info
+const getCompanyInfo = (settings: any) => {
+  if (!settings) return undefined;
+
+  const addressParts = [
+    settings.address_line1,
+    settings.address_line2,
+    [settings.city, settings.postal_code].filter(Boolean).join(' ').trim(),
+    settings.country,
+  ].filter((part: any) => part && part.length > 0);
+
+  return {
+    name: settings.company_name,
+    address: addressParts.join('\n'),
+    phone: settings.phone,
+    email: settings.email,
+  };
+};
 
 // Form validation schema
 const receiveItemsSchema = z.object({
@@ -103,6 +123,24 @@ export function ReceiveItemsModal({
   const [emailError, setEmailError] = useState<string | null>(null);
 
   const remainingToReceive = Math.max(0, supplierOrder.order_quantity - (supplierOrder.total_received || 0));
+
+  // Fetch company settings
+  const { data: companySettings } = useQuery({
+    queryKey: ['companySettings'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('quote_company_settings')
+        .select('*')
+        .limit(1)
+        .single();
+
+      if (error) {
+        console.error('Error fetching company settings:', error);
+        return null;
+      }
+      return data;
+    },
+  });
 
   const {
     register,
@@ -436,6 +474,7 @@ export function ReceiveItemsModal({
                     supplierInfo={{
                       supplier_name: supplierOrder.supplier_component.supplier.name,
                     }}
+                    companyInfo={getCompanyInfo(companySettings)}
                     returnType="rejection"
                   />
                 </div>

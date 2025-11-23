@@ -46,7 +46,7 @@ export function SupplierList() {
 
     return suppliers
       .filter((supplier) => {
-        const matchesSearch = 
+        const matchesSearch =
           supplier.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
           (supplier.contact_info?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
           (supplier.emails?.some(e => e.email.toLowerCase().includes(searchTerm.toLowerCase())) || false);
@@ -184,12 +184,14 @@ export function SupplierList() {
                 key={supplier.supplier_id}
                 className="border-b odd:bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer"
                 onClick={() => router.push(`/suppliers/${supplier.supplier_id}`)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') router.push(`/suppliers/${supplier.supplier_id}`);
-                }}
-                tabIndex={0}
                 role="button"
-                aria-label={`View details for ${supplier.name}`}
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    router.push(`/suppliers/${supplier.supplier_id}`);
+                  }
+                }}
               >
                 <td className="p-4">
                   <div className="flex items-center">

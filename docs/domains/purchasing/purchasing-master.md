@@ -72,8 +72,8 @@
 
 - Form groups items by supplier and uses the transactional RPC `create_purchase_order_with_lines` so the purchase order header
   and supplier order rows are inserted atomically.
-  - Payload: `{ supplier_id, customer_order_id: null, line_items: [{ supplier_component_id, order_quantity, component_id, quantity_for_order: 0, quantity_for_stock }] }`.
-  - UI builds one payload per supplier, setting `quantity_for_stock` to the entered quantity and leaving `customer_order_id` null so no junction rows are created.
+  - Payload: `{ supplier_id, line_items: [{ supplier_component_id, order_quantity, component_id, quantity_for_order, quantity_for_stock, customer_order_id }] }`.
+  - UI builds one payload per supplier. Each line item can be optionally linked to a specific `customer_order_id`. If linked, `quantity_for_order` is set; otherwise, it defaults to `quantity_for_stock`.
   - Entry point: `components/features/purchasing/new-purchase-order-form.tsx:210`.
 
 **Create POs From Sales Order**
@@ -116,7 +116,7 @@
   - Call the transactional RPC `process_supplier_order_receipt` to insert the inventory transaction, create the receipt record, update `inventory`, and recompute `supplier_orders.total_received`/status in one transaction.
   - If items are rejected, also call `process_supplier_order_return` with type='rejection' to record gate rejections (no inventory impact).
   - Generate GRN (Goods Return Number) for any rejections.
-  - Show success state with PDF download and email notification options.
+  - Show success state with PDF download and email notification options. The PDF generation fetches company settings (logo, address) from `quote_company_settings` to ensure correct branding.
 - **Auto-refresh:** After receiving stock, the page automatically updates without manual refresh. The mutation invalidates and refetches queries with `refetchOnMount: true` and `staleTime: 0` configured on the purchase order query. Both inline per-row receipts (`receiveOneMutation`) and bulk receipts (`receiptMutation`) trigger immediate refetch of active queries.
 - Receipt history renders under the PO with all receipts per line: `app/purchasing/purchase-orders/[id]/page.tsx:760`. Detail page implementation lives in `components/features/purchasing/order-detail.tsx`.
 - Deployment: apply `supabase/migrations/20251107_process_supplier_receipt.sql` via the Supabase CLI (`supabase db push` after linking the project) or run the script directly in SQL to enable the RPC before deploying updated UI.

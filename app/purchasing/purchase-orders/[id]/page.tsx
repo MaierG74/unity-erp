@@ -18,10 +18,11 @@ import {
 } from '@/components/ui/dialog';
 import { EmailOverrideDialog, EmailRecipientRow, EmailOverride, EmailOption } from './EmailOverrideDialog';
 import { ReceiveItemsModal } from './ReceiveItemsModal';
+import { BulkReceiveModal } from './BulkReceiveModal';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertCircle, ArrowLeft, Loader2, CheckCircle2 } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Loader2, CheckCircle2, Mail } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import styles from './page.module.css';
@@ -30,7 +31,7 @@ import styles from './page.module.css';
 // Status badge component
 function StatusBadge({ status, className }: { status: string; className?: string }) {
   let variant: 'default' | 'outline' | 'secondary' | 'destructive' | 'success' = 'default';
-  
+
   switch (status.toLowerCase()) {  // Make case-insensitive
     case 'draft':
       variant = 'secondary';  // Gray
@@ -53,10 +54,10 @@ function StatusBadge({ status, className }: { status: string; className?: string
     default:
       variant = 'outline';    // Gray outline
   }
-  
+
   return (
-    <Badge 
-      variant={variant} 
+    <Badge
+      variant={variant}
       className={cn(
         "text-xs font-medium",
         className
@@ -110,6 +111,7 @@ interface SupplierOrder {
     supplier_code: string;
     price: number;
     component: {
+      component_id: number;
       internal_code: string;
       description: string;
     };
@@ -126,7 +128,7 @@ interface SupplierOrder {
 type SupplierOrderWithParent = SupplierOrder & {
   purchase_order: {
     purchase_order_id: number;
-    q_number: string | null;
+    q_number: string;
   };
 };
 
@@ -162,7 +164,8 @@ async function fetchPurchaseOrderById(id: string) {
         supplier_component:suppliercomponents(
           supplier_code,
           price,
-          component:components(
+            component:components(
+            component_id,
             internal_code,
             description
           ),
@@ -236,12 +239,12 @@ async function approvePurchaseOrder(id: string, qNumber: string): Promise<{ id: 
 
     // Get current user
     const { data: { user }, error: userError } = await supabase.auth.getUser();
-    
+
     if (userError || !user) {
       console.error('Error getting current user:', userError);
       throw new Error('Could not get current user');
     }
-    
+
     // 2. Update the purchase order
     const { error: updateError } = await supabase
       .from('purchase_orders')
@@ -252,7 +255,7 @@ async function approvePurchaseOrder(id: string, qNumber: string): Promise<{ id: 
         approved_by: user.id
       })
       .eq('purchase_order_id', id);
-    
+
     if (updateError) {
       console.error('Error approving purchase order:', updateError);
       throw new Error(`Failed to update purchase order status: ${updateError.message}`);
@@ -270,7 +273,7 @@ async function approvePurchaseOrder(id: string, qNumber: string): Promise<{ id: 
       console.error('Error updating supplier orders:', ordersUpdateError);
       throw new Error('Failed to update supplier orders status');
     }
-    
+
     // 4. Call the email API to send emails to suppliers
     try {
       const response = await fetch('/api/send-purchase-order-email', {
@@ -281,8 +284,8 @@ async function approvePurchaseOrder(id: string, qNumber: string): Promise<{ id: 
         body: JSON.stringify({ purchaseOrderId: id }),
       });
 
-  const handleOpenEmailDialog = () => {}
-      
+      const handleOpenEmailDialog = () => { }
+
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         // Don't throw error, just log it - we don't want to fail the approval if email fails
@@ -311,12 +314,12 @@ async function submitForApproval(id: string) {
     .select('status_id')
     .eq('status_name', 'Pending Approval')
     .single();
-  
+
   if (statusError) {
     console.error('Error fetching pending approval status:', statusError);
     throw new Error('Failed to fetch pending approval status');
   }
-  
+
   // 2. Update the purchase order
   const { error: updateError } = await supabase
     .from('purchase_orders')
@@ -324,12 +327,12 @@ async function submitForApproval(id: string) {
       status_id: statusData.status_id,
     })
     .eq('purchase_order_id', id);
-  
+
   if (updateError) {
     console.error('Error submitting purchase order:', updateError);
     throw new Error('Failed to submit purchase order');
   }
-  
+
   // 3. Update all related supplier orders
   const { error: ordersUpdateError } = await supabase
     .from('supplier_orders')
@@ -337,12 +340,12 @@ async function submitForApproval(id: string) {
       status_id: statusData.status_id,
     })
     .eq('purchase_order_id', id);
-  
+
   if (ordersUpdateError) {
     console.error('Error updating supplier orders:', ordersUpdateError);
     throw new Error('Failed to update supplier orders');
   }
-  
+
   return id;
 }
 
@@ -562,7 +565,7 @@ function getOrderStatus(order: PurchaseOrder) {
   const allReceived = order.supplier_orders.every(
     so => so.order_quantity > 0 && so.total_received === so.order_quantity
   );
-  
+
   const someReceived = order.supplier_orders.some(
     so => (so.total_received || 0) > 0 && so.total_received !== so.order_quantity
   );
@@ -589,6 +592,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const [emailDialogLoading, setEmailDialogLoading] = useState(false);
   const [emailRows, setEmailRows] = useState<EmailRecipientRow[]>([]);
   const [receiveModalOpen, setReceiveModalOpen] = useState(false);
+  const [bulkReceiveModalOpen, setBulkReceiveModalOpen] = useState(false);
   const [selectedOrderForReceive, setSelectedOrderForReceive] = useState<SupplierOrderWithParent | null>(null);
   const handleReceiveModalChange = (open: boolean) => {
     setReceiveModalOpen(open);
@@ -639,7 +643,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
 
     headerEl.style.setProperty('--po-header-offset', `${headerEl.offsetTop}px`);
   }, [purchaseOrder]);
-  
+
   // Set initial Q number if available
   useEffect(() => {
     if (purchaseOrder?.q_number) {
@@ -717,12 +721,12 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
       ...order,
       purchase_order: {
         purchase_order_id: purchaseOrder.purchase_order_id,
-        q_number: purchaseOrder.q_number,
+        q_number: purchaseOrder.q_number || '',
       },
     });
     setReceiveModalOpen(true);
   };
-  
+
   // Approve purchase order mutation
   const approveMutation = useMutation({
     mutationFn: (data: { qNumber: string }) =>
@@ -770,7 +774,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
       setError(error.message);
     },
   });
-  
+
   // Submit for approval mutation
   const submitMutation = useMutation({
     mutationFn: () => submitForApproval(id),
@@ -782,7 +786,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
       setError(`Failed to submit purchase order: ${error.message}`);
     },
   });
-  
+
   // Add receipt mutation
   const receiptMutation = useMutation({
     mutationFn: () => receiveStock(id, receiptQuantities),
@@ -815,7 +819,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
       setError(`Failed to receive stock: ${error.message}`);
     },
   });
-  
+
   // Inline per-row receipt mutation
   const receiveOneMutation = useMutation({
     mutationFn: (payload: { orderId: string; qty: number }) =>
@@ -957,13 +961,13 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
       });
     },
   });
-  
+
   // Handle submit for approval
   const handleSubmit = () => {
     setError(null);
     submitMutation.mutate();
   };
-  
+
   // Handle approval with Q number validation
   const handleApprove = () => {
     if (!qNumber.trim()) {
@@ -975,11 +979,11 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
       setError('Q number must be in the format Q23-001 (Q + year + hyphen + 3-digit number)');
       return;
     }
-    
+
     setError(null);
     approveMutation.mutate({ qNumber });
   };
-  
+
   // Handle receipt quantity change
   const handleReceiptQuantityChange = (orderId: string, quantity: string) => {
     setReceiptQuantities(prev => ({
@@ -987,7 +991,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
       [orderId]: parseInt(quantity) || 0
     }));
   };
-  
+
   // Handle submit receipts
   const handleSubmitReceipts = () => {
     setError(null);
@@ -1042,7 +1046,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     const invalidReturns = Object.entries(returnQuantities).filter(
       ([_, data]) => data.quantity > 0 && (!data.reason || data.reason.trim() === '')
     );
-    
+
     if (invalidReturns.length > 0) {
       setError('Please provide a reason for all returns');
       return;
@@ -1061,7 +1065,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     setError(null);
     returnMutation.mutate();
   };
-  
+
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px]">
@@ -1070,7 +1074,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
       </div>
     );
   }
-  
+
   if (isError) {
     return (
       <div className="space-y-4">
@@ -1082,29 +1086,29 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           </Link>
           <h1 className="text-2xl font-bold">Purchase Order Not Found</h1>
         </div>
-        
+
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
             {queryError instanceof Error ? queryError.message : 'Failed to load purchase order'}
           </AlertDescription>
         </Alert>
-        
+
         <Link href="/purchasing/purchase-orders">
           <Button>Return to Purchase Orders</Button>
         </Link>
       </div>
     );
   }
-  
+
   if (!purchaseOrder) {
     return notFound();
   }
-  
+
   const isPendingApproval = purchaseOrder.status?.status_name === 'Pending Approval';
   const isDraft = purchaseOrder.status?.status_name === 'Draft';
   const isApproved = purchaseOrder.status?.status_name === 'Approved';
-  
+
   // Calculate totals
   const totalItems = purchaseOrder.supplier_orders?.reduce((sum, order) => sum + order.order_quantity, 0) || 0;
   const totalAmount = purchaseOrder.supplier_orders?.reduce((sum, order) => {
@@ -1113,7 +1117,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const totalReceived = purchaseOrder.supplier_orders?.reduce((sum, order) => {
     return sum + (order.total_received || 0);
   }, 0) || 0;
-  
+
   return (
     <div className="space-y-6">
       {/* Sticky header - sticks right below navbar with no gap */}
@@ -1156,496 +1160,516 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-        
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Order Summary</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            
-            <div>
-              <p className="text-sm font-medium mb-1">Order Date</p>
-              <p>{purchaseOrder.order_date 
-                ? format(new Date(purchaseOrder.order_date), 'PPP') 
-                : 'Not specified'}</p>
-            </div>
-            
-            <div>
-              <p className="text-sm font-medium mb-1">Status</p>
-              <StatusBadge status={getOrderStatus(purchaseOrder)} />
-            </div>
-            
-            <div>
-              <p className="text-sm font-medium mb-1">Notes</p>
-              <p className="whitespace-pre-wrap">{purchaseOrder.notes || 'No notes'}</p>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader>
-            <CardTitle>Supplier Info</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <p className="text-sm font-medium mb-1">Suppliers</p>
-              <div className="flex flex-wrap gap-2">
-                {Array.from(new Set(purchaseOrder.supplier_orders?.map(
-                  order => order.supplier_component?.supplier?.name
-                ) || [])).map((supplier, i) => (
-                  <Badge key={i} variant="outline">{String(supplier)}</Badge>
-                ))}
+          <Card>
+            <CardHeader>
+              <CardTitle>Order Summary</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+
+              <div>
+                <p className="text-sm font-medium mb-1">Order Date</p>
+                <p>{purchaseOrder.order_date
+                  ? format(new Date(purchaseOrder.order_date), 'PPP')
+                  : 'Not specified'}</p>
               </div>
-            </div>
-            {isApproved && (
-              <div className="text-sm text-muted-foreground">
-                Approved on {purchaseOrder.approved_at ? format(new Date(purchaseOrder.approved_at), 'PPP') : 'Unknown'}
+
+              <div>
+                <p className="text-sm font-medium mb-1">Status</p>
+                <StatusBadge status={getOrderStatus(purchaseOrder)} />
               </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-      
-      {/* Summary card moved above; removing duplicate compact bar */}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Order Items</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Component</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead>Supplier</TableHead>
-                <TableHead className="text-right">Unit Price</TableHead>
-                <TableHead className="text-right">Ordered</TableHead>
-                <TableHead className="text-right">Received</TableHead>
-                <TableHead className="text-right">Owing</TableHead>
-                {isApproved && <TableHead className="text-right">Receive Now</TableHead>}
-                <TableHead className="text-right">Total</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {purchaseOrder.supplier_orders && purchaseOrder.supplier_orders.length > 0 ? (
-                <>
-                  {purchaseOrder.supplier_orders.map((order) => {
-                    const component = order.supplier_component?.component;
-                    const supplier = order.supplier_component?.supplier;
-                    const price = order.supplier_component?.price || 0;
-                    const lineTotal = price * order.order_quantity;
-                    const remainingToReceive = Math.max(0, order.order_quantity - (order.total_received || 0));
+              <div>
+                <p className="text-sm font-medium mb-1">Notes</p>
+                <p className="whitespace-pre-wrap">{purchaseOrder.notes || 'No notes'}</p>
+              </div>
+            </CardContent>
+          </Card>
 
-                    return (
-                      <TableRow key={order.order_id} className="odd:bg-muted/30">
-                        <TableCell className="font-medium">{component?.internal_code || 'Unknown'}</TableCell>
-                        <TableCell>{component?.description || 'No description'}</TableCell>
-                        <TableCell>{supplier?.name || 'Unknown'}</TableCell>
-                        <TableCell className="text-right">R{price.toFixed(2)}</TableCell>
-                        <TableCell className="text-right">{order.order_quantity}</TableCell>
-                        <TableCell className="text-right">{order.total_received || 0}</TableCell>
-                        <TableCell className="text-right">
-                          <span className={remainingToReceive > 0 ? 'font-medium text-orange-600' : 'text-muted-foreground'}>
-                            {remainingToReceive}
-                          </span>
-                        </TableCell>
-                        {isApproved && (
-                          <TableCell className="text-right">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleOpenReceiveModal(order)}
-                              disabled={remainingToReceive <= 0}
-                            >
-                              Receive
-                            </Button>
-                          </TableCell>
-                        )}
-                        <TableCell className="text-right font-medium">R{lineTotal.toFixed(2)}</TableCell>
-                      </TableRow>
-                    );
-                  })}
-                  <TableRow className="bg-muted/30">
-                    <TableCell colSpan={4} className="text-right text-sm font-medium text-muted-foreground">Totals</TableCell>
-                    <TableCell className="text-right text-sm font-medium">{totalItems}</TableCell>
-                    <TableCell className="text-right text-sm font-medium">{totalReceived}</TableCell>
-                    <TableCell className="text-right text-sm font-medium">
-                      <span className="font-medium text-orange-600">
-                        {Math.max(0, totalItems - totalReceived)}
-                      </span>
-                    </TableCell>
-                    {isApproved && <TableCell />}
-                    <TableCell className="text-right font-semibold">R{totalAmount.toFixed(2)}</TableCell>
-                  </TableRow>
-                </>
-              ) : (
-                <TableRow>
-                  <TableCell
-                    colSpan={isApproved ? 9 : 8}
-                    className="text-center py-6 text-muted-foreground"
-                  >
-                    No items in this purchase order
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-
-          </CardContent>
-      </Card>
-
-      {purchaseOrder && (
-        <Card className="mt-6">
-          <CardHeader>
-            <CardTitle>Receipt History</CardTitle>
-            <CardDescription>
-              Record of all received items for this purchase order
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-6">
-              {purchaseOrder.supplier_orders.map((order) => {
-                if (!order.receipts || order.receipts.length === 0) return null;
-                
-                return (
-                  <div key={order.order_id} className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="text-lg font-semibold">
-                          {order.supplier_component?.component?.internal_code || 'Unknown'}
-                        </h3>
-                        <p className="text-sm text-muted-foreground">
-                          {order.supplier_component?.component?.description || 'No description'}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-medium">
-                          Total Received: {order.total_received} of {order.order_quantity}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          From {order.supplier_component.supplier.name}
-                        </p>
-                      </div>
-                    </div>
-                    
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Receipt ID</TableHead>
-                          <TableHead>Quantity</TableHead>
-                          <TableHead>Date Received</TableHead>
-                          <TableHead>Transaction ID</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {order.receipts.map((receipt) => (
-                          <TableRow key={receipt.receipt_id}>
-                            <TableCell>#{receipt.receipt_id}</TableCell>
-                            <TableCell>{receipt.quantity_received}</TableCell>
-                            <TableCell>
-                              {new Date(receipt.receipt_date).toLocaleString('en-ZA', {
-                                timeZone: 'Africa/Johannesburg',
-                                year: 'numeric',
-                                month: 'short',
-                                day: 'numeric',
-                                hour: 'numeric',
-                                minute: '2-digit',
-                                hour12: true
-                              })}
-                            </TableCell>
-                            <TableCell>#{receipt.transaction_id}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                );
-              })}
-              
-              {purchaseOrder.supplier_orders.every(order => !order.receipts?.length) && (
-                <Card className="bg-muted/40">
-                  <CardContent className="py-10 text-center">
-                    <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-full bg-muted mb-3">📦</div>
-                    <div className="font-medium">No receipts yet</div>
-                    <div className="text-sm text-muted-foreground">Use the Receive controls in the items table to record deliveries.</div>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Return Goods Section */}
-      {purchaseOrder && isApproved && (
-        <Card className="mt-6">
-          <CardHeader>
-            <CardTitle>Return Goods</CardTitle>
-            <CardDescription>
-              Return goods to suppliers. Select components and quantities to return.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {purchaseOrder.supplier_orders && purchaseOrder.supplier_orders.length > 0 ? (
-                <>
-                  {purchaseOrder.supplier_orders
-                    .filter(order => (order.total_received || 0) > 0)
-                    .map((order) => {
-                      const component = order.supplier_component?.component;
-                      const maxReturnable = order.total_received || 0;
-                      const returnData = returnQuantities[order.order_id.toString()] || {
-                        quantity: 0,
-                        reason: '',
-                        return_type: 'later_return' as const,
-                        notes: '',
-                      };
-
-                      return (
-                        <div key={order.order_id} className="border rounded-lg p-4 space-y-3">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h3 className="font-medium">{component?.internal_code || 'Unknown'}</h3>
-                              <p className="text-sm text-muted-foreground">{component?.description || 'No description'}</p>
-                              <p className="text-sm text-muted-foreground">
-                                Received: {order.total_received} / Ordered: {order.order_quantity}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                              <label className="text-sm font-medium mb-1 block">Quantity to Return</label>
-                              <input
-                                type="number"
-                                min="0"
-                                max={maxReturnable}
-                                value={returnData.quantity || ''}
-                                onChange={(e) => handleReturnQuantityChange(order.order_id.toString(), e.target.value)}
-                                className="w-full px-3 py-2 border rounded-md"
-                                placeholder="0"
-                              />
-                              <p className="text-xs text-muted-foreground mt-1">
-                                Max: {maxReturnable}
-                              </p>
-                            </div>
-                            <div>
-                              <label className="text-sm font-medium mb-1 block">Return Type</label>
-                              <select
-                                value={returnData.return_type}
-                                onChange={(e) => handleReturnTypeChange(order.order_id.toString(), e.target.value as 'rejection' | 'later_return')}
-                                className="w-full px-3 py-2 border rounded-md"
-                              >
-                                <option value="later_return">Later Return</option>
-                                <option value="rejection">Rejection on Delivery</option>
-                              </select>
-                            </div>
-                            <div className="md:col-span-2">
-                              <label className="text-sm font-medium mb-1 block">Reason <span className="text-red-500">*</span></label>
-                              <select
-                                value={returnData.reason}
-                                onChange={(e) => handleReturnReasonChange(order.order_id.toString(), e.target.value)}
-                                className="w-full px-3 py-2 border rounded-md"
-                                required
-                              >
-                                <option value="">Select a reason</option>
-                                <option value="Damage">Damage</option>
-                                <option value="Wrong Item">Wrong Item</option>
-                                <option value="Quality Issue">Quality Issue</option>
-                                <option value="Over-supplied">Over-supplied</option>
-                                <option value="Customer Cancellation">Customer Cancellation</option>
-                                <option value="Defective">Defective</option>
-                                <option value="Other">Other</option>
-                              </select>
-                            </div>
-                            {returnData.reason === 'Other' && (
-                              <div className="md:col-span-2">
-                                <label className="text-sm font-medium mb-1 block">Additional Notes</label>
-                                <textarea
-                                  value={returnData.notes || ''}
-                                  onChange={(e) => {
-                                    setReturnQuantities(prev => ({
-                                      ...prev,
-                                      [order.order_id.toString()]: {
-                                        ...prev[order.order_id.toString()],
-                                        notes: e.target.value,
-                                      }
-                                    }));
-                                  }}
-                                  className="w-full px-3 py-2 border rounded-md"
-                                  rows={2}
-                                  placeholder="Provide additional details..."
-                                />
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  {purchaseOrder.supplier_orders.filter(order => (order.total_received || 0) > 0).length === 0 && (
-                    <div className="text-center py-8 text-muted-foreground">
-                      No items have been received yet. Receive stock before returning.
-                    </div>
-                  )}
-                  {purchaseOrder.supplier_orders.filter(order => (order.total_received || 0) > 0).length > 0 && (
-                    <div className="flex justify-end pt-4">
-                      <Button
-                        onClick={handleSubmitReturns}
-                        disabled={returnMutation.isPending || Object.keys(returnQuantities).length === 0 || 
-                          !Object.values(returnQuantities).some(r => r.quantity > 0)}
-                        variant="destructive"
-                      >
-                        {returnMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                        Return Goods
-                      </Button>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  No items in this purchase order
+          <Card>
+            <CardHeader>
+              <CardTitle>Supplier Info</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <p className="text-sm font-medium mb-1">Suppliers</p>
+                <div className="flex flex-wrap gap-2">
+                  {Array.from(new Set(purchaseOrder.supplier_orders?.map(
+                    order => order.supplier_component?.supplier?.name
+                  ) || [])).map((supplier, i) => (
+                    <Badge key={i} variant="outline">{String(supplier)}</Badge>
+                  ))}
+                </div>
+              </div>
+              {isApproved && (
+                <div className="text-sm text-muted-foreground">
+                  Approved on {purchaseOrder.approved_at ? format(new Date(purchaseOrder.approved_at), 'PPP') : 'Unknown'}
                 </div>
               )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+            </CardContent>
+          </Card>
+        </div>
 
-      {/* Return History Section */}
-      {purchaseOrder && (
-        <Card className="mt-6">
-          <CardHeader>
-            <CardTitle>Return History</CardTitle>
-            <CardDescription>
-              Record of all returned items for this purchase order
-            </CardDescription>
+        {/* Summary card moved above; removing duplicate compact bar */}
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-xl font-bold">Order Items</CardTitle>
+            {isApproved && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setBulkReceiveModalOpen(true)}
+                  disabled={!purchaseOrder.supplier_orders?.some(o => (o.order_quantity - (o.total_received || 0)) > 0)}
+                >
+                  Bulk Receive
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleOpenEmailDialog}
+                >
+                  <Mail className="h-4 w-4 mr-2" />
+                  Send Supplier Emails
+                </Button>
+              </div>
+            )}
           </CardHeader>
           <CardContent>
-            <div className="space-y-6">
-              {purchaseOrder.supplier_orders.map((order) => {
-                if (!order.returns || order.returns.length === 0) return null;
-                
-                return (
-                  <div key={order.order_id} className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="text-lg font-semibold">
-                          {order.supplier_component?.component?.internal_code || 'Unknown'}
-                        </h3>
-                        <p className="text-sm text-muted-foreground">
-                          {order.supplier_component?.component?.description || 'No description'}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-medium">
-                          Total Returned: {order.returns.reduce((sum, r) => sum + r.quantity_returned, 0)}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          From {order.supplier_component.supplier.name}
-                        </p>
-                      </div>
-                    </div>
-                    
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Return ID</TableHead>
-                          <TableHead>Quantity</TableHead>
-                          <TableHead>Type</TableHead>
-                          <TableHead>Reason</TableHead>
-                          <TableHead>Date Returned</TableHead>
-                          <TableHead>Transaction ID</TableHead>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Component</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead>Supplier</TableHead>
+                  <TableHead className="text-right">Unit Price</TableHead>
+                  <TableHead className="text-right">Ordered</TableHead>
+                  <TableHead className="text-right">Received</TableHead>
+                  <TableHead className="text-right">Owing</TableHead>
+                  {isApproved && <TableHead className="text-right">Receive Now</TableHead>}
+                  <TableHead className="text-right">Total</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {purchaseOrder.supplier_orders && purchaseOrder.supplier_orders.length > 0 ? (
+                  <>
+                    {purchaseOrder.supplier_orders.map((order) => {
+                      const component = order.supplier_component?.component;
+                      const supplier = order.supplier_component?.supplier;
+                      const price = order.supplier_component?.price || 0;
+                      const lineTotal = price * order.order_quantity;
+                      const remainingToReceive = Math.max(0, order.order_quantity - (order.total_received || 0));
+
+                      return (
+                        <TableRow key={order.order_id} className="odd:bg-muted/30">
+                          <TableCell className="font-medium">{component?.internal_code || 'Unknown'}</TableCell>
+                          <TableCell>{component?.description || 'No description'}</TableCell>
+                          <TableCell>{supplier?.name || 'Unknown'}</TableCell>
+                          <TableCell className="text-right">R{price.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">{order.order_quantity}</TableCell>
+                          <TableCell className="text-right">{order.total_received || 0}</TableCell>
+                          <TableCell className="text-right">
+                            <span className={remainingToReceive > 0 ? 'font-medium text-orange-600' : 'text-muted-foreground'}>
+                              {remainingToReceive}
+                            </span>
+                          </TableCell>
+                          {isApproved && (
+                            <TableCell className="text-right">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleOpenReceiveModal(order)}
+                                disabled={remainingToReceive <= 0}
+                              >
+                                Receive
+                              </Button>
+                            </TableCell>
+                          )}
+                          <TableCell className="text-right font-medium">R{lineTotal.toFixed(2)}</TableCell>
                         </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {order.returns.map((returnItem) => (
-                          <TableRow key={returnItem.return_id}>
-                            <TableCell>#{returnItem.return_id}</TableCell>
-                            <TableCell>{returnItem.quantity_returned}</TableCell>
-                            <TableCell>
-                              <Badge variant={returnItem.return_type === 'rejection' ? 'destructive' : 'outline'}>
-                                {returnItem.return_type === 'rejection' ? 'Rejection' : 'Later Return'}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>{returnItem.reason}</TableCell>
-                            <TableCell>
-                              {new Date(returnItem.return_date).toLocaleString('en-ZA', {
-                                timeZone: 'Africa/Johannesburg',
-                                year: 'numeric',
-                                month: 'short',
-                                day: 'numeric',
-                                hour: 'numeric',
-                                minute: '2-digit',
-                                hour12: true
-                              })}
-                            </TableCell>
-                            <TableCell>#{returnItem.transaction_id}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                );
-              })}
-              
-              {purchaseOrder.supplier_orders.every(order => !order.returns?.length) && (
-                <Card className="bg-muted/40">
-                  <CardContent className="py-10 text-center">
-                    <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-full bg-muted mb-3">↩️</div>
-                    <div className="font-medium">No returns yet</div>
-                    <div className="text-sm text-muted-foreground">Use the Return Goods section above to record returns.</div>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
+                      );
+                    })}
+                    <TableRow className="bg-muted/30">
+                      <TableCell colSpan={4} className="text-right text-sm font-medium text-muted-foreground">Totals</TableCell>
+                      <TableCell className="text-right text-sm font-medium">{totalItems}</TableCell>
+                      <TableCell className="text-right text-sm font-medium">{totalReceived}</TableCell>
+                      <TableCell className="text-right text-sm font-medium">
+                        <span className="font-medium text-orange-600">
+                          {Math.max(0, totalItems - totalReceived)}
+                        </span>
+                      </TableCell>
+                      {isApproved && <TableCell />}
+                      <TableCell className="text-right font-semibold">R{totalAmount.toFixed(2)}</TableCell>
+                    </TableRow>
+                  </>
+                ) : (
+                  <TableRow>
+                    <TableCell
+                      colSpan={isApproved ? 9 : 8}
+                      className="text-center py-6 text-muted-foreground"
+                    >
+                      No items in this purchase order
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+
           </CardContent>
         </Card>
-      )}
-      {/* Bottom action bar */}
-      <div className="sticky bottom-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-t shadow-sm px-4 py-3 flex items-center justify-end gap-3">
-        {isDraft && (
-          <Button onClick={handleSubmit} disabled={submitMutation.isPending}>
-            {submitMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            Submit for Approval
-          </Button>
+
+        {purchaseOrder && (
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle>Receipt History</CardTitle>
+              <CardDescription>
+                Record of all received items for this purchase order
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-6">
+                {purchaseOrder.supplier_orders.map((order) => {
+                  if (!order.receipts || order.receipts.length === 0) return null;
+
+                  return (
+                    <div key={order.order_id} className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="text-lg font-semibold">
+                            {order.supplier_component?.component?.internal_code || 'Unknown'}
+                          </h3>
+                          <p className="text-sm text-muted-foreground">
+                            {order.supplier_component?.component?.description || 'No description'}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-medium">
+                            Total Received: {order.total_received} of {order.order_quantity}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            From {order.supplier_component.supplier.name}
+                          </p>
+                        </div>
+                      </div>
+
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Receipt ID</TableHead>
+                            <TableHead>Quantity</TableHead>
+                            <TableHead>Date Received</TableHead>
+                            <TableHead>Transaction ID</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {order.receipts.map((receipt) => (
+                            <TableRow key={receipt.receipt_id}>
+                              <TableCell>#{receipt.receipt_id}</TableCell>
+                              <TableCell>{receipt.quantity_received}</TableCell>
+                              <TableCell>
+                                {new Date(receipt.receipt_date).toLocaleString('en-ZA', {
+                                  timeZone: 'Africa/Johannesburg',
+                                  year: 'numeric',
+                                  month: 'short',
+                                  day: 'numeric',
+                                  hour: 'numeric',
+                                  minute: '2-digit',
+                                  hour12: true
+                                })}
+                              </TableCell>
+                              <TableCell>#{receipt.transaction_id}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  );
+                })}
+
+                {purchaseOrder.supplier_orders.every(order => !order.receipts?.length) && (
+                  <Card className="bg-muted/40">
+                    <CardContent className="py-10 text-center">
+                      <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-full bg-muted mb-3">📦</div>
+                      <div className="font-medium">No receipts yet</div>
+                      <div className="text-sm text-muted-foreground">Use the Receive controls in the items table to record deliveries.</div>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            </CardContent>
+          </Card>
         )}
-        {isPendingApproval && (
-          <div className="flex items-center gap-2">
-            <input
-              id="qNumber"
-              value={qNumber}
-              onChange={(e) => setQNumber(e.target.value)}
-              className="w-[140px] px-3 py-2 border rounded-md"
-              placeholder="Q23-001"
-              disabled={approveMutation.isPending}
-              pattern="Q\\d{2}-\\d{3}"
-            />
-            <Button onClick={handleApprove} disabled={approveMutation.isPending}>
-              {approveMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Approve Order
-            </Button>
-          </div>
+
+        {/* Return Goods Section */}
+        {purchaseOrder && isApproved && (
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle>Return Goods</CardTitle>
+              <CardDescription>
+                Return goods to suppliers. Select components and quantities to return.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {purchaseOrder.supplier_orders && purchaseOrder.supplier_orders.length > 0 ? (
+                  <>
+                    {purchaseOrder.supplier_orders
+                      .filter(order => (order.total_received || 0) > 0)
+                      .map((order) => {
+                        const component = order.supplier_component?.component;
+                        const maxReturnable = order.total_received || 0;
+                        const returnData = returnQuantities[order.order_id.toString()] || {
+                          quantity: 0,
+                          reason: '',
+                          return_type: 'later_return' as const,
+                          notes: '',
+                        };
+
+                        return (
+                          <div key={order.order_id} className="border rounded-lg p-4 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <h3 className="font-medium">{component?.internal_code || 'Unknown'}</h3>
+                                <p className="text-sm text-muted-foreground">{component?.description || 'No description'}</p>
+                                <p className="text-sm text-muted-foreground">
+                                  Received: {order.total_received} / Ordered: {order.order_quantity}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div>
+                                <label className="text-sm font-medium mb-1 block">Quantity to Return</label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max={maxReturnable}
+                                  value={returnData.quantity || ''}
+                                  onChange={(e) => handleReturnQuantityChange(order.order_id.toString(), e.target.value)}
+                                  className="w-full px-3 py-2 border rounded-md"
+                                  placeholder="0"
+                                />
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Max: {maxReturnable}
+                                </p>
+                              </div>
+                              <div>
+                                <label className="text-sm font-medium mb-1 block">Return Type</label>
+                                <select
+                                  value={returnData.return_type}
+                                  onChange={(e) => handleReturnTypeChange(order.order_id.toString(), e.target.value as 'rejection' | 'later_return')}
+                                  className="w-full px-3 py-2 border rounded-md"
+                                >
+                                  <option value="later_return">Later Return</option>
+                                  <option value="rejection">Rejection on Delivery</option>
+                                </select>
+                              </div>
+                              <div className="md:col-span-2">
+                                <label className="text-sm font-medium mb-1 block">Reason <span className="text-red-500">*</span></label>
+                                <select
+                                  value={returnData.reason}
+                                  onChange={(e) => handleReturnReasonChange(order.order_id.toString(), e.target.value)}
+                                  className="w-full px-3 py-2 border rounded-md"
+                                  required
+                                >
+                                  <option value="">Select a reason</option>
+                                  <option value="Damage">Damage</option>
+                                  <option value="Wrong Item">Wrong Item</option>
+                                  <option value="Quality Issue">Quality Issue</option>
+                                  <option value="Over-supplied">Over-supplied</option>
+                                  <option value="Customer Cancellation">Customer Cancellation</option>
+                                  <option value="Defective">Defective</option>
+                                  <option value="Other">Other</option>
+                                </select>
+                              </div>
+                              {returnData.reason === 'Other' && (
+                                <div className="md:col-span-2">
+                                  <label className="text-sm font-medium mb-1 block">Additional Notes</label>
+                                  <textarea
+                                    value={returnData.notes || ''}
+                                    onChange={(e) => {
+                                      setReturnQuantities(prev => ({
+                                        ...prev,
+                                        [order.order_id.toString()]: {
+                                          ...prev[order.order_id.toString()],
+                                          notes: e.target.value,
+                                        }
+                                      }));
+                                    }}
+                                    className="w-full px-3 py-2 border rounded-md"
+                                    rows={2}
+                                    placeholder="Provide additional details..."
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    {purchaseOrder.supplier_orders.filter(order => (order.total_received || 0) > 0).length === 0 && (
+                      <div className="text-center py-8 text-muted-foreground">
+                        No items have been received yet. Receive stock before returning.
+                      </div>
+                    )}
+                    {purchaseOrder.supplier_orders.filter(order => (order.total_received || 0) > 0).length > 0 && (
+                      <div className="flex justify-end pt-4">
+                        <Button
+                          onClick={handleSubmitReturns}
+                          disabled={returnMutation.isPending || Object.keys(returnQuantities).length === 0 ||
+                            !Object.values(returnQuantities).some(r => r.quantity > 0)}
+                          variant="destructive"
+                        >
+                          {returnMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                          Return Goods
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No items in this purchase order
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
         )}
-        {isApproved && (
-          <>
-            <Button
-              variant="outline"
-              onClick={handleOpenEmailDialog}
-              disabled={sendEmailMutation.isPending || emailDialogLoading}
-            >
-              {sendEmailMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Send Supplier Emails
-            </Button>
-            <Button
-              onClick={handleSubmitReceipts}
-              disabled={receiptMutation.isPending || Object.keys(receiptQuantities).length === 0}
-            >
-              {receiptMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Receive Stock
-            </Button>
-          </>
+
+        {/* Return History Section */}
+        {purchaseOrder && (
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle>Return History</CardTitle>
+              <CardDescription>
+                Record of all returned items for this purchase order
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-6">
+                {purchaseOrder.supplier_orders.map((order) => {
+                  if (!order.returns || order.returns.length === 0) return null;
+
+                  return (
+                    <div key={order.order_id} className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="text-lg font-semibold">
+                            {order.supplier_component?.component?.internal_code || 'Unknown'}
+                          </h3>
+                          <p className="text-sm text-muted-foreground">
+                            {order.supplier_component?.component?.description || 'No description'}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-medium">
+                            Total Returned: {order.returns.reduce((sum, r) => sum + r.quantity_returned, 0)}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            From {order.supplier_component.supplier.name}
+                          </p>
+                        </div>
+                      </div>
+
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Return ID</TableHead>
+                            <TableHead>Quantity</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Reason</TableHead>
+                            <TableHead>Date Returned</TableHead>
+                            <TableHead>Transaction ID</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {order.returns.map((returnItem) => (
+                            <TableRow key={returnItem.return_id}>
+                              <TableCell>#{returnItem.return_id}</TableCell>
+                              <TableCell>{returnItem.quantity_returned}</TableCell>
+                              <TableCell>
+                                <Badge variant={returnItem.return_type === 'rejection' ? 'destructive' : 'outline'}>
+                                  {returnItem.return_type === 'rejection' ? 'Rejection' : 'Later Return'}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>{returnItem.reason}</TableCell>
+                              <TableCell>
+                                {new Date(returnItem.return_date).toLocaleString('en-ZA', {
+                                  timeZone: 'Africa/Johannesburg',
+                                  year: 'numeric',
+                                  month: 'short',
+                                  day: 'numeric',
+                                  hour: 'numeric',
+                                  minute: '2-digit',
+                                  hour12: true
+                                })}
+                              </TableCell>
+                              <TableCell>#{returnItem.transaction_id}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  );
+                })}
+
+                {purchaseOrder.supplier_orders.every(order => !order.returns?.length) && (
+                  <Card className="bg-muted/40">
+                    <CardContent className="py-10 text-center">
+                      <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-full bg-muted mb-3">↩️</div>
+                      <div className="font-medium">No returns yet</div>
+                      <div className="text-sm text-muted-foreground">Use the Return Goods section above to record returns.</div>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            </CardContent>
+          </Card>
         )}
+        {/* Bottom action bar */}
+        <div className="sticky bottom-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-t shadow-sm px-4 py-3 flex items-center justify-end gap-3">
+          {isDraft && (
+            <Button onClick={handleSubmit} disabled={submitMutation.isPending}>
+              {submitMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Submit for Approval
+            </Button>
+          )}
+          {isPendingApproval && (
+            <div className="flex items-center gap-2">
+              <input
+                id="qNumber"
+                value={qNumber}
+                onChange={(e) => setQNumber(e.target.value)}
+                className="w-[140px] px-3 py-2 border rounded-md"
+                placeholder="Q23-001"
+                disabled={approveMutation.isPending}
+                pattern="Q\\d{2}-\\d{3}"
+              />
+              <Button onClick={handleApprove} disabled={approveMutation.isPending}>
+                {approveMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                Approve Order
+              </Button>
+            </div>
+          )}
+          {isApproved && (
+            <>
+              <Button
+                variant="outline"
+                onClick={handleOpenEmailDialog}
+                disabled={sendEmailMutation.isPending || emailDialogLoading}
+              >
+                {sendEmailMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                Send Supplier Emails
+              </Button>
+              <Button
+                onClick={handleSubmitReceipts}
+                disabled={receiptMutation.isPending || Object.keys(receiptQuantities).length === 0}
+              >
+                {receiptMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                Receive Stock
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -1672,6 +1696,20 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
               title: 'Success',
               description: 'Receipt recorded successfully',
             });
+          }}
+        />
+      )}
+      {purchaseOrder && (
+        <BulkReceiveModal
+          open={bulkReceiveModalOpen}
+          onOpenChange={setBulkReceiveModalOpen}
+          supplierOrders={purchaseOrder.supplier_orders || []}
+          purchaseOrderNumber={purchaseOrder.q_number || ''}
+          purchaseOrderId={purchaseOrder.purchase_order_id}
+          supplierName={purchaseOrder.supplier_orders?.[0]?.supplier_component?.supplier?.name || 'Supplier'}
+          onSuccess={() => {
+            queryClient.invalidateQueries({ queryKey: ['purchaseOrder', id] });
+            queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
           }}
         />
       )}

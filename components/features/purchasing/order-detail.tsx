@@ -27,10 +27,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { 
-  SupplierOrderWithDetails, 
+import {
+  SupplierOrderWithDetails,
   SupplierOrderReceipt,
-  ReceiveItemsFormValues 
+  ReceiveItemsFormValues
 } from '@/types/purchasing';
 
 // Zod schema for form validation
@@ -97,7 +97,7 @@ type OrderDetailProps = {
 // Fetch order details function
 async function fetchOrderDetails(orderId: number): Promise<SupplierOrderWithDetails> {
   console.log('Fetching order details for ID:', orderId);
-  
+
   const { data, error } = await supabase
     .from('supplier_orders')
     .select(`
@@ -177,199 +177,200 @@ async function processReceipt(
       return { grn: generatedGrn, returnId };
     }
 
-  console.warn('process_supplier_order_receipt RPC failed, using manual fallback:', rpcError);
+    console.warn('process_supplier_order_receipt RPC failed, using manual fallback:', rpcError);
 
-  // First, get or create the PURCHASE transaction type
-  let purchaseTypeId: number;
-  
-  // Try to fetch the PURCHASE transaction type
-  const { data: typeData, error: typeError } = await supabase
-    .from('transaction_types')
-    .select('transaction_type_id')
-    .eq('type_name', 'PURCHASE')
-    .single();
-  
-  if (typeError) {
-    // If not found, create it
-    if (typeError.code === 'PGRST116') { // No rows returned
-      const { data: insertData, error: insertError } = await supabase
-        .from('transaction_types')
-        .insert({ type_name: 'PURCHASE' })
-        .select('transaction_type_id')
-        .single();
-      
-      if (insertError) {
-        console.error('Error creating PURCHASE transaction type:', insertError);
-        throw new Error('Failed to create PURCHASE transaction type');
+    // First, get or create the PURCHASE transaction type
+    let purchaseTypeId: number;
+
+    // Try to fetch the PURCHASE transaction type
+    const { data: typeData, error: typeError } = await supabase
+      .from('transaction_types')
+      .select('transaction_type_id')
+      .eq('type_name', 'PURCHASE')
+      .single();
+
+    if (typeError) {
+      // If not found, create it
+      if (typeError.code === 'PGRST116') { // No rows returned
+        const { data: insertData, error: insertError } = await supabase
+          .from('transaction_types')
+          .insert({ type_name: 'PURCHASE' })
+          .select('transaction_type_id')
+          .single();
+
+        if (insertError) {
+          console.error('Error creating PURCHASE transaction type:', insertError);
+          throw new Error('Failed to create PURCHASE transaction type');
+        }
+
+        purchaseTypeId = insertData.transaction_type_id;
+      } else {
+        console.error('Error fetching PURCHASE transaction type:', typeError);
+        throw new Error('Failed to fetch PURCHASE transaction type');
       }
-      
-      purchaseTypeId = insertData.transaction_type_id;
     } else {
-      console.error('Error fetching PURCHASE transaction type:', typeError);
-      throw new Error('Failed to fetch PURCHASE transaction type');
+      purchaseTypeId = typeData.transaction_type_id;
     }
-  } else {
-    purchaseTypeId = typeData.transaction_type_id;
-  }
 
-  // Start a transaction - NOTE: We removed the order_id field here as it's for customer orders, not supplier orders
-  const { data: transactionData, error: transactionError } = await supabase
-    .from('inventory_transactions')
-    .insert({
-      component_id: componentId,
-      quantity: data.quantity_received,
-      transaction_type_id: purchaseTypeId,
-      transaction_date: receiptTimestamp,
-      // Removed order_id: orderId because it expects a customer order ID, not a supplier order ID
-    })
-    .select('transaction_id')
-    .single();
-
-  if (transactionError) {
-    console.error('Error creating inventory transaction:', transactionError);
-    throw new Error('Failed to create inventory transaction');
-  }
-
-  // Create receipt record
-  const { error: receiptError } = await supabase
-    .from('supplier_order_receipts')
-    .insert({
-      order_id: orderId,
-      transaction_id: transactionData.transaction_id,
-      quantity_received: data.quantity_received,
-      receipt_date: receiptTimestamp,
-    });
-
-  if (receiptError) {
-    console.error('Error creating receipt:', receiptError);
-    throw new Error('Failed to create receipt');
-  }
-
-  // UPDATE INVENTORY QUANTITIES
-  // First check if component exists in inventory
-  const { data: existingInventory, error: inventoryError } = await supabase
-    .from('inventory')
-    .select('inventory_id, quantity_on_hand')
-    .eq('component_id', componentId)
-    .single();
-
-  if (inventoryError && inventoryError.code !== 'PGRST116') {
-    console.error('Error checking inventory:', inventoryError);
-    throw new Error('Failed to update inventory');
-  }
-
-  // If component exists in inventory, update quantity
-  if (existingInventory) {
-    const newQuantity = (existingInventory.quantity_on_hand || 0) + data.quantity_received;
-    
-    const { error: updateError } = await supabase
-      .from('inventory')
-      .update({ quantity_on_hand: newQuantity })
-      .eq('inventory_id', existingInventory.inventory_id);
-    
-    if (updateError) {
-      console.error('Error updating inventory quantity:', updateError);
-      throw new Error('Failed to update inventory quantity');
-    }
-    
-    console.log(`Updated inventory for component ${componentId}, new quantity: ${newQuantity}`);
-  } 
-  // If component doesn't exist in inventory, create new record
-  else {
-    const { error: insertError } = await supabase
-      .from('inventory')
+    // Start a transaction - NOTE: We removed the order_id field here as it's for customer orders, not supplier orders
+    const { data: transactionData, error: transactionError } = await supabase
+      .from('inventory_transactions')
       .insert({
         component_id: componentId,
-        quantity_on_hand: data.quantity_received,
-        location: null, // Can be updated later by user
-        reorder_level: 0, // Default value, can be updated later
-      });
-    
-    if (insertError) {
-      console.error('Error creating inventory record:', insertError);
-      throw new Error('Failed to create inventory record');
-    }
-    
-    console.log(`Created new inventory record for component ${componentId} with quantity: ${data.quantity_received}`);
-  }
-
-  // Try to update using the RPC function
-  const { error: updateError } = await supabase.rpc('update_order_received_quantity', { 
-    order_id_param: orderId 
-  });
-
-  // If RPC function doesn't exist or fails, manually update the total_received and status
-  if (updateError) {
-    console.warn('RPC function failed, updating manually:', updateError);
-    
-    // Get current total from receipts
-    const { data: receiptsData, error: receiptsError } = await supabase
-      .from('supplier_order_receipts')
-      .select('quantity_received')
-      .eq('order_id', orderId);
-    
-    if (receiptsError) {
-      console.error('Error fetching receipts:', receiptsError);
-      throw new Error('Failed to update total received');
-    }
-    
-    // Calculate new total
-    const totalReceived = receiptsData.reduce((sum, receipt) => sum + receipt.quantity_received, 0);
-    
-    // Get the order details to check quantities
-    const { data: orderData, error: orderError } = await supabase
-      .from('supplier_orders')
-      .select('order_quantity, status_id')
-      .eq('order_id', orderId)
-      .single();
-      
-    if (orderError) {
-      console.error('Error fetching order details:', orderError);
-      throw new Error('Failed to update order status');
-    }
-    
-    // Get status IDs
-    const { data: statusData, error: statusError } = await supabase
-      .from('supplier_order_statuses')
-      .select('status_id, status_name');
-      
-    if (statusError) {
-      console.error('Error fetching status IDs:', statusError);
-      throw new Error('Failed to fetch status IDs');
-    }
-    
-    const statusMap = statusData.reduce((map, status) => {
-      map[status.status_name] = status.status_id;
-      return map;
-    }, {} as Record<string, number>);
-    
-    // Determine the new status
-    let newStatusId = orderData.status_id;
-    
-    if (totalReceived >= orderData.order_quantity) {
-      // Fully received - set to Completed
-      newStatusId = statusMap['Completed'];
-    } else if (totalReceived > 0) {
-      // Partially received - set to Partially Delivered
-      newStatusId = statusMap['Partially Delivered'];
-    }
-    
-    // Update the supplier order with total and status
-    const { error: manualUpdateError } = await supabase
-      .from('supplier_orders')
-      .update({ 
-        total_received: totalReceived,
-        status_id: newStatusId
+        quantity: data.quantity_received,
+        transaction_type_id: purchaseTypeId,
+        transaction_date: receiptTimestamp,
+        // Removed order_id: orderId because it expects a customer order ID, not a supplier order ID
       })
-      .eq('order_id', orderId);
-    
-    if (manualUpdateError) {
-      console.error('Error updating order:', manualUpdateError);
-      throw new Error('Failed to update order');
-    }
-  }
+      .select('transaction_id')
+      .single();
 
-  return { grn: generatedGrn, returnId };
+    if (transactionError) {
+      console.error('Error creating inventory transaction:', transactionError);
+      throw new Error('Failed to create inventory transaction');
+    }
+
+    // Create receipt record
+    const { error: receiptError } = await supabase
+      .from('supplier_order_receipts')
+      .insert({
+        order_id: orderId,
+        transaction_id: transactionData.transaction_id,
+        quantity_received: data.quantity_received,
+        receipt_date: receiptTimestamp,
+      });
+
+    if (receiptError) {
+      console.error('Error creating receipt:', receiptError);
+      throw new Error('Failed to create receipt');
+    }
+
+    // UPDATE INVENTORY QUANTITIES
+    // First check if component exists in inventory
+    const { data: existingInventory, error: inventoryError } = await supabase
+      .from('inventory')
+      .select('inventory_id, quantity_on_hand')
+      .eq('component_id', componentId)
+      .single();
+
+    if (inventoryError && inventoryError.code !== 'PGRST116') {
+      console.error('Error checking inventory:', inventoryError);
+      throw new Error('Failed to update inventory');
+    }
+
+    // If component exists in inventory, update quantity
+    if (existingInventory) {
+      const newQuantity = (existingInventory.quantity_on_hand || 0) + data.quantity_received;
+
+      const { error: updateError } = await supabase
+        .from('inventory')
+        .update({ quantity_on_hand: newQuantity })
+        .eq('inventory_id', existingInventory.inventory_id);
+
+      if (updateError) {
+        console.error('Error updating inventory quantity:', updateError);
+        throw new Error('Failed to update inventory quantity');
+      }
+
+      console.log(`Updated inventory for component ${componentId}, new quantity: ${newQuantity}`);
+    }
+    // If component doesn't exist in inventory, create new record
+    else {
+      const { error: insertError } = await supabase
+        .from('inventory')
+        .insert({
+          component_id: componentId,
+          quantity_on_hand: data.quantity_received,
+          location: null, // Can be updated later by user
+          reorder_level: 0, // Default value, can be updated later
+        });
+
+      if (insertError) {
+        console.error('Error creating inventory record:', insertError);
+        throw new Error('Failed to create inventory record');
+      }
+
+      console.log(`Created new inventory record for component ${componentId} with quantity: ${data.quantity_received}`);
+    }
+
+    // Try to update using the RPC function
+    const { error: updateError } = await supabase.rpc('update_order_received_quantity', {
+      order_id_param: orderId
+    });
+
+    // If RPC function doesn't exist or fails, manually update the total_received and status
+    if (updateError) {
+      console.warn('RPC function failed, updating manually:', updateError);
+
+      // Get current total from receipts
+      const { data: receiptsData, error: receiptsError } = await supabase
+        .from('supplier_order_receipts')
+        .select('quantity_received')
+        .eq('order_id', orderId);
+
+      if (receiptsError) {
+        console.error('Error fetching receipts:', receiptsError);
+        throw new Error('Failed to update total received');
+      }
+
+      // Calculate new total
+      const totalReceived = receiptsData.reduce((sum, receipt) => sum + receipt.quantity_received, 0);
+
+      // Get the order details to check quantities
+      const { data: orderData, error: orderError } = await supabase
+        .from('supplier_orders')
+        .select('order_quantity, status_id')
+        .eq('order_id', orderId)
+        .single();
+
+      if (orderError) {
+        console.error('Error fetching order details:', orderError);
+        throw new Error('Failed to update order status');
+      }
+
+      // Get status IDs
+      const { data: statusData, error: statusError } = await supabase
+        .from('supplier_order_statuses')
+        .select('status_id, status_name');
+
+      if (statusError) {
+        console.error('Error fetching status IDs:', statusError);
+        throw new Error('Failed to fetch status IDs');
+      }
+
+      const statusMap = statusData.reduce((map, status) => {
+        map[status.status_name] = status.status_id;
+        return map;
+      }, {} as Record<string, number>);
+
+      // Determine the new status
+      let newStatusId = orderData.status_id;
+
+      if (totalReceived >= orderData.order_quantity) {
+        // Fully received - set to Completed
+        newStatusId = statusMap['Completed'];
+      } else if (totalReceived > 0) {
+        // Partially received - set to Partially Delivered
+        newStatusId = statusMap['Partially Delivered'];
+      }
+
+      // Update the supplier order with total and status
+      const { error: manualUpdateError } = await supabase
+        .from('supplier_orders')
+        .update({
+          total_received: totalReceived,
+          status_id: newStatusId
+        })
+        .eq('order_id', orderId);
+
+      if (manualUpdateError) {
+        console.error('Error updating order:', manualUpdateError);
+        throw new Error('Failed to update order');
+      }
+    }
+
+    return { grn: generatedGrn, returnId };
+  }
 }
 
 // Fix the updateOrderQNumber function to handle the string type correctly
@@ -377,33 +378,33 @@ async function updateOrderQNumber(orderId: number, qNumber: string): Promise<voi
   if (!qNumber || qNumber.trim() === '') {
     throw new Error('Q number cannot be empty');
   }
-  
+
   console.log(`Updating order ${orderId} with Q number: ${qNumber}`);
-  
+
   // Get status IDs
   const { data: statusData, error: statusError } = await supabase
     .from('supplier_order_statuses')
     .select('status_id, status_name');
-    
+
   if (statusError) {
     console.error('Error fetching status IDs:', statusError);
     throw new Error('Failed to fetch status IDs');
   }
-  
+
   const statusMap = statusData.reduce((map, status) => {
     map[status.status_name] = status.status_id;
     return map;
   }, {} as Record<string, number>);
-  
+
   // Update the order with the Q number and change status to "In Progress"
   const { error: updateError } = await supabase
     .from('supplier_orders')
-    .update({ 
+    .update({
       q_number: qNumber.trim(),
       status_id: statusMap['In Progress'] // Assuming you have this status
     })
     .eq('order_id', orderId);
-  
+
   if (updateError) {
     console.error('Error updating order Q number:', updateError);
     throw new Error('Failed to update order Q number');
@@ -413,34 +414,34 @@ async function updateOrderQNumber(orderId: number, qNumber: string): Promise<voi
 // Add this new function to handle status change
 async function updateOrderStatus(orderId: number, newStatusName: string): Promise<void> {
   console.log(`Updating order ${orderId} status to: ${newStatusName}`);
-  
+
   // Get status IDs
   const { data: statusData, error: statusError } = await supabase
     .from('supplier_order_statuses')
     .select('status_id, status_name');
-    
+
   if (statusError) {
     console.error('Error fetching status IDs:', statusError);
     throw new Error('Failed to fetch status IDs');
   }
-  
+
   const statusMap = statusData.reduce((map, status) => {
     map[status.status_name] = status.status_id;
     return map;
   }, {} as Record<string, number>);
-  
+
   if (!statusMap[newStatusName]) {
     throw new Error(`Status "${newStatusName}" not found`);
   }
-  
+
   // Update the order status
   const { error: updateError } = await supabase
     .from('supplier_orders')
-    .update({ 
+    .update({
       status_id: statusMap[newStatusName]
     })
     .eq('order_id', orderId);
-  
+
   if (updateError) {
     console.error('Error updating order status:', updateError);
     throw new Error('Failed to update order status');
@@ -484,7 +485,7 @@ async function processStockReturn(
 // Status badge component
 function StatusBadge({ status }: { status: string }) {
   let variant: 'default' | 'destructive' | 'outline' | 'secondary' | null = null;
-  
+
   switch (status.toLowerCase()) {
     case 'open':
       variant = 'secondary';
@@ -504,7 +505,7 @@ function StatusBadge({ status }: { status: string }) {
     default:
       variant = 'secondary';
   }
-  
+
   return <Badge variant={variant}>{status}</Badge>;
 }
 
@@ -532,6 +533,43 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
     queryKey: ['supplierOrder', orderId],
     queryFn: () => fetchOrderDetails(orderId),
   });
+
+  // Fetch company settings
+  const { data: companySettings } = useQuery({
+    queryKey: ['companySettings'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('quote_company_settings')
+        .select('*')
+        .limit(1)
+        .single();
+
+      if (error) {
+        console.error('Error fetching company settings:', error);
+        return null;
+      }
+      return data;
+    },
+  });
+
+  // Helper to format company info
+  const getCompanyInfo = () => {
+    if (!companySettings) return undefined;
+
+    const addressParts = [
+      companySettings.address_line1,
+      companySettings.address_line2,
+      [companySettings.city, companySettings.postal_code].filter(Boolean).join(' ').trim(),
+      companySettings.country,
+    ].filter((part) => part && part.length > 0);
+
+    return {
+      name: companySettings.company_name,
+      address: addressParts.join('\n'),
+      phone: companySettings.phone,
+      email: companySettings.email,
+    };
+  };
 
   // Form setup
   const {
@@ -604,9 +642,9 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
               console.error('Error fetching order data for force update:', error);
               return;
             }
-            
+
             console.log('Order data for force update:', orderData);
-            
+
             if (orderData.total_received >= orderData.order_quantity) {
               console.log('Order is complete, forcing status to Completed');
               supabase
@@ -619,9 +657,9 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                     console.error('Error fetching Completed status ID:', statusError);
                     return;
                   }
-                  
+
                   console.log('Completed status ID:', statusData.status_id);
-                  
+
                   supabase
                     .from('supplier_orders')
                     .update({ status_id: statusData.status_id })
@@ -637,14 +675,14 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
             }
           });
       }
-      
+
       // Invalidate queries to refresh data
       queryClient.invalidateQueries({ queryKey: ['supplierOrder', orderId] });
       // Also invalidate inventory queries to refresh inventory view
       queryClient.invalidateQueries({ queryKey: ['inventory'] });
       // Also invalidate the components query to refresh the component details
       queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
-      
+
       // Reset form
       reset({
         quantity_received: undefined,
@@ -670,7 +708,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
     onSuccess: () => {
       // Invalidate queries to refresh data
       queryClient.invalidateQueries({ queryKey: ['supplierOrder', orderId] });
-      
+
       // Reset form
       resetQNumber();
       setQNumberError(null);
@@ -927,14 +965,14 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                 <p className="text-sm">
                   Current status: <span className="font-medium">{order.status.status_name}</span>
                 </p>
-                
+
                 {statusError && (
                   <div className="p-3 bg-destructive/10 text-destructive rounded-md text-sm">
                     {statusError}
                   </div>
                 )}
-                
-                <Button 
+
+                <Button
                   onClick={() => handleStatusChange('Open')}
                   disabled={statusMutation.isPending}
                   className="w-full"
@@ -972,9 +1010,8 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                     type="text"
                     id="q_number"
                     placeholder="e.g. Q344"
-                    className={`h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ${
-                      qNumberErrors.q_number ? 'border-destructive' : ''
-                    }`}
+                    className={`h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ${qNumberErrors.q_number ? 'border-destructive' : ''
+                      }`}
                     disabled={qNumberMutation.isPending}
                     {...registerQNumber('q_number')}
                   />
@@ -984,15 +1021,15 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                     </p>
                   )}
                 </div>
-                
+
                 {qNumberError && (
                   <div className="p-3 bg-destructive/10 text-destructive rounded-md text-sm">
                     {qNumberError}
                   </div>
                 )}
-                
-                <Button 
-                  type="submit" 
+
+                <Button
+                  type="submit"
                   disabled={qNumberMutation.isPending}
                   className="w-full"
                 >
@@ -1102,9 +1139,8 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                   <input
                     type="number"
                     id="quantity_received"
-                    className={`h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ${
-                      errors.quantity_received ? 'border-destructive' : ''
-                    }`}
+                    className={`h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ${errors.quantity_received ? 'border-destructive' : ''
+                      }`}
                     min="0"
                     max={remainingQuantity}
                     disabled={receiptMutation.isPending}
@@ -1129,9 +1165,8 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                   <input
                     type="number"
                     id="quantity_rejected"
-                    className={`h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ${
-                      errors.quantity_rejected ? 'border-destructive' : ''
-                    }`}
+                    className={`h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ${errors.quantity_rejected ? 'border-destructive' : ''
+                      }`}
                     min="0"
                     max={remainingQuantity}
                     disabled={receiptMutation.isPending}
@@ -1156,9 +1191,8 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                     </label>
                     <select
                       id="rejection_reason"
-                      className={`h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ${
-                        errors.rejection_reason ? 'border-destructive' : ''
-                      }`}
+                      className={`h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ${errors.rejection_reason ? 'border-destructive' : ''
+                        }`}
                       disabled={receiptMutation.isPending}
                       {...register('rejection_reason')}
                     >
@@ -1234,6 +1268,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                       supplierInfo={{
                         supplier_name: order.supplierComponent.supplier.name,
                       }}
+                      companyInfo={getCompanyInfo()}
                       returnType="rejection"
                     />
 
@@ -1468,6 +1503,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
                           phone: undefined,
                           email: undefined,
                         }}
+                        companyInfo={getCompanyInfo()}
                         returnType="later_return"
                       />
                     </div>
@@ -1538,5 +1574,4 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
       </div>
     </div>
   );
-}
 }

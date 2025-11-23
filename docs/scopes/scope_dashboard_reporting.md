@@ -20,7 +20,9 @@ Delivers the same truth to everyone — from finance to operations to the floor.
 
 ### ⚙️ Key Highlights
 ✅ Role-based dashboards
-✅ Real-time KPIs with thresholds
+✅ Real-time KPIs (Orders, Open Orders, Products, Customers)
+✅ Recent Activity Chart (Revenue Trends in ZAR)
+✅ Low Stock Alerts
 ✅ Drill-down to source transactions
 ✅ Export-ready summaries and charts
 ✅ Scheduled email reports

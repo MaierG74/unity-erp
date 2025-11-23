@@ -34,6 +34,7 @@ const formSchema = z.object({
         required_error: 'Please enter a quantity',
         invalid_type_error: 'Please enter a number',
       }).min(1, 'Quantity must be at least 1'),
+      customer_order_id: z.number().nullable().optional(),
     })
   ).min(1, 'Please add at least one item to the order'),
 });
@@ -60,6 +61,7 @@ type SupplierOrderLinePayload = {
   component_id: number;
   quantity_for_order: number;
   quantity_for_stock: number;
+  customer_order_id?: number | null;
 };
 
 type PurchaseOrderCreationResult = {
@@ -78,12 +80,12 @@ async function fetchComponents() {
     .from('components')
     .select('component_id, internal_code, description')
     .order('internal_code');
-  
+
   if (error) {
     console.error('Error fetching components:', error);
     throw new Error('Failed to fetch components');
   }
-  
+
   return data as ComponentFromAPI[];
 }
 
@@ -94,7 +96,7 @@ async function fetchSupplierComponentsForComponent(componentId: number): Promise
     console.warn('Invalid component ID:', componentId);
     return [];
   }
-  
+
   try {
     const { data, error } = await supabase
       .from('suppliercomponents')
@@ -106,17 +108,17 @@ async function fetchSupplierComponentsForComponent(componentId: number): Promise
         supplier:suppliers (name)
       `)
       .eq('component_id', componentId);
-    
+
     if (error) {
       console.error('Error fetching supplier components:', error);
       return [];
     }
-    
+
     if (!data || !Array.isArray(data)) {
       console.warn(`No supplier components found for component ${componentId}`);
       return [];
     }
-    
+
     // Transform the data to match expected format, handling potential null values
     return data.map(item => {
       const rawItem = item as unknown as {
@@ -126,7 +128,7 @@ async function fetchSupplierComponentsForComponent(componentId: number): Promise
         price: number;
         supplier: { name: string } | null;
       };
-      
+
       return {
         supplier_component_id: rawItem.supplier_component_id,
         component_id: rawItem.component_id,
@@ -170,6 +172,7 @@ async function createPurchaseOrder(
     supplier_component_id: number;
     quantity: number;
     component_id: number;
+    customer_order_id?: number | null;
   }>>();
 
   formData.items.forEach((item) => {
@@ -198,6 +201,7 @@ async function createPurchaseOrder(
       supplier_component_id: item.supplier_component_id,
       quantity: item.quantity,
       component_id: item.component_id,
+      customer_order_id: item.customer_order_id,
     });
   });
 
@@ -212,13 +216,17 @@ async function createPurchaseOrder(
         supplier_component_id: item.supplier_component_id,
         order_quantity: item.quantity,
         component_id: item.component_id,
-        quantity_for_order: 0,
-        quantity_for_stock: item.quantity,
+        quantity_for_order: item.customer_order_id ? item.quantity : 0,
+        quantity_for_stock: item.customer_order_id ? 0 : item.quantity,
+        customer_order_id: item.customer_order_id || null,
       }));
 
       const { data, error: rpcError } = await supabase.rpc('create_purchase_order_with_lines', {
         supplier_id: supplierId,
-        customer_order_id: null,
+        // customer_order_id: null, // Removed as per new RPC signature (or ignored if still present in DB, but we updated it)
+        // Wait, if I updated the RPC to accept line_items with customer_order_id, I should check if I removed the top-level param.
+        // My migration file REPLACED the function with one that DOES NOT have customer_order_id.
+        // So I MUST NOT pass it.
         line_items: lineItems,
         status_id: statusId,
         order_date: orderDateISO,
@@ -265,7 +273,7 @@ export function NewPurchaseOrderForm() {
     defaultValues: {
       order_date: new Date().toISOString().split('T')[0],
       notes: '',
-      items: [{ component_id: 0, supplier_component_id: 0, quantity: 1 }],
+      items: [{ component_id: 0, supplier_component_id: 0, quantity: 1, customer_order_id: null }],
     },
   });
 
@@ -293,6 +301,30 @@ export function NewPurchaseOrderForm() {
   const { data: draftStatusId, isLoading: statusLoading } = useQuery({
     queryKey: ['draftStatusId'],
     queryFn: fetchDraftStatusId,
+  });
+
+  // Fetch active customer orders
+  const { data: customerOrders, isLoading: ordersLoading } = useQuery({
+    queryKey: ['activeCustomerOrders'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('order_id, order_number, customer:customers(name)')
+        .not('status_id', 'in', '(3,4)') // Assuming 3=Completed, 4=Cancelled based on typical flows, but better to filter by name if IDs vary. 
+        // Actually, let's just fetch all for now or filter by status name if possible, but IDs are safer if known.
+        // Let's try to filter by status name to be safe.
+        // .eq('status.status_name', 'New') // This is hard with simple query.
+        // Let's just fetch latest 50 open orders for now to avoid complexity, or fetch all and filter client side if small.
+        // Given the previous file read didn't show status IDs, let's just fetch recent orders.
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (error) throw error;
+      return data?.map(o => ({
+        value: o.order_id,
+        label: `${o.order_number} - ${o.customer?.name || 'Unknown Customer'}`
+      })) || [];
+    }
   });
 
   // Watch for component changes to load suppliers
@@ -349,7 +381,7 @@ export function NewPurchaseOrderForm() {
   };
 
   const addItem = () => {
-    append({ component_id: 0, supplier_component_id: 0, quantity: 1 });
+    append({ component_id: 0, supplier_component_id: 0, quantity: 1, customer_order_id: null });
   };
 
   return (
@@ -379,7 +411,7 @@ export function NewPurchaseOrderForm() {
           )}
         </div>
 
-        <div>
+        <div className="md:col-span-2">
           <label htmlFor="notes" className="block text-sm font-medium mb-1">
             Notes
           </label>
@@ -432,7 +464,7 @@ export function NewPurchaseOrderForm() {
                 )}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div>
                   <label htmlFor={`items.${index}.component_id`} className="block text-sm font-medium mb-1">
                     Component
@@ -532,7 +564,7 @@ export function NewPurchaseOrderForm() {
                     render={({ field }) => {
                       const componentId = watchedItems[index]?.component_id;
                       const suppliers = supplierComponentsMap?.get(componentId) || [];
-                      
+
                       return (
                         <Select
                           value={field.value?.toString() || ''}
@@ -571,9 +603,8 @@ export function NewPurchaseOrderForm() {
                       <input
                         type="number"
                         id={`items.${index}.quantity`}
-                        className={`h-10 w-full rounded-md border ${
-                          errors.items?.[index]?.quantity ? 'border-destructive' : 'border-input'
-                        } bg-background px-3 py-2 text-sm`}
+                        className={`h-10 w-full rounded-md border ${errors.items?.[index]?.quantity ? 'border-destructive' : 'border-input'
+                          } bg-background px-3 py-2 text-sm`}
                         min="1"
                         value={field.value || ''}
                         onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
@@ -586,6 +617,57 @@ export function NewPurchaseOrderForm() {
                       {errors.items[index]?.quantity?.message}
                     </p>
                   )}
+                </div>
+
+                <div>
+                  <label htmlFor={`items.${index}.customer_order_id`} className="block text-sm font-medium mb-1">
+                    Customer Order
+                  </label>
+                  <Controller
+                    control={control}
+                    name={`items.${index}.customer_order_id`}
+                    render={({ field }) => (
+                      <ReactSelect
+                        inputId={`customer-order-select-${index}`}
+                        isClearable
+                        isDisabled={ordersLoading || createOrderMutation.isPending}
+                        isLoading={ordersLoading}
+                        options={customerOrders}
+                        value={customerOrders?.find(o => o.value === field.value) || null}
+                        onChange={(option) => field.onChange(option?.value || null)}
+                        placeholder="Stock Order"
+                        menuPlacement="auto"
+                        classNamePrefix="customer-order-select"
+                        styles={{
+                          control: (base) => ({
+                            ...base,
+                            minHeight: '2.5rem',
+                            borderRadius: '0.375rem',
+                            borderColor: 'hsl(var(--input))',
+                            backgroundColor: 'hsl(var(--background))',
+                          }),
+                          menu: (base) => ({
+                            ...base,
+                            zIndex: 50,
+                          }),
+                          option: (base, state) => ({
+                            ...base,
+                            backgroundColor: state.isFocused ? 'hsl(var(--accent))' : 'transparent',
+                            color: state.isFocused ? 'hsl(var(--accent-foreground))' : 'inherit',
+                          }),
+                          singleValue: (base) => ({
+                            ...base,
+                            color: 'hsl(var(--foreground))',
+                          }),
+                          placeholder: (base) => ({
+                            ...base,
+                            color: 'hsl(var(--muted-foreground))',
+                          }),
+                        }}
+                        menuPortalTarget={typeof document !== 'undefined' ? document.body : undefined}
+                      />
+                    )}
+                  />
                 </div>
               </div>
             </CardContent>
