@@ -43,6 +43,8 @@ export const TODO_ATTACHMENT_QUERY = `
   uploader:profiles!todo_attachments_uploaded_by_fkey ( id, username, avatar_url )
 `;
 
+export const TODO_CHECKLIST_QUERY = `*`;
+
 export interface ProfileSummary {
   id: string;
   username?: string | null;
@@ -53,6 +55,15 @@ export interface TodoWatcher {
   userId: string;
   addedAt: string | null;
   profile?: ProfileSummary | null;
+}
+
+export interface TodoChecklistItem {
+  id: string;
+  todoId: string;
+  title: string;
+  isCompleted: boolean;
+  position: number;
+  createdAt: string;
 }
 
 export interface TodoItem {
@@ -78,6 +89,7 @@ export interface TodoItem {
   assignee?: ProfileSummary | null;
   completer?: ProfileSummary | null;
   watchers: TodoWatcher[];
+  checklist: TodoChecklistItem[];
   statusLabel: string | null;
   statusColor: string | null;
   reminderOffsetMinutes: number | null;
@@ -138,6 +150,15 @@ const toWatcher = (row: any): TodoWatcher | null => {
   };
 };
 
+const toChecklistItem = (row: any): TodoChecklistItem => ({
+  id: String(row.id),
+  todoId: String(row.todo_id),
+  title: row.title ?? '',
+  isCompleted: Boolean(row.is_completed),
+  position: row.position ?? 0,
+  createdAt: row.created_at,
+});
+
 const toTodo = (row: any): TodoItem => {
   return {
     id: String(row.id),
@@ -163,6 +184,9 @@ const toTodo = (row: any): TodoItem => {
     completer: toProfile(row.completer),
     watchers: Array.isArray(row.watchers)
       ? (row.watchers.map(toWatcher).filter(Boolean) as TodoWatcher[])
+      : [],
+    checklist: Array.isArray(row.checklist)
+      ? (row.checklist.map(toChecklistItem) as TodoChecklistItem[])
       : [],
     statusLabel: row.status_label ?? null,
     statusColor: row.status_color ?? null,
@@ -286,15 +310,31 @@ export async function listTodos(
 }
 
 export async function fetchTodo(client: SupabaseClient, todoId: string): Promise<TodoItem | null> {
-  const { data, error } = await client
+  // Fetch main todo with relations
+  const { data: todoData, error: todoError } = await client
     .from('todo_items')
     .select(TODO_RELATION_QUERY)
     .eq('id', todoId)
     .maybeSingle();
 
-  if (error) throw error;
-  if (!data) return null;
-  return toTodo(data);
+  if (todoError) throw todoError;
+  if (!todoData) return null;
+
+  // Fetch checklist items separately to avoid complex joins/duplication
+  const { data: checklistData, error: checklistError } = await client
+    .from('todo_checklist_items')
+    .select(TODO_CHECKLIST_QUERY)
+    .eq('todo_id', todoId)
+    .order('position', { ascending: true })
+    .order('created_at', { ascending: true });
+
+  if (checklistError) throw checklistError;
+
+  // Combine data
+  return toTodo({
+    ...todoData,
+    checklist: checklistData ?? [],
+  });
 }
 
 export async function fetchTodoActivities(

@@ -32,6 +32,14 @@ export interface SupplierOrderBreakdown {
   order_date: string;
 }
 
+export interface DraftPOBreakdown {
+  supplier_order_id: number;
+  purchase_order_id: number;
+  supplier_name: string;
+  quantity: number;
+  order_date: string;
+}
+
 export interface ComponentHistoryEntry {
   component_id: number;
   supplier_order_id: number;
@@ -62,6 +70,8 @@ export interface ComponentRequirement {
   global_real_shortfall: number;
   supplier_options: SupplierOption[];
   selected_supplier: SupplierOption | null;
+  draft_po_quantity: number;
+  draft_po_breakdown: DraftPOBreakdown[];
 }
 
 export interface ProductRequirement {

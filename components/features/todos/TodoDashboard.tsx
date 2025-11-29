@@ -131,6 +131,7 @@ function isOverdue(todo: TodoItem) {
 
 export function TodoDashboard() {
   const router = useRouter();
+  const { user } = useAuth();
   const [scope, setScope] = useState<Scope>('assigned');
   const [status, setStatus] = useState<StatusFilter>('all');
   const [includeCompleted, setIncludeCompleted] = useState(false);
@@ -142,12 +143,11 @@ export function TodoDashboard() {
   const [quickTitle, setQuickTitle] = useState('');
   const [quickDueDate, setQuickDueDate] = useState<Date | null>(null);
   const [quickPriority, setQuickPriority] = useState<string>('medium');
-  const [quickAssignee, setQuickAssignee] = useState<string | null>(null);
+  const [quickAssignee, setQuickAssignee] = useState<string | null>(user?.id ?? null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
 
   const debouncedSearch = useDebounce(searchInput, 250);
   const { toast } = useToast();
-  const { user } = useAuth();
   const createMutation = useCreateTodo();
   const profilesQuery = useProfiles();
   const profiles = profilesQuery.data ?? [];
@@ -219,7 +219,7 @@ export function TodoDashboard() {
       setQuickTitle('');
       setQuickDueDate(null);
       setQuickPriority('medium');
-      setQuickAssignee(null);
+      setQuickAssignee(user?.id ?? null);
 
       toast({ title: 'Task created successfully' });
     } catch (err) {

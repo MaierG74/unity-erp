@@ -1,7 +1,7 @@
 **Orders Reset Guide**
 
 - **Purpose:** Clean Orders data (headers, lines, attachments, and junction links) to prepare a fresh test order. Purchasing can be cleaned separately.
-- **Scope:** `orders`, `order_details`, `order_attachments`, `supplier_order_customer_orders`, and Supabase Storage files under `qbutton/Orders/Customer/<customer_id>/`.
+- **Scope:** `orders`, `order_details`, `order_attachments`, `stock_issuances`, `supplier_order_customer_orders`, related `inventory_transactions`, and Supabase Storage files under `qbutton/Orders/Customer/<customer_id>/`.
 
 **Dry‑Run (SQL preview)**
 
@@ -28,9 +28,23 @@ Note: Storage files are not visible via SQL; use the script below to list and re
 **Apply (scripted, safe)**
 
 - Use `scripts/cleanup-orders.ts` (see below) to:
+  - Reverse inventory for stock issuances (adds back issued quantities).
+  - Delete `stock_issuances` and their linked `inventory_transactions`.
   - Delete DB rows in order: junctions → attachments → details → orders.
   - Remove files in Storage under `Orders/Customer/<customer_id>/` for affected customers.
   - Supports `--dry-run`, `--after=YYYY-MM-DD`, and `--orderIds=...` flags.
+
+**Tables Affected**
+
+| Table | Action |
+|-------|--------|
+| `orders` | Deleted |
+| `order_details` | Deleted |
+| `order_attachments` | Deleted |
+| `stock_issuances` | Deleted |
+| `inventory_transactions` | Issuance transactions deleted |
+| `inventory` | `quantity_on_hand` reversed (issued qty added back) |
+| `supplier_order_customer_orders` | Junction links deleted |
 
 Commands:
 

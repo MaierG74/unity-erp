@@ -165,6 +165,101 @@ This guide documents how we style the app: Tailwind CSS utilities + shadcn/ui pr
   - Use shadcn primitives if/when added; apply `p-4` content padding and `gap-3`.
 
 ## Patterns & Examples
+
+### List Pages (Entity Index)
+
+**Feature Name:** "List Page" or "Entity Index Page"
+
+**Purpose:** A consistent layout for pages that display a list of entities (Customers, Suppliers, Products, etc.) with search, filtering, and actions.
+
+**Key Design Elements:**
+- **Page wrapper:** `space-y-8 card bg-card shadow-lg dark:shadow-none`
+- **Title:** `text-4xl font-extrabold tracking-tight text-foreground`
+- **Primary action button:** Orange `button-primary` with icon, positioned top-right on desktop
+- **Search input:** Full-width with left-aligned search icon, `pl-12 input-field`
+- **Table:** Rounded card with shadow, uppercase column headers, hover states
+
+**Implementation Pattern:**
+
+```tsx
+// Page wrapper (in page.tsx)
+<div className="space-y-8 card bg-card shadow-lg dark:shadow-none">
+  {/* Header row */}
+  <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
+    <h1 className="text-4xl font-extrabold tracking-tight text-foreground">Customers</h1>
+    <Button asChild className="button-primary flex gap-2 items-center">
+      <Link href="/customers/new">
+        <PlusIcon className="h-5 w-5" />
+        Add Customer
+      </Link>
+    </Button>
+  </div>
+
+  {/* Search */}
+  <div className="relative mt-2">
+    <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
+    <Input
+      placeholder="Search customers..."
+      className="pl-12 input-field bg-background text-foreground"
+      value={searchQuery}
+      onChange={(e) => setSearchQuery(e.target.value)}
+    />
+  </div>
+
+  {/* Table */}
+  <div className="overflow-x-auto rounded-xl shadow-lg border border-border bg-card mt-8 dark:shadow-none">
+    <table className="min-w-full divide-y divide-border bg-background dark:bg-card">
+      <thead className="bg-muted dark:bg-muted/20">
+        <tr>
+          <th scope="col" className="px-6 py-3 text-left text-xs font-bold text-muted-foreground uppercase tracking-wider">
+            Name
+          </th>
+          {/* More columns... */}
+          <th scope="col" className="px-6 py-3 text-right text-xs font-bold text-muted-foreground uppercase tracking-wider">
+            Actions
+          </th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-border">
+        {items.map((item) => (
+          <tr key={item.id} className="hover:bg-accent/10 dark:hover:bg-accent/30 transition-colors">
+            <td className="px-6 py-4 whitespace-nowrap text-base font-semibold text-foreground">
+              <Link href={`/customers/${item.id}`} className="hover:underline">
+                {item.name}
+              </Link>
+            </td>
+            {/* More cells... */}
+            <td className="px-6 py-4 whitespace-nowrap text-right text-base font-medium flex gap-2 justify-end">
+              <Link href={`/customers/${item.id}`} className="button-primary px-3 py-1 text-xs font-semibold">
+                View
+              </Link>
+              <Link href={`/customers/${item.id}/edit`} className="button-primary bg-secondary text-secondary-foreground px-3 py-1 text-xs font-semibold">
+                Edit
+              </Link>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+</div>
+```
+
+**Key Requirements:**
+- **Card shadow:** `shadow-lg` in light mode, `dark:shadow-none` in dark mode
+- **Title size:** `text-4xl font-extrabold` for prominent page identity
+- **Table headers:** Uppercase, `text-xs font-bold`, muted background
+- **Row hover:** `hover:bg-accent/10 dark:hover:bg-accent/30` for subtle feedback
+- **Action buttons:** Orange "View" button, secondary "Edit" button, both small (`text-xs`)
+- **Empty state:** Centered message with `text-muted-foreground`
+- **Loading state:** Centered pulsing text
+
+**Reference Implementations:**
+- Customers: `app/customers/page.tsx`
+- Suppliers: `app/suppliers/page.tsx` + `components/features/suppliers/supplier-list.tsx`
+
+---
+
 ### Dialogs / Modals
 - Structure: `Dialog` → `DialogContent` → `DialogHeader` + body + `DialogFooter`.
 - Content container: wrap the body with `max-h-[min(calc(100vh-8rem),90vh)] overflow-y-auto` so tall modals scroll while keeping padding consistent.

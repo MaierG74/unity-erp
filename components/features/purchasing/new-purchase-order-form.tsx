@@ -17,6 +17,8 @@ import { Loader2, Plus, Trash2, AlertCircle } from 'lucide-react';
 import { PurchaseOrderFormData } from '@/types/purchasing';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import ReactSelect from 'react-select';
+import { toast } from 'sonner';
+import { ConsolidatePODialog, SupplierWithDrafts, ExistingDraftPO } from '@/components/features/purchasing/ConsolidatePODialog';
 
 // Form validation schema
 const formSchema = z.object({
@@ -259,6 +261,10 @@ export function NewPurchaseOrderForm() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
+  const [consolidateDialogOpen, setConsolidateDialogOpen] = useState(false);
+  const [suppliersWithDrafts, setSuppliersWithDrafts] = useState<SupplierWithDrafts[]>([]);
+  const [pendingFormData, setPendingFormData] = useState<PurchaseOrderFormData | null>(null);
+  const [isCheckingDrafts, setIsCheckingDrafts] = useState(false);
 
   // Form setup
   const {
@@ -375,9 +381,206 @@ export function NewPurchaseOrderForm() {
     },
   });
 
-  const onSubmit = (data: PurchaseOrderFormData) => {
+  // Check for existing Draft POs for the selected suppliers
+  const checkForExistingDrafts = async (formData: PurchaseOrderFormData): Promise<SupplierWithDrafts[]> => {
+    // Get unique supplier IDs from the form items
+    const supplierIds = new Set<number>();
+    
+    formData.items.forEach((item) => {
+      const supplierOptions = supplierComponentsMap?.get(item.component_id) || [];
+      const supplierComponent = supplierOptions.find(
+        (sc) => sc.supplier_component_id === item.supplier_component_id
+      );
+      if (supplierComponent?.supplier_id) {
+        supplierIds.add(supplierComponent.supplier_id);
+      }
+    });
+
+    const draftsPerSupplier: SupplierWithDrafts[] = [];
+
+    for (const supplierId of Array.from(supplierIds)) {
+      const { data: drafts, error } = await supabase.rpc('get_draft_purchase_orders_for_supplier', {
+        p_supplier_id: supplierId
+      });
+
+      if (!error && drafts && drafts.length > 0) {
+        // Find supplier name from our cache
+        let supplierName = 'Unknown';
+        for (const [, suppliers] of supplierComponentsMap?.entries() || []) {
+          const match = suppliers.find(s => s.supplier_id === supplierId);
+          if (match) {
+            supplierName = match.supplier.name;
+            break;
+          }
+        }
+
+        draftsPerSupplier.push({
+          supplierId,
+          supplierName,
+          existingDrafts: drafts.map((d: any) => ({
+            purchase_order_id: d.purchase_order_id,
+            q_number: d.q_number,
+            created_at: d.created_at,
+            notes: d.notes,
+            line_count: Number(d.line_count),
+            total_amount: Number(d.total_amount)
+          }))
+        });
+      }
+    }
+
+    return draftsPerSupplier;
+  };
+
+  // Handle consolidation decision
+  const handleConsolidationConfirm = async (decisions: Record<number, number | 'new'>) => {
+    setConsolidateDialogOpen(false);
+    
+    if (!pendingFormData || !draftStatusId) return;
+
+    const toastId = toast.loading('Creating purchase orders…');
+    
+    try {
+      // Group items by supplier
+      const itemsBySupplier = new Map<number, Array<{
+        supplier_component_id: number;
+        quantity: number;
+        component_id: number;
+        customer_order_id?: number | null;
+        supplierId: number;
+      }>>();
+
+      pendingFormData.items.forEach((item) => {
+        const supplierOptions = supplierComponentsMap?.get(item.component_id) || [];
+        const supplierComponent = supplierOptions.find(
+          (sc) => sc.supplier_component_id === item.supplier_component_id
+        );
+
+        if (supplierComponent?.supplier_id) {
+          if (!itemsBySupplier.has(supplierComponent.supplier_id)) {
+            itemsBySupplier.set(supplierComponent.supplier_id, []);
+          }
+          itemsBySupplier.get(supplierComponent.supplier_id)?.push({
+            supplier_component_id: item.supplier_component_id,
+            quantity: item.quantity,
+            component_id: item.component_id,
+            customer_order_id: item.customer_order_id,
+            supplierId: supplierComponent.supplier_id,
+          });
+        }
+      });
+
+      const orderDateISO = pendingFormData.order_date
+        ? new Date(pendingFormData.order_date).toISOString()
+        : new Date().toISOString();
+
+      const results: PurchaseOrderCreationResult[] = [];
+
+      for (const [supplierId, items] of Array.from(itemsBySupplier.entries())) {
+        const decision = decisions[supplierId] || 'new';
+        
+        const lineItems: SupplierOrderLinePayload[] = items.map((item) => ({
+          supplier_component_id: item.supplier_component_id,
+          order_quantity: item.quantity,
+          component_id: item.component_id,
+          quantity_for_order: item.customer_order_id ? item.quantity : 0,
+          quantity_for_stock: item.customer_order_id ? 0 : item.quantity,
+          customer_order_id: item.customer_order_id || null,
+        }));
+
+        if (decision !== 'new' && typeof decision === 'number') {
+          // Add to existing PO
+          const { data, error: rpcError } = await supabase.rpc('add_lines_to_purchase_order', {
+            target_purchase_order_id: decision,
+            line_items: lineItems
+          });
+
+          if (rpcError) throw rpcError;
+
+          results.push({
+            purchase_order_id: decision,
+            supplier_order_ids: data?.[0]?.supplier_order_ids ?? []
+          });
+        } else {
+          // Create new PO
+          const { data, error: rpcError } = await supabase.rpc('create_purchase_order_with_lines', {
+            supplier_id: supplierId,
+            line_items: lineItems,
+            status_id: draftStatusId,
+            order_date: orderDateISO,
+            notes: pendingFormData.notes ?? '',
+          });
+
+          if (rpcError) throw rpcError;
+
+          const rpcResult = Array.isArray(data) ? data?.[0] : data;
+          if (rpcResult && typeof rpcResult.purchase_order_id === 'number') {
+            results.push({
+              purchase_order_id: rpcResult.purchase_order_id,
+              supplier_order_ids: rpcResult.supplier_order_ids ?? []
+            });
+          }
+        }
+      }
+
+      // Success message
+      const addedCount = results.filter(r => 
+        suppliersWithDrafts.some(s => s.existingDrafts.some(d => d.purchase_order_id === r.purchase_order_id))
+      ).length;
+
+      let toastMessage = '';
+      if (addedCount > 0 && addedCount === results.length) {
+        toastMessage = addedCount === 1 
+          ? 'Items added to existing purchase order!' 
+          : `Items added to ${addedCount} existing purchase orders!`;
+      } else if (addedCount > 0) {
+        toastMessage = `${results.length - addedCount} new PO(s) created, ${addedCount} existing PO(s) updated!`;
+      } else {
+        toastMessage = results.length === 1
+          ? 'Purchase order created successfully!'
+          : `${results.length} purchase orders created successfully!`;
+      }
+
+      toast.success(toastMessage, { id: toastId });
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
+
+      // Redirect to first PO
+      if (results.length > 0) {
+        router.push(`/purchasing/purchase-orders/${results[0].purchase_order_id}`);
+      } else {
+        router.push('/purchasing/purchase-orders');
+      }
+    } catch (err) {
+      console.error('Error in consolidation:', err);
+      toast.error('Failed to create purchase orders', { id: toastId });
+    }
+
+    setPendingFormData(null);
+  };
+
+  const onSubmit = async (data: PurchaseOrderFormData) => {
     setError(null);
-    createOrderMutation.mutate(data);
+    setIsCheckingDrafts(true);
+
+    try {
+      // Check for existing drafts
+      const drafts = await checkForExistingDrafts(data);
+      
+      if (drafts.length > 0) {
+        setPendingFormData(data);
+        setSuppliersWithDrafts(drafts);
+        setConsolidateDialogOpen(true);
+      } else {
+        // No existing drafts, create new POs directly
+        createOrderMutation.mutate(data);
+      }
+    } catch (err) {
+      console.error('Error checking for drafts:', err);
+      // Fall back to creating new POs
+      createOrderMutation.mutate(data);
+    } finally {
+      setIsCheckingDrafts(false);
+    }
   };
 
   const addItem = () => {
@@ -678,17 +881,28 @@ export function NewPurchaseOrderForm() {
       <div className="pt-4 border-t flex justify-end">
         <Button
           type="submit"
-          disabled={createOrderMutation.isPending || statusLoading}
+          disabled={createOrderMutation.isPending || statusLoading || isCheckingDrafts}
           className="w-full md:w-auto"
         >
-          {createOrderMutation.isPending && (
+          {(createOrderMutation.isPending || isCheckingDrafts) && (
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
           )}
-          {createOrderMutation.isPending
-            ? 'Creating Purchase Order...'
-            : 'Create Purchase Order'}
+          {isCheckingDrafts
+            ? 'Checking existing orders...'
+            : createOrderMutation.isPending
+              ? 'Creating Purchase Order...'
+              : 'Create Purchase Order'}
         </Button>
       </div>
+
+      {/* Consolidation Dialog */}
+      <ConsolidatePODialog
+        open={consolidateDialogOpen}
+        onOpenChange={setConsolidateDialogOpen}
+        suppliersWithDrafts={suppliersWithDrafts}
+        onConfirm={handleConsolidationConfirm}
+        isLoading={false}
+      />
     </form>
   );
 } 

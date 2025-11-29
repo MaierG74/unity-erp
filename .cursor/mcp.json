@@ -8,7 +8,7 @@
         "--project-ref=ttlyfhkrsjjrzxiagzpb"
       ],
       "env": {
-        "SUPABASE_ACCESS_TOKEN": "sbp_049f3db7d2507966643a172c31776e9b2d563de8"
+        "SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN}"
       }
     },
     "sequential-thinking": {
@@ -17,6 +17,16 @@
         "-y",
         "@modelcontextprotocol/server-sequential-thinking"
       ]
+    },
+    "airtable": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "airtable-mcp-server"
+      ],
+      "env": {
+        "AIRTABLE_API_KEY": "${AIRTABLE_API_KEY}"
+      }
     }
   }
 }

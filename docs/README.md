@@ -40,6 +40,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - [`operations/email-integration.md`](operations/email-integration.md)
   - [`operations/chrome-devtools-mcp.md`](operations/chrome-devtools-mcp.md)
   - [`operations/quote-email-implementation.md`](operations/quote-email-implementation.md) – ✅ Quote email implementation summary (completed)
+  - [`operations/airtable-sync-runbook.md`](operations/airtable-sync-runbook.md) – Airtable migration/sync checklist and incident response guide
 - Plans: [`plans/`](plans/) – implementation briefs such as `quoting-module-plan.md`, `quote-email-plan.md`, `time-attendance-plan.md`, `cutlist-nesting-plan.md`, and other project plans
   - New: [`plans/permissions-and-logging-plan.md`](plans/permissions-and-logging-plan.md) – unified roadmap for role-based access control, permissions UI, and audit logging rollout
   - New: [`plans/todo-module-plan.md`](plans/todo-module-plan.md) – To-Do module planning doc covering cross-module task assignments
@@ -49,6 +50,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - Completed: [`plans/fix-on-order-calculation-inner-join.md`](plans/fix-on-order-calculation-inner-join.md) – Fix "On Order" calculation with INNER JOIN patterns (see [`changelogs/on-order-calculation-fix-20250110.md`](changelogs/on-order-calculation-fix-20250110.md) for implementation)
   - New: [`plans/supplier-returns-plan.md`](plans/supplier-returns-plan.md) – Return goods to suppliers (rejections and later returns)
   - Completed: [`plans/quote-email-plan.md`](plans/quote-email-plan.md) – Quote PDF email integration plan (see [`operations/quote-email-implementation.md`](operations/quote-email-implementation.md) for implementation)
+  - New: [`plans/inventory-traceability-po-consolidation-plan.md`](plans/inventory-traceability-po-consolidation-plan.md) – Inventory traceability through purchase cycle, PO consolidation, and reserved inventory system
 - Changelogs: [`changelogs/`](changelogs/)
   - [`changelogs/supplier-returns-rpc-overload-fix-20250113.md`](changelogs/supplier-returns-rpc-overload-fix-20250113.md) – Dropped legacy RPC overload to fix supplier return execution errors
   - [`changelogs/on-order-calculation-fix-20250110.md`](changelogs/on-order-calculation-fix-20250110.md) – Fixed "On Order" calculation discrepancies with INNER JOIN patterns and corrected supplier order statuses
@@ -66,11 +68,14 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - [`changelogs/purchase-order-per-line-association-20251120.md`](changelogs/purchase-order-per-line-association-20251120.md) – `create_purchase_order_with_lines` now links each PO line to a specific customer order id
   - [`changelogs/grn-pdf-company-details-fix-20251121.md`](changelogs/grn-pdf-company-details-fix-20251121.md) – Fixed missing company details in Goods Returned (GRN) PDF generation
   - [`changelogs/nextjs-entrycss-runtime-fix-20251123.md`](changelogs/nextjs-entrycss-runtime-fix-20251123.md) – Documented the Next.js `entryCSSFiles` runtime failure and the Inter font loader fix
+  - [`changelogs/purchase-order-edit-mode-20251126.md`](changelogs/purchase-order-edit-mode-20251126.md) – Added edit mode for Draft purchase orders (edit notes, quantities, delete line items)
 - Analysis: [`analysis/`](analysis/)
   - [`analysis/inventory-components-performance-review.md`](analysis/inventory-components-performance-review.md) – Performance and responsiveness review of Components section
 - Technical Guides: [`technical/`](technical/)
   - [`technical/supabase-query-patterns.md`](technical/supabase-query-patterns.md) – Supabase query patterns, common errors, and troubleshooting
   - [`technical/smoke-tests.md`](technical/smoke-tests.md) – How to run the Purchasing smoke test
+  - [`technical/airtable-migration-guide.md`](technical/airtable-migration-guide.md) – Airtable → Supabase migration process plus MCP server configuration
+  - [`technical/airtable-data-mapping.md`](technical/airtable-data-mapping.md) – Field-by-field Airtable to Supabase mapping reference
   - See also: [`changelogs/nextjs-server-build-fix-20251107.md`](changelogs/nextjs-server-build-fix-20251107.md) for Next.js build troubleshooting
 - Migrations: [`../migrations/README.md`](../migrations/README.md) – Database migration files and instructions
  - Scope Documents:

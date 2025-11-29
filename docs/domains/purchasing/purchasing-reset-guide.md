@@ -21,11 +21,24 @@
 
 **What the Script Does**
 
-- Reverses inventory for quantities that were received via supplier_order_receipts (joins through suppliercomponents → components).
-- Deletes `supplier_order_receipts` and their `inventory_transactions`.
+- Reverses inventory for the **net** quantity (receipts − returns) via suppliercomponents → components.
+- Deletes `supplier_order_returns` and their linked `inventory_transactions`.
+- Deletes `supplier_order_receipts` and their linked `inventory_transactions`.
 - Deletes junction rows in `supplier_order_customer_orders` for affected supplier orders.
 - Deletes `supplier_orders`, then parent `purchase_orders`.
 - Leaves all other modules and lookup tables untouched.
+
+**Tables Affected**
+
+| Table | Action |
+|-------|--------|
+| `purchase_orders` | Deleted |
+| `supplier_orders` | Deleted |
+| `supplier_order_receipts` | Deleted |
+| `supplier_order_returns` | Deleted |
+| `inventory_transactions` | Receipt and return transactions deleted |
+| `inventory` | `quantity_on_hand` reversed |
+| `supplier_order_customer_orders` | Junction links deleted |
 
 **Safeguards**
 

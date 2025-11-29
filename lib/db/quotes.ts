@@ -54,6 +54,7 @@ export interface QuoteClusterLine {
   cluster_id: string; // uuid
   line_type: 'component' | 'manual' | 'labor';
   component_id?: number | null;
+  supplier_component_id?: number | null; // References the specific supplier offer used
   description?: string | null;
   qty: number;
   unit_cost?: number | null;

@@ -5,14 +5,15 @@
 **Routes & Pages**
 - `app/suppliers/page.tsx:1`: Supplier list with search and “Has price list” filter.
 - `app/suppliers/new/page.tsx:1`: Create supplier via `SupplierForm`.
-- `app/suppliers/[id]/page.tsx:1`: Supplier detail with tabs: Details, Emails, Components, Price Lists.
+- `app/suppliers/[id]/page.tsx:1`: Supplier detail with tabs: Details, Components, Price Lists, Orders, Reports. Emails are managed inside the Details tab.
 
 **Key UI Components**
 - `components/features/suppliers/supplier-list.tsx:1`: Lists suppliers, primary email, and number of price lists. Opens `PricelistPreviewModal`.
 - `components/features/suppliers/supplier-form.tsx:1`: Create/update supplier (name, contact info) with Zod validation.
-- `components/features/suppliers/supplier-emails.tsx:1`: Manage email addresses, including primary flag toggle and delete.
+- `components/features/suppliers/supplier-emails.tsx:1`: Manage email addresses, including inline edit, primary flag toggle, and delete.
 - `components/features/suppliers/supplier-components.tsx:1`: Table of supplier-component mappings. Supports inline edit and delete. (Add flow is prepared in API but not yet wired in the UI.)
-- `components/features/suppliers/supplier-pricelists.tsx:1`: Upload and delete price lists (stored in Supabase Storage bucket `QButton`, folder `Price List/`).
+- `components/features/suppliers/supplier-pricelists.tsx:1`: Thumbnail grid display with click-to-preview modal for price lists. See [Price Lists Tab](#price-lists-tab) for detailed documentation.
+- `components/features/suppliers/supplier-list.tsx:1`: Supplier list with inline price list thumbnail strip (Airtable-style attachment chips) that opens the `PricelistPreviewModal`.
 - `components/features/suppliers/pricelist-preview-modal.tsx:1`: Modal preview list of price list files for a supplier.
 
 **Client API**
@@ -46,10 +47,9 @@
 - Data: fetched with `getSupplier(id)`; invalidates via React Query after updates.
 - Subtitle removed under the supplier name to reduce chrome and align with simplified page headers.
 - Tabs:
-  - Details: `SupplierForm` for name/contact.
-  - Emails: `SupplierEmails` with add, primary toggle, delete.
+  - Details: `SupplierForm` for name/contact plus `SupplierEmails` section (add, inline edit, primary toggle, delete).
   - Components: `SupplierComponents` lists supplier component mappings with inline edit/delete.
-  - Price Lists: `SupplierPricelists` upload/delete. Uses Supabase Storage bucket `QButton`.
+  - **Price Lists** (✅ Implemented): `SupplierPricelists` with thumbnail grid display and click-to-preview modal. See [Price Lists Tab](#price-lists-tab) below.
   - **Orders** (✅ Implemented 2025-01-15): `SupplierOrders` shows all purchase orders for the supplier with advanced filtering. See [Orders Tab](#orders-tab) below.
   - **Reports** (✅ Implemented 2025-01-15): `SupplierReports` displays analytics and statistics about supplier performance. See [Reports Tab](#reports-tab) below.
 
@@ -195,6 +195,245 @@
   - Separated `searchInput` (immediate) from `debouncedSearch` (filtered) for better UX - input feels responsive while filtering is efficient.
   - Filtering/sorting now only runs after user stops typing for 300ms, significantly reducing computational overhead for large datasets.
   - Performance improvement: For 100+ components, reduces filter operations from ~10-20 per second (while typing) to ~3-4 per second (after debounce).
+
+## Price Lists Tab
+
+**File:** `components/features/suppliers/supplier-pricelists.tsx`
+**Status:** ✅ Complete
+
+### Overview
+
+The Price Lists tab provides a visual thumbnail grid display for supplier price list documents and images. Inspired by Airtable's attachment UI pattern, this interface allows users to preview documents at a glance and interact with them through a full-screen preview modal. The tab supports uploading PDFs, Office documents, and various image formats with automatic thumbnail generation. The new thumbnail preview flow renders PDFs through `PdfThumbnailClient`, shows images inline, and opens `AttachmentPreviewModal` when any thumbnail is clicked for a full attachment carousel.
+
+### Features
+
+**Thumbnail Grid Layout:**
+- Responsive grid using `grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4`
+- Each thumbnail card maintains a 3:4 aspect ratio (`aspect-[3/4]`)
+- Automatic reflow based on viewport size (1 column mobile, 2 tablet, 3 desktop)
+- Cards styled with `border rounded-lg bg-card hover:bg-muted/50 transition-colors group`
+- Hover state triggers subtle background color change and reveals delete button
+- Clickable card surface opens full preview; click targets are blocked only on the delete button
+
+**File Type Display:**
+- **PDF Files**: Rendered using `PdfThumbnailClient` component which:
+  - Displays first page of PDF as thumbnail preview
+  - Uses React-PDF library for rendering
+  - Shows loading spinner while PDF loads
+  - Falls back to FileIcon on render error
+- **Image Files** (JPG, JPEG, PNG, GIF, WebP):
+  - Direct `<img>` rendering with object-cover scaling
+  - Images fill the thumbnail container while maintaining aspect ratio
+  - Alt text set to file name for accessibility
+- **Other File Types** (DOC, DOCX, XLS, XLSX, etc.):
+  - Displays appropriate file type icon using `FileIcon` component
+  - Icon centered in thumbnail container with muted background
+
+**Thumbnail Overlay:**
+- Bottom gradient overlay: `bg-gradient-to-t from-black/70 to-transparent`
+- Displays file metadata:
+  - Display name (white text, medium font weight)
+  - Upload date formatted as "MMM d, yyyy" using date-fns (muted white text)
+- Overlay positioned absolute at bottom of thumbnail with padding
+
+**Hover Effects:**
+- Delete button positioned absolute in top-right corner
+- Uses `opacity-0 group-hover:opacity-100 transition-opacity` for smooth reveal
+- Button styled as destructive variant with Trash2 icon
+- Hover on card also changes background to `bg-muted/50`
+
+**Click-to-Preview:**
+- Clicking anywhere on thumbnail card (except delete button) opens `AttachmentPreviewModal`
+- Modal receives full array of price lists and selected index
+- Cursor changes to pointer on hover to indicate clickability
+- Smooth modal transition with backdrop blur effect
+- Remembers the grid ordering so navigating next/previous in the modal follows the same layout sequence
+
+### Preview Modal
+
+**Full-Screen Preview Functionality:**
+- Modal component: `AttachmentPreviewModal` from `components/ui/attachment-preview-modal.tsx`
+- Full-screen overlay with `fixed inset-0 z-50` positioning
+- Dark backdrop with `bg-black/80 backdrop-blur-sm` for focus
+- Close button in top-right corner with X icon
+- ESC key support for closing modal
+
+**PDF Preview:**
+- Browser-specific rendering strategies:
+  - Chrome/Edge: Uses Google Docs viewer for full-featured PDF display
+  - Safari: Uses object tag with embedded PDF viewer
+  - Firefox: Direct iframe embedding
+- Full document scrolling and navigation
+- Maintains aspect ratio and responsive sizing
+- Download link provided for offline access
+
+**Image Preview:**
+- High-resolution image display centered in modal
+- Zoom controls using mouse wheel or touch gestures
+- Pan support for zoomed images
+- Maintains original aspect ratio
+- Smooth zoom transitions with CSS transforms
+
+**Other File Types:**
+- Displays file icon and metadata
+- Prominent download button for file access
+- Shows file size and upload date
+- Option to open in new tab if browser-supported
+
+**Grid View Navigation:**
+- Bottom section shows grid of all attachments
+- Click any thumbnail to switch preview without closing modal
+- Current file highlighted with border
+- Scroll support for many attachments
+- Maintains state when switching between files
+
+### Upload Flow
+
+**Upload Button:**
+- Primary button styled with `bg-primary text-primary-foreground`
+- Initially shows "Upload Price List" label with Upload icon
+- Clicking reveals upload form inline
+
+**Upload Form:**
+- **Display Name Input**:
+  - Text input with label "Display Name"
+  - Defaults to filename without extension
+  - User can customize before upload
+  - Validated as required field
+- **File Chooser**:
+  - Standard file input with "Choose File" button
+  - Accepted types: `.pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp`
+  - File selection triggers automatic upload flow
+  - Shows selected filename after choosing
+
+**Upload Process:**
+- Validates display name is not empty
+- Uploads file to Supabase Storage:
+  - Bucket: `QButton`
+  - Folder: `Price List/`
+  - Filename: `{timestamp}-{original-filename}`
+- Creates database record in `supplier_pricelists` table
+- Displays loading state during upload
+- Shows success/error toast notification
+- Invalidates React Query cache to refresh UI
+- Resets form after successful upload
+
+**Error Handling:**
+- File size limits enforced by Supabase Storage
+- Invalid file type shows error message
+- Network errors display user-friendly toast
+- Empty display name prevents form submission
+
+### Component References
+
+- **Implementation**: `components/features/suppliers/supplier-pricelists.tsx`
+- **Thumbnail Display Pattern**: `supplier-pricelists.tsx` combines `PdfThumbnailClient` for PDF first-page renders with `AttachmentPreviewModal` for full-screen navigation; reuse this pairing for other attachment grids.
+- **PDF Thumbnails**: `components/ui/pdf-thumbnail-client.tsx`
+- **Preview Modal**: `components/ui/attachment-preview-modal.tsx`
+- **File Icons**: `components/ui/file-icon.tsx`
+- **Page Integration**: `app/suppliers/[id]/page.tsx` (Price Lists tab at line ~170)
+- **Types**: `types/suppliers.ts` (SupplierPricelist type at line ~31)
+- **API**: `lib/api/suppliers.ts` (uploadPricelist and deletePricelist functions at line ~200)
+
+### UI Pattern Details
+
+**Thumbnail Card Structure:**
+```typescript
+className="border rounded-lg bg-card hover:bg-muted/50 transition-colors group cursor-pointer"
+```
+- Border: Default border color from theme
+- Rounded corners: Large radius (8px equivalent)
+- Background: Card color with hover state to muted/50
+- Transition: Smooth color transitions on hover
+- Group: Enables child elements to respond to parent hover
+- Cursor: Pointer to indicate clickability
+
+**Aspect Ratio Container:**
+```typescript
+className="aspect-[3/4] relative overflow-hidden bg-muted/30"
+```
+- Aspect ratio: 3:4 portrait orientation (standard for documents)
+- Position: Relative for absolute child positioning
+- Overflow: Hidden to crop content to container
+- Background: Subtle muted background for empty space
+
+**Gradient Overlay:**
+```typescript
+className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-3"
+```
+- Position: Absolute at bottom of thumbnail
+- Full width: left-0 right-0 spans container
+- Gradient: Top-to-bottom from black/70% to transparent
+- Padding: 12px (p-3) for text breathing room
+
+**Delete Button:**
+```typescript
+className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+variant="destructive" size="icon"
+```
+- Position: Top-right corner with 8px offset
+- Opacity: Hidden by default, visible on parent hover
+- Transition: Smooth fade in/out
+- Variant: Destructive red color scheme
+- Size: Icon-only button (32px square)
+
+**Empty State:**
+- Centered message when no price lists exist
+- Uses `text-muted-foreground` for subtle appearance
+- Icon: FileText from lucide-react
+- Message: "No price lists uploaded yet"
+- Container: Full width with centered flex layout
+
+### Database Schema
+
+**supplier_pricelists table:**
+```sql
+CREATE TABLE supplier_pricelists (
+  pricelist_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  supplier_id UUID NOT NULL REFERENCES suppliers(supplier_id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  file_url TEXT NOT NULL,
+  file_type TEXT,
+  uploaded_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+**Key fields:**
+- `pricelist_id`: UUID primary key
+- `supplier_id`: Foreign key to suppliers table with cascade delete
+- `file_name`: Original filename as stored in Supabase Storage
+- `display_name`: User-friendly name shown in UI
+- `file_url`: Full public URL from Supabase Storage
+- `file_type`: MIME type (e.g., "application/pdf", "image/jpeg")
+- `uploaded_at`: Timestamp for sorting and display
+
+### Performance Considerations
+
+- PDF thumbnails render client-side using React-PDF
+- Large PDFs may take 1-2 seconds to generate thumbnail
+- Images load progressively with browser-native lazy loading
+- Preview modal lazy-loads full documents on demand
+- Grid layout uses CSS Grid for efficient rendering
+- React Query cache prevents unnecessary refetches
+
+### Accessibility
+
+- All thumbnails have proper alt text
+- Delete buttons have aria-labels
+- Modal supports keyboard navigation (ESC to close)
+- File type icons have descriptive labels
+- Focus management when opening/closing modal
+- Color contrast meets WCAG AA standards
+
+### Future Enhancements
+
+- Drag-and-drop file upload
+- Bulk delete multiple price lists
+- File versioning and history
+- OCR text extraction for searchability
+- Automatic thumbnail regeneration
+- Support for additional file formats
 
 ## Orders Tab
 

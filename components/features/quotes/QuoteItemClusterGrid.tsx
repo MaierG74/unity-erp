@@ -2,6 +2,7 @@ import React, { FC, useState } from 'react';
 import { QuoteItemCluster, QuoteClusterLine, fetchProductComponents, formatCurrency } from '@/lib/db/quotes';
 import QuoteClusterLineRow from './QuoteClusterLineRow';
 import ComponentSelectionDialog from './ComponentSelectionDialog';
+import EditClusterLineDialog from './EditClusterLineDialog';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,6 +41,8 @@ const QuoteItemClusterGrid: FC<QuoteItemClusterGridProps> = ({
   itemId
 }) => {
   const [showComponentDialog, setShowComponentDialog] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [editingLine, setEditingLine] = useState<QuoteClusterLine | null>(null);
   const [markupType, setMarkupType] = useState<'percentage' | 'fixed'>('percentage');
   const [localMarkupValue, setLocalMarkupValue] = useState<string>(String(cluster.markup_percent || 0));
   
@@ -85,6 +88,17 @@ const QuoteItemClusterGrid: FC<QuoteItemClusterGridProps> = ({
     explode?: boolean;
   }) => {
     onAddLine(cluster.id, component);
+  };
+
+  const handleEditLine = (line: QuoteClusterLine) => {
+    setEditingLine(line);
+    setShowEditDialog(true);
+  };
+
+  const handleSaveEdit = (lineId: string, updates: Partial<QuoteClusterLine>) => {
+    onUpdateLine(lineId, updates);
+    setShowEditDialog(false);
+    setEditingLine(null);
   };
   
   const handleMarkupChange = (value: string) => {
@@ -137,7 +151,8 @@ const QuoteItemClusterGrid: FC<QuoteItemClusterGridProps> = ({
                 key={line.id} 
                 line={line} 
                 onUpdate={onUpdateLine} 
-                onDelete={onDeleteLine} 
+                onDelete={onDeleteLine}
+                onEdit={handleEditLine}
               />
             ))}
             
@@ -233,6 +248,18 @@ const QuoteItemClusterGrid: FC<QuoteItemClusterGridProps> = ({
         onClose={() => setShowComponentDialog(false)}
         onAddComponent={handleAddComponent}
       />
+
+      {editingLine && (
+        <EditClusterLineDialog
+          open={showEditDialog}
+          onClose={() => {
+            setShowEditDialog(false);
+            setEditingLine(null);
+          }}
+          line={editingLine}
+          onSave={handleSaveEdit}
+        />
+      )}
     </div>
   );
 };

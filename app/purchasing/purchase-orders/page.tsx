@@ -3,10 +3,21 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { PurchaseOrdersList } from '@/components/features/purchasing/purchase-orders-list';
-import { PlusCircle, ArrowLeft, Search, CalendarIcon, X, ExternalLink, FilterX } from 'lucide-react';
+import { PlusCircle, ArrowLeft, Search, CalendarIcon, X, ExternalLink, FilterX, Trash2, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableCell, TableHead, TableRow } from '@/components/ui/table';
@@ -173,12 +184,15 @@ function formatQNumber(qNumber: string | undefined): string {
 
 export default function PurchaseOrdersPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [activeTab, setActiveTab] = useState<OrderTab>('inProgress');
   const [qNumberSearch, setQNumberSearch] = useState<string>('');
   const [supplierSearch, setSupplierSearch] = useState<string>('all');
   const [startDate, setStartDate] = useState<Date | undefined>(undefined);
   const [endDate, setEndDate] = useState<Date | undefined>(undefined);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [poToDelete, setPoToDelete] = useState<PurchaseOrder | null>(null);
   
   // Fetch all suppliers for the dropdown
   const [uniqueSuppliers, setUniqueSuppliers] = useState<string[]>([]);
@@ -186,6 +200,53 @@ export default function PurchaseOrdersPage() {
   const { data: purchaseOrders, isLoading, error, refetch } = useQuery({
     queryKey: ['purchaseOrders'],
     queryFn: fetchPurchaseOrders,
+  });
+
+  // Delete mutation
+  const deletePOMutation = useMutation({
+    mutationFn: async (purchaseOrderId: number) => {
+      // First delete supplier_order_customer_orders for all supplier orders in this PO
+      const { data: supplierOrders } = await supabase
+        .from('supplier_orders')
+        .select('order_id')
+        .eq('purchase_order_id', purchaseOrderId);
+
+      if (supplierOrders && supplierOrders.length > 0) {
+        const orderIds = supplierOrders.map(so => so.order_id);
+        
+        // Delete customer order associations
+        await supabase
+          .from('supplier_order_customer_orders')
+          .delete()
+          .in('supplier_order_id', orderIds);
+      }
+
+      // Delete supplier orders
+      const { error: soError } = await supabase
+        .from('supplier_orders')
+        .delete()
+        .eq('purchase_order_id', purchaseOrderId);
+
+      if (soError) throw soError;
+
+      // Delete the purchase order
+      const { error: poError } = await supabase
+        .from('purchase_orders')
+        .delete()
+        .eq('purchase_order_id', purchaseOrderId);
+
+      if (poError) throw poError;
+    },
+    onSuccess: () => {
+      toast.success('Purchase order deleted successfully');
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
+      setDeleteDialogOpen(false);
+      setPoToDelete(null);
+    },
+    onError: (error) => {
+      console.error('Error deleting purchase order:', error);
+      toast.error('Failed to delete purchase order');
+    },
   });
 
   // Extract unique suppliers from orders for the supplier filter dropdown
@@ -532,17 +593,33 @@ export default function PurchaseOrdersPage() {
                 <StatusBadge status={getOrderStatus(order)} />
               </TableCell>
               <TableCell className="text-right">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  asChild
-                  onClick={(e) => e.stopPropagation()} // Prevent row click when clicking the button
-                >
-                  <Link href={`/purchasing/purchase-orders/${order.purchase_order_id}`}>
-                    View Details
-                    <ExternalLink className="w-4 h-4 ml-2" />
-                  </Link>
-                </Button>
+                <div className="flex items-center justify-end gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    asChild
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Link href={`/purchasing/purchase-orders/${order.purchase_order_id}`}>
+                      View Details
+                      <ExternalLink className="w-4 h-4 ml-2" />
+                    </Link>
+                  </Button>
+                  {getOrderStatus(order).toLowerCase() === 'draft' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPoToDelete(order);
+                        setDeleteDialogOpen(true);
+                      }}
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  )}
+                </div>
               </TableCell>
             </TableRow>
           ))
@@ -608,6 +685,39 @@ export default function PurchaseOrdersPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Purchase Order?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this Draft purchase order
+              {poToDelete?.q_number ? ` (${formatQNumber(poToDelete.q_number)})` : ''}? 
+              This will permanently remove the order and all its line items. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletePOMutation.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => poToDelete && deletePOMutation.mutate(poToDelete.purchase_order_id)}
+              disabled={deletePOMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deletePOMutation.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 } 
