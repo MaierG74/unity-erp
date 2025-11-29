@@ -4,12 +4,15 @@ import { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getSuppliers } from '@/lib/api/suppliers';
 import Link from 'next/link';
-import { Search, Plus, FileText, X } from 'lucide-react';
+import { Search, Plus, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { PricelistPreviewModal } from './pricelist-preview-modal';
 import type { SupplierWithDetails } from '@/types/suppliers';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Label } from '@/components/ui/label';
+import { PdfThumbnailClient } from '@/components/ui/pdf-thumbnail-client';
+import { FileIcon } from '@/components/ui/file-icon';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 export function SupplierList() {
   const router = useRouter();
@@ -75,193 +78,211 @@ export function SupplierList() {
     );
   };
 
+  const getAttachmentType = (fileType?: string, fileName?: string) => {
+    const mime = (fileType || '').toLowerCase();
+    if (mime.startsWith('application/pdf')) return 'pdf';
+    if (mime.startsWith('image/')) return 'image';
+
+    const ext = (fileName || '').split('.').pop()?.toLowerCase();
+    if (ext === 'pdf') return 'pdf';
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext || '')) return 'image';
+    return 'other';
+  };
+
+  const renderPricelistStrip = (supplier: SupplierWithDetails) => {
+    const pricelists = supplier.pricelists || [];
+    if (!pricelists.length) return null;
+
+    const visible = pricelists.slice(0, 6);
+    const remaining = pricelists.length - visible.length;
+
+    return (
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 max-w-[18rem] overflow-hidden">
+          {visible.map((p) => {
+            const type = getAttachmentType(p.file_type, p.file_name);
+            if (type === 'image') {
+              return (
+                <button
+                  key={p.pricelist_id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.open(p.file_url, '_blank', 'noopener,noreferrer');
+                  }}
+                  className="h-10 w-8 rounded border bg-muted overflow-hidden"
+                  title={p.display_name}
+                >
+                  <img
+                    src={p.file_url}
+                    alt={p.display_name}
+                    className="h-full w-full object-cover pointer-events-none"
+                    loading="lazy"
+                  />
+                </button>
+              );
+            }
+            if (type === 'pdf') {
+              return (
+                <button
+                  key={p.pricelist_id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.open(p.file_url, '_blank', 'noopener,noreferrer');
+                  }}
+                  className="h-10 w-8 overflow-hidden rounded border bg-muted"
+                  title={p.display_name}
+                >
+                  <PdfThumbnailClient url={p.file_url} className="h-full w-full pointer-events-none" />
+                </button>
+              );
+            }
+            return (
+              <button
+                key={p.pricelist_id}
+                className="h-10 w-8 rounded border bg-muted flex items-center justify-center"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.open(p.file_url, '_blank', 'noopener,noreferrer');
+                }}
+                title={p.display_name}
+              >
+                <FileIcon fileName={p.file_name} size={18} className="text-primary pointer-events-none" />
+              </button>
+            );
+          })}
+        </div>
+        {remaining > 0 && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setSelectedSupplier(supplier);
+            }}
+            className="rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-muted-foreground hover:bg-muted/80 transition-colors"
+            aria-label="View more price lists"
+          >
+            +{remaining}
+          </button>
+        )}
+      </div>
+    );
+  };
+
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        {/* Toolbar skeleton */}
-        <div className="flex flex-col gap-3 p-3 bg-card rounded-xl border shadow-sm md:flex-row md:items-center md:justify-between">
-          <div className="flex w-full items-center gap-3 md:max-w-2xl">
-            <div className="h-9 w-full md:w-96 bg-muted animate-pulse rounded-lg" />
-            <div className="h-9 w-32 bg-muted animate-pulse rounded-md" />
-          </div>
-          <div className="h-9 w-32 bg-muted animate-pulse rounded-lg md:shrink-0" />
-        </div>
-        {/* Table skeleton */}
-        <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
-          <div className="p-3 border-b bg-muted/40">
-            <div className="grid grid-cols-4 gap-4">
-              <div className="h-4 w-24 bg-muted animate-pulse rounded" />
-              <div className="h-4 w-32 bg-muted animate-pulse rounded" />
-              <div className="h-4 w-28 bg-muted animate-pulse rounded" />
-              <div className="h-4 w-24 bg-muted animate-pulse rounded" />
-            </div>
-          </div>
-          <div className="divide-y">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-4 px-4 py-4 animate-pulse">
-                <div className="h-8 w-8 rounded-full bg-muted" />
-                <div className="h-4 w-40 bg-muted rounded" />
-                <div className="h-4 w-48 bg-muted rounded" />
-                <div className="ml-auto h-4 w-24 bg-muted rounded" />
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="h-4 w-48 bg-muted animate-pulse rounded" />
+      <div className="flex justify-center items-center py-12">
+        <span className="text-muted-foreground animate-pulse text-lg">Loading...</span>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-destructive">Error loading suppliers: {error.message}</div>
+      <div className="flex justify-center items-center py-12">
+        <span className="text-destructive text-lg">Error loading suppliers.</span>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Toolbar (Search + Filters + Add) */}
-      <div className="flex flex-col gap-3 p-3 bg-card rounded-xl border shadow-sm md:flex-row md:items-center md:justify-between">
-        {/* Left controls - Search and filters */}
-        <div className="flex w-full items-center gap-3 md:max-w-2xl">
-          <div className="relative w-full md:w-96">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Search suppliers..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full h-9 pl-9 pr-10 rounded-lg border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-            />
-            {searchTerm && (
-              <button
-                type="button"
-                onClick={() => setSearchTerm('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex h-6 w-6 items-center justify-center rounded hover:bg-muted"
-                aria-label="Clear search"
-              >
-                <X className="h-4 w-4 text-muted-foreground" />
-              </button>
-            )}
-          </div>
-
-          <label htmlFor="filter-pricelist" className="inline-flex items-center gap-2 h-9 px-3 rounded-md border bg-background text-sm text-muted-foreground">
-            <Checkbox
-              id="filter-pricelist"
-              checked={hasPricelistOnly}
-              onCheckedChange={(v) => setHasPricelistOnly(Boolean(v))}
-            />
-            <span>Has price list</span>
-          </label>
-        </div>
-
-        {/* Right controls - Primary action */}
-        <Link
-          href="/suppliers/new"
-          className="inline-flex items-center justify-center gap-2 h-9 px-4 rounded-lg bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring md:shrink-0"
-        >
-          <Plus className="h-4 w-4" />
-          Add Supplier
-        </Link>
+    <>
+      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
+        <h1 className="text-4xl font-extrabold tracking-tight text-foreground">Suppliers</h1>
+        <Button asChild className="button-primary flex gap-2 items-center">
+          <Link href="/suppliers/new">
+            <Plus className="h-5 w-5" />
+            Add Supplier
+          </Link>
+        </Button>
       </div>
 
-      {/* Table */}
-      <div className="rounded-xl border bg-card shadow-sm overflow-auto">
-        <table className="w-full text-sm">
-          <thead className="text-muted-foreground">
-            <tr className="border-b">
-              <th scope="col" className="sticky top-0 z-10 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60 text-left p-4 font-medium">Name</th>
-              <th scope="col" className="sticky top-0 z-10 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60 text-left p-4 font-medium">Contact Info</th>
-              <th scope="col" className="sticky top-0 z-10 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60 text-left p-4 font-medium">Primary Email</th>
-              <th scope="col" className="sticky top-0 z-10 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60 text-center p-4 font-medium">Price Lists</th>
+      <div className="relative mt-2">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
+        <Input
+          placeholder="Search suppliers..."
+          className="pl-12 input-field bg-background text-foreground"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+      </div>
+
+      <div className="flex items-center gap-3 mt-2">
+        <label htmlFor="filter-pricelist" className="inline-flex items-center gap-2 h-9 px-3 rounded-md border bg-background text-sm text-muted-foreground">
+          <Checkbox
+            id="filter-pricelist"
+            checked={hasPricelistOnly}
+            onCheckedChange={(v) => setHasPricelistOnly(Boolean(v))}
+          />
+          <span>Has price list</span>
+        </label>
+      </div>
+
+      <div className="overflow-x-auto rounded-xl shadow-lg border border-border bg-card mt-8 dark:shadow-none">
+        <table className="min-w-full divide-y divide-border bg-background dark:bg-card">
+          <thead className="bg-muted dark:bg-muted/20">
+            <tr>
+              <th scope="col" className="px-6 py-3 text-left text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                Name
+              </th>
+              <th scope="col" className="px-6 py-3 text-left text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                Contact
+              </th>
+              <th scope="col" className="px-6 py-3 text-left text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                Email
+              </th>
+              <th scope="col" className="px-6 py-3 text-left text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                Price Lists
+              </th>
+              <th scope="col" className="px-6 py-3 text-right text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                Actions
+              </th>
             </tr>
           </thead>
-          <tbody>
-            {filteredSuppliers.map((supplier) => (
-              <tr
-                key={supplier.supplier_id}
-                className="border-b odd:bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer"
-                onClick={() => router.push(`/suppliers/${supplier.supplier_id}`)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    router.push(`/suppliers/${supplier.supplier_id}`);
-                  }
-                }}
-              >
-                <td className="p-4">
-                  <div className="flex items-center">
-                    {renderAvatar(supplier.name)}
-                    <span className="font-medium leading-none">{supplier.name}</span>
-                  </div>
-                </td>
-                <td className="p-4 text-muted-foreground">
-                  <span className="block max-w-[28ch] truncate" title={supplier.contact_info || ''}>
-                    {supplier.contact_info || '-'}
-                  </span>
-                </td>
-                <td className="p-4 text-muted-foreground">
-                  {(() => {
-                    const email = supplier.emails?.find((e) => e.is_primary)?.email || supplier.emails?.[0]?.email || '';
-                    return (
-                      <span className="block max-w-[32ch] truncate" title={email}>
-                        {email || '-'}
-                      </span>
-                    );
-                  })()}
-                </td>
-                <td className="p-4 text-center">
-                  {supplier.pricelists && supplier.pricelists.length > 0 ? (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setSelectedSupplier(supplier); }}
-                      className="inline-flex items-center gap-2 hover:opacity-90"
-                    >
-                      <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
-                        {supplier.pricelists.length}
-                      </span>
-                      <span className="sr-only">Preview pricelists</span>
-                      <FileText className="h-4 w-4 text-primary" />
-                    </button>
-                  ) : (
-                    <span className="text-muted-foreground text-xs">None</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {filteredSuppliers.length === 0 && (
+          <tbody className="divide-y divide-border">
+            {filteredSuppliers.length === 0 ? (
               <tr>
-                <td colSpan={4} className="p-12 text-center">
-                  <div className="space-y-2">
-                    <div className="text-base font-medium">No suppliers found</div>
-                    <div className="text-sm text-muted-foreground">
-                      {searchTerm
-                        ? `No suppliers match "${searchTerm}"`
-                        : 'Get started by adding your first supplier.'}
-                    </div>
-                    {!searchTerm && (
-                      <Link
-                        href="/suppliers/new"
-                        className="inline-flex items-center justify-center gap-2 h-9 px-4 rounded-lg bg-primary text-primary-foreground shadow-sm hover:bg-primary/90"
-                      >
-                        <Plus className="h-4 w-4" />
-                        Add Supplier
-                      </Link>
-                    )}
-                  </div>
+                <td colSpan={5} className="px-6 py-8 text-center text-base text-muted-foreground">
+                  {searchTerm ? 'No suppliers found matching your search.' : 'No suppliers found. Add your first supplier!'}
                 </td>
               </tr>
+            ) : (
+              filteredSuppliers.map((supplier) => {
+                const email = supplier.emails?.find((e) => e.is_primary)?.email || supplier.emails?.[0]?.email || '';
+                return (
+                  <tr key={supplier.supplier_id} className="hover:bg-accent/10 dark:hover:bg-accent/30 transition-colors">
+                    <td className="px-6 py-4 whitespace-nowrap text-base font-semibold text-foreground">
+                      <Link href={`/suppliers/${supplier.supplier_id}`} className="hover:underline">
+                        {supplier.name || 'N/A'}
+                      </Link>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-base text-muted-foreground">
+                      {supplier.contact_info || 'N/A'}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-base text-muted-foreground">
+                      {email || 'N/A'}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-base text-muted-foreground">
+                      {supplier.pricelists && supplier.pricelists.length > 0 ? (
+                        <div className="inline-flex items-center gap-2">
+                          {renderPricelistStrip(supplier)}
+                        </div>
+                      ) : (
+                        'None'
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-base font-medium flex gap-2 justify-end">
+                      <Link href={`/suppliers/${supplier.supplier_id}`} className="button-primary px-3 py-1 text-xs font-semibold">
+                        View
+                      </Link>
+                      <Link href={`/suppliers/${supplier.supplier_id}/edit`} className="button-primary bg-secondary text-secondary-foreground px-3 py-1 text-xs font-semibold">
+                        Edit
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
-      </div>
-
-      {/* Footer */}
-      <div className="text-sm text-muted-foreground">
-        Showing {filteredSuppliers.length} of {suppliers?.length} suppliers
       </div>
 
       {/* Pricelist Preview Modal */}
@@ -273,6 +294,6 @@ export function SupplierList() {
           supplierName={selectedSupplier.name}
         />
       )}
-    </div>
+    </>
   );
 }

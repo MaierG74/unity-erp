@@ -4,16 +4,17 @@ import React from 'react';
 import { QuoteClusterLine, formatCurrency } from '@/lib/db/quotes';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Pencil } from 'lucide-react';
 import { TableRow, TableCell } from '@/components/ui/table';
 
 interface QuoteClusterLineRowProps {
   line: QuoteClusterLine;
   onUpdate: (id: string, updates: Partial<QuoteClusterLine>) => void;
   onDelete: (id: string) => void;
+  onEdit?: (line: QuoteClusterLine) => void;
 }
 
-const QuoteClusterLineRow: React.FC<QuoteClusterLineRowProps> = ({ line, onUpdate, onDelete }) => {
+const QuoteClusterLineRow: React.FC<QuoteClusterLineRowProps> = ({ line, onUpdate, onDelete, onEdit }) => {
   const [description, setDescription] = React.useState(line.description || '');
   const [qty, setQty] = React.useState<string>(String(line.qty));
   const [unitCost, setUnitCost] = React.useState<string>(String(Math.round((line.unit_cost || 0) * 100) / 100));
@@ -64,16 +65,30 @@ const QuoteClusterLineRow: React.FC<QuoteClusterLineRowProps> = ({ line, onUpdat
       </TableCell>
       <TableCell className="text-sm text-right font-medium">{formatCurrency((Number(qty) || 0) * (Number(unitCost) || 0))}</TableCell>
       <TableCell>
-        <Button
-          variant="destructiveSoft"
-          size="icon"
-          className="h-8 w-8"
-          title="Delete line"
-          aria-label="Delete line"
-          onClick={() => onDelete(line.id)}
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          {onEdit && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              title="Edit line"
+              aria-label="Edit line"
+              onClick={() => onEdit(line)}
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+          )}
+          <Button
+            variant="destructiveSoft"
+            size="icon"
+            className="h-8 w-8"
+            title="Delete line"
+            aria-label="Delete line"
+            onClick={() => onDelete(line.id)}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
       </TableCell>
     </TableRow>
   );

@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
-import { RefreshCw, AlertTriangle, Package, TrendingDown, BarChart3, ChevronDown, ChevronRight } from 'lucide-react';
+import { RefreshCw, AlertTriangle, Package, TrendingDown, BarChart3, ChevronDown, ChevronRight, Clock, Mail, Loader2 } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -42,15 +42,59 @@ type CriticalComponent = {
   projectedShortage: number;
   severity: 'critical' | 'immediate';
   affectedOrders: string[]; // order numbers
+  isCoveredByOrder?: boolean;
+  draftPOQuantity: number;
 };
 
 export function ReportsTab() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [expandedComponentId, setExpandedComponentId] = useState<number | null>(null);
+  const [expandedOnOrderId, setExpandedOnOrderId] = useState<number | null>(null);
+  const [sendingFollowUp, setSendingFollowUp] = useState<number | null>(null);
+
+  const sendFollowUpEmail = async (componentId: number, componentCode: string) => {
+    setSendingFollowUp(componentId);
+    try {
+      const response = await fetch('/api/send-follow-up-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ componentId }),
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        toast({
+          title: 'Follow-up sent',
+          description: result.message,
+        });
+        // Refresh the follow-up history
+        queryClient.invalidateQueries({ queryKey: ['inventory', 'component-follow-ups', componentId] });
+      } else {
+        toast({
+          title: 'Failed to send',
+          description: result.error || 'Unknown error',
+          variant: 'destructive',
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to send follow-up email',
+        variant: 'destructive',
+      });
+    } finally {
+      setSendingFollowUp(null);
+    }
+  };
 
   const toggleExpand = (componentId: number) => {
     setExpandedComponentId(expandedComponentId === componentId ? null : componentId);
+  };
+
+  const toggleOnOrderExpand = (componentId: number) => {
+    setExpandedOnOrderId(expandedOnOrderId === componentId ? null : componentId);
   };
 
   // Fetch all components with inventory
@@ -107,7 +151,7 @@ export function ReportsTab() {
   }, [components]);
 
   // Fetch critical components data using RPC that accounts for FG coverage
-  const { data: criticalComponents = [], isLoading: isLoadingCritical } = useQuery({
+  const { data: criticalData = { toOrder: [], onOrderFollowUp: [] }, isLoading: isLoadingCritical } = useQuery({
     queryKey: ['inventory', 'critical-components'],
     queryFn: async () => {
       try {
@@ -119,10 +163,10 @@ export function ReportsTab() {
           throw error;
         }
 
-        if (!data || data.length === 0) return [];
+        if (!data || data.length === 0) return { toOrder: [], onOrderFollowUp: [] };
 
-        // Filter to only components with actual shortfalls (global or per-order)
-        const critical: CriticalComponent[] = (data || [])
+        // Map all components with shortfalls
+        const allCritical: CriticalComponent[] = (data || [])
           .filter((item: any) => {
             const globalShortfall = Number(item.global_real_shortfall || 0);
             const apparentShortfall = Number(item.global_apparent_shortfall || 0);
@@ -132,30 +176,46 @@ export function ReportsTab() {
           .map((item: any) => {
             const globalShortfall = Number(item.global_real_shortfall || 0);
             const apparentShortfall = Number(item.global_apparent_shortfall || 0);
+            const currentStock = Number(item.in_stock || 0);
+            const onOrder = Number(item.on_order || 0);
+            const required = Number(item.total_required || 0);
+            
+            // Determine if already covered by existing orders
+            const isCoveredByOrder = (currentStock + onOrder) >= required;
 
             return {
               component_id: item.component_id,
               internal_code: item.internal_code,
               description: item.description,
-              currentStock: Number(item.in_stock || 0),
-              onOrder: Number(item.on_order || 0),
-              required: Number(item.total_required || 0),
+              currentStock,
+              onOrder,
+              required,
               immediateShortage: apparentShortfall,
               projectedShortage: globalShortfall,
               severity: (globalShortfall > 0 ? 'critical' : 'immediate') as 'critical' | 'immediate',
-              affectedOrders: [] // RPC doesn't provide order list, but we can enhance if needed
+              affectedOrders: [],
+              isCoveredByOrder,
+              draftPOQuantity: Number(item.draft_po_quantity || 0)
             };
           });
 
+        // Split into two categories:
+        // 1. Need to order: not covered by existing orders
+        // 2. On order (follow up): covered by existing orders but not yet received
+        const toOrder = allCritical.filter(c => !c.isCoveredByOrder);
+        const onOrderFollowUp = allCritical.filter(c => c.isCoveredByOrder && c.onOrder > 0);
+
         // Sort: critical first, then by shortage amount
-        critical.sort((a, b) => {
+        toOrder.sort((a, b) => {
           if (a.severity !== b.severity) {
             return a.severity === 'critical' ? -1 : 1;
           }
           return b.projectedShortage - a.projectedShortage || b.immediateShortage - a.immediateShortage;
         });
 
-        return critical;
+        onOrderFollowUp.sort((a, b) => b.onOrder - a.onOrder);
+
+        return { toOrder, onOrderFollowUp };
       } catch (error) {
         console.error('Error fetching critical components:', error);
         throw error;
@@ -367,7 +427,7 @@ export function ReportsTab() {
             Critical Components to Order
           </CardTitle>
           <CardDescription>
-            Components needed for active orders with insufficient stock
+            Components needed for active orders - not yet ordered or insufficient on order
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -375,13 +435,13 @@ export function ReportsTab() {
             <div className="flex items-center justify-center py-8">
               <div className="text-sm text-muted-foreground">Loading critical components...</div>
             </div>
-          ) : criticalComponents.length === 0 ? (
+          ) : criticalData.toOrder.length === 0 ? (
             <div className="flex items-center justify-center py-8">
               <div className="text-center">
                 <Package className="h-12 w-12 text-green-600 mx-auto mb-2" />
                 <p className="text-sm font-medium text-green-600">All Good!</p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  All components needed for active orders are sufficiently stocked
+                  No components need ordering - all shortfalls are covered by existing orders
                 </p>
               </div>
             </div>
@@ -395,12 +455,13 @@ export function ReportsTab() {
                     <TableHead>Description</TableHead>
                     <TableHead className="text-right">Current</TableHead>
                     <TableHead className="text-right">On Order</TableHead>
+                    <TableHead className="text-right">Draft PO</TableHead>
                     <TableHead className="text-right">Required</TableHead>
                     <TableHead className="text-right">Shortage</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {criticalComponents.map((component) => {
+                  {criticalData.toOrder.map((component) => {
                     const shortage = component.severity === 'critical'
                       ? component.projectedShortage
                       : component.immediateShortage;
@@ -446,6 +507,15 @@ export function ReportsTab() {
                           <TableCell className="text-right text-blue-600">
                             {component.onOrder}
                           </TableCell>
+                          <TableCell className="text-right">
+                            {component.draftPOQuantity > 0 ? (
+                              <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-100 text-amber-800 border border-amber-200">
+                                {component.draftPOQuantity}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
                           <TableCell className="text-right text-purple-600 font-semibold">
                             {component.required}
                           </TableCell>
@@ -464,7 +534,7 @@ export function ReportsTab() {
                         </TableRow>
                         {isExpanded && (
                           <TableRow className="bg-muted/20">
-                            <TableCell colSpan={7} className="p-4">
+                            <TableCell colSpan={8} className="p-4">
                               <AffectedOrders componentId={component.component_id} />
                             </TableCell>
                           </TableRow>
@@ -478,6 +548,128 @@ export function ReportsTab() {
           )}
         </CardContent>
       </Card>
+
+      {/* Components On Order - Need Follow Up */}
+      {criticalData.onOrderFollowUp.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Clock className="h-5 w-5 text-blue-600" />
+              Components On Order - Follow Up
+            </CardTitle>
+            <CardDescription>
+              Components with shortfall but already covered by existing purchase orders - awaiting delivery
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="max-h-[400px] overflow-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[50px]"></TableHead>
+                    <TableHead>Code</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead className="text-right">Current</TableHead>
+                    <TableHead className="text-right">On Order</TableHead>
+                    <TableHead className="text-right">Draft PO</TableHead>
+                    <TableHead className="text-right">Required</TableHead>
+                    <TableHead className="text-right">Expected</TableHead>
+                    <TableHead className="text-center w-[100px]">Follow Up</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {criticalData.onOrderFollowUp.map((component) => {
+                    const expectedTotal = component.currentStock + component.onOrder;
+                    const surplus = expectedTotal - component.required;
+                    const isExpanded = expandedOnOrderId === component.component_id;
+                    const isSending = sendingFollowUp === component.component_id;
+
+                    return (
+                      <Fragment key={component.component_id}>
+                        <TableRow className="bg-blue-50 hover:bg-blue-100">
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              onClick={() => toggleOnOrderExpand(component.component_id)}
+                            >
+                              {isExpanded ? (
+                                <ChevronDown className="h-4 w-4" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            <a
+                              href={`/inventory/components/${component.component_id}`}
+                              className="text-blue-600 hover:underline"
+                            >
+                              {component.internal_code}
+                            </a>
+                          </TableCell>
+                          <TableCell className="text-sm max-w-[200px] truncate">
+                            {component.description || '-'}
+                          </TableCell>
+                          <TableCell className="text-right font-semibold">
+                            {component.currentStock}
+                          </TableCell>
+                          <TableCell className="text-right text-blue-600 font-semibold">
+                            {component.onOrder}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {component.draftPOQuantity > 0 ? (
+                              <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-100 text-amber-800 border border-amber-200">
+                                {component.draftPOQuantity}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right text-purple-600">
+                            {component.required}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Badge variant="outline" className="bg-blue-100 text-blue-700 border-blue-300">
+                              +{surplus} surplus
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 px-2 text-blue-600 border-blue-300 hover:bg-blue-100"
+                              onClick={() => sendFollowUpEmail(component.component_id, component.internal_code)}
+                              disabled={isSending}
+                            >
+                              {isSending ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <>
+                                  <Mail className="h-4 w-4 mr-1" />
+                                  Email
+                                </>
+                              )}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                        {isExpanded && (
+                          <TableRow className="bg-muted/20">
+                            <TableCell colSpan={9} className="p-4">
+                              <AffectedOrders componentId={component.component_id} />
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

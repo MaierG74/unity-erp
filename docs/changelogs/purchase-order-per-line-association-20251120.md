@@ -42,5 +42,5 @@ Verify that `supplier_order_customer_orders` contains the new supplier order id 
 
 ## Follow Ups
 
-- Ensure client code (new PO form) passes `customer_order_id` inside each line payload.
+- ✅ Updated `app/orders/[orderId]/page.tsx` to pass `customer_order_id` inside each line payload (fixed Nov 26, 2025).
 - Update any reporting/query logic to leverage the new per-line association where needed.

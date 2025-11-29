@@ -57,11 +57,44 @@ async function main() {
   const { count: detailCount } = await supabase.from('order_details').select('*', { count: 'exact', head: true }).in('order_id', targetOrderIds);
   const { count: attachCount } = await supabase.from('order_attachments').select('*', { count: 'exact', head: true }).in('order_id', targetOrderIds);
   const { count: junctionCount } = await supabase.from('supplier_order_customer_orders').select('*', { count: 'exact', head: true }).in('order_id', targetOrderIds);
-  console.log(`Details=${detailCount ?? 0} Attachments=${attachCount ?? 0} Junctions=${junctionCount ?? 0}`);
+  
+  // 2b) Load stock issuances linked to these orders
+  const { data: issuances, error: issuErr } = await supabase
+    .from('stock_issuances')
+    .select('issuance_id, order_id, transaction_id, component_id, quantity_issued')
+    .in('order_id', targetOrderIds);
+  if (issuErr) throw issuErr;
+  const issuanceTxIds = (issuances ?? []).map((i) => i.transaction_id).filter(Boolean) as number[];
+  
+  console.log(`Details=${detailCount ?? 0} Attachments=${attachCount ?? 0} Junctions=${junctionCount ?? 0} StockIssuances=${issuances?.length ?? 0}`);
+
+  // 2c) Compute inventory reversal deltas for stock issuances
+  // Stock issuances subtracted from inventory (negative transactions), so we need to ADD back
+  const issuanceDeltas = new Map<number, number>(); // component_id -> qty to add back
+  for (const iss of issuances ?? []) {
+    if (!iss.component_id) continue;
+    const qty = Number(iss.quantity_issued ?? 0);
+    issuanceDeltas.set(iss.component_id, (issuanceDeltas.get(iss.component_id) ?? 0) + qty);
+  }
 
   // 3) Storage listing (best-effort preview) on dry-run
   if (dryRun) {
     console.log('--- DRY RUN ---');
+    console.log({
+      orders: targetOrderIds.length,
+      details: detailCount ?? 0,
+      attachments: attachCount ?? 0,
+      junctions: junctionCount ?? 0,
+      stockIssuances: issuances?.length ?? 0,
+      issuanceTransactions: issuanceTxIds.length,
+      componentsToReverse: issuanceDeltas.size,
+    });
+    // Show first few issuance deltas
+    let shown = 0;
+    for (const [cid, qty] of issuanceDeltas.entries()) {
+      console.log(`component_id=${cid} add_back=${qty}`);
+      if (++shown >= 10) break;
+    }
     for (const cid of targetCustomerIds.slice(0, 10)) {
       const prefix = `Orders/Customer/${cid}`;
       const { data: files, error: listErr } = await supabase.storage.from('qbutton').list(prefix, { limit: 100 });
@@ -75,7 +108,46 @@ async function main() {
     return;
   }
 
-  // 4) Delete junction links
+  // 4) Reverse inventory for stock issuances (add back issued quantities)
+  for (const [cid, qty] of issuanceDeltas.entries()) {
+    const { data: inv, error: invErr } = await supabase
+      .from('inventory')
+      .select('inventory_id, quantity_on_hand')
+      .eq('component_id', cid)
+      .maybeSingle();
+    if (invErr) throw invErr;
+    if (inv) {
+      const current = inv.quantity_on_hand ?? 0;
+      const next = current + qty; // Add back the issued quantity
+      const { error: updErr } = await supabase
+        .from('inventory')
+        .update({ quantity_on_hand: next })
+        .eq('inventory_id', inv.inventory_id);
+      if (updErr) throw updErr;
+    }
+    // If no inventory row exists, the component was never stocked, skip
+  }
+
+  // 5) Delete stock issuances
+  if (issuances && issuances.length) {
+    const issuanceIds = issuances.map((i) => i.issuance_id);
+    for (let i = 0; i < issuanceIds.length; i += 1000) {
+      const chunk = issuanceIds.slice(i, i + 1000);
+      const { error: delIssErr } = await supabase.from('stock_issuances').delete().in('issuance_id', chunk);
+      if (delIssErr) throw delIssErr;
+    }
+  }
+
+  // 6) Delete inventory transactions from stock issuances
+  if (issuanceTxIds.length) {
+    for (let i = 0; i < issuanceTxIds.length; i += 1000) {
+      const chunk = issuanceTxIds.slice(i, i + 1000);
+      const { error: delTxErr } = await supabase.from('inventory_transactions').delete().in('transaction_id', chunk);
+      if (delTxErr) throw delTxErr;
+    }
+  }
+
+  // 7) Delete junction links
   if ((junctionCount ?? 0) > 0) {
     for (let i = 0; i < targetOrderIds.length; i += 1000) {
       const chunk = targetOrderIds.slice(i, i + 1000);
@@ -84,7 +156,7 @@ async function main() {
     }
   }
 
-  // 5) Delete attachment rows
+  // 8) Delete attachment rows
   if ((attachCount ?? 0) > 0) {
     for (let i = 0; i < targetOrderIds.length; i += 1000) {
       const chunk = targetOrderIds.slice(i, i + 1000);
@@ -93,7 +165,7 @@ async function main() {
     }
   }
 
-  // 6) Delete order details
+  // 9) Delete order details
   if ((detailCount ?? 0) > 0) {
     for (let i = 0; i < targetOrderIds.length; i += 1000) {
       const chunk = targetOrderIds.slice(i, i + 1000);
@@ -102,14 +174,14 @@ async function main() {
     }
   }
 
-  // 7) Delete orders
+  // 10) Delete orders
   for (let i = 0; i < targetOrderIds.length; i += 1000) {
     const chunk = targetOrderIds.slice(i, i + 1000);
     const { error: delOErr } = await supabase.from('orders').delete().in('order_id', chunk);
     if (delOErr) throw delOErr;
   }
 
-  // 8) Remove storage files under each customer folder (best effort)
+  // 11) Remove storage files under each customer folder (best effort)
   for (const cid of targetCustomerIds) {
     const prefix = `Orders/Customer/${cid}`;
     // List all files in the folder; paginate by fixed chunk
@@ -135,7 +207,7 @@ async function main() {
     }
   }
 
-  // 9) Refresh views if present
+  // 12) Refresh views if present
   try {
     await supabase.rpc('refresh_component_views');
   } catch (e) {

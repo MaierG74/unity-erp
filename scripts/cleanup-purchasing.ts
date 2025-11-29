@@ -78,8 +78,21 @@ async function main() {
     .select('receipt_id, order_id, quantity_received, transaction_id')
     .in('order_id', soIds);
   if (rErr) throw rErr;
-  const txIds = Array.from(new Set((receipts ?? []).map((r) => r.transaction_id))).filter(Boolean) as number[];
-  console.log(`Receipts: ${receipts?.length ?? 0}, Transactions to delete: ${txIds.length}`);
+  const receiptTxIds = (receipts ?? []).map((r) => r.transaction_id).filter(Boolean) as number[];
+  console.log(`Receipts: ${receipts?.length ?? 0}`);
+
+  // 3b) Load returns (supplier_order_returns)
+  const { data: returns, error: retErr } = await supabase
+    .from('supplier_order_returns')
+    .select('return_id, supplier_order_id, quantity_returned, transaction_id')
+    .in('supplier_order_id', soIds);
+  if (retErr) throw retErr;
+  const returnTxIds = (returns ?? []).map((r) => r.transaction_id).filter(Boolean) as number[];
+  console.log(`Returns: ${returns?.length ?? 0}`);
+
+  // Combine all transaction IDs to delete
+  const txIds = Array.from(new Set([...receiptTxIds, ...returnTxIds]));
+  console.log(`Transactions to delete: ${txIds.length}`);
 
   // 4) Map SO -> supplier_component -> component
   const supplierComponentIds = Array.from(new Set((sos ?? []).map((s) => s.supplier_component_id))).filter(Boolean) as number[];
@@ -97,15 +110,33 @@ async function main() {
     (scs ?? []).forEach((sc) => scMap.set(sc.supplier_component_id, sc.component_id));
   }
 
-  // 5) Compute deltas per component from receipts
+  // 5) Compute NET deltas per component from receipts minus returns
+  // Net = receipts (added to inventory) - returns (already subtracted from inventory)
+  // We need to subtract the NET amount to reverse to pre-receipt state
   const soById = new Map((sos ?? []).map((s) => [s.order_id, s] as const));
-  const deltas = new Map<number, number>(); // component_id -> qty to subtract
+  const deltas = new Map<number, number>(); // component_id -> NET qty to subtract
+
+  // Add receipts (positive)
   for (const r of receipts ?? []) {
     const so = soById.get(r.order_id);
     if (!so) continue;
     const componentId = scMap.get(so.supplier_component_id);
     if (!componentId) continue;
     deltas.set(componentId, (deltas.get(componentId) ?? 0) + (r.quantity_received ?? 0));
+  }
+
+  // Subtract returns (they already decremented inventory, so we need to add them back to our delta calc)
+  // Actually, returns have already subtracted from inventory, so net inventory change = receipts - returns
+  // To reverse: we subtract (receipts - returns) = subtract receipts, then add returns
+  // But since returns already decremented, the current inventory = original + receipts - returns
+  // To get back to original: subtract (receipts - returns)
+  for (const ret of returns ?? []) {
+    const so = soById.get(ret.supplier_order_id);
+    if (!so) continue;
+    const componentId = scMap.get(so.supplier_component_id);
+    if (!componentId) continue;
+    // Returns already subtracted from inventory, so reduce our reversal delta
+    deltas.set(componentId, (deltas.get(componentId) ?? 0) - (ret.quantity_returned ?? 0));
   }
   console.log(`Components with inventory to reverse: ${deltas.size}`);
 
@@ -116,6 +147,7 @@ async function main() {
       purchaseOrders: targetPoIds.length,
       supplierOrders: soIds.length,
       receipts: receipts?.length ?? 0,
+      returns: returns?.length ?? 0,
       transactions: txIds.length,
       componentsToAdjust: deltas.size,
     });
@@ -149,7 +181,17 @@ async function main() {
     if (updErr) throw updErr;
   }
 
-  // 7c) Delete receipts
+  // 7c) Delete returns first (FK depends on receipts and supplier_orders)
+  if (returns && returns.length) {
+    const returnIds = returns.map((r) => r.return_id);
+    for (let i = 0; i < returnIds.length; i += 1000) {
+      const chunk = returnIds.slice(i, i + 1000);
+      const { error: delRetErr } = await supabase.from('supplier_order_returns').delete().in('return_id', chunk);
+      if (delRetErr) throw delRetErr;
+    }
+  }
+
+  // 7d) Delete receipts
   if (receipts && receipts.length) {
     const receiptIds = receipts.map((r) => r.receipt_id);
     // Delete in chunks
@@ -160,7 +202,7 @@ async function main() {
     }
   }
 
-  // 7d) Delete inventory transactions created by those receipts
+  // 7e) Delete inventory transactions created by receipts and returns
   if (txIds.length) {
     for (let i = 0; i < txIds.length; i += 1000) {
       const chunk = txIds.slice(i, i + 1000);
@@ -169,7 +211,7 @@ async function main() {
     }
   }
 
-  // 7e) Delete junction links
+  // 7f) Delete junction links
   if (soIds.length) {
     for (let i = 0; i < soIds.length; i += 1000) {
       const chunk = soIds.slice(i, i + 1000);
@@ -178,7 +220,7 @@ async function main() {
     }
   }
 
-  // 7f) Delete supplier orders
+  // 7g) Delete supplier orders
   if (soIds.length) {
     for (let i = 0; i < soIds.length; i += 1000) {
       const chunk = soIds.slice(i, i + 1000);
@@ -187,7 +229,7 @@ async function main() {
     }
   }
 
-  // 7g) Delete purchase orders
+  // 7h) Delete purchase orders
   for (let i = 0; i < targetPoIds.length; i += 1000) {
     const chunk = targetPoIds.slice(i, i + 1000);
     const { error: delPOErr } = await supabase.from('purchase_orders').delete().in('purchase_order_id', chunk);

@@ -37,8 +37,9 @@ export default function SupplierDetailPage() {
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const supplierId = Number(params.id);
-  const defaultTab = searchParams?.get('tab') || 'details';
-  const activeTab = searchParams?.get('tab') || 'details';
+  const tabParam = searchParams?.get('tab');
+  const allowedTabs = new Set(['details', 'components', 'pricelists', 'orders', 'reports']);
+  const activeTab = allowedTabs.has(tabParam || '') ? (tabParam as string) : 'details';
 
   const { data: supplier, isLoading, error } = useQuery({
     queryKey: ['supplier', supplierId],
@@ -134,7 +135,6 @@ export default function SupplierDetailPage() {
       >
         <TabsList>
           <TabsTrigger value="details">Details</TabsTrigger>
-          <TabsTrigger value="emails">Emails</TabsTrigger>
           <TabsTrigger value="components">Components</TabsTrigger>
           <TabsTrigger value="pricelists">Price Lists</TabsTrigger>
           <TabsTrigger value="orders">Orders</TabsTrigger>
@@ -151,12 +151,10 @@ export default function SupplierDetailPage() {
                 }}
               />
             </div>
-          </Suspense>
-        </TabsContent>
-
-        <TabsContent value="emails" className="space-y-4">
-          <Suspense fallback={<TabSkeleton />}>
-            <SupplierEmails supplier={supplier} />
+            <div className="border rounded-lg p-6 bg-card">
+              <h2 className="text-lg font-semibold mb-4">Emails</h2>
+              <SupplierEmails supplier={supplier} />
+            </div>
           </Suspense>
         </TabsContent>
 

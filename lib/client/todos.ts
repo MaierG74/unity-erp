@@ -104,7 +104,7 @@ export async function createTodo(payload: CreateTodoPayload): Promise<TodoDetail
 export async function fetchTodoDetail(todoId: string): Promise<TodoDetailResponse> {
   const res = await authorizedFetch(`/api/todos/${todoId}`, { method: 'GET' });
   if (res.status === 404) {
-    return { todo: null, activities: [], comments: [] };
+    return { todo: null, activities: [], comments: [], attachments: [] };
   }
   if (!res.ok) {
     const text = await res.text();
@@ -208,4 +208,46 @@ export async function fetchProfiles(): Promise<ProfileSummary[]> {
   }
   const json = await res.json();
   return Array.isArray(json?.profiles) ? (json.profiles as ProfileSummary[]) : [];
+}
+export async function createChecklistItem(todoId: string, title: string) {
+  const res = await authorizedFetch(`/api/todos/${todoId}/checklist`, {
+    method: 'POST',
+    body: JSON.stringify({ title }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || 'Failed to create checklist item');
+  }
+
+  const json = await res.json();
+  return json.item;
+}
+
+export async function updateChecklistItem(todoId: string, itemId: string, updates: { title?: string; isCompleted?: boolean; position?: number }) {
+  const res = await authorizedFetch(`/api/todos/${todoId}/checklist/${itemId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(updates),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || 'Failed to update checklist item');
+  }
+
+  const json = await res.json();
+  return json.item;
+}
+
+export async function deleteChecklistItem(todoId: string, itemId: string) {
+  const res = await authorizedFetch(`/api/todos/${todoId}/checklist/${itemId}`, {
+    method: 'DELETE',
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || 'Failed to delete checklist item');
+  }
+
+  return true;
 }

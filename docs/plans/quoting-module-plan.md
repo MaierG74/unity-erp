@@ -3,6 +3,24 @@
 ---
 ## Status / UI Changelog
 
+### 2025-11-25 – Costing Cluster Line Editing
+- **Edit Line Dialog**: Added ability to edit costing cluster lines including changing the supplier
+  - New `EditClusterLineDialog.tsx` component for editing line details
+  - Edit button (pencil icon) added to each costing line row
+  - Dialog shows line type, description, quantity, and unit cost
+  - For component lines: "Change Supplier" button loads available suppliers for the component
+  - Supplier selection shows price comparison with "Lowest" and "Current" badges
+  - Unit cost auto-updates when selecting a new supplier (with override option)
+  - Description auto-updates to include new supplier name
+- **Database**: Added `supplier_component_id` column to `quote_cluster_lines` table
+  - References `suppliercomponents` table for tracking which supplier offer was used
+  - Enables supplier changes and price tracking
+- **Migration**: `add_supplier_component_id_to_quote_cluster_lines`
+- **Components updated**:
+  - `QuoteClusterLineRow.tsx`: Added edit button and `onEdit` prop
+  - `QuoteItemClusterGrid.tsx`: Wired up edit dialog with state management
+  - `lib/db/quotes.ts`: Updated `QuoteClusterLine` interface with `supplier_component_id`
+
 ### 2025-10-04 – Currency Formatting (ZAR), Column Width Optimization & Number Input UX
 - **Currency Formatting**: Implemented consistent South African Rand (ZAR) currency formatting across all quote displays
   - Updated `QuoteItemsTable.tsx`: Line item totals now display with proper ZAR formatting (e.g., "R 63,828.60")
@@ -240,7 +258,7 @@ These fields are maintained by the `update_quote_totals()` function triggered on
 - Global quote-level attachment drop zone (existing).
 - Keyboard shortcuts for adding items / navigating fields.
 
-## Current Implementation Files (2025-09-07)
+## Current Implementation Files (2025-11-25)
 - `app/quotes/page.tsx`
 - `app/quotes/[id]/page.tsx`
 - `app/quotes/new/page.tsx`
@@ -248,6 +266,9 @@ These fields are maintained by the `update_quote_totals()` function triggered on
 - `components/features/quotes/QuoteItemsTable.tsx`
 - `components/features/quotes/AddQuoteItemDialog.tsx`
 - `components/features/quotes/QuoteClusterLineRow.tsx`
+- `components/features/quotes/QuoteItemClusterGrid.tsx`
+- `components/features/quotes/EditClusterLineDialog.tsx` – Edit costing line with supplier change
+- `components/features/quotes/ComponentSelectionDialog.tsx`
 - `lib/db/quotes.ts`
 
 ---

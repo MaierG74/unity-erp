@@ -162,104 +162,105 @@ export function TodoCreateDialog({ open, onOpenChange }: TodoCreateDialogProps) 
           </div>
         )}
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-          <div className="grid gap-4">
-            <div className="grid gap-2">
-              <Label htmlFor="title">Title</Label>
-              <Input id="title" placeholder="Follow up with supplier..." {...register('title')} required />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="description">Description</Label>
-              <Textarea id="description" rows={4} placeholder="Add context or steps..." {...register('description')} />
-            </div>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="grid gap-2">
-              <Label htmlFor="priority">Priority</Label>
-              <Controller
-                control={control}
-                name="priority"
-                render={({ field }) => (
-                  <Select value={field.value} onValueChange={field.onChange}>
-                    <SelectTrigger id="priority">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {TODO_PRIORITIES.map(priority => (
-                        <SelectItem key={priority} value={priority} className="capitalize">
-                          {priority.replace(/_/g, ' ')}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
+          <div className="max-h-[60vh] overflow-y-auto px-1 space-y-6">
+            <div className="grid gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="title">Title</Label>
+                <Input id="title" placeholder="Follow up with supplier..." {...register('title')} required />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="description">Description</Label>
+                <Textarea id="description" rows={4} placeholder="Add context or steps..." {...register('description')} />
+              </div>
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="dueDate">Due date</Label>
-              <Controller
-                control={control}
-                name="dueDate"
-                render={({ field }) => (
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={cn(
-                          'justify-start text-left font-normal h-9',
-                          !field.value && 'text-muted-foreground'
-                        )}
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {field.value ? formatDate(field.value) : <span>Pick a date</span>}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={field.value || undefined}
-                        onSelect={field.onChange}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                )}
-              />
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="assignedTo">Assign to</Label>
-              <Controller
-                control={control}
-                name="assignedTo"
-                render={({ field }) => {
-                  const UNASSIGNED = 'unassigned';
-                  return (
-                    <Select
-                      value={field.value ?? UNASSIGNED}
-                      onValueChange={value => field.onChange(value === UNASSIGNED ? undefined : value)}
-                    >
-                      <SelectTrigger id="assignedTo">
-                        <SelectValue placeholder="Select teammate" />
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="priority">Priority</Label>
+                <Controller
+                  control={control}
+                  name="priority"
+                  render={({ field }) => (
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <SelectTrigger id="priority">
+                        <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={UNASSIGNED}>Unassigned</SelectItem>
-                        {profiles.map(profile => (
-                          <SelectItem key={profile.id} value={profile.id}>
-                            {profile.display_name}
+                        {TODO_PRIORITIES.map(priority => (
+                          <SelectItem key={priority} value={priority} className="capitalize">
+                            {priority.replace(/_/g, ' ')}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                  );
-                }}
-              />
-            </div>
+                  )}
+                />
+              </div>
 
-            <div className="grid gap-2">
-              <Label>Watchers</Label>
-              <div className="max-h-32 space-y-2 overflow-y-auto rounded-md border p-3">
+              <div className="grid gap-2">
+                <Label htmlFor="dueDate">Due date</Label>
+                <Controller
+                  control={control}
+                  name="dueDate"
+                  render={({ field }) => (
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            'justify-start text-left font-normal h-9',
+                            !field.value && 'text-muted-foreground'
+                          )}
+                        >
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {field.value ? formatDate(field.value) : <span>Pick a date</span>}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={field.value || undefined}
+                          onSelect={field.onChange}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  )}
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="assignedTo">Assign to</Label>
+                <Controller
+                  control={control}
+                  name="assignedTo"
+                  render={({ field }) => {
+                    const UNASSIGNED = 'unassigned';
+                    return (
+                      <Select
+                        value={field.value ?? UNASSIGNED}
+                        onValueChange={value => field.onChange(value === UNASSIGNED ? undefined : value)}
+                      >
+                        <SelectTrigger id="assignedTo">
+                          <SelectValue placeholder="Select teammate" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={UNASSIGNED}>Unassigned</SelectItem>
+                          {profiles.map(profile => (
+                            <SelectItem key={profile.id} value={profile.id}>
+                              {profile.display_name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    );
+                  }}
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label>Watchers</Label>
+                <div className="max-h-32 space-y-2 overflow-y-auto rounded-md border p-3">
                   {profiles.map(profile => (
                     <Controller
                       key={profile.id}
@@ -290,65 +291,66 @@ export function TodoCreateDialog({ open, onOpenChange }: TodoCreateDialogProps) 
                   {profiles.length === 0 ? (
                     <p className="text-xs text-muted-foreground">No teammates found.</p>
                   ) : null}
-              </div>
-            </div>
-          </div>
-
-          <input type="hidden" {...register('contextPath')} />
-          <input type="hidden" {...register('contextType')} />
-          <input type="hidden" {...register('contextId')} />
-
-          <Separator />
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <Label>Linked record</Label>
-                <p className="text-sm text-muted-foreground">
-                  Attach a customer order, supplier order, or quote so the assignee lands on the right screen.
-                </p>
-              </div>
-              <Button type="button" variant="outline" onClick={() => setLinkPickerOpen(true)}>
-                Select record
-              </Button>
-            </div>
-
-            {selectedLink ? (
-              <div className="rounded-md border bg-muted/30 p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-medium leading-tight">{selectedLink.label}</p>
-                    <p className="text-sm text-muted-foreground">{selectedLink.path}</p>
-                  </div>
-                  <Badge variant="outline" className="capitalize">
-                    {selectedLink.type.replace('_', ' ')}
-                  </Badge>
                 </div>
-                {selectedLink.meta && Object.keys(selectedLink.meta).length > 0 ? (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {Object.entries(selectedLink.meta)
-                      .filter(([, value]) => typeof value === 'string' && value)
-                      .map(([, value]) => value as string)
-                      .join(' • ')}
+              </div>
+            </div>
+
+            <input type="hidden" {...register('contextPath')} />
+            <input type="hidden" {...register('contextType')} />
+            <input type="hidden" {...register('contextId')} />
+
+            <Separator />
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <Label>Linked record</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Attach a customer order, supplier order, or quote so the assignee lands on the right screen.
                   </p>
-                ) : null}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="mt-2 h-8 px-2 text-xs text-muted-foreground"
-                  onClick={() => {
-                    setSelectedLink(null);
-                    setValue('contextPath', '', { shouldDirty: true });
-                    setValue('contextType', '', { shouldDirty: true });
-                    setValue('contextId', undefined, { shouldDirty: true });
-                  }}
-                >
-                  Clear link
+                </div>
+                <Button type="button" variant="outline" onClick={() => setLinkPickerOpen(true)}>
+                  Select record
                 </Button>
               </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">No record linked yet.</p>
-            )}
+
+              {selectedLink ? (
+                <div className="rounded-md border bg-muted/30 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium leading-tight">{selectedLink.label}</p>
+                      <p className="text-sm text-muted-foreground">{selectedLink.path}</p>
+                    </div>
+                    <Badge variant="outline" className="capitalize">
+                      {selectedLink.type.replace('_', ' ')}
+                    </Badge>
+                  </div>
+                  {selectedLink.meta && Object.keys(selectedLink.meta).length > 0 ? (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      {Object.entries(selectedLink.meta)
+                        .filter(([, value]) => typeof value === 'string' && value)
+                        .map(([, value]) => value as string)
+                        .join(' • ')}
+                    </p>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="mt-2 h-8 px-2 text-xs text-muted-foreground"
+                    onClick={() => {
+                      setSelectedLink(null);
+                      setValue('contextPath', '', { shouldDirty: true });
+                      setValue('contextType', '', { shouldDirty: true });
+                      setValue('contextId', undefined, { shouldDirty: true });
+                    }}
+                  >
+                    Clear link
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No record linked yet.</p>
+              )}
+            </div>
           </div>
 
           <DialogFooter>

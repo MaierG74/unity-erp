@@ -30,6 +30,8 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { Switch } from '@/components/ui/switch';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { IssueStockTab } from '@/components/features/orders/IssueStockTab';
+import { OrderDocumentsTab } from '@/components/features/orders/OrderDocumentsTab';
+import { ConsolidatePODialog, SupplierWithDrafts, ExistingDraftPO } from '@/components/features/purchasing/ConsolidatePODialog';
 
 type OrderDetailPageProps = {
   params: Promise<{
@@ -331,6 +333,8 @@ async function fetchOrderComponentRequirements(orderId: number): Promise<Product
             global_real_shortfall: globalRealShortfall,
             supplier_options: [],
             selected_supplier: null,
+            draft_po_quantity: Number(status?.draft_po_quantity ?? 0),
+            draft_po_breakdown: Array.isArray(status?.draft_po_breakdown) ? status.draft_po_breakdown : [],
           } as ComponentRequirement;
         })
         .filter((comp): comp is ComponentRequirement => Boolean(comp));
@@ -543,6 +547,7 @@ type SupplierOrderLinePayload = {
   component_id: number;
   quantity_for_order: number;
   quantity_for_stock: number;
+  customer_order_id: number;
 };
 
 type SupplierOrderCreationSuccess = {
@@ -602,30 +607,31 @@ async function createComponentPurchaseOrders(
 
     const suppliersToProcess = supplierGroups
       .filter(group =>
-        group.components.some(c => selectedComponents[c.component.component_id])
+        group.components.some(c => selectedComponents[c.selectedSupplier.supplier_component_id])
       )
       .map(group => {
         const selectedComponentsForSupplier = group.components
-          .filter(c => selectedComponents[c.component.component_id]);
+          .filter(c => selectedComponents[c.selectedSupplier.supplier_component_id]);
 
         if (selectedComponentsForSupplier.length === 0) {
           return null;
         }
 
         const lineItems: SupplierOrderLinePayload[] = selectedComponentsForSupplier.map(component => {
-          const componentId = component.component.component_id;
-          const orderQuantity = orderQuantities[componentId] ?? component.shortfall;
-          const componentAllocation = allocation[componentId] || {
+          const supplierComponentId = component.selectedSupplier.supplier_component_id;
+          const orderQuantity = orderQuantities[supplierComponentId] ?? component.shortfall;
+          const componentAllocation = allocation[supplierComponentId] || {
             forThisOrder: Math.min(orderQuantity, component.shortfall),
             forStock: Math.max(0, orderQuantity - component.shortfall)
           };
 
           return {
-            supplier_component_id: component.selectedSupplier.supplier_component_id,
+            supplier_component_id: supplierComponentId,
             order_quantity: orderQuantity,
-            component_id: componentId,
+            component_id: component.component.component_id,
             quantity_for_order: componentAllocation.forThisOrder,
-            quantity_for_stock: componentAllocation.forStock
+            quantity_for_stock: componentAllocation.forStock,
+            customer_order_id: parseInt(orderId, 10)
           };
         });
 
@@ -647,7 +653,6 @@ async function createComponentPurchaseOrders(
       try {
         const { data, error: rpcError } = await supabase.rpc('create_purchase_order_with_lines', {
           supplier_id: payload.supplierId,
-          customer_order_id: parseInt(orderId, 10),
           line_items: payload.lineItems,
           status_id: draftStatusId,
           order_date: today,
@@ -717,6 +722,9 @@ const OrderComponentsDialog = ({
   const [apparentShortfallExists, setApparentShortfallExists] = useState(false);
   const [creationFailures, setCreationFailures] = useState<SupplierOrderCreationFailure[] | null>(null);
   const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({});
+  const [consolidateDialogOpen, setConsolidateDialogOpen] = useState(false);
+  const [suppliersWithDrafts, setSuppliersWithDrafts] = useState<SupplierWithDrafts[]>([]);
+  const [pendingConsolidationPayload, setPendingConsolidationPayload] = useState<any>(null);
   const queryClient = useQueryClient();
   
   // Group components by supplier
@@ -759,23 +767,24 @@ const OrderComponentsDialog = ({
       
       data.forEach(group => {
         group.components.forEach(component => {
-          const componentId = component.component.component_id;
+          // Use supplier_component_id as key to distinguish same component across different suppliers
+          const key = component.selectedSupplier.supplier_component_id;
           const perOrderShortfall = component.shortfall;
           const globalShortfall = component.global_real_shortfall || 0;
           
           // Default quantity: use global shortfall if no per-order shortfall
           const defaultQuantity = perOrderShortfall > 0 ? perOrderShortfall : globalShortfall;
-          quantities[componentId] = defaultQuantity;
+          quantities[key] = defaultQuantity;
           
           // Smart allocation: per-order shortfall goes to "forThisOrder", global-only goes to "forStock"
           if (perOrderShortfall > 0) {
-            newAllocation[componentId] = {
+            newAllocation[key] = {
               forThisOrder: perOrderShortfall,
               forStock: 0
             };
           } else {
             // Global-only shortfall: allocate to stock
-            newAllocation[componentId] = {
+            newAllocation[key] = {
               forThisOrder: 0,
               forStock: globalShortfall
             };
@@ -800,23 +809,24 @@ const OrderComponentsDialog = ({
       
       data.forEach(group => {
         group.components.forEach(component => {
-          const componentId = component.component.component_id;
+          // Use supplier_component_id as key to distinguish same component across different suppliers
+          const key = component.selectedSupplier.supplier_component_id;
           const perOrderShortfall = component.shortfall;
           const globalShortfall = component.global_real_shortfall || 0;
           
           // Default quantity: use global shortfall if no per-order shortfall
           const defaultQuantity = perOrderShortfall > 0 ? perOrderShortfall : globalShortfall;
-          quantities[componentId] = defaultQuantity;
+          quantities[key] = defaultQuantity;
           
           // Smart allocation: per-order shortfall goes to "forThisOrder", global-only goes to "forStock"
           if (perOrderShortfall > 0) {
-            newAllocation[componentId] = {
+            newAllocation[key] = {
               forThisOrder: perOrderShortfall,
               forStock: 0
             };
           } else {
             // Global-only shortfall: allocate to stock
-            newAllocation[componentId] = {
+            newAllocation[key] = {
               forThisOrder: 0,
               forStock: globalShortfall
             };
@@ -829,10 +839,10 @@ const OrderComponentsDialog = ({
     }
   };
 
-  const handleSelectComponent = (componentId: number, selected: boolean) => {
+  const handleSelectComponent = (supplierComponentId: number, selected: boolean) => {
     setSelectedComponents(prev => ({
       ...prev,
-      [componentId]: selected,
+      [supplierComponentId]: selected,
     }));
   };
 
@@ -843,24 +853,24 @@ const OrderComponentsDialog = ({
     }));
   };
 
-  const handleQuantityChange = (componentId: number, quantity: number) => {
+  const handleQuantityChange = (supplierComponentId: number, quantity: number) => {
     const newQuantity = Math.max(0, quantity);
     setOrderQuantities(prev => ({
       ...prev,
-      [componentId]: newQuantity
+      [supplierComponentId]: newQuantity
     }));
     
     // Update allocation when quantity changes
-    updateAllocation(componentId, newQuantity);
+    updateAllocation(supplierComponentId, newQuantity);
   };
   
-  const updateAllocation = (componentId: number, totalQuantity: number) => {
+  const updateAllocation = (supplierComponentId: number, totalQuantity: number) => {
     // Find the component to get the shortfall
     let shortfall = 0;
     
     data?.forEach(group => {
       group.components.forEach(component => {
-        if (component.component.component_id === componentId) {
+        if (component.selectedSupplier.supplier_component_id === supplierComponentId) {
           shortfall = component.shortfall;
         }
       });
@@ -872,12 +882,12 @@ const OrderComponentsDialog = ({
     
     setAllocation(prev => ({
       ...prev,
-      [componentId]: { forThisOrder, forStock }
+      [supplierComponentId]: { forThisOrder, forStock }
     }));
   };
   
   const handleAllocationChange = (
-    componentId: number, 
+    supplierComponentId: number, 
     field: 'forThisOrder' | 'forStock', 
     value: number
   ) => {
@@ -887,13 +897,13 @@ const OrderComponentsDialog = ({
     let shortfall = 0;
     data?.forEach(group => {
       group.components.forEach(component => {
-        if (component.component.component_id === componentId) {
+        if (component.selectedSupplier.supplier_component_id === supplierComponentId) {
           shortfall = component.shortfall;
         }
       });
     });
     
-    const currentAllocation = allocation[componentId] || { forThisOrder: 0, forStock: 0 };
+    const currentAllocation = allocation[supplierComponentId] || { forThisOrder: 0, forStock: 0 };
     let newAllocation = { ...currentAllocation };
     
     if (field === 'forThisOrder') {
@@ -919,12 +929,12 @@ const OrderComponentsDialog = ({
     
     setOrderQuantities(prev => ({
       ...prev,
-      [componentId]: totalQuantity
+      [supplierComponentId]: totalQuantity
     }));
     
     setAllocation(prev => ({
       ...prev,
-      [componentId]: newAllocation
+      [supplierComponentId]: newAllocation
     }));
   };
 
@@ -1014,9 +1024,238 @@ const OrderComponentsDialog = ({
     },
   });
 
-  const handleCreatePurchaseOrders = () => {
+  // Check for existing Draft POs for the selected suppliers
+  const checkForExistingDrafts = async () => {
+    const selectedGroups = (data || [])
+      .filter(group => group.components.some(c => selectedComponents[c.selectedSupplier.supplier_component_id]));
+    
+    console.log('[PO Consolidation] Selected groups:', selectedGroups);
+    console.log('[PO Consolidation] Selected components:', selectedComponents);
+    
+    const supplierIds = selectedGroups.map(group => group.supplier.supplier_id);
+    console.log('[PO Consolidation] Supplier IDs to check:', supplierIds);
+
+    const draftsPerSupplier: SupplierWithDrafts[] = [];
+
+    for (const supplierId of supplierIds) {
+      console.log('[PO Consolidation] Checking supplier:', supplierId);
+      const { data: drafts, error } = await supabase.rpc('get_draft_purchase_orders_for_supplier', {
+        p_supplier_id: supplierId
+      });
+
+      console.log('[PO Consolidation] RPC result for supplier', supplierId, ':', { drafts, error });
+
+      if (!error && drafts && drafts.length > 0) {
+        const supplierName = (data || []).find(g => g.supplier.supplier_id === supplierId)?.supplier.name || 'Unknown';
+        draftsPerSupplier.push({
+          supplierId,
+          supplierName,
+          existingDrafts: drafts.map((d: any) => ({
+            purchase_order_id: d.purchase_order_id,
+            q_number: d.q_number,
+            created_at: d.created_at,
+            notes: d.notes,
+            line_count: Number(d.line_count),
+            total_amount: Number(d.total_amount)
+          }))
+        });
+      }
+    }
+
+    console.log('[PO Consolidation] Drafts per supplier:', draftsPerSupplier);
+    return draftsPerSupplier;
+  };
+
+  const handleCreatePurchaseOrders = async () => {
     if (createPurchaseOrdersMutation.isPending) return;
-    createPurchaseOrdersMutation.mutate();
+
+    // Check for existing drafts
+    const drafts = await checkForExistingDrafts();
+    
+    if (drafts.length > 0) {
+      // Store the payload for later use
+      const payload = {
+        selectedComponents,
+        supplierGroups: data || [],
+        notes,
+        orderQuantities,
+        allocation,
+        orderId
+      };
+      setPendingConsolidationPayload(payload);
+      setSuppliersWithDrafts(drafts);
+      setConsolidateDialogOpen(true);
+    } else {
+      // No existing drafts, create new POs directly
+      createPurchaseOrdersMutation.mutate();
+    }
+  };
+
+  // Handle consolidation decision
+  const handleConsolidationConfirm = async (decisions: Record<number, number | 'new'>) => {
+    setConsolidateDialogOpen(false);
+    
+    if (!pendingConsolidationPayload) return;
+
+    const toastId = toast.loading('Creating purchase orders…');
+    
+    try {
+      // Get Draft status ID
+      const { data: statusData, error: statusError } = await supabase
+        .from('supplier_order_statuses')
+        .select('status_id')
+        .eq('status_name', 'Draft')
+        .single();
+
+      if (statusError || !statusData) {
+        throw new Error('Could not find Draft status in the system');
+      }
+
+      const draftStatusId = statusData.status_id;
+      const today = new Date().toISOString();
+      const purchaseOrderSummaries: SupplierOrderCreationSuccess[] = [];
+      const supplierFailures: SupplierOrderCreationFailure[] = [];
+
+      const suppliersToProcess = (pendingConsolidationPayload.supplierGroups as SupplierGroup[])
+        .filter(group =>
+          group.components.some(c => pendingConsolidationPayload.selectedComponents[c.selectedSupplier.supplier_component_id])
+        )
+        .map(group => {
+          const selectedComponentsForSupplier = group.components
+            .filter(c => pendingConsolidationPayload.selectedComponents[c.selectedSupplier.supplier_component_id]);
+
+          if (selectedComponentsForSupplier.length === 0) return null;
+
+          const lineItems: SupplierOrderLinePayload[] = selectedComponentsForSupplier.map(component => {
+            const supplierComponentId = component.selectedSupplier.supplier_component_id;
+            const orderQuantity = pendingConsolidationPayload.orderQuantities[supplierComponentId] ?? component.shortfall;
+            const componentAllocation = pendingConsolidationPayload.allocation[supplierComponentId] || {
+              forThisOrder: Math.min(orderQuantity, component.shortfall),
+              forStock: Math.max(0, orderQuantity - component.shortfall)
+            };
+
+            return {
+              supplier_component_id: supplierComponentId,
+              order_quantity: orderQuantity,
+              component_id: component.component.component_id,
+              quantity_for_order: componentAllocation.forThisOrder,
+              quantity_for_stock: componentAllocation.forStock,
+              customer_order_id: parseInt(pendingConsolidationPayload.orderId, 10)
+            };
+          });
+
+          return {
+            supplierId: group.supplier.supplier_id,
+            supplierName: group.supplier.name,
+            note: pendingConsolidationPayload.notes[group.supplier.supplier_id] || '',
+            lineItems,
+            decision: decisions[group.supplier.supplier_id] || 'new'
+          };
+        })
+        .filter((payload): payload is NonNullable<typeof payload> => payload !== null);
+
+      for (const payload of suppliersToProcess) {
+        try {
+          if (payload.decision !== 'new' && typeof payload.decision === 'number') {
+            // Add to existing PO
+            const { data, error: rpcError } = await supabase.rpc('add_lines_to_purchase_order', {
+              target_purchase_order_id: payload.decision,
+              line_items: payload.lineItems
+            });
+
+            if (rpcError) throw rpcError;
+
+            purchaseOrderSummaries.push({
+              supplierId: payload.supplierId,
+              supplierName: payload.supplierName,
+              purchaseOrderId: payload.decision,
+              supplierOrderIds: data?.[0]?.supplier_order_ids ?? []
+            });
+          } else {
+            // Create new PO
+            const { data, error: rpcError } = await supabase.rpc('create_purchase_order_with_lines', {
+              supplier_id: payload.supplierId,
+              line_items: payload.lineItems,
+              status_id: draftStatusId,
+              order_date: today,
+              notes: payload.note
+            });
+
+            if (rpcError) throw rpcError;
+
+            const rpcResult = Array.isArray(data) ? data?.[0] : data;
+
+            if (!rpcResult || typeof rpcResult.purchase_order_id !== 'number') {
+              throw new Error('Unexpected response when creating purchase order');
+            }
+
+            purchaseOrderSummaries.push({
+              supplierId: payload.supplierId,
+              supplierName: payload.supplierName,
+              purchaseOrderId: rpcResult.purchase_order_id,
+              supplierOrderIds: rpcResult.supplier_order_ids ?? []
+            });
+          }
+        } catch (rpcError) {
+          console.error(`Failed to process order for supplier ${payload.supplierName}`, rpcError);
+          supplierFailures.push({
+            supplierId: payload.supplierId,
+            supplierName: payload.supplierName,
+            reason: rpcError instanceof Error ? rpcError.message : 'Unknown error'
+          });
+        }
+      }
+
+      if (supplierFailures.length > 0 && purchaseOrderSummaries.length === 0) {
+        throw new SupplierOrderCreationError(supplierFailures, purchaseOrderSummaries);
+      }
+
+      // Success
+      const createdCount = purchaseOrderSummaries.length;
+      const addedCount = purchaseOrderSummaries.filter(s => 
+        suppliersWithDrafts.some(d => d.existingDrafts.some(e => e.purchase_order_id === s.purchaseOrderId))
+      ).length;
+      
+      let toastMessage = '';
+      if (addedCount > 0 && addedCount === createdCount) {
+        toastMessage = addedCount === 1 
+          ? 'Items added to existing purchase order!' 
+          : `Items added to ${addedCount} existing purchase orders!`;
+      } else if (addedCount > 0) {
+        toastMessage = `${createdCount - addedCount} new PO(s) created, ${addedCount} existing PO(s) updated!`;
+      } else {
+        toastMessage = createdCount === 1
+          ? 'Purchase order created successfully!'
+          : `${createdCount} purchase orders created successfully!`;
+      }
+
+      toast.success(toastMessage, { id: toastId });
+
+      handleReset();
+      onOpenChange(false);
+      if (onCreated) onCreated();
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['component-suppliers', orderId] }),
+        queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] }),
+        queryClient.invalidateQueries({ queryKey: ['order', orderId] }),
+        queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] }),
+        queryClient.invalidateQueries({ queryKey: ['purchase-orders'] }),
+        queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] }),
+      ]);
+
+    } catch (error) {
+      console.error('Error in consolidation:', error);
+      if (error instanceof SupplierOrderCreationError) {
+        setCreationFailures(error.failures);
+        const supplierList = error.failures.map(f => f.supplierName).join(', ');
+        toast.error(`Purchase orders failed for: ${supplierList}`, { id: toastId });
+      } else {
+        toast.error('Failed to create purchase orders. Please try again.', { id: toastId });
+      }
+    }
+
+    setPendingConsolidationPayload(null);
   };
 
   if (isLoading) {
@@ -1110,19 +1349,20 @@ const OrderComponentsDialog = ({
                       </TableHeader>
                       <TableBody>
                         {group.components.map((component) => {
+                          const supplierComponentId = component.selectedSupplier.supplier_component_id;
                           const isExpanded = expandedRows[component.component.component_id];
                           const hasGlobalContext = component.total_required_all_orders > component.shortfall;
                           const isForStock = component.shortfall === 0 && component.global_real_shortfall > 0;
                           
                           return (
-                            <React.Fragment key={component.component.component_id}>
+                            <React.Fragment key={supplierComponentId}>
                               <TableRow className="hover:bg-muted/50">
                                 <TableCell className="py-4">
                                   <Checkbox
-                                    checked={selectedComponents[component.component.component_id] === true}
+                                    checked={selectedComponents[supplierComponentId] === true}
                                     onCheckedChange={(checked) =>
                                       handleSelectComponent(
-                                        component.component.component_id,
+                                        supplierComponentId,
                                         checked === true
                                       )
                                     }
@@ -1168,32 +1408,32 @@ const OrderComponentsDialog = ({
                                   <Input
                                     type="number"
                                     min="0"
-                                    value={orderQuantities[component.component.component_id] || 0}
+                                    value={orderQuantities[supplierComponentId] || 0}
                                     onChange={(e) => 
                                       handleQuantityChange(
-                                        component.component.component_id, 
+                                        supplierComponentId, 
                                         parseInt(e.target.value || '0')
                                       )
                                     }
                                     className="w-24 h-10"
-                                    disabled={!selectedComponents[component.component.component_id]}
+                                    disabled={!selectedComponents[supplierComponentId]}
                                   />
                                 </TableCell>
                                 <TableCell className="py-4">
-                                  {selectedComponents[component.component.component_id] ? (
+                                  {selectedComponents[supplierComponentId] ? (
                                     <div className="flex items-center gap-3">
                                       <div className="flex items-center gap-1.5">
-                                        <Label htmlFor={`forOrder-${component.component.component_id}`} className="text-xs font-medium whitespace-nowrap">
+                                        <Label htmlFor={`forOrder-${supplierComponentId}`} className="text-xs font-medium whitespace-nowrap">
                                           Order:
                                         </Label>
                                         <Input
-                                          id={`forOrder-${component.component.component_id}`}
+                                          id={`forOrder-${supplierComponentId}`}
                                           type="number"
                                           min="0"
-                                          value={allocation[component.component.component_id]?.forThisOrder || 0}
+                                          value={allocation[supplierComponentId]?.forThisOrder || 0}
                                           onChange={(e) => 
                                             handleAllocationChange(
-                                              component.component.component_id,
+                                              supplierComponentId,
                                               'forThisOrder',
                                               parseInt(e.target.value || '0')
                                             )
@@ -1202,17 +1442,17 @@ const OrderComponentsDialog = ({
                                         />
                                       </div>
                                       <div className="flex items-center gap-1.5">
-                                        <Label htmlFor={`forStock-${component.component.component_id}`} className="text-xs font-medium whitespace-nowrap">
+                                        <Label htmlFor={`forStock-${supplierComponentId}`} className="text-xs font-medium whitespace-nowrap">
                                           Stock:
                                         </Label>
                                         <Input
-                                          id={`forStock-${component.component.component_id}`}
+                                          id={`forStock-${supplierComponentId}`}
                                           type="number"
                                           min="0"
-                                          value={allocation[component.component.component_id]?.forStock || 0}
+                                          value={allocation[supplierComponentId]?.forStock || 0}
                                           onChange={(e) => 
                                             handleAllocationChange(
-                                              component.component.component_id,
+                                              supplierComponentId,
                                               'forStock',
                                               parseInt(e.target.value || '0')
                                             )
@@ -1321,7 +1561,7 @@ const OrderComponentsDialog = ({
               data
                 .filter((group) =>
                   group.components.some(
-                    (c) => selectedComponents[c.component.component_id]
+                    (c) => selectedComponents[c.selectedSupplier.supplier_component_id]
                   )
                 )
                 .map((group) => (
@@ -1343,17 +1583,18 @@ const OrderComponentsDialog = ({
                         <TableBody>
                           {group.components
                             .filter(
-                              (c) => selectedComponents[c.component.component_id]
+                              (c) => selectedComponents[c.selectedSupplier.supplier_component_id]
                             )
                             .map((component) => {
-                              const orderQty = orderQuantities[component.component.component_id] || component.shortfall;
-                              const currentAllocation = allocation[component.component.component_id] || {
+                              const supplierComponentId = component.selectedSupplier.supplier_component_id;
+                              const orderQty = orderQuantities[supplierComponentId] || component.shortfall;
+                              const currentAllocation = allocation[supplierComponentId] || {
                                 forThisOrder: component.shortfall,
                                 forStock: 0
                               };
                               
                               return (
-                                <TableRow key={component.component.component_id}>
+                                <TableRow key={supplierComponentId}>
                                   <TableCell>
                                     <div className="font-medium">
                                       {component.component.internal_code}
@@ -1388,13 +1629,13 @@ const OrderComponentsDialog = ({
                               {formatCurrency(
                                 group.components
                                   .filter(
-                                    (c) => selectedComponents[c.component.component_id]
+                                    (c) => selectedComponents[c.selectedSupplier.supplier_component_id]
                                   )
                                   .reduce(
                                     (sum, component) =>
                                       sum +
                                       component.selectedSupplier.price *
-                                        (orderQuantities[component.component.component_id] ||
+                                        (orderQuantities[component.selectedSupplier.supplier_component_id] ||
                                           component.shortfall),
                                     0
                                   )
@@ -1461,6 +1702,15 @@ const OrderComponentsDialog = ({
           )}
         </DialogFooter>
       </DialogContent>
+
+      {/* Consolidation Dialog */}
+      <ConsolidatePODialog
+        open={consolidateDialogOpen}
+        onOpenChange={setConsolidateDialogOpen}
+        suppliersWithDrafts={suppliersWithDrafts}
+        onConfirm={handleConsolidationConfirm}
+        isLoading={false}
+      />
     </Dialog>
   );
 };
@@ -2121,13 +2371,13 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   const [showGlobalContext, setShowGlobalContext] = useState<boolean>(true);
   const [fgReservationsOpen, setFgReservationsOpen] = useState<boolean>(false);
 
-  // Edit mode state
-  const [isEditMode, setIsEditMode] = useState(false);
+  // Inline edit state (always editable, auto-save on change)
   const [editCustomerId, setEditCustomerId] = useState<string>('');
   const [editOrderNumber, setEditOrderNumber] = useState<string>('');
   const [editDeliveryDate, setEditDeliveryDate] = useState<string>('');
   const [customerOpen, setCustomerOpen] = useState(false);
   const [customerSearchTerm, setCustomerSearchTerm] = useState('');
+  const [isInitialized, setIsInitialized] = useState(false);
 
   // Product editing state
   const [editingDetailId, setEditingDetailId] = useState<number | null>(null);
@@ -2178,11 +2428,10 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     refetchOnWindowFocus: true,
   });
 
-  // Fetch customers for edit mode
+  // Fetch customers (always fetch for inline editing)
   const { data: customers, isLoading: customersLoading } = useQuery<Customer[], Error>({
     queryKey: ['customers'],
     queryFn: () => fetchCustomers(),
-    enabled: isEditMode, // Only fetch when in edit mode
   });
 
   const customersSorted = useMemo(
@@ -2214,48 +2463,60 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
       toast.success('Order updated successfully');
-      setIsEditMode(false);
     },
     onError: (error: Error) => {
       toast.error(`Failed to update order: ${error.message}`);
     },
   });
 
-  // Initialize edit form when entering edit mode
+  // Initialize edit form values when order loads
   useEffect(() => {
-    if (isEditMode && order) {
+    if (order && !isInitialized) {
       setEditCustomerId(order.customer_id?.toString() || '');
       setEditOrderNumber(order.order_number || '');
       setEditDeliveryDate(order.delivery_date || '');
+      setIsInitialized(true);
     }
-  }, [isEditMode, order]);
+  }, [order, isInitialized]);
 
-  // Handle save
-  const handleSaveOrder = () => {
+  // Auto-save function for individual field changes
+  const saveField = useCallback((field: 'customer_id' | 'order_number' | 'delivery_date', value: any) => {
+    if (!order) return;
+    
     const updates: { customer_id?: number; order_number?: string | null; delivery_date?: string | null } = {};
-    if (editCustomerId && editCustomerId !== order?.customer_id?.toString()) {
-      updates.customer_id = Number(editCustomerId);
-    }
-    if (editOrderNumber !== order?.order_number) {
-      updates.order_number = editOrderNumber || null;
-    }
-    if (editDeliveryDate !== order?.delivery_date) {
-      updates.delivery_date = editDeliveryDate || null;
-    }
-
-    if (Object.keys(updates).length === 0) {
-      toast.info('No changes to save');
-      setIsEditMode(false);
-      return;
+    
+    if (field === 'customer_id' && value !== order.customer_id?.toString()) {
+      updates.customer_id = Number(value);
+    } else if (field === 'order_number' && value !== order.order_number) {
+      updates.order_number = value || null;
+    } else if (field === 'delivery_date' && value !== order.delivery_date) {
+      updates.delivery_date = value || null;
     }
 
-    updateOrderMutation.mutate(updates);
+    if (Object.keys(updates).length > 0) {
+      updateOrderMutation.mutate(updates);
+    }
+  }, [order, updateOrderMutation]);
+
+  // Handle customer change with immediate save
+  const handleCustomerChange = (customerId: string) => {
+    setEditCustomerId(customerId);
+    setCustomerOpen(false);
+    setCustomerSearchTerm('');
+    saveField('customer_id', customerId);
   };
 
-  // Handle cancel
-  const handleCancelEdit = () => {
-    setIsEditMode(false);
-    setCustomerSearchTerm('');
+  // Handle order number blur (save on blur)
+  const handleOrderNumberBlur = () => {
+    if (editOrderNumber !== (order?.order_number || '')) {
+      saveField('order_number', editOrderNumber);
+    }
+  };
+
+  // Handle delivery date change with immediate save
+  const handleDeliveryDateChange = (date: string) => {
+    setEditDeliveryDate(date);
+    saveField('delivery_date', date);
   };
 
   // Mutation for updating order detail
@@ -2566,24 +2827,71 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     queryFn: () => fetchOrderComponentRequirements(orderId),
   });
 
-  // Calculate totals from component requirements
+  // Calculate totals and critical shortfalls from component requirements
   const totals = useMemo(() => {
     let totalComponents = 0;
     let totalShortfall = 0;
+    let componentsInStock = 0;
+    let componentsOnOrder = 0;
+    let componentsInDraftPO = 0;
+    
+    // Collect shortfall details
+    const shortfallComponents: Array<{
+      code: string;
+      description: string;
+      required: number;
+      inStock: number;
+      onOrder: number;
+      draftPO: number;
+      shortfall: number;
+    }> = [];
 
     componentRequirements.forEach((productReq: ProductRequirement) => {
       (productReq.components ?? []).forEach((component: any) => {
         totalComponents++;
         const metrics = computeComponentMetrics(component, productReq.product_id);
+        const inStock = Number(component?.quantity_in_stock ?? component?.in_stock ?? 0);
+        const onOrder = Number(component?.quantity_on_order ?? component?.on_order ?? 0);
+        const draftPO = Number(component?.draft_po_quantity ?? 0);
+        
         if (metrics.real > 0.0001) {
           totalShortfall++;
+          shortfallComponents.push({
+            code: component?.internal_code || 'Unknown',
+            description: component?.description || '',
+            required: metrics.required,
+            inStock,
+            onOrder,
+            draftPO,
+            shortfall: metrics.real
+          });
+        } else {
+          componentsInStock++;
         }
+        
+        if (onOrder > 0) componentsOnOrder++;
+        if (draftPO > 0) componentsInDraftPO++;
       });
     });
+    
+    // Sort by shortfall and take top 5
+    const criticalShortfalls = shortfallComponents
+      .sort((a, b) => b.shortfall - a.shortfall)
+      .slice(0, 5);
+    
+    const stockCoverage = totalComponents > 0 
+      ? Math.round((componentsInStock / totalComponents) * 100) 
+      : 100;
 
     return {
       totalComponents,
-      totalShortfall
+      totalShortfall,
+      componentsInStock,
+      componentsOnOrder,
+      componentsInDraftPO,
+      criticalShortfalls,
+      allShortfalls: shortfallComponents,
+      stockCoverage
     };
   }, [componentRequirements, computeComponentMetrics]);
 
@@ -2670,11 +2978,12 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-4">
-          <StatusBadge status={order?.status?.status_name || 'Unknown'} />
+        <div className="flex items-center gap-3">
+          <StatusBadge status={order?.status?.status_name || 'Open'} />
           {order?.delivery_date && (
-            <Badge variant="outline" className="ml-2">
-              Delivery: {format(new Date(order.delivery_date), 'MMM d, yyyy')}
+            <Badge variant="outline" className="gap-1">
+              <span className="text-muted-foreground">Delivery:</span>
+              {format(new Date(order.delivery_date), 'MMM d, yyyy')}
             </Badge>
           )}
         </div>
@@ -2688,10 +2997,9 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
           <TabsTrigger value="documents">Documents</TabsTrigger>
         </TabsList>
         
-        <TabsContent value="details" className="space-y-4">
+        <TabsContent value="details" className="space-y-6">
           {/* Content for details tab */}
-          <div className="flex justify-between items-center">
-            <h2 className="text-xl font-semibold">Order Dashboard</h2>
+          <div className="flex justify-end">
             <AddProductsDialog 
               orderId={orderId} 
               onSuccess={() => {
@@ -2703,173 +3011,148 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
             />
       </div>
 
-          {/* Order Summary Card */}
+          {/* Order Summary Card - Inline Editing */}
           <Card>
           <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-lg">Order Summary</CardTitle>
-              {!isEditMode ? (
-                <Button variant="outline" size="sm" onClick={() => setIsEditMode(true)}>
-                  <Edit className="h-4 w-4 mr-2" />
-                  Edit Order
-                </Button>
-              ) : (
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleCancelEdit}
-                    disabled={updateOrderMutation.isPending}
-                  >
-                    <X className="h-4 w-4 mr-2" />
-                    Cancel
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={handleSaveOrder}
-                    disabled={updateOrderMutation.isPending || !editCustomerId}
-                  >
-                    {updateOrderMutation.isPending ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <Save className="h-4 w-4 mr-2" />
-                    )}
-                    Save
-                  </Button>
+              {updateOrderMutation.isPending && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Saving...
                 </div>
               )}
           </CardHeader>
           <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <h3 className="font-medium mb-2">Customer Details</h3>
-                  {!isEditMode ? (
-                    <>
-                      <p className="text-sm">
-                        <span className="font-medium">Customer:</span> {order?.customer?.name || 'N/A'}
-                      </p>
-                      <p className="text-sm">
-                        <span className="font-medium">Contact:</span> {order?.customer?.contact_person || 'N/A'}
-                      </p>
-                      <p className="text-sm">
-                        <span className="font-medium">Email:</span> {order?.customer?.email || 'N/A'}
-                      </p>
-                      <p className="text-sm">
-                        <span className="font-medium">Phone:</span> {order?.customer?.phone || 'N/A'}
-                      </p>
-                    </>
-                  ) : (
-                    <div className="space-y-2">
-                      <Label htmlFor="edit-customer">Customer</Label>
-                      <Popover open={customerOpen} onOpenChange={setCustomerOpen}>
-                        <PopoverTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            role="combobox"
-                            aria-expanded={customerOpen}
-                            className="w-full justify-between"
-                            disabled={customersLoading}
-                          >
-                            {customersLoading
-                              ? 'Loading...'
-                              : (customers?.find((c) => c.id.toString() === editCustomerId)?.name || 'Select a customer')}
-                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
-                          <div className="flex h-full w-full flex-col overflow-hidden rounded-md bg-popover text-popover-foreground">
-                            <div className="flex items-center border-b px-3">
-                              <input
-                                className="flex h-11 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                                placeholder="Search customers..."
-                                value={customerSearchTerm}
-                                onChange={(e) => setCustomerSearchTerm(e.target.value)}
-                              />
-                            </div>
-                            <div className="max-h-[300px] overflow-y-auto overflow-x-hidden">
-                              {filteredCustomers.length === 0 ? (
-                                <div className="py-6 text-center text-sm">No customer found.</div>
-                              ) : (
-                                <div className="overflow-hidden p-1 text-foreground">
-                                  {filteredCustomers.map((c) => (
-                                  <div
-                                    key={c.id}
-                                    className="relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
-                                    onClick={() => {
-                                      setEditCustomerId(String(c.id));
-                                      setCustomerOpen(false);
-                                      setCustomerSearchTerm('');
-                                    }}
-                                  >
-                                    <Check
-                                      className={cn(
-                                        'mr-2 h-4 w-4',
-                                        editCustomerId === c.id.toString() ? 'opacity-100' : 'opacity-0'
-                                      )}
-                                    />
-                                    {c.name}
-                                  </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Customer Details - Inline Editable */}
+                <div className="space-y-3">
+                  <h3 className="font-medium text-sm text-muted-foreground">Customer Details</h3>
+                  <div className="space-y-2">
+                    <Popover open={customerOpen} onOpenChange={setCustomerOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={customerOpen}
+                          className="w-full justify-between h-9 font-normal"
+                          disabled={customersLoading}
+                        >
+                          {customersLoading
+                            ? 'Loading...'
+                            : (customers?.find((c) => c.id.toString() === editCustomerId)?.name || order?.customer?.name || 'Select a customer')}
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
+                        <div className="flex h-full w-full flex-col overflow-hidden rounded-md bg-popover text-popover-foreground">
+                          <div className="flex items-center border-b px-3">
+                            <Search className="h-4 w-4 text-muted-foreground mr-2" />
+                            <input
+                              className="flex h-10 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                              placeholder="Search customers..."
+                              value={customerSearchTerm}
+                              onChange={(e) => setCustomerSearchTerm(e.target.value)}
+                            />
                           </div>
-                        </PopoverContent>
-                      </Popover>
-                      {editCustomerId && customers?.find(c => c.id.toString() === editCustomerId) && (
-                        <div className="text-xs text-muted-foreground space-y-1 mt-2">
-                          <p><span className="font-medium">Contact:</span> {customers.find(c => c.id.toString() === editCustomerId)?.contact_person || 'N/A'}</p>
-                          <p><span className="font-medium">Email:</span> {customers.find(c => c.id.toString() === editCustomerId)?.email || 'N/A'}</p>
-                          <p><span className="font-medium">Phone:</span> {customers.find(c => c.id.toString() === editCustomerId)?.phone || 'N/A'}</p>
+                          <div className="max-h-[300px] overflow-y-auto overflow-x-hidden">
+                            {filteredCustomers.length === 0 ? (
+                              <div className="py-6 text-center text-sm">No customer found.</div>
+                            ) : (
+                              <div className="overflow-hidden p-1 text-foreground">
+                                {filteredCustomers.map((c) => (
+                                <div
+                                  key={c.id}
+                                  className="relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+                                  onClick={() => handleCustomerChange(String(c.id))}
+                                >
+                                  <Check
+                                    className={cn(
+                                      'mr-2 h-4 w-4',
+                                      editCustomerId === c.id.toString() ? 'opacity-100' : 'opacity-0'
+                                    )}
+                                  />
+                                  {c.name}
+                                </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      )}
+                      </PopoverContent>
+                    </Popover>
+                    {/* Customer contact info */}
+                    {(() => {
+                      const selectedCustomer = customers?.find(c => c.id.toString() === editCustomerId) || order?.customer;
+                      if (!selectedCustomer) return null;
+                      return (
+                        <div className="text-sm space-y-1 pl-1">
+                          {selectedCustomer.contact_person && (
+                            <p className="text-muted-foreground">
+                              <span className="font-medium">Contact:</span> {selectedCustomer.contact_person}
+                            </p>
+                          )}
+                          {selectedCustomer.email && (
+                            <p>
+                              <a href={`mailto:${selectedCustomer.email}`} className="text-blue-600 hover:underline">
+                                {selectedCustomer.email}
+                              </a>
+                            </p>
+                          )}
+                          {selectedCustomer.phone && (
+                            <p>
+                              <a href={`tel:${selectedCustomer.phone}`} className="text-blue-600 hover:underline">
+                                {selectedCustomer.phone}
+                              </a>
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* Order Information - Inline Editable */}
+                <div className="space-y-3">
+                  <h3 className="font-medium text-sm text-muted-foreground">Order Information</h3>
+                  <div className="space-y-3">
+                    {/* Order Date (read-only) */}
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-muted-foreground min-w-[80px]">Created:</span>
+                      <span>{order?.created_at && format(new Date(order.created_at), 'MMM d, yyyy')}</span>
                     </div>
-                  )}
-                </div>
-                <div>
-                  <h3 className="font-medium mb-2">Order Information</h3>
-                  {!isEditMode ? (
-                    <>
-                      <p className="text-sm">
-                        <span className="font-medium">Order Date:</span> {order?.created_at && format(new Date(order.created_at), 'MMMM d, yyyy')}
-                      </p>
-                      <p className="text-sm">
-                        <span className="font-medium">Delivery Date:</span> {order?.delivery_date && format(new Date(order.delivery_date), 'MMMM d, yyyy')}
-                      </p>
-                      <p className="text-sm">
-                        <span className="font-medium">Status:</span> <StatusBadge status={order?.status?.status_name || 'Unknown'} />
-                      </p>
-                      <p className="text-sm">
-                        <span className="font-medium">Reference:</span> {order?.customer_reference || 'N/A'}
-                      </p>
-                    </>
-                  ) : (
-                    <div className="space-y-3">
-                      <div>
-                        <Label htmlFor="edit-order-number">Order Number</Label>
-                        <Input
-                          id="edit-order-number"
-                          value={editOrderNumber}
-                          onChange={(e) => setEditOrderNumber(e.target.value)}
-                          placeholder="Optional"
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="edit-delivery-date">Delivery Date</Label>
-                        <Input
-                          id="edit-delivery-date"
-                          type="date"
-                          value={editDeliveryDate}
-                          onChange={(e) => setEditDeliveryDate(e.target.value)}
-                        />
-                      </div>
-                      <p className="text-sm">
-                        <span className="font-medium">Status:</span> <StatusBadge status={order?.status?.status_name || 'Unknown'} />
-                      </p>
+                    
+                    {/* Delivery Date - Editable */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground min-w-[80px]">Delivery:</span>
+                      <Input
+                        type="date"
+                        value={editDeliveryDate}
+                        onChange={(e) => handleDeliveryDateChange(e.target.value)}
+                        className="h-8 w-[160px]"
+                      />
                     </div>
-                  )}
+                    
+                    {/* Order Number - Editable */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground min-w-[80px]">Order #:</span>
+                      <Input
+                        value={editOrderNumber}
+                        onChange={(e) => setEditOrderNumber(e.target.value)}
+                        onBlur={handleOrderNumberBlur}
+                        placeholder="Enter order number"
+                        className="h-8 w-[160px]"
+                      />
+                    </div>
+                    
+                    {/* Status */}
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-muted-foreground min-w-[80px]">Status:</span>
+                      <StatusBadge status={order?.status?.status_name || 'Unknown'} />
+                    </div>
+                  </div>
                 </div>
-                </div>
+              </div>
           </CardContent>
         </Card>
 
@@ -2885,9 +3168,9 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                       <ChevronDown className="h-4 w-4 text-muted-foreground" />
                     )}
                     <div>
-                      <CardTitle className="text-lg">Finished-Good Reservations</CardTitle>
+                      <CardTitle className="text-lg">Stock Reservations</CardTitle>
                       <CardDescription>
-                        Reserve available finished goods to reduce component demand before issuing stock.
+                        Reserve pre-built products from stock to reduce the components needed for this order.
                       </CardDescription>
                     </div>
                   </div>
@@ -2895,18 +3178,20 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                     <Button
                       onClick={() => reserveFgMutation.mutate()}
                       disabled={reserveFgMutation.isPending || orderLoading}
+                      title="Reserve available finished goods from stock for this order"
                     >
                       {reserveFgMutation.isPending ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       ) : (
                         <Package className="mr-2 h-4 w-4" />
                       )}
-                      Reserve FG
+                      Reserve Stock
                     </Button>
                     <Button
                       variant="outline"
                       onClick={() => releaseFgMutation.mutate()}
                       disabled={!hasFgReservations || releaseFgMutation.isPending}
+                      title="Release reservations back to available stock"
                     >
                       {releaseFgMutation.isPending ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -2919,13 +3204,14 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                       variant="secondary"
                       onClick={() => consumeFgMutation.mutate()}
                       disabled={!hasFgReservations || consumeFgMutation.isPending}
+                      title="Mark reserved items as shipped and deduct from inventory"
                     >
                       {consumeFgMutation.isPending ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       ) : (
                         <CheckCircle className="mr-2 h-4 w-4" />
                       )}
-                      Consume (Ship)
+                      Ship
                     </Button>
                   </div>
                 </CardHeader>
@@ -2934,7 +3220,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                 <CardContent>
               {applyFgCoverage && (
                 <Badge variant="outline" className="mb-3 bg-blue-50 text-blue-700">
-                  FG coverage applied
+                  Stock reservations applied
                 </Badge>
               )}
               {fgReservationsLoading ? (
@@ -2944,16 +3230,16 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                 </div>
               ) : finishedGoodsRows.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No products on this order can be reserved as finished goods yet.
+                  No products on this order have stock available to reserve.
                 </p>
               ) : (
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Product</TableHead>
-                      <TableHead className="text-right">Ordered</TableHead>
-                      <TableHead className="text-right">Reserved FG</TableHead>
-                      <TableHead className="text-right">Remain to Explode</TableHead>
+                      <TableHead>Ordered</TableHead>
+                      <TableHead className="text-right">Reserved</TableHead>
+                      <TableHead className="text-right">Need to Build</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -2993,7 +3279,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
               )}
               {!hasFgReservations && finishedGoodsRows.length > 0 && (
                 <div className="mt-3 rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-                  Reserving finished goods will automatically reduce the component quantities required for this order.
+                  Reserving stock will automatically reduce the components needed for this order.
                 </div>
               )}
                 </CardContent>
@@ -3012,12 +3298,12 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Product</TableHead>
-                      <TableHead className="text-right">Quantity</TableHead>
-                      <TableHead className="text-right">Reserved FG</TableHead>
-                      <TableHead className="text-right">Remain to Explode</TableHead>
+                      <TableHead className="text-right">Qty</TableHead>
+                      <TableHead className="text-right">Reserved</TableHead>
+                      <TableHead className="text-right">To Build</TableHead>
                       <TableHead className="text-right">Unit Price</TableHead>
                       <TableHead className="text-right">Total</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
+                      <TableHead className="text-right w-[100px]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -3144,36 +3430,143 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
             </CardContent>
           </Card>
 
-          {/* Components Summary */}
+          {/* Components Summary - Enhanced with critical shortfalls */}
           <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Components Summary</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
-                  <h3 className="text-sm font-medium text-blue-800 mb-2">Total Components</h3>
-                  <p className="text-2xl font-bold text-blue-900">{totals.totalComponents}</p>
-                          </div>
-                <div className="bg-amber-50 rounded-lg p-4 border border-amber-100">
-                  <h3 className="text-sm font-medium text-amber-800 mb-2">Components with Shortfall</h3>
-                  <p className="text-2xl font-bold text-amber-900">{totals.totalShortfall}</p>
-                        </div>
-                <div className="bg-green-50 rounded-lg p-4 border border-green-100">
-                  <h3 className="text-sm font-medium text-green-800 mb-2">Ready to Assemble</h3>
-                  <p className="text-2xl font-bold text-green-900">{totals.totalComponents - totals.totalShortfall}</p>
-                      </div>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-lg">Components Summary</CardTitle>
+                  <CardDescription>Parts needed to fulfill this order</CardDescription>
                 </div>
-              <div className="mt-4">
-                <Link href="#" onClick={(e) => { e.preventDefault(); setActiveTab('components'); }}>
-                  <Button variant="outline" size="sm" className="gap-1">
-                    <ChevronRight className="h-4 w-4" />
-                    View Detailed Components
-                  </Button>
-                </Link>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="gap-1"
+                  onClick={() => setActiveTab('components')}
+                >
+                  View All
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
               </div>
-          </CardContent>
-        </Card>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Stock Coverage Progress */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Stock Availability</span>
+                  <span className={cn(
+                    "font-semibold",
+                    totals.stockCoverage === 100 ? "text-green-600" : totals.stockCoverage >= 50 ? "text-amber-600" : "text-red-600"
+                  )}>
+                    {totals.stockCoverage}% ready
+                  </span>
+                </div>
+                <div className="h-2 bg-muted rounded-full overflow-hidden">
+                  <div 
+                    className={cn(
+                      "h-full transition-all duration-500",
+                      totals.stockCoverage === 100 ? "bg-green-500" : totals.stockCoverage >= 50 ? "bg-amber-500" : "bg-red-500"
+                    )}
+                    style={{ width: `${totals.stockCoverage}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>{totals.componentsInStock} of {totals.totalComponents} components in stock</span>
+                  {totals.totalShortfall > 0 && (
+                    <span className="text-red-600 font-medium">{totals.totalShortfall} need ordering</span>
+                  )}
+                </div>
+              </div>
+              
+              {/* Purchasing Status - Only show if there are shortfalls */}
+              {totals.totalShortfall > 0 && (
+                <div className="flex flex-wrap gap-3 text-sm">
+                  {totals.componentsOnOrder > 0 && (
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2 h-2 rounded-full bg-blue-500" />
+                      <span>{totals.componentsOnOrder} on order</span>
+                    </div>
+                  )}
+                  {totals.componentsInDraftPO > 0 && (
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2 h-2 rounded-full bg-amber-500" />
+                      <span>{totals.componentsInDraftPO} in draft PO</span>
+                    </div>
+                  )}
+                  {totals.componentsOnOrder === 0 && totals.componentsInDraftPO === 0 && (
+                    <div className="flex items-center gap-1.5 text-red-600">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      <span>No purchase orders created</span>
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {/* Critical Shortfalls Table */}
+              {totals.criticalShortfalls.length > 0 && (
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="bg-red-50 px-3 py-2 border-b flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-red-500" />
+                    <span className="text-sm font-medium text-red-700">Components Needing Attention</span>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr className="text-muted-foreground">
+                        <th className="text-left py-2 px-3 font-medium">Component</th>
+                        <th className="text-right py-2 px-3 font-medium">Need</th>
+                        <th className="text-right py-2 px-3 font-medium">Have</th>
+                        <th className="text-right py-2 px-3 font-medium text-red-600">Short</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {totals.criticalShortfalls.map((comp, idx) => (
+                        <tr key={idx} className="border-t">
+                          <td className="py-2 px-3">
+                            <div className="font-medium">{comp.code}</div>
+                            {comp.description && (
+                              <div className="text-xs text-muted-foreground truncate max-w-[180px]">
+                                {comp.description}
+                              </div>
+                            )}
+                          </td>
+                          <td className="text-right py-2 px-3">{formatQuantity(comp.required)}</td>
+                          <td className="text-right py-2 px-3">
+                            {formatQuantity(comp.inStock)}
+                            {comp.onOrder > 0 && (
+                              <span className="text-blue-600 text-xs ml-1">(+{formatQuantity(comp.onOrder)} coming)</span>
+                            )}
+                          </td>
+                          <td className="text-right py-2 px-3 text-red-600 font-medium">
+                            {formatQuantity(comp.shortfall)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {totals.allShortfalls.length > 5 && (
+                    <div className="px-3 py-2 bg-muted/30 text-xs text-center text-muted-foreground border-t">
+                      + {totals.allShortfalls.length - 5} more components need ordering
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {/* All good message */}
+              {totals.totalShortfall === 0 && totals.totalComponents > 0 && (
+                <div className="flex items-center gap-2 text-green-600 bg-green-50 rounded-lg p-3">
+                  <CheckCircle className="w-5 h-5" />
+                  <span className="font-medium">All components available in stock</span>
+                </div>
+              )}
+              
+              {/* No components message */}
+              {totals.totalComponents === 0 && (
+                <div className="text-center py-4 text-muted-foreground">
+                  <p>No bill of materials defined for products in this order</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Financial Summary */}
           <Card>
@@ -3219,7 +3612,10 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                   totalComponents: 0,
                   totalShortfall: 0,
                   totalGlobalShortfall: 0,
-                  multiOrderComponents: 0
+                  multiOrderComponents: 0,
+                  componentsInStock: 0,
+                  componentsOnOrder: 0,
+                  componentsInDraftPO: 0
                 };
                 
                 // Calculate totals from all components
@@ -3230,9 +3626,17 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                     totals.totalComponents++;
 
                     const metrics = computeComponentMetrics(comp, prodReq.product_id);
+                    const onOrder = Number(comp?.quantity_on_order ?? comp?.on_order ?? 0);
+                    const draftPO = Number(comp?.draft_po_quantity ?? 0);
+                    
                     if (metrics.real > 0.0001) {
                       totals.totalShortfall++;
+                    } else {
+                      totals.componentsInStock++;
                     }
+                    
+                    if (onOrder > 0) totals.componentsOnOrder++;
+                    if (draftPO > 0) totals.componentsInDraftPO++;
 
                     if ((comp?.global_real_shortfall ?? 0) > 0) {
                       totals.totalGlobalShortfall++;
@@ -3243,6 +3647,11 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                     }
                   });
                 });
+                
+                // Calculate stock coverage percentage
+                const stockCoverage = totals.totalComponents > 0 
+                  ? Math.round((totals.componentsInStock / totals.totalComponents) * 100) 
+                  : 100;
                 
                 return (
                   <>
@@ -3255,83 +3664,113 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                         Order Components
                       </Button>
                     </div>
-                    <Card className="shadow-sm border border-muted/40 overflow-hidden">
-                      <CardHeader className="pb-2 space-y-4">
-                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                          <div>
-                            <CardTitle>Components needed for this order</CardTitle>
-                            <div className="mt-2 flex flex-wrap items-center gap-2">
-                              {totals.totalShortfall > 0 ? (
-                                <Badge variant="destructive" className="bg-red-100 text-red-700 hover:bg-red-100">
-                                  {totals.totalShortfall} components with shortfall
-                                </Badge>
-                              ) : (
-                                <Badge variant="outline" className="bg-green-100 text-green-700 hover:bg-green-100">
-                                  All components available
-                                </Badge>
-                              )}
-                              {showGlobalContext && totals.totalGlobalShortfall > 0 && (
-                                <Badge variant="outline" className="bg-amber-100 text-amber-800 hover:bg-amber-100">
-                                  {totals.totalGlobalShortfall} global shortfalls
-                                </Badge>
-                              )}
-                              {applyFgCoverage && (
-                                <Badge variant="outline" className="bg-blue-50 text-blue-700 hover:bg-blue-50">
-                                  FG coverage applied
-                                </Badge>
+                    
+                    {/* Component Status Summary Card */}
+                    <Card className="shadow-sm border border-muted/40 mb-4">
+                      <CardContent className="pt-4">
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                          {/* Stock Coverage */}
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <h3 className="font-medium text-sm">Stock Availability</h3>
+                              <span className={cn(
+                                "text-sm font-semibold",
+                                stockCoverage === 100 ? "text-green-600" : stockCoverage >= 50 ? "text-amber-600" : "text-red-600"
+                              )}>
+                                {stockCoverage}% ready
+                              </span>
+                            </div>
+                            <div className="h-2 bg-muted rounded-full overflow-hidden">
+                              <div 
+                                className={cn(
+                                  "h-full transition-all duration-500",
+                                  stockCoverage === 100 ? "bg-green-500" : stockCoverage >= 50 ? "bg-amber-500" : "bg-red-500"
+                                )}
+                                style={{ width: `${stockCoverage}%` }}
+                              />
+                            </div>
+                            <div className="flex justify-between text-xs text-muted-foreground">
+                              <span>{totals.componentsInStock} of {totals.totalComponents} in stock</span>
+                              {totals.totalShortfall > 0 && (
+                                <span className="text-red-600 font-medium">{totals.totalShortfall} short</span>
                               )}
                             </div>
                           </div>
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-                            <div className="flex items-center gap-3 rounded-md border border-muted/40 p-2">
-                              <Switch
-                                id="toggle-fg-coverage"
-                                checked={applyFgCoverage}
-                                onCheckedChange={setApplyFgCoverage}
-                              />
-                              <div className="space-y-1">
-                                <Label htmlFor="toggle-fg-coverage" className="text-sm font-medium leading-tight">
+                          
+                          {/* Purchasing Status */}
+                          <div className="space-y-2">
+                            <h3 className="font-medium text-sm">Purchasing Status</h3>
+                            <div className="space-y-1.5 text-sm">
+                              {totals.componentsOnOrder > 0 && (
+                                <div className="flex items-center gap-2">
+                                  <div className="w-2 h-2 rounded-full bg-blue-500" />
+                                  <span>{totals.componentsOnOrder} components on order</span>
+                                </div>
+                              )}
+                              {totals.componentsInDraftPO > 0 && (
+                                <div className="flex items-center gap-2">
+                                  <div className="w-2 h-2 rounded-full bg-amber-500" />
+                                  <span>{totals.componentsInDraftPO} in draft POs</span>
+                                </div>
+                              )}
+                              {totals.totalShortfall > 0 && totals.componentsOnOrder === 0 && totals.componentsInDraftPO === 0 && (
+                                <div className="flex items-center gap-2 text-red-600">
+                                  <AlertCircle className="w-4 h-4" />
+                                  <span>No orders placed yet</span>
+                                </div>
+                              )}
+                              {totals.totalShortfall === 0 && (
+                                <div className="flex items-center gap-2 text-green-600">
+                                  <CheckCircle className="w-4 h-4" />
+                                  <span>All components available</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          
+                          {/* Settings */}
+                          <div className="space-y-2">
+                            <h3 className="font-medium text-sm">Display Options</h3>
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <Label htmlFor="toggle-fg-coverage-inline" className="text-sm cursor-pointer">
                                   Apply FG coverage
                                 </Label>
-                                <p className="text-xs text-muted-foreground">
-                                  Scale component requirements using reserved finished goods.
-                                </p>
+                                <Switch
+                                  id="toggle-fg-coverage-inline"
+                                  checked={applyFgCoverage}
+                                  onCheckedChange={setApplyFgCoverage}
+                                />
                               </div>
-                            </div>
-                            <div className="flex items-center gap-3 rounded-md border border-muted/40 p-2">
-                              <Switch
-                                id="toggle-global-context"
-                                checked={showGlobalContext}
-                                onCheckedChange={setShowGlobalContext}
-                              />
-                              <div className="space-y-1">
-                                <Label htmlFor="toggle-global-context" className="text-sm font-medium leading-tight">
+                              <div className="flex items-center justify-between">
+                                <Label htmlFor="toggle-global-context-inline" className="text-sm cursor-pointer">
                                   Show global context
                                 </Label>
-                                <p className="text-xs text-muted-foreground">
-                                  Display totals across all open orders.
-                                </p>
+                                <Switch
+                                  id="toggle-global-context-inline"
+                                  checked={showGlobalContext}
+                                  onCheckedChange={setShowGlobalContext}
+                                />
                               </div>
                             </div>
                           </div>
                         </div>
+                        
+                      </CardContent>
+                    </Card>
+                    
+                    {/* Product Details Card */}
+                    <Card className="shadow-sm border border-muted/40 overflow-hidden">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-base">Product Components</CardTitle>
                         <CardDescription>
-                          {componentRequirements.length} products with {totals.totalComponents || 0} component requirements
-                          {totals.multiOrderComponents > 0 && (
+                          {componentRequirements.length} products with {totals.totalComponents || 0} component types
+                          {showGlobalContext && totals.multiOrderComponents > 0 && (
                             <span className="ml-1">
-                              (<span className="text-blue-600 font-medium">{totals.multiOrderComponents}</span> components needed across multiple orders)
+                              • <span className="text-blue-600">{totals.multiOrderComponents}</span> shared across orders
                             </span>
                           )}
                         </CardDescription>
-                        {showGlobalContext && totals.multiOrderComponents > 0 && (
-                          <div className="mt-2 text-xs p-2 bg-blue-50 text-blue-700 rounded-md flex items-start">
-                            <Info className="h-4 w-4 mr-2 mt-0.5 flex-shrink-0" />
-                            <span>
-                              Some components are required by multiple orders. "Total Across Orders" shows the total quantity
-                              needed for all open orders, and "Global Shortfall" indicates potential shortages across all orders.
-                            </span>
-                          </div>
-                        )}
                       </CardHeader>
                       <CardContent>
                         {/* Display component requirements here */}
@@ -3342,7 +3781,8 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                               return metrics.real > 0.0001;
                             });
                             const productId = productReq.product_id || `product-${index}`;
-                            const isExpanded = !!expandedRows[productId];
+                            // Default to expanded (true) unless explicitly collapsed
+                            const isExpanded = expandedRows[productId] !== false;
                             const coverageSummary = coverageByProduct.get(productReq.product_id);
 
                             return (
@@ -3398,6 +3838,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                                             )}
                                             <TableHead className="text-right">In Stock</TableHead>
                                             <TableHead className="text-right">On Order</TableHead>
+                                            <TableHead className="text-right">Draft PO</TableHead>
                                             <TableHead className="text-right">Apparent Shortfall</TableHead>
                                             <TableHead className="text-right">Real Shortfall</TableHead>
                                             {showGlobalContext && (
@@ -3462,6 +3903,35 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                                                 )}
                                                 <TableCell className="text-right font-medium">{formatQuantity(metrics.inStock)}</TableCell>
                                                 <TableCell className="text-right font-medium">{formatQuantity(metrics.onOrder)}</TableCell>
+                                                <TableCell className="text-right">
+                                                  {(component.draft_po_quantity ?? 0) > 0 ? (
+                                                    <Popover>
+                                                      <PopoverTrigger>
+                                                        <div className="cursor-help inline-flex items-center">
+                                                          <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-100 text-amber-800 border border-amber-200">
+                                                            {formatQuantity(component.draft_po_quantity)}
+                                                          </span>
+                                                        </div>
+                                                      </PopoverTrigger>
+                                                      <PopoverContent className="p-0">
+                                                        <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
+                                                          <p className="text-sm font-medium mb-2">Draft Purchase Orders:</p>
+                                                          <div className="space-y-1 text-sm">
+                                                            {(component.draft_po_breakdown || [])?.map((draft: any, idx: number) => (
+                                                              <div key={draft.supplier_order_id || idx} className="flex justify-between">
+                                                                <span>{draft.supplier_name}:</span>
+                                                                <span>{draft.quantity} units</span>
+                                                              </div>
+                                                            ))}
+                                                          </div>
+                                                          <p className="text-xs text-muted-foreground mt-2">Awaiting confirmation/send to supplier</p>
+                                                        </div>
+                                                      </PopoverContent>
+                                                    </Popover>
+                                                  ) : (
+                                                    <span className="text-muted-foreground">—</span>
+                                                  )}
+                                                </TableCell>
                                                 <TableCell className="text-right">
                                                   {metrics.apparent > 0 && metrics.real === 0 ? (
                                                     <Popover>
@@ -3543,7 +4013,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
         </TabsContent>
         
         <TabsContent value="documents" className="space-y-4">
-          {/* Content for documents tab */}
+          <OrderDocumentsTab orderId={orderId} />
         </TabsContent>
       </Tabs>
 

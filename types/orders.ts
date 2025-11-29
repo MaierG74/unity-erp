@@ -35,6 +35,7 @@ export interface OrderAttachment {
   order_id: number;
   file_url: string;
   file_name: string;
+  mime_type: string;
   uploaded_at: string;
 }
 

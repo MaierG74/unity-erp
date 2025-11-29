@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, Fragment } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import type { SupplierWithDetails, SupplierPurchaseOrder } from '@/types/suppliers';
@@ -369,8 +369,8 @@ export function SupplierOrders({ supplier }: SupplierOrdersProps) {
                   const totalReceived = order.supplier_orders.reduce((sum, line) => sum + line.total_received, 0);
                   
                   return (
-                    <>
-                      <tr key={order.purchase_order_id} className="border-b hover:bg-muted/50">
+                    <Fragment key={order.purchase_order_id}>
+                      <tr className="border-b hover:bg-muted/50">
                         <td className="p-4">
                           <button
                             onClick={() => toggleRow(order.purchase_order_id)}
@@ -469,7 +469,7 @@ export function SupplierOrders({ supplier }: SupplierOrdersProps) {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </Fragment>
                   );
                 })
               )}
@@ -497,4 +497,3 @@ export function SupplierOrders({ supplier }: SupplierOrdersProps) {
     </div>
   );
 }
-

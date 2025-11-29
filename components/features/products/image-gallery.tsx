@@ -49,7 +49,7 @@ export function ImageGallery({
 
   const handleImageUpload = (url: string) => {
     const tempImage: ProductImage = {
-      id: `temp-${Date.now()}`,
+      id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       product_id: productId,
       image_url: url,
       is_primary: false,
@@ -159,9 +159,8 @@ export function ImageGallery({
         {localImages.map((image) => (
           <div
             key={image.id}
-            className={`group relative aspect-square cursor-pointer overflow-hidden rounded-md bg-card dark:bg-white/5 ${
-              selectedImage?.id === image.id ? "ring-2 ring-primary" : ""
-            }`}
+            className={`group relative aspect-square cursor-pointer overflow-hidden rounded-md bg-card dark:bg-white/5 ${selectedImage?.id === image.id ? "ring-2 ring-primary" : ""
+              }`}
             onClick={() => setSelectedImage(image)}
           >
             <Image

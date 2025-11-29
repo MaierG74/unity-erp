@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { getRouteClient } from '@/lib/supabase-route';
 import { TODO_PRIORITIES, TODO_STATUSES, fetchTodo, fetchTodoActivities, fetchTodoComments, fetchTodoAttachments, type TodoItem } from '@/lib/db/todos';
 
+export const dynamic = 'force-dynamic';
+
 const paramsSchema = z.object({
   todoId: z.string().uuid(),
 });

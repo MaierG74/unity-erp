@@ -13,12 +13,15 @@ import { Table, TableHeader, TableBody, TableCell, TableHead, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Textarea } from '@/components/ui/textarea';
-import { Loader2, Warehouse, AlertCircle, CheckCircle, Printer, RotateCcw, Info } from 'lucide-react';
+import { Loader2, Warehouse, AlertCircle, CheckCircle, Printer, RotateCcw, Info, Plus, X, Search, User, Users } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import type { Order } from '@/types/orders';
 import type { ProductRequirement } from '@/types/components';
 import { StockIssuancePDFDownload, StockIssuancePDFDocument } from './StockIssuancePDF';
+import { StockPickingListDownload } from './StockPickingListPDF';
 import { pdf } from '@react-pdf/renderer';
 import { ReverseIssuanceDialog } from './ReverseIssuanceDialog';
 
@@ -49,6 +52,11 @@ interface StockIssuance {
   issuance_date: string;
   notes: string | null;
   created_by: string | null;
+  staff_id: number | null;
+  staff: {
+    first_name: string;
+    last_name: string;
+  } | null;
 }
 
 function formatQuantity(value: number | null | undefined): string {
@@ -71,6 +79,14 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
   const [companyInfo, setCompanyInfo] = useState<any | null>(null);
   const [reversalDialogOpen, setReversalDialogOpen] = useState(false);
   const [selectedIssuanceForReversal, setSelectedIssuanceForReversal] = useState<StockIssuance | null>(null);
+  
+  // Manual component addition state
+  const [manualComponents, setManualComponents] = useState<ComponentIssue[]>([]);
+  const [componentSearchOpen, setComponentSearchOpen] = useState(false);
+  const [componentSearchTerm, setComponentSearchTerm] = useState('');
+  
+  // Staff assignment state
+  const [selectedStaffId, setSelectedStaffId] = useState<number | null>(null);
 
   // Fetch company info for PDF
   useEffect(() => {
@@ -104,6 +120,21 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     loadCompanyInfo();
   }, []);
 
+  // Fetch active staff members
+  const { data: staffMembers = [] } = useQuery({
+    queryKey: ['staff', 'active'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('staff')
+        .select('staff_id, first_name, last_name, job_description')
+        .eq('is_active', true)
+        .order('first_name');
+
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
   // Fetch inventory data for components
   const { data: inventoryData = [] } = useQuery({
     queryKey: ['inventory', 'components'],
@@ -136,6 +167,61 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     return map;
   }, [inventoryData]);
 
+  // Filter components for search
+  const filteredSearchComponents = useMemo(() => {
+    if (!componentSearchTerm.trim()) return [];
+    const term = componentSearchTerm.toLowerCase();
+    return inventoryData
+      .filter((item: any) => {
+        // Handle both array and object shapes from Supabase
+        const comp = Array.isArray(item.component) ? item.component[0] : item.component;
+        const code = comp?.internal_code?.toLowerCase() || '';
+        const desc = comp?.description?.toLowerCase() || '';
+        return code.includes(term) || desc.includes(term);
+      })
+      .map((item: any) => ({
+        ...item,
+        // Normalize component to always be an object
+        component: Array.isArray(item.component) ? item.component[0] : item.component
+      }))
+      .slice(0, 10); // Limit to 10 results
+  }, [inventoryData, componentSearchTerm]);
+
+  // Add a manual component
+  const addManualComponent = useCallback((item: any) => {
+    const componentId = item.component_id;
+    const available = Number(item.quantity_on_hand || 0);
+    
+    // Check if already in manual list or BOM list
+    if (manualComponents.some(c => c.component_id === componentId)) {
+      toast.error('Component already added');
+      return;
+    }
+    
+    setManualComponents(prev => [...prev, {
+      component_id: componentId,
+      internal_code: item.component?.internal_code || 'Unknown',
+      description: item.component?.description || null,
+      required_quantity: 0, // Manual components have no "required" quantity
+      available_quantity: available,
+      issue_quantity: 1, // Default to 1
+      has_warning: available < 1,
+    }]);
+    
+    setComponentSearchTerm('');
+    setComponentSearchOpen(false);
+  }, [manualComponents]);
+
+  // Remove a manual component
+  const removeManualComponent = useCallback((componentId: number) => {
+    setManualComponents(prev => prev.filter(c => c.component_id !== componentId));
+    setIssueQuantities(prev => {
+      const next = { ...prev };
+      delete next[componentId];
+      return next;
+    });
+  }, []);
+
   // Aggregate BOM requirements for selected order details
   const aggregatedComponents = useMemo(() => {
     if (selectedOrderDetails.size === 0) return [];
@@ -151,13 +237,12 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
       const productReq = componentRequirements.find(pr => pr.product_id === productId);
       if (!productReq) return;
 
-      const orderQuantity = Number(orderDetail.quantity || 0);
-
       // Use the component requirements which already have BOM data
+      // Note: comp.quantity_required is already multiplied by order quantity in the parent
       productReq.components?.forEach((comp: any) => {
         const componentId = comp.component_id;
-        const bomQuantity = Number(comp.quantity_required || 0);
-        const totalRequired = bomQuantity * orderQuantity;
+        // quantity_required already includes order quantity multiplication
+        const totalRequired = Number(comp.quantity_required || 0);
 
         if (componentMap.has(componentId)) {
           const existing = componentMap.get(componentId)!;
@@ -181,6 +266,22 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
 
     return Array.from(componentMap.values());
   }, [selectedOrderDetails, componentRequirements, order?.details, inventoryMap]);
+
+  // Combined components (BOM + manual)
+  const allComponentsToIssue = useMemo(() => {
+    // Start with BOM components
+    const combined = [...aggregatedComponents];
+    
+    // Add manual components that aren't already in the BOM list
+    manualComponents.forEach(manual => {
+      const existingIndex = combined.findIndex(c => c.component_id === manual.component_id);
+      if (existingIndex === -1) {
+        combined.push(manual);
+      }
+    });
+    
+    return combined;
+  }, [aggregatedComponents, manualComponents]);
 
   // Toggle order detail selection
   const toggleOrderDetail = useCallback((orderDetailId: number) => {
@@ -216,9 +317,14 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
           issuance_date,
           notes,
           created_by,
+          staff_id,
           component:components(
             internal_code,
             description
+          ),
+          staff:staff(
+            first_name,
+            last_name
           )
         `)
         .eq('order_id', orderId)
@@ -228,11 +334,13 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
       return (data || []).map((item: any) => ({
         issuance_id: item.issuance_id,
         component_id: item.component_id,
-        component: item.component,
+        component: Array.isArray(item.component) ? item.component[0] : item.component,
         quantity_issued: item.quantity_issued,
         issuance_date: item.issuance_date,
         notes: item.notes,
         created_by: item.created_by,
+        staff_id: item.staff_id,
+        staff: Array.isArray(item.staff) ? item.staff[0] : item.staff,
       }));
     },
     staleTime: 0,
@@ -257,7 +365,6 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     order?.details?.forEach((detail) => {
       const orderDetailId = detail.order_detail_id;
       const productId = detail.product_id;
-      const orderQuantity = Number(detail.quantity || 0);
       
       // Find the product's BOM requirements
       const productReq = componentRequirements.find(pr => pr.product_id === productId);
@@ -269,13 +376,11 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
       // Check if all components for this product have been issued in sufficient quantities
       const allComponentsIssued = productReq.components.every((comp: any) => {
         const componentId = comp.component_id;
-        const bomQuantity = Number(comp.quantity_required || 0);
-        const totalRequired = bomQuantity * orderQuantity;
+        // quantity_required already includes order quantity multiplication
+        const totalRequired = Number(comp.quantity_required || 0);
         const totalIssued = issuedQuantitiesByComponent.get(componentId) || 0;
         
         // Component is "issued" if total issued >= required for this product
-        // Note: This checks order-level totals, so if multiple products share components,
-        // we verify that enough has been issued to cover this product's requirements
         return totalIssued >= totalRequired;
       });
 
@@ -300,6 +405,8 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
           p_quantity: issue.quantity,
           p_purchase_order_id: purchaseOrderId,
           p_notes: notes || null,
+          p_issuance_date: new Date().toISOString(),
+          p_staff_id: selectedStaffId,
         });
 
         console.log('[IssueStock] RPC response:', { data, error });
@@ -324,6 +431,8 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
       setSelectedOrderDetails(new Set());
       setIssueQuantities({});
       setNotes('');
+      setManualComponents([]);
+      setSelectedStaffId(null);
       queryClient.invalidateQueries({ queryKey: ['stockIssuances', orderId] });
       queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
       queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
@@ -338,12 +447,12 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
   // Handle issue stock
   const handleIssueStock = useCallback(() => {
     console.log('[IssueStock] handleIssueStock called', {
-      aggregatedComponents: aggregatedComponents.length,
+      allComponentsToIssue: allComponentsToIssue.length,
       issueQuantities,
       selectedOrderDetails: Array.from(selectedOrderDetails),
     });
 
-    const issuesToProcess = aggregatedComponents
+    const issuesToProcess = allComponentsToIssue
       .filter(comp => {
         const issueQty = issueQuantities[comp.component_id] ?? comp.issue_quantity;
         return issueQty > 0;
@@ -362,7 +471,7 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
 
     console.log('[IssueStock] Calling mutation...');
     issueStockMutation.mutate(issuesToProcess);
-  }, [aggregatedComponents, issueQuantities, selectedOrderDetails, issueStockMutation]);
+  }, [allComponentsToIssue, issueQuantities, selectedOrderDetails, issueStockMutation]);
 
   // Handle reversal dialog open
   const handleOpenReversalDialog = useCallback((issuance: StockIssuance) => {
@@ -439,73 +548,213 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
             </div>
           </div>
 
-          {/* Aggregated Components */}
-          {aggregatedComponents.length > 0 && (
-            <div>
-              <Label className="text-base font-medium mb-3 block">Components to Issue</Label>
-              <Alert className="mb-4">
+          {/* Components to Issue (BOM + Manual) */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <Label className="text-base font-medium">Components to Issue</Label>
+              <Popover open={componentSearchOpen} onOpenChange={setComponentSearchOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add Component
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80 p-0" align="end">
+                  <div className="p-3 border-b">
+                    <div className="flex items-center gap-2">
+                      <Search className="h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search components..."
+                        value={componentSearchTerm}
+                        onChange={(e) => setComponentSearchTerm(e.target.value)}
+                        className="h-8"
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+                  <div className="max-h-[300px] overflow-y-auto">
+                    {componentSearchTerm.trim() === '' ? (
+                      <p className="p-3 text-sm text-muted-foreground text-center">
+                        Type to search for components...
+                      </p>
+                    ) : filteredSearchComponents.length === 0 ? (
+                      <p className="p-3 text-sm text-muted-foreground text-center">
+                        No components found
+                      </p>
+                    ) : (
+                      filteredSearchComponents.map((item: any) => (
+                        <div
+                          key={item.component_id}
+                          className="flex items-center justify-between p-3 hover:bg-muted cursor-pointer border-b last:border-0"
+                          onClick={() => addManualComponent(item)}
+                        >
+                          <div>
+                            <div className="font-medium">{item.component?.internal_code}</div>
+                            <div className="text-xs text-muted-foreground truncate max-w-[200px]">
+                              {item.component?.description || 'No description'}
+                            </div>
+                          </div>
+                          <Badge variant="outline" className="ml-2">
+                            {formatQuantity(item.quantity_on_hand)} avail
+                          </Badge>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
+            
+            {allComponentsToIssue.length === 0 ? (
+              <Alert>
                 <Info className="h-4 w-4" />
                 <AlertDescription>
-                  Quantities are pre-populated based on BOM requirements. You can adjust them as needed.
-                  Components used by multiple products are automatically aggregated.
+                  Select products above to see BOM components, or click "Add Component" to issue items not on the BOM.
                 </AlertDescription>
               </Alert>
-              <div className="border rounded-lg overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Component</TableHead>
-                      <TableHead className="text-right">Required</TableHead>
-                      <TableHead className="text-right">Available</TableHead>
-                      <TableHead className="text-right">Issue Qty</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {aggregatedComponents.map((comp) => {
-                      const issueQty = issueQuantities[comp.component_id] ?? comp.issue_quantity;
-                      return (
-                        <TableRow key={comp.component_id} className={comp.has_warning ? 'bg-amber-50' : ''}>
-                          <TableCell>
-                            <div className="font-medium">{comp.internal_code}</div>
-                            {comp.description && (
-                              <div className="text-sm text-muted-foreground">{comp.description}</div>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right">{formatQuantity(comp.required_quantity)}</TableCell>
-                          <TableCell className="text-right">
-                            <span className={cn(
-                              comp.available_quantity < comp.required_quantity ? 'text-amber-600 font-medium' : ''
-                            )}>
-                              {formatQuantity(comp.available_quantity)}
-                            </span>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={issueQty}
-                              onChange={(e) => updateIssueQuantity(comp.component_id, parseFloat(e.target.value) || 0)}
-                              className="w-24 ml-auto"
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                            {comp.has_warning && (
-                              <div className="text-xs text-amber-600 mt-1">
-                                Insufficient stock
+            ) : (
+              <>
+                {aggregatedComponents.length > 0 && (
+                  <Alert className="mb-4">
+                    <Info className="h-4 w-4" />
+                    <AlertDescription>
+                      BOM quantities are pre-populated. Adjust as needed or add extra components.
+                    </AlertDescription>
+                  </Alert>
+                )}
+                <div className="border rounded-lg overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Component</TableHead>
+                        <TableHead className="text-right">Required</TableHead>
+                        <TableHead className="text-right">Available</TableHead>
+                        <TableHead className="text-right">Issue Qty</TableHead>
+                        <TableHead className="w-[50px]"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {allComponentsToIssue.map((comp) => {
+                        const issueQty = issueQuantities[comp.component_id] ?? comp.issue_quantity;
+                        const isManual = manualComponents.some(m => m.component_id === comp.component_id);
+                        return (
+                          <TableRow key={comp.component_id} className={cn(
+                            comp.has_warning && 'bg-amber-50',
+                            isManual && 'bg-blue-50/50'
+                          )}>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <div className="font-medium">{comp.internal_code}</div>
+                                {isManual && (
+                                  <Badge variant="outline" className="text-xs bg-blue-100 text-blue-700 border-blue-200">
+                                    Manual
+                                  </Badge>
+                                )}
                               </div>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-          )}
+                              {comp.description && (
+                                <div className="text-sm text-muted-foreground">{comp.description}</div>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {isManual ? (
+                                <span className="text-muted-foreground">—</span>
+                              ) : (
+                                formatQuantity(comp.required_quantity)
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <span className={cn(
+                                comp.available_quantity < (issueQty || 0) ? 'text-amber-600 font-medium' : ''
+                              )}>
+                                {formatQuantity(comp.available_quantity)}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Input
+                                type="text"
+                                inputMode="decimal"
+                                value={issueQty === 0 ? '' : issueQty}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (val === '' || val === '.' || /^\d*\.?\d*$/.test(val)) {
+                                    updateIssueQuantity(comp.component_id, val === '' || val === '.' ? 0 : parseFloat(val));
+                                  }
+                                }}
+                                onBlur={(e) => {
+                                  // Ensure we have a valid number on blur
+                                  const val = parseFloat(e.target.value) || 0;
+                                  updateIssueQuantity(comp.component_id, val);
+                                }}
+                                className="w-24 ml-auto text-right"
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                              {comp.has_warning && (
+                                <div className="text-xs text-amber-600 mt-1">
+                                  Insufficient stock
+                                </div>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {isManual && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                                  onClick={() => removeManualComponent(comp.component_id)}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
+            )}
+          </div>
 
-          {/* Notes and Purchase Order */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Staff Assignment and Notes */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <Label htmlFor="staff-select">Issue To (Optional)</Label>
+              <Select
+                value={selectedStaffId?.toString() || 'none'}
+                onValueChange={(value) => setSelectedStaffId(value && value !== 'none' ? parseInt(value) : null)}
+              >
+                <SelectTrigger id="staff-select">
+                  <SelectValue placeholder="Select staff member...">
+                    {selectedStaffId ? (
+                      <span className="flex items-center gap-2">
+                        <User className="h-4 w-4" />
+                        {staffMembers.find(s => s.staff_id === selectedStaffId)?.first_name}{' '}
+                        {staffMembers.find(s => s.staff_id === selectedStaffId)?.last_name}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">Select staff member...</span>
+                    )}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">
+                    <span className="text-muted-foreground">No staff assigned</span>
+                  </SelectItem>
+                  {staffMembers.map((staff: any) => (
+                    <SelectItem key={staff.staff_id} value={staff.staff_id.toString()}>
+                      <div className="flex items-center gap-2">
+                        <User className="h-4 w-4" />
+                        <span>{staff.first_name} {staff.last_name}</span>
+                        {staff.job_description && (
+                          <span className="text-xs text-muted-foreground">({staff.job_description})</span>
+                        )}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div>
               <Label htmlFor="purchase-order-id">Purchase Order ID (Optional)</Label>
               <Input
@@ -528,12 +777,33 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
             </div>
           </div>
 
-          {/* Issue Button */}
+          {/* Action Buttons */}
           <div className="flex justify-end gap-2">
+            {/* Picking List PDF Download */}
+            {order && (
+              <StockPickingListDownload
+                order={order}
+                components={allComponentsToIssue.map(comp => ({
+                  component_id: comp.component_id,
+                  internal_code: comp.internal_code,
+                  description: comp.description,
+                  quantity: issueQuantities[comp.component_id] ?? comp.issue_quantity,
+                }))}
+                issuedTo={selectedStaffId ? 
+                  `${staffMembers.find(s => s.staff_id === selectedStaffId)?.first_name || ''} ${staffMembers.find(s => s.staff_id === selectedStaffId)?.last_name || ''}`.trim() 
+                  : null
+                }
+                notes={notes || null}
+                companyInfo={companyInfo}
+                disabled={issueStockMutation.isPending}
+              />
+            )}
+            
+            {/* Issue Stock Button */}
             <Button
               type="button"
               onClick={handleIssueStock}
-              disabled={issueStockMutation.isPending || aggregatedComponents.length === 0}
+              disabled={issueStockMutation.isPending || allComponentsToIssue.length === 0}
             >
               {issueStockMutation.isPending ? (
                 <>
@@ -584,6 +854,7 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                     <TableHead>Date</TableHead>
                     <TableHead>Component</TableHead>
                     <TableHead className="text-right">Quantity</TableHead>
+                    <TableHead>Issued To</TableHead>
                     <TableHead>Notes</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -601,6 +872,16 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                         )}
                       </TableCell>
                       <TableCell className="text-right">{formatQuantity(issuance.quantity_issued)}</TableCell>
+                      <TableCell>
+                        {issuance.staff ? (
+                          <div className="flex items-center gap-1.5">
+                            <User className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span>{issuance.staff.first_name} {issuance.staff.last_name}</span>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
                       <TableCell>{issuance.notes || '-'}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-2">

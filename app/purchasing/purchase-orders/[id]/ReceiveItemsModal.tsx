@@ -170,7 +170,17 @@ export function ReceiveItemsModal({
     setIsSubmitting(true);
 
     try {
-      const receiptTimestamp = data.receipt_date || new Date().toISOString();
+      const now = new Date();
+      const todayString = format(now, 'yyyy-MM-dd');
+      let receiptTimestamp: string;
+
+      if (data.receipt_date === todayString) {
+        // If the date is today, use the current full timestamp to preserve time
+        receiptTimestamp = now.toISOString();
+      } else {
+        // If it's a different date, use that date (defaults to midnight UTC)
+        receiptTimestamp = data.receipt_date ? new Date(data.receipt_date).toISOString() : now.toISOString();
+      }
       let nextSuccessState: {
         grn?: string;
         returnId?: number;

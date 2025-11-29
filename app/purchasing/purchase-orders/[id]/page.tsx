@@ -22,9 +22,12 @@ import { BulkReceiveModal } from './BulkReceiveModal';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertCircle, ArrowLeft, Loader2, CheckCircle2, Mail } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Loader2, CheckCircle2, Mail, Pencil, Save, X, Trash2, ChevronDown } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import styles from './page.module.css';
 // import { sendPurchaseOrderEmail } from '@/lib/email'; // not used here; email is sent via API route
 
@@ -103,6 +106,17 @@ interface Return {
   notes: string | null;
 }
 
+interface CustomerOrderLink {
+  id: number;
+  order_id: number;
+  quantity_for_order: number;
+  quantity_for_stock: number;
+  customer_order: {
+    order_id: number;
+    order_number: string;
+  } | null;
+}
+
 interface SupplierOrder {
   order_id: number;
   order_quantity: number;
@@ -123,6 +137,7 @@ interface SupplierOrder {
   };
   receipts?: Receipt[];
   returns?: Return[];
+  customer_order_links?: CustomerOrderLink[];
 }
 
 type SupplierOrderWithParent = SupplierOrder & {
@@ -192,6 +207,16 @@ async function fetchPurchaseOrderById(id: string) {
           return_type,
           receipt_id,
           notes
+        ),
+        customer_order_links:supplier_order_customer_orders(
+          id,
+          order_id,
+          quantity_for_order,
+          quantity_for_stock,
+          customer_order:orders(
+            order_id,
+            order_number
+          )
         )
       )
     `)
@@ -594,6 +619,13 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const [receiveModalOpen, setReceiveModalOpen] = useState(false);
   const [bulkReceiveModalOpen, setBulkReceiveModalOpen] = useState(false);
   const [selectedOrderForReceive, setSelectedOrderForReceive] = useState<SupplierOrderWithParent | null>(null);
+  
+  // Edit mode state
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editedNotes, setEditedNotes] = useState('');
+  const [editedQuantities, setEditedQuantities] = useState<Record<number, number>>({});
+  const [deleteConfirmOrderId, setDeleteConfirmOrderId] = useState<number | null>(null);
+  
   const handleReceiveModalChange = (open: boolean) => {
     setReceiveModalOpen(open);
     if (!open) {
@@ -962,6 +994,141 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     },
   });
 
+  // Edit purchase order mutation
+  const editPurchaseOrderMutation = useMutation({
+    mutationFn: async (data: { notes?: string; lineUpdates?: { orderId: number; quantity: number }[] }) => {
+      // Update notes if changed
+      if (data.notes !== undefined) {
+        const { error: notesError } = await supabase
+          .from('purchase_orders')
+          .update({ notes: data.notes })
+          .eq('purchase_order_id', id);
+        if (notesError) throw new Error(`Failed to update notes: ${notesError.message}`);
+      }
+
+      // Update line quantities if changed
+      if (data.lineUpdates && data.lineUpdates.length > 0) {
+        for (const update of data.lineUpdates) {
+          const { error: lineError } = await supabase
+            .from('supplier_orders')
+            .update({ order_quantity: update.quantity })
+            .eq('order_id', update.orderId);
+          if (lineError) throw new Error(`Failed to update line item: ${lineError.message}`);
+        }
+      }
+
+      return true;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrder', id] });
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
+      setIsEditMode(false);
+      setEditedQuantities({});
+      toast({
+        title: 'Purchase order updated',
+        description: 'Changes have been saved successfully.',
+      });
+    },
+    onError: (error: Error) => {
+      setError(`Failed to update purchase order: ${error.message}`);
+      toast({
+        title: 'Failed to update',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Delete line item mutation
+  const deleteLineItemMutation = useMutation({
+    mutationFn: async (orderId: number) => {
+      // First delete any related records in supplier_order_customer_orders
+      const { error: junctionError } = await supabase
+        .from('supplier_order_customer_orders')
+        .delete()
+        .eq('supplier_order_id', orderId);
+      
+      if (junctionError) {
+        console.warn('Error deleting junction records:', junctionError);
+        // Continue anyway as the junction table might not have records
+      }
+
+      // Then delete the supplier order
+      const { error } = await supabase
+        .from('supplier_orders')
+        .delete()
+        .eq('order_id', orderId);
+      
+      if (error) throw new Error(`Failed to delete line item: ${error.message}`);
+      return orderId;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrder', id] });
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
+      setDeleteConfirmOrderId(null);
+      toast({
+        title: 'Line item deleted',
+        description: 'The line item has been removed from the purchase order.',
+      });
+    },
+    onError: (error: Error) => {
+      setError(`Failed to delete line item: ${error.message}`);
+      toast({
+        title: 'Failed to delete',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Enter edit mode
+  const handleEnterEditMode = () => {
+    setEditedNotes(purchaseOrder?.notes || '');
+    const quantities: Record<number, number> = {};
+    purchaseOrder?.supplier_orders?.forEach(order => {
+      quantities[order.order_id] = order.order_quantity;
+    });
+    setEditedQuantities(quantities);
+    setIsEditMode(true);
+  };
+
+  // Cancel edit mode
+  const handleCancelEdit = () => {
+    setIsEditMode(false);
+    setEditedNotes('');
+    setEditedQuantities({});
+    setError(null);
+  };
+
+  // Save edits
+  const handleSaveEdits = () => {
+    const lineUpdates: { orderId: number; quantity: number }[] = [];
+    
+    // Check for quantity changes
+    purchaseOrder?.supplier_orders?.forEach(order => {
+      const newQty = editedQuantities[order.order_id];
+      if (newQty !== undefined && newQty !== order.order_quantity) {
+        if (newQty <= 0) {
+          setError('Quantity must be greater than 0. Use delete to remove items.');
+          return;
+        }
+        lineUpdates.push({ orderId: order.order_id, quantity: newQty });
+      }
+    });
+
+    const notesChanged = editedNotes !== (purchaseOrder?.notes || '');
+    
+    if (!notesChanged && lineUpdates.length === 0) {
+      setIsEditMode(false);
+      return;
+    }
+
+    editPurchaseOrderMutation.mutate({
+      notes: notesChanged ? editedNotes : undefined,
+      lineUpdates: lineUpdates.length > 0 ? lineUpdates : undefined,
+    });
+  };
+
   // Handle submit for approval
   const handleSubmit = () => {
     setError(null);
@@ -1182,7 +1349,16 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
 
               <div>
                 <p className="text-sm font-medium mb-1">Notes</p>
-                <p className="whitespace-pre-wrap">{purchaseOrder.notes || 'No notes'}</p>
+                {isEditMode ? (
+                  <Textarea
+                    value={editedNotes}
+                    onChange={(e) => setEditedNotes(e.target.value)}
+                    placeholder="Add notes..."
+                    className="min-h-[80px]"
+                  />
+                ) : (
+                  <p className="whitespace-pre-wrap">{purchaseOrder.notes || 'No notes'}</p>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -1216,6 +1392,43 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-xl font-bold">Order Items</CardTitle>
+            <div className="flex items-center gap-2">
+              {isDraft && !isEditMode && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleEnterEditMode}
+                >
+                  <Pencil className="h-4 w-4 mr-2" />
+                  Edit
+                </Button>
+              )}
+              {isEditMode && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCancelEdit}
+                    disabled={editPurchaseOrderMutation.isPending}
+                  >
+                    <X className="h-4 w-4 mr-2" />
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={handleSaveEdits}
+                    disabled={editPurchaseOrderMutation.isPending}
+                  >
+                    {editPurchaseOrderMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4 mr-2" />
+                    )}
+                    Save Changes
+                  </Button>
+                </>
+              )}
+            </div>
             {isApproved && (
               <div className="flex items-center gap-2">
                 <Button
@@ -1244,12 +1457,14 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                   <TableHead>Component</TableHead>
                   <TableHead>Description</TableHead>
                   <TableHead>Supplier</TableHead>
+                  <TableHead>For Order</TableHead>
                   <TableHead className="text-right">Unit Price</TableHead>
                   <TableHead className="text-right">Ordered</TableHead>
-                  <TableHead className="text-right">Received</TableHead>
-                  <TableHead className="text-right">Owing</TableHead>
+                  {!isEditMode && <TableHead className="text-right">Received</TableHead>}
+                  {!isEditMode && <TableHead className="text-right">Owing</TableHead>}
                   {isApproved && <TableHead className="text-right">Receive Now</TableHead>}
                   <TableHead className="text-right">Total</TableHead>
+                  {isEditMode && <TableHead className="text-right">Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1262,19 +1477,146 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                       const lineTotal = price * order.order_quantity;
                       const remainingToReceive = Math.max(0, order.order_quantity - (order.total_received || 0));
 
+                      const editedQty = editedQuantities[order.order_id] ?? order.order_quantity;
+                      const editedLineTotal = price * editedQty;
+
+                      // Build customer order display
+                      const customerOrderLinks = order.customer_order_links || [];
+                      const hasOrderLinks = customerOrderLinks.some(link => link.customer_order);
+                      const hasStockAllocation = customerOrderLinks.some(link => Number(link.quantity_for_stock) > 0);
+
                       return (
                         <TableRow key={order.order_id} className="odd:bg-muted/30">
                           <TableCell className="font-medium">{component?.internal_code || 'Unknown'}</TableCell>
                           <TableCell>{component?.description || 'No description'}</TableCell>
                           <TableCell>{supplier?.name || 'Unknown'}</TableCell>
-                          <TableCell className="text-right">R{price.toFixed(2)}</TableCell>
-                          <TableCell className="text-right">{order.order_quantity}</TableCell>
-                          <TableCell className="text-right">{order.total_received || 0}</TableCell>
-                          <TableCell className="text-right">
-                            <span className={remainingToReceive > 0 ? 'font-medium text-orange-600' : 'text-muted-foreground'}>
-                              {remainingToReceive}
-                            </span>
+                          <TableCell>
+                            {(() => {
+                              const orderLinks = customerOrderLinks.filter(link => link.customer_order);
+                              const stockOnly = customerOrderLinks.filter(link => !link.customer_order && Number(link.quantity_for_stock) > 0);
+                              const totalStock = customerOrderLinks.reduce((sum, link) => sum + Number(link.quantity_for_stock || 0), 0);
+                              
+                              if (orderLinks.length === 0 && stockOnly.length === 0) {
+                                return <span className="text-muted-foreground text-sm">—</span>;
+                              }
+                              
+                              // Single order - simple display
+                              if (orderLinks.length === 1 && totalStock === 0) {
+                                const link = orderLinks[0];
+                                return (
+                                  <Link
+                                    href={`/orders/${link.customer_order!.order_id}`}
+                                    target="_blank"
+                                    className="text-blue-600 hover:underline text-sm"
+                                  >
+                                    #{link.customer_order!.order_number || link.customer_order!.order_id}
+                                  </Link>
+                                );
+                              }
+                              
+                              // Single order with stock allocation
+                              if (orderLinks.length === 1 && totalStock > 0) {
+                                const link = orderLinks[0];
+                                return (
+                                  <div className="flex items-center gap-1">
+                                    <Link
+                                      href={`/orders/${link.customer_order!.order_id}`}
+                                      target="_blank"
+                                      className="text-blue-600 hover:underline text-sm"
+                                    >
+                                      #{link.customer_order!.order_number || link.customer_order!.order_id}
+                                    </Link>
+                                    <span className="text-xs text-muted-foreground">
+                                      ({link.quantity_for_order})
+                                    </span>
+                                    <Badge variant="outline" className="text-xs">
+                                      +{totalStock} stock
+                                    </Badge>
+                                  </div>
+                                );
+                              }
+                              
+                              // Stock only
+                              if (orderLinks.length === 0 && totalStock > 0) {
+                                return (
+                                  <Badge variant="outline" className="text-xs">
+                                    Stock: {totalStock}
+                                  </Badge>
+                                );
+                              }
+                              
+                              // Multiple orders - use popover
+                              return (
+                                <Popover>
+                                  <PopoverTrigger asChild>
+                                    <Button variant="ghost" size="sm" className="h-auto py-1 px-2 text-sm">
+                                      <span className="text-blue-600">
+                                        {orderLinks.length} orders
+                                      </span>
+                                      {totalStock > 0 && (
+                                        <Badge variant="outline" className="ml-1 text-xs">
+                                          +{totalStock}
+                                        </Badge>
+                                      )}
+                                      <ChevronDown className="ml-1 h-3 w-3" />
+                                    </Button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-auto p-2" align="start">
+                                    <div className="space-y-1">
+                                      <p className="text-xs font-medium text-muted-foreground mb-2">
+                                        Allocated to:
+                                      </p>
+                                      {orderLinks.map((link) => (
+                                        <div key={link.id} className="flex items-center justify-between gap-4 text-sm">
+                                          <Link
+                                            href={`/orders/${link.customer_order!.order_id}`}
+                                            target="_blank"
+                                            className="text-blue-600 hover:underline"
+                                          >
+                                            #{link.customer_order!.order_number || link.customer_order!.order_id}
+                                          </Link>
+                                          <span className="text-muted-foreground">
+                                            {link.quantity_for_order} units
+                                          </span>
+                                        </div>
+                                      ))}
+                                      {totalStock > 0 && (
+                                        <div className="flex items-center justify-between gap-4 text-sm border-t pt-1 mt-1">
+                                          <span className="text-muted-foreground">Stock</span>
+                                          <span className="text-muted-foreground">{totalStock} units</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </PopoverContent>
+                                </Popover>
+                              );
+                            })()}
                           </TableCell>
+                          <TableCell className="text-right">R{price.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">
+                            {isEditMode ? (
+                              <Input
+                                type="number"
+                                min="1"
+                                value={editedQty}
+                                onChange={(e) => setEditedQuantities(prev => ({
+                                  ...prev,
+                                  [order.order_id]: parseInt(e.target.value) || 1
+                                }))}
+                                className="w-20 text-right ml-auto"
+                              />
+                            ) : (
+                              order.order_quantity
+                            )}
+                          </TableCell>
+                          {!isEditMode && <TableCell className="text-right">{order.total_received || 0}</TableCell>}
+                          {!isEditMode && (
+                            <TableCell className="text-right">
+                              <span className={remainingToReceive > 0 ? 'font-medium text-orange-600' : 'text-muted-foreground'}>
+                                {remainingToReceive}
+                              </span>
+                            </TableCell>
+                          )}
                           {isApproved && (
                             <TableCell className="text-right">
                               <Button
@@ -1287,27 +1629,59 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                               </Button>
                             </TableCell>
                           )}
-                          <TableCell className="text-right font-medium">R{lineTotal.toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-medium">
+                            R{(isEditMode ? editedLineTotal : lineTotal).toFixed(2)}
+                          </TableCell>
+                          {isEditMode && (
+                            <TableCell className="text-right">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setDeleteConfirmOrderId(order.order_id)}
+                                disabled={deleteLineItemMutation.isPending || (purchaseOrder.supplier_orders?.length || 0) <= 1}
+                                title={(purchaseOrder.supplier_orders?.length || 0) <= 1 ? "Cannot delete the last item" : "Delete line item"}
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </TableCell>
+                          )}
                         </TableRow>
                       );
                     })}
                     <TableRow className="bg-muted/30">
-                      <TableCell colSpan={4} className="text-right text-sm font-medium text-muted-foreground">Totals</TableCell>
-                      <TableCell className="text-right text-sm font-medium">{totalItems}</TableCell>
-                      <TableCell className="text-right text-sm font-medium">{totalReceived}</TableCell>
+                      <TableCell colSpan={5} className="text-right text-sm font-medium text-muted-foreground">Totals</TableCell>
                       <TableCell className="text-right text-sm font-medium">
-                        <span className="font-medium text-orange-600">
-                          {Math.max(0, totalItems - totalReceived)}
-                        </span>
+                        {isEditMode 
+                          ? Object.values(editedQuantities).reduce((sum, qty) => sum + qty, 0)
+                          : totalItems
+                        }
                       </TableCell>
+                      {!isEditMode && <TableCell className="text-right text-sm font-medium">{totalReceived}</TableCell>}
+                      {!isEditMode && (
+                        <TableCell className="text-right text-sm font-medium">
+                          <span className="font-medium text-orange-600">
+                            {Math.max(0, totalItems - totalReceived)}
+                          </span>
+                        </TableCell>
+                      )}
                       {isApproved && <TableCell />}
-                      <TableCell className="text-right font-semibold">R{totalAmount.toFixed(2)}</TableCell>
+                      <TableCell className="text-right font-semibold">
+                        R{isEditMode 
+                          ? purchaseOrder.supplier_orders?.reduce((sum, order) => {
+                              const qty = editedQuantities[order.order_id] ?? order.order_quantity;
+                              const price = order.supplier_component?.price || 0;
+                              return sum + (price * qty);
+                            }, 0).toFixed(2)
+                          : totalAmount.toFixed(2)
+                        }
+                      </TableCell>
+                      {isEditMode && <TableCell />}
                     </TableRow>
                   </>
                 ) : (
                   <TableRow>
                     <TableCell
-                      colSpan={isApproved ? 9 : 8}
+                      colSpan={isApproved ? 10 : 9}
                       className="text-center py-6 text-muted-foreground"
                     >
                       No items in this purchase order
@@ -1628,7 +2002,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
         )}
         {/* Bottom action bar */}
         <div className="sticky bottom-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-t shadow-sm px-4 py-3 flex items-center justify-end gap-3">
-          {isDraft && (
+          {isDraft && !isEditMode && (
             <Button onClick={handleSubmit} disabled={submitMutation.isPending}>
               {submitMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Submit for Approval
@@ -1713,6 +2087,35 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           }}
         />
       )}
+
+      {/* Delete line item confirmation dialog */}
+      <Dialog open={deleteConfirmOrderId !== null} onOpenChange={(open) => !open && setDeleteConfirmOrderId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Line Item</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this line item? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteConfirmOrderId(null)}
+              disabled={deleteLineItemMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => deleteConfirmOrderId && deleteLineItemMutation.mutate(deleteConfirmOrderId)}
+              disabled={deleteLineItemMutation.isPending}
+            >
+              {deleteLineItemMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

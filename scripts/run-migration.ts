@@ -1,45 +1,46 @@
-/**
- * Migration Runner Script
- * Usage: tsx scripts/run-migration.ts migrations/20251005_quote_email_log.sql
- */
+import { Client } from 'pg';
+import fs from 'fs';
+import path from 'path';
+import dotenv from 'dotenv';
 
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+// Load env vars
+dotenv.config({ path: '.env.local' });
 
-async function runMigration(migrationPath: string) {
-  console.log(`Running migration: ${migrationPath}`);
+const connectionString = process.env.DATABASE_URL?.replace(':6543', ':5432');
 
-  try {
-    // Read the migration file
-    const fullPath = resolve(process.cwd(), migrationPath);
-    const sql = readFileSync(fullPath, 'utf-8');
-
-    console.log('Migration SQL loaded, executing...\n');
-
-    // Execute the SQL using Supabase admin client
-    // Note: Supabase client doesn't directly support raw SQL execution
-    // We need to use the REST API or execute via RPC
-
-    const { error } = await supabaseAdmin.rpc('exec_sql', { sql_query: sql });
-
-    if (error) {
-      console.error('❌ Migration failed:', error);
-      process.exit(1);
-    }
-
-    console.log('✅ Migration completed successfully!');
-  } catch (error) {
-    console.error('❌ Error running migration:', error);
-    process.exit(1);
-  }
-}
-
-const migrationPath = process.argv[2];
-
-if (!migrationPath) {
-  console.error('Usage: tsx scripts/run-migration.ts <path-to-migration-file>');
+if (!connectionString) {
+  console.error('DATABASE_URL is not defined');
   process.exit(1);
 }
 
-runMigration(migrationPath);
+const migrationFile = process.argv[2];
+
+if (!migrationFile) {
+  console.error('Please provide a migration file path');
+  process.exit(1);
+}
+
+async function runMigration() {
+  const client = new Client({
+    connectionString,
+    ssl: { rejectUnauthorized: false }, // Required for Supabase
+  });
+
+  try {
+    await client.connect();
+    console.log('Connected to database');
+
+    const sql = fs.readFileSync(migrationFile, 'utf8');
+    console.log(`Running migration: ${migrationFile}`);
+
+    await client.query(sql);
+    console.log('Migration completed successfully');
+  } catch (err) {
+    console.error('Migration failed:', err);
+    process.exit(1);
+  } finally {
+    await client.end();
+  }
+}
+
+runMigration();
