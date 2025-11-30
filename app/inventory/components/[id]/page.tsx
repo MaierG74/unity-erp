@@ -1,23 +1,27 @@
 'use client';
 
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Edit, Trash2 } from 'lucide-react';
+import Link from 'next/link';
 import { OverviewTab } from '@/components/features/inventory/component-detail/OverviewTab';
-import { EditTab } from '@/components/features/inventory/component-detail/EditTab';
-import { InventoryTab } from '@/components/features/inventory/component-detail/InventoryTab';
 import { SuppliersTab } from '@/components/features/inventory/component-detail/SuppliersTab';
 import { TransactionsTab as ComponentTransactionsTab } from '@/components/features/inventory/component-detail/TransactionsTab';
 import { OrdersTab } from '@/components/features/inventory/component-detail/OrdersTab';
 import { AnalyticsTab } from '@/components/features/inventory/component-detail/AnalyticsTab';
+import { EditComponentDialog } from '@/components/features/inventory/component-detail/EditComponentDialog';
+import { DeleteComponentDialog } from '@/components/features/inventory/component-detail/DeleteComponentDialog';
 
 export default function ComponentDetailPage() {
   const params = useParams();
   const router = useRouter();
   const componentId = parseInt(params.id as string);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   // Fetch component data
   const { data: component, isLoading, error } = useQuery({
@@ -174,34 +178,34 @@ export default function ComponentDetailPage() {
   };
 
   return (
-    <div className="container mx-auto py-6 max-w-7xl">
-      {/* Header with back button */}
-      <div className="mb-6">
-        <Button
-          variant="ghost"
-          onClick={() => router.push('/inventory')}
-          className="mb-4"
-        >
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Inventory
-        </Button>
-
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            {component.internal_code}
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            {component.description || 'No description'}
-          </p>
+    <div className="max-w-7xl space-y-4">
+      {/* Header - Customer page style */}
+      <div className="flex justify-between items-center">
+        <div className="flex items-center space-x-4">
+          <Button variant="outline" size="icon" asChild>
+            <Link href="/inventory">
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+          </Button>
+          <h1 className="text-3xl font-bold">{component.internal_code}</h1>
+        </div>
+        
+        <div className="flex space-x-2">
+          <Button variant="outline" onClick={() => setEditDialogOpen(true)}>
+            <Edit className="mr-2 h-4 w-4" />
+            Edit
+          </Button>
+          <Button variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
+            <Trash2 className="mr-2 h-4 w-4" />
+            Delete
+          </Button>
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Tabs - Reduced to 5 */}
       <Tabs defaultValue="overview" className="space-y-6">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="edit">Edit</TabsTrigger>
-          <TabsTrigger value="inventory">Inventory</TabsTrigger>
           <TabsTrigger value="suppliers">Suppliers</TabsTrigger>
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
           <TabsTrigger value="orders">Orders</TabsTrigger>
@@ -212,20 +216,12 @@ export default function ComponentDetailPage() {
           <OverviewTab component={componentData} />
         </TabsContent>
 
-        <TabsContent value="edit">
-          <EditTab component={componentData} />
-        </TabsContent>
-
-        <TabsContent value="inventory">
-          <InventoryTab component={componentData} />
-        </TabsContent>
-
         <TabsContent value="suppliers">
           <SuppliersTab component={componentData} />
         </TabsContent>
 
         <TabsContent value="transactions">
-          <ComponentTransactionsTab componentId={componentId} />
+          <ComponentTransactionsTab componentId={componentId} componentName={component.internal_code} />
         </TabsContent>
 
         <TabsContent value="orders">
@@ -236,6 +232,19 @@ export default function ComponentDetailPage() {
           <AnalyticsTab component={componentData} />
         </TabsContent>
       </Tabs>
+
+      {/* Dialogs */}
+      <EditComponentDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        component={componentData}
+      />
+      <DeleteComponentDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        componentId={componentId}
+        componentName={component.internal_code}
+      />
     </div>
   );
 }

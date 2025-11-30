@@ -56,15 +56,18 @@ export function SuppliersTab({ component }: SuppliersTabProps) {
   if (suppliers.length === 0) {
     return (
       <>
-        <div className="flex justify-end mb-4">
-          <Button onClick={() => setAddDialogOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Add Supplier
-          </Button>
-        </div>
-        
         <Card>
-          <CardContent className="pt-6">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              Suppliers
+            </CardTitle>
+            <Button onClick={() => setAddDialogOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Supplier
+            </Button>
+          </CardHeader>
+          <CardContent>
             <div className="text-center text-muted-foreground py-8">
               <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>No suppliers linked to this component.</p>
@@ -92,15 +95,7 @@ export function SuppliersTab({ component }: SuppliersTabProps) {
 
   return (
     <div className="space-y-6">
-      {/* Add Supplier Button */}
-      <div className="flex justify-end">
-        <Button onClick={() => setAddDialogOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          Add Supplier
-        </Button>
-      </div>
-
-      {/* Price Summary */}
+      {/* Price Summary with Add Button in first card */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -150,11 +145,15 @@ export function SuppliersTab({ component }: SuppliersTabProps) {
 
       {/* Suppliers Table */}
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2">
             <Users className="h-5 w-5" />
             Supplier List ({suppliers.length})
           </CardTitle>
+          <Button onClick={() => setAddDialogOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Supplier
+          </Button>
         </CardHeader>
         <CardContent>
           <Table>

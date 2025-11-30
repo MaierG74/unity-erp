@@ -121,7 +121,7 @@ export async function POST(request: Request) {
       );
     
     // Send email to each supplier
-    const emailResults: { supplier: string; success: boolean; error?: string; messageId?: string }[] = [];
+    const emailResults: { supplier: string; supplierId: number; success: boolean; error?: string; messageId?: string; recipientEmail?: string }[] = [];
     
     for (const supplier of uniqueSuppliers) {
       // Resolve recipient email (override -> primary -> any)
@@ -134,6 +134,7 @@ export async function POST(request: Request) {
         if (emailError) {
           emailResults.push({
             supplier: supplier.name,
+            supplierId: supplier.supplier_id,
             success: false,
             error: emailError.message
           });
@@ -146,6 +147,7 @@ export async function POST(request: Request) {
       if (!toEmail) {
         emailResults.push({
           supplier: supplier.name,
+          supplierId: supplier.supplier_id,
           success: false,
           error: 'No supplier email found'
         });
@@ -212,21 +214,42 @@ export async function POST(request: Request) {
         if (error) {
           emailResults.push({
             supplier: supplier.name,
+            supplierId: supplier.supplier_id,
             success: false,
-            error: error.message
+            error: error.message,
+            recipientEmail: toEmail,
           });
         } else {
           emailResults.push({
             supplier: supplier.name,
+            supplierId: supplier.supplier_id,
             success: true,
-            messageId: result?.id
+            messageId: result?.id,
+            recipientEmail: toEmail,
           });
         }
       } catch (renderError: any) {
         emailResults.push({
           supplier: supplier.name,
+          supplierId: supplier.supplier_id,
           success: false,
-          error: `Email rendering error: ${renderError.message}`
+          error: `Email rendering error: ${renderError.message}`,
+          recipientEmail: toEmail,
+        });
+      }
+    }
+
+    // Log all email results to the database
+    for (const result of emailResults) {
+      if (result.recipientEmail) {
+        await supabase.from('purchase_order_emails').insert({
+          purchase_order_id: purchaseOrderId,
+          supplier_id: result.supplierId,
+          recipient_email: result.recipientEmail,
+          cc_emails: ccList.length > 0 ? ccList : [],
+          status: result.success ? 'sent' : 'failed',
+          message_id: result.messageId || null,
+          error_message: result.error || null,
         });
       }
     }
