@@ -18,7 +18,8 @@
   --muted-foreground: 0 0% 45.1%;
   --accent: 24 95% 53%;
   --accent-foreground: 0 0% 100%;
-  --destructive: 0 84.2% 60.2%;
+  /* Softer destructive color for light mode (less saturation, slightly darker for contrast) */
+  --destructive: 0 70% 56%;
   --destructive-foreground: 0 0% 98%;
   --border: 240 5.9% 90%;
   --input: 240 5.9% 90%;
@@ -55,6 +56,9 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+      'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+      sans-serif;
   }
   h1 {
     @apply text-2xl font-bold;

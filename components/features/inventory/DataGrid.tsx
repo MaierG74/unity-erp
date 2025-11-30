@@ -25,12 +25,23 @@ import { supabase } from '@/lib/supabase'
 import type { InventoryItem } from '@/types/inventory'
 import type { Filters } from '@/app/inventory/inventory-client'
 import { Button } from "@/components/ui/button"
-import { Pencil, Loader2, PlusCircle } from "lucide-react"
+import { Pencil, Loader2, PlusCircle, Trash2 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { EditableCell } from './EditableCell'
 import { useUpdateComponent } from '@/hooks/use-update-component'
 import { useChangeCategory } from '@/hooks/use-change-category'
 import { useUpdateInventory } from '@/hooks/use-update-inventory'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 
 interface DataGridProps {
   onRowSelect?: (item: InventoryItem) => void
@@ -214,18 +225,50 @@ export function DataGrid({ onRowSelect, onEdit, filters }: DataGridProps) {
       id: "actions",
       cell: ({ row }: { row: Row<InventoryItem> }) => {
         const item = row.original
-        
+
+        const handleDelete = async () => {
+          // Call server route to cascade delete using service role
+          const res = await fetch(`/api/inventory/components/${item.component.component_id}`, {
+            method: 'DELETE'
+          })
+          if (!res.ok) {
+            const msg = await res.text().catch(() => 'Failed to delete')
+            throw new Error(msg)
+          }
+          // Refresh list
+          await queryClient.invalidateQueries({ queryKey: ['inventory'] })
+        }
+
         return (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={(e) => {
-              e.stopPropagation() // Prevent row selection
-              onEdit?.(item)
-            }}
-          >
-            <Pencil className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => onEdit?.(item)}
+              title="Edit"
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructiveSoft" size="icon" title="Delete">
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete Component</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently delete the component and related data.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
         )
       },
     }
@@ -235,11 +278,12 @@ export function DataGrid({ onRowSelect, onEdit, filters }: DataGridProps) {
   const filteredData = useMemo(() => {
     return inventoryData.filter(item => {
       // Text search
+      const searchTerm = filters.search.toLowerCase()
       const matchesSearch = !filters.search || [
         item.component?.internal_code,
         item.component?.description
-      ].some(field => 
-        field?.toLowerCase().includes(filters.search.toLowerCase())
+      ].some(field =>
+        (field?.toLowerCase() ?? '').includes(searchTerm)
       )
 
       // Category filter
@@ -334,11 +378,15 @@ export function DataGrid({ onRowSelect, onEdit, filters }: DataGridProps) {
                 <TableRow
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
-                  onClick={() => onRowSelect?.(row.original)}
+                  onClick={() => {
+                    // On row click, select and open edit dialog per spec
+                    onRowSelect?.(row.original)
+                    onEdit?.(row.original)
+                  }}
                   className="cursor-pointer hover:bg-muted/50"
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id} onClick={(e) => e.stopPropagation()}>
+                    <TableCell key={cell.id}>
                       {flexRender(cell.column.columnDef.cell, {
                         ...cell.getContext(),
                         row: row

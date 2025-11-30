@@ -3,6 +3,8 @@ export type InventoryItem = {
   quantity_on_hand: number
   location: string
   reorder_level: number
+  on_order_quantity?: number
+  required_for_orders?: number | null
   component: {
     component_id: number
     internal_code: string

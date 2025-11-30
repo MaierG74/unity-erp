@@ -1,104 +1,826 @@
 'use client';
 
-import { useState } from 'react';
+import React from 'react';
+import { useDropzone } from 'react-dropzone';
 import {
   QuoteItem,
+  QuoteItemCluster,
+  QuoteClusterLine,
   createQuoteItem,
   updateQuoteItem,
   deleteQuoteItem,
+  createQuoteItemCluster,
+  updateQuoteItemCluster,
+  createQuoteClusterLine,
+  updateQuoteClusterLine,
+  deleteQuoteClusterLine,
+  fetchQuoteItemClusters,
+  QuoteAttachment,
+  uploadQuoteAttachment,
+  fetchQuoteItemAttachments,
+  formatCurrency,
+  deleteQuoteAttachment,
+  Component,
+  fetchComponents,
+  fetchProductComponents,
+  fetchProductLabor,
+  fetchEffectiveBOM,
+  fetchComponentsByIds,
 } from '@/lib/db/quotes';
+import QuoteItemClusterGrid from './QuoteItemClusterGrid';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/use-toast';
+import { Loader2, Paperclip, FileText, Trash2 } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import InlineAttachmentsCell from './InlineAttachmentsCell';
+import AddQuoteItemDialog from './AddQuoteItemDialog';
+import { createQuoteAttachmentFromUrl, fetchPrimaryProductImage } from '@/lib/db/quotes';
+import type { ProductOptionSelection } from '@/lib/db/products';
+import CutlistTool from '@/components/features/cutlist/CutlistTool';
+import { exportCutlistToQuote } from '@/components/features/cutlist/export';
 
 interface Props {
   quoteId: string;
   items: QuoteItem[];
   onItemsChange: (items: QuoteItem[]) => void;
+  attachmentsVersion?: number; // bump to force cells to refresh their local attachments
+  onItemAttachmentsChange?: (itemId: string, attachments: QuoteAttachment[]) => void;
 }
 
-export default function QuoteItemsTable({ quoteId, items, onItemsChange }: Props) {
-  const handleAdd = async () => {
-    const newItem = await createQuoteItem({
-      quote_id: quoteId,
-      description: '',
-      qty: 0,
-      unit_price: 0,
+// --- Attachments Cell Component ---
+interface QuoteItemAttachmentsCellProps {
+  quoteId: string;
+  itemId: string;
+  version?: number;
+  onItemAttachmentsChange?: (itemId: string, attachments: QuoteAttachment[]) => void;
+}
+
+function QuoteItemAttachmentsCell({ quoteId, itemId, version, onItemAttachmentsChange }: QuoteItemAttachmentsCellProps) {
+  const [attachments, setAttachments] = React.useState<QuoteAttachment[]>([]);
+  const [isUploading, setIsUploading] = React.useState(false);
+  const { toast } = useToast();
+  const [previewOpen, setPreviewOpen] = React.useState(false);
+  const [previewAtt, setPreviewAtt] = React.useState<QuoteAttachment | null>(null);
+  const dropRef = React.useRef<HTMLDivElement | null>(null);
+
+  const fetchAttachments = React.useCallback(async () => {
+    try {
+      const data = await fetchQuoteItemAttachments(quoteId, itemId);
+      setAttachments(data);
+    } catch (error) {
+      console.error('Fetch attachments error:', error);
+    }
+  }, [quoteId, itemId]);
+
+  React.useEffect(() => {
+    fetchAttachments();
+  }, [fetchAttachments, version]);
+
+  const onDrop = async (acceptedFiles: File[]) => {
+    if (acceptedFiles.length === 0) return;
+    setIsUploading(true);
+    try {
+      await Promise.all(acceptedFiles.map(file => uploadQuoteAttachment(file, quoteId, itemId)));
+      await fetchAttachments();
+      toast({ title: 'Uploaded attachments', description: `${acceptedFiles.length} file(s) uploaded successfully.` });
+    } catch (error) {
+      console.error('Item upload error:', error);
+      toast({ variant: 'destructive', title: 'Upload failed', description: (error as Error).message });
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleDeleteAttachment = async (id: string) => {
+    try {
+      await deleteQuoteAttachment(id);
+      fetchAttachments();
+    } catch (error) {
+      console.error('Delete attachment error:', error);
+    }
+  };
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop, multiple: true, disabled: isUploading });
+
+  const handlePaste: React.ClipboardEventHandler<HTMLDivElement> = async (e) => {
+    if (isUploading) return;
+    const items = Array.from(e.clipboardData?.items || []);
+    const blobs: File[] = items.map(item => item.getAsFile()).filter((file): file is File => file !== null);
+    if (blobs.length > 0) {
+      e.preventDefault();
+      await onDrop(blobs);
+      dropRef.current?.focus();
+    }
+  };
+
+  return (
+    <InlineAttachmentsCell
+      quoteId={quoteId}
+      itemId={itemId}
+      version={version}
+      onItemAttachmentsChange={onItemAttachmentsChange}
+    />
+  );
+}
+
+// --- Quote Item Row Component (with expandable cluster) ---
+function QuoteItemRow({
+  item,
+  quoteId,
+  onUpdate,
+  onDelete,
+  onAddClusterLine,
+  onUpdateClusterLine,
+  onDeleteClusterLine,
+  onUpdateCluster,
+  onEnsureCluster,
+  onOpenCutlist,
+  attachmentsVersion,
+  onItemAttachmentsChange,
+}: {
+  item: QuoteItem;
+  quoteId: string;
+  onUpdate: (id: string, field: keyof Pick<QuoteItem, 'description' | 'qty' | 'unit_price' | 'bullet_points'>, value: string | number) => void;
+  onDelete: (id: string) => void;
+  onAddClusterLine: (clusterId: string, component: {
+    type: 'manual' | 'database' | 'product' | 'collection';
+    description: string;
+    qty: number;
+    unit_cost: number;
+    component_id?: number;
+    supplier_component_id?: number;
+    product_id?: number;
+    explode?: boolean;
+    include_labour?: boolean;
+    collection_id?: number;
+  }) => void;
+  onUpdateClusterLine: (id: string, updates: Partial<QuoteClusterLine>) => void;
+  onDeleteClusterLine: (id: string) => void;
+  onUpdateCluster: (clusterId: string, updates: Partial<QuoteItemCluster>) => void;
+  onEnsureCluster: (itemId: string) => void;
+  onOpenCutlist: (itemId: string) => void;
+  attachmentsVersion?: number;
+  onItemAttachmentsChange?: (itemId: string, attachments: QuoteAttachment[]) => void;
+}) {
+  const [desc, setDesc] = React.useState(item.description);
+  const [qty, setQty] = React.useState<string>(String(item.qty));
+  const [unitPrice, setUnitPrice] = React.useState<string>(String(Math.round((item.unit_price || 0) * 100) / 100));
+  const [isExpanded, setIsExpanded] = React.useState(false);
+  const [detailsOpen, setDetailsOpen] = React.useState(false);
+  const [bpText, setBpText] = React.useState<string>(item.bullet_points || '');
+
+  React.useEffect(() => { setDesc(item.description); }, [item.description]);
+  React.useEffect(() => { setQty(String(item.qty)); }, [item.qty]);
+  React.useEffect(() => { setUnitPrice(String(Math.round((item.unit_price || 0) * 100) / 100)); }, [item.unit_price]);
+  React.useEffect(() => { setBpText(item.bullet_points || ''); }, [item.bullet_points]);
+
+  const sortedClusters = React.useMemo(() => {
+    if (!Array.isArray(item.quote_item_clusters) || item.quote_item_clusters.length === 0) {
+      return [] as QuoteItemCluster[];
+    }
+    return [...item.quote_item_clusters].sort((a, b) => {
+      const posA = a.position ?? 0;
+      const posB = b.position ?? 0;
+      if (posA !== posB) return posA - posB;
+      const timeA = new Date(a.created_at).getTime();
+      const timeB = new Date(b.created_at).getTime();
+      return timeA - timeB;
     });
+  }, [item.quote_item_clusters]);
+
+  const clustersWithLines = React.useMemo(() =>
+    sortedClusters
+      .map((cluster) => ({
+        ...cluster,
+        quote_cluster_lines: (cluster.quote_cluster_lines || []).filter(Boolean),
+      }))
+      .filter((cluster) => (cluster.quote_cluster_lines?.length ?? 0) > 0),
+    [sortedClusters]
+  );
+
+  const cutlistLines = React.useMemo(
+    () => clustersWithLines.flatMap((cluster) => (cluster.quote_cluster_lines || []).filter((line) => Boolean(line.cutlist_slot))),
+    [clustersWithLines]
+  );
+
+  const manualClusters = React.useMemo(() =>
+    clustersWithLines
+      .map((cluster) => ({
+        ...cluster,
+        quote_cluster_lines: (cluster.quote_cluster_lines || []).filter((line) => !line.cutlist_slot),
+      }))
+      .filter((cluster) => (cluster.quote_cluster_lines?.length ?? 0) > 0),
+    [clustersWithLines]
+  );
+
+  const displayClusters = React.useMemo(() => {
+    if (manualClusters.length > 0) {
+      const [primaryManual, ...restManual] = manualClusters;
+      return [
+        {
+          ...primaryManual,
+          quote_cluster_lines: [
+            ...(primaryManual.quote_cluster_lines || []),
+            ...cutlistLines,
+          ],
+        },
+        ...restManual,
+      ];
+    }
+
+    if (cutlistLines.length > 0 && clustersWithLines.length > 0) {
+      const cutlistBase = clustersWithLines[0];
+      return [
+        {
+          ...cutlistBase,
+          quote_cluster_lines: cutlistLines,
+        },
+      ];
+    }
+
+    if (clustersWithLines.length > 0) {
+      return clustersWithLines;
+    }
+
+    return sortedClusters.length > 0 ? [sortedClusters[0]] : [];
+  }, [clustersWithLines, manualClusters, cutlistLines, sortedClusters]);
+
+  const hasClusterLines = displayClusters.length > 0;
+
+  return (
+    <React.Fragment>
+      <TableRow key={item.id}>
+        <TableCell>
+          {displayClusters.length > 0 ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsExpanded(!isExpanded)}
+              disabled={!hasClusterLines}
+              title={hasClusterLines ? 'Toggle costing clusters' : 'No costing lines yet'}
+            >
+              {isExpanded ? '▼' : '▶'}
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" onClick={() => onEnsureCluster(item.id)}>
+              + Cluster
+            </Button>
+          )}
+        </TableCell>
+        <TableCell><Input value={desc} onChange={e => setDesc(e.target.value)} onBlur={() => { if (desc !== item.description) onUpdate(item.id, 'description', desc); }} onFocus={e => e.target.select()} /></TableCell>
+        <TableCell><Input type="number" value={qty} onChange={e => setQty(e.target.value)} onBlur={() => { const numQty = Number(qty) || 0; if (numQty !== item.qty) onUpdate(item.id, 'qty', numQty); setQty(String(numQty)); }} onFocus={e => e.target.select()} /></TableCell>
+        <TableCell><Input type="number" step="0.01" value={unitPrice} onChange={e => setUnitPrice(e.target.value)} onBlur={() => { const numPrice = Math.round((Number(unitPrice) || 0) * 100) / 100; if (numPrice !== item.unit_price) onUpdate(item.id, 'unit_price', numPrice); setUnitPrice(String(numPrice)); }} onFocus={e => e.target.select()} /></TableCell>
+        <TableCell className="text-right font-medium">{formatCurrency((Number(qty) || 0) * (Number(unitPrice) || 0))}</TableCell>
+        <TableCell>
+          <QuoteItemAttachmentsCell
+            quoteId={quoteId}
+            itemId={item.id}
+            version={attachmentsVersion}
+            onItemAttachmentsChange={onItemAttachmentsChange}
+          />
+        </TableCell>
+        <TableCell className="text-center">
+          <div className="flex items-center justify-center gap-2">
+            <Button variant="secondary" size="sm" className="px-3 py-1.5" onClick={() => setDetailsOpen(true)}>
+              Details
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="px-3 py-1.5"
+              title="Cutlist Calculator"
+              aria-label="Cutlist Calculator"
+              onClick={() => onOpenCutlist(item.id)}
+            >
+              Cutlist
+            </Button>
+            <Button
+              variant="destructiveSoft"
+              size="icon"
+              className="h-8 w-8"
+              title="Delete item"
+              aria-label="Delete item"
+              onClick={() => onDelete(item.id)}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        </TableCell>
+      </TableRow>
+      {/* Item Details Dialog */}
+      <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Item Details</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <div className="text-sm text-muted-foreground">Bullet points (one per line)</div>
+            <Textarea
+              value={bpText}
+              onChange={e => setBpText(e.target.value)}
+              rows={6}
+              placeholder={"e.g.\nSize: 2m x 3m\nMaterial: Solid wood\nFinish: Walnut"}
+            />
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setDetailsOpen(false)}>Cancel</Button>
+            <Button onClick={() => { onUpdate(item.id, 'bullet_points', bpText); setDetailsOpen(false); }}>Save</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      {isExpanded && displayClusters.map((cluster) => (
+        <TableRow key={`${item.id}-cluster-${cluster.id}`}>
+          <TableCell colSpan={7} className="p-0">
+            <QuoteItemClusterGrid
+              cluster={cluster}
+              onAddLine={onAddClusterLine}
+              onUpdateLine={onUpdateClusterLine}
+              onDeleteLine={onDeleteClusterLine}
+              onUpdateCluster={onUpdateCluster}
+              onUpdateItemPrice={(itemId, price) => onUpdate(itemId, 'unit_price', price)}
+              itemId={item.id}
+            />
+          </TableCell>
+        </TableRow>
+      ))}
+    </React.Fragment>
+  );
+}
+
+// --- Main Table Component ---
+export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachmentsVersion, onItemAttachmentsChange }: Props) {
+  const { toast } = useToast();
+  const [showAddItemDialog, setShowAddItemDialog] = React.useState(false);
+  const [cutlistOpen, setCutlistOpen] = React.useState<{ open: boolean; itemId?: string | null }>({ open: false, itemId: null });
+
+  const handleAddItem = () => setShowAddItemDialog(true);
+
+  const handleOpenCutlist = (itemId: string) => setCutlistOpen({ open: true, itemId });
+
+  const handleCreateManualItem = async ({ description, qty, unit_price }: { description: string; qty: number; unit_price: number }) => {
+    const newItem = await createQuoteItem({ total: 0, quote_id: quoteId, description, qty, unit_price });
     onItemsChange([...items, newItem]);
   };
 
-  const handleUpdate = async (
-    id: string,
-    field: keyof Pick<QuoteItem, 'description' | 'qty' | 'unit_price'>,
-    value: string | number
-  ) => {
-    const updates: Partial<QuoteItem> = { [field]: value };
-    const updated = await updateQuoteItem(id, updates);
-    onItemsChange(items.map(i => (i.id === id ? updated : i)));
+  const handleCreateProductItem = async ({
+    product_id,
+    name,
+    qty,
+    explode,
+    include_labour,
+    attach_image,
+    selected_options,
+  }: {
+    product_id: number;
+    name: string;
+    qty: number;
+    explode: boolean;
+    include_labour?: boolean;
+    attach_image?: boolean;
+    selected_options?: ProductOptionSelection;
+  }) => {
+    try {
+      const optionSelections = selected_options ?? {};
+      const optionPayload = Object.keys(optionSelections).length > 0 ? optionSelections : null;
+
+      const newItem = await createQuoteItem({
+        total: 0,
+        quote_id: quoteId,
+        description: name,
+        qty,
+        unit_price: 0,
+        selected_options: optionPayload,
+      });
+
+      let newItemWithCluster = { ...newItem } as QuoteItem;
+      let clusters = await fetchQuoteItemClusters(newItem.id);
+      let targetCluster = clusters[0];
+      if (!targetCluster) {
+        targetCluster = await createQuoteItemCluster({ quote_item_id: newItem.id, name: 'Costing Cluster', position: 0 });
+        clusters = [targetCluster];
+      }
+
+      if (explode) {
+        // Prefer Effective BOM when available (includes linked sub-products)
+        const bomPromise = (async () => {
+          const eff = await fetchEffectiveBOM(product_id, optionSelections);
+          if (Array.isArray(eff) && eff.length > 0) {
+            const ids = eff.map(it => Number((it as any).component_id)).filter(Boolean);
+            const components = await fetchComponentsByIds(ids);
+            const map = new Map<number, string | undefined>();
+            for (const c of components) map.set(Number(c.component_id), c.description || undefined);
+            return eff.map(it => ({
+              component_id: Number((it as any).component_id),
+              quantity: Number((it as any).quantity_required || 1),
+              unit_cost: (it as any)?.suppliercomponents?.price ?? null,
+              description: map.get(Number((it as any).component_id)) || undefined,
+            }));
+          }
+          return await fetchProductComponents(product_id, optionSelections);
+        })();
+        const laborPromise = include_labour === false ? Promise.resolve([]) : fetchProductLabor(product_id);
+        const [bom, labor] = await Promise.all([bomPromise, laborPromise]);
+
+        const createdLines: QuoteClusterLine[] = [];
+
+        // BOM component lines
+        if (bom && bom.length > 0) {
+          for (const pc of bom) {
+            const line = await createQuoteClusterLine({
+              cluster_id: targetCluster.id,
+              line_type: 'component',
+              description: pc.description ?? '',
+              qty: (pc.quantity || 1) * (qty || 1),
+              unit_cost: pc.unit_cost ?? null,
+              component_id: pc.component_id,
+              include_in_markup: true,
+              sort_order: 0,
+            });
+            createdLines.push(line);
+          }
+        }
+
+        // Labor (BOL) lines
+        if (labor && (labor as any).length > 0) {
+          for (const l of labor) {
+            const time = Number(l.time_required || 0);
+            const unit = (l.time_unit || 'hours') as 'hours' | 'minutes' | 'seconds';
+            const hours = unit === 'hours' ? time : unit === 'minutes' ? time / 60 : time / 3600;
+            const productMultiplier = qty || 1;
+            const baseQty = Number(l.quantity || 1) * productMultiplier;
+            const isPiece = l.pay_type === 'piece';
+            const qtyLine = isPiece ? baseQty : baseQty * (hours || 0);
+            const rate = isPiece ? (l.piece_rate ?? 0) : (l.hourly_rate ?? 0);
+            const description = `Labour – ${l.category_name ? l.category_name + ' · ' : ''}${l.job_name ?? 'Job ' + l.job_id}`;
+            const line = await createQuoteClusterLine({
+              cluster_id: targetCluster.id,
+              line_type: 'labor',
+              description,
+              qty: qtyLine,
+              unit_cost: rate ?? 0,
+              include_in_markup: true,
+              labor_type: isPiece ? 'piece' : 'hourly',
+              hours: isPiece ? null : Number(hours || 0),
+              rate: rate ?? 0,
+              sort_order: 0,
+            } as any);
+            createdLines.push(line);
+          }
+        }
+
+        if (createdLines.length === 0) {
+          toast({ title: 'No BOM/BOL found', description: 'This product has no components or labour. Item added without costing lines.' });
+        } else {
+          newItemWithCluster = {
+            ...newItem,
+            quote_item_clusters: [
+              {
+                ...targetCluster,
+                quote_cluster_lines: createdLines,
+              },
+            ],
+            selected_options: optionSelections,
+          } as any;
+        }
+      }
+
+      // Optionally attach product primary image as an item attachment
+      if (attach_image) {
+        try {
+          const img = await fetchPrimaryProductImage(product_id);
+          if (img?.url) {
+            await createQuoteAttachmentFromUrl({
+              quoteId: quoteId,
+              quoteItemId: newItem.id,
+              url: img.url,
+              originalName: img.original_name || name,
+              mimeType: 'image/*',
+              displayInQuote: true,
+            });
+          }
+        } catch (e) {
+          console.warn('Attach product image failed (non-fatal):', e);
+        }
+      }
+
+      onItemsChange([
+        ...items,
+        {
+          ...newItemWithCluster,
+          selected_options: optionSelections,
+        } as QuoteItem,
+      ]);
+    } catch (e) {
+      console.error('Failed to add product item:', e);
+      toast({ variant: 'destructive', title: 'Failed to add product', description: (e as Error).message });
+    }
   };
 
-  const handleDelete = async (id: string) => {
+  // Helper function to ensure an item has a cluster
+  const ensureItemHasCluster = async (itemId: string) => {
+    try {
+      const newCluster = await createQuoteItemCluster({
+        quote_item_id: itemId,
+        name: 'Costing Cluster',
+        position: 0,
+      });
+      // Optimistically update local state to avoid full page reload
+      const updatedItems = items.map(i => {
+        if (i.id !== itemId) return i;
+        const existingClusters = i.quote_item_clusters || [];
+        return {
+          ...i,
+          quote_item_clusters: [...existingClusters, newCluster],
+        } as QuoteItem;
+      });
+      onItemsChange(updatedItems);
+      toast({ title: 'Cluster created', description: 'Added a Costing Cluster to this item.' });
+    } catch (error) {
+      console.error('Error creating cluster:', error);
+    }
+  };
+
+  const handleUpdateItem = async (id: string, field: keyof Pick<QuoteItem, 'description' | 'qty' | 'unit_price' | 'bullet_points'>, value: string | number) => {
+    const updated = await updateQuoteItem(id, { [field]: value });
+    onItemsChange(items.map(i => (i.id === id ? { ...i, ...updated } : i)));
+  };
+
+  const handleDeleteItem = async (id: string) => {
     await deleteQuoteItem(id);
     onItemsChange(items.filter(i => i.id !== id));
   };
 
-  const calculateTotal = (qty: number, unit_price: number) => qty * unit_price;
+  const handleAddClusterLine = async (clusterId: string, component: {
+    type: 'manual' | 'database' | 'product' | 'collection';
+    description: string;
+    qty: number;
+    unit_cost: number;
+    component_id?: number;
+    supplier_component_id?: number;
+    product_id?: number;
+    explode?: boolean;
+    include_labour?: boolean;
+    collection_id?: number;
+  }) => {
+    try {
+      if (component.type === 'product') {
+        if (!component.product_id) return;
+        // Phase 1: explode BOM by default (or when requested)
+        if (component.explode !== false) {
+          const bomPromise = fetchProductComponents(component.product_id);
+          const laborPromise = component.include_labour === false ? Promise.resolve([]) : fetchProductLabor(component.product_id);
+          const [bom, labor] = await Promise.all([bomPromise, laborPromise]);
+          const createdLines: QuoteClusterLine[] = [];
+
+          // BOM component lines
+          for (const pc of bom) {
+            const line = await createQuoteClusterLine({
+              cluster_id: clusterId,
+              line_type: 'component',
+              description: pc.description ?? '',
+              qty: (pc.quantity || 1) * (component.qty || 1),
+              unit_cost: pc.unit_cost ?? null,
+              component_id: pc.component_id,
+              include_in_markup: true,
+              sort_order: 0,
+            });
+            createdLines.push(line);
+          }
+
+          // Labor (BOL) lines
+          for (const l of labor as any[]) {
+            const time = Number(l.time_required || 0);
+            const unit = (l.time_unit || 'hours') as 'hours' | 'minutes' | 'seconds';
+            const hours = unit === 'hours' ? time : unit === 'minutes' ? time / 60 : time / 3600;
+            const productMultiplier = component.qty || 1;
+            const baseQty = Number(l.quantity || 1) * productMultiplier;
+            const isPiece = l.pay_type === 'piece';
+            const qtyLine = isPiece ? baseQty : baseQty * (hours || 0);
+            const rate = isPiece ? (l.piece_rate ?? 0) : (l.hourly_rate ?? 0);
+            const description = `Labour – ${l.category_name ? l.category_name + ' · ' : ''}${l.job_name ?? 'Job ' + l.job_id}`;
+            const line = await createQuoteClusterLine({
+              cluster_id: clusterId,
+              line_type: 'labor',
+              description,
+              qty: qtyLine,
+              unit_cost: rate ?? 0,
+              include_in_markup: true,
+              labor_type: isPiece ? 'piece' : 'hourly',
+              hours: isPiece ? null : Number(hours || 0),
+              rate: rate ?? 0,
+              sort_order: 0,
+            } as any);
+            createdLines.push(line);
+          }
+
+          const updatedItems = items.map(item => {
+            if (!item.quote_item_clusters) return item;
+            const updatedClusters = item.quote_item_clusters.map(c => {
+              if (c.id !== clusterId) return c;
+              return {
+                ...c,
+                quote_cluster_lines: [...(c.quote_cluster_lines || []), ...createdLines],
+              };
+            });
+            return { ...item, quote_item_clusters: updatedClusters };
+          });
+          onItemsChange(updatedItems);
+        } else {
+          console.warn('Product added with explode=false is not implemented at cluster level. Consider adding as top-level item.');
+        }
+      } else if (component.type === 'collection') {
+        if (!component.collection_id) return;
+        // Fetch the collection items via API and insert each as a component line
+        const res = await fetch(`/api/collections/${component.collection_id}`, { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to load costing cluster');
+        const json = await res.json();
+        const itemsInCollection = (json.items || []) as Array<{ component_id: number; quantity_required: number; supplier_component_id?: number | null; price?: number | null; components?: { description?: string } }>; 
+        const createdLines: QuoteClusterLine[] = [];
+        for (const row of itemsInCollection) {
+          const line = await createQuoteClusterLine({
+            cluster_id: clusterId,
+            line_type: 'component',
+            description: row.components?.description ?? '',
+            qty: (row.quantity_required || 1) * (component.qty || 1),
+            unit_cost: row.price ?? null,
+            component_id: row.component_id,
+            include_in_markup: true,
+            sort_order: 0,
+          });
+          createdLines.push(line);
+        }
+
+        const updatedItems = items.map(item => {
+          if (!item.quote_item_clusters) return item;
+          const updatedClusters = item.quote_item_clusters.map(c => {
+            if (c.id !== clusterId) return c;
+            return {
+              ...c,
+              quote_cluster_lines: [...(c.quote_cluster_lines || []), ...createdLines],
+            };
+          });
+          return { ...item, quote_item_clusters: updatedClusters };
+        });
+        onItemsChange(updatedItems);
+      } else {
+        const newLine = await createQuoteClusterLine({
+          cluster_id: clusterId,
+          line_type: component.type === 'database' ? 'component' : 'manual',
+          description: component.description,
+          qty: component.qty,
+          unit_cost: component.unit_cost,
+          component_id: component.component_id,
+          include_in_markup: true,
+          sort_order: 0,
+        });
+
+        // Optimistic UI update: add the new line to local state immediately
+        const updatedItems = items.map(item => {
+          if (item.quote_item_clusters) {
+            const updatedClusters = item.quote_item_clusters.map(cluster => {
+              if (cluster.id === clusterId) {
+                return {
+                  ...cluster,
+                  quote_cluster_lines: [...(cluster.quote_cluster_lines || []), newLine]
+                };
+              }
+              return cluster;
+            });
+            return { ...item, quote_item_clusters: updatedClusters };
+          }
+          return item;
+        });
+        
+        onItemsChange(updatedItems);
+      }
+    } catch (error) {
+      console.error('Error adding cluster line:', error);
+      // Could show a toast notification here
+    }
+  };
+
+  const handleUpdateClusterLine = async (id: string, updates: Partial<QuoteClusterLine>) => {
+    const updatedLine = await updateQuoteClusterLine(id, updates);
+    const newItems = items.map(item => ({
+      ...item,
+      quote_item_clusters: item.quote_item_clusters?.map(c => ({
+        ...c,
+        quote_cluster_lines: c.quote_cluster_lines?.map(l => l.id === id ? updatedLine : l)
+      }))
+    }));
+    onItemsChange(newItems);
+  };
+
+  const handleDeleteClusterLine = async (id: string) => {
+    await deleteQuoteClusterLine(id);
+    const newItems = items.map(item => ({
+      ...item,
+      quote_item_clusters: item.quote_item_clusters?.map(c => ({
+        ...c,
+        quote_cluster_lines: c.quote_cluster_lines?.filter(l => l.id !== id)
+      }))
+    }));
+    onItemsChange(newItems);
+  };
+
+  const handleUpdateCluster = async (clusterId: string, updates: Partial<QuoteItemCluster>) => {
+    try {
+      const updatedCluster = await updateQuoteItemCluster(clusterId, updates);
+      const newItems = items.map(item => ({
+        ...item,
+        quote_item_clusters: item.quote_item_clusters?.map(c => 
+          c.id === clusterId ? { ...c, ...updatedCluster } : c
+        )
+      }));
+      onItemsChange(newItems);
+    } catch (error) {
+      console.error('Error updating cluster:', error);
+    }
+  };
 
   return (
-    <div>
-      <Button onClick={handleAdd} size="sm" className="mb-2">
-        Add Item
-      </Button>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Description</TableHead>
-            <TableHead>Qty</TableHead>
-            <TableHead>Unit Price</TableHead>
-            <TableHead>Total</TableHead>
-            <TableHead>Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {items.map(item => (
-            <TableRow key={item.id}>
-              <TableCell>
-                <Input
-                  value={item.description}
-                  onChange={e => handleUpdate(item.id, 'description', e.target.value)}
-                />
-              </TableCell>
-              <TableCell>
-                <Input
-                  type="number"
-                  value={item.qty}
-                  onChange={e => handleUpdate(item.id, 'qty', parseFloat(e.target.value) || 0)}
-                />
-              </TableCell>
-              <TableCell>
-                <Input
-                  type="number"
-                  value={item.unit_price}
-                  onChange={e => handleUpdate(item.id, 'unit_price', parseFloat(e.target.value) || 0)}
-                />
-              </TableCell>
-              <TableCell>
-                {calculateTotal(item.qty, item.unit_price).toFixed(2)}
-              </TableCell>
-              <TableCell>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => handleDelete(item.id)}
-                >
-                  Delete
-                </Button>
-              </TableCell>
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <div className="text-sm text-muted-foreground">
+          {items.length} {items.length === 1 ? 'item' : 'items'}
+        </div>
+        <Button onClick={handleAddItem} size="sm" className="bg-primary hover:bg-primary/90">
+          Add Item
+        </Button>
+      </div>
+      
+      <div className="rounded-lg border bg-card overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-muted/50">
+              <TableHead className="w-12 text-center"></TableHead>
+              <TableHead className="font-medium">Description</TableHead>
+              <TableHead className="w-32 text-center font-medium">Qty</TableHead>
+              <TableHead className="w-36 text-center font-medium">Unit Price</TableHead>
+              <TableHead className="w-40 text-right font-medium">Total</TableHead>
+              <TableHead className="w-28 text-center font-medium">Attachments</TableHead>
+              <TableHead className="w-40 text-center font-medium">Actions</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {items.map(item => (
+              <QuoteItemRow
+                key={item.id}
+                item={item}
+                quoteId={quoteId}
+                onUpdate={handleUpdateItem}
+                onDelete={handleDeleteItem}
+                onAddClusterLine={handleAddClusterLine}
+                onUpdateClusterLine={handleUpdateClusterLine}
+                onDeleteClusterLine={handleDeleteClusterLine}
+                onUpdateCluster={handleUpdateCluster}
+                onEnsureCluster={ensureItemHasCluster}
+                onOpenCutlist={handleOpenCutlist}
+                attachmentsVersion={attachmentsVersion}
+                onItemAttachmentsChange={onItemAttachmentsChange}
+              />
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <AddQuoteItemDialog
+        open={showAddItemDialog}
+        onClose={() => setShowAddItemDialog(false)}
+        onCreateManual={handleCreateManualItem}
+        onCreateProduct={handleCreateProductItem}
+      />
+
+      {/* Cutlist Calculator Modal */}
+      <Dialog open={cutlistOpen.open} onOpenChange={(o) => setCutlistOpen({ open: o, itemId: cutlistOpen.itemId })}>
+        <DialogContent className="max-w-5xl max-h-[calc(100vh-4rem)] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Cutlist Calculator</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <CutlistTool
+              quoteItemId={cutlistOpen.itemId || undefined}
+              onExportSuccess={() => {
+                toast({ title: 'Exported to Costing Cluster' });
+                const itemId = cutlistOpen.itemId;
+                if (itemId) {
+                  // Refresh just this item's clusters and merge into local state
+                  fetchQuoteItemClusters(itemId).then((clusters) => {
+                    const updatedItems = items.map(i => i.id === itemId ? { ...i, quote_item_clusters: clusters } : i);
+                    onItemsChange(updatedItems);
+                  }).finally(() => {
+                    setCutlistOpen({ open: false, itemId: null });
+                  });
+                } else {
+                  setCutlistOpen({ open: false, itemId: null });
+                }
+              }}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

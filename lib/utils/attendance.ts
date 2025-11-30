@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { getSASTDayBoundaries, createSASTTimestamp } from './timezone';
 
 /**
  * Calculate duration in minutes between two timestamps
@@ -14,22 +15,19 @@ export const calculateDurationMinutes = (startTime: string, endTime: string): nu
  * Process clock events into time segments for a specific date
  */
 export const processClockEventsIntoSegments = async (dateStr: string, staffId?: number): Promise<void> => {
-  console.log(`[DEBUG] Starting processClockEventsIntoSegments for date: ${dateStr}`);
+  // // console.log(`[DEBUG] Starting processClockEventsIntoSegments for date: ${dateStr}, staffId: ${staffId}`);
   try {
     // Get all clock events for the date
-    console.log(`[DEBUG] Fetching clock events for date: ${dateStr}`);
-    let staffFilter = staffId ? `.eq('staff_id', staffId)` : '';
-    const utcDateStart = new Date(`${dateStr}T00:00:00.000Z`).toISOString();
-    const tempDate = new Date(`${dateStr}T00:00:00.000Z`);
-    tempDate.setUTCDate(tempDate.getUTCDate() + 1); // Move to the next day
-    const utcNextDayStart = tempDate.toISOString(); // This is the exclusive end boundary
+    // // console.log(`[DEBUG] Fetching clock events for date: ${dateStr}, filtering by staffId: ${staffId}`);
+    // Get SAST day boundaries
+    const { startOfDay: localDateStart, startOfNextDay: localNextDayStart } = getSASTDayBoundaries(dateStr);
 
-    console.log(`[DEBUG] Querying 'time_clock_events' for UTC Range: >= ${utcDateStart} and < ${utcNextDayStart}`);
+    // // console.log(`[DEBUG] Querying 'time_clock_events' for SAST Range: >= ${localDateStart} and < ${localNextDayStart}`);
     let clockEventsQuery = supabase
       .from('time_clock_events')
       .select('*')
-      .gte('event_time', utcDateStart)
-      .lt('event_time', utcNextDayStart)
+      .gte('event_time', localDateStart)
+      .lt('event_time', localNextDayStart)
       .order('event_time', { ascending: true });
     if (staffId) {
       clockEventsQuery = clockEventsQuery.eq('staff_id', staffId);
@@ -42,10 +40,23 @@ export const processClockEventsIntoSegments = async (dateStr: string, staffId?: 
     }
 
     if (!clockEvents || clockEvents.length === 0) {
-      console.log(`[DEBUG] No clock events found for ${dateStr}. Exiting.`);
+      if (staffId) {
+        const { error: cleanupError } = await supabase
+          .from('time_segments')
+          .delete()
+          .eq('staff_id', staffId)
+          .eq('date_worked', dateStr);
+
+        if (cleanupError) {
+          console.error(`[DEBUG] Error clearing segments for staff ${staffId} on ${dateStr}:`, cleanupError);
+        } else {
+          await generateDailySummary(dateStr, staffId);
+        }
+      }
+      // // console.log(`[DEBUG] No clock events found for ${dateStr}. Exiting.`);
       return;
     }
-    console.log(`[DEBUG] Found ${clockEvents.length} total events for ${dateStr}:`, clockEvents);
+    // // console.log(`[DEBUG] Found ${clockEvents.length} total events for ${dateStr}:`, clockEvents);
 
     // Group events by staff member
     const staffEvents: Record<number, any[]> = {};
@@ -55,43 +66,50 @@ export const processClockEventsIntoSegments = async (dateStr: string, staffId?: 
       }
       staffEvents[event.staff_id].push(event);
     });
-    console.log('[DEBUG] Grouped events by staff IDs:', Object.keys(staffEvents));
+    // console.log('[DEBUG] Grouped events by staff IDs:', Object.keys(staffEvents));
 
-    // Process each staff member's events
+    // Process each staff member's events (or just the specified staff member)
     for (const staffIdStr in staffEvents) {
-      const staffId = parseInt(staffIdStr); // Ensure staffId is a number for lookups
-      console.log(`\n[DEBUG] Processing events for staff_id: ${staffId}`);
-      const events = staffEvents[staffId];
-      console.log(`[DEBUG] Events for staff ${staffId}:`, events);
+      const currentStaffId = parseInt(staffIdStr); // Ensure staffId is a number for lookups
+
+      // If we're processing a specific staff member, skip others
+      if (staffId && currentStaffId !== staffId) {
+        // console.log(`[DEBUG] Skipping staff_id: ${currentStaffId} (only processing ${staffId})`);
+        continue;
+      }
+      
+      // console.log(`\n[DEBUG] Processing events for staff_id: ${currentStaffId}`);
+      const events = staffEvents[currentStaffId];
+      // console.log(`[DEBUG] Events for staff ${currentStaffId}:`, events);
 
       // Delete all existing segments for this staff member on this day.
-      console.log(`[DEBUG] Deleting existing segments for staff ${staffId} on ${dateStr}...`);
+      // console.log(`[DEBUG] Deleting existing segments for staff ${currentStaffId} on ${dateStr}...`);
       const { error: deleteError } = await supabase
         .from('time_segments')
         .delete()
-        .eq('staff_id', staffId) // Use numeric staffId
+        .eq('staff_id', currentStaffId) // Use numeric staffId
         .eq('date_worked', dateStr);
 
       if (deleteError) {
-        console.error(`[DEBUG] Error deleting old segments for staff ${staffId}:`, deleteError);
+        console.error(`[DEBUG] Error deleting old segments for staff ${currentStaffId}:`, deleteError);
         continue;
       }
-      console.log(`[DEBUG] Successfully deleted old segments for staff ${staffId}.`);
+      // console.log(`[DEBUG] Successfully deleted old segments for staff ${currentStaffId}.`);
 
       const processedInEvents = new Set();
       const processedOutEvents = new Set();
 
       const clockInEvents = events.filter(e => e.event_type === 'clock_in');
       const clockOutEvents = events.filter(e => e.event_type === 'clock_out');
-      console.log(`[DEBUG] Staff ${staffId}: Found ${clockInEvents.length} clock-ins and ${clockOutEvents.length} clock-outs.`);
-      if(clockInEvents.length > 0) console.log('[DEBUG] Clock-in events:', clockInEvents);
-      if(clockOutEvents.length > 0) console.log('[DEBUG] Clock-out events:', clockOutEvents);
+      // console.log(`[DEBUG] Staff ${staffId}: Found ${clockInEvents.length} clock-ins and ${clockOutEvents.length} clock-outs.`);
+      // if(clockInEvents.length > 0) console.log('[DEBUG] Clock-in events:', clockInEvents);
+      // if(clockOutEvents.length > 0) console.log('[DEBUG] Clock-out events:', clockOutEvents);
       
       // Process regular clock-in/clock-out pairs
       for (const clockOutEvent of clockOutEvents) {
-        console.log(`[DEBUG] Processing clock-out event: ${clockOutEvent.id} at ${clockOutEvent.event_time}`);
+        // console.log(`[DEBUG] Processing clock-out event: ${clockOutEvent.id} at ${clockOutEvent.event_time}`);
         if (processedOutEvents.has(clockOutEvent.id)) {
-          console.log(`[DEBUG] Skipping already processed clock-out event ${clockOutEvent.id}`);
+          // console.log(`[DEBUG] Skipping already processed clock-out event ${clockOutEvent.id}`);
           continue;
         }
 
@@ -99,20 +117,20 @@ export const processClockEventsIntoSegments = async (dateStr: string, staffId?: 
           .filter(e => {
             const isUnprocessed = !processedInEvents.has(e.id);
             const isInBeforeOut = new Date(e.event_time) < new Date(clockOutEvent.event_time);
-            // console.log(`[DEBUG] Checking clock-in ${e.id} (${e.event_time}): unprocessed=${isUnprocessed}, inBeforeOut=${isInBeforeOut}`);
+            // // console.log(`[DEBUG] Checking clock-in ${e.id} (${e.event_time}): unprocessed=${isUnprocessed}, inBeforeOut=${isInBeforeOut}`);
             return isUnprocessed && isInBeforeOut;
           })
           .sort((a, b) => new Date(b.event_time).getTime() - new Date(a.event_time).getTime())[0];
 
         if (matchingClockIn) {
-          console.log(`[DEBUG] Found matching clock-in ${matchingClockIn.id} (${matchingClockIn.event_time}) for clock-out ${clockOutEvent.id} (${clockOutEvent.event_time}).`);
+          // console.log(`[DEBUG] Found matching clock-in ${matchingClockIn.id} (${matchingClockIn.event_time}) for clock-out ${clockOutEvent.id} (${clockOutEvent.event_time}).`);
           const durationMins = calculateDurationMinutes(matchingClockIn.event_time, clockOutEvent.event_time);
-          console.log(`[DEBUG] Creating work segment for staff ${staffId} from ${matchingClockIn.event_time} to ${clockOutEvent.event_time} (${durationMins} mins)`);
+          // console.log(`[DEBUG] Creating work segment for staff ${currentStaffId} from ${matchingClockIn.event_time} to ${clockOutEvent.event_time} (${durationMins} mins)`);
 
           const { error: insertError } = await supabase
             .from('time_segments')
             .insert({
-              staff_id: staffId, // Use numeric staffId
+              staff_id: currentStaffId, // Use numeric staffId
               date_worked: dateStr,
               clock_in_event_id: matchingClockIn.id,
               clock_out_event_id: clockOutEvent.id,
@@ -128,11 +146,11 @@ export const processClockEventsIntoSegments = async (dateStr: string, staffId?: 
             console.error('[DEBUG] Error creating work segment:', insertError);
             continue;
           }
-          console.log(`[DEBUG] Successfully created work segment for clock-in ${matchingClockIn.id} and clock-out ${clockOutEvent.id}.`);
+          // console.log(`[DEBUG] Successfully created work segment for clock-in ${matchingClockIn.id} and clock-out ${clockOutEvent.id}.`);
           processedInEvents.add(matchingClockIn.id);
           processedOutEvents.add(clockOutEvent.id);
         } else {
-          console.log(`[DEBUG] No matching clock-in found for clock-out event ${clockOutEvent.id} at ${clockOutEvent.event_time}.`);
+          // console.log(`[DEBUG] No matching clock-in found for clock-out event ${clockOutEvent.id} at ${clockOutEvent.event_time}.`);
 
           // --- Overnight shift handling ---
           // Try to find an unmatched clock-in from the previous day
@@ -158,9 +176,9 @@ export const processClockEventsIntoSegments = async (dateStr: string, staffId?: 
             );
             if (unmatchedPrevClockIn) {
               // Split at midnight
-              // Local midnight based on the local timezone
+              // SAST midnight for South Africa (UTC+2)
 const [year, month, day] = dateStr.split('-').map(Number);
-const midnight = new Date(year, month - 1, day);
+const midnight = new Date(`${dateStr}T00:00:00+02:00`);
               const prevEnd = new Date(midnight.getTime() - 1); // 23:59:59.999 of previous day
               const outTime = new Date(clockOutEvent.event_time);
 
@@ -184,7 +202,7 @@ const midnight = new Date(year, month - 1, day);
               if (seg1Error) {
                 console.error(`[DEBUG] Error creating overnight segment for previous day:`, seg1Error);
               } else {
-                console.log(`[DEBUG] Created overnight segment for prev day: ${seg1Start} to ${seg1End} (${seg1Mins} mins)`);
+                // console.log(`[DEBUG] Created overnight segment for prev day: ${seg1Start} to ${seg1End} (${seg1Mins} mins)`);
               }
 
               // Segment 2: current day (midnight to clock-out)
@@ -207,7 +225,7 @@ const midnight = new Date(year, month - 1, day);
               if (seg2Error) {
                 console.error(`[DEBUG] Error creating overnight segment for current day:`, seg2Error);
               } else {
-                console.log(`[DEBUG] Created overnight segment for current day: ${seg2Start} to ${seg2End} (${seg2Mins} mins)`);
+                // console.log(`[DEBUG] Created overnight segment for current day: ${seg2Start} to ${seg2End} (${seg2Mins} mins)`);
               }
               // Mark both as processed
               processedInEvents.add(unmatchedPrevClockIn.id);
@@ -220,14 +238,14 @@ const midnight = new Date(year, month - 1, day);
       // Process break segments
       const breakStartEvents = events.filter(e => e.event_type === 'break_start');
       const breakEndEvents = events.filter(e => e.event_type === 'break_end');
-      console.log(`[DEBUG] Staff ${staffId}: Found ${breakStartEvents.length} break-starts and ${breakEndEvents.length} break-ends.`);
-      if(breakStartEvents.length > 0) console.log('[DEBUG] Break-start events:', breakStartEvents);
-      if(breakEndEvents.length > 0) console.log('[DEBUG] Break-end events:', breakEndEvents);
+      // console.log(`[DEBUG] Staff ${staffId}: Found ${breakStartEvents.length} break-starts and ${breakEndEvents.length} break-ends.`);
+      // if(breakStartEvents.length > 0) console.log('[DEBUG] Break-start events:', breakStartEvents);
+      // if(breakEndEvents.length > 0) console.log('[DEBUG] Break-end events:', breakEndEvents);
 
       for (const breakEndEvent of breakEndEvents) {
-        console.log(`[DEBUG] Processing break-end event: ${breakEndEvent.id} at ${breakEndEvent.event_time}`);
+        // console.log(`[DEBUG] Processing break-end event: ${breakEndEvent.id} at ${breakEndEvent.event_time}`);
         if (processedOutEvents.has(breakEndEvent.id)) {
-            console.log(`[DEBUG] Skipping already processed break-end event ${breakEndEvent.id}`);
+            // console.log(`[DEBUG] Skipping already processed break-end event ${breakEndEvent.id}`);
             continue;
         }
 
@@ -236,14 +254,14 @@ const midnight = new Date(year, month - 1, day);
           .sort((a, b) => new Date(b.event_time).getTime() - new Date(a.event_time).getTime())[0];
 
         if (matchingBreakStart) {
-          console.log(`[DEBUG] Found matching break-start ${matchingBreakStart.id} (${matchingBreakStart.event_time}) for break-end ${breakEndEvent.id} (${breakEndEvent.event_time}).`);
+          // console.log(`[DEBUG] Found matching break-start ${matchingBreakStart.id} (${matchingBreakStart.event_time}) for break-end ${breakEndEvent.id} (${breakEndEvent.event_time}).`);
           const durationMins = calculateDurationMinutes(matchingBreakStart.event_time, breakEndEvent.event_time);
-          console.log(`[DEBUG] Creating break segment for staff ${staffId} from ${matchingBreakStart.event_time} to ${breakEndEvent.event_time} (${durationMins} mins, type: ${matchingBreakStart.break_type})`);
+          // console.log(`[DEBUG] Creating break segment for staff ${currentStaffId} from ${matchingBreakStart.event_time} to ${breakEndEvent.event_time} (${durationMins} mins, type: ${matchingBreakStart.break_type})`);
           
           const { error: insertError } = await supabase
             .from('time_segments')
             .insert({
-              staff_id: staffId, // Use numeric staffId
+              staff_id: currentStaffId, // Use numeric staffId
               date_worked: dateStr,
               clock_in_event_id: matchingBreakStart.id,
               clock_out_event_id: breakEndEvent.id,
@@ -259,11 +277,11 @@ const midnight = new Date(year, month - 1, day);
             console.error('[DEBUG] Error creating break segment:', insertError);
             continue;
           }
-          console.log(`[DEBUG] Successfully created break segment for break-start ${matchingBreakStart.id} and break-end ${breakEndEvent.id}.`);
+          // console.log(`[DEBUG] Successfully created break segment for break-start ${matchingBreakStart.id} and break-end ${breakEndEvent.id}.`);
           processedInEvents.add(matchingBreakStart.id);
           processedOutEvents.add(breakEndEvent.id);
         } else {
-          console.log(`[DEBUG] No matching break-start found for break-end event ${breakEndEvent.id} at ${breakEndEvent.event_time}.`);
+          // console.log(`[DEBUG] No matching break-start found for break-end event ${breakEndEvent.id} at ${breakEndEvent.event_time}.`);
         }
       }
 
@@ -271,12 +289,12 @@ const midnight = new Date(year, month - 1, day);
       const remainingClockIns = clockInEvents.filter(e => !processedInEvents.has(e.id));
       if (remainingClockIns.length > 0) {
         const pendingClockIn = remainingClockIns[0]; // Process one by one, simplest for now
-        console.log(`[DEBUG] Found ${remainingClockIns.length} remaining unprocessed clock-in(s). Processing open work segment for ${pendingClockIn.id} at ${pendingClockIn.event_time}.`);
+        // console.log(`[DEBUG] Found ${remainingClockIns.length} remaining unprocessed clock-in(s). Processing open work segment for ${pendingClockIn.id} at ${pendingClockIn.event_time}.`);
         
         const { error: insertError } = await supabase
           .from('time_segments')
           .insert({
-            staff_id: staffId, // Use numeric staffId (BUG FIX from original where staffId was string from loop key)
+            staff_id: currentStaffId, // Use numeric staffId (BUG FIX from original where staffId was string from loop key)
             date_worked: dateStr,
             clock_in_event_id: pendingClockIn.id,
             clock_out_event_id: null,
@@ -291,7 +309,7 @@ const midnight = new Date(year, month - 1, day);
         if (insertError) {
           console.error(`[DEBUG] Error creating open work segment for staff ${staffId}, clock-in ${pendingClockIn.id}:`, insertError);
         } else {
-          console.log(`[DEBUG] Successfully created open work segment for clock-in ${pendingClockIn.id}.`);
+          // console.log(`[DEBUG] Successfully created open work segment for clock-in ${pendingClockIn.id}.`);
           processedInEvents.add(pendingClockIn.id); // Mark as processed to avoid reprocessing if logic is extended
         }
       }
@@ -300,12 +318,12 @@ const midnight = new Date(year, month - 1, day);
       const remainingBreakStarts = breakStartEvents.filter(e => !processedInEvents.has(e.id));
       if (remainingBreakStarts.length > 0) {
         const pendingBreakStart = remainingBreakStarts[0];
-        console.log(`[DEBUG] Found ${remainingBreakStarts.length} remaining unprocessed break-start(s). Processing open break segment for ${pendingBreakStart.id} at ${pendingBreakStart.event_time}.`);
+        // console.log(`[DEBUG] Found ${remainingBreakStarts.length} remaining unprocessed break-start(s). Processing open break segment for ${pendingBreakStart.id} at ${pendingBreakStart.event_time}.`);
 
         const { error: insertError } = await supabase
           .from('time_segments')
           .insert({
-            staff_id: staffId, // Use numeric staffId
+            staff_id: currentStaffId, // Use numeric staffId
             date_worked: dateStr,
             clock_in_event_id: pendingBreakStart.id,
             clock_out_event_id: null,
@@ -320,21 +338,22 @@ const midnight = new Date(year, month - 1, day);
         if (insertError) {
           console.error(`[DEBUG] Error creating open break segment for staff ${staffId}, break-start ${pendingBreakStart.id}:`, insertError);
         } else {
-          console.log(`[DEBUG] Successfully created open break segment for break-start ${pendingBreakStart.id}.`);
+          // console.log(`[DEBUG] Successfully created open break segment for break-start ${pendingBreakStart.id}.`);
           processedInEvents.add(pendingBreakStart.id);
         }
       }
-      console.log(`[DEBUG] Finished processing for staff_id: ${staffId}`);
+      // console.log(`[DEBUG] Finished processing for staff_id: ${currentStaffId}`);
+
+      // Regenerate the daily summary only for the staff member we just processed
+      await generateDailySummary(dateStr, currentStaffId);
     }
-    
-    console.log(`[DEBUG] All staff processed for ${dateStr}. Regenerating daily summary...`);
-    await generateDailySummary(dateStr);
-    console.log(`[DEBUG] Daily summary generation complete for ${dateStr}.`);
+
+    // console.log(`[DEBUG] All staff processed for ${dateStr}.`);
     
   } catch (error) {
     console.error('[DEBUG] Critical error in processClockEventsIntoSegments:', error);
   }
-  console.log(`[DEBUG] Exiting processClockEventsIntoSegments for date: ${dateStr}`);
+  // console.log(`[DEBUG] Exiting processClockEventsIntoSegments for date: ${dateStr}`);
 };
 
 /**
@@ -385,19 +404,45 @@ export const processAllClockEvents = async (): Promise<void> => {
  * This aggregates all segments into a daily summary record
  */
 export const generateDailySummary = async (dateStr: string, staffId?: number): Promise<void> => {
+  // console.log(`[DEBUG] Starting generateDailySummary for date: ${dateStr}, staffId: ${staffId}`);
   try {
-    // Fetch all segments for the date
-    const { data: segments, error: segmentsError } = await supabase
+    // Fetch segments for the date (filtered by staff if provided)
+    let segmentsQuery = supabase
       .from('time_segments')
       .select('*')
       .eq('date_worked', dateStr);
+      
+    if (staffId) {
+      segmentsQuery = segmentsQuery.eq('staff_id', staffId);
+      // console.log(`[DEBUG] Filtering segments by staffId: ${staffId}`);
+    }
+    
+    const { data: segments, error: segmentsError } = await segmentsQuery;
       
     if (segmentsError) {
       console.error('Error fetching time segments:', segmentsError);
       return;
     }
     
-    if (!segments || segments.length === 0) return;
+    if (!segments || segments.length === 0) {
+      // If we're processing a specific staff member and they have no segments,
+      // we should delete any existing stale daily summary record
+      if (staffId) {
+        // console.log(`[DEBUG] No segments found for staff ${staffId}, deleting any existing daily summary`);
+        const { error: deleteError } = await supabase
+          .from('time_daily_summary')
+          .delete()
+          .eq('staff_id', staffId)
+          .eq('date_worked', dateStr);
+          
+        if (deleteError) {
+          console.error('Error deleting stale daily summary:', deleteError);
+        } else {
+          // console.log(`[DEBUG] Deleted stale daily summary for staff ${staffId} on ${dateStr}`);
+        }
+      }
+      return;
+    }
     
     // Group segments by staff
     const staffSegments: Record<number, any[]> = {};
@@ -570,7 +615,7 @@ export const addManualClockEvent = async (
 ): Promise<{ success: boolean; error?: any }> => {
   try {
     // Step 1: Insert the clock event directly
-    const eventTime = new Date(`${dateStr}T${timeStr}`);
+    const eventTime = new Date(createSASTTimestamp(dateStr, timeStr));
     const notesValue = notes || 'Manually added by administrator';
     
     console.log(`Adding manual event: ${eventType} at ${dateStr}T${timeStr} for staff ${staffId}`);
@@ -716,7 +761,7 @@ export const addManualClockEvent = async (
           }
 
           // Create the segment
-          console.log(`[DEBUG] addManualClockEvent: Creating ${segmentType} segment: ${s_time} to ${e_time}`);
+          // console.log(`[DEBUG] addManualClockEvent: Creating ${segmentType} segment: ${s_time} to ${e_time}`);
           await supabase
             .from('time_segments')
             .insert({

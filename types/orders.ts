@@ -9,6 +9,9 @@ export interface Customer {
   contact: string;
   email: string;
   telephone: string;
+  // Optional fields used in some UI surfaces
+  contact_person?: string | null;
+  phone?: string | null;
 }
 
 export interface Product {
@@ -32,7 +35,18 @@ export interface OrderAttachment {
   order_id: number;
   file_url: string;
   file_name: string;
+  mime_type: string;
   uploaded_at: string;
+}
+
+export interface FinishedGoodReservation {
+  order_id: number;
+  product_id: number;
+  reserved_quantity: number;
+  product_name?: string;
+  product_internal_code?: string;
+  available_quantity?: number | null;
+  updated_at?: string | null;
 }
 
 export interface Order {
@@ -51,4 +65,6 @@ export interface Order {
   attachments?: OrderAttachment[];
   /** Linked quote */
   quote?: { id: string; quote_number: string; };
-} 
+  /** Optional customer-provided reference string */
+  customer_reference?: string | null;
+}

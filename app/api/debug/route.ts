@@ -12,7 +12,7 @@ export async function GET() {
 
     // Test Supabase connection
     let dbStatus = 'Unknown';
-    let error = null;
+    let error: string | null = null;
     
     try {
       const { data, error: dbError } = await supabase.from('components').select('count').single();

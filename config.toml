@@ -1,0 +1,13 @@
+# Configuration for MCP servers.
+[mcpServers.chrome-devtools]
+# The command to execute the MCP server.
+# Using 'npx' allows running the latest version without a global installation.
+command = "npx"
+
+# Arguments passed to the command.
+args = [
+  "-y",
+  "chrome-devtools-mcp@latest",
+  "--headless=true", # Run Chrome in headless mode (no UI).
+  "--isolated=true"  # Use a temporary, isolated user profile.
+]

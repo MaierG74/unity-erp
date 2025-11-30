@@ -107,7 +107,7 @@ export function ComponentRequirementsTable({ requirements }: { requirements: Com
                   <Popover>
                     <PopoverTrigger>
                       <div className="cursor-help inline-flex items-center">
-                        {req.total_required}
+                        {req.quantity_required}
                         <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
                       </div>
                     </PopoverTrigger>
@@ -116,13 +116,13 @@ export function ComponentRequirementsTable({ requirements }: { requirements: Com
                     </PopoverContent>
                   </Popover>
                 </TableCell>
-                <TableCell className="text-right font-medium">{req.in_stock}</TableCell>
+                <TableCell className="text-right font-medium">{req.quantity_in_stock}</TableCell>
                 <TableCell className="text-right">
-                  {req.on_order > 0 ? (
+                  {req.quantity_on_order > 0 ? (
                     <Popover>
                       <PopoverTrigger>
                         <div className="cursor-help inline-flex items-center">
-                          {req.on_order}
+                          {req.quantity_on_order}
                           <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
                         </div>
                       </PopoverTrigger>
@@ -131,7 +131,7 @@ export function ComponentRequirementsTable({ requirements }: { requirements: Com
                       </PopoverContent>
                     </Popover>
                   ) : (
-                    req.on_order
+                    req.quantity_on_order
                   )}
                 </TableCell>
                 <TableCell className="text-right">

@@ -120,46 +120,45 @@ RETURNS TABLE (
     on_order INT,
     global_apparent_shortfall NUMERIC,
     global_real_shortfall NUMERIC
-) AS $$
-BEGIN
-    RETURN QUERY
-    WITH global_requirements AS (
-        SELECT 
-            c.component_id,
-            SUM(bom.quantity_required * od.quantity) AS total_required,
-            COUNT(DISTINCT od.order_id) AS order_count
-        FROM 
-            public.order_details od
-        JOIN 
-            public.orders o ON od.order_id = o.order_id
-        JOIN 
-            public.order_statuses os ON o.status_id = os.status_id
-        JOIN 
-            public.billofmaterials bom ON od.product_id = bom.product_id
-        JOIN 
-            public.components c ON bom.component_id = c.component_id
-        WHERE 
-            -- Only include open/active orders, not completed or cancelled
-            os.status_name IN ('Open', 'In Progress', 'Approved', 'Partially Fulfilled')
-        GROUP BY 
-            c.component_id
-    )
+)
+LANGUAGE sql
+AS $$
+WITH global_requirements AS (
     SELECT 
-        cs.component_id,
-        cs.internal_code,
-        cs.description,
-        gr.total_required::INTEGER,
-        gr.order_count,
-        cs.in_stock::INTEGER,
-        cs.allocated_to_orders::INTEGER AS on_order,
-        GREATEST(gr.total_required - cs.in_stock, 0)::NUMERIC AS global_apparent_shortfall,
-        GREATEST(gr.total_required - cs.in_stock - cs.allocated_to_orders, 0)::NUMERIC AS global_real_shortfall
+        c.component_id,
+        SUM(bom.quantity_required * od.quantity) AS total_required,
+        COUNT(DISTINCT od.order_id) AS order_count
     FROM 
-        global_requirements gr
+        public.order_details od
     JOIN 
-        public.component_status_mv cs ON gr.component_id = cs.component_id;
-END;
-$$ LANGUAGE plpgsql;
+        public.orders o ON od.order_id = o.order_id
+    JOIN 
+        public.order_statuses os ON o.status_id = os.status_id
+    JOIN 
+        public.billofmaterials bom ON od.product_id = bom.product_id
+    JOIN 
+        public.components c ON bom.component_id = c.component_id
+    WHERE 
+        -- Only include open/active orders, not completed or cancelled
+        os.status_name NOT IN ('Completed', 'Cancelled')
+    GROUP BY 
+        c.component_id
+)
+SELECT 
+    cs.component_id,
+    cs.internal_code,
+    cs.description,
+    gr.total_required::INTEGER,
+    gr.order_count,
+    cs.in_stock::INTEGER,
+    cs.allocated_to_orders::INTEGER AS on_order,
+    GREATEST(gr.total_required - cs.in_stock, 0)::NUMERIC AS global_apparent_shortfall,
+    GREATEST(gr.total_required - cs.in_stock - cs.allocated_to_orders, 0)::NUMERIC AS global_real_shortfall
+FROM 
+    global_requirements gr
+JOIN 
+    public.component_status_mv cs ON gr.component_id = cs.component_id;
+$$;
 
 -- Create a combined function that returns both order-specific and global component status
 CREATE OR REPLACE FUNCTION get_detailed_component_status(p_order_id INT)
@@ -178,133 +177,125 @@ RETURNS TABLE (
     global_real_shortfall NUMERIC,
     order_breakdown JSON,
     on_order_breakdown JSON
-) AS $$
-BEGIN
-    RETURN QUERY
-    WITH 
-    -- Get components needed for this specific order
-    order_components AS (
-        SELECT 
-            c.component_id,
-            SUM(bom.quantity_required * od.quantity) AS order_required
-        FROM 
-            public.order_details od
-        JOIN 
-            public.billofmaterials bom ON od.product_id = bom.product_id
-        JOIN 
-            public.components c ON bom.component_id = c.component_id
-        WHERE 
-            od.order_id = p_order_id
-        GROUP BY 
-            c.component_id
-    ),
-    -- Get total requirements across all open orders
-    global_requirements AS (
-        SELECT 
-            c.component_id,
-            SUM(bom.quantity_required * od.quantity) AS total_required,
-            COUNT(DISTINCT od.order_id) AS order_count
-        FROM 
-            public.order_details od
-        JOIN 
-            public.orders o ON od.order_id = o.order_id
-        JOIN 
-            public.order_statuses os ON o.status_id = os.status_id
-        JOIN 
-            public.billofmaterials bom ON od.product_id = bom.product_id
-        JOIN 
-            public.components c ON bom.component_id = c.component_id
-        WHERE 
-            -- Only include open/active orders, not completed or cancelled
-            os.status_name IN ('Open', 'In Progress', 'Approved', 'Partially Fulfilled')
-        GROUP BY 
-            c.component_id
-    ),
-    -- Get breakdown of which orders need this component
-    order_details AS (
-        SELECT 
-            c.component_id,
-            jsonb_agg(
-                jsonb_build_object(
-                    'order_id', od.order_id,
-                    'quantity', bom.quantity_required * od.quantity,
-                    'order_date', o.order_date,
-                    'status', os.status_name
-                )
-            ) AS order_breakdown
-        FROM 
-            public.order_details od
-        JOIN 
-            public.orders o ON od.order_id = o.order_id
-        JOIN 
-            public.order_statuses os ON o.status_id = os.status_id
-        JOIN 
-            public.billofmaterials bom ON od.product_id = bom.product_id
-        JOIN 
-            public.components c ON bom.component_id = c.component_id
-        WHERE 
-            -- Only include open/active orders, not completed or cancelled
-            os.status_name IN ('Open', 'In Progress', 'Approved', 'Partially Fulfilled')
-            AND c.component_id IN (SELECT component_id FROM order_components)
-        GROUP BY 
-            c.component_id
-    ),
-    -- Get breakdown of supplier orders for these components
-    supplier_orders AS (
-        SELECT 
-            sc.component_id,
-            jsonb_agg(
-                jsonb_build_object(
-                    'supplier_order_id', so.order_id,
-                    'supplier_name', s.name,
-                    'quantity', so.order_quantity,
-                    'received', so.total_received,
-                    'status', sos.status_name,
-                    'order_date', so.order_date
-                )
-            ) AS on_order_breakdown
-        FROM 
-            public.supplier_orders so
-        JOIN 
-            public.suppliercomponents sc ON so.supplier_component_id = sc.supplier_component_id
-        JOIN 
-            public.suppliers s ON sc.supplier_id = s.supplier_id
-        JOIN 
-            public.supplier_order_statuses sos ON so.status_id = sos.status_id
-        WHERE 
-            -- Only include open/active orders
-            sos.status_name IN ('Open', 'In Progress', 'Approved', 'Partially Received')
-            AND sc.component_id IN (SELECT component_id FROM order_components)
-        GROUP BY 
-            sc.component_id
-    )
+)
+LANGUAGE sql
+AS $$
+WITH 
+order_components AS (
     SELECT 
-        cs.component_id,
-        cs.internal_code,
-        cs.description,
-        oc.order_required::INTEGER,
-        gr.total_required::INTEGER,
-        gr.order_count,
-        cs.in_stock::INTEGER,
-        cs.allocated_to_orders::INTEGER AS on_order,
-        GREATEST(oc.order_required - cs.in_stock, 0)::NUMERIC AS apparent_shortfall,
-        GREATEST(oc.order_required - cs.in_stock - cs.allocated_to_orders, 0)::NUMERIC AS real_shortfall,
-        GREATEST(gr.total_required - cs.in_stock, 0)::NUMERIC AS global_apparent_shortfall,
-        GREATEST(gr.total_required - cs.in_stock - cs.allocated_to_orders, 0)::NUMERIC AS global_real_shortfall,
-        COALESCE(od.order_breakdown::JSON, '[]'::JSON) AS order_breakdown,
-        COALESCE(so.on_order_breakdown::JSON, '[]'::JSON) AS on_order_breakdown
+        c.component_id,
+        SUM(bom.quantity_required * od.quantity) AS order_required
     FROM 
-        order_components oc
+        public.order_details od
     JOIN 
-        public.component_status_mv cs ON oc.component_id = cs.component_id
-    JOIN
-        global_requirements gr ON oc.component_id = gr.component_id
-    LEFT JOIN
-        order_details od ON oc.component_id = od.component_id
-    LEFT JOIN
-        supplier_orders so ON oc.component_id = so.component_id;
-END;
-$$ LANGUAGE plpgsql;
+        public.billofmaterials bom ON od.product_id = bom.product_id
+    JOIN 
+        public.components c ON bom.component_id = c.component_id
+    WHERE 
+        od.order_id = p_order_id
+    GROUP BY 
+        c.component_id
+),
+global_requirements AS (
+    SELECT 
+        c.component_id,
+        SUM(bom.quantity_required * od.quantity) AS total_required,
+        COUNT(DISTINCT od.order_id) AS order_count
+    FROM 
+        public.order_details od
+    JOIN 
+        public.orders o ON od.order_id = o.order_id
+    JOIN 
+        public.order_statuses os ON o.status_id = os.status_id
+    JOIN 
+        public.billofmaterials bom ON od.product_id = bom.product_id
+    JOIN 
+        public.components c ON bom.component_id = c.component_id
+    WHERE 
+        os.status_name NOT IN ('Completed', 'Cancelled')
+    GROUP BY 
+        c.component_id
+),
+order_details AS (
+    SELECT 
+        c.component_id,
+        jsonb_agg(
+            jsonb_build_object(
+                'order_id', od.order_id,
+                'quantity', bom.quantity_required * od.quantity,
+                'order_date', o.order_date,
+                'status', os.status_name
+            )
+        ) AS order_breakdown
+    FROM 
+        public.order_details od
+    JOIN 
+        public.orders o ON od.order_id = o.order_id
+    JOIN 
+        public.order_statuses os ON o.status_id = os.status_id
+    JOIN 
+        public.billofmaterials bom ON od.product_id = bom.product_id
+    JOIN 
+        public.components c ON bom.component_id = c.component_id
+    WHERE 
+        os.status_name NOT IN ('Completed', 'Cancelled')
+        AND c.component_id IN (SELECT oc_inner.component_id FROM order_components oc_inner)
+    GROUP BY 
+        c.component_id
+),
+supplier_orders AS (
+    SELECT 
+        sc.component_id,
+        jsonb_agg(
+            jsonb_build_object(
+                'supplier_order_id', so.order_id,
+                'supplier_name', s.name,
+                'quantity', so.order_quantity,
+                'received', so.total_received,
+                'status', sos.status_name,
+                'order_date', so.order_date
+            )
+        ) AS on_order_breakdown
+    FROM 
+        public.supplier_orders so
+    JOIN 
+        public.suppliercomponents sc ON so.supplier_component_id = sc.supplier_component_id
+    JOIN 
+        public.suppliers s ON sc.supplier_id = s.supplier_id
+    JOIN 
+        public.supplier_order_statuses sos ON so.status_id = sos.status_id
+    WHERE 
+        sos.status_name IN ('Open', 'In Progress', 'Approved', 'Partially Received')
+        AND sc.component_id IN (SELECT oc_inner.component_id FROM order_components oc_inner)
+    GROUP BY 
+        sc.component_id
+)
+SELECT 
+    cs.component_id,
+    cs.internal_code,
+    cs.description,
+    oc.order_required::INTEGER,
+    gr.total_required::INTEGER,
+    gr.order_count,
+    cs.in_stock::INTEGER,
+    cs.allocated_to_orders::INTEGER AS on_order,
+    GREATEST(oc.order_required - cs.in_stock, 0)::NUMERIC AS apparent_shortfall,
+    GREATEST(oc.order_required - cs.in_stock - cs.allocated_to_orders, 0)::NUMERIC AS real_shortfall,
+    GREATEST(gr.total_required - cs.in_stock, 0)::NUMERIC AS global_apparent_shortfall,
+    GREATEST(gr.total_required - cs.in_stock - cs.allocated_to_orders, 0)::NUMERIC AS global_real_shortfall,
+    COALESCE(od.order_breakdown::JSON, '[]'::JSON) AS order_breakdown,
+    COALESCE(so.on_order_breakdown::JSON, '[]'::JSON) AS on_order_breakdown
+FROM 
+    order_components oc
+JOIN 
+    public.component_status_mv cs ON oc.component_id = cs.component_id
+JOIN
+    global_requirements gr ON oc.component_id = gr.component_id
+LEFT JOIN
+    order_details od ON oc.component_id = od.component_id
+LEFT JOIN
+    supplier_orders so ON oc.component_id = so.component_id;
+$$;
 
 -- Create a function to link supplier orders to customer orders
 CREATE OR REPLACE FUNCTION link_supplier_order_to_customer_order(
@@ -402,37 +393,25 @@ WITH
             o.order_id IN (SELECT order_id FROM open_orders)
         GROUP BY 
             c.component_id
-    ),
-    
-    -- Get component stock levels
-    component_stock AS (
-        SELECT 
-            c.component_id,
-            COALESCE(c.in_stock, 0) AS in_stock,
-            COALESCE(c.allocated_to_orders, 0) AS allocated_to_orders
-        FROM 
-            public.components c
-        WHERE 
-            c.component_id IN (SELECT component_id FROM all_order_components)
     )
     
     SELECT 
         jsonb_build_object(
             'component_id', aoc.component_id,
-            'internal_code', aoc.internal_code,
-            'description', aoc.description,
+            'internal_code', COALESCE(cs.internal_code, aoc.internal_code),
+            'description', COALESCE(cs.description, aoc.description),
             'total_required', aoc.total_required::INTEGER,
             'order_count', aoc.order_count,
-            'in_stock', cs.in_stock::INTEGER,
-            'allocated_to_orders', cs.allocated_to_orders::INTEGER,
-            'global_apparent_shortfall', GREATEST(aoc.total_required - cs.in_stock, 0)::INTEGER,
-            'global_real_shortfall', GREATEST(aoc.total_required - cs.in_stock - cs.allocated_to_orders, 0)::INTEGER,
+            'in_stock', COALESCE(cs.in_stock, 0)::INTEGER,
+            'allocated_to_orders', COALESCE(cs.allocated_to_orders, 0)::INTEGER,
+            'global_apparent_shortfall', GREATEST(aoc.total_required - COALESCE(cs.in_stock, 0), 0)::INTEGER,
+            'global_real_shortfall', GREATEST(aoc.total_required - COALESCE(cs.in_stock, 0) - COALESCE(cs.allocated_to_orders, 0), 0)::INTEGER,
             'order_breakdown', COALESCE(od.order_breakdown, '[]'::JSONB)
         )
     FROM 
         all_order_components aoc
-    JOIN 
-        component_stock cs ON aoc.component_id = cs.component_id
+    LEFT JOIN 
+        public.component_status_mv cs ON aoc.component_id = cs.component_id
     LEFT JOIN 
         order_details od ON aoc.component_id = od.component_id;
 $$ LANGUAGE SQL; 

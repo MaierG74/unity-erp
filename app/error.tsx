@@ -1,8 +1,5 @@
 'use client'
 
-import { useEffect } from 'react'
-import { Button } from '@/components/ui/button'
-
 export default function Error({
   error,
   reset,
@@ -10,31 +7,18 @@ export default function Error({
   error: Error & { digest?: string }
   reset: () => void
 }) {
-  useEffect(() => {
-    // Log the error to an error reporting service
-    console.error('Application error:', error)
-  }, [error])
-
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-4">
-      <h2 className="text-2xl font-bold">Something went wrong!</h2>
-      <p className="text-muted-foreground">
-        An error occurred while loading this page.
-      </p>
-      <div className="flex gap-2">
-        <Button
-          onClick={() => reset()}
-          variant="default"
-        >
+    <div style={{ padding: '20px', textAlign: 'center' }}>
+      <h2>Something went wrong!</h2>
+      <p>An error occurred while loading this page.</p>
+      <div style={{ marginTop: '20px' }}>
+        <button onClick={() => reset()} style={{ marginRight: '10px', padding: '8px 16px' }}>
           Try again
-        </Button>
-        <Button
-          onClick={() => window.location.href = '/'}
-          variant="outline"
-        >
+        </button>
+        <button onClick={() => window.location.href = '/'} style={{ padding: '8px 16px' }}>
           Go to Home
-        </Button>
+        </button>
       </div>
     </div>
   )
-} 
+}

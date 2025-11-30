@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo, use } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import {
@@ -11,21 +11,30 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Package, Edit, Plus, Trash2, Save, X } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
+import React from 'react';
 import { ImageGallery } from '@/components/features/products/image-gallery';
 import { CategoryDialog } from '@/components/features/products/category-dialog';
 import { ProductBOM } from '@/components/features/products/product-bom';
 import { ProductBOL } from '@/components/features/products/product-bol';
+import ProductCosting from '@/components/features/products/product-costing';
+import { ProductOptionsTab } from '@/components/features/products/ProductOptionsTab';
+import { ProductCutlistTab } from '@/components/features/products/ProductCutlistTab';
 import { useToast } from '@/components/ui/use-toast';
+import { ProductTransactionsTab } from '@/components/features/products/ProductTransactionsTab';
 
 interface ProductDetailPageProps {
-  params: {
+  params: Promise<{
     productId: string;
-  };
+  }>;
 }
 
 interface Product {
@@ -115,10 +124,21 @@ async function fetchProduct(productId: number): Promise<Product | null> {
 }
 
 export default function ProductDetailPage({ params }: ProductDetailPageProps) {
-  const productId = parseInt(params.productId, 10);
+  // Unwrap the params Promise (Next.js 16 requirement)
+  const { productId: productIdParam } = use(params);
+  const productId = parseInt(productIdParam, 10);
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('details');
   const { toast } = useToast();
+  const [editOpen, setEditOpen] = useState(false);
+  const [editCode, setEditCode] = useState('');
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [savingProduct, setSavingProduct] = useState(false);
+  const [addFgQty, setAddFgQty] = useState('');
+  const [addFgLocation, setAddFgLocation] = useState('');
+  const [addingFg, setAddingFg] = useState(false);
+  const [reservationsOpen, setReservationsOpen] = useState(false);
 
   console.log('ProductDetailPage mounted, productId:', productId);
 
@@ -133,10 +153,141 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
     },
   });
 
+  // FG: fetch inventory rows for this product
+  const { data: inventoryRows, refetch: refetchInventory } = useQuery({
+    queryKey: ['productInventory', productId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('product_inventory')
+        .select('product_inventory_id, product_id, quantity_on_hand, location')
+        .eq('product_id', productId);
+      if (error) {
+        console.error('[product-inventory] error', error);
+        return [] as Array<{ product_inventory_id: number; product_id: number; quantity_on_hand: number | string | null; location: string | null }>; 
+      }
+      return data || [];
+    },
+    enabled: Number.isFinite(productId),
+  });
+
+  // FG: fetch active reservations for this product across orders
+  const { data: reservationRows, refetch: refetchReservations } = useQuery({
+    queryKey: ['productReservations', productId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('product_reservations')
+        .select('order_id, product_id, qty_reserved')
+        .eq('product_id', productId);
+      if (error) {
+        console.error('[product-reservations] error', error);
+        return [] as Array<{ order_id: number; product_id: number; qty_reserved: number | string | null }>;
+      }
+      return data || [];
+    },
+    enabled: Number.isFinite(productId),
+  });
+
+  // Derived FG summary
+  const onHandTotal = (inventoryRows || []).reduce((sum, r: any) => sum + Number(r?.quantity_on_hand ?? 0), 0);
+  const reservedTotal = (reservationRows || []).reduce((sum, r: any) => sum + Number(r?.qty_reserved ?? r?.reserved_quantity ?? 0), 0);
+  const availableTotal = Math.max(0, onHandTotal - reservedTotal);
+
+  // Reservations breakdown (for dialog)
+  const reservationsList: Array<{ order_id: number; qty: number }> = (reservationRows || [])
+    .map((r: any) => ({ order_id: Number(r?.order_id), qty: Number(r?.qty_reserved ?? r?.reserved_quantity ?? 0) }))
+    .filter((r) => Number.isFinite(r.order_id) && r.qty > 0);
+  const reservationsByOrderCount = new Set(reservationsList.map((r) => r.order_id)).size;
+  const reservationsListSorted = [...reservationsList].sort((a, b) => (b.order_id - a.order_id));
+  const orderIds = useMemo(() => Array.from(new Set(reservationsListSorted.map((r) => r.order_id))), [reservationsListSorted]);
+
+  // Fetch latest attachment per order (when dialog is open)
+  const { data: orderAttachments } = useQuery({
+    queryKey: ['attachmentsForOrders', orderIds],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('order_attachments')
+        .select('id, order_id, file_url, file_name, uploaded_at')
+        .in('order_id', orderIds);
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: reservationsOpen && orderIds.length > 0,
+  });
+
+  const attachmentsByOrder = useMemo(() => {
+    const map: Record<number, any> = {};
+    (orderAttachments || []).forEach((a: any) => {
+      const prev = map[a.order_id];
+      if (!prev || new Date(a.uploaded_at) > new Date(prev.uploaded_at)) {
+        map[a.order_id] = a;
+      }
+    });
+    return map;
+  }, [orderAttachments]);
+
   // Handle back button
   const handleBack = () => {
     console.log('Back button clicked');
     router.push('/products');
+  };
+
+  const openEdit = () => {
+    setEditCode(product?.internal_code ?? '');
+    setEditName(product?.name ?? '');
+    setEditDescription(product?.description ?? '');
+    setEditOpen(true);
+  };
+
+  const handleSaveProduct = async () => {
+    if (!product) return;
+    setSavingProduct(true);
+    try {
+      const { error } = await supabase
+        .from('products')
+        .update({
+          internal_code: editCode.trim(),
+          name: editName.trim(),
+          description: editDescription || null,
+        })
+        .eq('product_id', productId);
+      if (error) throw error;
+      toast({ title: 'Product updated', description: 'Your changes have been saved.' });
+      setEditOpen(false);
+      refetch();
+    } catch (e: any) {
+      console.error('[save-product]', e);
+      toast({ title: 'Failed to update product', description: e?.message || 'Please try again', variant: 'destructive' });
+    } finally {
+      setSavingProduct(false);
+    }
+  };
+
+  const handleAddFg = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const qty = Number(addFgQty);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast({ title: 'Invalid quantity', description: 'Enter a positive number', variant: 'destructive' });
+      return;
+    }
+    setAddingFg(true);
+    try {
+      const res = await fetch(`/api/products/${productId}/add-fg`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quantity: qty, location: addFgLocation || null }),
+      });
+      const json = await res.json().catch(() => ({} as any));
+      if (!res.ok) throw new Error(json?.error || 'Failed to add finished goods');
+      toast({ title: 'Finished goods added', description: `Added ${qty} to on-hand${addFgLocation ? ' @ ' + addFgLocation : ''}.` });
+      setAddFgQty('');
+      setAddFgLocation('');
+      await Promise.all([refetchInventory(), refetchReservations()]);
+    } catch (e: any) {
+      console.error('[add-fg]', e);
+      toast({ title: 'Failed to add finished goods', description: e?.message || 'Please try again', variant: 'destructive' });
+    } finally {
+      setAddingFg(false);
+    }
   };
 
   if (isLoading) {
@@ -171,10 +322,37 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
             {product.internal_code}
           </div>
         </div>
-        <Button>
-          <Edit className="h-4 w-4 mr-2" />
-          Edit Product
-        </Button>
+        <Dialog open={editOpen} onOpenChange={setEditOpen}>
+          <Button onClick={openEdit}>
+            <Edit className="h-4 w-4 mr-2" />
+            Edit Product
+          </Button>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Product</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="grid gap-2">
+                <Label htmlFor="code">Product Code</Label>
+                <Input id="code" value={editCode} onChange={(e) => setEditCode(e.target.value)} />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="name">Name</Label>
+                <Input id="name" value={editName} onChange={(e) => setEditName(e.target.value)} />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="desc">Description</Label>
+                <Textarea id="desc" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} rows={4} />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
+              <Button onClick={handleSaveProduct} disabled={savingProduct}>
+                {savingProduct ? 'Saving…' : 'Save Changes'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
@@ -183,7 +361,11 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
           <TabsTrigger value="images">Images</TabsTrigger>
           <TabsTrigger value="categories">Categories</TabsTrigger>
           <TabsTrigger value="bom">Bill of Materials</TabsTrigger>
+          <TabsTrigger value="cutlist">Cutlist</TabsTrigger>
           <TabsTrigger value="bol">Bill of Labor</TabsTrigger>
+          <TabsTrigger value="options">Options</TabsTrigger>
+          <TabsTrigger value="costing">Costing</TabsTrigger>
+          <TabsTrigger value="transactions">Transactions</TabsTrigger>
         </TabsList>
         
         <TabsContent value="details" className="space-y-4">
@@ -195,12 +377,12 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
               </CardHeader>
               <CardContent className="flex justify-center">
                 {product.primary_image ? (
-                  <div className="relative h-60 w-60 rounded-md overflow-hidden">
+                  <div className="relative h-60 w-60 rounded-md overflow-hidden bg-card ring-0 dark:bg-white/5 dark:ring-1 dark:ring-white/10">
                     <Image 
                       src={product.primary_image}
                       alt={product.name}
                       fill
-                      className="object-contain"
+                      className="object-contain dark:brightness-110 dark:drop-shadow-[0_8px_24px_rgba(0,0,0,0.85)]"
                     />
                   </div>
                 ) : (
@@ -261,6 +443,96 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
               </CardContent>
             </Card>
           </div>
+
+          {/* Finished-Goods Inventory Summary */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Finished-Goods Inventory</CardTitle>
+              <CardDescription>On-hand, reserved, and available quantities for this product.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="rounded-md border p-4">
+                  <div className="text-sm text-muted-foreground">On Hand</div>
+                  <div className="text-2xl font-semibold mt-1">{onHandTotal}</div>
+                </div>
+                <div className="rounded-md border p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm text-muted-foreground">Reserved (all orders)</div>
+                    {reservationsListSorted.length > 0 && (
+                      <button type="button" className="text-xs text-primary hover:underline" onClick={() => setReservationsOpen(true)}>
+                        View
+                      </button>
+                    )}
+                  </div>
+                  <div className="text-2xl font-semibold mt-1">{reservedTotal}</div>
+                </div>
+                <div className="rounded-md border p-4">
+                  <div className="text-sm text-muted-foreground">Available</div>
+                  <div className="text-2xl font-semibold mt-1">{availableTotal}</div>
+                </div>
+              </div>
+              {Array.isArray(inventoryRows) && inventoryRows.length > 0 && (
+                <div className="mt-4 text-sm text-muted-foreground">
+                  Locations tracked: {inventoryRows.filter((r: any) => r.location).length} / {inventoryRows.length}
+                </div>
+              )}
+              {Array.isArray(reservationRows) && reservationRows.length > 0 && (
+                <div className="mt-2 text-sm text-muted-foreground">
+                  Active reservations across {new Set(reservationRows.map((r: any) => r.order_id)).size} order(s).
+                </div>
+              )}
+
+              {/* Add Finished Goods */}
+              <form onSubmit={handleAddFg} className="mt-6 grid grid-cols-1 sm:grid-cols-6 gap-3">
+                <div className="sm:col-span-2">
+                  <Label htmlFor="fg-qty">Add Quantity</Label>
+                  <Input id="fg-qty" type="number" min="0" step="1" value={addFgQty} onChange={(e) => setAddFgQty(e.target.value)} placeholder="e.g. 5" />
+                </div>
+                <div className="sm:col-span-3">
+                  <Label htmlFor="fg-loc">Location (optional)</Label>
+                  <Input id="fg-loc" value={addFgLocation} onChange={(e) => setAddFgLocation(e.target.value)} placeholder="Leave blank for primary" />
+                </div>
+                <div className="sm:col-span-1 flex items-end">
+                  <Button type="submit" disabled={addingFg || !addFgQty} className="w-full">
+                    {addingFg ? 'Adding…' : 'Add FG'}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+
+          {/* Reservations dialog */}
+          <Dialog open={reservationsOpen} onOpenChange={setReservationsOpen}>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Reserved across {reservationsByOrderCount} order(s)</DialogTitle>
+                <DialogDescription>Click an order to open its page or open the latest PDF attachment.</DialogDescription>
+              </DialogHeader>
+              <div className="divide-y">
+                {reservationsListSorted.map((r) => {
+                  const att = attachmentsByOrder[r.order_id];
+                  return (
+                    <div key={r.order_id} className="flex items-center justify-between py-2">
+                      <div className="flex items-center gap-2">
+                        <Link className="text-primary hover:underline" href={`/orders/${r.order_id}`}>Order #{r.order_id}</Link>
+                        <span className="text-sm text-muted-foreground">Qty {r.qty}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {att?.file_url ? (
+                          <a className="text-sm text-primary hover:underline" href={att.file_url} target="_blank" rel="noopener noreferrer">
+                            Open PDF
+                          </a>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">No attachment</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         <TabsContent value="images" className="space-y-4">
@@ -351,9 +623,33 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
         <TabsContent value="bom" className="space-y-4">
           <ProductBOM productId={product.product_id} />
         </TabsContent>
+
+        <TabsContent value="cutlist" className="space-y-4">
+          <ProductCutlistTab productId={product.product_id} />
+        </TabsContent>
         
         <TabsContent value="bol" className="space-y-4">
           <ProductBOL productId={product.product_id} />
+        </TabsContent>
+
+        <TabsContent value="options" className="space-y-4">
+          <ProductOptionsTab productId={product.product_id} />
+        </TabsContent>
+
+        <TabsContent value="costing" className="space-y-4">
+          <ProductCosting productId={product.product_id} />
+        </TabsContent>
+
+        <TabsContent value="transactions" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Product Transactions</CardTitle>
+              <CardDescription>Per-product finished-good activity feed.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ProductTransactionsTab productId={product.product_id} />
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>
