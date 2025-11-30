@@ -1,10 +1,12 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ShoppingCart, Package, AlertCircle, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { ShoppingCart, Package, AlertCircle, Loader2, Mail, CheckCircle2 } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -13,7 +15,22 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import Link from 'next/link';
+import { toast } from 'sonner';
+import { format } from 'date-fns';
+import { cn } from '@/lib/utils';
 
 type ComponentData = {
   component_id: number;
@@ -26,6 +43,44 @@ type OrdersTabProps = {
 };
 
 export function OrdersTab({ component }: OrdersTabProps) {
+  const queryClient = useQueryClient();
+  const [sendingFollowUp, setSendingFollowUp] = useState<number | null>(null);
+  const [responseDialogOpen, setResponseDialogOpen] = useState(false);
+  const [selectedResponse, setSelectedResponse] = useState<any>(null);
+
+  // Send follow-up email for a specific purchase order
+  const sendFollowUpEmail = async (purchaseOrderId: number, qNumber: string) => {
+    setSendingFollowUp(purchaseOrderId);
+    try {
+      const response = await fetch('/api/send-po-follow-up', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ purchaseOrderId }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        toast.success('Follow-up Sent', {
+          description: result.message,
+        });
+        // Refresh follow-up data
+        queryClient.invalidateQueries({ queryKey: ['purchaseOrderFollowUps', purchaseOrderId] });
+        queryClient.invalidateQueries({ queryKey: ['component', component.component_id, 'follow-ups'] });
+      } else {
+        toast.error('Failed to send follow-up', {
+          description: result.error || 'Unknown error',
+        });
+      }
+    } catch (error: any) {
+      toast.error('Error', {
+        description: error.message || 'Failed to send follow-up email',
+      });
+    } finally {
+      setSendingFollowUp(null);
+    }
+  };
+
   // Fetch purchase orders
   const { data: purchaseOrders = [], isLoading: isLoadingPO } = useQuery({
     queryKey: ['component', component.component_id, 'purchase-orders'],
@@ -130,6 +185,52 @@ export function OrdersTab({ component }: OrdersTabProps) {
     enabled: products.length > 0,
   });
 
+  // Get unique PO IDs for follow-up query
+  const poIds = [...new Set(purchaseOrders.map((po: any) => po.purchase_order_id).filter(Boolean))];
+
+  // Fetch follow-up responses for these purchase orders
+  const { data: followUpResponses = [] } = useQuery({
+    queryKey: ['component', component.component_id, 'follow-ups', poIds],
+    queryFn: async () => {
+      if (poIds.length === 0) return [];
+      
+      const { data, error } = await supabase
+        .from('component_follow_up_emails')
+        .select(`
+          id,
+          purchase_order_id,
+          supplier_name,
+          sent_at,
+          status,
+          response:supplier_follow_up_responses(
+            status,
+            expected_delivery_date,
+            notes,
+            responded_at
+          )
+        `)
+        .in('purchase_order_id', poIds)
+        .order('sent_at', { ascending: false });
+
+      if (error) throw error;
+      
+      // Normalize response (Supabase returns array for 1-to-many)
+      return (data || []).map((item: any) => ({
+        ...item,
+        response: Array.isArray(item.response) ? item.response[0] : item.response
+      }));
+    },
+    enabled: poIds.length > 0,
+  });
+
+  // Create a map of PO ID to latest follow-up response
+  const followUpByPO = new Map<number, any>();
+  for (const followUp of followUpResponses) {
+    if (followUp.purchase_order_id && !followUpByPO.has(followUp.purchase_order_id)) {
+      followUpByPO.set(followUp.purchase_order_id, followUp);
+    }
+  }
+
   const isLoading = isLoadingPO || isLoadingProducts || isLoadingOrders;
 
   if (isLoading) {
@@ -193,46 +294,118 @@ export function OrdersTab({ component }: OrdersTabProps) {
             <CardTitle>Purchase Orders</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>PO Number</TableHead>
-                  <TableHead>Supplier Code</TableHead>
-                  <TableHead className="text-right">Ordered</TableHead>
-                  <TableHead className="text-right">Received</TableHead>
-                  <TableHead className="text-right">Pending</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {purchaseOrders.map((po: any) => {
-                  const pending = (po.order_quantity || 0) - (po.total_received || 0);
-                  return (
-                    <TableRow key={po.order_id}>
-                      <TableCell>
-                        <Link
-                          href={`/purchasing/purchase-orders/${po.purchase_order_id}`}
-                          className="text-blue-600 hover:underline font-medium"
-                        >
-                          {po.purchase_order?.q_number || `PO #${po.purchase_order_id}`}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="font-mono text-sm">
-                        {po.suppliercomponents?.supplier_code || '-'}
-                      </TableCell>
-                      <TableCell className="text-right">{po.order_quantity || 0}</TableCell>
-                      <TableCell className="text-right">{po.total_received || 0}</TableCell>
-                      <TableCell className="text-right font-semibold text-blue-600">
-                        {pending}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{po.status?.status_name || 'Unknown'}</Badge>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            <TooltipProvider>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>PO Number</TableHead>
+                    <TableHead>Supplier Code</TableHead>
+                    <TableHead className="text-right">Ordered</TableHead>
+                    <TableHead className="text-right">Received</TableHead>
+                    <TableHead className="text-right">Pending</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-center">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {purchaseOrders.map((po: any) => {
+                    const pending = (po.order_quantity || 0) - (po.total_received || 0);
+                    const followUp = followUpByPO.get(po.purchase_order_id);
+                    const hasResponse = followUp?.response?.responded_at;
+                    const isSending = sendingFollowUp === po.purchase_order_id;
+                    const qNumber = po.purchase_order?.q_number || `PO #${po.purchase_order_id}`;
+                    
+                    return (
+                      <TableRow key={po.order_id}>
+                        <TableCell>
+                          <Link
+                            href={`/purchasing/purchase-orders/${po.purchase_order_id}`}
+                            className="text-blue-600 hover:underline font-medium"
+                          >
+                            {qNumber}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">
+                          {po.suppliercomponents?.supplier_code || '-'}
+                        </TableCell>
+                        <TableCell className="text-right">{po.order_quantity || 0}</TableCell>
+                        <TableCell className="text-right">{po.total_received || 0}</TableCell>
+                        <TableCell className="text-right font-semibold text-blue-600">
+                          {pending}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{po.status?.status_name || 'Unknown'}</Badge>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            {/* Follow-up button */}
+                            {pending > 0 && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 px-2 text-blue-600 border-blue-300 hover:bg-blue-50"
+                                    onClick={() => sendFollowUpEmail(po.purchase_order_id, qNumber)}
+                                    disabled={isSending}
+                                  >
+                                    {isSending ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <Mail className="h-4 w-4" />
+                                    )}
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>Send follow-up email to supplier</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
+                            {/* Response indicator - clickable to view full response */}
+                            {hasResponse && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    className="flex items-center p-1 rounded hover:bg-green-50 transition-colors"
+                                    onClick={() => {
+                                      setSelectedResponse({ ...followUp, qNumber });
+                                      setResponseDialogOpen(true);
+                                    }}
+                                  >
+                                    <CheckCircle2 className="h-4 w-4 text-green-600" />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p className="text-xs">Click to view full response</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
+                            {/* Sent indicator (no response yet) */}
+                            {followUp && !hasResponse && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div className="flex items-center">
+                                    <Mail className="h-4 w-4 text-amber-500" />
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <div className="text-xs">
+                                    <p className="font-medium">Follow-up sent</p>
+                                    <p className="text-muted-foreground">
+                                      {format(new Date(followUp.sent_at), 'PP')} - Awaiting response
+                                    </p>
+                                  </div>
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TooltipProvider>
           </CardContent>
         </Card>
       )}
@@ -337,6 +510,97 @@ export function OrdersTab({ component }: OrdersTabProps) {
             </CardContent>
           </Card>
         )}
+
+      {/* Supplier Response Dialog */}
+      <Dialog open={responseDialogOpen} onOpenChange={setResponseDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-green-600" />
+              Supplier Response
+            </DialogTitle>
+          </DialogHeader>
+          {selectedResponse && (
+            <div className="space-y-4">
+              {/* PO Reference */}
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Purchase Order</span>
+                <Link 
+                  href={`/purchasing/purchase-orders/${selectedResponse.purchase_order_id}`}
+                  className="font-medium text-blue-600 hover:underline"
+                >
+                  {selectedResponse.qNumber}
+                </Link>
+              </div>
+
+              {/* Supplier */}
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Supplier</span>
+                <span className="font-medium">{selectedResponse.supplier_name}</span>
+              </div>
+
+              {/* Status */}
+              {selectedResponse.response?.status && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Status</span>
+                  <Badge 
+                    variant="outline"
+                    className={cn(
+                      selectedResponse.response.status === 'on_track' && 'bg-green-50 border-green-300 text-green-700',
+                      selectedResponse.response.status === 'delayed' && 'bg-amber-50 border-amber-300 text-amber-700',
+                      selectedResponse.response.status === 'issue' && 'bg-red-50 border-red-300 text-red-700'
+                    )}
+                  >
+                    {selectedResponse.response.status === 'on_track' && 'On Track'}
+                    {selectedResponse.response.status === 'delayed' && 'Delayed'}
+                    {selectedResponse.response.status === 'issue' && 'Issue'}
+                    {!['on_track', 'delayed', 'issue'].includes(selectedResponse.response.status) && selectedResponse.response.status}
+                  </Badge>
+                </div>
+              )}
+
+              {/* Expected Delivery Date - always show, indicate if not provided */}
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Expected Delivery</span>
+                {selectedResponse.response?.expected_delivery_date ? (
+                  <span className="font-medium">
+                    {format(new Date(selectedResponse.response.expected_delivery_date), 'PPP')}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground italic">Not provided</span>
+                )}
+              </div>
+
+              {/* Response Date */}
+              {selectedResponse.response?.responded_at && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Responded</span>
+                  <span className="text-muted-foreground">
+                    {format(new Date(selectedResponse.response.responded_at), 'PPP · p')}
+                  </span>
+                </div>
+              )}
+
+              {/* Notes */}
+              {selectedResponse.response?.notes && (
+                <div className="pt-2 border-t">
+                  <p className="text-sm text-muted-foreground mb-1">Notes from Supplier</p>
+                  <div className="bg-muted/50 rounded-md p-3">
+                    <p className="text-sm whitespace-pre-wrap">{selectedResponse.response.notes}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Follow-up sent date */}
+              {selectedResponse.sent_at && (
+                <div className="pt-2 border-t text-xs text-muted-foreground">
+                  Follow-up sent: {format(new Date(selectedResponse.sent_at), 'PPP · p')}
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { CategoriesTab } from '@/components/features/inventory/CategoriesTab';
 import { OnOrderTab } from '@/components/features/inventory/OnOrderTab';
 import { TransactionsTab } from '@/components/features/inventory/TransactionsTab';
 import { ReportsTab } from '@/components/features/inventory/ReportsTab';
+import { ManualStockIssueTab } from '@/components/features/inventory/ManualStockIssueTab';
 
 export default function InventoryPage() {
   return (
@@ -21,10 +22,11 @@ export default function InventoryPage() {
 
       {/* Tabs */}
       <Tabs defaultValue="components" className="space-y-6">
-        <TabsList className="grid w-full max-w-3xl grid-cols-5">
+        <TabsList className="grid w-full max-w-4xl grid-cols-6">
           <TabsTrigger value="components">Components</TabsTrigger>
           <TabsTrigger value="categories">Categories</TabsTrigger>
           <TabsTrigger value="on-order">On Order</TabsTrigger>
+          <TabsTrigger value="stock-issue">Stock Issue</TabsTrigger>
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
           <TabsTrigger value="reports">Reports</TabsTrigger>
         </TabsList>
@@ -39,6 +41,10 @@ export default function InventoryPage() {
 
         <TabsContent value="on-order" className="space-y-4">
           <OnOrderTab />
+        </TabsContent>
+
+        <TabsContent value="stock-issue" className="space-y-4">
+          <ManualStockIssueTab />
         </TabsContent>
 
         <TabsContent value="transactions" className="space-y-4">

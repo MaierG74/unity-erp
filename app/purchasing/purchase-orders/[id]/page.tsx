@@ -22,7 +22,7 @@ import { BulkReceiveModal } from './BulkReceiveModal';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertCircle, ArrowLeft, Loader2, CheckCircle2, Mail, Pencil, Save, X, Trash2, ChevronDown } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Loader2, CheckCircle2, Mail, Pencil, Save, X, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -616,6 +616,8 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
   const [emailDialogLoading, setEmailDialogLoading] = useState(false);
   const [emailRows, setEmailRows] = useState<EmailRecipientRow[]>([]);
+  const [sendingFollowUp, setSendingFollowUp] = useState(false);
+  const [emailHistoryExpanded, setEmailHistoryExpanded] = useState(false);
   const [receiveModalOpen, setReceiveModalOpen] = useState(false);
   const [bulkReceiveModalOpen, setBulkReceiveModalOpen] = useState(false);
   const [selectedOrderForReceive, setSelectedOrderForReceive] = useState<SupplierOrderWithParent | null>(null);
@@ -664,6 +666,84 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     queryFn: () => fetchPurchaseOrderById(id),
     refetchOnMount: true,
     staleTime: 0, // Always consider data stale so it refetches when invalidated
+  });
+
+  // Fetch email history for this purchase order
+  const { data: emailHistory } = useQuery({
+    queryKey: ['purchaseOrderEmails', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('purchase_order_emails')
+        .select(`
+          email_id,
+          supplier_id,
+          recipient_email,
+          cc_emails,
+          status,
+          message_id,
+          error_message,
+          sent_at,
+          supplier:suppliers(name)
+        `)
+        .eq('purchase_order_id', id)
+        .order('sent_at', { ascending: false });
+      if (error) throw error;
+      return data as Array<{
+        email_id: number;
+        supplier_id: number;
+        recipient_email: string;
+        cc_emails: string[];
+        status: 'sent' | 'failed';
+        message_id: string | null;
+        error_message: string | null;
+        sent_at: string;
+        supplier: { name: string } | null;
+      }>;
+    },
+    enabled: !!id,
+  });
+
+  // Fetch follow-up responses for this purchase order
+  const { data: followUpResponses } = useQuery({
+    queryKey: ['purchaseOrderFollowUps', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('component_follow_up_emails')
+        .select(`
+          id,
+          supplier_name,
+          sent_at,
+          status,
+          response:supplier_follow_up_responses(
+            status,
+            expected_delivery_date,
+            notes,
+            responded_at,
+            line_item_responses
+          )
+        `)
+        .eq('purchase_order_id', id)
+        .order('sent_at', { ascending: false });
+      if (error) throw error;
+      // Normalize response (Supabase returns array for 1-to-many)
+      return (data || []).map((item: any) => ({
+        ...item,
+        response: Array.isArray(item.response) ? item.response[0] : item.response
+      })) as Array<{
+        id: number;
+        supplier_name: string;
+        sent_at: string;
+        status: string;
+        response?: {
+          status: string | null;
+          expected_delivery_date: string | null;
+          notes: string | null;
+          responded_at: string | null;
+          line_item_responses: any[] | null;
+        };
+      }>;
+    },
+    enabled: !!id,
   });
 
   useEffect(() => {
@@ -745,6 +825,46 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
         setEmailDialogLoading(false);
       },
     });
+  };
+
+  // Send follow-up email for outstanding items
+  const sendFollowUpEmail = async () => {
+    setSendingFollowUp(true);
+    try {
+      const response = await fetch('/api/send-po-follow-up', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ purchaseOrderId: id }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        toast({
+          title: '✅ Follow-up Sent',
+          description: result.message,
+          duration: 5000,
+        });
+        // Refresh email history
+        queryClient.invalidateQueries({ queryKey: ['purchaseOrderEmails', id] });
+      } else {
+        toast({
+          title: 'Failed to send follow-up',
+          description: result.error || 'Unknown error',
+          variant: 'destructive',
+          duration: 6000,
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to send follow-up email',
+        variant: 'destructive',
+        duration: 6000,
+      });
+    } finally {
+      setSendingFollowUp(false);
+    }
   };
 
   const handleOpenReceiveModal = (order: SupplierOrder) => {
@@ -983,6 +1103,8 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           duration: 6000,
         });
       }
+      // Refresh email history after sending
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrderEmails', id] });
     },
     onError: (error: Error) => {
       toast({
@@ -1381,6 +1503,139 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
               {isApproved && (
                 <div className="text-sm text-muted-foreground">
                   Approved on {purchaseOrder.approved_at ? format(new Date(purchaseOrder.approved_at), 'PPP') : 'Unknown'}
+                </div>
+              )}
+
+              {/* Email History & Follow-up - Collapsible */}
+              {isApproved && ((emailHistory && emailHistory.length > 0) || purchaseOrder.supplier_orders?.some(o => 
+                (o.order_quantity - (o.total_received || 0)) > 0
+              )) && (
+                <div className="pt-2 border-t">
+                  <button
+                    onClick={() => setEmailHistoryExpanded(!emailHistoryExpanded)}
+                    className="w-full flex items-center justify-between text-sm font-medium hover:bg-muted/50 rounded-md py-1 px-1 -mx-1"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Mail className="h-4 w-4" />
+                      Email Activity
+                      {emailHistory && emailHistory.length > 0 && (
+                        <Badge variant="secondary" className="text-[10px] h-5">
+                          {emailHistory.length}
+                        </Badge>
+                      )}
+                      {followUpResponses && followUpResponses.some(f => f.response?.responded_at) && (
+                        <Badge variant="default" className="text-[10px] h-5 bg-green-600">
+                          {followUpResponses.filter(f => f.response?.responded_at).length} response{followUpResponses.filter(f => f.response?.responded_at).length !== 1 ? 's' : ''}
+                        </Badge>
+                      )}
+                    </span>
+                    {emailHistoryExpanded ? (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </button>
+                  
+                  {emailHistoryExpanded && (
+                    <div className="mt-2 space-y-3">
+                      {/* Supplier Responses */}
+                      {followUpResponses && followUpResponses.some(f => f.response?.responded_at) && (
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Supplier Responses</p>
+                          {followUpResponses.filter(f => f.response?.responded_at).map((followUp) => {
+                            const resp = followUp.response;
+                            const statusColors: Record<string, string> = {
+                              on_track: 'bg-green-100 border-green-300 text-green-800',
+                              delayed: 'bg-amber-100 border-amber-300 text-amber-800',
+                              issue: 'bg-red-100 border-red-300 text-red-800',
+                            };
+                            const statusLabels: Record<string, string> = {
+                              on_track: 'On Track',
+                              delayed: 'Delayed',
+                              issue: 'Issue',
+                            };
+                            return (
+                              <div
+                                key={followUp.id}
+                                className={cn(
+                                  "text-xs p-2 rounded-md border",
+                                  statusColors[resp?.status || ''] || 'bg-blue-50 border-blue-200'
+                                )}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className="font-medium">{followUp.supplier_name}</span>
+                                  <Badge variant="outline" className={cn("text-[10px]", statusColors[resp?.status || ''])}>
+                                    {statusLabels[resp?.status || ''] || resp?.status || 'Responded'}
+                                  </Badge>
+                                </div>
+                                {resp?.expected_delivery_date && (
+                                  <div className="text-muted-foreground mt-1">
+                                    Expected: {format(new Date(resp.expected_delivery_date), 'PP')}
+                                  </div>
+                                )}
+                                {resp?.notes && (
+                                  <div className="mt-1 italic">"{resp.notes}"</div>
+                                )}
+                                <div className="text-muted-foreground mt-1">
+                                  Responded: {resp?.responded_at ? format(new Date(resp.responded_at), 'PP · p') : 'Unknown'}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Email History List */}
+                      {emailHistory && emailHistory.length > 0 && (
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Emails Sent</p>
+                          <div className="space-y-2 max-h-24 overflow-y-auto">
+                            {emailHistory.map((email) => (
+                              <div
+                                key={email.email_id}
+                                className={cn(
+                                  "text-xs p-2 rounded-md border",
+                                  email.status === 'sent' ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"
+                                )}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className="font-medium truncate">
+                                    {email.supplier?.name || 'Unknown'}
+                                  </span>
+                                  <Badge variant={email.status === 'sent' ? 'default' : 'destructive'} className="text-[10px] ml-2">
+                                    {email.status === 'sent' ? 'Sent' : 'Failed'}
+                                  </Badge>
+                                </div>
+                                <div className="text-muted-foreground">
+                                  {format(new Date(email.sent_at), 'PP · p')}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Follow-up button */}
+                      {purchaseOrder.supplier_orders?.some(o => 
+                        (o.order_quantity - (o.total_received || 0)) > 0
+                      ) && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full text-blue-600 border-blue-300 hover:bg-blue-50"
+                          onClick={sendFollowUpEmail}
+                          disabled={sendingFollowUp}
+                        >
+                          {sendingFollowUp ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <Mail className="h-4 w-4 mr-2" />
+                          )}
+                          Send Follow-up
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>

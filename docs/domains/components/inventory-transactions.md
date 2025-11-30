@@ -61,6 +61,78 @@ Canonical specification for `inventory_transactions` and how movements affect on
   - Log `user_id` from session
   - Validate permissions and prevent zero‑delta writes
 
+## Stock Adjustment UI (Client)
+The Transactions tab on the component detail page (`/inventory/components/[id]`) includes:
+
+### Current Stock Balance Banner
+- Prominent display of current `quantity_on_hand` at the top of the Transactions tab
+- Blue gradient card with icon for visual emphasis
+- "Stock Adjustment" button for quick access to adjustment dialog
+
+### Stock Adjustment Dialog
+Accessible via the "Stock Adjustment" button, the dialog provides:
+
+**Adjustment Types:**
+- **Set To** — Enter the counted quantity (system calculates delta)
+- **Add** — Add units to current stock
+- **Subtract** — Remove units from current stock
+
+**Reason Codes (mandatory):**
+| Code | Label | Description |
+|------|-------|-------------|
+| `stock_count` | Stock Count Variance | Discrepancy found during stock take |
+| `damage` | Damage/Spoilage | Items damaged or spoiled |
+| `theft` | Theft/Loss | Items lost or stolen |
+| `data_entry_error` | Data Entry Correction | Correcting previous entry error |
+| `found_stock` | Found Stock | Previously unrecorded stock found |
+| `quality_rejection` | Quality Rejection | Items failed quality check |
+| `sample_usage` | Sample/Testing | Used for samples or testing |
+| `write_off` | Write-off | Obsolete or expired stock |
+| `cycle_count` | Cycle Count | Regular cycle count adjustment |
+| `other` | Other | Other reason (requires notes) |
+
+**Validation:**
+- Reason is required for all adjustments
+- "Other" reason requires additional notes
+- Large adjustments (>50 units or >50% of current stock) show a warning
+- Zero-delta adjustments are prevented
+
+**Audit Trail:**
+- Records `user_id`, `transaction_date`, and full reason text
+- Transaction appears in history with "ADJUSTMENT" type badge
+- Running balance is recalculated and displayed
+
+### Best Practices (from ERP industry standards)
+1. **Mandatory reason codes** — Every adjustment must have a documented reason
+2. **Approval workflow** — Large adjustments should trigger review (future enhancement)
+3. **Cycle counting** — Regular partial counts between full stock takes
+4. **Real-time visibility** — Current balance always visible on Transactions tab
+5. **Full audit trail** — Who, when, why for every adjustment
+
+## Transaction History Filters
+
+The Transactions tab includes a comprehensive filter panel for analyzing transaction history:
+
+### Filter Options
+- **Date Range** — From/To date pickers with quick presets (Last 7/30/90 days, This year)
+- **Transaction Type** — All, Purchases (IN), Issues (OUT), Adjustments, Returns
+- **Source** — All, Purchase Orders, Customer Orders, Manual Adjustments
+- **Search** — Free-text search across order numbers, PO numbers, and reasons
+
+### Features
+- Filter badge shows count of matching transactions vs total
+- Statistics cards update to reflect filtered data
+- Export to CSV respects active filters
+- Clear all filters with one click
+
+## Quick Actions
+
+### Create Purchase Order
+The "Create PO" button in the stock balance banner links to `/purchasing/purchase-orders/new?component={id}`, pre-filling the component for quick reordering when stock is low.
+
+### Export to CSV
+Exports filtered transaction history with columns: Date, Type, Quantity, Balance, Order Reference, Reason
+
 ## Reconciliation Queries (Examples)
 - Component movement summary (last 30 days)
 ```sql

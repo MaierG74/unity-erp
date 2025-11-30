@@ -167,20 +167,30 @@ export function OverviewTab({ component }: OverviewTabProps) {
         </CardContent>
       </Card>
 
-      {/* Stock Information Grid */}
+      {/* Stock Information Grid - with subtle gradients */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Current Stock */}
-        <Card>
+        <Card className={cn(
+          isOutOfStock && 'bg-gradient-to-br from-red-50 to-red-100/50 dark:from-red-950/30 dark:to-red-900/20 border-red-200 dark:border-red-800',
+          isLowStock && 'bg-gradient-to-br from-amber-50 to-amber-100/50 dark:from-amber-950/30 dark:to-amber-900/20 border-amber-200 dark:border-amber-800',
+          isInStock && 'bg-gradient-to-br from-green-50 to-green-100/50 dark:from-green-950/30 dark:to-green-900/20 border-green-200 dark:border-green-800'
+        )}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Current Stock</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
+            <Package className={cn(
+              "h-4 w-4",
+              isOutOfStock && 'text-red-600',
+              isLowStock && 'text-amber-600',
+              isInStock && 'text-green-600'
+            )} />
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold">
               <span
                 className={cn(
-                  isOutOfStock && 'text-destructive',
-                  isLowStock && 'text-amber-600'
+                  isOutOfStock && 'text-red-700 dark:text-red-400',
+                  isLowStock && 'text-amber-700 dark:text-amber-400',
+                  isInStock && 'text-green-700 dark:text-green-400'
                 )}
               >
                 {quantityOnHand}
@@ -193,10 +203,10 @@ export function OverviewTab({ component }: OverviewTabProps) {
         </Card>
 
         {/* Reorder Level */}
-        <Card>
+        <Card className="bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-950/30 dark:to-slate-900/20">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Reorder Level</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+            <AlertTriangle className="h-4 w-4 text-slate-500" />
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold">{reorderLevel}</div>
@@ -211,13 +221,13 @@ export function OverviewTab({ component }: OverviewTabProps) {
         </Card>
 
         {/* On Order */}
-        <Card>
+        <Card className="bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-950/30 dark:to-blue-900/20 border-blue-200 dark:border-blue-800">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">On Order</CardTitle>
-            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+            <ShoppingCart className="h-4 w-4 text-blue-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-blue-600">{onOrder}</div>
+            <div className="text-3xl font-bold text-blue-700 dark:text-blue-400">{onOrder}</div>
             <p className="text-xs text-muted-foreground mt-1">
               {onOrder > 0 ? 'Incoming stock' : 'No orders pending'}
             </p>
@@ -225,13 +235,13 @@ export function OverviewTab({ component }: OverviewTabProps) {
         </Card>
 
         {/* Required for Orders */}
-        <Card>
+        <Card className="bg-gradient-to-br from-purple-50 to-purple-100/50 dark:from-purple-950/30 dark:to-purple-900/20 border-purple-200 dark:border-purple-800">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Required</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            <TrendingUp className="h-4 w-4 text-purple-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-purple-600">
+            <div className="text-3xl font-bold text-purple-700 dark:text-purple-400">
               {requiredForOrders}
             </div>
             <p className="text-xs text-muted-foreground mt-1">

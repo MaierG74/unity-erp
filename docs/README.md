@@ -52,6 +52,8 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - Completed: [`plans/quote-email-plan.md`](plans/quote-email-plan.md) – Quote PDF email integration plan (see [`operations/quote-email-implementation.md`](operations/quote-email-implementation.md) for implementation)
   - New: [`plans/inventory-traceability-po-consolidation-plan.md`](plans/inventory-traceability-po-consolidation-plan.md) – Inventory traceability through purchase cycle, PO consolidation, and reserved inventory system
 - Changelogs: [`changelogs/`](changelogs/)
+  - [`changelogs/inventory-component-ui-improvements-20251130.md`](changelogs/inventory-component-ui-improvements-20251130.md) – Inventory component page UI/UX improvements (header, tabs, gradients)
+  - [`changelogs/stock-adjustment-feature-20251130.md`](changelogs/stock-adjustment-feature-20251130.md) – Stock adjustment feature for inventory corrections after stock take
   - [`changelogs/supplier-returns-rpc-overload-fix-20250113.md`](changelogs/supplier-returns-rpc-overload-fix-20250113.md) – Dropped legacy RPC overload to fix supplier return execution errors
   - [`changelogs/on-order-calculation-fix-20250110.md`](changelogs/on-order-calculation-fix-20250110.md) – Fixed "On Order" calculation discrepancies with INNER JOIN patterns and corrected supplier order statuses
   - [`changelogs/purchase-orders-date-filtering-verification-20250115.md`](changelogs/purchase-orders-date-filtering-verification-20250115.md) – Purchase orders date filtering verification and documentation
