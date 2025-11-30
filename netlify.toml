@@ -1,11 +1,12 @@
 # Netlify configuration for Unity ERP
 [build]
-  command = "npm run build"
+  command = "npm install --legacy-peer-deps && npm run build"
   publish = ".next"
 
 [build.environment]
   NEXT_PUBLIC_SUPABASE_URL = "https://ttlyfhkrsjjrzxiagzpb.supabase.co"
   NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR0bHlmaGtyc2pqcnp4aWFnenBiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjI0OTM4NDAsImV4cCI6MjAzODA2OTg0MH0.DX2KUKr1-0_xOujx7o6E_uwEMKDhJ-m2sFmrsZDOp00"
+  NPM_FLAGS = "--legacy-peer-deps"
 
 
 [[plugins]]
