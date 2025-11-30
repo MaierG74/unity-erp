@@ -4,8 +4,14 @@ import { renderAsync } from '@react-email/render';
 import PurchaseOrderEmail, { PurchaseOrderEmailProps } from '@/emails/purchase-order-email';
 import QuoteEmail, { QuoteEmailProps } from '@/emails/quote-email';
 
-// Initialize Resend with API key
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Lazy initialization of Resend to avoid build-time errors
+function getResendClient(): Resend {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    throw new Error('RESEND_API_KEY environment variable is not set');
+  }
+  return new Resend(apiKey);
+}
 
 /**
  * Send a purchase order notification email to a supplier
@@ -19,6 +25,7 @@ export async function sendPurchaseOrderEmail(
     const html = await renderAsync(PurchaseOrderEmail(data));
 
     // Send the email via Resend
+    const resend = getResendClient();
     const { data: result, error } = await resend.emails.send({
       from: `Unity Purchasing <${process.env.EMAIL_FROM || 'purchasing@example.com'}>`,
       to: [supplierEmail],
@@ -115,6 +122,7 @@ export async function sendQuoteEmail(
     }
 
     // Send the email via Resend
+    const resend = getResendClient();
     const { data: result, error } = await resend.emails.send(emailPayload);
 
     if (error) {
