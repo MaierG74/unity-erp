@@ -85,4 +85,5 @@ export type AttendanceRecord = {
   overtime_hours: number;
   overtime_rate: number;
   notes: string | null;
+  has_open_clock: boolean;
 };

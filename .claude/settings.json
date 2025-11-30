@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit",
+      "Write",
+      "MultiEdit",
+      "Read",
+      "Glob",
+      "Grep",
+      "LS",
+      "Bash",
+      "TodoWrite",
+      "NotebookEdit",
+      "WebFetch",
+      "WebSearch",
+      "Task",
+      "ExitPlanMode",
+      "BashOutput",
+      "KillBash",
+      "mcp__chrome-devtools",
+      "mcp__supabase"
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+.stickyHeader {
+  margin-left: -1rem;
+  margin-right: -1rem;
+  transform: translateY(calc(64px - var(--po-header-offset, 64px)));
+}
+
+@media (min-width: 768px) {
+  .stickyHeader {
+    margin-left: -1.5rem;
+    margin-right: -1.5rem;
+  }
+}
+
+.contentWrapper {
+  padding: 0;
+}
+

@@ -22,14 +22,16 @@ interface AttachmentPreviewModalProps {
   onClose: () => void;
   attachments: Attachment[];
   orderNumber: string;
+  initialAttachmentId?: number | null;
 }
 
 // Only use named export to avoid import confusion
-export function AttachmentPreviewModal({ 
-  isOpen, 
-  onClose, 
-  attachments = [], 
-  orderNumber 
+export function AttachmentPreviewModal({
+  isOpen,
+  onClose,
+  attachments = [],
+  orderNumber,
+  initialAttachmentId = null
 }: AttachmentPreviewModalProps) {
   // State to track the currently selected attachment for full-screen viewing
   const [selectedAttachment, setSelectedAttachment] = useState<Attachment | null>(null);
@@ -50,28 +52,42 @@ export function AttachmentPreviewModal({
       setPreloadedImages({});
       setLoadedPdfs({});
       console.log("Modal opened - forcing refresh of all thumbnails");
-      
+
       // Pre-fetch all PDF files
       const pdfAttachments = attachments.filter(attachment => {
         const fileName = attachment.file_name || "";
         return fileName.toLowerCase().endsWith('.pdf');
       });
-      
+
       console.log(`Pre-fetching ${pdfAttachments.length} PDF attachments...`);
-      
+
       // Initialize loadedPdfs state for tracking
       const initialPdfState: Record<string, boolean> = {};
       pdfAttachments.forEach(pdf => {
         initialPdfState[pdf.file_url] = false;
       });
       setLoadedPdfs(initialPdfState);
-      
+
       // Fetch each PDF with cache forcing
       pdfAttachments.forEach(pdf => {
         preFetchPdf(pdf.file_url);
       });
+
+      // Set initial attachment if provided
+      if (initialAttachmentId !== null) {
+        const initialAttachment = attachments.find(
+          att => (att.attachment_id || att.id) === initialAttachmentId
+        );
+        if (initialAttachment) {
+          console.log("Setting initial attachment:", initialAttachment.file_name);
+          setSelectedAttachment(initialAttachment);
+        }
+      } else {
+        // Reset selected attachment if no initial ID provided
+        setSelectedAttachment(null);
+      }
     }
-  }, [isOpen, attachments]);
+  }, [isOpen, attachments, initialAttachmentId]);
   
   // Function to pre-fetch PDF content with multiple retries
   const preFetchPdf = async (url: string) => {

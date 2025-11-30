@@ -1,19 +1,20 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback, use } from 'react';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { supabase } from '@/lib/supabase';
-import { type Order, type Product, type OrderDetail, type Customer, type OrderAttachment, type OrderStatus } from '@/types/orders';
-import { ComponentRequirement, ProductRequirement, OrderComponentsDialogProps, SupplierInfo, OrderBreakdown, SupplierOrderBreakdown } from '@/types/components';
+import { type Order, type Product, type OrderDetail, type Customer, type OrderAttachment, type OrderStatus, type FinishedGoodReservation } from '@/types/orders';
+import { ComponentRequirement, ProductRequirement, SupplierInfo, SupplierOption } from '@/types/components';
+import { fetchCustomers } from '@/lib/db/customers';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { ArrowLeft, File, Download, Paperclip, Package, Layers, Wrench, Cog, Search, PaintBucket, PlusCircle, Check, Plus, Loader2, AlertCircle, ShoppingCart, ChevronDown, CheckCircle, Trash, FilePlus, Terminal, ChevronRight, Info, ShoppingBag, Users } from 'lucide-react';
+import { ArrowLeft, File, Download, Paperclip, Package, Layers, Wrench, Cog, Search, PaintBucket, PlusCircle, Check, Plus, Loader2, AlertCircle, ShoppingCart, ChevronDown, CheckCircle, Trash, FilePlus, Terminal, ChevronRight, Info, ShoppingBag, Users, RotateCcw, ChevronUp, Warehouse, Printer, Edit, Save, X, ChevronsUpDown } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
@@ -26,17 +27,33 @@ import { useRouter } from 'next/navigation';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { clsx } from 'clsx';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { Switch } from '@/components/ui/switch';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { IssueStockTab } from '@/components/features/orders/IssueStockTab';
+import { OrderDocumentsTab } from '@/components/features/orders/OrderDocumentsTab';
+import { ConsolidatePODialog, SupplierWithDrafts, ExistingDraftPO } from '@/components/features/purchasing/ConsolidatePODialog';
 
 type OrderDetailPageProps = {
-  params: {
+  params: Promise<{
     orderId: string;
-  };
+  }>;
 };
 
 // Format currency function
 function formatCurrency(amount: number | null): string {
   if (amount === null || amount === undefined) return 'N/A';
   return `R ${amount.toFixed(2)}`;
+}
+
+function formatQuantity(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return '0';
+  }
+  const numeric = Number(value);
+  if (Math.abs(numeric - Math.round(numeric)) < 0.001) {
+    return Math.round(numeric).toString();
+  }
+  return numeric.toFixed(2);
 }
 
 // Fetch a single order with all related data
@@ -121,33 +138,61 @@ async function fetchOrderAttachments(orderId: number): Promise<OrderAttachment[]
   }
 }
 
+async function fetchFinishedGoodReservations(orderId: number): Promise<FinishedGoodReservation[]> {
+  const response = await fetch(`/api/orders/${orderId}/fg-reservations`, {
+    method: 'GET',
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to load finished-good reservations');
+  }
+
+  const payload = await response.json();
+  return (payload?.reservations ?? []) as FinishedGoodReservation[];
+}
+
+async function reserveFinishedGoods(orderId: number): Promise<FinishedGoodReservation[]> {
+  const response = await fetch(`/api/orders/${orderId}/reserve-fg`, {
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to reserve finished goods');
+  }
+
+  const payload = await response.json();
+  return (payload?.reservations ?? []) as FinishedGoodReservation[];
+}
+
+async function releaseFinishedGoods(orderId: number): Promise<number | null> {
+  const response = await fetch(`/api/orders/${orderId}/release-fg`, {
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to release finished goods');
+  }
+
+  const payload = await response.json();
+  return (payload?.released ?? null) as number | null;
+}
+
+async function consumeFinishedGoods(orderId: number): Promise<Array<{ product_id: number; consumed_quantity: number }>> {
+  const response = await fetch(`/api/orders/${orderId}/consume-fg`, {
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to consume finished goods');
+  }
+
+  const payload = await response.json();
+  return (payload?.consumed ?? []) as Array<{ product_id: number; consumed_quantity: number }>;
+}
+
 // Function to fetch component requirements for an order
 async function fetchOrderComponentRequirements(orderId: number): Promise<ProductRequirement[]> {
   try {
-    console.log(`[DEBUG] Fetching component requirements for order ${orderId}`);
-    
-    // First get all components across all orders to ensure we have global totals
-    const { data: globalComponents, error: globalError } = await supabase.rpc(
-      'get_all_component_requirements'
-    );
-    
-    if (globalError) {
-      console.error(`[ERROR] Error fetching global component requirements:`, globalError);
-      // Continue anyway with null/empty data
-    }
-    
-    // Create a map of component IDs to their global requirements
-    const globalRequirementsMap = globalComponents ?
-      globalComponents.reduce((map: Record<number, any>, item: any) => {
-        if (item && item.component_id) {
-          map[item.component_id] = item;
-        }
-        return map;
-      }, {}) : {};
-      
-    console.log(`[DEBUG] Retrieved global requirements for ${Object.keys(globalRequirementsMap).length} components`);
-    
-    // Get the order details with products
     const { data: orderDetails, error: orderError } = await supabase
       .from('order_details')
       .select(`
@@ -163,227 +208,147 @@ async function fetchOrderComponentRequirements(orderId: number): Promise<Product
         )
       `)
       .eq('order_id', orderId);
-    
+
     if (orderError) {
-      console.error(`[ERROR] Error fetching order details:`, orderError);
+      console.error('[components] Failed to fetch order details', orderError);
       throw new Error('Failed to fetch order details');
     }
-    
-    console.log(`[DEBUG] Found ${orderDetails?.length || 0} order details`);
-    
+
     if (!orderDetails || orderDetails.length === 0) {
       return [];
     }
-    
-    // Use the detailed component status function that includes global requirements
-    const { data: componentStatus, error: statusError } = await supabase.rpc(
-      'get_detailed_component_status',
-      { p_order_id: orderId }
+
+    const productIds = Array.from(
+      new Set(
+        orderDetails
+          .map((detail) => detail.product_id)
+          .filter((id): id is number => typeof id === 'number' && Number.isFinite(id))
+      )
     );
-    
-    if (statusError) {
-      console.error(`[ERROR] Error fetching detailed component status:`, statusError);
-      // Don't throw here, just continue with null/empty data
-    }
-    
-    console.log(`[DEBUG] Retrieved component status for ${componentStatus?.length || 0} components`);
-    // Log a sample of the data to debug the issue
-    if (componentStatus && componentStatus.length > 0) {
-      console.log(`[DEBUG] Sample component data:`, JSON.stringify(componentStatus[0], null, 2));
-    }
-    
-    // Create a map of component IDs to their status - safely handle null/undefined
-    const componentStatusMap = componentStatus ?
-      componentStatus.reduce((map: Record<number, any>, item: any) => {
-        if (item && item.component_id) {
-          map[item.component_id] = item;
-        }
-        return map;
-      }, {}) : {};
-    
-    // Fetch component order history for this order - wrap in try/catch
-    let orderHistoryMap: Record<number, any[]> = {};
-    
-    try {
-      const { data: orderHistory, error: historyError } = await supabase.rpc(
-        'get_order_component_history',
-        { p_order_id: orderId }
-      );
-      
-      if (historyError) {
-        console.error(`[ERROR] Error fetching order history:`, historyError);
-        // Continue anyway with empty history
-      } else if (orderHistory) {
-        // Safely create the history map
-        orderHistoryMap = orderHistory.reduce((map: Record<number, any[]>, item: any) => {
-          if (item && item.component_id) {
-            if (!map[item.component_id]) {
-              map[item.component_id] = [];
-            }
-            map[item.component_id].push(item);
-          }
-          return map;
-        }, {});
-      }
-    } catch (historyError) {
-      console.error(`[ERROR] Exception fetching order history:`, historyError);
-      // Continue with empty history map
-    }
-    
-    // Process each order detail to get component requirements
-    const requirements = await Promise.all(
-      orderDetails.map(async (detail) => {
-        try {
-          console.log(`[DEBUG] Processing order detail ${detail.order_detail_id} for product ${detail.product_id}`);
-          
-          // Get bill of materials for this product
-          const { data: bomData, error: bomError } = await supabase
+
+    const [statusResult, historyResult, bomResult] = await Promise.all([
+      supabase.rpc('get_detailed_component_status', { p_order_id: orderId }),
+      supabase.rpc('get_order_component_history', { p_order_id: orderId }),
+      productIds.length > 0
+        ? supabase
             .from('billofmaterials')
             .select(`
-              bom_id,
-              quantity_required,
+              product_id,
               component_id,
+              quantity_required,
               component:components(
                 component_id,
                 internal_code,
                 description
-              ),
-              supplierComponent:suppliercomponents(
-                supplier_component_id,
-                supplier:suppliers(
-                  supplier_id,
-                  name
-                ),
-                price
               )
             `)
-            .eq('product_id', detail.product_id);
-          
-          if (bomError) {
-            console.error(`[ERROR] Error fetching BOM for product ${detail.product_id}:`, bomError);
-            throw new Error('Failed to fetch bill of materials');
+            .in('product_id', productIds)
+        : Promise.resolve({ data: [], error: null })
+    ]);
+
+    if (bomResult.error) {
+      console.error('[components] Failed to fetch bill of materials', bomResult.error);
+      throw new Error('Failed to load bill of materials');
+    }
+
+    if (statusResult.error) {
+      console.error('[components] Failed to fetch component status', statusResult.error);
+    }
+
+    if (historyResult.error) {
+      console.error('[components] Failed to fetch component history', historyResult.error);
+    }
+
+    const componentStatusMap = new Map<number, any>();
+    (statusResult.data ?? []).forEach((item: any) => {
+      if (item?.component_id) {
+        componentStatusMap.set(item.component_id, item);
+      }
+    });
+
+    const historyMap = new Map<number, any[]>();
+    (historyResult.data ?? []).forEach((entry: any) => {
+      if (!entry?.component_id) return;
+      if (!historyMap.has(entry.component_id)) {
+        historyMap.set(entry.component_id, []);
+      }
+      historyMap.get(entry.component_id)!.push(entry);
+    });
+
+    const bomByProduct = new Map<number, any[]>();
+    (bomResult.data ?? []).forEach((row: any) => {
+      if (!row?.product_id || !row?.component) return;
+      if (!bomByProduct.has(row.product_id)) {
+        bomByProduct.set(row.product_id, []);
+      }
+      bomByProduct.get(row.product_id)!.push(row);
+    });
+
+    return orderDetails.map((detail) => {
+      const bomRows = bomByProduct.get(detail.product_id) ?? [];
+
+      const components = bomRows
+        .map((bomRow) => {
+          const componentId = bomRow.component_id;
+          const component = bomRow.component;
+
+          if (!componentId || !component) {
+            return null;
           }
-          
-          console.log(`[DEBUG] Found ${bomData?.length || 0} BOM items for product ${detail.product_id}`);
-          
-          if (!bomData || bomData.length === 0) {
-            return {
-              order_detail_id: detail.order_detail_id,
-              product_id: detail.product_id,
-              product_name: detail.product?.name || 'Unknown Product',
-              order_quantity: detail.quantity,
-              components: []
-            } as ProductRequirement;
-          }
-          
-          // Process components and their requirements
-          const components = bomData.map(bomItem => {
-            const componentId = bomItem.component_id;
-            const component = bomItem.component;
-            const status = componentStatusMap[componentId];
-            
-            if (!component) {
-              console.error(`[ERROR] Component ${componentId} not found in component data`);
-              return null;
-            }
-            
-            // Use the computed values from our database function
-            // or calculate fallbacks if they're not available
-            const requiredQuantity = detail.quantity * parseFloat(bomItem.quantity_required);
-            const inStock = status ? status.in_stock : 0;
-            const onOrder = status ? status.on_order : 0;
-            const apparentShortfall = status ? status.apparent_shortfall : Math.max(requiredQuantity - inStock, 0);
-            const realShortfall = status ? status.real_shortfall : Math.max(requiredQuantity - inStock - onOrder, 0);
-            const isCovered = realShortfall <= 0 && apparentShortfall > 0;
-            
-            // Process supplier options
-            const supplierOptions = Array.isArray(bomItem.supplierComponent) ?
-              bomItem.supplierComponent
-                .filter(sc => sc && sc.supplier)
-                .map(sc => ({
-                  supplier: sc.supplier,
-                  price: sc.price,
-                  supplier_component_id: sc.supplier_component_id
-                })) : [];
-            
-            // Find the lowest price supplier option
-            const selectedSupplier = supplierOptions.length > 0 ?
-              supplierOptions.reduce((lowest, current) => {
-                return (current.price < lowest.price) ? current : lowest;
-              }, supplierOptions[0]) : null;
-              
-            // Get global requirements for this component
-            const globalRequirements = globalRequirementsMap[componentId];
-            
-            // Add the global requirement fields from detailed component status and global requirements
-            const totalRequiredAllOrders = globalRequirements ? 
-              globalRequirements.total_required : 
-              (status ? status.total_required : requiredQuantity);
-                
-            const orderCount = globalRequirements ? 
-              globalRequirements.order_count : 
-              (status ? status.order_count : 1);
-                
-            const globalApparentShortfall = globalRequirements ? 
-              globalRequirements.global_apparent_shortfall : 
-              (status ? status.global_apparent_shortfall : apparentShortfall);
-                
-            const globalRealShortfall = globalRequirements ? 
-              globalRequirements.global_real_shortfall : 
-              (status ? status.global_real_shortfall : realShortfall);
-                
-            const orderBreakdown = globalRequirements ? 
-              globalRequirements.order_breakdown || [] : 
-              (status ? status.order_breakdown || [] : []);
-            
-            return {
-              component_id: componentId,
-              internal_code: component.internal_code,
-              description: component.description,
-              quantity_required: requiredQuantity,
-              quantity_in_stock: inStock,
-              quantity_on_order: onOrder,
-              apparent_shortfall: apparentShortfall,
-              real_shortfall: realShortfall,
-              is_covered_by_orders: isCovered,
-              history: orderHistoryMap[componentId] || [],
-              supplier_options: supplierOptions,
-              selected_supplier: selectedSupplier,
-              // Add global requirement fields
-              total_required_all_orders: totalRequiredAllOrders,
-              order_count: orderCount,
-              global_apparent_shortfall: globalApparentShortfall,
-              global_real_shortfall: globalRealShortfall,
-              order_breakdown: orderBreakdown
-            } as ComponentRequirement;
-          }).filter(Boolean) as ComponentRequirement[];
-          
+
+          const status = componentStatusMap.get(componentId);
+          const requiredQuantity = Number(detail.quantity ?? 0) * Number(bomRow.quantity_required ?? 0);
+          const quantityInStock = Number(status?.in_stock ?? 0);
+          const quantityOnOrder = Number(status?.on_order ?? 0);
+          const apparentShortfall = Number(
+            status?.apparent_shortfall ?? Math.max(requiredQuantity - quantityInStock, 0)
+          );
+          const realShortfall = Number(
+            status?.real_shortfall ?? Math.max(requiredQuantity - quantityInStock - quantityOnOrder, 0)
+          );
+          const totalRequiredAllOrders = Number(status?.total_required ?? requiredQuantity);
+          const orderCount = Number(status?.order_count ?? 1);
+          const globalApparentShortfall = Number(
+            status?.global_apparent_shortfall ?? Math.max(totalRequiredAllOrders - quantityInStock, 0)
+          );
+          const globalRealShortfall = Number(
+            status?.global_real_shortfall ?? Math.max(totalRequiredAllOrders - quantityInStock - quantityOnOrder, 0)
+          );
+
           return {
-            order_detail_id: detail.order_detail_id,
-            product_id: detail.product_id,
-            product_name: detail.product?.name || 'Unknown Product',
-            order_quantity: detail.quantity,
-            components
-          } as ProductRequirement;
-        } catch (error) {
-          console.error(`[ERROR] Error processing order detail ${detail.order_detail_id}:`, error);
-          return {
-            order_detail_id: detail.order_detail_id,
-            product_id: detail.product_id,
-            product_name: detail.product?.name || 'Unknown Product',
-            order_quantity: detail.quantity,
-            components: [],
-            error: 'Failed to process components'
-          } as ProductRequirement;
-        }
-      })
-    );
-    
-    console.log(`[DEBUG] Processed ${requirements.length} product requirements with components`);
-    
-    return requirements;
+            component_id: componentId,
+            internal_code: component.internal_code,
+            description: component.description,
+            quantity_required: requiredQuantity,
+            quantity_in_stock: quantityInStock,
+            quantity_on_order: quantityOnOrder,
+            apparent_shortfall: apparentShortfall,
+            real_shortfall: realShortfall,
+            order_breakdown: Array.isArray(status?.order_breakdown) ? status.order_breakdown : [],
+            on_order_breakdown: Array.isArray(status?.on_order_breakdown) ? status.on_order_breakdown : [],
+            history: historyMap.get(componentId) ?? [],
+            total_required_all_orders: totalRequiredAllOrders,
+            order_count: orderCount,
+            global_apparent_shortfall: globalApparentShortfall,
+            global_real_shortfall: globalRealShortfall,
+            supplier_options: [],
+            selected_supplier: null,
+            draft_po_quantity: Number(status?.draft_po_quantity ?? 0),
+            draft_po_breakdown: Array.isArray(status?.draft_po_breakdown) ? status.draft_po_breakdown : [],
+          } as ComponentRequirement;
+        })
+        .filter((comp): comp is ComponentRequirement => Boolean(comp));
+
+      return {
+        order_detail_id: detail.order_detail_id,
+        product_id: detail.product_id,
+        product_name: detail.product?.name || 'Unknown Product',
+        order_quantity: detail.quantity,
+        components,
+      } as ProductRequirement;
+    });
   } catch (error) {
-    console.error(`[ERROR] Error in fetchOrderComponentRequirements:`, error);
+    console.error('[components] Error building order component requirements', error);
     throw error;
   }
 }
@@ -391,258 +356,183 @@ async function fetchOrderComponentRequirements(orderId: number): Promise<Product
 // Function to fetch component suppliers for ordering
 async function fetchComponentSuppliers(orderId: number) {
   try {
-    console.log(`[DEBUG] Fetching component suppliers for order ${orderId}`);
-    
-    // First, get the component requirements for this order
-    const requirements = await fetchOrderComponentRequirements(orderId);
-    
-    // Filter to only components with a real shortfall
-    const componentsWithShortfall = requirements.flatMap(req => 
-      req.components
-        .filter(comp => comp.real_shortfall > 0) // Use real shortfall (after accounting for on-order)
-        .map(comp => ({
-          component_id: comp.component_id,
-          internal_code: comp.internal_code,
-          description: comp.description,
-          shortfall: comp.real_shortfall,
-          quantity_required: comp.quantity_required,
-          quantity_on_order: comp.quantity_on_order,
-          // Add global requirement data
-          total_required_all_orders: comp.total_required_all_orders,
-          order_count: comp.order_count,
-          global_apparent_shortfall: comp.global_apparent_shortfall,
-          global_real_shortfall: comp.global_real_shortfall
-        }))
+    const { data: statusData, error: statusError } = await supabase.rpc('get_detailed_component_status', {
+      p_order_id: orderId,
+    });
+
+    if (statusError) {
+      console.error('[suppliers] Failed to load component status', statusError);
+      return [];
+    }
+
+    const componentsWithShortfall = (statusData ?? []).filter(
+      (item: any) => 
+        Number(item?.real_shortfall ?? 0) > 0 || 
+        Number(item?.global_real_shortfall ?? 0) > 0
     );
-    
-    console.log(`[DEBUG] Found ${componentsWithShortfall.length} components with shortfall`);
-    
+
     if (componentsWithShortfall.length === 0) {
       return [];
     }
-    
-    // For each component with shortfall, find supplier options
-    let allSupplierComponents: any[] = [];
-    
-    for (const comp of componentsWithShortfall) {
-      const componentId = comp.component_id;
-      
-      if (!componentId) {
-        console.error(`[ERROR] Missing component ID for:`, comp);
-        continue;
-      }
-      
-      const { data, error } = await supabase
-        .from('suppliercomponents')
-        .select(`
-          supplier_component_id,
-          price,
-          supplier:suppliers(
-            supplier_id,
-            name,
-            contact_info
-          )
-        `)
-        .eq('component_id', componentId);
-      
-      if (error) {
-        console.error(`[ERROR] Error fetching suppliers for component ${componentId}:`, error);
-        continue;
-      }
-      
-      if (!data || data.length === 0) {
-        console.log(`[DEBUG] No suppliers found for component ${componentId}`);
-        continue;
-      }
-      
-      // Add missing fields needed by the UI
-      for (const supplierComponent of data) {
-        if (supplierComponent.supplier?.supplier_id) {
-          // Fetch emails for this supplier
-          const { data: emails, error: emailError } = await supabase
-            .from('supplier_emails')
-            .select('email, is_primary')
-            .eq('supplier_id', supplierComponent.supplier.supplier_id);
-          
-          if (!emailError && emails) {
-            // Add emails array to the supplier object
-            supplierComponent.supplier.emails = emails.map(e => e.email);
-          } else {
-            // Empty array if no emails or error
-            supplierComponent.supplier.emails = [];
-          }
-          
-          // Add more required fields with default values
-          supplierComponent.supplier.address = '';
-          supplierComponent.supplier.phone = '';
-          supplierComponent.supplier.contact_person = '';
-        }
-      }
-      
-      // Add valid supplier components to our list
-      const validSupplierComponents = data.filter(d => 
-        d.supplier && d.supplier_component_id && d.price !== null
-      );
-      
-      // Attach the component and shortfall info to each supplier component
-      const supplierComponentsWithInfo = validSupplierComponents.map(sc => ({
-        ...sc,
-        component: {
-          component_id: comp.component_id,
-          internal_code: comp.internal_code,
-          description: comp.description
-        },
-        shortfall: comp.shortfall,
-        quantity_required: comp.quantity_required,
-        quantity_on_order: comp.quantity_on_order,
-        // Add global requirement data
-        total_required_all_orders: comp.total_required_all_orders,
-        order_count: comp.order_count,
-        global_apparent_shortfall: comp.global_apparent_shortfall,
-        global_real_shortfall: comp.global_real_shortfall,
-        selectedSupplier: {
-          supplier: sc.supplier,
-          price: sc.price,
-          supplier_component_id: sc.supplier_component_id
-        },
-        supplierOptions: [{
-          supplier: sc.supplier,
-          price: sc.price,
-          supplier_component_id: sc.supplier_component_id
-        }]
-      }));
-      
-      allSupplierComponents = [...allSupplierComponents, ...supplierComponentsWithInfo];
-    }
-    
-    console.log(`[DEBUG] Found ${allSupplierComponents.length} supplier components total`);
-    
-    if (allSupplierComponents.length === 0) {
+
+    const componentMetaMap = new Map<number, any>();
+    const componentIds: number[] = [];
+
+    componentsWithShortfall.forEach((item: any) => {
+      if (!item?.component_id) return;
+      componentMetaMap.set(item.component_id, item);
+      componentIds.push(item.component_id);
+    });
+
+    const { data: supplierComponents, error: supplierError } = await supabase
+      .from('suppliercomponents')
+      .select(`
+        supplier_component_id,
+        component_id,
+        price,
+        supplier:suppliers(
+          supplier_id,
+          name,
+          contact_info
+        )
+      `)
+      .in('component_id', componentIds);
+
+    if (supplierError) {
+      console.error('[suppliers] Failed to load supplier components', supplierError);
       return [];
     }
-    
-    // Group supplier components by supplier
-    const supplierGroups = allSupplierComponents.reduce((groups: any[], sc) => {
-      // Find if we already have a group for this supplier
-      const existingGroup = groups.find(g => 
-        g.supplier.supplier_id === sc.supplier.supplier_id
-      );
-      
-      if (existingGroup) {
-        // Check if we already have this component in this supplier group
-        const existingComp = existingGroup.components.find((c: any) => 
-          c.component.component_id === sc.component.component_id
-        );
-        
-        if (existingComp) {
-          // If this supplier already has this component listed, add as another option
-          existingComp.supplierOptions = [
-            ...(existingComp.supplierOptions || []),
-            {
-              supplier: sc.supplier,
-              price: sc.price,
-              supplier_component_id: sc.supplier_component_id
-            }
-          ];
-          
-          // If the new option is cheaper, make it the selected one
-          if (sc.price < existingComp.selectedSupplier.price) {
-            existingComp.selectedSupplier = {
-              supplier: sc.supplier,
-              price: sc.price,
-              supplier_component_id: sc.supplier_component_id
-            };
+
+    if (!supplierComponents || supplierComponents.length === 0) {
+      return [];
+    }
+
+    const supplierIds = Array.from(
+      new Set(
+        supplierComponents
+          .map((sc: any) => sc?.supplier?.supplier_id)
+          .filter((id): id is number => typeof id === 'number' && Number.isFinite(id))
+      )
+    );
+
+    let emailMap = new Map<number, string[]>();
+    if (supplierIds.length > 0) {
+      const { data: supplierEmails, error: emailError } = await supabase
+        .from('supplier_emails')
+        .select('supplier_id, email, is_primary')
+        .in('supplier_id', supplierIds);
+
+      if (emailError) {
+        console.error('[suppliers] Failed to load supplier emails', emailError);
+      } else if (supplierEmails) {
+        emailMap = supplierEmails.reduce((map, row) => {
+          if (!row?.supplier_id || !row?.email) return map;
+          if (!map.has(row.supplier_id)) {
+            map.set(row.supplier_id, []);
           }
-        } else {
-          // Add component to existing supplier group
-          existingGroup.components.push({
-            component: sc.component,
-            shortfall: sc.shortfall,
-            quantity_required: sc.quantity_required,
-            quantity_on_order: sc.quantity_on_order,
-            // Add global requirement fields
-            total_required_all_orders: sc.total_required_all_orders,
-            order_count: sc.order_count,
-            global_apparent_shortfall: sc.global_apparent_shortfall,
-            global_real_shortfall: sc.global_real_shortfall,
-            selectedSupplier: {
-              supplier: sc.supplier,
-              price: sc.price,
-              supplier_component_id: sc.supplier_component_id
-            },
-            supplierOptions: [{
-              supplier: sc.supplier,
-              price: sc.price,
-              supplier_component_id: sc.supplier_component_id
-            }]
-          });
+          const list = map.get(row.supplier_id)!;
+          if (row.is_primary) {
+            list.unshift(row.email);
+          } else {
+            list.push(row.email);
+          }
+          return map;
+        }, new Map<number, string[]>());
+      }
+    }
+
+    const groups = new Map<number, SupplierGroup>();
+
+    supplierComponents.forEach((sc: any) => {
+      const supplier = sc?.supplier;
+      const componentId = sc?.component_id;
+      const componentMeta = componentMetaMap.get(componentId);
+
+      if (!supplier || !componentMeta) {
+        return;
+      }
+
+      const existingGroup = groups.get(supplier.supplier_id);
+      const supplierInfo: SupplierInfo = existingGroup?.supplier ?? {
+        supplier_id: supplier.supplier_id,
+        name: supplier.name,
+        contact_person: supplier.contact_info ?? '',
+        emails: emailMap.get(supplier.supplier_id) ?? [],
+        phone: supplier.contact_info ?? '', // Using contact_info for phone as well since phone column doesn't exist
+      };
+
+      const option: SupplierOption = {
+        supplier: supplierInfo,
+        price: Number(sc.price ?? 0),
+        supplier_component_id: sc.supplier_component_id,
+      };
+
+      const componentEntry = {
+        component: {
+          component_id: componentMeta.component_id,
+          internal_code: componentMeta.internal_code,
+          description: componentMeta.description,
+        },
+        shortfall: Number(componentMeta.real_shortfall ?? 0),
+        quantity_required: Number(componentMeta.order_required ?? 0),
+        quantity_on_order: Number(componentMeta.on_order ?? 0),
+        total_required_all_orders: Number(
+          componentMeta.total_required ?? componentMeta.order_required ?? 0
+        ),
+        order_count: Number(componentMeta.order_count ?? 1),
+        global_apparent_shortfall: Number(componentMeta.global_apparent_shortfall ?? 0),
+        global_real_shortfall: Number(componentMeta.global_real_shortfall ?? 0),
+        selectedSupplier: option,
+        supplierOptions: [option],
+      };
+
+      if (!existingGroup) {
+        groups.set(supplierInfo.supplier_id, {
+          supplier: supplierInfo,
+          components: [componentEntry],
+        });
+        return;
+      }
+
+      const existingComponent = existingGroup.components.find(
+        (entry) => entry.component.component_id === componentEntry.component.component_id
+      );
+
+      if (existingComponent) {
+        existingComponent.supplierOptions.push(option);
+        if (option.price < existingComponent.selectedSupplier.price) {
+          existingComponent.selectedSupplier = option;
         }
       } else {
-        // Create a new supplier group
-        groups.push({
-          supplier: sc.supplier,
-          components: [{
-            component: sc.component,
-            shortfall: sc.shortfall,
-            quantity_required: sc.quantity_required,
-            quantity_on_order: sc.quantity_on_order,
-            // Add global requirement fields
-            total_required_all_orders: sc.total_required_all_orders,
-            order_count: sc.order_count,
-            global_apparent_shortfall: sc.global_apparent_shortfall,
-            global_real_shortfall: sc.global_real_shortfall,
-            selectedSupplier: {
-              supplier: sc.supplier,
-              price: sc.price,
-              supplier_component_id: sc.supplier_component_id
-            },
-            supplierOptions: [{
-              supplier: sc.supplier,
-              price: sc.price,
-              supplier_component_id: sc.supplier_component_id
-            }]
-          }]
-        });
+        existingGroup.components.push(componentEntry);
       }
-      
-      return groups;
-    }, []);
-    
-    // Sort suppliers by those that can provide the most components
-    supplierGroups.sort((a, b) => b.components.length - a.components.length);
-    
-    console.log(`[DEBUG] Grouped into ${supplierGroups.length} supplier groups`);
-    
-    return supplierGroups;
+    });
+
+    return Array.from(groups.values()).sort(
+      (a, b) => b.components.length - a.components.length
+    );
   } catch (error) {
-    console.error(`[ERROR] Error in fetchComponentSuppliers:`, error);
+    console.error('[suppliers] Error assembling supplier options', error);
     return [];
   }
 }
 
-// Define types for suppliers and components
-type SupplierInfo = {
-  supplier_id: number;
-  name: string;
-  contact_person: string;
-  emails: string[];  // Changed from single email to array
-  phone: string;
-};
-
 // Define the SupplierComponent type
 type SupplierComponent = {
-  component: any;
+  component: {
+    component_id: number;
+    internal_code: string;
+    description: string;
+  };
   shortfall: number;
-  // Add global requirement fields
+  quantity_required: number;
+  quantity_on_order: number;
   total_required_all_orders?: number;
   order_count?: number;
   global_apparent_shortfall?: number;
   global_real_shortfall?: number;
-  selectedSupplier: { 
-    supplier_component_id: number;
-    supplier: SupplierInfo; 
-    price: number; 
-  };
+  selectedSupplier: SupplierOption;
+  supplierOptions: SupplierOption[];
 };
 
 // Define the SupplierGroup type
@@ -651,11 +541,49 @@ type SupplierGroup = {
   components: SupplierComponent[];
 };
 
+type SupplierOrderLinePayload = {
+  supplier_component_id: number;
+  order_quantity: number;
+  component_id: number;
+  quantity_for_order: number;
+  quantity_for_stock: number;
+  customer_order_id: number;
+};
+
+type SupplierOrderCreationSuccess = {
+  supplierId: number;
+  supplierName: string;
+  purchaseOrderId: number;
+  supplierOrderIds: number[];
+};
+
+type SupplierOrderCreationFailure = {
+  supplierId: number;
+  supplierName: string;
+  reason: string;
+};
+
+type SupplierOrderCreationSummary = {
+  successes: SupplierOrderCreationSuccess[];
+};
+
+class SupplierOrderCreationError extends Error {
+  public readonly failures: SupplierOrderCreationFailure[];
+  public readonly successes: SupplierOrderCreationSuccess[];
+
+  constructor(failures: SupplierOrderCreationFailure[], successes: SupplierOrderCreationSuccess[]) {
+    super('Failed to create purchase orders for one or more suppliers');
+    this.name = 'SupplierOrderCreationError';
+    this.failures = failures;
+    this.successes = successes;
+  }
+}
+
 // Implement the real purchase order creation function
 async function createComponentPurchaseOrders(
   selectedComponents: Record<number, boolean>,
   supplierGroups: SupplierGroup[],
-  notes: Record<string, string>,
+  notes: Record<number, string>,
   orderQuantities: Record<number, number>,
   allocation: Record<number, { forThisOrder: number; forStock: number }>,
   orderId: string
@@ -674,90 +602,100 @@ async function createComponentPurchaseOrders(
     
     const draftStatusId = statusData.status_id;
     const today = new Date().toISOString();
-    const purchaseOrderIds: number[] = [];
-    
-    // Process each supplier group that has selected components
-    await Promise.all(
-      supplierGroups
-        .filter(group => 
-          group.components.some(c => selectedComponents[c.component.component_id])
-        )
-        .map(async (group) => {
-          // Filter to only selected components
-          const selectedComponentsForSupplier = group.components
-            .filter(c => selectedComponents[c.component.component_id]);
-          
-          if (selectedComponentsForSupplier.length === 0) return;
-          
-          // 1. Create the purchase order
-          const { data: purchaseOrder, error: purchaseOrderError } = await supabase
-            .from('purchase_orders')
-            .insert({
-              order_date: today,
-              status_id: draftStatusId,
-              notes: notes[group.supplier.supplier_id] || '',
-              supplier_id: group.supplier.supplier_id,
-            })
-            .select('purchase_order_id')
-            .single();
+    const purchaseOrderSummaries: SupplierOrderCreationSuccess[] = [];
+    const supplierFailures: SupplierOrderCreationFailure[] = [];
 
-          if (purchaseOrderError) {
-            throw new Error(`Failed to create purchase order for ${group.supplier.name}`);
-          }
-          
-          purchaseOrderIds.push(purchaseOrder.purchase_order_id);
-          
-          // 2. Create supplier orders for each selected component
-          await Promise.all(
-            selectedComponentsForSupplier.map(async (component) => {
-              const componentId = component.component.component_id;
-              // Use orderQuantities if available, otherwise use shortfall
-              const orderQuantity = orderQuantities[componentId] || component.shortfall;
-              
-              // Get allocation or calculate default allocation
-              const componentAllocation = allocation[componentId] || {
-                forThisOrder: Math.min(orderQuantity, component.shortfall),
-                forStock: Math.max(0, orderQuantity - component.shortfall)
-              };
-              
-              // Create supplier order
-              const { data: supplierOrder, error: orderError } = await supabase
-                .from('supplier_orders')
-                .insert({
-                  supplier_component_id: component.selectedSupplier.supplier_component_id,
-                  order_quantity: orderQuantity, // Removed Math.round to keep decimal quantities
-                  order_date: today,
-                  status_id: draftStatusId,
-                  total_received: 0,
-                  purchase_order_id: purchaseOrder.purchase_order_id,
-                })
-                .select('order_id')
-                .single();
-              
-              if (orderError) {
-                throw new Error(`Failed to create order for component ${component.component.internal_code}`);
-              }
-              
-              // 3. Create junction record to link this supplier order to the customer order
-              const { error: junctionError } = await supabase
-                .from('supplier_order_customer_orders')
-                .insert({
-                  supplier_order_id: supplierOrder.order_id,
-                  order_id: parseInt(orderId), // Parse string to number for the database
-                  component_id: componentId,
-                  quantity_for_order: componentAllocation.forThisOrder, // Removed Math.round to keep decimal quantities
-                  quantity_for_stock: componentAllocation.forStock // Removed Math.round to keep decimal quantities
-                });
-              
-              if (junctionError) {
-                throw new Error(`Failed to link component order to customer order: ${junctionError.message}`);
-              }
-            })
-          );
-        })
-    );
-    
-    return purchaseOrderIds;
+    const suppliersToProcess = supplierGroups
+      .filter(group =>
+        group.components.some(c => selectedComponents[c.selectedSupplier.supplier_component_id])
+      )
+      .map(group => {
+        const selectedComponentsForSupplier = group.components
+          .filter(c => selectedComponents[c.selectedSupplier.supplier_component_id]);
+
+        if (selectedComponentsForSupplier.length === 0) {
+          return null;
+        }
+
+        const lineItems: SupplierOrderLinePayload[] = selectedComponentsForSupplier.map(component => {
+          const supplierComponentId = component.selectedSupplier.supplier_component_id;
+          const orderQuantity = orderQuantities[supplierComponentId] ?? component.shortfall;
+          const componentAllocation = allocation[supplierComponentId] || {
+            forThisOrder: Math.min(orderQuantity, component.shortfall),
+            forStock: Math.max(0, orderQuantity - component.shortfall)
+          };
+
+          return {
+            supplier_component_id: supplierComponentId,
+            order_quantity: orderQuantity,
+            component_id: component.component.component_id,
+            quantity_for_order: componentAllocation.forThisOrder,
+            quantity_for_stock: componentAllocation.forStock,
+            customer_order_id: parseInt(orderId, 10)
+          };
+        });
+
+        return {
+          supplierId: group.supplier.supplier_id,
+          supplierName: group.supplier.name,
+          note: notes[group.supplier.supplier_id] || '',
+          lineItems
+        };
+      })
+      .filter((payload): payload is {
+        supplierId: number;
+        supplierName: string;
+        note: string;
+        lineItems: SupplierOrderLinePayload[];
+      } => payload !== null);
+
+    for (const payload of suppliersToProcess) {
+      try {
+        const { data, error: rpcError } = await supabase.rpc('create_purchase_order_with_lines', {
+          supplier_id: payload.supplierId,
+          line_items: payload.lineItems,
+          status_id: draftStatusId,
+          order_date: today,
+          notes: payload.note
+        });
+
+        if (rpcError) {
+          throw rpcError;
+        }
+
+        const rpcResult = Array.isArray(data) ? data?.[0] : data;
+
+        if (!rpcResult || typeof rpcResult.purchase_order_id !== 'number') {
+          throw new Error('Unexpected response when creating purchase order');
+        }
+
+        purchaseOrderSummaries.push({
+          supplierId: payload.supplierId,
+          supplierName: payload.supplierName,
+          purchaseOrderId: rpcResult.purchase_order_id,
+          supplierOrderIds: rpcResult.supplier_order_ids ?? []
+        });
+      } catch (rpcError) {
+        console.error(
+          `[purchase-orders] Failed to create purchase order for supplier ${payload.supplierName}`,
+          rpcError
+        );
+
+        supplierFailures.push({
+          supplierId: payload.supplierId,
+          supplierName: payload.supplierName,
+          reason: rpcError instanceof Error ? rpcError.message : 'Unknown error'
+        });
+      }
+    }
+
+    if (supplierFailures.length > 0) {
+      throw new SupplierOrderCreationError(supplierFailures, purchaseOrderSummaries);
+    }
+
+    return {
+      successes: purchaseOrderSummaries
+    } satisfies SupplierOrderCreationSummary;
   } catch (error) {
     console.error('Error creating purchase orders:', error);
     throw error;
@@ -777,17 +715,34 @@ const OrderComponentsDialog = ({
   onCreated?: () => void;
 }) => {
   const [step, setStep] = useState<'select' | 'review'>('select');
-  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [notes, setNotes] = useState<Record<number, string>>({});
   const [selectedComponents, setSelectedComponents] = useState<Record<number, boolean>>({});
   const [orderQuantities, setOrderQuantities] = useState<Record<number, number>>({});
   const [allocation, setAllocation] = useState<Record<number, { forThisOrder: number; forStock: number }>>({});
   const [apparentShortfallExists, setApparentShortfallExists] = useState(false);
+  const [creationFailures, setCreationFailures] = useState<SupplierOrderCreationFailure[] | null>(null);
+  const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({});
+  const [consolidateDialogOpen, setConsolidateDialogOpen] = useState(false);
+  const [suppliersWithDrafts, setSuppliersWithDrafts] = useState<SupplierWithDrafts[]>([]);
+  const [pendingConsolidationPayload, setPendingConsolidationPayload] = useState<any>(null);
+  const queryClient = useQueryClient();
   
   // Group components by supplier
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery<SupplierGroup[]>({
     queryKey: ['component-suppliers', orderId],
     queryFn: () => fetchComponentSuppliers(Number(orderId)),
+    // Refetch when dialog opens to ensure fresh data
+    refetchOnMount: true,
+    staleTime: 0, // Always consider data stale so it refetches when dialog opens
+    enabled: open, // Only fetch when dialog is open
   });
+
+  // Force refetch when dialog opens
+  useEffect(() => {
+    if (open) {
+      refetch();
+    }
+  }, [open, refetch]);
 
   useEffect(() => {
     if (data) {
@@ -812,12 +767,28 @@ const OrderComponentsDialog = ({
       
       data.forEach(group => {
         group.components.forEach(component => {
-          const componentId = component.component.component_id;
-          quantities[componentId] = component.shortfall;
-          newAllocation[componentId] = {
-            forThisOrder: component.shortfall,
-            forStock: 0
-          };
+          // Use supplier_component_id as key to distinguish same component across different suppliers
+          const key = component.selectedSupplier.supplier_component_id;
+          const perOrderShortfall = component.shortfall;
+          const globalShortfall = component.global_real_shortfall || 0;
+          
+          // Default quantity: use global shortfall if no per-order shortfall
+          const defaultQuantity = perOrderShortfall > 0 ? perOrderShortfall : globalShortfall;
+          quantities[key] = defaultQuantity;
+          
+          // Smart allocation: per-order shortfall goes to "forThisOrder", global-only goes to "forStock"
+          if (perOrderShortfall > 0) {
+            newAllocation[key] = {
+              forThisOrder: perOrderShortfall,
+              forStock: 0
+            };
+          } else {
+            // Global-only shortfall: allocate to stock
+            newAllocation[key] = {
+              forThisOrder: 0,
+              forStock: globalShortfall
+            };
+          }
         });
       });
       
@@ -830,6 +801,7 @@ const OrderComponentsDialog = ({
     setStep('select');
     setNotes({});
     setSelectedComponents({});
+    setCreationFailures(null);
     
     if (data) {
       const quantities: Record<number, number> = {};
@@ -837,12 +809,28 @@ const OrderComponentsDialog = ({
       
       data.forEach(group => {
         group.components.forEach(component => {
-          const componentId = component.component.component_id;
-          quantities[componentId] = component.shortfall;
-          newAllocation[componentId] = {
-            forThisOrder: component.shortfall,
-            forStock: 0
-          };
+          // Use supplier_component_id as key to distinguish same component across different suppliers
+          const key = component.selectedSupplier.supplier_component_id;
+          const perOrderShortfall = component.shortfall;
+          const globalShortfall = component.global_real_shortfall || 0;
+          
+          // Default quantity: use global shortfall if no per-order shortfall
+          const defaultQuantity = perOrderShortfall > 0 ? perOrderShortfall : globalShortfall;
+          quantities[key] = defaultQuantity;
+          
+          // Smart allocation: per-order shortfall goes to "forThisOrder", global-only goes to "forStock"
+          if (perOrderShortfall > 0) {
+            newAllocation[key] = {
+              forThisOrder: perOrderShortfall,
+              forStock: 0
+            };
+          } else {
+            // Global-only shortfall: allocate to stock
+            newAllocation[key] = {
+              forThisOrder: 0,
+              forStock: globalShortfall
+            };
+          }
         });
       });
       
@@ -851,31 +839,38 @@ const OrderComponentsDialog = ({
     }
   };
 
-  const handleSelectComponent = (componentId: number, selected: boolean) => {
+  const handleSelectComponent = (supplierComponentId: number, selected: boolean) => {
     setSelectedComponents(prev => ({
       ...prev,
-      [componentId]: selected,
+      [supplierComponentId]: selected,
     }));
   };
 
-  const handleQuantityChange = (componentId: number, quantity: number) => {
+  const toggleRowExpansion = (componentId: number) => {
+    setExpandedRows(prev => ({
+      ...prev,
+      [componentId]: !prev[componentId],
+    }));
+  };
+
+  const handleQuantityChange = (supplierComponentId: number, quantity: number) => {
     const newQuantity = Math.max(0, quantity);
     setOrderQuantities(prev => ({
       ...prev,
-      [componentId]: newQuantity
+      [supplierComponentId]: newQuantity
     }));
     
     // Update allocation when quantity changes
-    updateAllocation(componentId, newQuantity);
+    updateAllocation(supplierComponentId, newQuantity);
   };
   
-  const updateAllocation = (componentId: number, totalQuantity: number) => {
+  const updateAllocation = (supplierComponentId: number, totalQuantity: number) => {
     // Find the component to get the shortfall
     let shortfall = 0;
     
     data?.forEach(group => {
       group.components.forEach(component => {
-        if (component.component.component_id === componentId) {
+        if (component.selectedSupplier.supplier_component_id === supplierComponentId) {
           shortfall = component.shortfall;
         }
       });
@@ -887,12 +882,12 @@ const OrderComponentsDialog = ({
     
     setAllocation(prev => ({
       ...prev,
-      [componentId]: { forThisOrder, forStock }
+      [supplierComponentId]: { forThisOrder, forStock }
     }));
   };
   
   const handleAllocationChange = (
-    componentId: number, 
+    supplierComponentId: number, 
     field: 'forThisOrder' | 'forStock', 
     value: number
   ) => {
@@ -902,13 +897,13 @@ const OrderComponentsDialog = ({
     let shortfall = 0;
     data?.forEach(group => {
       group.components.forEach(component => {
-        if (component.component.component_id === componentId) {
+        if (component.selectedSupplier.supplier_component_id === supplierComponentId) {
           shortfall = component.shortfall;
         }
       });
     });
     
-    const currentAllocation = allocation[componentId] || { forThisOrder: 0, forStock: 0 };
+    const currentAllocation = allocation[supplierComponentId] || { forThisOrder: 0, forStock: 0 };
     let newAllocation = { ...currentAllocation };
     
     if (field === 'forThisOrder') {
@@ -934,46 +929,337 @@ const OrderComponentsDialog = ({
     
     setOrderQuantities(prev => ({
       ...prev,
-      [componentId]: totalQuantity
+      [supplierComponentId]: totalQuantity
     }));
     
     setAllocation(prev => ({
       ...prev,
-      [componentId]: newAllocation
+      [supplierComponentId]: newAllocation
     }));
   };
 
-  const handleNoteChange = (supplierId: string, note: string) => {
+  const handleNoteChange = (supplierId: number, note: string) => {
     setNotes(prev => ({
       ...prev,
       [supplierId]: note,
     }));
   };
 
-  const handleCreatePurchaseOrders = async () => {
-    try {
-      await createComponentPurchaseOrders(
-        selectedComponents, 
-        data || [], 
-        notes, 
+  const createPurchaseOrdersMutation = useMutation<
+    SupplierOrderCreationSummary,
+    Error,
+    void,
+    { toastId: string }
+  >({
+    mutationFn: async () => {
+      setCreationFailures(null);
+      return createComponentPurchaseOrders(
+        selectedComponents,
+        data || [],
+        notes,
         orderQuantities,
         allocation,
         orderId
       );
-      
-      // Reset form and close dialog
+    },
+    onMutate: () => {
+      const toastId = toast.loading('Creating purchase orders…');
+      return { toastId };
+    },
+    onSuccess: async (result, _, context) => {
+      const createdCount = result.successes.length;
+      const toastMessage =
+        createdCount === 1
+          ? 'Purchase order created successfully!'
+          : `${createdCount} purchase orders created successfully!`;
+
+      if (context?.toastId) {
+        toast.success(toastMessage, { id: context.toastId });
+      } else {
+        toast.success(toastMessage);
+      }
+
       handleReset();
       onOpenChange(false);
       if (onCreated) onCreated();
-      toast.success("Purchase orders created successfully!");
-    } catch (error) {
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['component-suppliers', orderId] }),
+        queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] }),
+        queryClient.invalidateQueries({ queryKey: ['order', orderId] }),
+        // Invalidate all purchase order queries to ensure the new order appears everywhere
+        queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] }),
+        queryClient.invalidateQueries({ queryKey: ['purchase-orders'] }),
+        queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] }),
+      ]);
+    },
+    onError: (error, _, context) => {
       console.error('Error creating purchase orders:', error);
-      toast.error("Failed to create purchase orders. Please try again.");
+
+       if (error instanceof SupplierOrderCreationError) {
+         setCreationFailures(error.failures);
+
+         const supplierList = error.failures.map(failure => failure.supplierName).join(', ');
+         const partialMessage = error.successes.length
+           ? ` Created ${error.successes.length} supplier${error.successes.length > 1 ? 's' : ''} before failing.`
+           : '';
+
+         if (context?.toastId) {
+           toast.error(
+             `Purchase orders failed for: ${supplierList}.${partialMessage}`,
+             { id: context.toastId }
+           );
+         } else {
+           toast.error(`Purchase orders failed for: ${supplierList}.${partialMessage}`);
+         }
+
+         return;
+       }
+
+      if (context?.toastId) {
+        toast.error('Failed to create purchase orders. Please try again.', { id: context.toastId });
+      } else {
+        toast.error('Failed to create purchase orders. Please try again.');
+      }
+    },
+  });
+
+  // Check for existing Draft POs for the selected suppliers
+  const checkForExistingDrafts = async () => {
+    const selectedGroups = (data || [])
+      .filter(group => group.components.some(c => selectedComponents[c.selectedSupplier.supplier_component_id]));
+    
+    console.log('[PO Consolidation] Selected groups:', selectedGroups);
+    console.log('[PO Consolidation] Selected components:', selectedComponents);
+    
+    const supplierIds = selectedGroups.map(group => group.supplier.supplier_id);
+    console.log('[PO Consolidation] Supplier IDs to check:', supplierIds);
+
+    const draftsPerSupplier: SupplierWithDrafts[] = [];
+
+    for (const supplierId of supplierIds) {
+      console.log('[PO Consolidation] Checking supplier:', supplierId);
+      const { data: drafts, error } = await supabase.rpc('get_draft_purchase_orders_for_supplier', {
+        p_supplier_id: supplierId
+      });
+
+      console.log('[PO Consolidation] RPC result for supplier', supplierId, ':', { drafts, error });
+
+      if (!error && drafts && drafts.length > 0) {
+        const supplierName = (data || []).find(g => g.supplier.supplier_id === supplierId)?.supplier.name || 'Unknown';
+        draftsPerSupplier.push({
+          supplierId,
+          supplierName,
+          existingDrafts: drafts.map((d: any) => ({
+            purchase_order_id: d.purchase_order_id,
+            q_number: d.q_number,
+            created_at: d.created_at,
+            notes: d.notes,
+            line_count: Number(d.line_count),
+            total_amount: Number(d.total_amount)
+          }))
+        });
+      }
+    }
+
+    console.log('[PO Consolidation] Drafts per supplier:', draftsPerSupplier);
+    return draftsPerSupplier;
+  };
+
+  const handleCreatePurchaseOrders = async () => {
+    if (createPurchaseOrdersMutation.isPending) return;
+
+    // Check for existing drafts
+    const drafts = await checkForExistingDrafts();
+    
+    if (drafts.length > 0) {
+      // Store the payload for later use
+      const payload = {
+        selectedComponents,
+        supplierGroups: data || [],
+        notes,
+        orderQuantities,
+        allocation,
+        orderId
+      };
+      setPendingConsolidationPayload(payload);
+      setSuppliersWithDrafts(drafts);
+      setConsolidateDialogOpen(true);
+    } else {
+      // No existing drafts, create new POs directly
+      createPurchaseOrdersMutation.mutate();
     }
   };
 
+  // Handle consolidation decision
+  const handleConsolidationConfirm = async (decisions: Record<number, number | 'new'>) => {
+    setConsolidateDialogOpen(false);
+    
+    if (!pendingConsolidationPayload) return;
+
+    const toastId = toast.loading('Creating purchase orders…');
+    
+    try {
+      // Get Draft status ID
+      const { data: statusData, error: statusError } = await supabase
+        .from('supplier_order_statuses')
+        .select('status_id')
+        .eq('status_name', 'Draft')
+        .single();
+
+      if (statusError || !statusData) {
+        throw new Error('Could not find Draft status in the system');
+      }
+
+      const draftStatusId = statusData.status_id;
+      const today = new Date().toISOString();
+      const purchaseOrderSummaries: SupplierOrderCreationSuccess[] = [];
+      const supplierFailures: SupplierOrderCreationFailure[] = [];
+
+      const suppliersToProcess = (pendingConsolidationPayload.supplierGroups as SupplierGroup[])
+        .filter(group =>
+          group.components.some(c => pendingConsolidationPayload.selectedComponents[c.selectedSupplier.supplier_component_id])
+        )
+        .map(group => {
+          const selectedComponentsForSupplier = group.components
+            .filter(c => pendingConsolidationPayload.selectedComponents[c.selectedSupplier.supplier_component_id]);
+
+          if (selectedComponentsForSupplier.length === 0) return null;
+
+          const lineItems: SupplierOrderLinePayload[] = selectedComponentsForSupplier.map(component => {
+            const supplierComponentId = component.selectedSupplier.supplier_component_id;
+            const orderQuantity = pendingConsolidationPayload.orderQuantities[supplierComponentId] ?? component.shortfall;
+            const componentAllocation = pendingConsolidationPayload.allocation[supplierComponentId] || {
+              forThisOrder: Math.min(orderQuantity, component.shortfall),
+              forStock: Math.max(0, orderQuantity - component.shortfall)
+            };
+
+            return {
+              supplier_component_id: supplierComponentId,
+              order_quantity: orderQuantity,
+              component_id: component.component.component_id,
+              quantity_for_order: componentAllocation.forThisOrder,
+              quantity_for_stock: componentAllocation.forStock,
+              customer_order_id: parseInt(pendingConsolidationPayload.orderId, 10)
+            };
+          });
+
+          return {
+            supplierId: group.supplier.supplier_id,
+            supplierName: group.supplier.name,
+            note: pendingConsolidationPayload.notes[group.supplier.supplier_id] || '',
+            lineItems,
+            decision: decisions[group.supplier.supplier_id] || 'new'
+          };
+        })
+        .filter((payload): payload is NonNullable<typeof payload> => payload !== null);
+
+      for (const payload of suppliersToProcess) {
+        try {
+          if (payload.decision !== 'new' && typeof payload.decision === 'number') {
+            // Add to existing PO
+            const { data, error: rpcError } = await supabase.rpc('add_lines_to_purchase_order', {
+              target_purchase_order_id: payload.decision,
+              line_items: payload.lineItems
+            });
+
+            if (rpcError) throw rpcError;
+
+            purchaseOrderSummaries.push({
+              supplierId: payload.supplierId,
+              supplierName: payload.supplierName,
+              purchaseOrderId: payload.decision,
+              supplierOrderIds: data?.[0]?.supplier_order_ids ?? []
+            });
+          } else {
+            // Create new PO
+            const { data, error: rpcError } = await supabase.rpc('create_purchase_order_with_lines', {
+              supplier_id: payload.supplierId,
+              line_items: payload.lineItems,
+              status_id: draftStatusId,
+              order_date: today,
+              notes: payload.note
+            });
+
+            if (rpcError) throw rpcError;
+
+            const rpcResult = Array.isArray(data) ? data?.[0] : data;
+
+            if (!rpcResult || typeof rpcResult.purchase_order_id !== 'number') {
+              throw new Error('Unexpected response when creating purchase order');
+            }
+
+            purchaseOrderSummaries.push({
+              supplierId: payload.supplierId,
+              supplierName: payload.supplierName,
+              purchaseOrderId: rpcResult.purchase_order_id,
+              supplierOrderIds: rpcResult.supplier_order_ids ?? []
+            });
+          }
+        } catch (rpcError) {
+          console.error(`Failed to process order for supplier ${payload.supplierName}`, rpcError);
+          supplierFailures.push({
+            supplierId: payload.supplierId,
+            supplierName: payload.supplierName,
+            reason: rpcError instanceof Error ? rpcError.message : 'Unknown error'
+          });
+        }
+      }
+
+      if (supplierFailures.length > 0 && purchaseOrderSummaries.length === 0) {
+        throw new SupplierOrderCreationError(supplierFailures, purchaseOrderSummaries);
+      }
+
+      // Success
+      const createdCount = purchaseOrderSummaries.length;
+      const addedCount = purchaseOrderSummaries.filter(s => 
+        suppliersWithDrafts.some(d => d.existingDrafts.some(e => e.purchase_order_id === s.purchaseOrderId))
+      ).length;
+      
+      let toastMessage = '';
+      if (addedCount > 0 && addedCount === createdCount) {
+        toastMessage = addedCount === 1 
+          ? 'Items added to existing purchase order!' 
+          : `Items added to ${addedCount} existing purchase orders!`;
+      } else if (addedCount > 0) {
+        toastMessage = `${createdCount - addedCount} new PO(s) created, ${addedCount} existing PO(s) updated!`;
+      } else {
+        toastMessage = createdCount === 1
+          ? 'Purchase order created successfully!'
+          : `${createdCount} purchase orders created successfully!`;
+      }
+
+      toast.success(toastMessage, { id: toastId });
+
+      handleReset();
+      onOpenChange(false);
+      if (onCreated) onCreated();
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['component-suppliers', orderId] }),
+        queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] }),
+        queryClient.invalidateQueries({ queryKey: ['order', orderId] }),
+        queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] }),
+        queryClient.invalidateQueries({ queryKey: ['purchase-orders'] }),
+        queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] }),
+      ]);
+
+    } catch (error) {
+      console.error('Error in consolidation:', error);
+      if (error instanceof SupplierOrderCreationError) {
+        setCreationFailures(error.failures);
+        const supplierList = error.failures.map(f => f.supplierName).join(', ');
+        toast.error(`Purchase orders failed for: ${supplierList}`, { id: toastId });
+      } else {
+        toast.error('Failed to create purchase orders. Please try again.', { id: toastId });
+      }
+    }
+
+    setPendingConsolidationPayload(null);
+  };
+
   if (isLoading) {
-  return (
+    return (
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-[900px]">
           <DialogHeader>
@@ -1008,7 +1294,7 @@ const OrderComponentsDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[900px]">
+      <DialogContent className="sm:max-w-[1200px] max-h-[85vh]">
         <DialogHeader>
           <DialogTitle>Order Components</DialogTitle>
           <DialogDescription>
@@ -1017,6 +1303,23 @@ const OrderComponentsDialog = ({
               : 'Review and confirm your order'}
           </DialogDescription>
         </DialogHeader>
+
+        {creationFailures && creationFailures.length > 0 && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertTitle>Some purchase orders failed</AlertTitle>
+            <AlertDescription>
+              <div className="space-y-1">
+                <p>Please review and retry the following suppliers:</p>
+                {creationFailures.map((failure) => (
+                  <div key={failure.supplierId} className="text-sm">
+                    <span className="font-medium">{failure.supplierName}:</span>{' '}
+                    <span>{failure.reason}</span>
+                  </div>
+                ))}
+              </div>
+            </AlertDescription>
+          </Alert>
+        )}
 
         {step === 'select' && (
           <div className="space-y-6 max-h-[600px] overflow-y-auto">
@@ -1036,122 +1339,182 @@ const OrderComponentsDialog = ({
                       <TableHeader>
                         <TableRow>
                           <TableHead className="w-[50px]"></TableHead>
-                          <TableHead>Component</TableHead>
-                          <TableHead>Shortfall</TableHead>
-                          <TableHead>Order Quantity</TableHead>
-                          <TableHead>Allocation</TableHead>
-                          <TableHead className="text-right">Price</TableHead>
+                          <TableHead className="w-[35%]">Component</TableHead>
+                          <TableHead className="w-[12%]">Shortfall</TableHead>
+                          <TableHead className="w-[12%]">Order Quantity</TableHead>
+                          <TableHead className="w-[20%]">Allocation</TableHead>
+                          <TableHead className="w-[10%] text-right">Price</TableHead>
+                          <TableHead className="w-[50px]"></TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {group.components.map((component) => (
-                          <TableRow key={component.component.component_id}>
-                            <TableCell>
-                              <Checkbox
-                                checked={selectedComponents[component.component.component_id] === true}
-                                onCheckedChange={(checked) =>
-                                  handleSelectComponent(
-                                    component.component.component_id,
-                                    checked === true
-                                  )
-                                }
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <div className="font-medium">
-                                {component.component.internal_code}
-                                {component.total_required_all_orders > component.shortfall && (
-                                  <span className="ml-2 inline-flex items-center text-xs font-medium text-blue-500">
-                                    <Users className="h-3 w-3 mr-1" />
-                                    <span className="sr-only">Required in multiple orders</span>
+                        {group.components.map((component) => {
+                          const supplierComponentId = component.selectedSupplier.supplier_component_id;
+                          const isExpanded = expandedRows[component.component.component_id];
+                          const hasGlobalContext = component.total_required_all_orders > component.shortfall;
+                          const isForStock = component.shortfall === 0 && component.global_real_shortfall > 0;
+                          
+                          return (
+                            <React.Fragment key={supplierComponentId}>
+                              <TableRow className="hover:bg-muted/50">
+                                <TableCell className="py-4">
+                                  <Checkbox
+                                    checked={selectedComponents[supplierComponentId] === true}
+                                    onCheckedChange={(checked) =>
+                                      handleSelectComponent(
+                                        supplierComponentId,
+                                        checked === true
+                                      )
+                                    }
+                                  />
+                                </TableCell>
+                                <TableCell className="py-4">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium text-base">
+                                      {component.component.internal_code}
+                                    </span>
+                                    {isForStock && (
+                                      <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-50 text-amber-700 border border-amber-200">
+                                        For Stock
+                                      </span>
+                                    )}
+                                    {hasGlobalContext && (
+                                      <span className="inline-flex items-center text-xs font-medium text-blue-500" title="Required in multiple orders">
+                                        <Users className="h-3 w-3" />
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-sm text-muted-foreground mt-1">
+                                    {component.component.description}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="py-4">
+                                  <div className="flex flex-col gap-0.5">
+                                    <div className="flex items-center gap-1">
+                                      <span className={component.shortfall > 0 ? "text-red-600 font-medium text-base" : "text-base"}>
+                                        {component.shortfall}
+                                      </span>
+                                      <span className="text-xs text-muted-foreground">(this order)</span>
+                                    </div>
+                                    {component.global_real_shortfall > 0 && (
+                                      <div className="flex items-center gap-1 text-amber-600">
+                                        <span className="text-xs font-medium">Global:</span>
+                                        <span className="text-sm font-medium">{component.global_real_shortfall}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="py-4">
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    value={orderQuantities[supplierComponentId] || 0}
+                                    onChange={(e) => 
+                                      handleQuantityChange(
+                                        supplierComponentId, 
+                                        parseInt(e.target.value || '0')
+                                      )
+                                    }
+                                    className="w-24 h-10"
+                                    disabled={!selectedComponents[supplierComponentId]}
+                                  />
+                                </TableCell>
+                                <TableCell className="py-4">
+                                  {selectedComponents[supplierComponentId] ? (
+                                    <div className="flex items-center gap-3">
+                                      <div className="flex items-center gap-1.5">
+                                        <Label htmlFor={`forOrder-${supplierComponentId}`} className="text-xs font-medium whitespace-nowrap">
+                                          Order:
+                                        </Label>
+                                        <Input
+                                          id={`forOrder-${supplierComponentId}`}
+                                          type="number"
+                                          min="0"
+                                          value={allocation[supplierComponentId]?.forThisOrder || 0}
+                                          onChange={(e) => 
+                                            handleAllocationChange(
+                                              supplierComponentId,
+                                              'forThisOrder',
+                                              parseInt(e.target.value || '0')
+                                            )
+                                          }
+                                          className="w-20 h-9"
+                                        />
+                                      </div>
+                                      <div className="flex items-center gap-1.5">
+                                        <Label htmlFor={`forStock-${supplierComponentId}`} className="text-xs font-medium whitespace-nowrap">
+                                          Stock:
+                                        </Label>
+                                        <Input
+                                          id={`forStock-${supplierComponentId}`}
+                                          type="number"
+                                          min="0"
+                                          value={allocation[supplierComponentId]?.forStock || 0}
+                                          onChange={(e) => 
+                                            handleAllocationChange(
+                                              supplierComponentId,
+                                              'forStock',
+                                              parseInt(e.target.value || '0')
+                                            )
+                                          }
+                                          className="w-20 h-9"
+                                        />
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <span className="text-sm text-muted-foreground">—</span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right py-4">
+                                  <span className="text-base font-medium">
+                                    {formatCurrency(component.selectedSupplier.price)}
                                   </span>
-                                )}
-                              </div>
-                              <div className="text-sm text-muted-foreground">
-                                {component.component.description}
-                              </div>
-                              {component.total_required_all_orders > component.shortfall && (
-                                <div className="text-xs text-blue-600 mt-1">
-                                  Total needed across all orders: {component.total_required_all_orders} 
-                                  <span className="mx-1">•</span>
-                                  Global shortfall: {component.global_real_shortfall}
-                                </div>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <span className={component.shortfall > 0 ? "text-red-600 font-medium" : ""}>
-                                {component.shortfall}
-                              </span>
-                              {component.global_real_shortfall > component.shortfall && (
-                                <div className="text-xs text-amber-600">
-                                  +{component.global_real_shortfall - component.shortfall} in other orders
-                                </div>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <Input
-                                type="number"
-                                min="0"
-                                value={orderQuantities[component.component.component_id] || 0}
-                                onChange={(e) => 
-                                  handleQuantityChange(
-                                    component.component.component_id, 
-                                    parseInt(e.target.value || '0')
-                                  )
-                                }
-                                className="w-20"
-                                disabled={!selectedComponents[component.component.component_id]}
-                              />
-                            </TableCell>
-                            <TableCell>
-                              {selectedComponents[component.component.component_id] && (
-                                <div className="flex flex-col space-y-2">
-                                  <div className="flex items-center space-x-2">
-                                    <Label htmlFor={`forOrder-${component.component.component_id}`} className="w-20 text-xs">
-                                      For Order:
-                                    </Label>
-                                    <Input
-                                      id={`forOrder-${component.component.component_id}`}
-                                      type="number"
-                                      min="0"
-                                      value={allocation[component.component.component_id]?.forThisOrder || 0}
-                                      onChange={(e) => 
-                                        handleAllocationChange(
-                                          component.component.component_id,
-                                          'forThisOrder',
-                                          parseInt(e.target.value || '0')
-                                        )
-                                      }
-                                      className="w-16 h-8"
+                                </TableCell>
+                                <TableCell className="py-4">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 p-0"
+                                    onClick={() => toggleRowExpansion(component.component.component_id)}
+                                    disabled={!hasGlobalContext && !isForStock}
+                                  >
+                                    <ChevronDown 
+                                      className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
                                     />
-                                  </div>
-                                  <div className="flex items-center space-x-2">
-                                    <Label htmlFor={`forStock-${component.component.component_id}`} className="w-20 text-xs">
-                                      For Stock:
-                                    </Label>
-                                    <Input
-                                      id={`forStock-${component.component.component_id}`}
-                                      type="number"
-                                      min="0"
-                                      value={allocation[component.component.component_id]?.forStock || 0}
-                                      onChange={(e) => 
-                                        handleAllocationChange(
-                                          component.component.component_id,
-                                          'forStock',
-                                          parseInt(e.target.value || '0')
-                                        )
-                                      }
-                                      className="w-16 h-8"
-                                    />
-                                  </div>
-                                </div>
+                                    <span className="sr-only">
+                                      {isExpanded ? 'Collapse' : 'Expand'} details
+                                    </span>
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                              
+                              {isExpanded && (hasGlobalContext || isForStock) && (
+                                <TableRow>
+                                  <TableCell colSpan={7} className="bg-muted/30 py-4 px-6">
+                                    <div className="space-y-2 text-sm">
+                                      {hasGlobalContext && (
+                                        <div className="flex items-start gap-2 text-blue-600">
+                                          <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                                          <div>
+                                            <span className="font-medium">Global Context:</span> Total needed across all orders: {component.total_required_all_orders} • Global shortfall: {component.global_real_shortfall}
+                                          </div>
+                                        </div>
+                                      )}
+                                      {isForStock && (
+                                        <div className="flex items-start gap-2 text-amber-600">
+                                          <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                                          <div>
+                                            This order is covered by finished goods, but other orders need this component.
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
                               )}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {formatCurrency(component.selectedSupplier.price)}
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                            </React.Fragment>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </CardContent>
@@ -1172,6 +1535,9 @@ const OrderComponentsDialog = ({
             ) : (
               <div className="text-center p-8">
                 <p>No component suppliers found or all components are in stock.</p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  Either no components have shortfalls, or components with shortfalls don't have configured suppliers.
+                </p>
                 {apparentShortfallExists && (
                   <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-md">
                     <p className="text-amber-800">
@@ -1195,7 +1561,7 @@ const OrderComponentsDialog = ({
               data
                 .filter((group) =>
                   group.components.some(
-                    (c) => selectedComponents[c.component.component_id]
+                    (c) => selectedComponents[c.selectedSupplier.supplier_component_id]
                   )
                 )
                 .map((group) => (
@@ -1217,17 +1583,18 @@ const OrderComponentsDialog = ({
                         <TableBody>
                           {group.components
                             .filter(
-                              (c) => selectedComponents[c.component.component_id]
+                              (c) => selectedComponents[c.selectedSupplier.supplier_component_id]
                             )
                             .map((component) => {
-                              const orderQty = orderQuantities[component.component.component_id] || component.shortfall;
-                              const currentAllocation = allocation[component.component.component_id] || {
+                              const supplierComponentId = component.selectedSupplier.supplier_component_id;
+                              const orderQty = orderQuantities[supplierComponentId] || component.shortfall;
+                              const currentAllocation = allocation[supplierComponentId] || {
                                 forThisOrder: component.shortfall,
                                 forStock: 0
                               };
                               
                               return (
-                                <TableRow key={component.component.component_id}>
+                                <TableRow key={supplierComponentId}>
                                   <TableCell>
                                     <div className="font-medium">
                                       {component.component.internal_code}
@@ -1262,13 +1629,13 @@ const OrderComponentsDialog = ({
                               {formatCurrency(
                                 group.components
                                   .filter(
-                                    (c) => selectedComponents[c.component.component_id]
+                                    (c) => selectedComponents[c.selectedSupplier.supplier_component_id]
                                   )
                                   .reduce(
                                     (sum, component) =>
                                       sum +
                                       component.selectedSupplier.price *
-                                        (orderQuantities[component.component.component_id] ||
+                                        (orderQuantities[component.selectedSupplier.supplier_component_id] ||
                                           component.shortfall),
                                     0
                                   )
@@ -1318,13 +1685,32 @@ const OrderComponentsDialog = ({
               <Button variant="ghost" onClick={() => setStep('select')}>
                 Back
               </Button>
-              <Button onClick={handleCreatePurchaseOrders}>
-                Create Purchase Orders
+              <Button
+                onClick={handleCreatePurchaseOrders}
+                disabled={createPurchaseOrdersMutation.isPending}
+              >
+                {createPurchaseOrdersMutation.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Creating…
+                  </>
+                ) : (
+                  'Create Purchase Orders'
+                )}
               </Button>
             </>
           )}
         </DialogFooter>
       </DialogContent>
+
+      {/* Consolidation Dialog */}
+      <ConsolidatePODialog
+        open={consolidateDialogOpen}
+        onOpenChange={setConsolidateDialogOpen}
+        suppliersWithDrafts={suppliersWithDrafts}
+        onConfirm={handleConsolidationConfirm}
+        isLoading={false}
+      />
     </Dialog>
   );
 };
@@ -1369,10 +1755,10 @@ function AddProductsDialog({
         delete newState[productId];
       } else {
         // Product is not selected, select it
-        const product = products.find((p: any) => p.product_id === productId);
+        const productAny: any = products.find((p: any) => p.product_id === productId);
         newState[productId] = {
           quantity: 1,
-          price: product?.unit_price || 0
+          price: (productAny?.unit_price ?? productAny?.price ?? 0) as number
         };
       }
       
@@ -1953,65 +2339,7 @@ const sections: { [key: string]: OrderSection } = {
   },
 };
 
-// Before any components or functions, add these type definitions
-interface Customer {
-  customer_id: number;
-  name: string;
-  email?: string;
-  contact_person?: string;
-  phone?: string;
-  address?: string;
-}
-
-interface OrderDetail {
-  order_detail_id: number;
-  order_id: number;
-  product_id: number;
-  quantity: number;
-  unit_price: number;
-  product?: {
-    product_id: number;
-    name: string;
-    description?: string;
-  };
-}
-
-interface Order extends DBOrder {
-  customer?: Customer;
-  details?: OrderDetail[];
-}
-
-interface SupplierInfo {
-  supplier_id: number;
-  name: string;
-  contact_person: string;
-  emails: string[];  // Changed from single email to array
-  phone: string;
-}
-
-interface SupplierGroup {
-  supplier: SupplierInfo;
-  components: Array<{
-    component: {
-      component_id: number;
-      internal_code: string;
-      description: string;
-    };
-    shortfall: number;
-    quantity_required: number;
-    quantity_on_order: number;
-    selectedSupplier: {
-      supplier: SupplierInfo;
-      price: number;
-      supplier_component_id: number;
-    };
-    supplierOptions?: Array<{
-      supplier: SupplierInfo;
-      price: number;
-      supplier_component_id: number;
-    }>;
-  }>;
-}
+// Using shared types from '@/types/components' for SupplierInfo and SupplierGroup
 
 interface SupplierOrder {
   supplier_id: number;
@@ -2025,320 +2353,11 @@ interface SupplierOrder {
   }>;
 }
 
-interface OrderComponentsDialogProps {
-  isOpen: boolean;
-  onClose: () => void;
-  orderId: number;
-  onOrderPlaced?: () => void;
-}
-
-interface OrderBreakdown {
-  order_id: number;
-  quantity: number;
-  order_date: string;
-  status: string;
-}
-
-interface SupplierOrderBreakdown {
-  supplier_order_id: number;
-  supplier_name: string;
-  quantity: number;
-  received: number;
-  status: string;
-  order_date: string;
-}
-
-interface ComponentRequirement {
-  component_id: number;
-  internal_code: string;
-  description: string;
-  total_required: number;
-  order_breakdown: OrderBreakdown[];
-  in_stock: number;
-  on_order: number;
-  on_order_breakdown: SupplierOrderBreakdown[];
-  apparent_shortfall: number;
-  real_shortfall: number;
-  supplier_options: Array<{
-    supplier: SupplierInfo;
-    price: number;
-    supplier_component_id: number;
-  }>;
-  selected_supplier: {
-    supplier: SupplierInfo;
-    price: number;
-    supplier_component_id: number;
-  } | null;
-}
-
-interface ProductRequirement {
-  order_detail_id: number;
-  product_id: number;
-  product_name: string;
-  order_quantity: number;
-  components: ComponentRequirement[];
-  error?: string;
-}
-
-// Add new components for tooltips
-function RequirementTooltip({ breakdown }: { breakdown: OrderBreakdown[] }) {
-  return (
-    <div className="p-2 max-w-sm">
-      <p className="font-semibold mb-2">Order Breakdown:</p>
-      <ul className="space-y-1">
-        {breakdown?.map((order) => (
-          <li key={order.order_id} className="text-sm">
-            Order #{order.order_id}: {order.quantity} units ({order.status})
-            <br />
-            <span className="text-xs text-muted-foreground">
-              {new Date(order.order_date).toLocaleDateString()}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function OnOrderTooltip({ breakdown }: { breakdown: SupplierOrderBreakdown[] }) {
-  return (
-    <div className="p-2 max-w-sm">
-      <p className="font-semibold mb-2">Supplier Orders:</p>
-      <ul className="space-y-2">
-        {breakdown?.map((order) => (
-          <li key={order.supplier_order_id} className="text-sm">
-            <div className="flex justify-between">
-              <span>PO #{order.supplier_order_id}</span>
-              <span>{order.status}</span>
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {order.supplier_name}
-            </div>
-            <div className="text-xs">
-              Ordered: {order.quantity} | Received: {order.received}
-              <br />
-              {new Date(order.order_date).toLocaleDateString()}
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 // Update the component requirements table to use the new tooltips
-function ComponentRequirementsTable({ requirements }: { requirements: ComponentRequirement[] }) {
-  return (
-    <Table>
-      <TableHeader className="bg-muted/50">
-        <TableRow>
-          <TableHead>Component</TableHead>
-          <TableHead className="text-right">Required</TableHead>
-          <TableHead className="text-right whitespace-nowrap">
-            Total Across Orders
-            <span className="sr-only">(Total required across all orders)</span>
-          </TableHead>
-          <TableHead className="text-right">In Stock</TableHead>
-          <TableHead className="text-right">On Order</TableHead>
-          <TableHead className="text-right">Apparent Shortfall</TableHead>
-          <TableHead className="text-right">Real Shortfall</TableHead>
-          <TableHead className="text-right whitespace-nowrap">
-            Global Shortfall
-            <span className="sr-only">(Total shortfall across all orders)</span>
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {requirements?.map((req, index) => (
-          <TableRow 
-            key={req.component_id}
-            className={cn(
-              index % 2 === 0 ? "bg-white" : "bg-muted/20",
-              "hover:bg-muted/30 transition-all duration-200 ease-in-out"
-            )}
-          >
-            <TableCell>
-              <div>
-                <p className="font-medium">{req.internal_code}</p>
-                <p className="text-sm text-muted-foreground">{req.description}</p>
-              </div>
-            </TableCell>
-            <TableCell className="text-right">
-              <Popover>
-                <PopoverTrigger>
-                  <div className="cursor-help inline-flex items-center">
-                    {req.total_required}
-                    <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
-                  </div>
-                </PopoverTrigger>
-                <PopoverContent className="p-0">
-                  <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
-                    <RequirementTooltip breakdown={req.order_breakdown || []} />
-                  </div>
-                </PopoverContent>
-              </Popover>
-            </TableCell>
-            <TableCell className="text-right">
-              <Popover>
-                <PopoverTrigger>
-                  <div className="cursor-help inline-flex items-center">
-                    <span className={cn(
-                      req.total_required_all_orders > req.total_required 
-                        ? "text-blue-600" 
-                        : "",
-                      "font-medium"
-                    )}>
-                      {req.total_required_all_orders || 0}
-                    </span>
-                    {req.order_count > 1 && (
-                      <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
-                    )}
-                  </div>
-                </PopoverTrigger>
-                <PopoverContent className="p-0">
-                  <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
-                    <p className="text-sm font-medium mb-2">Required across {req.order_count} orders:</p>
-                    <div className="space-y-1 text-sm">
-                      {(req.order_breakdown || [])?.map((order: any) => (
-                        <div key={order.order_id} className="flex justify-between">
-                          <span>Order #{order.order_id}:</span>
-                          <span>{order.quantity} units</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </PopoverContent>
-              </Popover>
-            </TableCell>
-            <TableCell className="text-right font-medium">{req.in_stock}</TableCell>
-            <TableCell className="text-right">
-              {req.on_order > 0 ? (
-                <Popover>
-                  <PopoverTrigger>
-                    <div className="cursor-help inline-flex items-center">
-                      {req.on_order}
-                      <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
-                    </div>
-                  </PopoverTrigger>
-                  <PopoverContent className="p-0">
-                    <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
-                      <OnOrderTooltip breakdown={req.on_order_breakdown || []} />
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              ) : (
-                req.on_order
-              )}
-            </TableCell>
-            <TableCell className="text-right">
-              <span className={cn(
-                req.apparent_shortfall > 0 
-                  ? "text-orange-600" 
-                  : "text-green-600",
-                "font-medium"
-              )}>
-                {req.apparent_shortfall}
-              </span>
-            </TableCell>
-            <TableCell className="text-right">
-              {req.apparent_shortfall > 0 && req.real_shortfall === 0 ? (
-                <Popover>
-                  <PopoverTrigger>
-                    <div className="cursor-help inline-flex items-center">
-                      <span className="text-green-600 font-medium">{req.real_shortfall}</span>
-                      <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
-                    </div>
-                  </PopoverTrigger>
-                  <PopoverContent className="p-0">
-                    <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
-                      <p className="text-sm">This apparent shortfall is covered by existing supplier orders.</p>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              ) : (
-                <span className={cn(
-                  req.real_shortfall > 0 
-                    ? "text-red-600" 
-                    : "text-green-600",
-                  "font-medium"
-                )}>
-                  {req.real_shortfall}
-                </span>
-              )}
-            </TableCell>
-            <TableCell className="text-right">
-              <span className={cn(
-                req.global_real_shortfall > 0 
-                  ? "text-red-600" 
-                  : req.global_apparent_shortfall > 0 
-                    ? "text-amber-600" 
-                    : "text-green-600",
-                "font-medium"
-              )}>
-                {req.global_real_shortfall || 0}
-              </span>
-              {req.global_apparent_shortfall > 0 && req.global_real_shortfall === 0 && (
-                <span className="text-xs text-muted-foreground ml-1">(Covered)</span>
-              )}
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  );
-}
-
-async function fetchComponentRequirements(orderId: number): Promise<ComponentRequirement[]> {
-  const { data, error } = await supabase.rpc('get_detailed_component_status', { p_order_id: orderId });
-  
-  if (error) {
-    console.error('Error fetching component requirements:', error);
-    return [];
-  }
-
-  return (data || []).map((item: any) => ({
-    component_id: item.component_id,
-    internal_code: item.internal_code,
-    description: item.description,
-    total_required: item.order_required,
-    in_stock: item.in_stock,
-    on_order: item.on_order,
-    apparent_shortfall: item.apparent_shortfall,
-    real_shortfall: item.real_shortfall,
-    // Add the new global requirement fields
-    total_required_all_orders: item.total_required,
-    order_count: item.order_count,
-    global_apparent_shortfall: item.global_apparent_shortfall,
-    global_real_shortfall: item.global_real_shortfall,
-    order_breakdown: item.order_breakdown || [],
-    on_order_breakdown: item.on_order_breakdown || [],
-    supplier_options: item.supplier_options?.map((opt: any) => ({
-      supplier: {
-        supplier_id: opt.supplier.supplier_id,
-        name: opt.supplier.name,
-        contact_person: opt.supplier.contact_person || '',
-        emails: opt.supplier.emails || [],
-        phone: opt.supplier.phone || ''
-      },
-      price: opt.price,
-      supplier_component_id: opt.supplier_component_id
-    })) || [],
-    selected_supplier: item.selected_supplier ? {
-      supplier: {
-        supplier_id: item.selected_supplier.supplier.supplier_id,
-        name: item.selected_supplier.supplier.name,
-        contact_person: item.selected_supplier.supplier.contact_person || '',
-        emails: item.selected_supplier.supplier.emails || [],
-        phone: item.selected_supplier.supplier.phone || ''
-      },
-      price: item.selected_supplier.price,
-      supplier_component_id: item.selected_supplier.supplier_component_id
-    } : null
-  }));
-}
-
 export default function OrderDetailPage({ params }: OrderDetailPageProps) {
-  const orderId = parseInt(params.orderId, 10);
+  // Unwrap the params Promise (Next.js 16 requirement)
+  const { orderId: orderIdParam } = use(params);
+  const orderId = parseInt(orderIdParam, 10);
   // Set initial tab back to details
   const [activeTab, setActiveTab] = useState<string>('details');
   const [searchQuery, setSearchQuery] = useState('');
@@ -2348,6 +2367,26 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   const [statusOptions, setStatusOptions] = useState<any[]>([]);
   // Add state for expanded rows
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
+  const [applyFgCoverage, setApplyFgCoverage] = useState<boolean>(true);
+  const [showGlobalContext, setShowGlobalContext] = useState<boolean>(true);
+  const [fgReservationsOpen, setFgReservationsOpen] = useState<boolean>(false);
+
+  // Inline edit state (always editable, auto-save on change)
+  const [editCustomerId, setEditCustomerId] = useState<string>('');
+  const [editOrderNumber, setEditOrderNumber] = useState<string>('');
+  const [editDeliveryDate, setEditDeliveryDate] = useState<string>('');
+  const [customerOpen, setCustomerOpen] = useState(false);
+  const [customerSearchTerm, setCustomerSearchTerm] = useState('');
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  // Product editing state
+  const [editingDetailId, setEditingDetailId] = useState<number | null>(null);
+  const [editQuantity, setEditQuantity] = useState<string>('');
+  const [editUnitPrice, setEditUnitPrice] = useState<string>('');
+
+  // Delete confirmation dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [productToDelete, setProductToDelete] = useState<{ id: number; name: string } | null>(null);
 
   // Add toggle function for product row expansion
   const toggleRowExpansion = (productId: string) => {
@@ -2368,14 +2407,324 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   });
 
   // Fetch order attachments
-  const { 
-    data: attachments, 
-    isLoading: attachmentsLoading, 
-    error: attachmentsError 
+  const {
+    data: attachments,
+    isLoading: attachmentsLoading,
+    error: attachmentsError
   } = useQuery({
     queryKey: ['orderAttachments', orderId],
     queryFn: () => fetchOrderAttachments(orderId),
   });
+
+  const {
+    data: fgReservations = [],
+    isLoading: fgReservationsLoading,
+    refetch: refetchFgReservations,
+  } = useQuery({
+    queryKey: ['fgReservations', orderId],
+    queryFn: () => fetchFinishedGoodReservations(orderId),
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+  });
+
+  // Fetch customers (always fetch for inline editing)
+  const { data: customers, isLoading: customersLoading } = useQuery<Customer[], Error>({
+    queryKey: ['customers'],
+    queryFn: () => fetchCustomers(),
+  });
+
+  const customersSorted = useMemo(
+    () => (customers || []).slice().sort((a, b) => a.name.localeCompare(b.name)),
+    [customers]
+  );
+
+  const filteredCustomers = useMemo(
+    () => customersSorted.filter(c =>
+      c.name.toLowerCase().startsWith(customerSearchTerm.toLowerCase())
+    ),
+    [customersSorted, customerSearchTerm]
+  );
+
+  // Mutation for updating order
+  const updateOrderMutation = useMutation({
+    mutationFn: async (data: { customer_id?: number; order_number?: string | null; delivery_date?: string | null }) => {
+      const response = await fetch(`/api/orders/${orderId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to update order');
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+      toast.success('Order updated successfully');
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to update order: ${error.message}`);
+    },
+  });
+
+  // Initialize edit form values when order loads
+  useEffect(() => {
+    if (order && !isInitialized) {
+      setEditCustomerId(order.customer_id?.toString() || '');
+      setEditOrderNumber(order.order_number || '');
+      setEditDeliveryDate(order.delivery_date || '');
+      setIsInitialized(true);
+    }
+  }, [order, isInitialized]);
+
+  // Auto-save function for individual field changes
+  const saveField = useCallback((field: 'customer_id' | 'order_number' | 'delivery_date', value: any) => {
+    if (!order) return;
+    
+    const updates: { customer_id?: number; order_number?: string | null; delivery_date?: string | null } = {};
+    
+    if (field === 'customer_id' && value !== order.customer_id?.toString()) {
+      updates.customer_id = Number(value);
+    } else if (field === 'order_number' && value !== order.order_number) {
+      updates.order_number = value || null;
+    } else if (field === 'delivery_date' && value !== order.delivery_date) {
+      updates.delivery_date = value || null;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      updateOrderMutation.mutate(updates);
+    }
+  }, [order, updateOrderMutation]);
+
+  // Handle customer change with immediate save
+  const handleCustomerChange = (customerId: string) => {
+    setEditCustomerId(customerId);
+    setCustomerOpen(false);
+    setCustomerSearchTerm('');
+    saveField('customer_id', customerId);
+  };
+
+  // Handle order number blur (save on blur)
+  const handleOrderNumberBlur = () => {
+    if (editOrderNumber !== (order?.order_number || '')) {
+      saveField('order_number', editOrderNumber);
+    }
+  };
+
+  // Handle delivery date change with immediate save
+  const handleDeliveryDateChange = (date: string) => {
+    setEditDeliveryDate(date);
+    saveField('delivery_date', date);
+  };
+
+  // Mutation for updating order detail
+  const updateDetailMutation = useMutation({
+    mutationFn: async ({ detailId, quantity, unit_price }: { detailId: number; quantity?: number; unit_price?: number }) => {
+      const response = await fetch(`/api/order-details/${detailId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quantity, unit_price }),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to update product');
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] });
+      toast.success('Product updated successfully');
+      setEditingDetailId(null);
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to update product: ${error.message}`);
+    },
+  });
+
+  // Mutation for deleting order detail
+  const deleteDetailMutation = useMutation({
+    mutationFn: async (detailId: number) => {
+      const response = await fetch(`/api/order-details/${detailId}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to delete product');
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] });
+      toast.success('Product removed from order');
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to delete product: ${error.message}`);
+    },
+  });
+
+  // Handlers for product editing
+  const handleStartEditDetail = (detail: OrderDetail) => {
+    setEditingDetailId(detail.order_detail_id);
+    setEditQuantity(detail.quantity?.toString() || '0');
+    setEditUnitPrice(detail.unit_price?.toString() || '0');
+  };
+
+  const handleSaveDetail = (detailId: number) => {
+    const quantity = parseFloat(editQuantity);
+    const unit_price = parseFloat(editUnitPrice);
+
+    if (isNaN(quantity) || quantity < 0) {
+      toast.error('Please enter a valid quantity');
+      return;
+    }
+    if (isNaN(unit_price) || unit_price < 0) {
+      toast.error('Please enter a valid unit price');
+      return;
+    }
+
+    updateDetailMutation.mutate({ detailId, quantity, unit_price });
+  };
+
+  const handleCancelDetailEdit = () => {
+    setEditingDetailId(null);
+    setEditQuantity('');
+    setEditUnitPrice('');
+  };
+
+  const handleDeleteDetail = (detailId: number, productName: string) => {
+    setProductToDelete({ id: detailId, name: productName });
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDeleteProduct = () => {
+    if (productToDelete) {
+      deleteDetailMutation.mutate(productToDelete.id);
+      setDeleteDialogOpen(false);
+      setProductToDelete(null);
+    }
+  };
+
+  const cancelDeleteProduct = () => {
+    setDeleteDialogOpen(false);
+    setProductToDelete(null);
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const storedCoverage = window.localStorage.getItem('orders.applyFgCoverage');
+    const storedGlobal = window.localStorage.getItem('orders.showGlobalContext');
+    if (storedCoverage !== null) {
+      setApplyFgCoverage(storedCoverage === 'true');
+    }
+    if (storedGlobal !== null) {
+      setShowGlobalContext(storedGlobal === 'true');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('orders.applyFgCoverage', applyFgCoverage ? 'true' : 'false');
+  }, [applyFgCoverage]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('orders.showGlobalContext', showGlobalContext ? 'true' : 'false');
+  }, [showGlobalContext]);
+
+  const fgReservationMap = useMemo(() => {
+    const map = new Map<number, number>();
+    (fgReservations ?? []).forEach((reservation: FinishedGoodReservation) => {
+      if (typeof reservation?.product_id === 'number') {
+        map.set(
+          reservation.product_id,
+          Number(
+            reservation.reserved_quantity ??
+            0
+          )
+        );
+      }
+    });
+    return map;
+  }, [fgReservations]);
+
+  const coverageByProduct = useMemo(() => {
+    const map = new Map<number, { ordered: number; reserved: number; remain: number; factor: number }>();
+    if (order?.details) {
+      order.details.forEach((detail: OrderDetail) => {
+        if (!detail?.product_id) return;
+        const ordered = Number(detail?.quantity ?? 0);
+        const reserved = fgReservationMap.get(detail.product_id) ?? 0;
+        const remain = Math.max(0, ordered - reserved);
+        const factor = ordered > 0 ? remain / ordered : 1;
+        map.set(detail.product_id, { ordered, reserved, remain, factor });
+      });
+    }
+    return map;
+  }, [order?.details, fgReservationMap]);
+
+  const finishedGoodsRows = useMemo(() => {
+    if (!order?.details || order.details.length === 0) {
+      return [] as Array<{
+        product_id: number;
+        name: string;
+        internal_code?: string | null;
+        ordered: number;
+        reserved: number;
+        remain: number;
+      }>;
+    }
+
+    return order.details.map((detail: OrderDetail & { product?: Product }) => {
+      const coverage = coverageByProduct.get(detail.product_id) ?? {
+        ordered: Number(detail.quantity ?? 0),
+        reserved: 0,
+        remain: Number(detail.quantity ?? 0),
+        factor: 1,
+      };
+      const reservation = fgReservations.find(res => res.product_id === detail.product_id);
+      return {
+        product_id: detail.product_id,
+        name: detail.product?.name || reservation?.product_name || `Product ${detail.product_id}`,
+        internal_code: detail.product?.internal_code || reservation?.product_internal_code || null,
+        ordered: coverage.ordered,
+        reserved: coverage.reserved,
+        remain: coverage.remain,
+      };
+    });
+  }, [coverageByProduct, fgReservations, order?.details]);
+
+  const hasFgReservations = useMemo(() => (fgReservations?.length ?? 0) > 0, [fgReservations]);
+
+  const computeComponentMetrics = useCallback((component: any, productId: number) => {
+    const baseRequired = Number(
+      component?.quantity_required ??
+      component?.total_required ??
+      component?.order_required ??
+      0
+    );
+    const inStock = Number(component?.quantity_in_stock ?? component?.in_stock ?? 0);
+    const onOrder = Number(component?.quantity_on_order ?? component?.on_order ?? 0);
+    const coverage = coverageByProduct.get(productId);
+    const factor = applyFgCoverage ? (coverage?.factor ?? 1) : 1;
+    const required = baseRequired * factor;
+    const apparent = Math.max(0, required - inStock);
+    const real = Math.max(0, required - inStock - onOrder);
+
+    return {
+      required,
+      inStock,
+      onOrder,
+      apparent,
+      real,
+      factor,
+    };
+  }, [applyFgCoverage, coverageByProduct]);
 
   // Fetch order statuses
   useEffect(() => {
@@ -2403,37 +2752,148 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     },
   });
 
+  const reserveFgMutation = useMutation({
+    mutationFn: () => reserveFinishedGoods(orderId),
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['fgReservations', orderId] });
+    },
+    onSuccess: async (reservations) => {
+      queryClient.setQueryData(['fgReservations', orderId], reservations);
+      toast.success('Finished goods reserved');
+      await Promise.all([
+        refetchFgReservations(),
+        refetchComponentRequirements(),
+      ]);
+    },
+    onError: (error: any) => {
+      console.error('[reserve-fg] mutation error', error);
+      toast.error('Failed to reserve finished goods');
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+    },
+  });
+
+  const releaseFgMutation = useMutation({
+    mutationFn: () => releaseFinishedGoods(orderId),
+    onSuccess: async () => {
+      // Optimistic UI: clear reservations immediately
+      queryClient.setQueryData(['fgReservations', orderId], [] as FinishedGoodReservation[]);
+      toast.success('Finished goods released');
+      // Proactively refetch to sync any server-side side effects
+      await Promise.all([
+        refetchFgReservations(),
+        refetchComponentRequirements(),
+        queryClient.invalidateQueries({ queryKey: ['order', orderId] }),
+      ]);
+      // Also refresh supplier group data if dialog is open
+      queryClient.invalidateQueries({ queryKey: ['component-suppliers', String(orderId)] });
+    },
+    onError: (error: any) => {
+      console.error('[release-fg] mutation error', error);
+      toast.error('Failed to release finished goods');
+    },
+  });
+
+  const consumeFgMutation = useMutation({
+    mutationFn: () => consumeFinishedGoods(orderId),
+    onSuccess: async () => {
+      queryClient.setQueryData(['fgReservations', orderId], [] as FinishedGoodReservation[]);
+      toast.success('Finished goods consumed');
+      await Promise.all([
+        refetchFgReservations(),
+        refetchComponentRequirements(),
+      ]);
+    },
+    onError: (error: any) => {
+      console.error('[consume-fg] mutation error', error);
+      toast.error('Failed to consume finished goods');
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+    },
+  });
+
   // Inside the OrderDetailPage component, add this query for component requirements
   const { 
     data: componentRequirements = [], 
     refetch: refetchComponentRequirements
-  } = useQuery({
+  } = useQuery<ProductRequirement[]>({
     queryKey: ['orderComponentRequirements', orderId],
     queryFn: () => fetchOrderComponentRequirements(orderId),
-    onSuccess: (data) => {
-      console.log('Component requirements loaded:', JSON.stringify(data, null, 2));
-    }
   });
 
-  // Calculate totals from component requirements
+  // Calculate totals and critical shortfalls from component requirements
   const totals = useMemo(() => {
     let totalComponents = 0;
     let totalShortfall = 0;
+    let componentsInStock = 0;
+    let componentsOnOrder = 0;
+    let componentsInDraftPO = 0;
     
+    // Collect shortfall details
+    const shortfallComponents: Array<{
+      code: string;
+      description: string;
+      required: number;
+      inStock: number;
+      onOrder: number;
+      draftPO: number;
+      shortfall: number;
+    }> = [];
+
     componentRequirements.forEach((productReq: ProductRequirement) => {
-      productReq.components.forEach((component: ComponentRequirement) => {
+      (productReq.components ?? []).forEach((component: any) => {
         totalComponents++;
-        if (component.real_shortfall > 0) {
+        const metrics = computeComponentMetrics(component, productReq.product_id);
+        const inStock = Number(component?.quantity_in_stock ?? component?.in_stock ?? 0);
+        const onOrder = Number(component?.quantity_on_order ?? component?.on_order ?? 0);
+        const draftPO = Number(component?.draft_po_quantity ?? 0);
+        
+        if (metrics.real > 0.0001) {
           totalShortfall++;
+          shortfallComponents.push({
+            code: component?.internal_code || 'Unknown',
+            description: component?.description || '',
+            required: metrics.required,
+            inStock,
+            onOrder,
+            draftPO,
+            shortfall: metrics.real
+          });
+        } else {
+          componentsInStock++;
         }
+        
+        if (onOrder > 0) componentsOnOrder++;
+        if (draftPO > 0) componentsInDraftPO++;
       });
     });
     
+    // Sort by shortfall and take top 5
+    const criticalShortfalls = shortfallComponents
+      .sort((a, b) => b.shortfall - a.shortfall)
+      .slice(0, 5);
+    
+    const stockCoverage = totalComponents > 0 
+      ? Math.round((componentsInStock / totalComponents) * 100) 
+      : 100;
+
     return {
       totalComponents,
-      totalShortfall
+      totalShortfall,
+      componentsInStock,
+      componentsOnOrder,
+      componentsInDraftPO,
+      criticalShortfalls,
+      allShortfalls: shortfallComponents,
+      stockCoverage
     };
-  }, [componentRequirements]);
+  }, [componentRequirements, computeComponentMetrics]);
 
   // Enhanced filter function to include section filtering
   const filterOrderDetails = (details: any[]) => {
@@ -2518,11 +2978,12 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-4">
-          <StatusBadge status={order?.status?.status_name || 'Unknown'} />
+        <div className="flex items-center gap-3">
+          <StatusBadge status={order?.status?.status_name || 'Open'} />
           {order?.delivery_date && (
-            <Badge variant="outline" className="ml-2">
-              Delivery: {format(new Date(order.delivery_date), 'MMM d, yyyy')}
+            <Badge variant="outline" className="gap-1">
+              <span className="text-muted-foreground">Delivery:</span>
+              {format(new Date(order.delivery_date), 'MMM d, yyyy')}
             </Badge>
           )}
         </div>
@@ -2532,63 +2993,299 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
         <TabsList>
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="components">Components</TabsTrigger>
+          <TabsTrigger value="issue-stock">Issue Stock</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
         </TabsList>
         
-        <TabsContent value="details" className="space-y-4">
+        <TabsContent value="details" className="space-y-6">
           {/* Content for details tab */}
-          <div className="flex justify-between items-center">
-            <h2 className="text-xl font-semibold">Order Dashboard</h2>
+          <div className="flex justify-end">
             <AddProductsDialog 
               orderId={orderId} 
               onSuccess={() => {
                 queryClient.invalidateQueries({ queryKey: ['order', orderId] });
                 queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
+                queryClient.invalidateQueries({ queryKey: ['component-suppliers', orderId] });
                 toast.success("Products added successfully");
               }} 
             />
       </div>
 
-          {/* Order Summary Card */}
+          {/* Order Summary Card - Inline Editing */}
           <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-lg">Order Summary</CardTitle>
+              {updateOrderMutation.isPending && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Saving...
+                </div>
+              )}
           </CardHeader>
           <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <h3 className="font-medium mb-2">Customer Details</h3>
-                  <p className="text-sm">
-                    <span className="font-medium">Customer:</span> {order?.customer?.name || 'N/A'}
-                  </p>
-                  <p className="text-sm">
-                    <span className="font-medium">Contact:</span> {order?.customer?.contact_person || 'N/A'}
-                  </p>
-                  <p className="text-sm">
-                    <span className="font-medium">Email:</span> {order?.customer?.email || 'N/A'}
-                  </p>
-                  <p className="text-sm">
-                    <span className="font-medium">Phone:</span> {order?.customer?.phone || 'N/A'}
-                  </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Customer Details - Inline Editable */}
+                <div className="space-y-3">
+                  <h3 className="font-medium text-sm text-muted-foreground">Customer Details</h3>
+                  <div className="space-y-2">
+                    <Popover open={customerOpen} onOpenChange={setCustomerOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={customerOpen}
+                          className="w-full justify-between h-9 font-normal"
+                          disabled={customersLoading}
+                        >
+                          {customersLoading
+                            ? 'Loading...'
+                            : (customers?.find((c) => c.id.toString() === editCustomerId)?.name || order?.customer?.name || 'Select a customer')}
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
+                        <div className="flex h-full w-full flex-col overflow-hidden rounded-md bg-popover text-popover-foreground">
+                          <div className="flex items-center border-b px-3">
+                            <Search className="h-4 w-4 text-muted-foreground mr-2" />
+                            <input
+                              className="flex h-10 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                              placeholder="Search customers..."
+                              value={customerSearchTerm}
+                              onChange={(e) => setCustomerSearchTerm(e.target.value)}
+                            />
+                          </div>
+                          <div className="max-h-[300px] overflow-y-auto overflow-x-hidden">
+                            {filteredCustomers.length === 0 ? (
+                              <div className="py-6 text-center text-sm">No customer found.</div>
+                            ) : (
+                              <div className="overflow-hidden p-1 text-foreground">
+                                {filteredCustomers.map((c) => (
+                                <div
+                                  key={c.id}
+                                  className="relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+                                  onClick={() => handleCustomerChange(String(c.id))}
+                                >
+                                  <Check
+                                    className={cn(
+                                      'mr-2 h-4 w-4',
+                                      editCustomerId === c.id.toString() ? 'opacity-100' : 'opacity-0'
+                                    )}
+                                  />
+                                  {c.name}
+                                </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                    {/* Customer contact info */}
+                    {(() => {
+                      const selectedCustomer = customers?.find(c => c.id.toString() === editCustomerId) || order?.customer;
+                      if (!selectedCustomer) return null;
+                      return (
+                        <div className="text-sm space-y-1 pl-1">
+                          {selectedCustomer.contact_person && (
+                            <p className="text-muted-foreground">
+                              <span className="font-medium">Contact:</span> {selectedCustomer.contact_person}
+                            </p>
+                          )}
+                          {selectedCustomer.email && (
+                            <p>
+                              <a href={`mailto:${selectedCustomer.email}`} className="text-blue-600 hover:underline">
+                                {selectedCustomer.email}
+                              </a>
+                            </p>
+                          )}
+                          {selectedCustomer.phone && (
+                            <p>
+                              <a href={`tel:${selectedCustomer.phone}`} className="text-blue-600 hover:underline">
+                                {selectedCustomer.phone}
+                              </a>
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
                 </div>
-                <div>
-                  <h3 className="font-medium mb-2">Order Information</h3>
-                  <p className="text-sm">
-                    <span className="font-medium">Order Date:</span> {order?.created_at && format(new Date(order.created_at), 'MMMM d, yyyy')}
-                  </p>
-                  <p className="text-sm">
-                    <span className="font-medium">Delivery Date:</span> {order?.delivery_date && format(new Date(order.delivery_date), 'MMMM d, yyyy')}
-                  </p>
-                  <p className="text-sm">
-                    <span className="font-medium">Status:</span> <StatusBadge status={order?.status?.status_name || 'Unknown'} />
-                  </p>
-                  <p className="text-sm">
-                    <span className="font-medium">Reference:</span> {order?.customer_reference || 'N/A'}
-                  </p>
+
+                {/* Order Information - Inline Editable */}
+                <div className="space-y-3">
+                  <h3 className="font-medium text-sm text-muted-foreground">Order Information</h3>
+                  <div className="space-y-3">
+                    {/* Order Date (read-only) */}
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-muted-foreground min-w-[80px]">Created:</span>
+                      <span>{order?.created_at && format(new Date(order.created_at), 'MMM d, yyyy')}</span>
+                    </div>
+                    
+                    {/* Delivery Date - Editable */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground min-w-[80px]">Delivery:</span>
+                      <Input
+                        type="date"
+                        value={editDeliveryDate}
+                        onChange={(e) => handleDeliveryDateChange(e.target.value)}
+                        className="h-8 w-[160px]"
+                      />
+                    </div>
+                    
+                    {/* Order Number - Editable */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground min-w-[80px]">Order #:</span>
+                      <Input
+                        value={editOrderNumber}
+                        onChange={(e) => setEditOrderNumber(e.target.value)}
+                        onBlur={handleOrderNumberBlur}
+                        placeholder="Enter order number"
+                        className="h-8 w-[160px]"
+                      />
+                    </div>
+                    
+                    {/* Status */}
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-muted-foreground min-w-[80px]">Status:</span>
+                      <StatusBadge status={order?.status?.status_name || 'Unknown'} />
+                    </div>
+                  </div>
                 </div>
-                </div>
+              </div>
           </CardContent>
         </Card>
+
+          {/* Finished-Good Reservations */}
+          <Collapsible open={fgReservationsOpen} onOpenChange={setFgReservationsOpen}>
+            <Card>
+              <CollapsibleTrigger asChild>
+                <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between cursor-pointer hover:bg-muted/50 transition-colors">
+                  <div className="flex items-center gap-2">
+                    {fgReservationsOpen ? (
+                      <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    )}
+                    <div>
+                      <CardTitle className="text-lg">Stock Reservations</CardTitle>
+                      <CardDescription>
+                        Reserve pre-built products from stock to reduce the components needed for this order.
+                      </CardDescription>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      onClick={() => reserveFgMutation.mutate()}
+                      disabled={reserveFgMutation.isPending || orderLoading}
+                      title="Reserve available finished goods from stock for this order"
+                    >
+                      {reserveFgMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Package className="mr-2 h-4 w-4" />
+                      )}
+                      Reserve Stock
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => releaseFgMutation.mutate()}
+                      disabled={!hasFgReservations || releaseFgMutation.isPending}
+                      title="Release reservations back to available stock"
+                    >
+                      {releaseFgMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RotateCcw className="mr-2 h-4 w-4" />
+                      )}
+                      Release
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => consumeFgMutation.mutate()}
+                      disabled={!hasFgReservations || consumeFgMutation.isPending}
+                      title="Mark reserved items as shipped and deduct from inventory"
+                    >
+                      {consumeFgMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <CheckCircle className="mr-2 h-4 w-4" />
+                      )}
+                      Ship
+                    </Button>
+                  </div>
+                </CardHeader>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <CardContent>
+              {applyFgCoverage && (
+                <Badge variant="outline" className="mb-3 bg-blue-50 text-blue-700">
+                  Stock reservations applied
+                </Badge>
+              )}
+              {fgReservationsLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading finished-good reservations…
+                </div>
+              ) : finishedGoodsRows.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No products on this order have stock available to reserve.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Product</TableHead>
+                      <TableHead>Ordered</TableHead>
+                      <TableHead className="text-right">Reserved</TableHead>
+                      <TableHead className="text-right">Need to Build</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {finishedGoodsRows.map((row) => {
+                      const reservedPercent = row.ordered > 0
+                        ? Math.round(((row.ordered - row.remain) / row.ordered) * 100)
+                        : 0;
+                      return (
+                        <TableRow key={`fg-row-${row.product_id}`}>
+                          <TableCell>
+                            <div className="font-medium">{row.name}</div>
+                            {row.internal_code && (
+                              <div className="text-xs text-muted-foreground">{row.internal_code}</div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">{formatQuantity(row.ordered)}</TableCell>
+                          <TableCell className="text-right">
+                            <span className={cn(
+                              row.reserved > 0 ? 'text-blue-700 font-medium' : 'text-muted-foreground'
+                            )}>
+                              {formatQuantity(row.reserved)}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {formatQuantity(row.remain)}
+                            {row.reserved > 0 && (
+                              <span className="ml-2 text-xs text-muted-foreground">
+                                {reservedPercent}% reserved
+                              </span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+              {!hasFgReservations && finishedGoodsRows.length > 0 && (
+                <div className="mt-3 rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+                  Reserving stock will automatically reduce the components needed for this order.
+                </div>
+              )}
+                </CardContent>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
 
           {/* Products List */}
           <Card>
@@ -2601,31 +3298,126 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Product</TableHead>
-                      <TableHead className="text-right">Quantity</TableHead>
+                      <TableHead className="text-right">Qty</TableHead>
+                      <TableHead className="text-right">Reserved</TableHead>
+                      <TableHead className="text-right">To Build</TableHead>
                       <TableHead className="text-right">Unit Price</TableHead>
                       <TableHead className="text-right">Total</TableHead>
+                      <TableHead className="text-right w-[100px]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {order.details.map((detail: any) => (
-                      <TableRow key={detail.order_detail_id}>
-                        <TableCell>
-                          <div>
-                            <p className="font-medium">{detail.product?.name}</p>
-                            <p className="text-sm text-muted-foreground truncate max-w-md">
-                              {detail.product?.description || 'No description available'}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right">{detail.quantity}</TableCell>
-                        <TableCell className="text-right">{formatCurrency(detail.unit_price || 0)}</TableCell>
-                        <TableCell className="text-right">{formatCurrency((detail.quantity || 0) * (detail.unit_price || 0))}</TableCell>
-                      </TableRow>
-                    ))}
+                    {order.details.map((detail: any) => {
+                      const isEditing = editingDetailId === detail.order_detail_id;
+                      const coverage = coverageByProduct.get(detail.product_id) ?? {
+                        ordered: Number(detail.quantity ?? 0),
+                        reserved: 0,
+                        remain: Number(detail.quantity ?? 0),
+                        factor: 1,
+                      };
+
+                      return (
+                        <TableRow key={detail.order_detail_id}>
+                          <TableCell>
+                            <div>
+                              <p className="font-medium">{detail.product?.name}</p>
+                              <p className="text-sm text-muted-foreground truncate max-w-md">
+                                {detail.product?.description || 'No description available'}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {isEditing ? (
+                              <Input
+                                type="number"
+                                value={editQuantity}
+                                onChange={(e) => setEditQuantity(e.target.value)}
+                                className="w-24 text-right"
+                                min="0"
+                                step="0.01"
+                              />
+                            ) : (
+                              formatQuantity(coverage.ordered)
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">{formatQuantity(coverage.reserved)}</TableCell>
+                          <TableCell className="text-right">{formatQuantity(coverage.remain)}</TableCell>
+                          <TableCell className="text-right">
+                            {isEditing ? (
+                              <Input
+                                type="number"
+                                value={editUnitPrice}
+                                onChange={(e) => setEditUnitPrice(e.target.value)}
+                                className="w-28 text-right"
+                                min="0"
+                                step="0.01"
+                              />
+                            ) : (
+                              formatCurrency(detail.unit_price || 0)
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {isEditing ? (
+                              formatCurrency(parseFloat(editQuantity || '0') * parseFloat(editUnitPrice || '0'))
+                            ) : (
+                              formatCurrency((detail.quantity || 0) * (detail.unit_price || 0))
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {isEditing ? (
+                              <div className="flex gap-1 justify-end">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleSaveDetail(detail.order_detail_id)}
+                                  disabled={updateDetailMutation.isPending}
+                                >
+                                  {updateDetailMutation.isPending ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Check className="h-4 w-4" />
+                                  )}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={handleCancelDetailEdit}
+                                  disabled={updateDetailMutation.isPending}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="flex gap-1 justify-end">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleStartEditDetail(detail)}
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleDeleteDetail(detail.order_detail_id, detail.product?.name || 'this product')}
+                                  disabled={deleteDetailMutation.isPending}
+                                >
+                                  {deleteDetailMutation.isPending ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Trash className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              </div>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                   <TableFooter>
                     <TableRow>
-                      <TableCell colSpan={3}>Total</TableCell>
+                      <TableCell colSpan={6}>Total</TableCell>
                       <TableCell className="text-right">{formatCurrency(order.total_amount || 0)}</TableCell>
                     </TableRow>
                   </TableFooter>
@@ -2638,36 +3430,143 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
             </CardContent>
           </Card>
 
-          {/* Components Summary */}
+          {/* Components Summary - Enhanced with critical shortfalls */}
           <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Components Summary</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
-                  <h3 className="text-sm font-medium text-blue-800 mb-2">Total Components</h3>
-                  <p className="text-2xl font-bold text-blue-900">{totals.totalComponents}</p>
-                          </div>
-                <div className="bg-amber-50 rounded-lg p-4 border border-amber-100">
-                  <h3 className="text-sm font-medium text-amber-800 mb-2">Components with Shortfall</h3>
-                  <p className="text-2xl font-bold text-amber-900">{totals.totalShortfall}</p>
-                        </div>
-                <div className="bg-green-50 rounded-lg p-4 border border-green-100">
-                  <h3 className="text-sm font-medium text-green-800 mb-2">Ready to Assemble</h3>
-                  <p className="text-2xl font-bold text-green-900">{totals.totalComponents - totals.totalShortfall}</p>
-                      </div>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-lg">Components Summary</CardTitle>
+                  <CardDescription>Parts needed to fulfill this order</CardDescription>
                 </div>
-              <div className="mt-4">
-                <Link href="#" onClick={(e) => { e.preventDefault(); setActiveTab('components'); }}>
-                  <Button variant="outline" size="sm" className="gap-1">
-                    <ChevronRight className="h-4 w-4" />
-                    View Detailed Components
-                  </Button>
-                </Link>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="gap-1"
+                  onClick={() => setActiveTab('components')}
+                >
+                  View All
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
               </div>
-          </CardContent>
-        </Card>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Stock Coverage Progress */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Stock Availability</span>
+                  <span className={cn(
+                    "font-semibold",
+                    totals.stockCoverage === 100 ? "text-green-600" : totals.stockCoverage >= 50 ? "text-amber-600" : "text-red-600"
+                  )}>
+                    {totals.stockCoverage}% ready
+                  </span>
+                </div>
+                <div className="h-2 bg-muted rounded-full overflow-hidden">
+                  <div 
+                    className={cn(
+                      "h-full transition-all duration-500",
+                      totals.stockCoverage === 100 ? "bg-green-500" : totals.stockCoverage >= 50 ? "bg-amber-500" : "bg-red-500"
+                    )}
+                    style={{ width: `${totals.stockCoverage}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>{totals.componentsInStock} of {totals.totalComponents} components in stock</span>
+                  {totals.totalShortfall > 0 && (
+                    <span className="text-red-600 font-medium">{totals.totalShortfall} need ordering</span>
+                  )}
+                </div>
+              </div>
+              
+              {/* Purchasing Status - Only show if there are shortfalls */}
+              {totals.totalShortfall > 0 && (
+                <div className="flex flex-wrap gap-3 text-sm">
+                  {totals.componentsOnOrder > 0 && (
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2 h-2 rounded-full bg-blue-500" />
+                      <span>{totals.componentsOnOrder} on order</span>
+                    </div>
+                  )}
+                  {totals.componentsInDraftPO > 0 && (
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2 h-2 rounded-full bg-amber-500" />
+                      <span>{totals.componentsInDraftPO} in draft PO</span>
+                    </div>
+                  )}
+                  {totals.componentsOnOrder === 0 && totals.componentsInDraftPO === 0 && (
+                    <div className="flex items-center gap-1.5 text-red-600">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      <span>No purchase orders created</span>
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {/* Critical Shortfalls Table */}
+              {totals.criticalShortfalls.length > 0 && (
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="bg-red-50 px-3 py-2 border-b flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-red-500" />
+                    <span className="text-sm font-medium text-red-700">Components Needing Attention</span>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr className="text-muted-foreground">
+                        <th className="text-left py-2 px-3 font-medium">Component</th>
+                        <th className="text-right py-2 px-3 font-medium">Need</th>
+                        <th className="text-right py-2 px-3 font-medium">Have</th>
+                        <th className="text-right py-2 px-3 font-medium text-red-600">Short</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {totals.criticalShortfalls.map((comp, idx) => (
+                        <tr key={idx} className="border-t">
+                          <td className="py-2 px-3">
+                            <div className="font-medium">{comp.code}</div>
+                            {comp.description && (
+                              <div className="text-xs text-muted-foreground truncate max-w-[180px]">
+                                {comp.description}
+                              </div>
+                            )}
+                          </td>
+                          <td className="text-right py-2 px-3">{formatQuantity(comp.required)}</td>
+                          <td className="text-right py-2 px-3">
+                            {formatQuantity(comp.inStock)}
+                            {comp.onOrder > 0 && (
+                              <span className="text-blue-600 text-xs ml-1">(+{formatQuantity(comp.onOrder)} coming)</span>
+                            )}
+                          </td>
+                          <td className="text-right py-2 px-3 text-red-600 font-medium">
+                            {formatQuantity(comp.shortfall)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {totals.allShortfalls.length > 5 && (
+                    <div className="px-3 py-2 bg-muted/30 text-xs text-center text-muted-foreground border-t">
+                      + {totals.allShortfalls.length - 5} more components need ordering
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {/* All good message */}
+              {totals.totalShortfall === 0 && totals.totalComponents > 0 && (
+                <div className="flex items-center gap-2 text-green-600 bg-green-50 rounded-lg p-3">
+                  <CheckCircle className="w-5 h-5" />
+                  <span className="font-medium">All components available in stock</span>
+                </div>
+              )}
+              
+              {/* No components message */}
+              {totals.totalComponents === 0 && (
+                <div className="text-center py-4 text-muted-foreground">
+                  <p>No bill of materials defined for products in this order</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Financial Summary */}
           <Card>
@@ -2713,29 +3612,46 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                   totalComponents: 0,
                   totalShortfall: 0,
                   totalGlobalShortfall: 0,
-                  multiOrderComponents: 0
+                  multiOrderComponents: 0,
+                  componentsInStock: 0,
+                  componentsOnOrder: 0,
+                  componentsInDraftPO: 0
                 };
                 
                 // Calculate totals from all components
                 componentRequirements?.forEach(prodReq => {
                   if (!prodReq?.components) return;
-                  
+
                   prodReq.components?.forEach(comp => {
                     totals.totalComponents++;
+
+                    const metrics = computeComponentMetrics(comp, prodReq.product_id);
+                    const onOrder = Number(comp?.quantity_on_order ?? comp?.on_order ?? 0);
+                    const draftPO = Number(comp?.draft_po_quantity ?? 0);
                     
-                    if (comp.real_shortfall > 0) {
+                    if (metrics.real > 0.0001) {
                       totals.totalShortfall++;
+                    } else {
+                      totals.componentsInStock++;
                     }
                     
-                    if (comp.global_real_shortfall > 0) {
+                    if (onOrder > 0) totals.componentsOnOrder++;
+                    if (draftPO > 0) totals.componentsInDraftPO++;
+
+                    if ((comp?.global_real_shortfall ?? 0) > 0) {
                       totals.totalGlobalShortfall++;
                     }
-                    
-                    if (comp.order_count > 1) {
+
+                    if ((comp?.order_count ?? 0) > 1) {
                       totals.multiOrderComponents++;
                     }
                   });
                 });
+                
+                // Calculate stock coverage percentage
+                const stockCoverage = totals.totalComponents > 0 
+                  ? Math.round((totals.componentsInStock / totals.totalComponents) * 100) 
+                  : 100;
                 
                 return (
                   <>
@@ -2748,60 +3664,130 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                         Order Components
                       </Button>
                     </div>
-                    <Card className="shadow-sm border border-muted/40 overflow-hidden">
-                      <CardHeader className="pb-2">
-                        <div className="flex items-center justify-between">
-                          <CardTitle>Components needed for this order</CardTitle>
-                          <div className="flex items-center gap-2">
-                            {totals.totalShortfall > 0 ? (
-                              <Badge variant="destructive" className="bg-red-100 text-red-700 hover:bg-red-100">
-                                {totals.totalShortfall} components with shortfall
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="bg-green-100 text-green-700 hover:bg-green-100">
-                                All components available
-                              </Badge>
-                            )}
-                            
-                            {/* Global requirements summary */}
-                            {totals.totalGlobalShortfall > 0 && (
-                              <Badge variant="outline" className="bg-amber-100 text-amber-800 hover:bg-amber-100">
-                                {totals.totalGlobalShortfall} global shortfalls
-                              </Badge>
-                            )}
+                    
+                    {/* Component Status Summary Card */}
+                    <Card className="shadow-sm border border-muted/40 mb-4">
+                      <CardContent className="pt-4">
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                          {/* Stock Coverage */}
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <h3 className="font-medium text-sm">Stock Availability</h3>
+                              <span className={cn(
+                                "text-sm font-semibold",
+                                stockCoverage === 100 ? "text-green-600" : stockCoverage >= 50 ? "text-amber-600" : "text-red-600"
+                              )}>
+                                {stockCoverage}% ready
+                              </span>
+                            </div>
+                            <div className="h-2 bg-muted rounded-full overflow-hidden">
+                              <div 
+                                className={cn(
+                                  "h-full transition-all duration-500",
+                                  stockCoverage === 100 ? "bg-green-500" : stockCoverage >= 50 ? "bg-amber-500" : "bg-red-500"
+                                )}
+                                style={{ width: `${stockCoverage}%` }}
+                              />
+                            </div>
+                            <div className="flex justify-between text-xs text-muted-foreground">
+                              <span>{totals.componentsInStock} of {totals.totalComponents} in stock</span>
+                              {totals.totalShortfall > 0 && (
+                                <span className="text-red-600 font-medium">{totals.totalShortfall} short</span>
+                              )}
+                            </div>
+                          </div>
+                          
+                          {/* Purchasing Status */}
+                          <div className="space-y-2">
+                            <h3 className="font-medium text-sm">Purchasing Status</h3>
+                            <div className="space-y-1.5 text-sm">
+                              {totals.componentsOnOrder > 0 && (
+                                <div className="flex items-center gap-2">
+                                  <div className="w-2 h-2 rounded-full bg-blue-500" />
+                                  <span>{totals.componentsOnOrder} components on order</span>
+                                </div>
+                              )}
+                              {totals.componentsInDraftPO > 0 && (
+                                <div className="flex items-center gap-2">
+                                  <div className="w-2 h-2 rounded-full bg-amber-500" />
+                                  <span>{totals.componentsInDraftPO} in draft POs</span>
+                                </div>
+                              )}
+                              {totals.totalShortfall > 0 && totals.componentsOnOrder === 0 && totals.componentsInDraftPO === 0 && (
+                                <div className="flex items-center gap-2 text-red-600">
+                                  <AlertCircle className="w-4 h-4" />
+                                  <span>No orders placed yet</span>
+                                </div>
+                              )}
+                              {totals.totalShortfall === 0 && (
+                                <div className="flex items-center gap-2 text-green-600">
+                                  <CheckCircle className="w-4 h-4" />
+                                  <span>All components available</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          
+                          {/* Settings */}
+                          <div className="space-y-2">
+                            <h3 className="font-medium text-sm">Display Options</h3>
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <Label htmlFor="toggle-fg-coverage-inline" className="text-sm cursor-pointer">
+                                  Apply FG coverage
+                                </Label>
+                                <Switch
+                                  id="toggle-fg-coverage-inline"
+                                  checked={applyFgCoverage}
+                                  onCheckedChange={setApplyFgCoverage}
+                                />
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <Label htmlFor="toggle-global-context-inline" className="text-sm cursor-pointer">
+                                  Show global context
+                                </Label>
+                                <Switch
+                                  id="toggle-global-context-inline"
+                                  checked={showGlobalContext}
+                                  onCheckedChange={setShowGlobalContext}
+                                />
+                              </div>
+                            </div>
                           </div>
                         </div>
+                        
+                      </CardContent>
+                    </Card>
+                    
+                    {/* Product Details Card */}
+                    <Card className="shadow-sm border border-muted/40 overflow-hidden">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-base">Product Components</CardTitle>
                         <CardDescription>
-                          {componentRequirements.length} products with {totals.totalComponents || 0} component requirements
-                          {totals.multiOrderComponents > 0 && (
+                          {componentRequirements.length} products with {totals.totalComponents || 0} component types
+                          {showGlobalContext && totals.multiOrderComponents > 0 && (
                             <span className="ml-1">
-                              (<span className="text-blue-600 font-medium">{totals.multiOrderComponents}</span> components needed across multiple orders)
+                              • <span className="text-blue-600">{totals.multiOrderComponents}</span> shared across orders
                             </span>
                           )}
                         </CardDescription>
-                        
-                        {/* Add global requirements alert if there are components with high global demand */}
-                        {totals.multiOrderComponents > 0 && (
-                          <div className="mt-2 text-xs p-2 bg-blue-50 text-blue-700 rounded-md flex items-start">
-                            <Info className="h-4 w-4 mr-2 mt-0.5 flex-shrink-0" />
-                            <span>
-                              Some components are required by multiple orders. "Total Across Orders" shows the total quantity 
-                              needed for all open orders, and "Global Shortfall" indicates potential shortages across all orders.
-                            </span>
-                          </div>
-                        )}
                       </CardHeader>
                       <CardContent>
                         {/* Display component requirements here */}
                         <div className="space-y-4">
                           {componentRequirements?.map((productReq: any, index: number) => {
-                            const hasShortfall = productReq?.components && productReq.components?.some((c: any) => c.shortfall > 0);
+                            const hasShortfall = productReq?.components?.some((component: any) => {
+                              const metrics = computeComponentMetrics(component, productReq.product_id);
+                              return metrics.real > 0.0001;
+                            });
                             const productId = productReq.product_id || `product-${index}`;
-                            const isExpanded = !!expandedRows[productId];
-                            
+                            // Default to expanded (true) unless explicitly collapsed
+                            const isExpanded = expandedRows[productId] !== false;
+                            const coverageSummary = coverageByProduct.get(productReq.product_id);
+
                             return (
                               <div key={productReq.order_detail_id || index} className="border rounded-lg overflow-hidden shadow-sm hover:shadow transition-all duration-200">
-                                <div 
+                                <div
                                   className={cn(
                                     "p-4 flex justify-between items-center cursor-pointer",
                                     hasShortfall ? 'bg-red-50' : 'bg-white'
@@ -2818,6 +3804,11 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                                     <p className="text-sm text-muted-foreground">
                                       Order quantity: {productReq.order_quantity || 0} × {productReq.components?.length || 0} component types
                                     </p>
+                                    {coverageSummary && (
+                                      <p className="text-xs text-muted-foreground mt-1">
+                                        Reserved FG: {formatQuantity(coverageSummary.reserved)} of {formatQuantity(coverageSummary.ordered)} — Remaining: {formatQuantity(coverageSummary.remain)}
+                                      </p>
+                                    )}
                                   </div>
                                   <div className="flex items-center">
                                     <Button variant="ghost" size="sm" className="ml-2">
@@ -2839,127 +3830,160 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                                           <TableRow>
                                             <TableHead>Component</TableHead>
                                             <TableHead className="text-right">Required</TableHead>
-                                            <TableHead className="text-right whitespace-nowrap">
-                                              Total Across Orders
-                                              <span className="sr-only">(Total required across all orders)</span>
-                                            </TableHead>
+                                            {showGlobalContext && (
+                                              <TableHead className="text-right whitespace-nowrap">
+                                                Total Across Orders
+                                                <span className="sr-only">(Total required across all orders)</span>
+                                              </TableHead>
+                                            )}
                                             <TableHead className="text-right">In Stock</TableHead>
                                             <TableHead className="text-right">On Order</TableHead>
+                                            <TableHead className="text-right">Draft PO</TableHead>
                                             <TableHead className="text-right">Apparent Shortfall</TableHead>
                                             <TableHead className="text-right">Real Shortfall</TableHead>
-                                            <TableHead className="text-right whitespace-nowrap">
-                                              Global Shortfall
-                                              <span className="sr-only">(Total shortfall across all orders)</span>
-                                            </TableHead>
+                                            {showGlobalContext && (
+                                              <TableHead className="text-right whitespace-nowrap">
+                                                Global Shortfall
+                                                <span className="sr-only">(Total shortfall across all orders)</span>
+                                              </TableHead>
+                                            )}
                                           </TableRow>
                                         </TableHeader>
-                                        <TableBody>
-                                          {productReq.components?.map((component: any, compIndex: number) => (
-                                            <TableRow 
-                                              key={component.component_id || `comp-${compIndex}`}
-                                              className={cn(
-                                                compIndex % 2 === 0 ? "bg-white" : "bg-muted/20",
-                                                "hover:bg-muted/30 transition-all duration-200 ease-in-out"
-                                              )}
-                                            >
-                                              <TableCell>
-                                                <div className="font-medium">{component.internal_code || 'Unknown'}</div>
-                                                <div className="text-sm text-muted-foreground">{component.description || 'No description'}</div>
-                                              </TableCell>
-                                              <TableCell className="text-right font-medium">{component.quantity_required || 0}</TableCell>
-                                              <TableCell className="text-right">
-                                                <Popover>
-                                                  <PopoverTrigger>
-                                                    <div className="cursor-help inline-flex items-center">
-                                                      <span className={cn(
-                                                        component.total_required_all_orders > component.quantity_required 
-                                                          ? "text-blue-600" 
-                                                          : "",
-                                                        "font-medium"
-                                                      )}>
-                                                        {component.total_required_all_orders || 0}
-                                                      </span>
-                                                      {component.order_count > 1 && (
-                                                        <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
-                                                      )}
-                                                    </div>
-                                                  </PopoverTrigger>
-                                                  <PopoverContent className="p-0">
-                                                    <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
-                                                      <p className="text-sm font-medium mb-2">Required across {component.order_count} orders:</p>
-                                                      <div className="space-y-1 text-sm">
-                                                        {(component.order_breakdown || [])?.map((order: any) => (
-                                                          <div key={order.order_id} className="flex justify-between">
-                                                            <span>Order #{order.order_id}:</span>
-                                                            <span>{order.quantity} units</span>
-                                                          </div>
-                                                        ))}
-                                                      </div>
-                                                    </div>
-                                                  </PopoverContent>
-                                                </Popover>
-                                              </TableCell>
-                                              <TableCell className="text-right font-medium">{component.quantity_in_stock || 0}</TableCell>
-                                              <TableCell className="text-right">
-                                                {component.quantity_on_order > 0 ? (
-                                                  <span className="text-blue-600 font-medium">{component.quantity_on_order}</span>
-                                                ) : (
-                                                  component.quantity_on_order || 0
+                                                                                                                        <TableBody>
+                                          {productReq.components?.map((component: any, compIndex: number) => {
+                                            const metrics = computeComponentMetrics(component, productReq.product_id);
+                                            const globalRequired = Number(component.total_required_all_orders ?? 0);
+                                            const globalShortfall = Number(component.global_real_shortfall ?? 0);
+                                            const globalApparent = Number(component.global_apparent_shortfall ?? 0);
+
+                                            return (
+                                              <TableRow
+                                                key={component.component_id || `comp-${compIndex}`}
+                                                className={cn(
+                                                  compIndex % 2 === 0 ? "bg-white" : "bg-muted/20",
+                                                  "hover:bg-muted/30 transition-all duration-200 ease-in-out"
                                                 )}
-                                              </TableCell>
-                                              <TableCell className="text-right">
-                                                <span className={cn(
-                                                  component.apparent_shortfall > 0 
-                                                    ? "text-orange-600" 
-                                                    : "text-green-600",
-                                                  "font-medium"
-                                                )}>
-                                                  {component.apparent_shortfall || 0}
-                                                </span>
-                                              </TableCell>
-                                              <TableCell className="text-right">
-                                                {component.apparent_shortfall > 0 && component.real_shortfall === 0 ? (
-                                                  <Popover>
-                                                    <PopoverTrigger>
-                                                      <div className="cursor-help inline-flex items-center">
-                                                        <span className="text-green-600 font-medium">{component.real_shortfall || 0}</span>
-                                                        <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
-                                                      </div>
-                                                    </PopoverTrigger>
-                                                    <PopoverContent className="p-0">
-                                                      <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
-                                                        <p className="text-sm">This apparent shortfall is covered by existing supplier orders.</p>
-                                                      </div>
-                                                    </PopoverContent>
-                                                  </Popover>
-                                                ) : (
+                                              >
+                                                <TableCell>
+                                                  <div className="font-medium">{component.internal_code || 'Unknown'}</div>
+                                                  <div className="text-sm text-muted-foreground">{component.description || 'No description'}</div>
+                                                </TableCell>
+                                                <TableCell className="text-right font-medium">{formatQuantity(metrics.required)}</TableCell>
+                                                {showGlobalContext && (
+                                                  <TableCell className="text-right">
+                                                    <Popover>
+                                                      <PopoverTrigger>
+                                                        <div className="cursor-help inline-flex items-center">
+                                                          <span className={cn(
+                                                            globalRequired > metrics.required ? "text-blue-600" : "",
+                                                            "font-medium"
+                                                          )}>
+                                                            {formatQuantity(globalRequired)}
+                                                          </span>
+                                                          {(component.order_count ?? 0) > 1 && (
+                                                            <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
+                                                          )}
+                                                        </div>
+                                                      </PopoverTrigger>
+                                                      <PopoverContent className="p-0">
+                                                        <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
+                                                          <p className="text-sm font-medium mb-2">Required across {component.order_count || 1} orders:</p>
+                                                          <div className="space-y-1 text-sm">
+                                                            {(component.order_breakdown || [])?.map((order: any) => (
+                                                              <div key={order.order_id} className="flex justify-between">
+                                                                <span>Order #{order.order_id}:</span>
+                                                                <span>{order.quantity} units</span>
+                                                              </div>
+                                                            ))}
+                                                          </div>
+                                                        </div>
+                                                      </PopoverContent>
+                                                    </Popover>
+                                                  </TableCell>
+                                                )}
+                                                <TableCell className="text-right font-medium">{formatQuantity(metrics.inStock)}</TableCell>
+                                                <TableCell className="text-right font-medium">{formatQuantity(metrics.onOrder)}</TableCell>
+                                                <TableCell className="text-right">
+                                                  {(component.draft_po_quantity ?? 0) > 0 ? (
+                                                    <Popover>
+                                                      <PopoverTrigger>
+                                                        <div className="cursor-help inline-flex items-center">
+                                                          <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-100 text-amber-800 border border-amber-200">
+                                                            {formatQuantity(component.draft_po_quantity)}
+                                                          </span>
+                                                        </div>
+                                                      </PopoverTrigger>
+                                                      <PopoverContent className="p-0">
+                                                        <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
+                                                          <p className="text-sm font-medium mb-2">Draft Purchase Orders:</p>
+                                                          <div className="space-y-1 text-sm">
+                                                            {(component.draft_po_breakdown || [])?.map((draft: any, idx: number) => (
+                                                              <div key={draft.supplier_order_id || idx} className="flex justify-between">
+                                                                <span>{draft.supplier_name}:</span>
+                                                                <span>{draft.quantity} units</span>
+                                                              </div>
+                                                            ))}
+                                                          </div>
+                                                          <p className="text-xs text-muted-foreground mt-2">Awaiting confirmation/send to supplier</p>
+                                                        </div>
+                                                      </PopoverContent>
+                                                    </Popover>
+                                                  ) : (
+                                                    <span className="text-muted-foreground">—</span>
+                                                  )}
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                  {metrics.apparent > 0 && metrics.real === 0 ? (
+                                                    <Popover>
+                                                      <PopoverTrigger>
+                                                        <div className="cursor-help inline-flex items-center">
+                                                          <span className="text-green-600 font-medium">{formatQuantity(metrics.apparent)}</span>
+                                                          <Info className="h-4 w-4 ml-1 text-blue-500 hover:text-blue-600" />
+                                                        </div>
+                                                      </PopoverTrigger>
+                                                      <PopoverContent className="p-0">
+                                                        <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
+                                                          <p className="text-sm">This apparent shortfall is covered by existing supplier orders.</p>
+                                                        </div>
+                                                      </PopoverContent>
+                                                    </Popover>
+                                                  ) : (
+                                                    <span className={cn(
+                                                      metrics.apparent > 0 ? "text-orange-600" : "text-green-600",
+                                                      "font-medium"
+                                                    )}>
+                                                      {formatQuantity(metrics.apparent)}
+                                                    </span>
+                                                  )}
+                                                </TableCell>
+                                                <TableCell className="text-right">
                                                   <span className={cn(
-                                                    component.real_shortfall > 0 
-                                                      ? "text-red-600" 
-                                                      : "text-green-600",
+                                                    metrics.real > 0 ? "text-red-600" : "text-green-600",
                                                     "font-medium"
                                                   )}>
-                                                    {component.real_shortfall || 0}
+                                                    {formatQuantity(metrics.real)}
                                                   </span>
+                                                </TableCell>
+                                                {showGlobalContext && (
+                                                  <TableCell className="text-right">
+                                                    <span className={cn(
+                                                      globalShortfall > 0
+                                                        ? "text-red-600"
+                                                        : globalApparent > 0
+                                                          ? "text-amber-600"
+                                                          : "text-green-600",
+                                                      "font-medium"
+                                                    )}>
+                                                      {formatQuantity(globalShortfall)}
+                                                    </span>
+                                                    {globalApparent > 0 && globalShortfall === 0 && (
+                                                      <span className="text-xs text-muted-foreground ml-1">(Covered)</span>
+                                                    )}
+                                                  </TableCell>
                                                 )}
-                                              </TableCell>
-                                              <TableCell className="text-right">
-                                                <span className={cn(
-                                                  component.global_real_shortfall > 0 
-                                                    ? "text-red-600" 
-                                                    : component.global_apparent_shortfall > 0 
-                                                      ? "text-amber-600" 
-                                                      : "text-green-600",
-                                                  "font-medium"
-                                                )}>
-                                                  {component.global_real_shortfall || 0}
-                                                </span>
-                                                {component.global_apparent_shortfall > 0 && component.global_real_shortfall === 0 && (
-                                                  <span className="text-xs text-muted-foreground ml-1">(Covered)</span>
-                                                )}
-                                              </TableCell>
-                                            </TableRow>
-                                          ))}
+                                              </TableRow>
+                                            );
+                                          })}
                                         </TableBody>
                                       </Table>
                                     </div>
@@ -2984,10 +4008,50 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
           )}
         </TabsContent>
         
+        <TabsContent value="issue-stock" className="space-y-4">
+          <IssueStockTab orderId={orderId} order={order} componentRequirements={componentRequirements} />
+        </TabsContent>
+        
         <TabsContent value="documents" className="space-y-4">
-          {/* Content for documents tab */}
+          <OrderDocumentsTab orderId={orderId} />
         </TabsContent>
       </Tabs>
+
+      {/* Delete Product Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove Product from Order</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to remove "{productToDelete?.name}" from this order?
+              This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={cancelDeleteProduct}
+              disabled={deleteDetailMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDeleteProduct}
+              disabled={deleteDetailMutation.isPending}
+            >
+              {deleteDetailMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Removing...
+                </>
+              ) : (
+                'Remove Product'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 } 

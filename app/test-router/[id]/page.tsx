@@ -1,13 +1,15 @@
 'use client';
 
+import { use } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ArrowLeft } from 'lucide-react';
 
-export default function TestDetailPage({ params }: { params: { id: string } }) {
+export default function TestDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  // Unwrap the params Promise (Next.js 16 requirement)
+  const { id } = use(params);
   const router = useRouter();
-  const id = params.id;
 
   const handleBack = () => {
     console.log('Back button clicked');

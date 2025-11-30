@@ -5,12 +5,20 @@ import { Providers } from "@/components/common/providers";
 import { RootLayout as AppRootLayout } from "@/components/layout/root-layout";
 import { ThemeProvider } from '@/components/common/theme-provider';
 import { Toaster } from "@/components/ui/toaster";
+import { cn } from "@/lib/utils";
 
-// Use only the Inter font which is already working
-const inter = Inter({ subsets: ["latin"], preload: false });
+const inter = Inter({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-inter",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
-  title: "Unity ERP",
+  title: {
+    default: "Unity ERP",
+    template: "%s",
+  },
   description: "Internal ERP system built with modern React stack",
   icons: {
     icon: "/favicon.ico",
@@ -22,11 +30,13 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  console.log("Root layout rendering with simplified structure");
-  
   return (
-    <html lang="en" className={`dark ${inter.className}`} suppressHydrationWarning>
-      <body className="antialiased min-h-screen bg-background">
+    <html
+      lang="en"
+      className={cn("dark", inter.variable)}
+      suppressHydrationWarning
+    >
+      <body className={cn("antialiased min-h-screen bg-background", inter.className)}>
         <ThemeProvider
           attribute="class"
           defaultTheme="dark"

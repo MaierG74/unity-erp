@@ -24,14 +24,14 @@ export function Providers({ children }: { children: ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-            <ResetQueryErrorBoundary>
-        <ToastProvider>
-          {children}
-        </ToastProvider>
-      </ResetQueryErrorBoundary>
-            <ReactQueryDevtools initialIsOpen={false} />
-      </AuthProvider>
+      <ToastProvider>
+        <AuthProvider>
+          <ResetQueryErrorBoundary>
+            {children}
+          </ResetQueryErrorBoundary>
+          <ReactQueryDevtools initialIsOpen={false} />
+        </AuthProvider>
+      </ToastProvider>
     </QueryClientProvider>
   );
 }

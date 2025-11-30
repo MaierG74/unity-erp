@@ -67,6 +67,17 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM supplier_order_statuses WHERE status_name = 'Cancelled') THEN
     INSERT INTO supplier_order_statuses (status_name) VALUES ('Cancelled');
   END IF;
+  
+  -- Additional names used by UI/queries (keep alongside legacy names)
+  IF NOT EXISTS (SELECT 1 FROM supplier_order_statuses WHERE status_name = 'Approved') THEN
+    INSERT INTO supplier_order_statuses (status_name) VALUES ('Approved');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM supplier_order_statuses WHERE status_name = 'Partially Received') THEN
+    INSERT INTO supplier_order_statuses (status_name) VALUES ('Partially Received');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM supplier_order_statuses WHERE status_name = 'Fully Received') THEN
+    INSERT INTO supplier_order_statuses (status_name) VALUES ('Fully Received');
+  END IF;
 END
 $$;
 

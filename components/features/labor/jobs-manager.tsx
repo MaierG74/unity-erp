@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import React from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useForm } from 'react-hook-form';
@@ -49,10 +50,18 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
-import { Plus, Trash2, Edit, Save, X, ChevronDown, ChevronUp, Search, Filter, LayoutList, LayoutGrid } from 'lucide-react';
+import { Plus, Trash2, Edit, Loader2, ChevronDown, ChevronRight, Search, Briefcase, TrendingUp, DollarSign, Filter } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Badge } from '@/components/ui/badge';
-import { debounce } from 'lodash';
+import { useDebounce } from '@/hooks/use-debounce';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 // Define types
 interface JobCategory {
@@ -81,13 +90,11 @@ type JobFormValues = z.infer<typeof jobSchema>;
 
 export function JobsManager() {
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('');
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-  const [totalJobs, setTotalJobs] = useState(0);
-  const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({});
-  const [isCompactView, setIsCompactView] = useState(true);
+  const [expandedJobs, setExpandedJobs] = useState<Set<number>>(new Set());
+  const [isAddJobOpen, setIsAddJobOpen] = useState(false);
+  const [isEditJobOpen, setIsEditJobOpen] = useState(false);
   
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -116,37 +123,11 @@ export function JobsManager() {
     },
   });
   
-  // Count total jobs (for pagination)
-  useEffect(() => {
-    const fetchTotalJobs = async () => {
-      let query = supabase
-        .from('jobs')
-        .select('job_id', { count: 'exact', head: true });
-      
-      // Apply filters if present
-      if (categoryFilter) {
-        query = query.eq('category_id', categoryFilter);
-      }
-      
-      if (searchTerm) {
-        query = query.or(`name.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`);
-      }
-      
-      const { count, error } = await query;
-      
-      if (!error && count !== null) {
-        setTotalJobs(count);
-      }
-    };
-    
-    fetchTotalJobs();
-  }, [categoryFilter, searchTerm]);
-  
-  // Fetch jobs with filters and pagination
-  const { data: jobs = [], isLoading: jobsLoading, refetch: refetchJobs } = useQuery({
-    queryKey: ['jobs', page, pageSize, categoryFilter, searchTerm],
+  // Fetch all jobs (no pagination)
+  const { data: allJobs = [], isLoading: jobsLoading } = useQuery({
+    queryKey: ['jobs'],
     queryFn: async () => {
-      let query = supabase
+      const { data, error } = await supabase
         .from('jobs')
         .select(`
           job_id,
@@ -159,26 +140,8 @@ export function JobsManager() {
             description,
             current_hourly_rate
           )
-        `);
-      
-      // Apply filters if present
-      if (categoryFilter) {
-        query = query.eq('category_id', categoryFilter);
-      }
-      
-      if (searchTerm) {
-        query = query.or(`name.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`);
-      }
-      
-      // Apply pagination
-      const from = (page - 1) * pageSize;
-      const to = from + pageSize - 1;
-      
-      query = query
-        .order('name')
-        .range(from, to);
-      
-      const { data, error } = await query;
+        `)
+        .order('name');
       
       if (error) throw error;
       
@@ -189,33 +152,54 @@ export function JobsManager() {
     },
   });
   
-  // Debounced search handler
-  const debouncedSearch = debounce((value: string) => {
-    setSearchTerm(value);
-    setPage(1); // Reset to first page on new search
-  }, 300);
+  // Filter and search jobs client-side
+  const filteredJobs = React.useMemo(() => {
+    let filtered = allJobs;
+    
+    // Apply category filter
+    if (categoryFilter) {
+      filtered = filtered.filter(job => job.category_id.toString() === categoryFilter);
+    }
+    
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(job => 
+        job.name.toLowerCase().includes(query) ||
+        job.description?.toLowerCase().includes(query) ||
+        job.category?.name.toLowerCase().includes(query)
+      );
+    }
+    
+    return filtered;
+  }, [allJobs, categoryFilter, searchQuery]);
   
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    debouncedSearch(e.target.value);
-  };
+  // Calculate stats
+  const stats = React.useMemo(() => {
+    if (allJobs.length === 0) {
+      return { total: 0, avgRate: 0, categoriesUsed: 0 };
+    }
+    
+    const rates = allJobs.map(j => j.category?.current_hourly_rate || 0).filter(r => r > 0);
+    const avgRate = rates.length > 0 ? rates.reduce((sum, r) => sum + r, 0) / rates.length : 0;
+    const uniqueCategories = new Set(allJobs.map(j => j.category_id)).size;
+    
+    return {
+      total: allJobs.length,
+      avgRate,
+      categoriesUsed: uniqueCategories
+    };
+  }, [allJobs]);
   
-  // Category filter handler
-  const handleCategoryFilterChange = (value: string) => {
-    setCategoryFilter(value === '_all' ? '' : value);
-    setPage(1); // Reset to first page on new filter
-  };
-  
-  // Row expansion handler
-  const toggleRowExpansion = (jobId: number) => {
-    setExpandedRows(prev => ({
-      ...prev,
-      [jobId]: !prev[jobId]
-    }));
-  };
-  
-  // View mode toggle handler
-  const toggleViewMode = () => {
-    setIsCompactView(!isCompactView);
+  // Toggle job expansion
+  const toggleJob = (jobId: number) => {
+    const newExpanded = new Set(expandedJobs);
+    if (newExpanded.has(jobId)) {
+      newExpanded.delete(jobId);
+    } else {
+      newExpanded.add(jobId);
+    }
+    setExpandedJobs(newExpanded);
   };
   
   // Add job mutation
@@ -236,11 +220,11 @@ export function JobsManager() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
       form.reset();
+      setIsAddJobOpen(false);
       toast({
         title: 'Success',
         description: 'Job added successfully',
       });
-      refetchJobs();
     },
     onError: (error) => {
       toast({
@@ -271,11 +255,11 @@ export function JobsManager() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
       setEditingId(null);
+      setIsEditJobOpen(false);
       toast({
         title: 'Success',
         description: 'Job updated successfully',
       });
-      refetchJobs();
     },
     onError: (error) => {
       toast({
@@ -294,16 +278,12 @@ export function JobsManager() {
         .from('jobs')
         .delete()
         .eq('job_id', jobId);
-        
+
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
-      toast({
-        title: 'Success',
-        description: 'Job deleted successfully',
-      });
-      refetchJobs();
+      toast({ title: 'Success', description: 'Job deleted successfully' });
     },
     onError: (error) => {
       toast({
@@ -335,362 +315,385 @@ export function JobsManager() {
       description: job.description || '',
       category_id: job.category_id.toString(),
     });
+    setIsEditJobOpen(true);
   };
   
   // Cancel editing
   const cancelEditing = () => {
     setEditingId(null);
     form.reset();
+    setIsEditJobOpen(false);
   };
-  
-  // Calculate total pages
-  const totalPages = Math.ceil(totalJobs / pageSize);
   
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-lg">Jobs Management</CardTitle>
-              <CardDescription>
-                Manage jobs and assign them to categories
-              </CardDescription>
-            </div>
-            <div className="flex items-center space-x-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={toggleViewMode}
-                title={isCompactView ? "Switch to detailed view" : "Switch to compact view"}
-              >
-                {isCompactView ? <LayoutGrid className="h-4 w-4" /> : <LayoutList className="h-4 w-4" />}
-              </Button>
-            </div>
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+              <Briefcase className="h-4 w-4" />
+              Total Jobs
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.total}</div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+              <DollarSign className="h-4 w-4" />
+              Average Rate
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">R{stats.avgRate.toFixed(2)}</div>
+            <p className="text-xs text-muted-foreground mt-1">per hour</p>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+              <Filter className="h-4 w-4" />
+              Categories Used
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.categoriesUsed}</div>
+            <p className="text-xs text-muted-foreground mt-1">of {categories.length} total</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Toolbar */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <Button onClick={() => setIsAddJobOpen(true)} className="h-9">
+          <Plus className="h-4 w-4 mr-2" />
+          Add Job
+        </Button>
+        
+        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+          {/* Search */}
+          <div className="relative w-full md:w-80">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              type="text"
+              placeholder="Search jobs..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-9 pl-9"
+            />
           </div>
-        </CardHeader>
-        <CardContent>
+          
+          {/* Category Filter */}
+          <Select
+            value={categoryFilter || '_all'}
+            onValueChange={(value) => setCategoryFilter(value === '_all' ? '' : value)}
+          >
+            <SelectTrigger className="h-9 w-full md:w-48">
+              <SelectValue placeholder="All Categories" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_all">All Categories</SelectItem>
+              {categories.map((category) => (
+                <SelectItem
+                  key={category.category_id}
+                  value={category.category_id.toString()}
+                >
+                  {category.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {/* Jobs List */}
+      <Card>
+        <CardContent className="p-0">
           {jobsLoading || categoriesLoading ? (
-            <div className="text-center py-4">Loading...</div>
+            <div className="text-center py-8">Loading jobs...</div>
+          ) : filteredJobs.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              {searchQuery || categoryFilter ? 'No jobs match your filters' : 'No jobs defined yet'}
+            </div>
           ) : (
-            <>
-              {/* Search and Filter Controls */}
-              <div className="flex flex-col sm:flex-row gap-4 mb-6">
-                <div className="relative flex-1">
-                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search jobs..."
-                    onChange={handleSearchChange}
-                    className="pl-8"
-                  />
-                </div>
-                <div className="w-full sm:w-48">
-                  <Select
-                    value={categoryFilter}
-                    onValueChange={handleCategoryFilterChange}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="All Categories" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="_all">All Categories</SelectItem>
-                      {categories.map((category) => (
-                        <SelectItem
-                          key={category.category_id}
-                          value={category.category_id.toString()}
-                        >
-                          {category.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {/* Jobs Table */}
-              <div className="rounded-md border mb-6">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      {isCompactView && <TableHead className="w-[30px]"></TableHead>}
-                      <TableHead>Name</TableHead>
-                      {!isCompactView && <TableHead>Description</TableHead>}
-                      <TableHead>Category</TableHead>
-                      <TableHead>Hourly Rate</TableHead>
-                      <TableHead className="w-[100px]">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {jobs.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={isCompactView ? 5 : 6} className="text-center py-4">
-                          No jobs found
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      jobs.map((job) => (
-                        <>
-                          <TableRow key={job.job_id}>
-                            {isCompactView && (
-                              <TableCell className="px-2">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => toggleRowExpansion(job.job_id)}
-                                >
-                                  {expandedRows[job.job_id] ? (
-                                    <ChevronUp className="h-4 w-4" />
-                                  ) : (
-                                    <ChevronDown className="h-4 w-4" />
-                                  )}
-                                </Button>
-                              </TableCell>
-                            )}
-                            <TableCell className="font-medium">{job.name}</TableCell>
-                            {!isCompactView && <TableCell>{job.description}</TableCell>}
-                            <TableCell>
-                              <Badge variant="outline">{job.category?.name || 'Uncategorized'}</Badge>
-                            </TableCell>
-                            <TableCell>
+            <div className="divide-y">
+              {filteredJobs.map((job) => {
+                const isExpanded = expandedJobs.has(job.job_id);
+                
+                return (
+                  <div key={job.job_id} className="p-4">
+                    {/* Job Header */}
+                    <div className="flex items-start justify-between gap-4">
+                      <button
+                        onClick={() => toggleJob(job.job_id)}
+                        className="flex-1 flex items-start gap-3 text-left hover:opacity-70 transition-opacity"
+                      >
+                        {isExpanded ? (
+                          <ChevronDown className="h-5 w-5 mt-0.5 text-muted-foreground flex-shrink-0" />
+                        ) : (
+                          <ChevronRight className="h-5 w-5 mt-0.5 text-muted-foreground flex-shrink-0" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <h3 className="font-medium">{job.name}</h3>
+                            <Badge variant="outline">{job.category?.name || 'Uncategorized'}</Badge>
+                            <span className="text-sm font-semibold text-primary">
                               {job.category ? `R${job.category.current_hourly_rate.toFixed(2)}/hr` : 'N/A'}
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => startEditing(job)}
-                                >
-                                  <Edit className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => {
-                                    if (confirm(`Are you sure you want to delete ${job.name}?`)) {
-                                      deleteJob.mutate(job.job_id);
-                                    }
-                                  }}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                          {isCompactView && expandedRows[job.job_id] && (
-                            <TableRow>
-                              <TableCell colSpan={5} className="bg-muted/30">
-                                <div className="p-2">
-                                  <h4 className="text-sm font-semibold mb-1">Description:</h4>
-                                  <p className="text-sm text-muted-foreground">{job.description || 'No description provided'}</p>
-                                </div>
-                              </TableCell>
-                            </TableRow>
+                            </span>
+                          </div>
+                          {job.description && !isExpanded && (
+                            <p className="text-sm text-muted-foreground mt-1 line-clamp-1">
+                              {job.description}
+                            </p>
                           )}
-                        </>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-              
-              {/* Pagination */}
-              {totalPages > 1 && (
-                <div className="flex justify-center my-4">
-                  <Pagination>
-                    <PaginationContent>
-                      <PaginationItem>
-                        <PaginationPrevious 
-                          onClick={() => setPage(p => Math.max(1, p - 1))}
-                          className={page === 1 ? "pointer-events-none opacity-50" : ""}
-                        />
-                      </PaginationItem>
+                        </div>
+                      </button>
                       
-                      {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                        // Display pages around the current page
-                        let pageToShow;
-                        if (totalPages <= 5) {
-                          pageToShow = i + 1;
-                        } else if (page <= 3) {
-                          pageToShow = i + 1;
-                        } else if (page >= totalPages - 2) {
-                          pageToShow = totalPages - 4 + i;
-                        } else {
-                          pageToShow = page - 2 + i;
-                        }
-                        
-                        return (
-                          <PaginationItem key={pageToShow}>
-                            <PaginationLink
-                              isActive={pageToShow === page}
-                              onClick={() => setPage(pageToShow)}
-                            >
-                              {pageToShow}
-                            </PaginationLink>
-                          </PaginationItem>
-                        );
-                      })}
-                      
-                      {totalPages > 5 && page < totalPages - 2 && (
-                        <>
-                          <PaginationItem>
-                            <PaginationEllipsis />
-                          </PaginationItem>
-                          <PaginationItem>
-                            <PaginationLink onClick={() => setPage(totalPages)}>
-                              {totalPages}
-                            </PaginationLink>
-                          </PaginationItem>
-                        </>
-                      )}
-                      
-                      <PaginationItem>
-                        <PaginationNext 
-                          onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                          className={page === totalPages ? "pointer-events-none opacity-50" : ""}
-                        />
-                      </PaginationItem>
-                    </PaginationContent>
-                  </Pagination>
-                </div>
-              )}
-
-              {/* Add/Edit Job Form */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-md">
-                    {editingId ? 'Edit Job' : 'Add Job'}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <Form {...form}>
-                    <form
-                      onSubmit={form.handleSubmit(onSubmit)}
-                      className="space-y-4"
-                    >
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <FormField
-                          control={form.control}
-                          name="name"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Name</FormLabel>
-                              <FormControl>
-                                <Input {...field} />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-
-                        <FormField
-                          control={form.control}
-                          name="category_id"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Category</FormLabel>
-                              <Select
-                                onValueChange={field.onChange}
-                                value={field.value}
-                              >
-                                <FormControl>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Select category" />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                  {categories.map((category) => (
-                                    <SelectItem
-                                      key={category.category_id}
-                                      value={category.category_id.toString()}
-                                    >
-                                      {category.name} - R{category.current_hourly_rate.toFixed(2)}/hr
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-
-                      <FormField
-                        control={form.control}
-                        name="description"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Description</FormLabel>
-                            <FormControl>
-                              <Textarea {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <div className="flex justify-end space-x-2">
-                        {editingId && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={cancelEditing}
-                          >
-                            Cancel
-                          </Button>
-                        )}
+                      <div className="flex items-center gap-2">
                         <Button
-                          type="submit"
-                          disabled={addJob.isPending || updateJob.isPending}
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => startEditing(job)}
                         >
-                          {addJob.isPending || updateJob.isPending ? (
-                            'Saving...'
-                          ) : editingId ? (
-                            'Update Job'
-                          ) : (
-                            <>
-                              <Plus className="h-4 w-4 mr-2" />
-                              Add Job
-                            </>
-                          )}
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="destructiveSoft"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => {
+                            if (confirm(`Are you sure you want to delete ${job.name}?`)) {
+                              deleteJob.mutate(job.job_id);
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
-                    </form>
-                  </Form>
-                </CardContent>
-              </Card>
-            </>
+                    </div>
+                    
+                    {/* Expanded Description */}
+                    {isExpanded && job.description && (
+                      <div className="mt-3 ml-8 p-3 rounded-lg border bg-muted/20">
+                        <h4 className="text-sm font-medium mb-1">Description</h4>
+                        <p className="text-sm text-muted-foreground">{job.description}</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </CardContent>
-        <CardFooter className="flex justify-between text-sm text-muted-foreground">
-          <div>
-            {!jobsLoading && (
-              <span>
-                Showing {jobs.length} of {totalJobs} jobs
-              </span>
-            )}
-          </div>
-          <div className="flex space-x-4">
-            <Select 
-              value={pageSize.toString()}
-              onValueChange={(value) => {
-                setPageSize(parseInt(value));
-                setPage(1); // Reset to first page when changing page size
-              }}
-            >
-              <SelectTrigger className="w-[120px]">
-                <SelectValue placeholder="Items per page" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="10">10 per page</SelectItem>
-                <SelectItem value="20">20 per page</SelectItem>
-                <SelectItem value="50">50 per page</SelectItem>
-                <SelectItem value="100">100 per page</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardFooter>
       </Card>
+      
+      {/* Add Job Dialog */}
+      <Dialog open={isAddJobOpen} onOpenChange={setIsAddJobOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Job</DialogTitle>
+            <DialogDescription>
+              Create a new job and assign it to a category
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Name</FormLabel>
+                    <FormControl>
+                      <Input {...field} className="h-9" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="category_id"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Category</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger className="h-9">
+                          <SelectValue placeholder="Select category" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {categories.map((category) => (
+                          <SelectItem
+                            key={category.category_id}
+                            value={category.category_id.toString()}
+                          >
+                            {category.name} - R{category.current_hourly_rate.toFixed(2)}/hr
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="description"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Description</FormLabel>
+                    <FormControl>
+                      <Textarea {...field} rows={3} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9"
+                  onClick={() => {
+                    setIsAddJobOpen(false);
+                    form.reset();
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  className="h-9"
+                  disabled={addJob.isPending}
+                >
+                  {addJob.isPending ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Adding...
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Job
+                    </>
+                  )}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Edit Job Dialog */}
+      <Dialog open={isEditJobOpen} onOpenChange={setIsEditJobOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Job</DialogTitle>
+            <DialogDescription>
+              Update the job details and category assignment
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Name</FormLabel>
+                    <FormControl>
+                      <Input {...field} className="h-9" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="category_id"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Category</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger className="h-9">
+                          <SelectValue placeholder="Select category" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {categories.map((category) => (
+                          <SelectItem
+                            key={category.category_id}
+                            value={category.category_id.toString()}
+                          >
+                            {category.name} - R{category.current_hourly_rate.toFixed(2)}/hr
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="description"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Description</FormLabel>
+                    <FormControl>
+                      <Textarea {...field} rows={3} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9"
+                  onClick={cancelEditing}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  className="h-9"
+                  disabled={updateJob.isPending}
+                >
+                  {updateJob.isPending ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Updating...
+                    </>
+                  ) : (
+                    'Update Job'
+                  )}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
-} 
+}
