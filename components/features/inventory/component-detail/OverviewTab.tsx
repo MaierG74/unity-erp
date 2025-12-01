@@ -92,15 +92,19 @@ export function OverviewTab({ component }: OverviewTabProps) {
           <div className="flex flex-col md:flex-row gap-6">
             {/* Image */}
             <div className="flex-shrink-0">
-              <Avatar className="h-32 w-32 rounded-lg">
-                <AvatarImage 
-                  src={component.image_url || undefined} 
-                  className="object-cover"
-                />
-                <AvatarFallback className="rounded-lg text-2xl">
-                  {component.internal_code.substring(0, 2).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
+              <div className="h-32 w-32 rounded-lg border bg-muted overflow-hidden flex items-center justify-center">
+                {component.image_url ? (
+                  <img 
+                    src={component.image_url} 
+                    alt={component.internal_code}
+                    className="max-h-full max-w-full object-contain"
+                  />
+                ) : (
+                  <span className="text-2xl font-medium text-muted-foreground">
+                    {component.internal_code.substring(0, 2).toUpperCase()}
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* Details */}

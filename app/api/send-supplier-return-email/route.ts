@@ -144,6 +144,8 @@ export async function POST(request: Request) {
     };
 
     const fromAddress = process.env.EMAIL_FROM || companyInfo.email || 'purchasing@example.com';
+    // Sanitize company name for email header (remove special chars that break RFC 5322)
+    const sanitizedCompanyName = companyInfo.name.replace(/[<>()[\]\\,;:@"]/g, '').trim();
 
     // Resolve recipient email (override -> primary -> any)
     let toEmail = overrideEmail;
@@ -202,7 +204,7 @@ export async function POST(request: Request) {
 
     // Send the email via Resend
     const { data: result, error } = await resend.emails.send({
-      from: `${emailData.companyName} Purchasing <${fromAddress}>`,
+      from: `${sanitizedCompanyName} Purchasing <${fromAddress}>`,
       to: [toEmail],
       cc: ccList.length ? ccList : undefined,
       subject: `Goods Returned - ${emailData.goodsReturnNumber} (PO: ${emailData.purchaseOrderNumber})`,
