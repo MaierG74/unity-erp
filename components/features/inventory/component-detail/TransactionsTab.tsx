@@ -350,16 +350,66 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
     );
   }
 
+  const currentStock = inventoryData?.quantity_on_hand ?? 0;
+
   if (transactionsWithBalance.length === 0) {
     return (
-      <Card>
-        <CardContent className="pt-6">
-          <div className="text-center text-muted-foreground py-8">
-            <Calendar className="h-12 w-12 mx-auto mb-4 opacity-50" />
-            <p>No transactions recorded for this component.</p>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="space-y-6">
+        {/* Current Stock Banner with Action Buttons - shown even with no transactions */}
+        <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800">
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="p-3 bg-blue-100 dark:bg-blue-900 rounded-full">
+                  <Boxes className="h-8 w-8 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Current Stock Balance</p>
+                  <p className="text-4xl font-bold text-blue-700 dark:text-blue-300">{currentStock}</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  asChild
+                  className="gap-2"
+                >
+                  <Link href={`/purchasing/purchase-orders/new?component=${componentId}`}>
+                    <Plus className="h-4 w-4" />
+                    Create PO
+                  </Link>
+                </Button>
+                <Button
+                  onClick={() => setAdjustmentDialogOpen(true)}
+                  className="gap-2"
+                >
+                  <ClipboardCheck className="h-4 w-4" />
+                  Stock Adjustment
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-center text-muted-foreground py-8">
+              <Calendar className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p>No transactions recorded for this component.</p>
+              <p className="text-sm mt-2">Use Stock Adjustment to record initial inventory from a stocktake.</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Stock Adjustment Dialog */}
+        <StockAdjustmentDialog
+          open={adjustmentDialogOpen}
+          onOpenChange={setAdjustmentDialogOpen}
+          componentId={componentId}
+          componentName={componentName}
+          currentStock={currentStock}
+        />
+      </div>
     );
   }
 
@@ -375,8 +425,6 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
   );
   const totalIssued = Math.abs(issues.reduce((sum, t) => sum + (t.quantity || 0), 0));
   const totalReturned = Math.abs(returns.reduce((sum, t) => sum + (t.quantity || 0), 0));
-
-  const currentStock = inventoryData?.quantity_on_hand ?? 0;
 
   return (
     <div className="space-y-6">
