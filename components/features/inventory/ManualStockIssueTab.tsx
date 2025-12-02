@@ -721,22 +721,66 @@ export function ManualStockIssueTab() {
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            if (confirm(`Reverse ${formatQuantity(issuance.quantity_issued)} of ${issuance.component?.internal_code}?`)) {
-                              reverseIssuanceMutation.mutate({
-                                issuanceId: issuance.issuance_id,
-                                quantity: issuance.quantity_issued,
-                                reason: 'Manual reversal',
-                              });
-                            }
-                          }}
-                          title="Reverse Issuance"
-                        >
-                          <RotateCcw className="h-4 w-4" />
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={async () => {
+                              try {
+                                const staffName = issuance.staff 
+                                  ? `${issuance.staff.first_name} ${issuance.staff.last_name}`
+                                  : null;
+                                const blob = await pdf(
+                                  <ManualIssuancePDFDocument
+                                    components={[{
+                                      component_id: issuance.component_id,
+                                      internal_code: issuance.component?.internal_code || 'Unknown',
+                                      description: issuance.component?.description || null,
+                                      quantity: issuance.quantity_issued,
+                                    }]}
+                                    externalReference={issuance.external_reference || ''}
+                                    issueCategory={ISSUE_CATEGORIES.find(c => c.value === issuance.issue_category)?.label || issuance.issue_category || 'Unknown'}
+                                    issuedTo={staffName}
+                                    notes={issuance.notes || null}
+                                    issuanceDate={issuance.issuance_date}
+                                    companyInfo={companyInfo}
+                                    type="issuance"
+                                  />
+                                ).toBlob();
+                                const url = URL.createObjectURL(blob);
+                                const link = document.createElement('a');
+                                link.href = url;
+                                link.download = `issuance-${issuance.external_reference || issuance.issuance_id}-${format(new Date(issuance.issuance_date), 'yyyyMMdd')}.pdf`;
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                                URL.revokeObjectURL(url);
+                              } catch (error) {
+                                console.error('Failed to generate PDF:', error);
+                                toast.error('Failed to generate PDF');
+                              }
+                            }}
+                            title="Download PDF"
+                          >
+                            <Download className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              if (confirm(`Reverse ${formatQuantity(issuance.quantity_issued)} of ${issuance.component?.internal_code}?`)) {
+                                reverseIssuanceMutation.mutate({
+                                  issuanceId: issuance.issuance_id,
+                                  quantity: issuance.quantity_issued,
+                                  reason: 'Manual reversal',
+                                });
+                              }
+                            }}
+                            title="Reverse Issuance"
+                          >
+                            <RotateCcw className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
