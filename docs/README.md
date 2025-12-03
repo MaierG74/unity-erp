@@ -56,6 +56,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
 - Changelogs: [`changelogs/`](changelogs/)
   - [`changelogs/november-2025-deployment-20251130.md`](changelogs/november-2025-deployment-20251130.md) – **November 2025 production deployment** (major release)
   - [`changelogs/inventory-component-ui-improvements-20251130.md`](changelogs/inventory-component-ui-improvements-20251130.md) – Inventory component page UI/UX improvements (header, tabs, gradients)
+  - [`changelogs/inventory-issuance-and-deletion-fixes-20251202.md`](changelogs/inventory-issuance-and-deletion-fixes-20251202.md) – Manual issuance RPC, PDF workflow, and component deletion cleanup fixes
   - [`changelogs/stock-adjustment-feature-20251130.md`](changelogs/stock-adjustment-feature-20251130.md) – Stock adjustment feature for inventory corrections after stock take
   - [`changelogs/supplier-returns-rpc-overload-fix-20250113.md`](changelogs/supplier-returns-rpc-overload-fix-20250113.md) – Dropped legacy RPC overload to fix supplier return execution errors
   - [`changelogs/on-order-calculation-fix-20250110.md`](changelogs/on-order-calculation-fix-20250110.md) – Fixed "On Order" calculation discrepancies with INNER JOIN patterns and corrected supplier order statuses

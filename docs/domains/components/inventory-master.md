@@ -40,6 +40,10 @@
   - OUT transactions are created by job/issue flows; they reduce on‑hand.
 - Adjust stock (Counts/Corrections)
   - ADJUST with reason and user attribution; affects on‑hand and audit trail.
+  - Transactions tab now shows the Stock Adjustment banner even when a component has no prior movements, allowing initial stocktakes to be recorded immediately.
+- Manual issuance (Samples/Non‑BOM work)
+  - `process_manual_stock_issuance` RPC handles validations, decrements stock, and emits `stock_issuances` rows.
+  - Manual issuance history includes PDF download buttons for signed issuance records (mirrors Purchase Order issuance PDFs).
 
 ## Reporting & Queries
 - Below Reorder: `inventory.quantity_on_hand < inventory.reorder_level` with joins to components and location.
@@ -59,8 +63,7 @@
 - Multiple joins per row; keep detail fetches scoped and cache with React Query.
 
 ## Known Gaps
-- Canonical spec for `inventory_transactions` (types, invariants, reconciliation) — see `inventory-transactions.md`.
-- Stock Adjustment UI/RPC to formalize reasons and audit.
+- Canonical spec for `inventory_transactions` (types, invariants, reconciliation) — see `inventory-transactions.md` (kept current with manual issuance notes).
 - Reorder policy and alerts/digests.
 - Two UI variants exist; converging on a single canonical page is recommended.
 
