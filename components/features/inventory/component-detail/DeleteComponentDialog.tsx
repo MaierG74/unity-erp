@@ -35,7 +35,7 @@ export function DeleteComponentDialog({
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
-      // First check if there are any dependencies
+      // First check if there are any dependencies that should block deletion
       const { data: bomData } = await supabase
         .from('billofmaterials')
         .select('bom_id')
@@ -46,29 +46,15 @@ export function DeleteComponentDialog({
         throw new Error('This component is used in one or more product BOMs and cannot be deleted.');
       }
 
-      const { data: supplierData } = await supabase
-        .from('suppliercomponents')
-        .select('supplier_component_id')
-        .eq('component_id', componentId)
-        .limit(1);
+      // Use the API route which handles all related tables with admin privileges
+      const response = await fetch(`/api/inventory/components/${componentId}`, {
+        method: 'DELETE',
+      });
 
-      if (supplierData && supplierData.length > 0) {
-        throw new Error('This component has supplier links. Please remove them first.');
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Failed to delete component');
       }
-
-      // Delete inventory record first
-      await supabase
-        .from('inventory')
-        .delete()
-        .eq('component_id', componentId);
-
-      // Delete the component
-      const { error } = await supabase
-        .from('components')
-        .delete()
-        .eq('component_id', componentId);
-
-      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });

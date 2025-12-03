@@ -96,12 +96,12 @@ export function OverviewTab({ component }: OverviewTabProps) {
                 {component.image_url ? (
                   <img 
                     src={component.image_url} 
-                    alt={component.internal_code}
+                    alt={component.internal_code || 'Component'}
                     className="max-h-full max-w-full object-contain"
                   />
                 ) : (
                   <span className="text-2xl font-medium text-muted-foreground">
-                    {component.internal_code.substring(0, 2).toUpperCase()}
+                    {(component.internal_code || '??').substring(0, 2).toUpperCase()}
                   </span>
                 )}
               </div>
@@ -110,7 +110,7 @@ export function OverviewTab({ component }: OverviewTabProps) {
             {/* Details */}
             <div className="flex-1 space-y-4">
               <div>
-                <h2 className="text-2xl font-bold">{component.internal_code}</h2>
+                <h2 className="text-2xl font-bold">{component.internal_code || 'Unnamed Component'}</h2>
                 <p className="text-muted-foreground mt-1">
                   {component.description || 'No description available'}
                 </p>

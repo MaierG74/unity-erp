@@ -12,34 +12,90 @@ export async function DELETE(
   }
 
   try {
-    // 1) Delete inventory transactions
+    // Delete all related records in order of dependencies
+    
+    // 1) Delete stock issuances
+    {
+      const { error } = await supabaseAdmin
+        .from('stock_issuances')
+        .delete()
+        .eq('component_id', idNum)
+      if (error) console.warn('stock_issuances delete:', error.message)
+    }
+
+    // 2) Delete inventory transactions
     {
       const { error } = await supabaseAdmin
         .from('inventory_transactions')
         .delete()
         .eq('component_id', idNum)
-      if (error) throw error
+      if (error) console.warn('inventory_transactions delete:', error.message)
     }
 
-    // 2) Delete inventory rows
+    // 3) Delete inventory rows
     {
       const { error } = await supabaseAdmin
         .from('inventory')
         .delete()
         .eq('component_id', idNum)
-      if (error) throw error
+      if (error) console.warn('inventory delete:', error.message)
     }
 
-    // 3) Delete supplier components
+    // 4) Delete supplier components
     {
       const { error } = await supabaseAdmin
         .from('suppliercomponents')
         .delete()
         .eq('component_id', idNum)
-      if (error) throw error
+      if (error) console.warn('suppliercomponents delete:', error.message)
     }
 
-    // 4) Delete the component itself
+    // 5) Delete component follow-up emails (has CASCADE but be explicit)
+    {
+      const { error } = await supabaseAdmin
+        .from('component_follow_up_emails')
+        .delete()
+        .eq('component_id', idNum)
+      if (error) console.warn('component_follow_up_emails delete:', error.message)
+    }
+
+    // 6) Delete quote cluster lines
+    {
+      const { error } = await supabaseAdmin
+        .from('quote_cluster_lines')
+        .delete()
+        .eq('component_id', idNum)
+      if (error) console.warn('quote_cluster_lines delete:', error.message)
+    }
+
+    // 7) Delete bom collection items
+    {
+      const { error } = await supabaseAdmin
+        .from('bom_collection_items')
+        .delete()
+        .eq('component_id', idNum)
+      if (error) console.warn('bom_collection_items delete:', error.message)
+    }
+
+    // 8) Delete section details
+    {
+      const { error } = await supabaseAdmin
+        .from('section_details')
+        .delete()
+        .eq('component_id', idNum)
+      if (error) console.warn('section_details delete:', error.message)
+    }
+
+    // 9) Delete supplier order customer orders
+    {
+      const { error } = await supabaseAdmin
+        .from('supplier_order_customer_orders')
+        .delete()
+        .eq('component_id', idNum)
+      if (error) console.warn('supplier_order_customer_orders delete:', error.message)
+    }
+
+    // 10) Delete the component itself
     {
       const { error } = await supabaseAdmin
         .from('components')
