@@ -45,7 +45,7 @@ type AnalyticsTabProps = {
 };
 
 export function AnalyticsTab({ component }: AnalyticsTabProps) {
-  const inventory = component.inventory?.[0];
+  const inventory = Array.isArray(component.inventory) ? component.inventory[0] : component.inventory;
   const currentStock = inventory?.quantity_on_hand || 0;
   const reorderLevel = inventory?.reorder_level || 0;
   const onOrder = component.on_order_quantity || 0;

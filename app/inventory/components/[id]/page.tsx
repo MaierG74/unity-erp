@@ -171,8 +171,14 @@ export default function ComponentDetailPage() {
     );
   }
 
+  // Normalize inventory from array to single object (one-to-one relationship)
+  const inventoryRecord = Array.isArray(component.inventory) 
+    ? component.inventory[0] || null 
+    : component.inventory;
+
   const componentData = {
     ...component,
+    inventory: inventoryRecord,
     on_order_quantity: onOrderData || 0,
     required_for_orders: requiredForOrdersData || 0,
   };
@@ -221,7 +227,11 @@ export default function ComponentDetailPage() {
         </TabsContent>
 
         <TabsContent value="transactions">
-          <ComponentTransactionsTab componentId={componentId} componentName={component.internal_code} />
+          <ComponentTransactionsTab 
+            componentId={componentId} 
+            componentName={component.internal_code}
+            reorderLevel={inventoryRecord?.reorder_level ?? 0}
+          />
         </TabsContent>
 
         <TabsContent value="orders">
