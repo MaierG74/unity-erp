@@ -29,12 +29,12 @@ type ComponentData = {
     unit_code: string;
     unit_name: string;
   } | null;
-  inventory: Array<{
+  inventory: {
     inventory_id: number;
     quantity_on_hand: number;
     location: string | null;
     reorder_level: number | null;
-  }> | null;
+  } | null;
   supplierComponents: Array<{
     supplier_component_id: number;
     supplier_id: number;
@@ -54,7 +54,7 @@ type OverviewTabProps = {
 };
 
 export function OverviewTab({ component }: OverviewTabProps) {
-  const inventory = component.inventory?.[0];
+  const inventory = component.inventory;
   const quantityOnHand = inventory?.quantity_on_hand || 0;
   const reorderLevel = inventory?.reorder_level || 0;
   const location = inventory?.location || 'Not set';

@@ -41,6 +41,8 @@ const formSchema = z.object({
   unit_id: z.string().min(1, 'Unit is required'),
   category_id: z.string().min(1, 'Category is required'),
   image_url: z.string().nullable().optional(),
+  reorder_level: z.coerce.number().min(0, 'Must be 0 or greater').optional(),
+  location: z.string().nullable().optional(),
 });
 
 type ComponentData = {
@@ -56,6 +58,12 @@ type ComponentData = {
     unit_id: number;
     unit_code: string;
     unit_name: string;
+  } | null;
+  inventory: {
+    inventory_id: number;
+    quantity_on_hand: number;
+    reorder_level: number | null;
+    location: string | null;
   } | null;
 };
 
@@ -79,6 +87,8 @@ export function EditComponentDialog({ open, onOpenChange, component }: EditCompo
       unit_id: component.unit?.unit_id.toString() || '',
       category_id: component.category?.cat_id.toString() || '',
       image_url: component.image_url,
+      reorder_level: component.inventory?.reorder_level ?? 0,
+      location: component.inventory?.location || '',
     },
   });
 
@@ -91,6 +101,8 @@ export function EditComponentDialog({ open, onOpenChange, component }: EditCompo
         unit_id: component.unit?.unit_id.toString() || '',
         category_id: component.category?.cat_id.toString() || '',
         image_url: component.image_url,
+        reorder_level: component.inventory?.reorder_level ?? 0,
+        location: component.inventory?.location || '',
       });
       setImagePreview(component.image_url);
     }
@@ -125,6 +137,7 @@ export function EditComponentDialog({ open, onOpenChange, component }: EditCompo
   // Update component mutation
   const updateMutation = useMutation({
     mutationFn: async (values: z.infer<typeof formSchema>) => {
+      // Update component details
       const { error } = await supabase
         .from('components')
         .update({
@@ -137,10 +150,25 @@ export function EditComponentDialog({ open, onOpenChange, component }: EditCompo
         .eq('component_id', component.component_id);
 
       if (error) throw error;
+
+      // Update or create inventory record with reorder level and location
+      const { error: invError } = await supabase
+        .from('inventory')
+        .upsert(
+          {
+            component_id: component.component_id,
+            reorder_level: values.reorder_level ?? 0,
+            location: values.location || null,
+            quantity_on_hand: component.inventory?.quantity_on_hand ?? 0,
+          },
+          { onConflict: 'component_id' }
+        );
+
+      if (invError) throw invError;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['component', component.component_id] });
-      queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
       toast({
         title: 'Component updated',
         description: 'The component has been successfully updated.',
@@ -337,6 +365,49 @@ export function EditComponentDialog({ open, onOpenChange, component }: EditCompo
                 </FormItem>
               )}
             />
+
+            {/* Inventory Settings */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="reorder_level"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Minimum Stock Level</FormLabel>
+                    <FormControl>
+                      <Input 
+                        type="number" 
+                        min="0" 
+                        placeholder="0" 
+                        {...field} 
+                        value={field.value ?? 0}
+                      />
+                    </FormControl>
+                    <FormDescription>Alert when stock falls below this</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="location"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Storage Location</FormLabel>
+                    <FormControl>
+                      <Input 
+                        placeholder="e.g., Shelf A-3, Bin 12" 
+                        {...field} 
+                        value={field.value ?? ''}
+                      />
+                    </FormControl>
+                    <FormDescription>Where this item is stored</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
 
             {/* Image Upload */}
             <div className="space-y-3">

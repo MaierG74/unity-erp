@@ -72,6 +72,7 @@ type Transaction = {
 type StockMovementChartProps = {
   transactions: Transaction[];
   currentStock: number;
+  reorderLevel?: number;
 };
 
 type DayData = {
@@ -91,7 +92,7 @@ const TIME_RANGES = [
   { label: 'Last 90 days', days: 90 },
 ];
 
-export function StockMovementChart({ transactions, currentStock }: StockMovementChartProps) {
+export function StockMovementChart({ transactions, currentStock, reorderLevel = 0 }: StockMovementChartProps) {
   const [timeRange, setTimeRange] = useState(30);
   const [selectedDay, setSelectedDay] = useState<DayData | null>(null);
 
@@ -300,6 +301,23 @@ export function StockMovementChart({ transactions, currentStock }: StockMovement
                 
                 {/* Reference line at zero */}
                 <ReferenceLine y={0} stroke="#888" strokeDasharray="3 3" />
+                
+                {/* Reorder level reference line */}
+                {reorderLevel > 0 && (
+                  <ReferenceLine 
+                    y={reorderLevel} 
+                    stroke="#f59e0b" 
+                    strokeWidth={2}
+                    strokeDasharray="8 4"
+                    label={{ 
+                      value: `Reorder Level (${reorderLevel})`, 
+                      position: 'right',
+                      fill: '#f59e0b',
+                      fontSize: 11,
+                      fontWeight: 500
+                    }}
+                  />
+                )}
                 
                 {/* Stock In bars (positive) */}
                 <Bar

@@ -33,7 +33,12 @@ type Component = {
     quantity_on_hand: number;
     location: string | null;
     reorder_level: number | null;
-  }> | null;
+  }> | {
+    inventory_id: number;
+    quantity_on_hand: number;
+    location: string | null;
+    reorder_level: number | null;
+  } | null;
   supplierComponents: {
     supplier_component_id: number;
     supplier_id: number;
@@ -43,6 +48,12 @@ type Component = {
       name: string;
     };
   }[];
+};
+
+// Helper to get inventory data (handles both array and single object)
+const getInventory = (component: Component) => {
+  if (!component.inventory) return null;
+  return Array.isArray(component.inventory) ? component.inventory[0] : component.inventory;
 };
 
 // Define columns for the DataTable
@@ -68,8 +79,9 @@ const columns = [
     accessorKey: 'inventory.0.quantity_on_hand',
     header: 'Stock',
     cell: (row: Component) => {
-      const quantity = row.inventory?.[0]?.quantity_on_hand || 0;
-      const reorderLevel = row.inventory?.[0]?.reorder_level || 0;
+      const inv = getInventory(row);
+      const quantity = inv?.quantity_on_hand || 0;
+      const reorderLevel = inv?.reorder_level || 0;
       const isLowStock = quantity <= reorderLevel && quantity > 0;
       const isOutOfStock = quantity <= 0;
       
@@ -87,7 +99,7 @@ const columns = [
   {
     accessorKey: 'inventory.0.reorder_level',
     header: 'Reorder Level',
-    cell: (row: Component) => row.inventory?.[0]?.reorder_level || 0,
+    cell: (row: Component) => getInventory(row)?.reorder_level || 0,
     editable: true
   },
   {

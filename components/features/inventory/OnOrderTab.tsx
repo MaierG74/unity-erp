@@ -254,8 +254,9 @@ export function OnOrderTab() {
               </TableRow>
             ) : (
               componentsOnOrder.map((component) => {
-                const currentStock = component.inventory?.[0]?.quantity_on_hand || 0;
-                const reorderLevel = component.inventory?.[0]?.reorder_level || 0;
+                const inv = Array.isArray(component.inventory) ? component.inventory[0] : component.inventory;
+                const currentStock = inv?.quantity_on_hand || 0;
+                const reorderLevel = inv?.reorder_level || 0;
                 const isLowStock = currentStock <= reorderLevel && currentStock > 0;
                 const isOutOfStock = currentStock <= 0;
 

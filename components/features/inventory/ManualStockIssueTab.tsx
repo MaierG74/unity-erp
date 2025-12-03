@@ -167,12 +167,15 @@ export function ManualStockIssueTab() {
 
       if (error) throw error;
       
-      return (data || []).map((comp: any) => ({
-        component_id: comp.component_id,
-        internal_code: comp.internal_code,
-        description: comp.description,
-        quantity_on_hand: comp.inventory?.[0]?.quantity_on_hand || 0,
-      }));
+      return (data || []).map((comp: any) => {
+        const inv = Array.isArray(comp.inventory) ? comp.inventory[0] : comp.inventory;
+        return {
+          component_id: comp.component_id,
+          internal_code: comp.internal_code,
+          description: comp.description,
+          quantity_on_hand: inv?.quantity_on_hand || 0,
+        };
+      });
     },
     enabled: componentSearchTerm.trim().length >= 2,
     staleTime: 30000,

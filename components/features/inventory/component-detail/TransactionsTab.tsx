@@ -95,6 +95,7 @@ type TransactionsTabProps = {
   componentId: number;
   componentName?: string;
   supplierId?: number; // Optional: preferred supplier for quick PO
+  reorderLevel?: number; // Minimum stock level for chart reference line
 };
 
 type FilterState = {
@@ -179,7 +180,7 @@ function getTransactionTypeStyle(typeName: string) {
   }
 }
 
-export function TransactionsTab({ componentId, componentName = 'Component', supplierId }: TransactionsTabProps) {
+export function TransactionsTab({ componentId, componentName = 'Component', supplierId, reorderLevel = 0 }: TransactionsTabProps) {
   const [adjustmentDialogOpen, setAdjustmentDialogOpen] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<FilterState>({
@@ -239,6 +240,37 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
       return data;
     },
   });
+
+  // Fetch user profiles for transactions
+  const userIds = useMemo(() => {
+    const ids = transactions
+      .map(t => t.user_id)
+      .filter((id): id is string => id !== null);
+    return [...new Set(ids)];
+  }, [transactions]);
+
+  const { data: userProfiles = [] } = useQuery({
+    queryKey: ['profiles', userIds],
+    queryFn: async () => {
+      if (userIds.length === 0) return [];
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, username')
+        .in('id', userIds);
+      if (error) throw error;
+      return data;
+    },
+    enabled: userIds.length > 0,
+  });
+
+  // Create a map of user_id to username
+  const userMap = useMemo(() => {
+    const map = new Map<string, string>();
+    userProfiles.forEach(p => {
+      if (p.id && p.username) map.set(p.id, p.username);
+    });
+    return map;
+  }, [userProfiles]);
 
   // Calculate running balance for each transaction
   const transactionsWithBalance: InventoryTransaction[] = transactions.reduce((acc, transaction, index) => {
@@ -535,7 +567,8 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
       {/* Stock Movement Chart */}
       <StockMovementChart 
         transactions={transactionsWithBalance} 
-        currentStock={currentStock} 
+        currentStock={currentStock}
+        reorderLevel={reorderLevel}
       />
 
       {/* Transactions Table */}
@@ -802,7 +835,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
                     </TableCell>
                     <TableCell>
                       <span className="text-sm text-muted-foreground">
-                        {transaction.user_id ? transaction.user_id.substring(0, 8) + '...' : '-'}
+                        {(transaction.user_id && userMap.get(transaction.user_id)) || (transaction.user_id ? transaction.user_id.substring(0, 8) + '...' : '-')}
                       </span>
                     </TableCell>
                     <TableCell>
