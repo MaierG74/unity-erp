@@ -2834,6 +2834,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     let componentsInStock = 0;
     let componentsOnOrder = 0;
     let componentsInDraftPO = 0;
+    let componentsPendingDeliveries = 0;
     
     // Collect shortfall details
     const shortfallComponents: Array<{
@@ -2854,6 +2855,9 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
         const onOrder = Number(component?.quantity_on_order ?? component?.on_order ?? 0);
         const draftPO = Number(component?.draft_po_quantity ?? 0);
         
+        const readyNow = metrics.apparent <= 0.0001;
+        const waitingOnDeliveries = metrics.apparent > 0.0001 && metrics.real <= 0.0001;
+
         if (metrics.real > 0.0001) {
           totalShortfall++;
           shortfallComponents.push({
@@ -2865,8 +2869,10 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
             draftPO,
             shortfall: metrics.real
           });
-        } else {
+        } else if (readyNow) {
           componentsInStock++;
+        } else if (waitingOnDeliveries) {
+          componentsPendingDeliveries++;
         }
         
         if (onOrder > 0) componentsOnOrder++;
@@ -2889,6 +2895,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       componentsInStock,
       componentsOnOrder,
       componentsInDraftPO,
+      componentsPendingDeliveries,
       criticalShortfalls,
       allShortfalls: shortfallComponents,
       stockCoverage
@@ -3476,6 +3483,16 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                     <span className="text-red-600 font-medium">{totals.totalShortfall} need ordering</span>
                   )}
                 </div>
+                {totals.componentsPendingDeliveries > 0 && (
+                  <div className="flex items-center gap-1 pt-1 text-xs text-amber-600">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span>
+                      Waiting on deliveries for {totals.componentsPendingDeliveries === 1
+                        ? '1 component'
+                        : `${totals.componentsPendingDeliveries} components`}
+                    </span>
+                  </div>
+                )}
               </div>
               
               {/* Purchasing Status - Only show if there are shortfalls */}
@@ -3552,10 +3569,20 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
               )}
               
               {/* All good message */}
-              {totals.totalShortfall === 0 && totals.totalComponents > 0 && (
+              {totals.totalShortfall === 0 && totals.totalComponents > 0 && totals.componentsPendingDeliveries === 0 && (
                 <div className="flex items-center gap-2 text-green-600 bg-green-50 rounded-lg p-3">
                   <CheckCircle className="w-5 h-5" />
                   <span className="font-medium">All components available in stock</span>
+                </div>
+              )}
+              {totals.totalShortfall === 0 && totals.totalComponents > 0 && totals.componentsPendingDeliveries > 0 && (
+                <div className="flex items-center gap-2 text-amber-700 bg-amber-50 rounded-lg p-3">
+                  <AlertCircle className="w-5 h-5" />
+                  <span className="font-medium">
+                    All components will be available once pending deliveries arrive for {totals.componentsPendingDeliveries === 1
+                      ? '1 component'
+                      : `${totals.componentsPendingDeliveries} components`}.
+                  </span>
                 </div>
               )}
               

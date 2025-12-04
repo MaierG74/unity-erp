@@ -116,6 +116,7 @@ Accessible via the "Stock Adjustment" button, the dialog provides:
 - Manual issuance tab (`/inventory`) now mirrors the PO issuance workflow:
   - After any successful manual issuance, the history table surfaces a download icon that renders `ManualIssuancePDFDocument` with component, reference, category, issued-to, and notes info.
   - The Picking List PDF button remains available pre-issuance; post-issuance PDFs use the new "Stock Issuance Record" layout for signature capture.
+- The history card is rendered inside a collapsible container to keep the manual issuance form the primary focus. The section is collapsed by default with a "Show history" button (that toggles to "Hide history" when expanded). The button includes a chevron that rotates with the open state for quick visual feedback.
 - The PDF flow depends on `company settings` (`/api/settings`) to display branding. Missing branding is tolerated, but populate `company_name`, `address`, and `logo` for production parity.
 
 ### Best Practices (from ERP industry standards)

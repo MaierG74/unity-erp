@@ -22,6 +22,8 @@
   - `component_id`, `internal_code` (unique), `description`, `image_url`, `category_id`, `unit_id`.
 - `inventory`
   - `inventory_id`, `component_id`, `quantity_on_hand`, `location`, `reorder_level`.
+  - **One-to-one relationship.** A unique constraint on `inventory.component_id` enforces at most one inventory record per component. Frontend consumers should treat `component.inventory` as a single object (Supabase now returns an object, not an array) and fall back to `null` if the record has not been created yet.
+  - `location` is an optional free-form storage hint surfaced in the Edit Component dialog and Overview tab. `reorder_level` (aka minimum stock) drives the Low Stock alert and the reorder reference line in the stock movement chart.
 - `inventory_transactions`
   - `transaction_id`, `component_id`, `quantity`, `transaction_type` ('IN'|'OUT'|'ADJUST'), `transaction_date`, optional `order_id`/reference.
 - `suppliercomponents`
@@ -51,6 +53,8 @@
 - Where Used: BOM/collections usage via `billofmaterials` and `bom_collections` (for shortages and planning).
 - On Order: Calculated from open purchase orders (`supplier_orders` where status is Open/In Progress/Approved/Partially Received/Pending Approval), showing `order_quantity - total_received` per component. Only includes `supplier_orders` linked to *existing* `purchase_orders` (via INNER JOIN), ensuring consistency with the Purchase Orders table display and excluding orphaned rows from deleted purchase orders.
 - Critical Components to Order: Shows components with global shortfalls across all active orders. Uses `get_global_component_requirements()` RPC to calculate shortfalls, ensuring consistency with order detail page calculations. Displays components where `global_real_shortfall > 0` or `global_apparent_shortfall > 0`.
+- Low Stock Alerts (Reports tab): runs a Supabase query for all components + inventory records, then classifies each item as `lowStock` when `quantity_on_hand > 0` and `quantity_on_hand <= reorder_level`. Out-of-stock components are shown separately (quantity ≤ 0). Because the Low Stock card depends on the `inventory` object, ensure the inventory upsert happens whenever quantity, reorder level, or location are edited.
+- Stock Movement Chart: the component detail page renders a dashed reference line at the component’s `reorder_level`. The line is hidden when the level is not set (> 0 check). Always pass the normalized `inventory.reorder_level` into `TransactionsTab → StockMovementChart` to keep the chart and Overview data in sync.
 
 ## Permissions & RLS
 - Reads and writes enforced by Supabase RLS.
