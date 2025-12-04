@@ -71,6 +71,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - [`changelogs/inventory-component-detail-supplier-dialog-20250115.md`](changelogs/inventory-component-detail-supplier-dialog-20250115.md) – Component detail page supplier dialog improvements and products page build fix
   - [`changelogs/purchase-orders-date-filtering-verification-20250115.md`](changelogs/purchase-orders-date-filtering-verification-20250115.md) – Purchase Orders date filtering verification and documentation
   - [`changelogs/supplier-orders-reports-20250115.md`](changelogs/supplier-orders-reports-20250115.md) – Supplier Orders and Reports tabs implementation with filtering and analytics
+  - [`changelogs/inventory-reorder-and-alerts-20251203.md`](changelogs/inventory-reorder-and-alerts-20251203.md) – Reorder/location fields, normalized inventory data shape, Low Stock alert fixes, and chart reference line
   - [`changelogs/purchase-order-per-line-association-20251120.md`](changelogs/purchase-order-per-line-association-20251120.md) – `create_purchase_order_with_lines` now links each PO line to a specific customer order id
   - [`changelogs/grn-pdf-company-details-fix-20251121.md`](changelogs/grn-pdf-company-details-fix-20251121.md) – Fixed missing company details in Goods Returned (GRN) PDF generation
   - [`changelogs/nextjs-entrycss-runtime-fix-20251123.md`](changelogs/nextjs-entrycss-runtime-fix-20251123.md) – Documented the Next.js `entryCSSFiles` runtime failure and the Inter font loader fix

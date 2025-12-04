@@ -79,6 +79,7 @@
   - RPC: `get_all_component_requirements` to compute global totals.
   - RPC: `get_detailed_component_status(p_order_id)` for per-order requirements with stock/on-order and global fields.
   - RPC: `get_order_component_history(p_order_id)` for per-component historical context.
+  - UI summary now distinguishes **Ready Now** (fully covered by on-hand stock) vs **Pending Deliveries** (covered only once outstanding supplier orders arrive). When any component is pending deliveries, the Components Summary card swaps the "All components available in stock" badge for an amber warning explaining that availability depends on incoming receipts, and it shows the count of affected components so planners know what must arrive before issuing stock.
 - Suppliers & PO creation:
   - Suppliers fetched from `suppliercomponents` (with supplier emails joined from `supplier_emails`).
   - Components grouped by supplier; user selects components and quantities, and can allocate between "For this order" vs "For stock".
