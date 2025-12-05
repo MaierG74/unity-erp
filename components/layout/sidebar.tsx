@@ -153,6 +153,10 @@ export function Sidebar() {
     const storedCollapsed = localStorage.getItem('sidebar-collapsed');
     if (storedCollapsed !== null) {
       setCollapsed(storedCollapsed === 'true');
+    } else if (pathname?.startsWith('/labor-planning')) {
+      // Start the planning view with more canvas space by default.
+      setCollapsed(true);
+      globalSetCollapsed(true);
     }
     
     // Check if the screen is mobile size
