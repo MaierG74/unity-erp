@@ -7,6 +7,7 @@ import { OnOrderTab } from '@/components/features/inventory/OnOrderTab';
 import { TransactionsTab } from '@/components/features/inventory/TransactionsTab';
 import { ReportsTab } from '@/components/features/inventory/ReportsTab';
 import { ManualStockIssueTab } from '@/components/features/inventory/ManualStockIssueTab';
+import { ImportTabWrapper } from '@/components/features/inventory/ImportTabWrapper';
 
 export default function InventoryPage() {
   return (
@@ -22,13 +23,14 @@ export default function InventoryPage() {
 
       {/* Tabs */}
       <Tabs defaultValue="components" className="space-y-6">
-        <TabsList className="grid w-full max-w-4xl grid-cols-6">
+        <TabsList className="grid w-full max-w-5xl grid-cols-7">
           <TabsTrigger value="components">Components</TabsTrigger>
           <TabsTrigger value="categories">Categories</TabsTrigger>
           <TabsTrigger value="on-order">On Order</TabsTrigger>
           <TabsTrigger value="stock-issue">Stock Issue</TabsTrigger>
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
           <TabsTrigger value="reports">Reports</TabsTrigger>
+          <TabsTrigger value="import" className="text-orange-600">Import</TabsTrigger>
         </TabsList>
 
         <TabsContent value="components" className="space-y-4">
@@ -53,6 +55,10 @@ export default function InventoryPage() {
 
         <TabsContent value="reports" className="space-y-4">
           <ReportsTab />
+        </TabsContent>
+
+        <TabsContent value="import" className="space-y-4">
+          <ImportTabWrapper />
         </TabsContent>
       </Tabs>
     </div>
