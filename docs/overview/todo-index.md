@@ -26,6 +26,7 @@ Unity ERP's documentation spreads TODOs and open questions across domain guides,
 
 ## UI Tech Debt
 - **Avoid hard‑coded status IDs in dashboard** — Status: _Backlog_, Owner: _Unassigned_. Replace numeric `status_id` filters with name‑based joins to `supplier_order_statuses` in `app/purchasing/page.tsx` to avoid environment ID drift.
+- **Navbar page chrome rollout** — Status: _Planned_, Owner: _Unassigned_. Move page titles and per-page controls (e.g., toggles, badges) into the top navbar across all pages to free vertical space; leave sidebar for navigation only. See `docs/overview/STYLE_GUIDE.md` (`todo_navbar-page-chrome-rollout`).
 
 ## AI Assistant
 - **Deliver Phase 1 read-only assistant** — Status: _In refinement_, Owner: _Unassigned_. Build the NLQ + RAG tooling, chat dock, and logging required for the initial assistant rollout. Source: [AI assistant plan – Phase 1](AI%20Assistant.md#phase-1-%E2%80%94-read-only-nlq-%2B-rag).

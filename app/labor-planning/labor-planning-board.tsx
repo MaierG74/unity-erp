@@ -1,13 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Switch } from '@/components/ui/switch';
+import { Card, CardContent } from '@/components/ui/card';
 import { OrderTree } from '@/components/labor-planning/order-tree';
 import { StaffLaneList } from '@/components/labor-planning/staff-lane-list';
 import { TimeAxisHeader } from '@/components/labor-planning/time-axis-header';
@@ -28,18 +27,64 @@ import {
 } from '@/src/lib/laborScheduling';
 import { logSchedulingEvent } from '@/src/lib/analytics/scheduling';
 import { useLaborPlanningMutations } from '@/src/lib/mutations/laborPlanning';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Minus, Plus, ZoomIn } from 'lucide-react';
 
 const START_MINUTES = 7 * 60;
 const END_MINUTES = 19 * 60;
 const MIN_DURATION = 30;
 const TIME_MARKERS = buildTimeMarkers(START_MINUTES, END_MINUTES);
 
+// Zoom levels: pixels per hour
+const ZOOM_LEVELS = [80, 120, 180, 240] as const;
+const ZOOM_STORAGE_KEY = 'labor-planning-zoom';
+
+function getStoredZoom(): number {
+  if (typeof window === 'undefined') return 1;
+  const stored = localStorage.getItem(ZOOM_STORAGE_KEY);
+  if (stored) {
+    const idx = parseInt(stored, 10);
+    if (idx >= 0 && idx < ZOOM_LEVELS.length) return idx;
+  }
+  return 1; // default to second level (120px/hr)
+}
+
+function storeZoom(index: number): void {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(ZOOM_STORAGE_KEY, String(index));
+  }
+}
+
 export function LaborPlanningBoard() {
   const [selectedDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [compact, setCompact] = useState(true);
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
+  const compactFromParams = searchParams?.get('compact') !== '0';
+  const [compact, setCompact] = useState(compactFromParams);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [collapsedRoles, setCollapsedRoles] = useState<Set<string>>(new Set());
+  const [zoomIndex, setZoomIndex] = useState(1);
+  const swimlaneScrollRef = useRef<HTMLDivElement>(null);
   const queryKey = ['labor-planning', selectedDate] as const;
+
+  // Load zoom from localStorage on mount
+  useEffect(() => {
+    setZoomIndex(getStoredZoom());
+  }, []);
+
+  const handleZoomChange = useCallback((delta: number) => {
+    setZoomIndex((prev) => {
+      const next = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, prev + delta));
+      storeZoom(next);
+      return next;
+    });
+  }, []);
+
+  // Calculate timeline width based on zoom
+  const totalHours = (END_MINUTES - START_MINUTES) / 60;
+  const pixelsPerHour = ZOOM_LEVELS[zoomIndex];
+  const timelineWidth = totalHours * pixelsPerHour;
 
   const { data, isLoading, isError } = useQuery({
     queryKey,
@@ -79,6 +124,11 @@ export function LaborPlanningBoard() {
         .flatMap((group) => group.lanes),
     [filteredRoles, roleGroups]
   );
+
+  useEffect(() => {
+    setCompact(compactFromParams);
+  }, [compactFromParams]);
+
 
   const noStaffAvailable = useMemo(() => {
     if (!data) return false;
@@ -288,33 +338,60 @@ export function LaborPlanningBoard() {
   if (isError || !data) {
     return (
       <div className="container mx-auto space-y-4 py-10">
-        <h1 className="text-2xl font-semibold">Labor Planning Board</h1>
+        <h1 className="text-2xl font-semibold sr-only">Labor Planning Board</h1>
         <p className="text-muted-foreground">Failed to load planning data.</p>
       </div>
     );
   }
 
+  // Height tuned so columns scroll independently while fitting in viewport
+  // Account for: navbar (64px) + role filter bar (~42px) + grid gap (12px) + padding (8px)
+  const columnHeight = 'calc(100vh - 130px)';
+
   return (
-    <div className="container mx-auto space-y-4 py-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="space-y-1">
-          <h1 className="text-3xl font-bold tracking-tight">Labor Planning Board</h1>
-          <p className="text-sm text-muted-foreground">
-            Drag jobs into swimlanes; move or resize bars to adjust. Compact view trims labels and grid clutter.
-          </p>
+    <div className="w-full space-y-0 px-2 py-1">
+      <div className="flex flex-wrap items-center gap-1.5 rounded-md border bg-card px-2 py-1 text-sm shadow-sm mb-2">
+        <span className="text-muted-foreground">Filter by role:</span>
+        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
+          {roleGroups.map((group) => {
+            const active = filteredRoles.includes(group.key);
+            return (
+              <Button
+                key={group.key}
+                size="sm"
+                variant={active ? 'default' : 'outline'}
+                className="h-7 whitespace-nowrap px-2 text-xs"
+                onClick={() => {
+                  setSelectedRoles((prev) => {
+                    if (prev.length === 0) return [group.key];
+                    if (prev.includes(group.key)) {
+                      const next = prev.filter((key) => key !== group.key);
+                      return next;
+                    }
+                    return [...prev, group.key];
+                  });
+                }}
+              >
+                {group.label}
+              </Button>
+            );
+          })}
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 rounded-full border px-3 py-1 text-sm">
-            <span className="text-muted-foreground">Compact lanes</span>
-            <Switch checked={compact} onCheckedChange={setCompact} aria-label="Toggle compact lane density" />
-          </div>
-          <Badge variant="outline" className="bg-primary/10 text-primary">
-            Prototype surface
-          </Badge>
-          <Badge variant="secondary" className="text-xs">
-            {formatRange(START_MINUTES)} – {formatRange(END_MINUTES)}
-          </Badge>
-        </div>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-xs"
+          onClick={() => setSelectedRoles([])}
+        >
+          Reset
+        </Button>
+      </div>
+
+      <div className="sr-only">
+        <h1 className="text-3xl font-bold tracking-tight">Labor Planning Board</h1>
+        <p className="text-sm text-muted-foreground">
+          Drag jobs into swimlanes; move or resize bars to adjust. Compact view trims labels and grid clutter.
+        </p>
       </div>
 
       {noStaffAvailable && (
@@ -326,121 +403,107 @@ export function LaborPlanningBoard() {
         </Alert>
       )}
 
-      <div className="grid min-h-[70vh] gap-4 lg:grid-cols-[320px_1fr] xl:grid-cols-[300px_1fr]">
-        <Card className="flex h-[72vh] flex-col">
-          <CardHeader>
-            <CardTitle>Orders ready for placement</CardTitle>
-            <CardDescription>
-              Expand an order to see its jobs, then drag jobs into swimlanes on the right.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex-1 overflow-hidden p-0">
+      <div className="grid gap-2 lg:grid-cols-[200px_1fr]">
+        <Card className="flex flex-col overflow-hidden" style={{ height: columnHeight, maxHeight: columnHeight }}>
+          <div className="flex items-center justify-between border-b px-3 py-2">
+            <span className="text-sm font-semibold">Orders</span>
+            <span className="text-[11px] text-muted-foreground">{data.orders.length} open</span>
+          </div>
+          <div className="flex-1 overflow-auto px-1 py-1">
             <OrderTree orders={data.orders as PlanningOrder[]} />
-          </CardContent>
+          </div>
         </Card>
 
-        <Card className="flex h-[72vh] flex-col">
-          <CardHeader className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <CardTitle>Staff swimlanes</CardTitle>
-              <CardDescription>
-                Time-scaled grid with sticky header and drop targets for scheduling.
-              </CardDescription>
+        <Card className="flex flex-col overflow-hidden" style={{ height: columnHeight, maxHeight: columnHeight }}>
+          {/* Zoom controls bar */}
+          <div className="flex items-center justify-between border-b bg-muted/30 px-3 py-1.5">
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+              <ZoomIn className="h-3.5 w-3.5" />
+              <span>Timeline zoom</span>
             </div>
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className="bg-muted text-xs">
-                Drag to adjust run-times
-              </Badge>
+            <div className="flex items-center gap-1">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 w-6 p-0"
+                onClick={() => handleZoomChange(-1)}
+                disabled={zoomIndex === 0}
+              >
+                <Minus className="h-3.5 w-3.5" />
+              </Button>
+              <span className="w-16 text-center text-[11px] text-muted-foreground">
+                {pixelsPerHour}px/hr
+              </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 w-6 p-0"
+                onClick={() => handleZoomChange(1)}
+                disabled={zoomIndex === ZOOM_LEVELS.length - 1}
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
             </div>
-          </CardHeader>
-          <CardContent className="flex-1 overflow-hidden p-0">
-            <div className="flex items-center gap-2 px-4 pb-2 text-sm">
-              <span className="text-muted-foreground">Filter by role:</span>
-              <div className="flex flex-wrap gap-1">
-                {roleGroups.map((group) => {
-                  const active = filteredRoles.includes(group.key);
-                  return (
-                    <Button
-                      key={group.key}
-                      size="sm"
-                      variant={active ? 'default' : 'outline'}
-                      className="h-7 px-2 text-xs"
-                      onClick={() => {
-                        setSelectedRoles((prev) => {
-                          if (prev.length === 0) return [group.key];
-                          if (prev.includes(group.key)) {
-                            const next = prev.filter((key) => key !== group.key);
-                            return next;
-                          }
-                          return [...prev, group.key];
-                        });
-                      }}
-                    >
-                      {group.label}
-                    </Button>
-                  );
-                })}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 px-2 text-xs"
-                  onClick={() => setSelectedRoles([])}
-                >
-                  Reset
-                </Button>
-              </div>
-            </div>
-            <div className="relative h-full overflow-auto rounded-b-lg">
-              <TimeAxisHeader
-                markers={TIME_MARKERS}
-                startMinutes={START_MINUTES}
-                endMinutes={END_MINUTES}
-                showMinorTicks={!compact}
-              />
-              <div className="space-y-4 px-4 pb-4 pt-2">
-                {roleGroups
-                  .filter((group) => filteredRoles.includes(group.key))
-                  .map((group) => {
-                    const collapsed = collapsedRoles.has(group.key);
-                    return (
-                      <div key={group.key} className="overflow-hidden rounded-xl border bg-card shadow-sm">
-                        <div className="flex items-center justify-between border-b px-4 py-2">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-semibold">{group.label}</span>
-                            <Badge variant="secondary" className="text-[11px]">
-                              {group.lanes.length} staff
-                            </Badge>
+          </div>
+          <CardContent className="relative flex-1 overflow-hidden p-0">
+            <div
+              ref={swimlaneScrollRef}
+              className="relative h-full overflow-auto rounded-b-lg"
+            >
+              <div style={{ minWidth: timelineWidth + 160 }}>
+                <TimeAxisHeader
+                  markers={TIME_MARKERS}
+                  startMinutes={START_MINUTES}
+                  endMinutes={END_MINUTES}
+                  showMinorTicks={!compact}
+                  timelineWidth={timelineWidth}
+                />
+                <div className="space-y-3 px-3 pb-3 pt-1">
+                  {roleGroups
+                    .filter((group) => filteredRoles.includes(group.key))
+                    .map((group) => {
+                      const collapsed = collapsedRoles.has(group.key);
+                      return (
+                        <div key={group.key} className="rounded-lg border bg-card shadow-sm">
+                          <div className="flex items-center justify-between border-b px-3 py-1.5">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-semibold">{group.label}</span>
+                              <Badge variant="secondary" className="h-5 text-[10px]">
+                                {group.lanes.length} staff
+                              </Badge>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 px-2 text-[11px]"
+                              onClick={() =>
+                                setCollapsedRoles((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(group.key)) next.delete(group.key);
+                                  else next.add(group.key);
+                                  return next;
+                                })
+                              }
+                            >
+                              {collapsed ? 'Expand' : 'Collapse'}
+                            </Button>
                           </div>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 px-2 text-xs"
-                            onClick={() =>
-                              setCollapsedRoles((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(group.key)) next.delete(group.key);
-                                else next.add(group.key);
-                                return next;
-                              })
-                            }
-                          >
-                            {collapsed ? 'Expand' : 'Collapse'}
-                          </Button>
+                          {!collapsed && (
+                            <StaffLaneList
+                              staff={group.lanes}
+                              markers={TIME_MARKERS}
+                              startMinutes={START_MINUTES}
+                              endMinutes={END_MINUTES}
+                              onDrop={handleDrop}
+                              onUnassign={handleUnassign}
+                              compact={compact}
+                              timelineWidth={timelineWidth}
+                            />
+                          )}
                         </div>
-                        {!collapsed && (
-                          <StaffLaneList
-                            staff={group.lanes}
-                            markers={TIME_MARKERS}
-                            startMinutes={START_MINUTES}
-                            endMinutes={END_MINUTES}
-                            onDrop={handleDrop}
-                            onUnassign={handleUnassign}
-                            compact={compact}
-                          />
-                        )}
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                </div>
               </div>
             </div>
           </CardContent>

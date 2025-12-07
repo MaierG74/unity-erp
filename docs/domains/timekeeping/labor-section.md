@@ -13,6 +13,7 @@ This document consolidates how the Labor section of the app works today across U
 
 - **Labor Management (`/labor`)**: app/labor/page.tsx:1
   - Tabs: `Job Categories`, `Jobs`, and `Piecework Rates`.
+  - Launch shortcut: “Open Labor Planning” button links to `/labor-planning` for the scheduling board.
   - Components used:
     - `components/features/labor/job-categories-manager.tsx:1`
     - `components/features/labor/jobs-manager.tsx:1`

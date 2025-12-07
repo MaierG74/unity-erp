@@ -1,10 +1,19 @@
 'use client';
 
 import type { DragEvent } from 'react';
+import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { minutesToClock } from '@/src/lib/laborScheduling';
-import { Circle, GripHorizontal, X } from 'lucide-react';
+import { Circle, GripHorizontal, X, Calendar, Clock, User, Briefcase } from 'lucide-react';
 import type { LaborDragPayload, StaffAssignment, StaffLane, TimeMarker } from './types';
 
 interface StaffLaneListProps {
@@ -15,6 +24,7 @@ interface StaffLaneListProps {
   onDrop: (options: { staff: StaffLane; startMinutes: number; payload: LaborDragPayload }) => void;
   onUnassign?: (assignment: StaffAssignment) => void;
   compact?: boolean;
+  timelineWidth?: number;
 }
 
 export function StaffLaneList({
@@ -25,10 +35,23 @@ export function StaffLaneList({
   onDrop,
   onUnassign,
   compact = false,
+  timelineWidth,
 }: StaffLaneListProps) {
   const totalMinutes = endMinutes - startMinutes;
-  const laneHeightClass = compact ? 'h-24' : 'h-32';
+  const laneHeightClass = compact ? 'h-14' : 'h-16';
 
+  // Use fixed pixel positioning when timelineWidth is provided
+  const useFixedWidth = timelineWidth != null && timelineWidth > 0;
+  const toPosition = (value: number) => {
+    const ratio = (value - startMinutes) / totalMinutes;
+    return useFixedWidth ? ratio * timelineWidth : ratio * 100;
+  };
+  const toWidth = (start: number, end: number) => {
+    const ratio = (end - start) / totalMinutes;
+    return useFixedWidth ? ratio * timelineWidth : ratio * 100;
+  };
+
+  // Keep old percent helpers for compatibility
   const toPercent = (value: number) => ((value - startMinutes) / totalMinutes) * 100;
   const widthPercent = (start: number, end: number) => ((end - start) / totalMinutes) * 100;
   const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
@@ -52,179 +75,300 @@ export function StaffLaneList({
   };
 
   const computeMinutesFromEvent = (event: DragEvent<HTMLDivElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const offset = clamp(event.clientX - rect.left, 0, rect.width);
-    const ratio = rect.width === 0 ? 0 : offset / rect.width;
+    const target = event.currentTarget;
+    const rect = target.getBoundingClientRect();
+    // Use the element's actual rendered width for calculation
+    // getBoundingClientRect gives us the full element dimensions even when scrolled
+    const elementWidth = rect.width;
+    // Calculate click offset from the element's left edge
+    const clickOffset = event.clientX - rect.left;
+    const offset = clamp(clickOffset, 0, elementWidth);
+    const ratio = elementWidth === 0 ? 0 : offset / elementWidth;
     return Math.round(startMinutes + ratio * totalMinutes);
   };
 
+  // Track which lane is being dragged over
+  const [dragOverLaneId, setDragOverLaneId] = useState<string | null>(null);
+  // Track selected assignment for modal
+  const [selectedAssignment, setSelectedAssignment] = useState<StaffAssignment | null>(null);
+  // Track drag position for time indicator
+  const [dragIndicator, setDragIndicator] = useState<{ laneId: string; x: number; minutes: number } | null>(null);
+
   return (
-    <div className="space-y-3 p-3">
+    <div className="space-y-2 p-2">
       {staff.length === 0 && (
-        <div className="flex h-32 items-center justify-center rounded-lg border border-dashed border-muted-foreground/40 bg-muted/60 text-sm text-muted-foreground">
+        <div className="flex h-28 items-center justify-center rounded-lg border border-dashed border-muted-foreground/40 bg-muted/60 text-sm text-muted-foreground">
           No staff available to accept drops for this date.
         </div>
       )}
       {staff.map((lane) => {
         const laneAvailable = isAvailable(lane);
+        const isDragOver = dragOverLaneId === lane.id;
 
         return (
-          <div key={lane.id} className="overflow-hidden rounded-xl border bg-card shadow-sm">
-          <div className={cn("flex items-center justify-between gap-3 border-b px-4", compact ? "py-2" : "py-3")}>
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <span className={cn("font-semibold", compact ? "text-[13px]" : "text-sm")}>{lane.name}</span>
-                <Badge variant="secondary" className="text-[11px]">
-                  {lane.role}
-                </Badge>
-                {!laneAvailable && (
-                  <Badge variant="outline" className="border-amber-300 bg-amber-50 text-[11px] text-amber-900">
-                    Off shift / unavailable
-                  </Badge>
-                )}
+          <div key={lane.id} className={cn(
+            "flex rounded-lg border bg-card shadow-sm transition-all",
+            dragIndicator?.laneId === lane.id ? "overflow-visible" : "overflow-hidden",
+            isDragOver && laneAvailable && "ring-2 ring-primary ring-offset-1 border-primary/50"
+          )}>
+            {/* Staff info column - fixed width */}
+            <div className={cn(
+              "flex w-[120px] shrink-0 flex-col justify-center border-r px-2 transition-colors",
+              compact ? "py-1.5" : "py-2",
+              isDragOver && laneAvailable ? "bg-primary/10" : "bg-muted/20"
+            )}>
+              <div className="flex items-center gap-1.5">
+                <Circle className={cn('h-2 w-2 shrink-0', laneAvailable ? 'fill-emerald-500 text-emerald-500' : 'fill-amber-500 text-amber-500')} />
+                <span className="truncate text-xs font-semibold">{lane.name}</span>
               </div>
-              <p className={cn("text-muted-foreground", compact ? "text-[11px]" : "text-xs")}>
-                Capacity {lane.capacityHours}h • Window {lane.availableFrom ?? '07:00'} - {lane.availableTo ?? '19:00'}
+              <p className="truncate text-[10px] text-muted-foreground">
+                {lane.role} • {lane.capacityHours}h
               </p>
             </div>
-            <div className={cn("flex items-center gap-2 text-muted-foreground", compact ? "text-[10px]" : "text-[11px]")}>
-              <Circle className={cn('h-2.5 w-2.5', laneAvailable ? 'fill-emerald-500/70 text-emerald-500/70' : 'fill-amber-500/70 text-amber-500/70')} />
-              <span>{laneAvailable ? 'Accepting drops' : 'Off shift'}</span>
-            </div>
-          </div>
 
-          <div
-            className={cn("relative bg-muted/40 group", laneHeightClass)}
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={(event) => {
-              event.preventDefault();
-              const payload = parsePayload(event);
-              if (!payload) return;
-              const dropMinutes = computeMinutesFromEvent(event);
-              onDrop({ staff: lane, startMinutes: dropMinutes, payload });
-            }}
-          >
-            <div className="pointer-events-none absolute inset-0">
-              {markers.map((marker) => (
-                <div
-                  key={`${lane.id}-grid-${marker.minutes}`}
-                  className={cn(
-                    'absolute inset-y-0 border-l',
-                    marker.isMajor ? 'border-border/80' : 'border-dashed border-muted-foreground/40',
-                  )}
-                  style={{ left: `${((marker.minutes - startMinutes) / totalMinutes) * 100}%` }}
-                />
-              ))}
-            </div>
+            {/* Timeline grid - scrollable with fixed width */}
+            <div
+              className={cn(
+                "relative transition-colors",
+                useFixedWidth ? "" : "flex-1",
+                laneHeightClass,
+                isDragOver && laneAvailable ? "bg-primary/5" : "bg-muted/30"
+              )}
+              style={useFixedWidth ? { width: timelineWidth, flexShrink: 0 } : undefined}
+              onDragOver={(event) => {
+                event.preventDefault();
+                if (laneAvailable) {
+                  setDragOverLaneId(lane.id);
+                  // Calculate position for time indicator
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  const x = event.clientX - rect.left;
+                  const minutes = computeMinutesFromEvent(event);
+                  setDragIndicator({ laneId: lane.id, x, minutes });
+                }
+              }}
+              onDragEnter={(event) => {
+                event.preventDefault();
+                if (laneAvailable) setDragOverLaneId(lane.id);
+              }}
+              onDragLeave={(event) => {
+                // Only clear if leaving the lane entirely (not entering a child)
+                if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+                  setDragOverLaneId(null);
+                  setDragIndicator(null);
+                }
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                setDragOverLaneId(null);
+                setDragIndicator(null);
+                const payload = parsePayload(event);
+                if (!payload) return;
+                const dropMinutes = computeMinutesFromEvent(event);
+                onDrop({ staff: lane, startMinutes: dropMinutes, payload });
+              }}
+            >
+              {/* Grid lines */}
+              <div className="pointer-events-none absolute inset-0">
+                {markers.map((marker) => {
+                  const pos = toPosition(marker.minutes);
+                  return (
+                    <div
+                      key={`${lane.id}-grid-${marker.minutes}`}
+                      className={cn(
+                        'absolute inset-y-0 border-l',
+                        marker.isMajor ? 'border-border/60' : 'border-dashed border-muted-foreground/20',
+                      )}
+                      style={{ left: useFixedWidth ? pos : `${pos}%` }}
+                    />
+                  );
+                })}
+              </div>
 
-            <div className="absolute inset-0 flex items-center gap-3 px-3">
-              {(lane.openSlots ?? defaultSlots()).map((slot, index) => (
+              {/* Time indicator during drag */}
+              {dragIndicator && dragIndicator.laneId === lane.id && (
                 <div
-                  key={`${lane.id}-slot-${index}`}
-                  className={cn(
-                    "relative flex-1 rounded-lg border border-dashed border-primary/40 bg-primary/5 text-[11px] text-primary transition hover:border-primary/80 hover:bg-primary/10",
-                    compact ? "h-7 opacity-0 group-hover:opacity-60" : "h-9"
-                  )}
+                  className="pointer-events-none absolute inset-y-0 z-50"
+                  style={{ left: dragIndicator.x }}
                 >
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2">
-                    {slot.label ?? 'Open slot'}
-                  </span>
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-primary/80">
-                    {slot.start} → {slot.end}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {lane.assignments.map((assignment) => {
-              const left = toPercent(assignment.startMinutes);
-              const width = widthPercent(assignment.startMinutes, assignment.endMinutes);
-              const baseColor =
-                assignment.color ??
-                (assignment.status === 'overbooked'
-                  ? '#fb7185'
-                  : assignment.status === 'tentative'
-                    ? '#60a5fa'
-                    : '#34d399');
-
-              return (
-                <div
-                  key={assignment.id}
-                  className={cn(
-                    'absolute top-14 flex h-11 items-center rounded-lg border bg-gradient-to-r px-3 text-xs font-medium text-foreground shadow-sm',
-                    assignment.status === 'overbooked'
-                      ? 'border-rose-300/80'
-                      : assignment.status === 'tentative'
-                        ? 'border-blue-300/70'
-                        : 'border-emerald-300/70',
-                  )}
-                  draggable
-                  onDragStart={(event) => {
-                    const payload: LaborDragPayload = { type: 'assignment', assignment };
-                    event.dataTransfer.setData('application/json', JSON.stringify(payload));
-                    event.dataTransfer.effectAllowed = 'move';
-                  }}
-                  style={{
-                    left: `${left}%`,
-                    width: `${width}%`,
-                    minWidth: compact ? '88px' : '96px',
-                    background: `linear-gradient(90deg, ${baseColor} 0%, ${baseColor}cc 70%)`,
-                    borderColor: baseColor,
-                  }}
-                >
-                  {assignment.showHandles !== false && (
-                    <>
-                      <div
-                        className="absolute left-0 top-0 flex h-full w-2 cursor-ew-resize items-center justify-center rounded-l bg-black/15"
-                        draggable
-                        onDragStart={(event) => {
-                          const payload: LaborDragPayload = { type: 'resize-start', assignment };
-                          event.dataTransfer.setData('application/json', JSON.stringify(payload));
-                          event.dataTransfer.effectAllowed = 'move';
-                        }}
-                      >
-                        <GripHorizontal className="h-3 w-3 text-white/70" />
-                      </div>
-                      <div
-                        className="absolute right-0 top-0 flex h-full w-2 cursor-ew-resize items-center justify-center rounded-r bg-black/15"
-                        draggable
-                        onDragStart={(event) => {
-                          const payload: LaborDragPayload = { type: 'resize-end', assignment };
-                          event.dataTransfer.setData('application/json', JSON.stringify(payload));
-                          event.dataTransfer.effectAllowed = 'move';
-                        }}
-                      >
-                        <GripHorizontal className="h-3 w-3 text-white/70" />
-                      </div>
-                    </>
-                  )}
-                  <div className="flex flex-1 flex-col">
-                    <span className="truncate">{assignment.label}</span>
-                    <span className="text-[11px] text-white/90">
-                      {minutesToClock(assignment.startMinutes)} → {minutesToClock(assignment.endMinutes)}
-                    </span>
+                  {/* Vertical line */}
+                  <div className="absolute inset-y-0 w-0.5 bg-primary" />
+                  {/* Time badge */}
+                  <div className="absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-primary px-2 py-1 text-xs font-semibold text-primary-foreground shadow-lg">
+                    {minutesToClock(dragIndicator.minutes)}
                   </div>
-                  {onUnassign && (
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onUnassign(assignment);
-                      }}
-                      className="ml-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-black/15 text-white/80 transition hover:bg-black/25"
-                      aria-label="Unassign job"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  )}
+                  {/* Arrow pointing down */}
+                  <div className="absolute -top-1 left-1/2 -translate-x-1/2 border-4 border-transparent border-t-primary" />
                 </div>
-              );
-            })}
+              )}
+
+              {/* Assignment bars */}
+              {lane.assignments.map((assignment) => {
+                const left = toPosition(assignment.startMinutes);
+                const width = toWidth(assignment.startMinutes, assignment.endMinutes);
+                const baseColor =
+                  assignment.color ??
+                  (assignment.status === 'overbooked'
+                    ? '#fb7185'
+                    : assignment.status === 'tentative'
+                      ? '#60a5fa'
+                      : '#34d399');
+
+                return (
+                  <div
+                    key={assignment.id}
+                    title={`${assignment.label}\n${minutesToClock(assignment.startMinutes)} – ${minutesToClock(assignment.endMinutes)}\nOrder: ${assignment.orderNumber || 'N/A'}\nClick for details`}
+                    className={cn(
+                      'absolute top-1 flex items-center rounded-md border px-2 text-xs font-medium text-white shadow-sm cursor-pointer hover:brightness-110 transition-all',
+                      compact ? 'h-12' : 'h-14',
+                    )}
+                    draggable
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSelectedAssignment(assignment);
+                    }}
+                    onDragStart={(event) => {
+                      const payload: LaborDragPayload = { type: 'assignment', assignment };
+                      event.dataTransfer.setData('application/json', JSON.stringify(payload));
+                      event.dataTransfer.effectAllowed = 'move';
+                    }}
+                    style={{
+                      left: useFixedWidth ? left : `${left}%`,
+                      width: useFixedWidth ? Math.max(width, 80) : `${Math.max(width, 8)}%`,
+                      minWidth: '80px',
+                      background: `linear-gradient(135deg, ${baseColor} 0%, ${baseColor}dd 100%)`,
+                      borderColor: baseColor,
+                    }}
+                  >
+                    {/* Resize handles */}
+                    {assignment.showHandles !== false && (
+                      <>
+                        <div
+                          className="absolute left-0 top-0 flex h-full w-3 cursor-ew-resize items-center justify-center rounded-l bg-black/20 opacity-0 transition hover:opacity-100"
+                          draggable
+                          onDragStart={(event) => {
+                            event.stopPropagation();
+                            const payload: LaborDragPayload = { type: 'resize-start', assignment };
+                            event.dataTransfer.setData('application/json', JSON.stringify(payload));
+                            event.dataTransfer.effectAllowed = 'move';
+                          }}
+                        >
+                          <GripHorizontal className="h-3 w-3 rotate-90 text-white/80" />
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 flex h-full w-3 cursor-ew-resize items-center justify-center rounded-r bg-black/20 opacity-0 transition hover:opacity-100"
+                          draggable
+                          onDragStart={(event) => {
+                            event.stopPropagation();
+                            const payload: LaborDragPayload = { type: 'resize-end', assignment };
+                            event.dataTransfer.setData('application/json', JSON.stringify(payload));
+                            event.dataTransfer.effectAllowed = 'move';
+                          }}
+                        >
+                          <GripHorizontal className="h-3 w-3 rotate-90 text-white/80" />
+                        </div>
+                      </>
+                    )}
+                    <div className="flex min-w-0 flex-1 flex-col justify-center px-1.5">
+                      <span className="truncate text-[10px] font-medium text-white/95">
+                        {assignment.productName || assignment.jobName || assignment.label}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[9px] font-semibold text-white/80">
+                          #{assignment.orderNumber || 'N/A'}
+                        </span>
+                        <span className="text-[8px] text-white/60">•</span>
+                        <span className="text-[9px] text-white/70">
+                          {Math.round((assignment.endMinutes - assignment.startMinutes) / 60 * 10) / 10}h
+                        </span>
+                      </div>
+                    </div>
+                    {onUnassign && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onUnassign(assignment);
+                        }}
+                        className="ml-1 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-black/20 text-white/80 transition hover:bg-black/30"
+                        aria-label="Unassign job"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      );
-    })}
-  </div>
+        );
+      })}
+
+      {/* Job Details Modal */}
+      <Dialog open={!!selectedAssignment} onOpenChange={(open) => !open && setSelectedAssignment(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Briefcase className="h-5 w-5" />
+              Job Assignment Details
+            </DialogTitle>
+            <DialogDescription>
+              {selectedAssignment?.label}
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedAssignment && (
+            <div className="space-y-4">
+              {/* Time Info */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  <span className="font-medium">Scheduled Time</span>
+                </div>
+                <div className="ml-6 space-y-1 text-sm text-muted-foreground">
+                  <div>Start: {minutesToClock(selectedAssignment.startMinutes)}</div>
+                  <div>End: {minutesToClock(selectedAssignment.endMinutes)}</div>
+                  <div>Duration: {Math.round((selectedAssignment.endMinutes - selectedAssignment.startMinutes) / 60 * 10) / 10}h</div>
+                </div>
+              </div>
+
+              {/* Order Info */}
+              {selectedAssignment.orderNumber && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm">
+                    <Calendar className="h-4 w-4 text-muted-foreground" />
+                    <span className="font-medium">Order Details</span>
+                  </div>
+                  <div className="ml-6 space-y-1 text-sm text-muted-foreground">
+                    <div>Order #: {selectedAssignment.orderNumber}</div>
+                    {selectedAssignment.orderId && <div>ID: {selectedAssignment.orderId}</div>}
+                  </div>
+                </div>
+              )}
+
+              {/* Job Info */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <User className="h-4 w-4 text-muted-foreground" />
+                  <span className="font-medium">Job Information</span>
+                </div>
+                <div className="ml-6 space-y-1 text-sm text-muted-foreground">
+                  {selectedAssignment.jobName && <div>Job: {selectedAssignment.jobName}</div>}
+                  {selectedAssignment.productName && <div>Product: {selectedAssignment.productName}</div>}
+                  <div>Pay Type: {selectedAssignment.payType === 'piece' ? 'Piecework' : 'Hourly'}</div>
+                  <div>Status: <Badge variant="outline" className="ml-1">{selectedAssignment.status}</Badge></div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4">
+                <Button variant="outline" size="sm" onClick={() => setSelectedAssignment(null)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
 

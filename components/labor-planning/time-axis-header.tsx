@@ -8,6 +8,7 @@ interface TimeAxisHeaderProps {
   startMinutes: number;
   endMinutes: number;
   showMinorTicks?: boolean;
+  timelineWidth?: number;
 }
 
 export function TimeAxisHeader({
@@ -15,24 +16,32 @@ export function TimeAxisHeader({
   startMinutes,
   endMinutes,
   showMinorTicks = true,
+  timelineWidth,
 }: TimeAxisHeaderProps) {
   const totalMinutes = endMinutes - startMinutes;
   const visibleMarkers = showMinorTicks ? markers : markers.filter((marker) => marker.isMajor);
 
+  // Use percentage if no fixed width, otherwise use pixel positioning
+  const useFixedWidth = timelineWidth != null && timelineWidth > 0;
+  const toPosition = (minutes: number) => {
+    const ratio = (minutes - startMinutes) / totalMinutes;
+    return useFixedWidth ? ratio * timelineWidth : ratio * 100;
+  };
+
   return (
-    <div className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
-      <div className="flex items-center justify-between px-4 py-1.5 text-[11px] text-muted-foreground">
-        <span className="font-medium text-foreground">Time axis</span>
-        <div className="flex items-center gap-2">
-          <span className="rounded-full bg-primary/10 px-2 py-1 text-primary">Shift view</span>
-          <span className="rounded-full bg-muted px-2 py-1 text-foreground/70">
-            {formatMinutes(startMinutes)} – {formatMinutes(endMinutes)}
-          </span>
-        </div>
+    <div className="sticky top-0 z-30 border-b bg-background/95 backdrop-blur">
+      <div className="flex items-center justify-between px-3 py-1 text-[11px] text-muted-foreground">
+        <span className="font-medium text-foreground">Time</span>
+        <span className="rounded-full bg-muted px-2 py-0.5 text-foreground/70">
+          {formatMinutes(startMinutes)} – {formatMinutes(endMinutes)}
+        </span>
       </div>
-      <div className="relative h-10">
+      <div
+        className="relative h-8 pointer-events-none select-none ml-[120px]"
+        style={useFixedWidth ? { width: timelineWidth } : undefined}
+      >
         {visibleMarkers.map((marker) => {
-          const offset = ((marker.minutes - startMinutes) / totalMinutes) * 100;
+          const pos = toPosition(marker.minutes);
 
           return (
             <div
@@ -41,20 +50,20 @@ export function TimeAxisHeader({
                 'absolute top-0 bottom-0 border-l',
                 marker.isMajor ? 'border-border' : 'border-dashed border-muted-foreground/40',
               )}
-              style={{ left: `${offset}%` }}
+              style={{ left: useFixedWidth ? pos : `${pos}%` }}
             >
-              <div
-                className={cn(
-                  'absolute -top-0.5 -translate-x-1/2 whitespace-nowrap text-[11px]',
-                  marker.isMajor ? 'text-foreground' : 'text-muted-foreground',
-                )}
-              >
-                {marker.label}
-              </div>
+              {marker.isMajor && (
+                <div className="absolute top-0 -translate-x-1/2 whitespace-nowrap text-[10px] text-foreground">
+                  {marker.label}
+                </div>
+              )}
             </div>
           );
         })}
-        <div className="absolute inset-y-0 right-0 border-l border-border" />
+        <div
+          className="absolute inset-y-0 border-l border-border"
+          style={{ left: useFixedWidth ? timelineWidth : '100%' }}
+        />
       </div>
     </div>
   );

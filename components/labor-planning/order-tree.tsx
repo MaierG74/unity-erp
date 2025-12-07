@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import { CalendarClock, CheckCircle2, ChevronRight, Clock3, Flame, GripVertical, Loader2, Sparkles } from 'lucide-react';
 import type { PlanningOrder, PlanningJob } from './types';
 
-const ESTIMATED_ROW_HEIGHT = 96;
+const ESTIMATED_ROW_HEIGHT = 48;
 
 interface OrderTreeProps {
   orders: PlanningOrder[];
@@ -70,63 +70,51 @@ export function OrderTree({ orders, windowSize = 12, onJobDragStart }: OrderTree
       className="relative h-full overflow-y-auto pr-1"
       onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
     >
-      <div style={{ paddingTop, paddingBottom }} className="space-y-2">
+      <div style={{ paddingTop, paddingBottom }} className="space-y-1">
         {visibleOrders.map((order) => {
           const isOpen = openOrders.has(order.id);
 
           return (
             <Collapsible key={order.id} open={isOpen} onOpenChange={() => toggleOrder(order.id)}>
-              <div className="rounded-lg border bg-card shadow-sm transition hover:border-primary/40">
+              <div className="rounded-md border bg-card shadow-sm transition hover:border-primary/40">
                 <CollapsibleTrigger asChild>
                   <button
                     type="button"
-                    className="flex w-full items-start gap-3 px-3 py-3 text-left transition hover:bg-muted/60"
+                    className="flex w-full items-center gap-2 px-2 py-1.5 text-left transition hover:bg-muted/60"
                   >
-                    <div className="mt-1 flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
-                      <ChevronRight
-                        className={cn(
-                          'h-4 w-4 transition-transform',
-                          isOpen ? 'rotate-90' : 'rotate-0',
-                        )}
-                      />
-                    </div>
-                    <div className="flex flex-1 items-center justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold tracking-tight">{order.id}</span>
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              'border text-xs font-medium',
-                              priorityStyles[order.priority],
-                            )}
-                          >
-                            {order.priority === 'high' && <Flame className="mr-1 h-3 w-3" />}
-                            {order.priority === 'low' && <Loader2 className="mr-1 h-3 w-3" />}
-                            {order.priority === 'medium' && <Sparkles className="mr-1 h-3 w-3" />}
-                            {order.priority.charAt(0).toUpperCase() + order.priority.slice(1)}
-                          </Badge>
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          {order.customer} • {order.jobs.length} jobs
-                        </p>
+                    <ChevronRight
+                      className={cn(
+                        'h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform',
+                        isOpen ? 'rotate-90' : 'rotate-0',
+                      )}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate text-xs font-semibold">{order.id}</span>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            'h-4 shrink-0 border px-1 text-[10px] font-medium',
+                            priorityStyles[order.priority],
+                          )}
+                        >
+                          {order.priority === 'high' && <Flame className="h-2.5 w-2.5" />}
+                          {order.priority !== 'high' && order.priority.charAt(0).toUpperCase()}
+                        </Badge>
                       </div>
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                        <div className="inline-flex items-center gap-1 rounded-md border px-2 py-1">
-                          <Clock3 className="h-3.5 w-3.5" />
-                          <span>Due {formatDate(order.dueDate)}</span>
-                        </div>
-                      </div>
+                      <p className="truncate text-[10px] text-muted-foreground">
+                        {order.customer} • {order.jobs.length} jobs • {formatDate(order.dueDate)}
+                      </p>
                     </div>
                   </button>
                 </CollapsibleTrigger>
 
                 <CollapsibleContent>
-                  <div className="space-y-2 px-3 pb-3">
+                  <div className="space-y-1 px-2 pb-2">
                     {order.jobs.map((job) => (
                       <div
                         key={job.id}
-                        className="group flex items-start gap-3 rounded-md border border-dashed border-muted-foreground/30 bg-muted/50 px-3 py-2"
+                        className="group flex items-center gap-1.5 rounded border border-dashed border-muted-foreground/30 bg-muted/50 px-1.5 py-1 cursor-grab active:cursor-grabbing"
                         draggable
                         onDragStart={(event) => {
                           const payload = {
@@ -143,56 +131,17 @@ export function OrderTree({ orders, windowSize = 12, onJobDragStart }: OrderTree
                           onJobDragStart?.(event, job, order);
                         }}
                       >
-                        <GripVertical className="mt-1 h-4 w-4 text-muted-foreground/70 group-hover:text-foreground" />
-                        <div className="flex flex-1 items-center justify-between gap-3">
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <p className="text-sm font-medium">{job.name}</p>
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  'border text-[11px]',
-                                  jobStatusStyles[job.status],
-                                )}
-                              >
-                                {jobStatusLabel[job.status]}
-                              </Badge>
-                              {job.scheduleStatus && (
-                                <Badge
-                                  variant={job.scheduleStatus === 'scheduled' ? 'default' : 'outline'}
-                                  className={cn(
-                                    'border text-[11px]',
-                                    job.scheduleStatus === 'scheduled'
-                                      ? 'bg-emerald-500/10 text-emerald-700'
-                                      : 'border-dashed border-muted-foreground/50 text-muted-foreground'
-                                  )}
-                                >
-                                  <CheckCircle2 className="mr-1 h-3 w-3" />
-                                  {job.scheduleStatus === 'scheduled' ? 'Scheduled' : 'Unscheduled'}
-                                </Badge>
-                              )}
-                            </div>
-                            <p className="text-xs text-muted-foreground">
-                              Est. {job.durationHours}h{' '}
-                              {job.owner ? `• ${job.owner}` : '• Unassigned'}{' '}
-                              {job.payType === 'piece' ? '• Piecework' : ''}
-                            </p>
-                            {(job.start || job.end) && (
-                              <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                                <CalendarClock className="h-3 w-3" />
-                                <span>{job.start ?? 'TBD'} → {job.end ?? 'TBD'}</span>
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                            <div
-                              className="h-7 w-1 rounded-full bg-gradient-to-b from-primary/80 to-primary/40"
-                              style={job.categoryColor ? { background: job.categoryColor } : undefined}
-                            />
-                            <span className="rounded-full bg-primary/10 px-2 py-1 text-primary">
-                              Drag to schedule
-                            </span>
-                          </div>
+                        <GripVertical className="h-3 w-3 shrink-0 text-muted-foreground/70 group-hover:text-foreground" />
+                        <div
+                          className="h-5 w-1 shrink-0 rounded-full"
+                          style={{ background: job.categoryColor ?? '#0ea5e9' }}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[11px] font-medium">{job.name}</p>
+                          <p className="truncate text-[10px] text-muted-foreground">
+                            {job.durationHours}h • {job.status === 'ready' ? 'Ready' : job.status}
+                            {job.scheduleStatus === 'scheduled' && ' • Scheduled'}
+                          </p>
                         </div>
                       </div>
                     ))}

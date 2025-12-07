@@ -1,9 +1,11 @@
 import { Metadata } from 'next';
+import Link from 'next/link';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { JobCategoriesManager } from '@/components/features/labor/job-categories-manager';
 import { JobsManager } from '@/components/features/labor/jobs-manager';
 import { PieceworkRatesManager } from '@/components/features/labor/piecework-rates-manager';
 import { JobHourlyRatesManager } from '@/components/features/labor/job-hourly-rates-manager';
+import { Button } from '@/components/ui/button';
 
 export const metadata: Metadata = {
   title: 'Labor Management',
@@ -13,11 +15,18 @@ export const metadata: Metadata = {
 export default function LaborManagementPage() {
   return (
     <div className="container mx-auto py-6">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold">Labor Management</h1>
-        <p className="text-muted-foreground">
-          Manage job categories, rates, and jobs for the bill of labor
-        </p>
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-bold">Labor Management</h1>
+          <p className="text-muted-foreground">
+            Manage job categories, rates, and jobs for the bill of labor
+          </p>
+        </div>
+        <Button asChild variant="outline" className="gap-2">
+          <Link href="/labor-planning">
+            Open Labor Planning
+          </Link>
+        </Button>
       </div>
       
       <Tabs defaultValue="jobs" className="space-y-4">
