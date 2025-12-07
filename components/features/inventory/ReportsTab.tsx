@@ -135,14 +135,20 @@ export function ReportsTab() {
     const inStock: Component[] = [];
 
     components.forEach((component) => {
-      const quantity = component.inventory?.[0]?.quantity_on_hand || 0;
-      const reorderLevel = component.inventory?.[0]?.reorder_level || 0;
+      // Handle both array and single object inventory data
+      const inv = Array.isArray(component.inventory) 
+        ? component.inventory[0] 
+        : component.inventory;
+      const quantity = inv?.quantity_on_hand || 0;
+      const reorderLevel = inv?.reorder_level || 0;
+
 
       if (quantity <= 0) {
         outOfStock.push(component);
-      } else if (quantity <= reorderLevel) {
+      } else if (reorderLevel > 0 && quantity <= reorderLevel) {
+        // Only consider low stock if reorder level is set (> 0)
         lowStock.push(component);
-      } else {
+      } else if (quantity > 0) {
         inStock.push(component);
       }
     });
@@ -346,22 +352,27 @@ export function ReportsTab() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {stockStatus.lowStock.map((component) => (
-                      <TableRow key={component.component_id}>
-                        <TableCell className="font-medium">
-                          {component.internal_code}
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {component.description || '-'}
-                        </TableCell>
-                        <TableCell className="text-right text-amber-600 font-semibold">
-                          {component.inventory?.[0]?.quantity_on_hand || 0}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {component.inventory?.[0]?.reorder_level || 0}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {stockStatus.lowStock.map((component) => {
+                      const inv = Array.isArray(component.inventory) 
+                        ? component.inventory[0] 
+                        : component.inventory;
+                      return (
+                        <TableRow key={component.component_id}>
+                          <TableCell className="font-medium">
+                            {component.internal_code}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {component.description || '-'}
+                          </TableCell>
+                          <TableCell className="text-right text-amber-600 font-semibold">
+                            {inv?.quantity_on_hand || 0}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {inv?.reorder_level || 0}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>

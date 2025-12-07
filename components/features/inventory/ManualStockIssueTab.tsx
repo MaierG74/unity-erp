@@ -23,7 +23,8 @@ import {
   User,
   FileText,
   Package,
-  Download
+  Download,
+  ChevronDown
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -31,6 +32,7 @@ import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { pdf } from '@react-pdf/renderer';
 import { ManualIssuancePDFDocument } from './ManualIssuancePDF';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 
 // Issue categories for phased rollout
 const ISSUE_CATEGORIES = [
@@ -96,6 +98,7 @@ export function ManualStockIssueTab() {
   // Component search state
   const [componentSearchOpen, setComponentSearchOpen] = useState(false);
   const [componentSearchTerm, setComponentSearchTerm] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
   
   // Company info for PDF
   const [companyInfo, setCompanyInfo] = useState<any | null>(null);
@@ -167,12 +170,15 @@ export function ManualStockIssueTab() {
 
       if (error) throw error;
       
-      return (data || []).map((comp: any) => ({
-        component_id: comp.component_id,
-        internal_code: comp.internal_code,
-        description: comp.description,
-        quantity_on_hand: comp.inventory?.[0]?.quantity_on_hand || 0,
-      }));
+      return (data || []).map((comp: any) => {
+        const inv = Array.isArray(comp.inventory) ? comp.inventory[0] : comp.inventory;
+        return {
+          component_id: comp.component_id,
+          internal_code: comp.internal_code,
+          description: comp.description,
+          quantity_on_hand: inv?.quantity_on_hand || 0,
+        };
+      });
     },
     enabled: componentSearchTerm.trim().length >= 2,
     staleTime: 30000,
@@ -659,93 +665,155 @@ export function ManualStockIssueTab() {
       </Card>
 
       {/* Issuance History */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Manual Issuance History</CardTitle>
-          <CardDescription>
-            Recent manual stock issuances (not linked to Unity orders)
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {issuanceHistory.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">
-              No manual issuances recorded yet.
-            </p>
-          ) : (
-            <div className="border rounded-lg overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Reference</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Component</TableHead>
-                    <TableHead className="text-right">Quantity</TableHead>
-                    <TableHead>Issued To</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {issuanceHistory.map((issuance) => (
-                    <TableRow key={issuance.issuance_id}>
-                      <TableCell className="text-sm">
-                        {format(new Date(issuance.issuance_date), 'MMM d, yyyy HH:mm')}
-                      </TableCell>
-                      <TableCell>
-                        <div className="font-medium">{issuance.external_reference || '-'}</div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">
-                          {ISSUE_CATEGORIES.find(c => c.value === issuance.issue_category)?.label || issuance.issue_category || '-'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="font-medium">{issuance.component?.internal_code || 'Unknown'}</div>
-                        {issuance.component?.description && (
-                          <div className="text-xs text-muted-foreground truncate max-w-[150px]">
-                            {issuance.component.description}
-                          </div>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right font-medium">
-                        {formatQuantity(issuance.quantity_issued)}
-                      </TableCell>
-                      <TableCell>
-                        {issuance.staff ? (
-                          <div className="flex items-center gap-1.5">
-                            <User className="h-3.5 w-3.5 text-muted-foreground" />
-                            <span className="text-sm">{issuance.staff.first_name} {issuance.staff.last_name}</span>
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            if (confirm(`Reverse ${formatQuantity(issuance.quantity_issued)} of ${issuance.component?.internal_code}?`)) {
-                              reverseIssuanceMutation.mutate({
-                                issuanceId: issuance.issuance_id,
-                                quantity: issuance.quantity_issued,
-                                reason: 'Manual reversal',
-                              });
-                            }
-                          }}
-                          title="Reverse Issuance"
-                        >
-                          <RotateCcw className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+      <Collapsible open={historyOpen} onOpenChange={setHistoryOpen}>
+        <Card>
+          <CardHeader className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div>
+              <CardTitle>Manual Issuance History</CardTitle>
+              <CardDescription>
+                Recent manual stock issuances (not linked to Unity orders)
+              </CardDescription>
             </div>
-          )}
-        </CardContent>
-      </Card>
+            <CollapsibleTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2 self-start"
+              >
+                {historyOpen ? 'Hide history' : 'Show history'}
+                <ChevronDown
+                  className={cn('h-4 w-4 transition-transform', historyOpen ? 'rotate-180' : 'rotate-0')}
+                />
+              </Button>
+            </CollapsibleTrigger>
+          </CardHeader>
+          <CollapsibleContent>
+            <CardContent>
+              {issuanceHistory.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  No manual issuances recorded yet.
+                </p>
+              ) : (
+                <div className="border rounded-lg overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Reference</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead>Component</TableHead>
+                        <TableHead className="text-right">Quantity</TableHead>
+                        <TableHead>Issued To</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {issuanceHistory.map((issuance) => (
+                        <TableRow key={issuance.issuance_id}>
+                          <TableCell className="text-sm">
+                            {format(new Date(issuance.issuance_date), 'MMM d, yyyy HH:mm')}
+                          </TableCell>
+                          <TableCell>
+                            <div className="font-medium">{issuance.external_reference || '-'}</div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline">
+                              {ISSUE_CATEGORIES.find(c => c.value === issuance.issue_category)?.label || issuance.issue_category || '-'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="font-medium">{issuance.component?.internal_code || 'Unknown'}</div>
+                            {issuance.component?.description && (
+                              <div className="text-xs text-muted-foreground truncate max-w-[150px]">
+                                {issuance.component.description}
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right font-medium">
+                            {formatQuantity(issuance.quantity_issued)}
+                          </TableCell>
+                          <TableCell>
+                            {issuance.staff ? (
+                              <div className="flex items-center gap-1.5">
+                                <User className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span className="text-sm">{issuance.staff.first_name} {issuance.staff.last_name}</span>
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={async () => {
+                                  try {
+                                    const staffName = issuance.staff 
+                                      ? `${issuance.staff.first_name} ${issuance.staff.last_name}`
+                                      : null;
+                                    const blob = await pdf(
+                                      <ManualIssuancePDFDocument
+                                        components={[{
+                                          component_id: issuance.component_id,
+                                          internal_code: issuance.component?.internal_code || 'Unknown',
+                                          description: issuance.component?.description || null,
+                                          quantity: issuance.quantity_issued,
+                                        }]}
+                                        externalReference={issuance.external_reference || ''}
+                                        issueCategory={ISSUE_CATEGORIES.find(c => c.value === issuance.issue_category)?.label || issuance.issue_category || 'Unknown'}
+                                        issuedTo={staffName}
+                                        notes={issuance.notes || null}
+                                        issuanceDate={issuance.issuance_date}
+                                        companyInfo={companyInfo}
+                                        type="issuance"
+                                      />
+                                    ).toBlob();
+                                    const url = URL.createObjectURL(blob);
+                                    const link = document.createElement('a');
+                                    link.href = url;
+                                    link.download = `issuance-${issuance.external_reference || issuance.issuance_id}-${format(new Date(issuance.issuance_date), 'yyyyMMdd')}.pdf`;
+                                    document.body.appendChild(link);
+                                    link.click();
+                                    document.body.removeChild(link);
+                                    URL.revokeObjectURL(url);
+                                  } catch (error) {
+                                    console.error('Failed to generate PDF:', error);
+                                    toast.error('Failed to generate PDF');
+                                  }
+                                }}
+                                title="Download PDF"
+                              >
+                                <Download className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  if (confirm(`Reverse ${formatQuantity(issuance.quantity_issued)} of ${issuance.component?.internal_code}?`)) {
+                                    reverseIssuanceMutation.mutate({
+                                      issuanceId: issuance.issuance_id,
+                                      quantity: issuance.quantity_issued,
+                                      reason: 'Manual reversal',
+                                    });
+                                  }
+                                }}
+                                title="Reverse Issuance"
+                              >
+                                <RotateCcw className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </CollapsibleContent>
+        </Card>
+      </Collapsible>
     </div>
   );
 }

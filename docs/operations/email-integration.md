@@ -9,13 +9,47 @@ Unity ERP currently sends supplier purchase order notifications through the [Res
 - [`@react-email/components`](https://react.email/docs/components) – UI primitives used to compose the purchase order template.【F:emails/purchase-order-email.tsx†L1-L118】
 
 ## Configuration & Environment
-Set the following environment variables in every deployment target:
-- `RESEND_API_KEY` – required by both the API route and the helper in `lib/email.ts` to authenticate with Resend.【F:lib/email.ts†L1-L31】【F:app/api/send-purchase-order-email/route.ts†L1-L148】
-- `EMAIL_FROM` – actual sender identity used by Resend. The Settings email is displayed inside the template but the mail is dispatched from this environment address for deliverability.【F:app/api/send-purchase-order-email/route.ts†L76-L178】
-- `NEXT_PUBLIC_SUPABASE_LOGO_BUCKET` (optional) – storage bucket name for `company_logo_path`. Defaults to `QButton` to match the settings page uploader.【F:app/api/send-purchase-order-email/route.ts†L64-L73】【F:app/settings/page.tsx†L37-L84】
-- `NEXT_PUBLIC_PO_EMAIL_CC` (optional) – comma-separated default CC list pre-filled in the “Send Supplier Emails” dialog. Useful for routing purchasing notifications to a shared mailbox.
 
-Branding details (company name, address, phone, website, supplier footer copy, logo path) live in the `quote_company_settings` table and are editable from `/settings`. Environment variables act strictly as fallbacks for local development or in the unlikely event the settings row is missing. Ensure that the deployment surface where the API route runs supports secure storage of these secrets (e.g., Vercel/Netlify environment variables or Supabase Edge runtime config).
+### Required Environment Variables
+
+Set the following environment variables in every deployment target:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `RESEND_API_KEY` | **Yes** | API key from Resend dashboard for email authentication |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Yes** | Service role key for server-side database access |
+| `EMAIL_FROM` | **Yes** | Verified sender email (e.g., `noreply@apexza.net`) |
+| `NEXT_PUBLIC_APP_URL` | **Yes** | Production URL for email links (e.g., `https://unity-erp.windsurf.build`) |
+| `NEXT_PUBLIC_SUPABASE_LOGO_BUCKET` | No | Storage bucket for company logo. Defaults to `QButton` |
+| `NEXT_PUBLIC_PO_EMAIL_CC` | No | Default CC list for purchasing notifications |
+
+### Production Configuration (Netlify)
+
+All environment variables must be configured in Netlify for email functionality to work in production:
+
+1. Go to **Site settings → Build & deploy → Environment → Environment variables**
+2. Add each variable with appropriate values
+3. Mark `RESEND_API_KEY` and `SUPABASE_SERVICE_ROLE_KEY` as **secrets**
+
+See [`deployment-guide.md`](./deployment-guide.md) for complete Netlify configuration instructions.
+
+### Important: Build-Time vs Runtime
+
+The Resend client must be instantiated **inside request handlers**, not at module top-level. This prevents build-time errors when environment variables aren't available during Next.js static generation:
+
+```typescript
+// ❌ Bad - fails at build time
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+// ✅ Good - runs only at request time
+function getResendClient(): Resend {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) throw new Error('RESEND_API_KEY not set');
+  return new Resend(apiKey);
+}
+```
+
+Branding details (company name, address, phone, website, supplier footer copy, logo path) live in the `quote_company_settings` table and are editable from `/settings`. Environment variables act strictly as fallbacks for local development or in the unlikely event the settings row is missing.
 
 ## Email Templates
 All purchase order emails render through `emails/purchase-order-email.tsx`, a React component composed with Tailwind-compatible styling helpers. The supplier template now focuses on a clean header, a spacious zebra-striped line item table, and a branded footer (no customer-style summary card or terms block). Key traits:

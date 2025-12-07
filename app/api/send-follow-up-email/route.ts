@@ -204,6 +204,14 @@ export async function POST(request: Request) {
 
       const poNumbersList = [...new Set(items.map(i => i.po_number))];
       
+      // Get the first purchase_order_id from the orders for this supplier
+      // This links the follow-up to a specific PO for the PO detail page
+      const firstOrder = orders[0];
+      const firstPo = Array.isArray(firstOrder?.purchase_order)
+        ? firstOrder.purchase_order[0]
+        : firstOrder?.purchase_order;
+      const purchaseOrderId = firstPo?.purchase_order_id || null;
+      
       // Create follow-up record first
       const { data: followUpRecord } = await supabase
         .from('component_follow_up_emails')
@@ -212,6 +220,7 @@ export async function POST(request: Request) {
           supplier_id: supplierId,
           supplier_name: supplierName,
           po_numbers: poNumbersList,
+          purchase_order_id: purchaseOrderId,
           status: 'pending'
         })
         .select('id')

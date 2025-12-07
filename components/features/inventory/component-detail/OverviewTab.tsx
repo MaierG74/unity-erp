@@ -29,12 +29,12 @@ type ComponentData = {
     unit_code: string;
     unit_name: string;
   } | null;
-  inventory: Array<{
+  inventory: {
     inventory_id: number;
     quantity_on_hand: number;
     location: string | null;
     reorder_level: number | null;
-  }> | null;
+  } | null;
   supplierComponents: Array<{
     supplier_component_id: number;
     supplier_id: number;
@@ -54,7 +54,7 @@ type OverviewTabProps = {
 };
 
 export function OverviewTab({ component }: OverviewTabProps) {
-  const inventory = component.inventory?.[0];
+  const inventory = component.inventory;
   const quantityOnHand = inventory?.quantity_on_hand || 0;
   const reorderLevel = inventory?.reorder_level || 0;
   const location = inventory?.location || 'Not set';
@@ -92,21 +92,25 @@ export function OverviewTab({ component }: OverviewTabProps) {
           <div className="flex flex-col md:flex-row gap-6">
             {/* Image */}
             <div className="flex-shrink-0">
-              <Avatar className="h-32 w-32 rounded-lg">
-                <AvatarImage 
-                  src={component.image_url || undefined} 
-                  className="object-cover"
-                />
-                <AvatarFallback className="rounded-lg text-2xl">
-                  {component.internal_code.substring(0, 2).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
+              <div className="h-32 w-32 rounded-lg border bg-muted overflow-hidden flex items-center justify-center">
+                {component.image_url ? (
+                  <img 
+                    src={component.image_url} 
+                    alt={component.internal_code || 'Component'}
+                    className="max-h-full max-w-full object-contain"
+                  />
+                ) : (
+                  <span className="text-2xl font-medium text-muted-foreground">
+                    {(component.internal_code || '??').substring(0, 2).toUpperCase()}
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* Details */}
             <div className="flex-1 space-y-4">
               <div>
-                <h2 className="text-2xl font-bold">{component.internal_code}</h2>
+                <h2 className="text-2xl font-bold">{component.internal_code || 'Unnamed Component'}</h2>
                 <p className="text-muted-foreground mt-1">
                   {component.description || 'No description available'}
                 </p>

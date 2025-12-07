@@ -43,7 +43,7 @@ type InventoryTabProps = {
 export function InventoryTab({ component }: InventoryTabProps) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const inventory = component.inventory?.[0];
+  const inventory = Array.isArray(component.inventory) ? component.inventory[0] : component.inventory;
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),

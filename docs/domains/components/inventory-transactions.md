@@ -53,6 +53,16 @@ Canonical specification for `inventory_transactions` and how movements affect on
   - Increments `inventory.quantity_on_hand`
   - Updates `stock_issuances` record
 
+## Manual Issuance Contract (Server)
+- RPC: `process_manual_stock_issuance(p_component_id, p_quantity, p_notes, p_external_reference, p_issue_category, p_staff_id, p_issuance_date)`
+- Behavior (2025-12-02 hotfix):
+  - Validates positive quantity, external reference, and stock availability
+  - Logs `user_id` (UUID) on `stock_issuances` and `inventory_transactions`
+  - Generates OUT transaction and decrements `inventory.quantity_on_hand`
+  - Returns `{ issuance_id, transaction_id, quantity_on_hand, success, message }`
+- Error handling was corrected to return structured errors instead of empty `{}` objects and to cast types correctly (UUID vs TEXT, numeric deltas). See changelog `inventory-issuance-and-deletion-fixes-20251202.md` for context.
+- Manual issuances create history rows that now expose a PDF download button (see UI section below) which renders the same document used for PO issuances but tailored to manual references.
+
 ## Adjustment Contract (Server)
 - Input: `component_id`, `delta_quantity`, `reason` (enum/string), optional `note`
 - Behavior:
@@ -67,7 +77,7 @@ The Transactions tab on the component detail page (`/inventory/components/[id]`)
 ### Current Stock Balance Banner
 - Prominent display of current `quantity_on_hand` at the top of the Transactions tab
 - Blue gradient card with icon for visual emphasis
-- "Stock Adjustment" button for quick access to adjustment dialog
+- "Stock Adjustment" button for quick access to adjustment dialog (now rendered even when the component has zero historical transactions so stocktakes can start from an empty ledger)
 
 ### Stock Adjustment Dialog
 Accessible via the "Stock Adjustment" button, the dialog provides:
@@ -101,6 +111,13 @@ Accessible via the "Stock Adjustment" button, the dialog provides:
 - Records `user_id`, `transaction_date`, and full reason text
 - Transaction appears in history with "ADJUSTMENT" type badge
 - Running balance is recalculated and displayed
+
+### Manual Issuance PDFs & History
+- Manual issuance tab (`/inventory`) now mirrors the PO issuance workflow:
+  - After any successful manual issuance, the history table surfaces a download icon that renders `ManualIssuancePDFDocument` with component, reference, category, issued-to, and notes info.
+  - The Picking List PDF button remains available pre-issuance; post-issuance PDFs use the new "Stock Issuance Record" layout for signature capture.
+- The history card is rendered inside a collapsible container to keep the manual issuance form the primary focus. The section is collapsed by default with a "Show history" button (that toggles to "Hide history" when expanded). The button includes a chevron that rotates with the open state for quick visual feedback.
+- The PDF flow depends on `company settings` (`/api/settings`) to display branding. Missing branding is tolerated, but populate `company_name`, `address`, and `logo` for production parity.
 
 ### Best Practices (from ERP industry standards)
 1. **Mandatory reason codes** — Every adjustment must have a documented reason

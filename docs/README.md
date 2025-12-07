@@ -7,6 +7,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
 ## Directory structure
 
 - `overview/` – High-level orientation docs. Start here for the overall roadmap (`master-plan.md`), platform style guide, auth overview, and the AI assistant vision.
+- `deployment/` – Production deployment guides, environment configuration, and operational procedures.
 - `domains/`
   - `orders/` – Day-to-day order operations, including the master guide and reset instructions.
   - `purchasing/` – Purchasing workflows and reset checklist.
@@ -35,6 +36,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - Timekeeping: [`domains/timekeeping/labor-section.md`](domains/timekeeping/labor-section.md), [`domains/timekeeping/labor-planning-user-guide.md`](domains/timekeeping/labor-planning-user-guide.md)
   - Suppliers: [`domains/suppliers/suppliers-master.md`](domains/suppliers/suppliers-master.md)
 - Operations:
+  - [`operations/deployment-guide.md`](operations/deployment-guide.md) – **Production deployment guide** (Netlify, env vars, rollback)
   - [`operations/BOL_SYSTEM.md`](operations/BOL_SYSTEM.md)
   - [`operations/cutlist-standalone.md`](operations/cutlist-standalone.md)
   - [`operations/email-integration.md`](operations/email-integration.md)
@@ -53,7 +55,9 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - Completed: [`plans/quote-email-plan.md`](plans/quote-email-plan.md) – Quote PDF email integration plan (see [`operations/quote-email-implementation.md`](operations/quote-email-implementation.md) for implementation)
   - New: [`plans/inventory-traceability-po-consolidation-plan.md`](plans/inventory-traceability-po-consolidation-plan.md) – Inventory traceability through purchase cycle, PO consolidation, and reserved inventory system
 - Changelogs: [`changelogs/`](changelogs/)
+  - [`changelogs/november-2025-deployment-20251130.md`](changelogs/november-2025-deployment-20251130.md) – **November 2025 production deployment** (major release)
   - [`changelogs/inventory-component-ui-improvements-20251130.md`](changelogs/inventory-component-ui-improvements-20251130.md) – Inventory component page UI/UX improvements (header, tabs, gradients)
+  - [`changelogs/inventory-issuance-and-deletion-fixes-20251202.md`](changelogs/inventory-issuance-and-deletion-fixes-20251202.md) – Manual issuance RPC, PDF workflow, and component deletion cleanup fixes
   - [`changelogs/stock-adjustment-feature-20251130.md`](changelogs/stock-adjustment-feature-20251130.md) – Stock adjustment feature for inventory corrections after stock take
   - [`changelogs/supplier-returns-rpc-overload-fix-20250113.md`](changelogs/supplier-returns-rpc-overload-fix-20250113.md) – Dropped legacy RPC overload to fix supplier return execution errors
   - [`changelogs/on-order-calculation-fix-20250110.md`](changelogs/on-order-calculation-fix-20250110.md) – Fixed "On Order" calculation discrepancies with INNER JOIN patterns and corrected supplier order statuses
@@ -68,6 +72,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - [`changelogs/inventory-component-detail-supplier-dialog-20250115.md`](changelogs/inventory-component-detail-supplier-dialog-20250115.md) – Component detail page supplier dialog improvements and products page build fix
   - [`changelogs/purchase-orders-date-filtering-verification-20250115.md`](changelogs/purchase-orders-date-filtering-verification-20250115.md) – Purchase Orders date filtering verification and documentation
   - [`changelogs/supplier-orders-reports-20250115.md`](changelogs/supplier-orders-reports-20250115.md) – Supplier Orders and Reports tabs implementation with filtering and analytics
+  - [`changelogs/inventory-reorder-and-alerts-20251203.md`](changelogs/inventory-reorder-and-alerts-20251203.md) – Reorder/location fields, normalized inventory data shape, Low Stock alert fixes, and chart reference line
   - [`changelogs/purchase-order-per-line-association-20251120.md`](changelogs/purchase-order-per-line-association-20251120.md) – `create_purchase_order_with_lines` now links each PO line to a specific customer order id
   - [`changelogs/grn-pdf-company-details-fix-20251121.md`](changelogs/grn-pdf-company-details-fix-20251121.md) – Fixed missing company details in Goods Returned (GRN) PDF generation
   - [`changelogs/nextjs-entrycss-runtime-fix-20251123.md`](changelogs/nextjs-entrycss-runtime-fix-20251123.md) – Documented the Next.js `entryCSSFiles` runtime failure and the Inter font loader fix

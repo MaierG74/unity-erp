@@ -111,11 +111,18 @@ export function StockAdjustmentDialog({
       
       if (txError) throw txError;
       
-      // Then update the inventory
+      // Then update or create the inventory record
       const { error: invError } = await supabase
         .from('inventory')
-        .update({ quantity_on_hand: newStockLevel })
-        .eq('component_id', componentId);
+        .upsert(
+          { 
+            component_id: componentId, 
+            quantity_on_hand: newStockLevel,
+            reorder_level: 0,
+            location: null
+          },
+          { onConflict: 'component_id' }
+        );
       
       if (invError) {
         // If inventory update fails, we should ideally rollback the transaction
