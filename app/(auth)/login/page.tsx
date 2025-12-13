@@ -32,6 +32,7 @@ type LoginForm = z.infer<typeof loginSchema>
 export default function LoginPage() {
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
+  const [isRedirecting, setIsRedirecting] = useState(false)
   const { resolvedTheme } = useTheme()
   const isDarkMode = resolvedTheme === 'dark'
 
@@ -48,9 +49,6 @@ export default function LoginPage() {
       console.log('Login attempt with:', { email: data.email })
       setError(null)
 
-      // Add a small delay to ensure UI feedback
-      await new Promise(resolve => setTimeout(resolve, 500))
-
       console.log('Calling Supabase auth.signInWithPassword')
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: data.email,
@@ -61,11 +59,17 @@ export default function LoginPage() {
 
       if (authError) throw authError
 
-      console.log('Login successful, redirecting to dashboard')
+      console.log('Login successful, showing redirect screen')
+      setIsRedirecting(true)
+
+      // Small delay to ensure auth state propagates
+      await new Promise(resolve => setTimeout(resolve, 800))
+
       router.push('/dashboard')
     } catch (error: any) {
       console.error('Login error:', error)
       setError(error?.message || 'Failed to sign in')
+      setIsRedirecting(false)
     }
   }
 
@@ -77,6 +81,22 @@ export default function LoginPage() {
 
   return (
     <div className={`fixed inset-0 w-screen h-screen ${isDarkMode ? 'bg-[#0a0a0f]' : 'bg-gradient-to-br from-stone-100 via-orange-50/30 to-stone-100'}`}>
+      {/* Loading overlay */}
+      {isRedirecting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-6">
+            <div className="relative">
+              <div className="w-16 h-16 border-4 border-orange-500/30 rounded-full"></div>
+              <div className="absolute top-0 left-0 w-16 h-16 border-4 border-t-orange-500 rounded-full animate-spin"></div>
+            </div>
+            <div className="text-center">
+              <p className="text-white text-lg font-light tracking-wide mb-1">Signing in</p>
+              <p className="text-gray-400 text-sm">Redirecting to dashboard...</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Decorative gradient orbs */}
       <div className={`absolute top-0 left-0 w-[500px] h-[500px] ${isDarkMode ? 'bg-orange-600/20' : 'bg-orange-400/20'} rounded-full blur-[120px] pointer-events-none -translate-x-1/3 -translate-y-1/3`} />
       <div className={`absolute bottom-0 right-0 w-[400px] h-[400px] ${isDarkMode ? 'bg-orange-500/15' : 'bg-orange-300/20'} rounded-full blur-[100px] pointer-events-none translate-x-1/3 translate-y-1/3`} />
