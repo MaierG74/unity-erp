@@ -47,16 +47,30 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const [{ data: profileRows, error: profileError }, users] = await Promise.all([
+    const [{ data: profileRows, error: profileError }, users, { data: memberRows, error: memberError }] = await Promise.all([
       supabaseAdmin
         .from('profiles')
-        .select('id, username, avatar_url')
+        .select('id, username, display_name, first_name, last_name, login, avatar_url')
         .limit(2000),
       listAllUsers(),
+      supabaseAdmin
+        .from('organization_members')
+        .select('user_id, org_id, role, is_active, banned_until')
+        .limit(5000),
     ]);
 
     if (profileError) {
       return NextResponse.json({ error: profileError.message }, { status: 500 });
+    }
+    if (memberError) {
+      return NextResponse.json({ error: memberError.message }, { status: 500 });
+    }
+
+    const membershipMap = new Map<string, any[]>();
+    for (const m of memberRows ?? []) {
+      const list = membershipMap.get(m.user_id) ?? [];
+      list.push(m);
+      membershipMap.set(m.user_id, list);
     }
 
     const userMap = new Map(users.map(user => [user.id, user]));
@@ -65,14 +79,27 @@ export async function GET(req: NextRequest) {
       const user = userMap.get(row.id) ?? null;
       const metadata = user?.user_metadata ?? user?.raw_user_meta_data ?? {};
       const nameFromMetadata = metadata?.full_name || metadata?.name || metadata?.display_name;
+      const login = row.login ?? metadata?.login ?? null;
+      const displayName = row.display_name || row.username || nameFromMetadata || login || user?.email || row.id;
+      const memberships = membershipMap.get(row.id) ?? [];
+      const primaryMembership = memberships[0] ?? null;
 
       return {
         id: row.id,
-        username: row.username,
+        username: displayName,
+        display_name: displayName,
+        first_name: row.first_name ?? metadata?.first_name ?? null,
+        last_name: row.last_name ?? metadata?.last_name ?? null,
+        login,
         avatar_url: row.avatar_url,
         email: user?.email ?? null,
         metadata,
-        display_name: row.username || nameFromMetadata || user?.email || row.id,
+        raw_display_name: row.display_name ?? null,
+        memberships,
+        primary_org_id: primaryMembership?.org_id ?? null,
+        primary_role: primaryMembership?.role ?? null,
+        is_active: primaryMembership?.is_active ?? null,
+        banned_until: primaryMembership?.banned_until ?? null,
       };
     });
 
@@ -81,14 +108,25 @@ export async function GET(req: NextRequest) {
       if (entries.some(entry => entry.id === user.id)) continue;
       const metadata = user.user_metadata ?? user.raw_user_meta_data ?? {};
       const nameFromMetadata = metadata?.full_name || metadata?.name || metadata?.display_name;
+      const memberships = membershipMap.get(user.id) ?? [];
+      const primaryMembership = memberships[0] ?? null;
 
       entries.push({
         id: user.id,
-        username: null,
+        username: nameFromMetadata || user.email || user.id,
+        display_name: nameFromMetadata || user.email || user.id,
+        first_name: metadata?.first_name ?? null,
+        last_name: metadata?.last_name ?? null,
+        login: metadata?.login ?? null,
         avatar_url: null,
         email: user.email ?? null,
         metadata,
-        display_name: nameFromMetadata || user.email || user.id,
+        raw_display_name: null,
+        memberships,
+        primary_org_id: primaryMembership?.org_id ?? null,
+        primary_role: primaryMembership?.role ?? null,
+        is_active: primaryMembership?.is_active ?? null,
+        banned_until: primaryMembership?.banned_until ?? null,
       });
     }
 

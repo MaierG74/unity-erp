@@ -561,6 +561,7 @@ function buildStaffLanes(
         jobKey: assignment.jobKey,
         orderId: order?.orderId ?? job?.orderId ?? null,
         orderNumber: order?.orderNumber ?? null,
+        jobId: assignment.jobId ?? job?.jobId ?? null,
         jobName: job?.name ?? null,
         productName: job?.productName ?? null,
         label,
@@ -573,6 +574,11 @@ function buildStaffLanes(
         pieceRateId: assignment.pieceRateId,
         rateId: assignment.rateId,
         bolId: assignment.bolId,
+        // Time tracking fields
+        jobStatus: assignment.jobStatus ?? undefined,
+        issuedAt: assignment.issuedAt,
+        startedAt: assignment.startedAt,
+        assignmentDate: assignment.assignmentDate,
       };
     });
 

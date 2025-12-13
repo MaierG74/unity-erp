@@ -13,8 +13,9 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { minutesToClock } from '@/src/lib/laborScheduling';
-import { Circle, GripHorizontal, X, Calendar, Clock, User, Briefcase } from 'lucide-react';
+import { Circle, GripHorizontal, X, Calendar, Clock, User, Briefcase, CheckCircle2 } from 'lucide-react';
 import type { LaborDragPayload, StaffAssignment, StaffLane, TimeMarker } from './types';
+import { CompleteJobDialog } from './complete-job-dialog';
 
 interface StaffLaneListProps {
   staff: StaffLane[];
@@ -91,8 +92,28 @@ export function StaffLaneList({
   const [dragOverLaneId, setDragOverLaneId] = useState<string | null>(null);
   // Track selected assignment for modal
   const [selectedAssignment, setSelectedAssignment] = useState<StaffAssignment | null>(null);
+  // Track selected lane for getting staff info
+  const [selectedLane, setSelectedLane] = useState<StaffLane | null>(null);
   // Track drag position for time indicator
   const [dragIndicator, setDragIndicator] = useState<{ laneId: string; x: number; minutes: number } | null>(null);
+  // Track assignment being completed
+  const [completeAssignment, setCompleteAssignment] = useState<{
+    assignment_id: number;
+    job_instance_id?: string;
+    order_id?: number;
+    orderNumber?: string;
+    job_id?: number;
+    jobName?: string;
+    productName?: string;
+    staffName?: string;
+    staff_id?: number;
+    assignment_date?: string;
+    start_minutes: number;
+    end_minutes: number;
+    issued_at?: string;
+    started_at?: string;
+    job_status?: string;
+  } | null>(null);
 
   return (
     <div className="space-y-2 p-2">
@@ -225,6 +246,7 @@ export function StaffLaneList({
                     onClick={(event) => {
                       event.stopPropagation();
                       setSelectedAssignment(assignment);
+                      setSelectedLane(lane);
                     }}
                     onDragStart={(event) => {
                       const payload: LaborDragPayload = { type: 'assignment', assignment };
@@ -360,7 +382,40 @@ export function StaffLaneList({
               </div>
 
               <div className="flex justify-end gap-2 pt-4">
-                <Button variant="outline" size="sm" onClick={() => setSelectedAssignment(null)}>
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="bg-green-600 hover:bg-green-700"
+                  onClick={() => {
+                    if (!selectedAssignment || !selectedLane) return;
+                    setCompleteAssignment({
+                      assignment_id: parseInt(selectedAssignment.id, 10),
+                      job_instance_id: selectedAssignment.jobKey,
+                      order_id: typeof selectedAssignment.orderId === 'number' ? selectedAssignment.orderId : undefined,
+                      orderNumber: selectedAssignment.orderNumber ?? undefined,
+                      job_id: selectedAssignment.jobId ?? undefined,
+                      jobName: selectedAssignment.jobName ?? undefined,
+                      productName: selectedAssignment.productName ?? undefined,
+                      staffName: selectedLane.name,
+                      staff_id: parseInt(selectedLane.id, 10),
+                      assignment_date: selectedAssignment.assignmentDate ?? undefined,
+                      start_minutes: selectedAssignment.startMinutes,
+                      end_minutes: selectedAssignment.endMinutes,
+                      issued_at: selectedAssignment.issuedAt ?? undefined,
+                      started_at: selectedAssignment.startedAt ?? undefined,
+                      job_status: selectedAssignment.jobStatus,
+                    });
+                    setSelectedAssignment(null);
+                    setSelectedLane(null);
+                  }}
+                >
+                  <CheckCircle2 className="h-4 w-4 mr-1.5" />
+                  Complete Job
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => {
+                  setSelectedAssignment(null);
+                  setSelectedLane(null);
+                }}>
                   Close
                 </Button>
               </div>
@@ -368,6 +423,13 @@ export function StaffLaneList({
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Complete Job Dialog */}
+      <CompleteJobDialog
+        open={!!completeAssignment}
+        onOpenChange={(open) => !open && setCompleteAssignment(null)}
+        assignment={completeAssignment}
+      />
     </div>
   );
 }

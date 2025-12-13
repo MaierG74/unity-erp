@@ -91,6 +91,8 @@ export async function fetchOpenOrdersWithLabor(): Promise<PlanningOrderWithMeta[
             jobs(
               job_id,
               name,
+              estimated_minutes,
+              time_unit,
               job_categories(
                 category_id,
                 name
@@ -155,21 +157,39 @@ export async function fetchStaffRoster(options: StaffRosterOptions = {}): Promis
 export async function fetchLaborAssignments(options: { date?: string } = {}): Promise<LaborPlanAssignment[]> {
   const { date } = options;
 
+  // Try with time tracking columns first, fall back to basic query if columns don't exist
+  const fullSelect = 'assignment_id, job_instance_id, order_id, order_detail_id, bol_id, job_id, staff_id, assignment_date, start_minutes, end_minutes, status, pay_type, rate_id, hourly_rate_id, piece_rate_id, job_status, issued_at, started_at, completed_at';
+  const basicSelect = 'assignment_id, job_instance_id, order_id, order_detail_id, bol_id, job_id, staff_id, assignment_date, start_minutes, end_minutes, status, pay_type, rate_id, hourly_rate_id, piece_rate_id';
+
   let assignmentQuery = supabase
     .from('labor_plan_assignments')
-    .select(
-      'assignment_id, job_instance_id, order_id, order_detail_id, bol_id, job_id, staff_id, assignment_date, start_minutes, end_minutes, status, pay_type, rate_id, hourly_rate_id, piece_rate_id'
-    )
+    .select(fullSelect)
     .order('start_minutes', { ascending: true });
 
   if (date) {
     assignmentQuery = assignmentQuery.eq('assignment_date', date);
   }
 
-  const { data, error } = await assignmentQuery;
+  let { data, error } = await assignmentQuery;
+
+  // If query failed (likely due to missing columns), try without time tracking columns
   if (error) {
-    console.warn('[laborPlanning] Failed to load labor assignments', error);
-    return [];
+    console.warn('[laborPlanning] Full query failed, trying without time tracking columns:', error.message);
+    let fallbackQuery = supabase
+      .from('labor_plan_assignments')
+      .select(basicSelect)
+      .order('start_minutes', { ascending: true });
+
+    if (date) {
+      fallbackQuery = fallbackQuery.eq('assignment_date', date);
+    }
+
+    const fallbackResult = await fallbackQuery;
+    if (fallbackResult.error) {
+      console.warn('[laborPlanning] Failed to load labor assignments', fallbackResult.error);
+      return [];
+    }
+    data = fallbackResult.data;
   }
 
   return (data || []).map((row: any) => normalizeAssignmentRow(row));
@@ -319,6 +339,11 @@ function normalizeAssignmentRow(row: any): LaborPlanAssignment {
     ? String(row.job_instance_id)
     : buildJobId(row?.order_id ?? 'unknown', row?.order_detail_id, row?.bol_id, row?.job_id);
 
+  // Parse job_status as a valid JobStatus or null
+  const rawJobStatus = row?.job_status;
+  const validJobStatuses = ['scheduled', 'issued', 'in_progress', 'completed', 'on_hold'];
+  const jobStatus = rawJobStatus && validJobStatuses.includes(rawJobStatus) ? rawJobStatus : null;
+
   return {
     assignmentId: row?.assignment_id ? String(row.assignment_id) : jobKey,
     jobKey,
@@ -335,6 +360,10 @@ function normalizeAssignmentRow(row: any): LaborPlanAssignment {
     rateId: toNumber(row?.rate_id),
     hourlyRateId: toNumber(row?.hourly_rate_id),
     pieceRateId: toNumber(row?.piece_rate_id),
+    jobStatus,
+    issuedAt: row?.issued_at ?? null,
+    startedAt: row?.started_at ?? null,
+    completedAt: row?.completed_at ?? null,
   };
 }
 

@@ -14,6 +14,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - `components/` – Component modelling, product creation, and subcomponent execution references.
   - `timekeeping/` – Labor and time & attendance implementation notes.
   - `suppliers/` – Supplier master data standards and flows.
+- `auth/` – Auth flows, roles/RLS, admin APIs, UI guides, and SQL snippets for Supabase
 - `operations/` – Cross-cutting operational procedures such as the Bill of Labor system, sidebar updates, and logging guidance.
 - `plans/` – Implementation plans and project briefs (`*-plan.md` / `*-plan.txt`).
 - `changelogs/` – Historical release notes and change summaries.
@@ -28,6 +29,12 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - [`overview/STYLE_GUIDE.md`](overview/STYLE_GUIDE.md)
   - [`overview/auth.md`](overview/auth.md)
   - [`overview/AI Assistant.md`](overview/AI%20Assistant.md)
+- Auth
+  - [`auth/user-onboarding.md`](auth/user-onboarding.md)
+  - [`auth/roles-and-rls.md`](auth/roles-and-rls.md)
+  - [`auth/admin-api.md`](auth/admin-api.md)
+  - [`auth/ui-admin-users.md`](auth/ui-admin-users.md)
+  - [`auth/sql-snippets.md`](auth/sql-snippets.md)
 - Domains
   - Orders: [`domains/orders/orders-master.md`](domains/orders/orders-master.md)
   - Purchasing: [`domains/purchasing/purchasing-master.md`](domains/purchasing/purchasing-master.md)

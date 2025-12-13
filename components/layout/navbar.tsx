@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { useSidebar } from './sidebar';
 import { useEffect, useState } from 'react';
 import { usePathname, useSearchParams, useRouter } from 'next/navigation';
+import { cn } from '@/lib/utils';
 
 export function Navbar() {
   const { user } = useAuth();
@@ -20,6 +21,8 @@ export function Navbar() {
   const router = useRouter();
   const compactOn = searchParams?.get('compact') !== '0';
   const isLaborPlanning = pathname?.startsWith('/labor-planning');
+  const userRole = (user as any)?.app_metadata?.role || (user as any)?.user_metadata?.role;
+  const isAdmin = userRole === 'owner' || userRole === 'admin';
 
   // Check if the screen is mobile size
   useEffect(() => {
@@ -94,6 +97,17 @@ export function Navbar() {
                 7:00 AM – 7:00 PM
               </Badge>
             </>
+          )}
+          {isAdmin && (
+            <Link
+              href="/admin/users"
+              className={cn(
+                'text-sm font-medium text-muted-foreground hover:text-foreground',
+                pathname === '/admin/users' && 'text-foreground'
+              )}
+            >
+              Admin
+            </Link>
           )}
           <ThemeToggle />
           {user ? (

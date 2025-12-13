@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import React from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useForm } from 'react-hook-form';
@@ -71,12 +72,20 @@ interface JobCategory {
   current_hourly_rate: number;
 }
 
+interface LaborRole {
+  role_id: number;
+  name: string;
+  color: string | null;
+}
+
 interface Job {
   job_id: number;
   name: string;
   description: string | null;
   category_id: number;
+  role_id: number | null;
   category?: JobCategory;
+  labor_roles?: LaborRole | null;
 }
 
 // Form schema for adding/editing jobs
@@ -89,13 +98,14 @@ const jobSchema = z.object({
 type JobFormValues = z.infer<typeof jobSchema>;
 
 export function JobsManager() {
+  const router = useRouter();
   const [editingId, setEditingId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('');
   const [expandedJobs, setExpandedJobs] = useState<Set<number>>(new Set());
   const [isAddJobOpen, setIsAddJobOpen] = useState(false);
   const [isEditJobOpen, setIsEditJobOpen] = useState(false);
-  
+
   const { toast } = useToast();
   const queryClient = useQueryClient();
   
@@ -124,30 +134,67 @@ export function JobsManager() {
   });
   
   // Fetch all jobs (no pagination)
-  const { data: allJobs = [], isLoading: jobsLoading } = useQuery({
+  const { data: allJobs = [], isLoading: jobsLoading, error: jobsError } = useQuery({
     queryKey: ['jobs'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      // Try full query with role_id first, fall back if column doesn't exist
+      let { data, error } = await supabase
         .from('jobs')
         .select(`
           job_id,
           name,
           description,
           category_id,
+          role_id,
           job_categories (
             category_id,
             name,
             description,
             current_hourly_rate
+          ),
+          labor_roles (
+            role_id,
+            name,
+            color
           )
         `)
         .order('name');
-      
-      if (error) throw error;
-      
+
+      // If role_id column doesn't exist, use basic query
+      if (error && error.message?.includes('role_id')) {
+        console.warn('[JobsManager] role_id column not found, using basic query');
+        const { data: basicData, error: basicError } = await supabase
+          .from('jobs')
+          .select(`
+            job_id,
+            name,
+            description,
+            category_id,
+            job_categories (
+              category_id,
+              name,
+              description,
+              current_hourly_rate
+            )
+          `)
+          .order('name');
+
+        if (basicError) {
+          console.error('[JobsManager] Error fetching jobs:', basicError);
+          throw basicError;
+        }
+        data = basicData;
+        error = null;
+      } else if (error) {
+        console.error('[JobsManager] Error fetching jobs:', error);
+        throw error;
+      }
+
+      console.log('[JobsManager] Loaded jobs:', data);
       return (data || []).map((job: any) => ({
         ...job,
-        category: job.job_categories
+        category: job.job_categories,
+        labor_roles: job.labor_roles
       })) as Job[];
     },
   });
@@ -414,47 +461,58 @@ export function JobsManager() {
       {/* Jobs List */}
       <Card>
         <CardContent className="p-0">
-          {jobsLoading || categoriesLoading ? (
+          {jobsError && (
+            <div className="text-center py-8 text-red-600">
+              <p className="font-medium">Error loading jobs</p>
+              <p className="text-sm">{jobsError?.message || 'Unknown error'}</p>
+            </div>
+          )}
+          {!jobsError && (jobsLoading || categoriesLoading) ? (
             <div className="text-center py-8">Loading jobs...</div>
-          ) : filteredJobs.length === 0 ? (
+          ) : !jobsError && filteredJobs.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               {searchQuery || categoryFilter ? 'No jobs match your filters' : 'No jobs defined yet'}
             </div>
-          ) : (
+          ) : !jobsError && (
             <div className="divide-y">
               {filteredJobs.map((job) => {
                 const isExpanded = expandedJobs.has(job.job_id);
                 
                 return (
-                  <div key={job.job_id} className="p-4">
+                  <div
+                    key={job.job_id}
+                    className="p-4 cursor-pointer hover:bg-muted/50 transition-colors"
+                    onClick={() => router.push(`/labor/jobs/${job.job_id}`)}
+                  >
                     {/* Job Header */}
                     <div className="flex items-start justify-between gap-4">
-                      <button
-                        onClick={() => toggleJob(job.job_id)}
-                        className="flex-1 flex items-start gap-3 text-left hover:opacity-70 transition-opacity"
-                      >
-                        {isExpanded ? (
-                          <ChevronDown className="h-5 w-5 mt-0.5 text-muted-foreground flex-shrink-0" />
-                        ) : (
-                          <ChevronRight className="h-5 w-5 mt-0.5 text-muted-foreground flex-shrink-0" />
-                        )}
+                      <div className="flex-1 flex items-start gap-3">
+                        <ChevronRight className="h-5 w-5 mt-0.5 text-muted-foreground flex-shrink-0" />
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-3 flex-wrap">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <h3 className="font-medium">{job.name}</h3>
                             <Badge variant="outline">{job.category?.name || 'Uncategorized'}</Badge>
+                            {job.labor_roles && (
+                              <Badge
+                                style={{ backgroundColor: job.labor_roles.color || undefined }}
+                                className="text-white text-xs"
+                              >
+                                {job.labor_roles.name}
+                              </Badge>
+                            )}
                             <span className="text-sm font-semibold text-primary">
                               {job.category ? `R${job.category.current_hourly_rate.toFixed(2)}/hr` : 'N/A'}
                             </span>
                           </div>
-                          {job.description && !isExpanded && (
+                          {job.description && (
                             <p className="text-sm text-muted-foreground mt-1 line-clamp-1">
                               {job.description}
                             </p>
                           )}
                         </div>
-                      </button>
-                      
-                      <div className="flex items-center gap-2">
+                      </div>
+
+                      <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                         <Button
                           variant="ghost"
                           size="icon"
@@ -477,14 +535,6 @@ export function JobsManager() {
                         </Button>
                       </div>
                     </div>
-                    
-                    {/* Expanded Description */}
-                    {isExpanded && job.description && (
-                      <div className="mt-3 ml-8 p-3 rounded-lg border bg-muted/20">
-                        <h4 className="text-sm font-medium mb-1">Description</h4>
-                        <p className="text-sm text-muted-foreground">{job.description}</p>
-                      </div>
-                    )}
                   </div>
                 );
               })}

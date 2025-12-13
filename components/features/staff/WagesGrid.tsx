@@ -38,7 +38,8 @@ import {
     X,
     Clock,
     LogIn,
-    LogOut
+    LogOut,
+    Trash2
 } from 'lucide-react';
 import { addManualClockEvent, processClockEventsIntoSegments } from '@/lib/utils/attendance';
 
@@ -212,34 +213,41 @@ export function WagesGrid() {
 
         setIsProcessing(true);
         try {
-            for (const staffId of selectedStaff) {
-                if (type === 'in' || type === 'both') {
-                    // Delete existing clock in
-                    await supabase
-                        .from('time_clock_events')
-                        .delete()
-                        .eq('staff_id', staffId)
-                        .eq('event_type', 'clock_in')
-                        .gte('event_time', `${dateStr}T00:00:00`)
-                        .lte('event_time', `${dateStr}T23:59:59`);
+            const selectedIds = Array.from(selectedStaff);
+            const BATCH_SIZE = 5; // To prevent overwhelming the server/browser
 
-                    await addManualClockEvent(staffId, 'clock_in', dateStr, timeIn, null, 'Bulk Quick Entry');
-                }
+            for (let i = 0; i < selectedIds.length; i += BATCH_SIZE) {
+                const batch = selectedIds.slice(i, i + BATCH_SIZE);
 
-                if (type === 'out' || type === 'both') {
-                    // Delete existing clock out
-                    await supabase
-                        .from('time_clock_events')
-                        .delete()
-                        .eq('staff_id', staffId)
-                        .eq('event_type', 'clock_out')
-                        .gte('event_time', `${dateStr}T00:00:00`)
-                        .lte('event_time', `${dateStr}T23:59:59`);
+                await Promise.all(batch.map(async (staffId) => {
+                    if (type === 'in' || type === 'both') {
+                        // Delete existing clock in
+                        await supabase
+                            .from('time_clock_events')
+                            .delete()
+                            .eq('staff_id', staffId)
+                            .eq('event_type', 'clock_in')
+                            .gte('event_time', `${dateStr}T00:00:00`)
+                            .lte('event_time', `${dateStr}T23:59:59`);
 
-                    await addManualClockEvent(staffId, 'clock_out', dateStr, timeOut, null, 'Bulk Quick Entry');
-                }
+                        await addManualClockEvent(staffId, 'clock_in', dateStr, timeIn, null, 'Bulk Quick Entry');
+                    }
 
-                await processClockEventsIntoSegments(dateStr, staffId);
+                    if (type === 'out' || type === 'both') {
+                        // Delete existing clock out
+                        await supabase
+                            .from('time_clock_events')
+                            .delete()
+                            .eq('staff_id', staffId)
+                            .eq('event_type', 'clock_out')
+                            .gte('event_time', `${dateStr}T00:00:00`)
+                            .lte('event_time', `${dateStr}T23:59:59`);
+
+                        await addManualClockEvent(staffId, 'clock_out', dateStr, timeOut, null, 'Bulk Quick Entry');
+                    }
+
+                    await processClockEventsIntoSegments(dateStr, staffId);
+                }));
             }
 
             await refetchEvents();
@@ -249,6 +257,31 @@ export function WagesGrid() {
         } catch (error: any) {
             console.error('Error applying bulk times:', error);
             toast({ title: 'Error', description: 'Failed to apply times', variant: 'destructive' });
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    // Clear times for a staff member
+    const handleClear = async (staffId: number) => {
+        setIsProcessing(true);
+        try {
+            const { error } = await supabase
+                .from('time_clock_events')
+                .delete()
+                .eq('staff_id', staffId)
+                .gte('event_time', `${dateStr}T00:00:00`)
+                .lte('event_time', `${dateStr}T23:59:59`);
+
+            if (error) throw error;
+
+            await processClockEventsIntoSegments(dateStr, staffId);
+            await refetchEvents();
+
+            toast({ title: 'Times cleared', description: 'Deleted all events for this day' });
+        } catch (error: any) {
+            console.error('Error clearing times:', error);
+            toast({ title: 'Error', description: 'Failed to clear times', variant: 'destructive' });
         } finally {
             setIsProcessing(false);
         }
@@ -449,7 +482,7 @@ export function WagesGrid() {
                                     </div>
                                 </TableHead>
                                 <TableHead className="w-[100px] text-center">Hours</TableHead>
-                                <TableHead className="w-[100px]">Actions</TableHead>
+                                <TableHead className="w-[140px]">Actions</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -509,9 +542,22 @@ export function WagesGrid() {
                                                     </Button>
                                                 </div>
                                             ) : (
-                                                <Button size="sm" variant="ghost" onClick={() => startEditing(row)}>
-                                                    Edit
-                                                </Button>
+                                                <div className="flex items-center gap-1">
+                                                    <Button size="sm" variant="ghost" className="h-8 px-2" onClick={() => startEditing(row)}>
+                                                        Edit
+                                                    </Button>
+                                                    {(row.clockIn || row.clockOut) && (
+                                                        <Button
+                                                            size="sm"
+                                                            variant="ghost"
+                                                            className="h-8 w-8 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
+                                                            onClick={() => handleClear(row.staff_id)}
+                                                            disabled={isProcessing}
+                                                        >
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </Button>
+                                                    )}
+                                                </div>
                                             )}
                                         </TableCell>
                                     </TableRow>

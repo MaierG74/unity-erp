@@ -43,6 +43,7 @@ export interface StaffAssignment {
   jobKey: string;
   orderId?: number | string | null;
   orderNumber?: string | null;
+  jobId?: number | null;
   jobName?: string | null;
   productName?: string | null;
   label: string;
@@ -56,6 +57,11 @@ export interface StaffAssignment {
   rateId?: number | null;
   bolId?: number | null;
   showHandles?: boolean;
+  // Time tracking fields
+  jobStatus?: 'scheduled' | 'issued' | 'in_progress' | 'completed' | 'on_hold';
+  issuedAt?: string | null;
+  startedAt?: string | null;
+  assignmentDate?: string | null;
 }
 
 export interface StaffOpenSlot {
@@ -87,6 +93,8 @@ export interface TimeMarker {
   isMajor?: boolean;
 }
 
+export type JobStatus = 'scheduled' | 'issued' | 'in_progress' | 'completed' | 'on_hold';
+
 export interface LaborPlanAssignment {
   assignmentId: string;
   jobKey: string;
@@ -103,6 +111,11 @@ export interface LaborPlanAssignment {
   hourlyRateId: number | null;
   pieceRateId: number | null;
   assignmentDate: string | null;
+  // Time tracking fields
+  jobStatus: JobStatus | null;
+  issuedAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
 }
 
 export type LaborDragPayload =

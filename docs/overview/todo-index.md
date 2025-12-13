@@ -1,6 +1,6 @@
 ---
 title: TODO Index
-last_updated: 2025-10-20
+last_updated: 2025-12-07
 ---
 
 Unity ERP's documentation spreads TODOs and open questions across domain guides, changelogs, and technical references. Use this index as a single starting point to see what still needs attention and where the authoritative source of truth lives.
@@ -9,6 +9,9 @@ Unity ERP's documentation spreads TODOs and open questions across domain guides,
 - Scan the area that matches your current project or release scope.
 - Follow the "Source" link for full context, acceptance criteria, and historical notes before making changes.
 - Update the status/owner placeholders as work is planned or completed so downstream readers know who is driving each item.
+
+## Auth
+- **Roll out admin-managed user lifecycle (synthetic login, display name, avatar)** — Status: _In progress_, Owner: _Unassigned_. Implement admin endpoints/UI for create/reset/deactivate, display-name/login edits, and avatar uploads to the `avatars` bucket; enforce `is_active`/`banned_until` in RLS. Source: [user onboarding](../auth/user-onboarding.md), [admin API](../auth/admin-api.md), [Admin Users UI](../auth/ui-admin-users.md), [SQL snippets](../auth/sql-snippets.md).
 
 ## Purchasing
 - **Seed missing supplier order statuses** — Status: _Addressed (seeded)_, Owner: _Unassigned_. Seeds now include Approved, Partially Received, and Fully Received alongside legacy names. Verify in your DB after running setup. Source: [purchasing-known gaps](../domains/purchasing/purchasing-master.md#known-gaps--todos).
