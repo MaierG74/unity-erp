@@ -87,6 +87,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
 - Analysis: [`analysis/`](analysis/)
   - [`analysis/inventory-components-performance-review.md`](analysis/inventory-components-performance-review.md) – Performance and responsiveness review of Components section
 - Technical Guides: [`technical/`](technical/)
+  - [`technical/color-system.md`](technical/color-system.md) – Centralized color palette, semantic colors, and rollback instructions
   - [`technical/supabase-query-patterns.md`](technical/supabase-query-patterns.md) – Supabase query patterns, common errors, and troubleshooting
   - [`technical/smoke-tests.md`](technical/smoke-tests.md) – How to run the Purchasing smoke test
   - [`technical/airtable-migration-guide.md`](technical/airtable-migration-guide.md) – Airtable → Supabase migration process plus MCP server configuration

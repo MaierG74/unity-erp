@@ -75,34 +75,39 @@ export function DashboardStats() {
         fetchStats();
     }, []);
 
+    // Stat card colors using semantic palette:
+    // - Primary (teal): Orders (main business metric)
+    // - Success (green): Open orders (active/positive)
+    // - Info (blue): Products (informational)
+    // - Primary (teal): Customers (key business metric)
     const statItems = [
         {
             title: 'Total Orders',
             value: stats.totalOrders.toLocaleString(),
             icon: ShoppingCart,
-            color: 'text-blue-500',
-            bgColor: 'bg-blue-500/10',
+            color: 'text-primary',
+            bgColor: 'bg-primary/10',
         },
         {
             title: 'Total Open Orders',
             value: stats.totalOpenOrders.toLocaleString(),
             icon: FileText,
-            color: 'text-green-500',
-            bgColor: 'bg-green-500/10',
+            color: 'text-success',
+            bgColor: 'bg-success/10',
         },
         {
             title: 'Active Products',
             value: stats.totalProducts.toLocaleString(),
             icon: Package,
-            color: 'text-purple-500',
-            bgColor: 'bg-purple-500/10',
+            color: 'text-info',
+            bgColor: 'bg-info/10',
         },
         {
             title: 'Total Customers',
             value: stats.totalCustomers.toLocaleString(),
             icon: Users,
-            color: 'text-orange-500',
-            bgColor: 'bg-orange-500/10',
+            color: 'text-primary',
+            bgColor: 'bg-primary/10',
         },
     ];
 
@@ -144,9 +149,10 @@ export function DashboardStats() {
                         </CardHeader>
                         <CardContent>
                             <div className="text-2xl font-bold">{item.value}</div>
+                            {/* Growth indicator using success color (green) for positive metrics */}
                             <p className="text-xs text-muted-foreground mt-1 flex items-center">
-                                <TrendingUp className="h-3 w-3 mr-1 text-green-500" />
-                                <span className="text-green-500 font-medium">+2.5%</span>
+                                <TrendingUp className="h-3 w-3 mr-1 text-success" />
+                                <span className="text-success font-medium">+2.5%</span>
                                 <span className="ml-1">from last month</span>
                             </p>
                         </CardContent>

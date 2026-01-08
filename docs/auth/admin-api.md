@@ -28,6 +28,9 @@
   - Changing `login` regenerates the synthetic email; updates Auth and `profiles`.
   - `display_name` keeps `profiles.username` in sync for existing UI consumers.
 
+- GET `/api/admin/orgs`
+  - Lists organizations for admin UI dropdowns.
+
 ## Security
 - Require server auth (e.g., Next.js Route Handler with server-side check).
 - Use `service_role` key only on server/Edge Function env.

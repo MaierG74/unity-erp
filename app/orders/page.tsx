@@ -391,7 +391,7 @@ function UploadAttachmentDialog({ order, onSuccess }: { order: Order, onSuccess:
         <button
           onClick={handleUpload}
           disabled={isUploading || !selectedFile}
-          className="inline-flex items-center gap-2 bg-[#F26B3A] text-white px-4 py-2 rounded-lg hover:bg-[#E25A29] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Upload className="h-4 w-4" />
           {isUploading ? 'Uploading...' : 'Upload'}
@@ -754,15 +754,16 @@ export default function OrdersPage() {
             Manage and track all your manufacturing orders
           </p>
         </div>
+        {/* Primary CTA uses teal from centralized palette */}
         <Link href="/orders/new">
-          <Button className="bg-[#F26B3A] hover:bg-[#E25A29] text-white transition-all duration-200 shadow-lg hover:shadow-xl">
+          <Button className="bg-primary hover:bg-primary/90 text-primary-foreground transition-all duration-200 shadow-lg hover:shadow-xl">
             <PlusCircle className="h-4 w-4 mr-2" />
             New Order
           </Button>
         </Link>
       </div>
 
-      {/* Section Filter Pills */}
+      {/* Section Filter Pills - uses primary color for active state */}
       <div className="flex flex-wrap gap-3 mb-6">
         <div className="flex flex-wrap gap-2">
           <Button
@@ -770,7 +771,7 @@ export default function OrdersPage() {
             size="sm"
             onClick={() => handleSectionFilter(null)}
             className={`rounded-full shadow-sm hover:shadow transition-all duration-200 ${
-              activeSection === null ? 'bg-[#F26B3A] text-white hover:bg-[#E25A29]' : ''
+              activeSection === null ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
             }`}
           >
             All Orders
@@ -780,7 +781,7 @@ export default function OrdersPage() {
             size="sm"
             onClick={() => handleSectionFilter('chair')}
             className={`rounded-full shadow-sm hover:shadow transition-all duration-200 ${
-              activeSection === 'chair' ? 'bg-[#F26B3A] text-white hover:bg-[#E25A29]' : ''
+              activeSection === 'chair' ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
             }`}
           >
             <Package className="h-4 w-4 mr-2" />
@@ -791,7 +792,7 @@ export default function OrdersPage() {
             size="sm"
             onClick={() => handleSectionFilter('wood')}
             className={`rounded-full shadow-sm hover:shadow transition-all duration-200 ${
-              activeSection === 'wood' ? 'bg-[#F26B3A] text-white hover:bg-[#E25A29]' : ''
+              activeSection === 'wood' ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
             }`}
           >
             <Layers className="h-4 w-4 mr-2" />
@@ -802,7 +803,7 @@ export default function OrdersPage() {
             size="sm"
             onClick={() => handleSectionFilter('steel')}
             className={`rounded-full shadow-sm hover:shadow transition-all duration-200 ${
-              activeSection === 'steel' ? 'bg-[#F26B3A] text-white hover:bg-[#E25A29]' : ''
+              activeSection === 'steel' ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
             }`}
           >
             <Wrench className="h-4 w-4 mr-2" />
@@ -813,7 +814,7 @@ export default function OrdersPage() {
             size="sm"
             onClick={() => handleSectionFilter('powdercoating')}
             className={`rounded-full shadow-sm hover:shadow transition-all duration-200 ${
-              activeSection === 'powdercoating' ? 'bg-[#F26B3A] text-white hover:bg-[#E25A29]' : ''
+              activeSection === 'powdercoating' ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
             }`}
           >
             <PaintBucket className="h-4 w-4 mr-2" />
@@ -854,7 +855,7 @@ export default function OrdersPage() {
                   placeholder="Search orders by number or customer name"
                   value={searchQuery}
                   onChange={handleSearchChange}
-                  className="pl-10 w-full transition-all duration-200 focus:ring-2 focus:ring-[#F26B3A]/20"
+                  className="pl-10 w-full transition-all duration-200 focus:ring-2 focus:ring-primary/20"
                 />
               </div>
             </div>
@@ -933,7 +934,7 @@ export default function OrdersPage() {
                         <OrderAttachments order={order} />
                         <TableCell className="w-10 pr-4 text-right align-middle">
                           <ChevronRight
-                            className="h-4 w-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-1 group-hover:text-[#F26B3A]"
+                            className="h-4 w-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-1 group-hover:text-primary"
                             aria-hidden="true"
                           />
                         </TableCell>

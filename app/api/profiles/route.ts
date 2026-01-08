@@ -47,7 +47,12 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const [{ data: profileRows, error: profileError }, users, { data: memberRows, error: memberError }] = await Promise.all([
+    const [
+      { data: profileRows, error: profileError },
+      users,
+      { data: memberRows, error: memberError },
+      { data: orgRows, error: orgError },
+    ] = await Promise.all([
       supabaseAdmin
         .from('profiles')
         .select('id, username, display_name, first_name, last_name, login, avatar_url')
@@ -57,6 +62,7 @@ export async function GET(req: NextRequest) {
         .from('organization_members')
         .select('user_id, org_id, role, is_active, banned_until')
         .limit(5000),
+      supabaseAdmin.from('organizations').select('id, name').limit(5000),
     ]);
 
     if (profileError) {
@@ -64,6 +70,14 @@ export async function GET(req: NextRequest) {
     }
     if (memberError) {
       return NextResponse.json({ error: memberError.message }, { status: 500 });
+    }
+    if (orgError) {
+      return NextResponse.json({ error: orgError.message }, { status: 500 });
+    }
+
+    const orgNameById = new Map<string, string>();
+    for (const org of orgRows ?? []) {
+      if (org?.id && org?.name) orgNameById.set(org.id, org.name);
     }
 
     const membershipMap = new Map<string, any[]>();
@@ -83,6 +97,10 @@ export async function GET(req: NextRequest) {
       const displayName = row.display_name || row.username || nameFromMetadata || login || user?.email || row.id;
       const memberships = membershipMap.get(row.id) ?? [];
       const primaryMembership = memberships[0] ?? null;
+      const primaryOrgName =
+        primaryMembership?.org_id && orgNameById.has(primaryMembership.org_id)
+          ? orgNameById.get(primaryMembership.org_id)
+          : null;
 
       return {
         id: row.id,
@@ -97,6 +115,7 @@ export async function GET(req: NextRequest) {
         raw_display_name: row.display_name ?? null,
         memberships,
         primary_org_id: primaryMembership?.org_id ?? null,
+        primary_org_name: primaryOrgName ?? null,
         primary_role: primaryMembership?.role ?? null,
         is_active: primaryMembership?.is_active ?? null,
         banned_until: primaryMembership?.banned_until ?? null,
@@ -110,6 +129,10 @@ export async function GET(req: NextRequest) {
       const nameFromMetadata = metadata?.full_name || metadata?.name || metadata?.display_name;
       const memberships = membershipMap.get(user.id) ?? [];
       const primaryMembership = memberships[0] ?? null;
+      const primaryOrgName =
+        primaryMembership?.org_id && orgNameById.has(primaryMembership.org_id)
+          ? orgNameById.get(primaryMembership.org_id)
+          : null;
 
       entries.push({
         id: user.id,
@@ -124,6 +147,7 @@ export async function GET(req: NextRequest) {
         raw_display_name: null,
         memberships,
         primary_org_id: primaryMembership?.org_id ?? null,
+        primary_org_name: primaryOrgName ?? null,
         primary_role: primaryMembership?.role ?? null,
         is_active: primaryMembership?.is_active ?? null,
         banned_until: primaryMembership?.banned_until ?? null,

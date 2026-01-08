@@ -41,7 +41,12 @@ const formSchema = z.object({
   unit_id: z.string().min(1, 'Unit is required'),
   category_id: z.string().min(1, 'Category is required'),
   image_url: z.string().nullable().optional(),
-  reorder_level: z.coerce.number().min(0, 'Must be 0 or greater').optional(),
+  reorder_level: z
+    .preprocess(
+      (val) => (val === '' || val === null || val === undefined ? undefined : val),
+      z.coerce.number().min(0, 'Must be 0 or greater')
+    )
+    .optional(),
   location: z.string().nullable().optional(),
 });
 
@@ -79,6 +84,11 @@ export function EditComponentDialog({ open, onOpenChange, component }: EditCompo
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
+  const initialReorderLevel =
+    component.inventory?.reorder_level && component.inventory.reorder_level > 0
+      ? component.inventory.reorder_level
+      : undefined;
+
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -87,7 +97,7 @@ export function EditComponentDialog({ open, onOpenChange, component }: EditCompo
       unit_id: component.unit?.unit_id.toString() || '',
       category_id: component.category?.cat_id.toString() || '',
       image_url: component.image_url,
-      reorder_level: component.inventory?.reorder_level ?? 0,
+      reorder_level: initialReorderLevel,
       location: component.inventory?.location || '',
     },
   });
@@ -101,7 +111,10 @@ export function EditComponentDialog({ open, onOpenChange, component }: EditCompo
         unit_id: component.unit?.unit_id.toString() || '',
         category_id: component.category?.cat_id.toString() || '',
         image_url: component.image_url,
-        reorder_level: component.inventory?.reorder_level ?? 0,
+        reorder_level:
+          component.inventory?.reorder_level && component.inventory.reorder_level > 0
+            ? component.inventory.reorder_level
+            : undefined,
         location: component.inventory?.location || '',
       });
       setImagePreview(component.image_url);
@@ -157,7 +170,7 @@ export function EditComponentDialog({ open, onOpenChange, component }: EditCompo
         .upsert(
           {
             component_id: component.component_id,
-            reorder_level: values.reorder_level ?? 0,
+            reorder_level: values.reorder_level ?? null,
             location: values.location || null,
             quantity_on_hand: component.inventory?.quantity_on_hand ?? 0,
           },
@@ -378,9 +391,10 @@ export function EditComponentDialog({ open, onOpenChange, component }: EditCompo
                       <Input 
                         type="number" 
                         min="0" 
-                        placeholder="0" 
-                        {...field} 
-                        value={field.value ?? 0}
+                        placeholder="" 
+                        {...field}
+                        value={field.value ?? ''}
+                        onChange={(e) => field.onChange(e.target.value)}
                       />
                     </FormControl>
                     <FormDescription>Alert when stock falls below this</FormDescription>

@@ -2,8 +2,13 @@
 const { createClient } = require('@supabase/supabase-js');
 
 // Get Supabase credentials from environment variables
-const supabaseUrl = 'https://ttlyfhkrsjjrzxiagzpb.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR0bHlmaGtyc2pqcnp4aWFnenBiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MTU1MjA0MzAsImV4cCI6MjAzMTA5NjQzMH0.Wd9JKE1Ub3MwRvBrRXJgJZPrEFLJoYk9J3Y0M1oPnQs';
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  console.error('Missing SUPABASE_URL or SUPABASE_ANON_KEY environment variables');
+  process.exit(1);
+}
 
 // Create Supabase client
 const supabase = createClient(supabaseUrl, supabaseKey);

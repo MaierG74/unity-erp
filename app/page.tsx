@@ -1,19 +1,29 @@
 'use client';
 
+/**
+ * Landing Page - Unity ERP
+ *
+ * Modernized design with:
+ * - Animated background paths from 21st.dev
+ * - Cool/neutral color palette (teal/slate instead of orange)
+ * - Inter font (already configured in layout)
+ * - Spacious hero section with animated title
+ * - Refined feature cards with hover effects
+ */
+
 import Link from "next/link";
+import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/components/common/auth-provider";
 import { useRouter } from "next/navigation";
-import { useTheme } from "next-themes";
+import { BackgroundPaths } from "@/components/ui/background-paths";
 import { BarChart3, Users, Package, ClipboardList, Truck, ArrowRight } from "lucide-react";
 
 export default function HomePage() {
   const router = useRouter();
   const { user, loading } = useAuth();
-  const { resolvedTheme } = useTheme();
 
-  const isDarkMode = resolvedTheme === 'dark';
-
+  // Feature cards data - describes key modules
   const features = [
     { icon: BarChart3, title: 'Analytics & Reports', description: 'Real-time insights and comprehensive reporting' },
     { icon: Users, title: 'Staff Management', description: 'Time tracking, payroll, and scheduling' },
@@ -22,49 +32,87 @@ export default function HomePage() {
     { icon: Truck, title: 'Purchasing', description: 'Supplier management and purchase orders' },
   ];
 
-  return (
-    <div className={`fixed inset-0 w-screen h-screen overflow-auto ${isDarkMode ? 'bg-[#0a0a0f]' : 'bg-gradient-to-br from-stone-100 via-orange-50/30 to-stone-100'}`}>
-      {/* Decorative gradient orbs - larger and more prominent in dark mode */}
-      <div className={`absolute top-0 left-0 w-[600px] h-[600px] ${isDarkMode ? 'bg-orange-600/20' : 'bg-orange-400/20'} rounded-full blur-[120px] pointer-events-none -translate-x-1/2 -translate-y-1/2`} />
-      <div className={`absolute bottom-0 right-0 w-[500px] h-[500px] ${isDarkMode ? 'bg-orange-500/15' : 'bg-orange-300/20'} rounded-full blur-[100px] pointer-events-none translate-x-1/3 translate-y-1/3`} />
-      <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] ${isDarkMode ? 'bg-orange-600/10' : 'bg-orange-200/20'} rounded-full blur-[150px] pointer-events-none`} />
+  // Title animation - split into words then letters for staggered effect
+  const title = "UNITY ERP";
+  const words = title.split(" ");
 
-      <div className="relative z-10 w-full min-h-full flex flex-col">
-        {/* Hero Section */}
-        <div className="flex-1 flex items-center justify-center px-6 py-12 md:py-20">
+  return (
+    <BackgroundPaths className="fixed inset-0 w-screen h-screen overflow-auto">
+      <div className="w-full min-h-full flex flex-col">
+        {/* Hero Section - increased padding for spaciousness */}
+        <div className="flex-1 flex items-center justify-center px-6 py-20 md:py-28">
           <div className="w-full max-w-6xl mx-auto">
             <div className="text-center mb-16">
-              {/* Title */}
-              <div className="relative inline-block mb-6">
-                <h1
-                  className={`${isDarkMode ? 'text-white' : 'text-[#F26B3A]'} text-5xl md:text-6xl lg:text-7xl font-extralight tracking-[0.2em] uppercase`}
-                >
-                  Unity ERP
+              {/* Animated Title - using motion for staggered letter reveal */}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 1 }}
+                className="mb-6"
+              >
+                <h1 className="text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-bold tracking-tighter">
+                  {words.map((word, wordIndex) => (
+                    <span key={wordIndex} className="inline-block mr-4 last:mr-0">
+                      {word.split("").map((letter, letterIndex) => (
+                        <motion.span
+                          key={`${wordIndex}-${letterIndex}`}
+                          initial={{ y: 50, opacity: 0 }}
+                          animate={{ y: 0, opacity: 1 }}
+                          transition={{
+                            delay: wordIndex * 0.1 + letterIndex * 0.04,
+                            type: "spring",
+                            stiffness: 150,
+                            damping: 25,
+                          }}
+                          className="inline-block text-transparent bg-clip-text bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-white/80"
+                        >
+                          {letter}
+                        </motion.span>
+                      ))}
+                    </span>
+                  ))}
                 </h1>
-              </div>
+              </motion.div>
 
-              {/* Tagline */}
-              <p className={`text-base md:text-lg font-light tracking-[0.15em] uppercase ${isDarkMode ? 'text-gray-400' : 'text-gray-600'} max-w-2xl mx-auto mb-12`}>
+              {/* Tagline - dark charcoal for contrast, light weight */}
+              <motion.p
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.5, duration: 0.8 }}
+                className="text-base md:text-lg font-light tracking-[0.15em] uppercase text-slate-600 dark:text-slate-400 max-w-2xl mx-auto mb-12"
+              >
                 Enterprise Resource Planning
-              </p>
+              </motion.p>
 
-              {/* CTA Buttons */}
-              <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+              {/* CTA Buttons - teal/blue solid color, 8px radius */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.7, duration: 0.8 }}
+                className="flex flex-col sm:flex-row gap-4 justify-center items-center"
+              >
                 {!loading && !user ? (
                   <>
-                    <Button
-                      variant="default"
-                      size="lg"
-                      className="px-8 py-6 text-lg bg-[#F26B3A] hover:bg-[#E25A29] text-white shadow-lg shadow-orange-500/20 transition-all duration-300 hover:shadow-orange-500/30 hover:scale-[1.02] group"
-                      onClick={() => router.push('/login')}
-                    >
-                      Get Started
-                      <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                    </Button>
+                    {/* Primary CTA - Teal solid color with hover darkening */}
+                    <div className="inline-block group relative bg-gradient-to-b from-black/10 to-white/10 dark:from-white/10 dark:to-black/10 p-px rounded-xl backdrop-blur-lg overflow-hidden shadow-lg hover:shadow-xl transition-shadow duration-300">
+                      <Button
+                        variant="ghost"
+                        size="lg"
+                        className="rounded-[0.65rem] px-8 py-6 text-lg font-semibold backdrop-blur-md bg-teal-600 hover:bg-teal-700 dark:bg-teal-600 dark:hover:bg-teal-700 text-white transition-all duration-300 group-hover:-translate-y-0.5 border-0"
+                        onClick={() => router.push('/login')}
+                      >
+                        <span className="opacity-90 group-hover:opacity-100 transition-opacity">
+                          Get Started
+                        </span>
+                        <ArrowRight className="ml-3 w-5 h-5 opacity-70 group-hover:opacity-100 group-hover:translate-x-1 transition-all duration-300" />
+                      </Button>
+                    </div>
+
+                    {/* Secondary CTA - outlined style */}
                     <Button
                       variant="outline"
                       size="lg"
-                      className={`px-8 py-6 text-lg ${isDarkMode ? 'border-gray-700 text-gray-300 hover:bg-gray-800' : 'border-gray-300 text-gray-700 hover:bg-gray-100'} transition-all duration-300`}
+                      className="px-8 py-6 text-lg rounded-xl border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-all duration-300"
                       onClick={() => document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })}
                     >
                       Learn More
@@ -72,65 +120,76 @@ export default function HomePage() {
                   </>
                 ) : !loading && user ? (
                   <Link href="/dashboard">
-                    <Button
-                      variant="default"
-                      size="lg"
-                      className="px-8 py-6 text-lg bg-[#F26B3A] hover:bg-[#E25A29] text-white shadow-lg shadow-orange-500/20 transition-all duration-300 hover:shadow-orange-500/30 hover:scale-[1.02] group"
-                    >
-                      Go to Dashboard
-                      <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                    </Button>
+                    <div className="inline-block group relative bg-gradient-to-b from-black/10 to-white/10 dark:from-white/10 dark:to-black/10 p-px rounded-xl backdrop-blur-lg overflow-hidden shadow-lg hover:shadow-xl transition-shadow duration-300">
+                      <Button
+                        variant="ghost"
+                        size="lg"
+                        className="rounded-[0.65rem] px-8 py-6 text-lg font-semibold backdrop-blur-md bg-teal-600 hover:bg-teal-700 dark:bg-teal-600 dark:hover:bg-teal-700 text-white transition-all duration-300 group-hover:-translate-y-0.5 border-0"
+                      >
+                        <span className="opacity-90 group-hover:opacity-100 transition-opacity">
+                          Go to Dashboard
+                        </span>
+                        <ArrowRight className="ml-3 w-5 h-5 opacity-70 group-hover:opacity-100 group-hover:translate-x-1 transition-all duration-300" />
+                      </Button>
+                    </div>
                   </Link>
                 ) : (
                   <Button
                     variant="default"
                     size="lg"
                     disabled
-                    className="px-8 py-6 text-lg bg-[#F26B3A] hover:bg-[#E25A29] text-white"
+                    className="px-8 py-6 text-lg rounded-xl bg-slate-300 text-slate-600"
                   >
                     Loading...
                   </Button>
                 )}
-              </div>
+              </motion.div>
             </div>
 
-            {/* Features Section */}
-            <div id="features" className="mt-8">
-              <h3 className={`text-center text-sm font-semibold uppercase tracking-wider ${isDarkMode ? 'text-gray-500' : 'text-gray-400'} mb-8`}>
+            {/* Features Section - consistent spacing, hover effects */}
+            <motion.div
+              id="features"
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 1, duration: 0.8 }}
+              className="mt-16"
+            >
+              <h3 className="text-center text-sm font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-8">
                 Everything you need to manage your business
               </h3>
 
+              {/* Feature Cards Grid - equal margins, consistent styling */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                 {features.map((feature, index) => (
-                  <div
+                  <motion.div
                     key={index}
-                    className={`group p-6 rounded-xl ${
-                      isDarkMode
-                        ? 'bg-gray-900/50 border border-gray-800 hover:border-orange-500/50 hover:bg-gray-900/80'
-                        : 'bg-white/60 border border-gray-200 hover:border-orange-300 hover:bg-white/80'
-                    } backdrop-blur-sm transition-all duration-300 hover:scale-[1.02] hover:shadow-lg cursor-default`}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 1.2 + index * 0.1, duration: 0.5 }}
+                    className="group p-6 rounded-xl bg-white/80 dark:bg-neutral-900/50 border border-slate-200 dark:border-slate-800 hover:border-teal-300 dark:hover:border-teal-600/50 backdrop-blur-sm transition-all duration-300 hover:scale-[1.02] hover:shadow-lg hover:shadow-teal-500/10 cursor-default"
                   >
-                    <div className={`w-12 h-12 rounded-lg ${isDarkMode ? 'bg-orange-500/10' : 'bg-orange-100'} flex items-center justify-center mb-4 group-hover:scale-110 transition-transform`}>
-                      <feature.icon className={`w-6 h-6 ${isDarkMode ? 'text-orange-400' : 'text-[#F26B3A]'}`} />
+                    {/* Icon container - teal tint */}
+                    <div className="w-12 h-12 rounded-lg bg-teal-50 dark:bg-teal-500/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                      <feature.icon className="w-6 h-6 text-teal-600 dark:text-teal-400" />
                     </div>
-                    <h4 className={`font-semibold mb-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                    <h4 className="font-semibold mb-2 text-slate-900 dark:text-white">
                       {feature.title}
                     </h4>
-                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
                       {feature.description}
                     </p>
-                  </div>
+                  </motion.div>
                 ))}
               </div>
-            </div>
+            </motion.div>
           </div>
         </div>
 
         {/* Footer */}
-        <footer className={`py-6 text-center ${isDarkMode ? 'text-gray-500' : 'text-gray-400'} text-sm`}>
+        <footer className="py-6 text-center text-slate-500 dark:text-slate-400 text-sm">
           <p>Enterprise Resource Planning System</p>
         </footer>
       </div>
-    </div>
+    </BackgroundPaths>
   );
 }

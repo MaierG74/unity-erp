@@ -2,54 +2,191 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Base colors - ensure they're explicitly defined */
+/**
+ * =============================================================================
+ * UNITY ERP - CENTRALIZED COLOR PALETTE
+ * =============================================================================
+ *
+ * All application colors are defined here as CSS custom properties.
+ * This enables easy theming, consistency, and simple rollback if needed.
+ *
+ * COLOR NAMING CONVENTION:
+ * - Primary: Main brand color for CTAs, active states, links
+ * - Secondary: Supporting color for secondary actions
+ * - Accent: Highlights, icons, subtle emphasis
+ * - Success: Positive actions, growth indicators, confirmations
+ * - Warning: Caution states, pending items, alerts (kept as amber/orange)
+ * - Destructive: Errors, deletions, critical actions
+ *
+ * HOW TO ROLLBACK:
+ * To revert to the old orange scheme, simply change the HSL values below:
+ * - Old primary: 24 95% 53% (orange #F26B3A)
+ * - Old accent: 24 95% 53% (same orange)
+ * Then run a find/replace for any hardcoded teal colors.
+ *
+ * MIGRATION FROM OLD COLORS:
+ * - #F26B3A (orange) -> use `primary` or `bg-primary`
+ * - #E25A29 (darker orange) -> use `primary` with hover state
+ * - orange-500/600 -> use `warning` for actual warnings, `primary` for CTAs
+ *
+ * =============================================================================
+ */
+
 :root {
-  --background: 0 0% 100%;
-  --foreground: 0 0% 3.9%;
-  --card: 0 0% 100%;
-  --card-foreground: 0 0% 3.9%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 0 0% 3.9%;
-  --primary: 24 95% 53%;
+  /* --------------------------------------------------------------------------
+   * CORE BRAND COLORS - Teal/Blue Palette
+   * These define the primary visual identity of the application
+   * HSL format: hue saturation% lightness%
+   * -------------------------------------------------------------------------- */
+
+  /* Primary: Deep teal for main CTAs, active navigation, links
+   * Hex equivalent: ~#0d9488 (teal-600) */
+  --primary: 173 58% 39%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 45 93% 47%;
-  --secondary-foreground: 0 0% 3.9%;
-  --muted: 0 0% 96.1%;
-  --muted-foreground: 0 0% 45.1%;
-  --accent: 24 95% 53%;
+
+  /* Secondary: Slate for secondary actions, muted buttons
+   * Hex equivalent: ~#475569 (slate-600) */
+  --secondary: 215 19% 35%;
+  --secondary-foreground: 0 0% 98%;
+
+  /* Accent: Lighter teal for icons, highlights, subtle emphasis
+   * Hex equivalent: ~#14b8a6 (teal-500) */
+  --accent: 173 58% 39%;
   --accent-foreground: 0 0% 100%;
-  /* Softer destructive color for light mode (less saturation, slightly darker for contrast) */
+
+  /* --------------------------------------------------------------------------
+   * SEMANTIC COLORS - Convey meaning
+   * -------------------------------------------------------------------------- */
+
+  /* Success: Green for positive metrics, confirmations, growth arrows
+   * Hex equivalent: ~#16a34a (green-600) */
+  --success: 142 71% 45%;
+  --success-foreground: 0 0% 100%;
+
+  /* Warning: Amber for caution, pending states, alerts (keeping orange tones)
+   * Hex equivalent: ~#f59e0b (amber-500) */
+  --warning: 38 92% 50%;
+  --warning-foreground: 0 0% 9%;
+
+  /* Info: Blue for informational messages, neutral indicators
+   * Hex equivalent: ~#3b82f6 (blue-500) */
+  --info: 217 91% 60%;
+  --info-foreground: 0 0% 100%;
+
+  /* Destructive: Red for errors, deletions, critical warnings
+   * Softened for light mode to reduce visual harshness */
   --destructive: 0 70% 56%;
   --destructive-foreground: 0 0% 98%;
-  --border: 240 5.9% 90%;
-  --input: 240 5.9% 90%;
-  --ring: 24 95% 53%;
+
+  /* --------------------------------------------------------------------------
+   * SURFACE COLORS - Backgrounds, cards, panels
+   * -------------------------------------------------------------------------- */
+
+  --background: 0 0% 100%;
+  --foreground: 222 47% 11%;
+
+  /* Card: White background with subtle styling */
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --card-shadow: 0 0% 0% / 0.08;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+
+  /* Muted: For disabled states, placeholders, subtle backgrounds */
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 16% 47%;
+
+  /* --------------------------------------------------------------------------
+   * FORM & INTERACTIVE ELEMENTS
+   * -------------------------------------------------------------------------- */
+
+  --border: 214 32% 91%;
+  --input: 214 32% 91%;
+  --ring: 173 58% 39%; /* Matches primary for focus rings */
+
+  /* --------------------------------------------------------------------------
+   * CHART COLORS - Data visualization
+   * A harmonious palette for charts and graphs
+   * -------------------------------------------------------------------------- */
+
+  --chart-1: 173 58% 39%;  /* Teal (primary) */
+  --chart-2: 142 71% 45%;  /* Green (success) */
+  --chart-3: 217 91% 60%;  /* Blue (info) */
+  --chart-4: 38 92% 50%;   /* Amber (warning) */
+  --chart-5: 280 65% 60%;  /* Purple (accent variation) */
+
+  /* --------------------------------------------------------------------------
+   * MISC
+   * -------------------------------------------------------------------------- */
+
   --radius: 0.5rem;
 }
 
-/* Dark mode class - explicitly defined */
+/**
+ * =============================================================================
+ * DARK MODE THEME
+ * Inverted and adjusted colors for dark backgrounds
+ * =============================================================================
+ */
 .dark {
-  --background: 0 0% 3.9%;
-  --foreground: 0 0% 98%;
-  --card: 0 0% 3.9%;
-  --card-foreground: 0 0% 98%;
-  --popover: 0 0% 3.9%;
-  --popover-foreground: 0 0% 98%;
-  --primary: 0 0% 98%;
-  --primary-foreground: 0 0% 9%;
-  --secondary: 0 0% 14.9%;
+  /* Primary: Lighter teal that pops on dark backgrounds */
+  --primary: 173 58% 50%;
+  --primary-foreground: 222 47% 11%;
+
+  /* Secondary: Lighter slate for dark mode */
+  --secondary: 217 19% 27%;
   --secondary-foreground: 0 0% 98%;
-  --muted: 0 0% 14.9%;
-  --muted-foreground: 0 0% 63.9%;
-  --accent: 0 0% 14.9%;
+
+  /* Accent: Matches primary in dark mode */
+  --accent: 217 19% 27%;
   --accent-foreground: 0 0% 98%;
-  --destructive: 0 62.8% 30.6%;
+
+  /* Semantic colors - adjusted for dark backgrounds */
+  --success: 142 71% 45%;
+  --success-foreground: 0 0% 100%;
+
+  --warning: 38 92% 50%;
+  --warning-foreground: 0 0% 9%;
+
+  --info: 217 91% 60%;
+  --info-foreground: 0 0% 100%;
+
+  --destructive: 0 62% 30%;
   --destructive-foreground: 0 0% 98%;
-  --border: 0 0% 14.9%;
-  --input: 0 0% 14.9%;
-  --ring: 0 0% 83.1%;
+
+  /* Surface colors */
+  --background: 222 47% 11%;
+  --foreground: 210 40% 98%;
+
+  --card: 222 47% 11%;
+  --card-foreground: 210 40% 98%;
+  --card-shadow: 0 0% 0% / 0.3;
+
+  --popover: 222 47% 11%;
+  --popover-foreground: 210 40% 98%;
+
+  --muted: 217 19% 27%;
+  --muted-foreground: 215 20% 65%;
+
+  /* Form elements */
+  --border: 217 19% 27%;
+  --input: 217 19% 27%;
+  --ring: 173 58% 50%;
+
+  /* Chart colors - same as light mode for consistency */
+  --chart-1: 173 58% 50%;
+  --chart-2: 142 71% 45%;
+  --chart-3: 217 91% 60%;
+  --chart-4: 38 92% 50%;
+  --chart-5: 280 65% 60%;
 }
 
+/**
+ * =============================================================================
+ * BASE STYLES
+ * =============================================================================
+ */
 @layer base {
   * {
     @apply border-border;
@@ -85,24 +222,92 @@ tr {
   @apply backdrop-blur-[inherit];
 }
 
+/**
+ * =============================================================================
+ * COMPONENT STYLES
+ * Reusable component classes using the centralized color palette
+ * =============================================================================
+ */
 @layer components {
+  /* Card component */
   .card {
     @apply rounded-lg border bg-card p-6 text-card-foreground shadow;
   }
-  
+
+  /* Sidebar navigation link */
   .sidebar-link {
     @apply flex items-center rounded-lg px-3 py-2 text-sm font-medium gap-3 transition-colors hover:bg-accent/10 active:scale-95;
   }
-  
+
   .sidebar-link.active {
     @apply bg-primary/10 text-primary hover:bg-primary/20;
   }
-  
+
+  /* Form input field */
   .input-field {
     @apply rounded-lg border border-input bg-background px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring focus:border-input;
   }
-  
+
+  /**
+   * PRIMARY BUTTON
+   * Use for main CTAs: "New Order", "Save", "Submit", etc.
+   * Color: Teal (--primary)
+   */
   .button-primary {
     @apply bg-primary text-primary-foreground px-4 py-2 rounded-lg hover:bg-primary/90 transition-colors active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  /**
+   * SECONDARY BUTTON
+   * Use for secondary actions: "Cancel", "Back", etc.
+   * Color: Slate (--secondary)
+   */
+  .button-secondary {
+    @apply bg-secondary text-secondary-foreground px-4 py-2 rounded-lg hover:bg-secondary/90 transition-colors active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  /**
+   * SUCCESS BUTTON
+   * Use for confirmations: "Approve", "Complete", etc.
+   * Color: Green (--success)
+   */
+  .button-success {
+    @apply px-4 py-2 rounded-lg transition-colors active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
+    background-color: hsl(var(--success));
+    color: hsl(var(--success-foreground));
+  }
+  .button-success:hover {
+    background-color: hsl(var(--success) / 0.9);
+  }
+
+  /**
+   * WARNING BUTTON
+   * Use for caution actions: "Archive", "Suspend", etc.
+   * Color: Amber (--warning)
+   */
+  .button-warning {
+    @apply px-4 py-2 rounded-lg transition-colors active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
+    background-color: hsl(var(--warning));
+    color: hsl(var(--warning-foreground));
+  }
+  .button-warning:hover {
+    background-color: hsl(var(--warning) / 0.9);
+  }
+
+  /**
+   * STATUS INDICATORS
+   * Consistent colors for status badges and indicators
+   */
+  .status-success {
+    @apply text-green-600 dark:text-green-400;
+  }
+  .status-warning {
+    @apply text-amber-600 dark:text-amber-400;
+  }
+  .status-error {
+    @apply text-red-600 dark:text-red-400;
+  }
+  .status-info {
+    @apply text-blue-600 dark:text-blue-400;
   }
 }

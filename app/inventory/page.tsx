@@ -1,6 +1,20 @@
 'use client';
 
+/**
+ * Inventory Page
+ *
+ * REFACTORED: Uses PageToolbar for compact header layout.
+ * - Removed verbose description paragraph (was "Manage components, categories...")
+ * - Removed decorative gradient divider
+ * - Reduced container padding from py-6 to py-2
+ * - Tabs sit directly below the compact toolbar
+ *
+ * Note: Each tab (Components, Categories, etc.) maintains its own
+ * search/filter controls since filtering needs differ per tab.
+ */
+
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { PageToolbar } from '@/components/ui/page-toolbar';
 import { ComponentsTab } from '@/components/features/inventory/ComponentsTab';
 import { CategoriesTab } from '@/components/features/inventory/CategoriesTab';
 import { OnOrderTab } from '@/components/features/inventory/OnOrderTab';
@@ -11,18 +25,17 @@ import { ImportTabWrapper } from '@/components/features/inventory/ImportTabWrapp
 
 export default function InventoryPage() {
   return (
-    <div className="container mx-auto py-6">
-      {/* Header */}
-      <div className="space-y-2 mb-6">
-        <h1 className="text-3xl font-bold tracking-tight">Inventory</h1>
-        <p className="text-sm text-muted-foreground max-w-3xl">
-          Manage components, categories, track orders, and view inventory reports.
-        </p>
-        <div className="mt-2 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
-      </div>
+    // CHANGED: Reduced py-6 to py-2 for less vertical padding
+    <div className="container mx-auto py-2">
+      {/* NEW: PageToolbar replaces the old header with h1 + description + divider */}
+      <PageToolbar
+        title="Inventory"
+        // Note: Search is handled per-tab since each tab has different filter needs
+        // Actions could be added here for cross-tab operations if needed
+      />
 
-      {/* Tabs */}
-      <Tabs defaultValue="components" className="space-y-6">
+      {/* CHANGED: Reduced space-y from 6 to 4 for tighter layout */}
+      <Tabs defaultValue="components" className="space-y-4">
         <TabsList className="grid w-full max-w-5xl grid-cols-7">
           <TabsTrigger value="components">Components</TabsTrigger>
           <TabsTrigger value="categories">Categories</TabsTrigger>
@@ -30,34 +43,36 @@ export default function InventoryPage() {
           <TabsTrigger value="stock-issue">Stock Issue</TabsTrigger>
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
           <TabsTrigger value="reports">Reports</TabsTrigger>
-          <TabsTrigger value="import" className="text-orange-600">Import</TabsTrigger>
+          {/* CHANGED: Use semantic warning color instead of hardcoded orange */}
+          <TabsTrigger value="import" className="text-warning">Import</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="components" className="space-y-4">
+        {/* CHANGED: Reduced space-y from 4 to 2 in tab content */}
+        <TabsContent value="components" className="space-y-2">
           <ComponentsTab />
         </TabsContent>
 
-        <TabsContent value="categories" className="space-y-4">
+        <TabsContent value="categories" className="space-y-2">
           <CategoriesTab />
         </TabsContent>
 
-        <TabsContent value="on-order" className="space-y-4">
+        <TabsContent value="on-order" className="space-y-2">
           <OnOrderTab />
         </TabsContent>
 
-        <TabsContent value="stock-issue" className="space-y-4">
+        <TabsContent value="stock-issue" className="space-y-2">
           <ManualStockIssueTab />
         </TabsContent>
 
-        <TabsContent value="transactions" className="space-y-4">
+        <TabsContent value="transactions" className="space-y-2">
           <TransactionsTab />
         </TabsContent>
 
-        <TabsContent value="reports" className="space-y-4">
+        <TabsContent value="reports" className="space-y-2">
           <ReportsTab />
         </TabsContent>
 
-        <TabsContent value="import" className="space-y-4">
+        <TabsContent value="import" className="space-y-2">
           <ImportTabWrapper />
         </TabsContent>
       </Tabs>

@@ -29,6 +29,22 @@ export async function requireAdmin(req: NextRequest): Promise<AdminCheck> {
   }
 
   if (!isAdminUser(ctx.user)) {
+    // Fallback: check org membership role (works even if JWT claims are stale).
+    try {
+      const { data, error } = await ctx.supabase
+        .from('organization_members')
+        .select('role')
+        .eq('user_id', ctx.user.id)
+        .limit(1)
+        .maybeSingle();
+
+      if (!error && isAdminRole(data?.role)) {
+        return { user: ctx.user, accessToken: ctx.accessToken };
+      }
+    } catch (_err) {
+      // ignore
+    }
+
     return {
       error: NextResponse.json({ error: 'Admin role required' }, { status: 403 }),
     };

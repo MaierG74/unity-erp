@@ -1,18 +1,26 @@
 'use client';
 
+/**
+ * SupplierList Component
+ *
+ * REFACTORED: Uses PageToolbar for compact header layout.
+ * - Removed separate h1, search input, and button rows
+ * - All header elements consolidated into PageToolbar
+ * - Checkbox filter passed as children to toolbar
+ */
+
 import { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getSuppliers } from '@/lib/api/suppliers';
 import Link from 'next/link';
-import { Search, Plus, X } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { PricelistPreviewModal } from './pricelist-preview-modal';
 import type { SupplierWithDetails } from '@/types/suppliers';
 import { Checkbox } from '@/components/ui/checkbox';
 import { PdfThumbnailClient } from '@/components/ui/pdf-thumbnail-client';
 import { FileIcon } from '@/components/ui/file-icon';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { PageToolbar } from '@/components/ui/page-toolbar';
 
 export function SupplierList() {
   const router = useRouter();
@@ -184,28 +192,23 @@ export function SupplierList() {
   }
 
   return (
-    <>
-      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
-        <h1 className="text-4xl font-extrabold tracking-tight text-foreground">Suppliers</h1>
-        <Button asChild className="button-primary flex gap-2 items-center">
-          <Link href="/suppliers/new">
-            <Plus className="h-5 w-5" />
-            Add Supplier
-          </Link>
-        </Button>
-      </div>
-
-      <div className="relative mt-2">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
-        <Input
-          placeholder="Search suppliers..."
-          className="pl-12 input-field bg-background text-foreground"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
-      </div>
-
-      <div className="flex items-center gap-3 mt-2">
+    // CHANGED: Wrapped in fragment with reduced spacing
+    <div className="space-y-2">
+      {/* NEW: PageToolbar replaces separate h1, search, button, and filter rows */}
+      <PageToolbar
+        title="Suppliers"
+        searchPlaceholder="Search suppliers..."
+        searchValue={searchTerm}
+        onSearchChange={setSearchTerm}
+        actions={[
+          {
+            label: 'Add Supplier',
+            onClick: () => router.push('/suppliers/new'),
+            icon: <Plus className="h-4 w-4" />,
+          },
+        ]}
+      >
+        {/* Checkbox filter as toolbar child */}
         <label htmlFor="filter-pricelist" className="inline-flex items-center gap-2 h-9 px-3 rounded-md border bg-background text-sm text-muted-foreground">
           <Checkbox
             id="filter-pricelist"
@@ -214,9 +217,10 @@ export function SupplierList() {
           />
           <span>Has price list</span>
         </label>
-      </div>
+      </PageToolbar>
 
-      <div className="overflow-x-auto rounded-xl shadow-lg border border-border bg-card mt-8 dark:shadow-none">
+      {/* CHANGED: Removed mt-8, table sits directly below toolbar */}
+      <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
         <table className="min-w-full divide-y divide-border bg-background dark:bg-card">
           <thead className="bg-muted dark:bg-muted/20">
             <tr>
@@ -294,6 +298,6 @@ export function SupplierList() {
           supplierName={selectedSupplier.name}
         />
       )}
-    </>
+    </div>
   );
 }

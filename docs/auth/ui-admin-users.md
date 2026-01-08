@@ -9,6 +9,7 @@
 ## Create user form
 - Fields: login (username), password, display name, first name, last name, role, org, optional avatar upload.
 - Warning: “Synthetic email; no inbox. Password resets are admin-only. Login updates change the synthetic email.”
+- Recommended UX: render the create form behind an “Add user” collapsible so the users table stays primary.
 
 ## Reset password flow
 - Admin clicks “Reset password” → modal asks for new password → show it once.
@@ -22,4 +23,4 @@
 - Avatar upload writes to storage bucket `avatars/{user_id}/...`; display immediately on save.
 
 ## Edit UI
-- Use in-app dialog (no browser prompts) for editing display name, first/last name, login, and avatar URL.
+- Use in-app dialogs (no browser prompts) for editing display name, first/last name, login, avatar URL, role/org, deactivate/reactivate, and reset password.

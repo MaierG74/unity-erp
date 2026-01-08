@@ -1,0 +1,85 @@
+"use client";
+
+/**
+ * BackgroundPaths Component
+ * Animated SVG background with flowing paths - inspired by 21st.dev/kokonutd/background-paths
+ * Creates an elegant, modern backdrop with subtle motion
+ */
+
+import { motion } from "framer-motion";
+
+interface FloatingPathsProps {
+  position: number;
+}
+
+function FloatingPaths({ position }: FloatingPathsProps) {
+  // Generate 36 flowing SVG paths with varying opacity and width
+  const paths = Array.from({ length: 36 }, (_, i) => ({
+    id: i,
+    d: `M-${380 - i * 5 * position} -${189 + i * 6}C-${
+      380 - i * 5 * position
+    } -${189 + i * 6} -${312 - i * 5 * position} ${216 - i * 6} ${
+      152 - i * 5 * position
+    } ${343 - i * 6}C${616 - i * 5 * position} ${470 - i * 6} ${
+      684 - i * 5 * position
+    } ${875 - i * 6} ${684 - i * 5 * position} ${875 - i * 6}`,
+    width: 0.5 + i * 0.03,
+  }));
+
+  return (
+    <div className="absolute inset-0 pointer-events-none">
+      <svg
+        className="w-full h-full text-slate-950 dark:text-white"
+        viewBox="0 0 696 316"
+        fill="none"
+      >
+        <title>Background Paths</title>
+        {paths.map((path) => (
+          <motion.path
+            key={path.id}
+            d={path.d}
+            stroke="currentColor"
+            strokeWidth={path.width}
+            strokeOpacity={0.1 + path.id * 0.03}
+            initial={{ pathLength: 0.3, opacity: 0.6 }}
+            animate={{
+              pathLength: 1,
+              opacity: [0.3, 0.6, 0.3],
+              pathOffset: [0, 1, 0],
+            }}
+            transition={{
+              duration: 20 + Math.random() * 10,
+              repeat: Infinity,
+              ease: "linear",
+            }}
+          />
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+interface BackgroundPathsProps {
+  children?: React.ReactNode;
+  className?: string;
+}
+
+export function BackgroundPaths({ children, className = "" }: BackgroundPathsProps) {
+  return (
+    <div className={`relative min-h-screen w-full flex items-center justify-center overflow-hidden bg-white dark:bg-neutral-950 ${className}`}>
+      {/* Animated SVG path layers - creates depth with mirrored positions */}
+      <div className="absolute inset-0">
+        <FloatingPaths position={1} />
+        <FloatingPaths position={-1} />
+      </div>
+
+      {/* Semi-transparent overlay for better text readability */}
+      <div className="absolute inset-0 bg-white/60 dark:bg-neutral-950/60" />
+
+      {/* Content layer */}
+      <div className="relative z-10 w-full">
+        {children}
+      </div>
+    </div>
+  );
+}

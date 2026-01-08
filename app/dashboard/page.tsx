@@ -68,10 +68,14 @@ export default function DashboardPage() {
   if (loading) return null;
   if (!user) return null;
 
+  // Quick action colors use semantic palette:
+  // - Primary (teal): Main actions like New Order
+  // - Info (blue): Product creation
+  // - Success (green): Customer additions
   const quickActions = [
-    { label: 'New Order', icon: FileText, href: '/orders/new', color: 'bg-blue-500' },
-    { label: 'New Product', icon: Box, href: '/products/new', color: 'bg-purple-500' },
-    { label: 'Add Customer', icon: UsersIcon, href: '/customers/new', color: 'bg-orange-500' },
+    { label: 'New Order', icon: FileText, href: '/orders/new', color: 'bg-primary' },
+    { label: 'New Product', icon: Box, href: '/products/new', color: 'bg-info' },
+    { label: 'Add Customer', icon: UsersIcon, href: '/customers/new', color: 'bg-success' },
   ];
 
   return (
@@ -140,10 +144,11 @@ export default function DashboardPage() {
             <CardDescription>Staff members who haven't clocked out yet</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
+            {/* Today's pending - uses destructive (red) for urgent, success (green) for all clear */}
             <div className="rounded-lg border p-4">
               <button onClick={() => setShowToday(!showToday)} className="flex items-center justify-between w-full text-sm font-medium">
                 <div className="flex items-center space-x-2">
-                  <div className={`w-2 h-2 rounded-full ${todayPending.length > 0 ? 'bg-red-500' : 'bg-green-500'}`}></div>
+                  <div className={`w-2 h-2 rounded-full ${todayPending.length > 0 ? 'bg-destructive' : 'bg-success'}`}></div>
                   <span>Still to Check-Out Today</span>
                   <span className="px-2 py-0.5 rounded-full bg-muted text-xs">{todayPending.length}</span>
                 </div>
@@ -166,10 +171,11 @@ export default function DashboardPage() {
               )}
             </div>
 
+            {/* Yesterday's pending - uses warning color (amber) for caution state */}
             <div className="rounded-lg border p-4">
               <button onClick={() => setShowYesterday(!showYesterday)} className="flex items-center justify-between w-full text-sm font-medium">
                 <div className="flex items-center space-x-2">
-                  <div className={`w-2 h-2 rounded-full ${yesterdayPending.length > 0 ? 'bg-orange-500' : 'bg-green-500'}`}></div>
+                  <div className={`w-2 h-2 rounded-full ${yesterdayPending.length > 0 ? 'bg-warning' : 'bg-success'}`}></div>
                   <span>Not Checked-Out Yesterday</span>
                   <span className="px-2 py-0.5 rounded-full bg-muted text-xs">{yesterdayPending.length}</span>
                 </div>
@@ -179,7 +185,7 @@ export default function DashboardPage() {
                 <ul className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {yesterdayPending.map(s => (
                     <li key={s.staff_id} className="flex items-center p-2 rounded bg-accent/50 text-sm">
-                      <div className="w-8 h-8 rounded-full bg-orange-500/10 flex items-center justify-center mr-3 text-orange-500 font-bold text-xs">
+                      <div className="w-8 h-8 rounded-full bg-warning/10 flex items-center justify-center mr-3 text-warning font-bold text-xs">
                         {s.first_name[0]}{s.last_name[0]}
                       </div>
                       {s.first_name} {s.last_name}

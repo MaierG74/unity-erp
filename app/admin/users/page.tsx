@@ -6,11 +6,20 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/lib/supabase";
+import { ChevronDown, MoreHorizontal, UserPlus } from "lucide-react";
 
 type Membership = {
   org_id: string | null;
@@ -31,6 +40,7 @@ type ProfileEntry = {
   metadata?: Record<string, any>;
   memberships?: Membership[];
   primary_org_id?: string | null;
+  primary_org_name?: string | null;
   primary_role?: string | null;
   is_active?: boolean | null;
   banned_until?: string | null;
@@ -80,6 +90,8 @@ export default function AdminUsersPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [organizations, setOrganizations] = useState<{ id: string; name: string }[]>([]);
   const [createState, setCreateState] = useState<{
     login: string;
     password: string;
@@ -116,6 +128,37 @@ export default function AdminUsersPage() {
     avatarUrl: "",
   });
 
+  const [roleDialog, setRoleDialog] = useState<{ user: ProfileEntry | null; role: string; orgId: string }>({
+    user: null,
+    role: "staff",
+    orgId: "",
+  });
+
+  const [passwordDialog, setPasswordDialog] = useState<{ user: ProfileEntry | null; password: string }>({
+    user: null,
+    password: "",
+  });
+
+  const [deactivateDialog, setDeactivateDialog] = useState<{
+    user: ProfileEntry | null;
+    isActive: boolean;
+    orgId: string;
+    bannedUntilLocal: string;
+  }>({ user: null, isActive: true, orgId: "", bannedUntilLocal: "" });
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("adminUsers.createOpen");
+      if (saved === "1") setCreateOpen(true);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("adminUsers.createOpen", createOpen ? "1" : "0");
+    } catch {}
+  }, [createOpen]);
+
   const loadProfiles = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -139,9 +182,21 @@ export default function AdminUsersPage() {
     }
   }, []);
 
+  const loadOrganizations = useCallback(async () => {
+    try {
+      const res = await authorizedFetch("/api/admin/orgs");
+      if (!res.ok) return;
+      const json = await res.json();
+      setOrganizations(Array.isArray(json?.organizations) ? json.organizations : []);
+    } catch (_err) {
+      // ignore
+    }
+  }, []);
+
   useEffect(() => {
     loadProfiles();
-  }, [loadProfiles]);
+    loadOrganizations();
+  }, [loadProfiles, loadOrganizations]);
 
   const sortedProfiles = useMemo(() => {
     return [...profiles].sort((a, b) => displayForProfile(a).localeCompare(displayForProfile(b)));
@@ -174,23 +229,12 @@ export default function AdminUsersPage() {
       alert(`User created. Synthetic email: ${json.email}. Password (save now): ${json.password}`);
     } catch (err: any) {
       setError(err?.message ?? "Failed to create user");
+      setCreateOpen(true);
     }
   };
 
-  const handleResetPassword = async (user: ProfileEntry) => {
-    const newPassword = prompt("Enter new password for user", "");
-    if (!newPassword) return;
-    try {
-      const res = await authorizedFetch(`/api/admin/users/${user.id}/password`, {
-        method: "POST",
-        body: JSON.stringify({ new_password: newPassword }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "Failed to reset password");
-      alert(`Password updated. New password: ${json.new_password}`);
-    } catch (err: any) {
-      alert(err?.message ?? "Failed to reset password");
-    }
+  const openPasswordDialog = (user: ProfileEntry) => {
+    setPasswordDialog({ user, password: "" });
   };
 
   const openEditDialog = (user: ProfileEntry) => {
@@ -226,43 +270,74 @@ export default function AdminUsersPage() {
     }
   };
 
-  const handleChangeRole = async (user: ProfileEntry) => {
-    const role = prompt("Role (owner/admin/manager/staff)", user.primary_role || "") ?? "";
-    if (!role) return;
-    const orgId = prompt("Org ID", user.primary_org_id || "") ?? "";
-    if (!orgId) return;
+  const handleSavePassword = async () => {
+    if (!passwordDialog.user) return;
+    const newPassword = passwordDialog.password.trim();
+    if (!newPassword) return;
     try {
-      const res = await authorizedFetch(`/api/admin/users/${user.id}/role`, {
+      const res = await authorizedFetch(`/api/admin/users/${passwordDialog.user.id}/password`, {
         method: "POST",
-        body: JSON.stringify({ role, org_id: orgId }),
+        body: JSON.stringify({ new_password: newPassword }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Failed to reset password");
+      setPasswordDialog({ user: null, password: "" });
+      alert(`Password updated. New password: ${json.new_password}`);
+    } catch (err: any) {
+      alert(err?.message ?? "Failed to reset password");
+    }
+  };
+
+  const openRoleDialog = (user: ProfileEntry) => {
+    setRoleDialog({
+      user,
+      role: (user.primary_role as string) || "staff",
+      orgId: user.primary_org_id || "",
+    });
+  };
+
+  const handleSaveRole = async () => {
+    if (!roleDialog.user) return;
+    try {
+      const res = await authorizedFetch(`/api/admin/users/${roleDialog.user.id}/role`, {
+        method: "POST",
+        body: JSON.stringify({ role: roleDialog.role, org_id: roleDialog.orgId }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || "Failed to change role");
+      setRoleDialog({ user: null, role: "staff", orgId: "" });
       await loadProfiles();
     } catch (err: any) {
       alert(err?.message ?? "Failed to change role");
     }
   };
 
-  const handleToggleActive = async (user: ProfileEntry) => {
-    const nextActive = !(user.is_active ?? true);
-    let orgId = user.primary_org_id || "";
-    if (!orgId) {
-      orgId = prompt("Org ID for membership to toggle", "") ?? "";
-      if (!orgId) return;
-    }
-    let banned_until: string | null | undefined = undefined;
-    if (!nextActive) {
-      const banInput = prompt("Optional banned_until (ISO string) or leave blank", "") ?? "";
-      banned_until = banInput ? banInput : null;
-    }
+  const openDeactivateDialog = (user: ProfileEntry) => {
+    setDeactivateDialog({
+      user,
+      isActive: user.is_active !== false,
+      orgId: user.primary_org_id || "",
+      bannedUntilLocal: "",
+    });
+  };
+
+  const handleSaveDeactivate = async () => {
+    if (!deactivateDialog.user) return;
+    const orgId = deactivateDialog.orgId.trim();
+    if (!orgId) return;
+    const banned_until = deactivateDialog.isActive
+      ? null
+      : deactivateDialog.bannedUntilLocal
+        ? new Date(deactivateDialog.bannedUntilLocal).toISOString()
+        : null;
     try {
-      const res = await authorizedFetch(`/api/admin/users/${user.id}/deactivate`, {
+      const res = await authorizedFetch(`/api/admin/users/${deactivateDialog.user.id}/deactivate`, {
         method: "POST",
-        body: JSON.stringify({ is_active: nextActive, org_id: orgId, banned_until }),
+        body: JSON.stringify({ is_active: deactivateDialog.isActive, org_id: orgId, banned_until }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || "Failed to update status");
+      setDeactivateDialog({ user: null, isActive: true, orgId: "", bannedUntilLocal: "" });
       await loadProfiles();
     } catch (err: any) {
       alert(err?.message ?? "Failed to update status");
@@ -283,104 +358,122 @@ export default function AdminUsersPage() {
 
       {authError ? <p className="text-sm text-red-500">{authError}</p> : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Create User</CardTitle>
-          <CardDescription>Synthetic email is derived from login (e.g. login@qbutton.co.za). Password is shown once.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleCreate} className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="login">Login</Label>
-              <Input
-                id="login"
-                required
-                value={createState.login}
-                onChange={e => setCreateState(prev => ({ ...prev, login: e.target.value }))}
-                placeholder="jdoe"
-              />
+      <Collapsible open={createOpen} onOpenChange={setCreateOpen}>
+        <Card>
+          <CardHeader className="py-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <CardTitle className="text-lg">Users</CardTitle>
+                <CardDescription>Reset passwords, change roles, and manage activation.</CardDescription>
+              </div>
+              <CollapsibleTrigger asChild>
+                <Button variant="secondary" size="sm">
+                  <UserPlus className="mr-2 h-4 w-4" />
+                  {createOpen ? "Hide add user" : "Add user"}
+                  <ChevronDown className={`ml-2 h-4 w-4 transition-transform ${createOpen ? "rotate-180" : ""}`} />
+                </Button>
+              </CollapsibleTrigger>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                required
-                value={createState.password}
-                onChange={e => setCreateState(prev => ({ ...prev, password: e.target.value }))}
-                placeholder="Min 12 chars"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="displayName">Display name</Label>
-              <Input
-                id="displayName"
-                value={createState.displayName}
-                onChange={e => setCreateState(prev => ({ ...prev, displayName: e.target.value }))}
-                placeholder="Jane Doe"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="firstName">First name</Label>
-              <Input
-                id="firstName"
-                value={createState.firstName}
-                onChange={e => setCreateState(prev => ({ ...prev, firstName: e.target.value }))}
-                placeholder="Jane"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="lastName">Last name</Label>
-              <Input
-                id="lastName"
-                value={createState.lastName}
-                onChange={e => setCreateState(prev => ({ ...prev, lastName: e.target.value }))}
-                placeholder="Doe"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="role">Role</Label>
-              <select
-                id="role"
-                className="h-10 w-full rounded-md border px-3 text-sm"
-                value={createState.role}
-                onChange={e => setCreateState(prev => ({ ...prev, role: e.target.value }))}
-              >
-                {ROLE_OPTIONS.map(r => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="org">Org ID</Label>
-              <Input
-                id="org"
-                required
-                value={createState.orgId}
-                onChange={e => setCreateState(prev => ({ ...prev, orgId: e.target.value }))}
-                placeholder="UUID for org"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="avatar">Avatar URL (optional)</Label>
-              <Input
-                id="avatar"
-                value={createState.avatarUrl}
-                onChange={e => setCreateState(prev => ({ ...prev, avatarUrl: e.target.value }))}
-                placeholder="https://..."
-              />
-            </div>
-            <div className="md:col-span-2">
-              <Button type="submit" disabled={loading}>
-                {loading ? "Working..." : "Create user"}
-              </Button>
-            </div>
-          </form>
-          {error ? <p className="mt-2 text-sm text-red-500">{error}</p> : null}
-        </CardContent>
-      </Card>
+          </CardHeader>
+          <CollapsibleContent>
+            <CardContent>
+              <div className="mb-3 text-sm text-muted-foreground">
+                Synthetic email is derived from login (e.g. login@qbutton.co.za). Password is shown once.
+              </div>
+              <form onSubmit={handleCreate} className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="login">Login</Label>
+                  <Input
+                    id="login"
+                    required
+                    value={createState.login}
+                    onChange={e => setCreateState(prev => ({ ...prev, login: e.target.value }))}
+                    placeholder="jdoe"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    required
+                    value={createState.password}
+                    onChange={e => setCreateState(prev => ({ ...prev, password: e.target.value }))}
+                    placeholder="Min 12 chars"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="displayName">Display name</Label>
+                  <Input
+                    id="displayName"
+                    value={createState.displayName}
+                    onChange={e => setCreateState(prev => ({ ...prev, displayName: e.target.value }))}
+                    placeholder="Jane Doe"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="firstName">First name</Label>
+                  <Input
+                    id="firstName"
+                    value={createState.firstName}
+                    onChange={e => setCreateState(prev => ({ ...prev, firstName: e.target.value }))}
+                    placeholder="Jane"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="lastName">Last name</Label>
+                  <Input
+                    id="lastName"
+                    value={createState.lastName}
+                    onChange={e => setCreateState(prev => ({ ...prev, lastName: e.target.value }))}
+                    placeholder="Doe"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="role">Role</Label>
+                  <select
+                    id="role"
+                    className="h-10 w-full rounded-md border px-3 text-sm"
+                    value={createState.role}
+                    onChange={e => setCreateState(prev => ({ ...prev, role: e.target.value }))}
+                  >
+                    {ROLE_OPTIONS.map(r => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="org">Org ID</Label>
+                  <Input
+                    id="org"
+                    required
+                    value={createState.orgId}
+                    onChange={e => setCreateState(prev => ({ ...prev, orgId: e.target.value }))}
+                    placeholder="UUID for org"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="avatar">Avatar URL (optional)</Label>
+                  <Input
+                    id="avatar"
+                    value={createState.avatarUrl}
+                    onChange={e => setCreateState(prev => ({ ...prev, avatarUrl: e.target.value }))}
+                    placeholder="https://..."
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <Button type="submit" disabled={loading}>
+                    {loading ? "Working..." : "Create user"}
+                  </Button>
+                </div>
+              </form>
+              {error ? <p className="mt-2 text-sm text-red-500">{error}</p> : null}
+            </CardContent>
+          </CollapsibleContent>
+        </Card>
+      </Collapsible>
 
       <Separator />
 
@@ -393,27 +486,29 @@ export default function AdminUsersPage() {
           <table className="min-w-full divide-y divide-border">
             <thead className="bg-muted/50">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">User</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Login</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Role</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Org</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Actions</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide">User</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide">Login</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide">Role</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide">Org</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide">Status</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border bg-background">
               {sortedProfiles.map(profile => {
                 const role = profile.primary_role || profile.metadata?.role || profile.metadata?.app_metadata?.role || "—";
-                const org = profile.primary_org_id || profile.metadata?.org_id || profile.metadata?.app_metadata?.org_id || "—";
+                const org = profile.primary_org_name || profile.primary_org_id || profile.metadata?.org_id || profile.metadata?.app_metadata?.org_id || "—";
                 const status = statusBadge(profile);
+                const orgLabel =
+                  typeof org === "string" && org.length > 14 ? `${org.slice(0, 8)}…${org.slice(-4)}` : String(org);
                 return (
                   <tr key={profile.id}>
-                    <td className="px-4 py-3 align-top">
+                    <td className="px-3 py-2 align-top">
                       <div className="flex items-center space-x-3">
                         {profile.avatar_url ? (
-                          <img src={profile.avatar_url} alt={displayForProfile(profile)} className="h-9 w-9 rounded-full object-cover" />
+                          <img src={profile.avatar_url} alt={displayForProfile(profile)} className="h-8 w-8 rounded-full object-cover" />
                         ) : (
-                          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-sm font-semibold">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-semibold">
                             {displayForProfile(profile).substring(0, 2).toUpperCase()}
                           </div>
                         )}
@@ -423,30 +518,39 @@ export default function AdminUsersPage() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3 align-top text-sm text-muted-foreground">{profile.login ?? "—"}</td>
-                    <td className="px-4 py-3 align-top text-sm">{role}</td>
-                    <td className="px-4 py-3 align-top text-sm">{org}</td>
-                    <td className="px-4 py-3 align-top text-sm">
+                    <td className="px-3 py-2 align-top text-sm text-muted-foreground">{profile.login ?? "—"}</td>
+                    <td className="px-3 py-2 align-top text-sm">{role}</td>
+                    <td className="px-3 py-2 align-top text-sm font-mono" title={String(org)}>
+                      {orgLabel}
+                    </td>
+                    <td className="px-3 py-2 align-top text-sm">
                       <Badge variant={status.tone}>{status.label}</Badge>
                       {profile.banned_until ? (
                         <div className="text-xs text-muted-foreground">until {new Date(profile.banned_until).toLocaleString()}</div>
                       ) : null}
                     </td>
-                    <td className="px-4 py-3 align-top text-sm">
-                      <div className="flex flex-wrap gap-2">
-                        <Button size="sm" variant="secondary" onClick={() => openEditDialog(profile)}>
-                          Edit profile
-                        </Button>
-                        <Button size="sm" variant="secondary" onClick={() => handleChangeRole(profile)}>
-                          Change role/org
-                        </Button>
-                        <Button size="sm" variant="secondary" onClick={() => handleResetPassword(profile)}>
-                          Reset password
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => handleToggleActive(profile)}>
-                          {profile.is_active === false ? "Reactivate" : "Deactivate"}
-                        </Button>
-                      </div>
+                    <td className="px-3 py-2 align-top text-sm text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            aria-label={`Actions for ${displayForProfile(profile)}`}
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onSelect={() => openEditDialog(profile)}>Edit profile</DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => openRoleDialog(profile)}>Change role/org</DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => openPasswordDialog(profile)}>Reset password</DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onSelect={() => openDeactivateDialog(profile)}>
+                            {profile.is_active === false ? "Reactivate" : "Deactivate"}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </td>
                   </tr>
                 );
@@ -508,6 +612,173 @@ export default function AdminUsersPage() {
               Cancel
             </Button>
             <Button onClick={handleSaveEdit}>Save changes</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(roleDialog.user)}
+        onOpenChange={open => !open && setRoleDialog({ user: null, role: "staff", orgId: "" })}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change role / org</DialogTitle>
+            <DialogDescription>Assign the user to an org and role.</DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="roleSelect">Role</Label>
+              <select
+                id="roleSelect"
+                className="h-10 w-full rounded-md border px-3 text-sm"
+                value={roleDialog.role}
+                onChange={e => setRoleDialog(prev => ({ ...prev, role: e.target.value }))}
+              >
+                {ROLE_OPTIONS.map(r => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="orgSelect">Org</Label>
+              {organizations.length ? (
+                <select
+                  id="orgSelect"
+                  className="h-10 w-full rounded-md border px-3 text-sm"
+                  value={roleDialog.orgId}
+                  onChange={e => setRoleDialog(prev => ({ ...prev, orgId: e.target.value }))}
+                >
+                  <option value="">Select org</option>
+                  {organizations.map(org => (
+                    <option key={org.id} value={org.id}>
+                      {org.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Input
+                  id="orgSelect"
+                  value={roleDialog.orgId}
+                  onChange={e => setRoleDialog(prev => ({ ...prev, orgId: e.target.value }))}
+                  placeholder="Org UUID"
+                />
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setRoleDialog({ user: null, role: "staff", orgId: "" })}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveRole} disabled={!roleDialog.orgId}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(passwordDialog.user)}
+        onOpenChange={open => !open && setPasswordDialog({ user: null, password: "" })}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reset password</DialogTitle>
+            <DialogDescription>Set a new password for this user. It will be shown once.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="newPassword">New password</Label>
+            <Input
+              id="newPassword"
+              type="password"
+              value={passwordDialog.password}
+              onChange={e => setPasswordDialog(prev => ({ ...prev, password: e.target.value }))}
+              placeholder="Min 12 chars"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setPasswordDialog({ user: null, password: "" })}>
+              Cancel
+            </Button>
+            <Button onClick={handleSavePassword} disabled={!passwordDialog.password.trim()}>
+              Reset
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(deactivateDialog.user)}
+        onOpenChange={open =>
+          !open && setDeactivateDialog({ user: null, isActive: true, orgId: "", bannedUntilLocal: "" })
+        }
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{deactivateDialog.isActive ? "Reactivate user" : "Deactivate user"}</DialogTitle>
+            <DialogDescription>Toggle org membership activity. Optional ban timestamp blocks access until then.</DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="activeToggle">Status</Label>
+              <select
+                id="activeToggle"
+                className="h-10 w-full rounded-md border px-3 text-sm"
+                value={deactivateDialog.isActive ? "active" : "inactive"}
+                onChange={e => setDeactivateDialog(prev => ({ ...prev, isActive: e.target.value === "active" }))}
+              >
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="deactivateOrg">Org</Label>
+              {organizations.length ? (
+                <select
+                  id="deactivateOrg"
+                  className="h-10 w-full rounded-md border px-3 text-sm"
+                  value={deactivateDialog.orgId}
+                  onChange={e => setDeactivateDialog(prev => ({ ...prev, orgId: e.target.value }))}
+                >
+                  <option value="">Select org</option>
+                  {organizations.map(org => (
+                    <option key={org.id} value={org.id}>
+                      {org.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Input
+                  id="deactivateOrg"
+                  value={deactivateDialog.orgId}
+                  onChange={e => setDeactivateDialog(prev => ({ ...prev, orgId: e.target.value }))}
+                  placeholder="Org UUID"
+                />
+              )}
+            </div>
+            {!deactivateDialog.isActive ? (
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="bannedUntil">Banned until (optional)</Label>
+                <Input
+                  id="bannedUntil"
+                  type="datetime-local"
+                  value={deactivateDialog.bannedUntilLocal}
+                  onChange={e => setDeactivateDialog(prev => ({ ...prev, bannedUntilLocal: e.target.value }))}
+                />
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              onClick={() => setDeactivateDialog({ user: null, isActive: true, orgId: "", bannedUntilLocal: "" })}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveDeactivate} disabled={!deactivateDialog.orgId}>
+              Save
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

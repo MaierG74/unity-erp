@@ -16,13 +16,54 @@ export function Navbar() {
   const { user } = useAuth();
   const { collapsed, setCollapsed } = useSidebar();
   const [isMobile, setIsMobile] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
   const compactOn = searchParams?.get('compact') !== '0';
   const isLaborPlanning = pathname?.startsWith('/labor-planning');
   const userRole = (user as any)?.app_metadata?.role || (user as any)?.user_metadata?.role;
-  const isAdmin = userRole === 'owner' || userRole === 'admin';
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function resolveAdmin() {
+      if (!user) {
+        if (!cancelled) setIsAdmin(false);
+        return;
+      }
+
+      // Fast path if the current session already has role claims.
+      if (userRole === 'owner' || userRole === 'admin') {
+        if (!cancelled) setIsAdmin(true);
+        return;
+      }
+
+      // Fallback: read the user's org membership (RLS allows selecting your own row).
+      try {
+        const { data, error } = await supabase
+          .from('organization_members')
+          .select('role')
+          .eq('user_id', user.id)
+          .limit(1)
+          .maybeSingle();
+
+        if (cancelled) return;
+        if (error) {
+          setIsAdmin(false);
+          return;
+        }
+        setIsAdmin(data?.role === 'owner' || data?.role === 'admin');
+      } catch (_err) {
+        if (!cancelled) setIsAdmin(false);
+      }
+    }
+
+    resolveAdmin();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, userRole]);
 
   // Check if the screen is mobile size
   useEffect(() => {

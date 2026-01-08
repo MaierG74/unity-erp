@@ -85,6 +85,60 @@ interface ManualIssuance {
   issue_category: string | null;
 }
 
+// Grouped issuance for consolidated display
+interface GroupedIssuance {
+  groupKey: string;
+  external_reference: string | null;
+  issue_category: string | null;
+  issuance_date: string;
+  staff_id: number | null;
+  staff: { first_name: string; last_name: string } | null;
+  notes: string | null;
+  items: Array<{
+    issuance_id: number;
+    component_id: number;
+    component: { internal_code: string; description: string | null };
+    quantity_issued: number;
+  }>;
+}
+
+// Group issuances by reference, category, staff, and timestamp (within same minute)
+function groupIssuances(issuances: ManualIssuance[]): GroupedIssuance[] {
+  const groups = new Map<string, GroupedIssuance>();
+  
+  for (const issuance of issuances) {
+    // Create group key from reference, category, staff, and timestamp (truncated to minute)
+    const dateMinute = issuance.issuance_date.substring(0, 16); // YYYY-MM-DDTHH:mm
+    const groupKey = `${issuance.external_reference || ''}_${issuance.issue_category || ''}_${issuance.staff_id || ''}_${dateMinute}`;
+    
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, {
+        groupKey,
+        external_reference: issuance.external_reference,
+        issue_category: issuance.issue_category,
+        issuance_date: issuance.issuance_date,
+        staff_id: issuance.staff_id,
+        staff: issuance.staff,
+        notes: issuance.notes,
+        items: [],
+      });
+    }
+    
+    const group = groups.get(groupKey)!;
+    group.items.push({
+      issuance_id: issuance.issuance_id,
+      component_id: issuance.component_id,
+      component: issuance.component,
+      quantity_issued: issuance.quantity_issued,
+    });
+  }
+  
+  // Sort by date descending and return as array
+  return Array.from(groups.values()).sort(
+    (a, b) => new Date(b.issuance_date).getTime() - new Date(a.issuance_date).getTime()
+  );
+}
+
 interface PendingIssuance {
   pending_id: number;
   external_reference: string;
@@ -348,6 +402,12 @@ export function ManualStockIssueTab() {
     staleTime: 0,
     refetchOnMount: 'always',
   });
+
+  // Group issuance history for consolidated display
+  const groupedIssuanceHistory = useMemo(() => 
+    groupIssuances(issuanceHistory), 
+    [issuanceHistory]
+  );
 
   // Create inventory record mutation
   const createInventoryMutation = useMutation({
@@ -1067,7 +1127,7 @@ export function ManualStockIssueTab() {
           </CardHeader>
           <CollapsibleContent>
             <CardContent>
-              {issuanceHistory.length === 0 ? (
+              {groupedIssuanceHistory.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-4">
                   No manual issuances recorded yet.
                 </p>
@@ -1086,101 +1146,116 @@ export function ManualStockIssueTab() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {issuanceHistory.map((issuance) => (
-                        <TableRow key={issuance.issuance_id}>
-                          <TableCell className="text-sm">
-                            {format(new Date(issuance.issuance_date), 'MMM d, yyyy HH:mm')}
+                      {groupedIssuanceHistory.map((group) => (
+                        <TableRow key={group.groupKey}>
+                          <TableCell className="text-sm align-top">
+                            {format(new Date(group.issuance_date), 'MMM d, yyyy HH:mm')}
                           </TableCell>
-                          <TableCell>
-                            <div className="font-medium">{issuance.external_reference || '-'}</div>
+                          <TableCell className="align-top">
+                            <div className="font-medium">{group.external_reference || '-'}</div>
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="align-top">
                             <Badge variant="outline">
-                              {ISSUE_CATEGORIES.find(c => c.value === issuance.issue_category)?.label || issuance.issue_category || '-'}
+                              {ISSUE_CATEGORIES.find(c => c.value === group.issue_category)?.label || group.issue_category || '-'}
                             </Badge>
                           </TableCell>
                           <TableCell>
-                            <div className="font-medium">{issuance.component?.internal_code || 'Unknown'}</div>
-                            {issuance.component?.description && (
-                              <div className="text-xs text-muted-foreground truncate max-w-[150px]">
-                                {issuance.component.description}
-                              </div>
-                            )}
+                            <div className="space-y-1">
+                              {group.items.map((item) => (
+                                <div key={item.issuance_id} className="flex items-center gap-2">
+                                  <div className="flex-1">
+                                    <div className="font-medium">{item.component?.internal_code || 'Unknown'}</div>
+                                    {item.component?.description && (
+                                      <div className="text-xs text-muted-foreground truncate max-w-[150px]">
+                                        {item.component.description}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 w-6 p-0 opacity-50 hover:opacity-100"
+                                    onClick={() => {
+                                      if (confirm(`Reverse ${formatQuantity(item.quantity_issued)} of ${item.component?.internal_code}?`)) {
+                                        reverseIssuanceMutation.mutate({
+                                          issuanceId: item.issuance_id,
+                                          quantity: item.quantity_issued,
+                                          reason: 'Manual reversal',
+                                        });
+                                      }
+                                    }}
+                                    title="Reverse this item"
+                                  >
+                                    <RotateCcw className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
                           </TableCell>
-                          <TableCell className="text-right font-medium">
-                            {formatQuantity(issuance.quantity_issued)}
+                          <TableCell className="text-right align-top">
+                            <div className="space-y-1">
+                              {group.items.map((item) => (
+                                <div key={item.issuance_id} className="font-medium h-6 flex items-center justify-end">
+                                  {formatQuantity(item.quantity_issued)}
+                                </div>
+                              ))}
+                            </div>
                           </TableCell>
-                          <TableCell>
-                            {issuance.staff ? (
+                          <TableCell className="align-top">
+                            {group.staff ? (
                               <div className="flex items-center gap-1.5">
                                 <User className="h-3.5 w-3.5 text-muted-foreground" />
-                                <span className="text-sm">{issuance.staff.first_name} {issuance.staff.last_name}</span>
+                                <span className="text-sm">{group.staff.first_name} {group.staff.last_name}</span>
                               </div>
                             ) : (
                               <span className="text-muted-foreground">—</span>
                             )}
                           </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={async () => {
-                                  try {
-                                    const staffName = issuance.staff 
-                                      ? `${issuance.staff.first_name} ${issuance.staff.last_name}`
-                                      : null;
-                                    const blob = await pdf(
-                                      <ManualIssuancePDFDocument
-                                        components={[{
-                                          component_id: issuance.component_id,
-                                          internal_code: issuance.component?.internal_code || 'Unknown',
-                                          description: issuance.component?.description || null,
-                                          quantity: issuance.quantity_issued,
-                                        }]}
-                                        externalReference={issuance.external_reference || ''}
-                                        issueCategory={ISSUE_CATEGORIES.find(c => c.value === issuance.issue_category)?.label || issuance.issue_category || 'Unknown'}
-                                        issuedTo={staffName}
-                                        notes={issuance.notes || null}
-                                        issuanceDate={issuance.issuance_date}
-                                        companyInfo={companyInfo}
-                                        type="issuance"
-                                      />
-                                    ).toBlob();
-                                    const url = URL.createObjectURL(blob);
-                                    const link = document.createElement('a');
-                                    link.href = url;
-                                    link.download = `issuance-${issuance.external_reference || issuance.issuance_id}-${format(new Date(issuance.issuance_date), 'yyyyMMdd')}.pdf`;
-                                    document.body.appendChild(link);
-                                    link.click();
-                                    document.body.removeChild(link);
-                                    URL.revokeObjectURL(url);
-                                  } catch (error) {
-                                    console.error('Failed to generate PDF:', error);
-                                    toast.error('Failed to generate PDF');
-                                  }
-                                }}
-                                title="Download PDF"
-                              >
-                                <Download className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => {
-                                  if (confirm(`Reverse ${formatQuantity(issuance.quantity_issued)} of ${issuance.component?.internal_code}?`)) {
-                                    reverseIssuanceMutation.mutate({
-                                      issuanceId: issuance.issuance_id,
-                                      quantity: issuance.quantity_issued,
-                                      reason: 'Manual reversal',
-                                    });
-                                  }
-                                }}
-                                title="Reverse Issuance"
-                              >
-                                <RotateCcw className="h-4 w-4" />
-                              </Button>
-                            </div>
+                          <TableCell className="text-right align-top">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={async () => {
+                                try {
+                                  const staffName = group.staff 
+                                    ? `${group.staff.first_name} ${group.staff.last_name}`
+                                    : null;
+                                  // Include all components in the group for a single consolidated PDF
+                                  const components = group.items.map(item => ({
+                                    component_id: item.component_id,
+                                    internal_code: item.component?.internal_code || 'Unknown',
+                                    description: item.component?.description || null,
+                                    quantity: item.quantity_issued,
+                                  }));
+                                  const blob = await pdf(
+                                    <ManualIssuancePDFDocument
+                                      components={components}
+                                      externalReference={group.external_reference || ''}
+                                      issueCategory={ISSUE_CATEGORIES.find(c => c.value === group.issue_category)?.label || group.issue_category || 'Unknown'}
+                                      issuedTo={staffName}
+                                      notes={group.notes || null}
+                                      issuanceDate={group.issuance_date}
+                                      companyInfo={companyInfo}
+                                      type="issuance"
+                                    />
+                                  ).toBlob();
+                                  const url = URL.createObjectURL(blob);
+                                  const link = document.createElement('a');
+                                  link.href = url;
+                                  link.download = `issuance-${group.external_reference || group.groupKey}-${format(new Date(group.issuance_date), 'yyyyMMdd')}.pdf`;
+                                  document.body.appendChild(link);
+                                  link.click();
+                                  document.body.removeChild(link);
+                                  URL.revokeObjectURL(url);
+                                } catch (error) {
+                                  console.error('Failed to generate PDF:', error);
+                                  toast.error('Failed to generate PDF');
+                                }
+                              }}
+                              title="Download PDF"
+                            >
+                              <Download className="h-4 w-4" />
+                            </Button>
                           </TableCell>
                         </TableRow>
                       ))}
