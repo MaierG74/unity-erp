@@ -1,6 +1,6 @@
 ---
 title: TODO Index
-last_updated: 2025-10-20
+last_updated: 2025-12-07
 ---
 
 Unity ERP's documentation spreads TODOs and open questions across domain guides, changelogs, and technical references. Use this index as a single starting point to see what still needs attention and where the authoritative source of truth lives.
@@ -10,6 +10,8 @@ Unity ERP's documentation spreads TODOs and open questions across domain guides,
 - Follow the "Source" link for full context, acceptance criteria, and historical notes before making changes.
 - Update the status/owner placeholders as work is planned or completed so downstream readers know who is driving each item.
 
+## Auth
+- **Roll out admin-managed user lifecycle (synthetic login, display name, avatar)** — Status: _In progress_, Owner: _Unassigned_. Implement admin endpoints/UI for create/reset/deactivate, display-name/login edits, and avatar uploads to the `avatars` bucket; enforce `is_active`/`banned_until` in RLS. Source: [user onboarding](../auth/user-onboarding.md), [admin API](../auth/admin-api.md), [Admin Users UI](../auth/ui-admin-users.md), [SQL snippets](../auth/sql-snippets.md).
 ## Purchasing
 - **Seed missing supplier order statuses** — Status: _Addressed (seeded)_, Owner: _Unassigned_. Seeds now include Approved, Partially Received, and Fully Received alongside legacy names. Verify in your DB after running setup. Source: [purchasing-known gaps](../domains/purchasing/purchasing-master.md#known-gaps--todos).
 - **Define transactional receiving RPC** — Status: _Implemented_, Owner: _Unassigned_. `process_supplier_order_receipt` RPC handles receipt insertion, inventory updates, and status recompute atomically. Frontend falls back to manual updates if RPC unavailable. Source: [purchasing-known gaps](../domains/purchasing/purchasing-master.md#known-gaps--todos).
@@ -26,6 +28,7 @@ Unity ERP's documentation spreads TODOs and open questions across domain guides,
 
 ## UI Tech Debt
 - **Avoid hard‑coded status IDs in dashboard** — Status: _Backlog_, Owner: _Unassigned_. Replace numeric `status_id` filters with name‑based joins to `supplier_order_statuses` in `app/purchasing/page.tsx` to avoid environment ID drift.
+- **Navbar page chrome rollout** — Status: _Planned_, Owner: _Unassigned_. Move page titles and per-page controls (e.g., toggles, badges) into the top navbar across all pages to free vertical space; leave sidebar for navigation only. See `docs/overview/STYLE_GUIDE.md` (`todo_navbar-page-chrome-rollout`).
 
 ## AI Assistant
 - **Deliver Phase 1 read-only assistant** — Status: _In refinement_, Owner: _Unassigned_. Build the NLQ + RAG tooling, chat dock, and logging required for the initial assistant rollout. Source: [AI assistant plan – Phase 1](AI%20Assistant.md#phase-1-%E2%80%94-read-only-nlq-%2B-rag).

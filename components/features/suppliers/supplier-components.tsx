@@ -57,6 +57,8 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
 
   const pageSizeOptions = [10, 25, 50, 100];
   const [componentSearchTerm, setComponentSearchTerm] = useState('');
+  // Store selected component details so we don't lose them when search term changes
+  const [selectedAddComponent, setSelectedAddComponent] = useState<{ component_id: number; internal_code: string; description: string } | null>(null);
 
   // Async component search - only loads when dropdown is opened or search term changes
   const { data: components = [], isLoading: componentsSearchLoading } = useQuery({
@@ -113,6 +115,7 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
       setIsAdding(false);
       setAddForm(null);
       setAddError(null);
+      setSelectedAddComponent(null);
     },
     onError: (err: any) => {
       const msg = String(err?.message || 'Failed to add component');
@@ -217,6 +220,7 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
     setIsAdding(true);
     setAddError(null);
     setComponentSearchTerm(''); // Reset search when opening add form
+    setSelectedAddComponent(null); // Reset selected component
     setAddForm({ component_id: 0, supplier_id: supplier.supplier_id, supplier_code: '', price: 0, lead_time: undefined, min_order_quantity: undefined });
   };
 
@@ -225,6 +229,7 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
     setAddForm(null);
     setAddError(null);
     setComponentSearchTerm(''); // Reset search when closing add form
+    setSelectedAddComponent(null); // Reset selected component
   };
 
   const handleCreate = async () => {
@@ -547,21 +552,35 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
                 {/* Component select */}
                 <td className="p-4 align-top">
                   <ReactSelect<OptionType>
-                    value={addForm?.component_id ? {
-                      value: String(addForm.component_id),
-                      label: componentOptions.find(o => o.value === String(addForm.component_id))?.label || ''
+                    value={selectedAddComponent ? {
+                      value: String(selectedAddComponent.component_id),
+                      label: `${selectedAddComponent.internal_code} - ${selectedAddComponent.description}`
                     } : null}
                     onChange={(opt) => {
-                      setAddForm(prev => prev ? { ...prev, component_id: Number(opt?.value || 0) } : prev);
                       if (opt) {
+                        // Find the full component details from the current search results
+                        const selectedComp = (components || []).find((c: any) => String(c.component_id) === opt.value);
+                        if (selectedComp) {
+                          setSelectedAddComponent({
+                            component_id: selectedComp.component_id,
+                            internal_code: selectedComp.internal_code,
+                            description: selectedComp.description
+                          });
+                          setAddForm(prev => prev ? { ...prev, component_id: selectedComp.component_id } : prev);
+                        }
                         setComponentSearchTerm(''); // Clear search term when option is selected
+                      } else {
+                        setSelectedAddComponent(null);
+                        setAddForm(prev => prev ? { ...prev, component_id: 0 } : prev);
                       }
                     }}
                     options={componentOptions}
                     isOptionDisabled={(opt) => linkedComponentIds.has(Number(opt.value))}
                     isSearchable
-                    onInputChange={(newValue) => {
-                      setComponentSearchTerm(newValue);
+                    onInputChange={(newValue, actionMeta) => {
+                      if (actionMeta.action === 'input-change') {
+                        setComponentSearchTerm(newValue);
+                      }
                     }}
                     filterOption={() => true}
                     inputValue={componentSearchTerm}
@@ -580,10 +599,7 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
                 {/* Description (read-only from selected) */}
                 <td className="p-4 align-top text-muted-foreground">
                   <span className="block max-w-[36ch] truncate">
-                    {(() => {
-                      const c = (components || []).find((x: any) => x.component_id === addForm?.component_id);
-                      return c?.description || '-';
-                    })()}
+                    {selectedAddComponent?.description || '-'}
                   </span>
                 </td>
 
@@ -683,8 +699,10 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
                             options={componentOptions}
                             isOptionDisabled={(opt) => linkedComponentIds.has(Number(opt.value)) && Number(opt.value) !== component.component_id}
                             isSearchable
-                            onInputChange={(newValue) => {
-                              setComponentSearchTerm(newValue);
+                            onInputChange={(newValue, actionMeta) => {
+                              if (actionMeta.action === 'input-change') {
+                                setComponentSearchTerm(newValue);
+                              }
                             }}
                             filterOption={() => true}
                             inputValue={componentSearchTerm}

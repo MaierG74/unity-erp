@@ -5,6 +5,10 @@ This document consolidates how the Labor section of the app works today across U
 ## Scope
 
 - Labor Management page at `/labor` with two tabs: Job Categories and Jobs.
+<<<<<<< HEAD
+=======
+- Labor Planning board at `/labor-planning` that pairs an order/job tree with staff swimlanes for scheduling mockups.
+>>>>>>> origin/January
 - Product Labor (BOL) on the product detail page.
 - Underlying Supabase tables, relationships, and policies.
 
@@ -12,10 +16,31 @@ This document consolidates how the Labor section of the app works today across U
 
 - **Labor Management (`/labor`)**: app/labor/page.tsx:1
   - Tabs: `Job Categories`, `Jobs`, and `Piecework Rates`.
+<<<<<<< HEAD
+=======
+  - Launch shortcut: “Open Labor Planning” button links to `/labor-planning` for the scheduling board.
+>>>>>>> origin/January
   - Components used:
     - `components/features/labor/job-categories-manager.tsx:1`
     - `components/features/labor/jobs-manager.tsx:1`
     - `components/features/labor/piecework-rates-manager.tsx:1`
+<<<<<<< HEAD
+=======
+- **Labor Planning (`/labor-planning`)**: app/labor-planning/page.tsx:1
+  - Two-pane layout:
+    - Left pane: order tree with expandable job lists and light virtualization for large queues.
+    - Right pane: time-scaled swimlanes with sticky time axis and placeholder drag handles for unscheduled jobs.
+  - Reusable building blocks:
+    - `components/labor-planning/order-tree.tsx` — collapsible order/job tree with priority badges and drop prompts.
+    - `components/labor-planning/time-axis-header.tsx` — sticky header rendering major/minor time markers.
+    - `components/labor-planning/staff-lane-list.tsx` — staff rows with placeholder slots and gradient assignment bars.
+    - Drag jobs from the order tree onto staff lanes to assign start time + assignee; bars can be moved between lanes or resized via handles with conflict/availability checks applied.
+    - Mutation layer: `src/lib/mutations/laborPlanning.ts` wires optimistic `assignJobToStaff`, `updateJobSchedule`, and `unassignJob` calls against Supabase with overlap/window validation and undo toasts in the UI.
+  - Data feed (typed): `lib/queries/laborPlanning.ts`
+    - `fetchOpenOrdersWithLabor()` pulls non-closed orders with `order_details → products → billoflabour` joins to surface job identifiers, pay type, time/unit, quantity (scaled by order qty), and category metadata (hashed color fallback).
+    - `fetchStaffRoster({ date? })` returns active staff with role, weekly capacity, and availability flags (`isActive`, `isCurrent`, `hasSummaryOnDate` via `time_daily_summary`, `isAvailableOnDate`).
+    - `fetchLaborPlanningPayload({ date? })` composes the orders + staff + a default `unscheduledJobs` list (flattened from the order/job tree for drag-ready UI wiring) plus scheduled assignments loaded from `labor_plan_assignments` for the selected date.
+>>>>>>> origin/January
 
 - **Product Bill of Labor**: components/features/products/product-bol.tsx:1
   - Embedded on product detail: app/products/[productId]/page.tsx:358
@@ -60,6 +85,13 @@ Tables involved and their key columns and relationships. Source: Supabase MCP qu
 - (New) **`job_hourly_rates`**
   - Columns: `rate_id serial PK`, `job_id int references jobs`, `hourly_rate numeric`, `effective_date date`, `end_date date`, `created_at timestamptz` with unique `(job_id, effective_date)`.
 
+<<<<<<< HEAD
+=======
+- (New) **`labor_plan_assignments`**
+  - Columns: `assignment_id bigserial PK`, `job_instance_id text unique with assignment_date`, `order_id`, `order_detail_id`, `bol_id`, `job_id`, `staff_id`, `assignment_date date`, `start_minutes int`, `end_minutes int`, `status text check (scheduled/unscheduled)`, `pay_type text check (hourly/piece)`, `rate_id`, `hourly_rate_id`, `piece_rate_id`, timestamps.
+  - Purpose: Persist the linkage between an order-specific BOL job instance and a staff assignee/time window for costing and re-scheduling. Start/end minutes are null when unscheduled; uniqueness on `(job_instance_id, assignment_date)` prevents duplicate placements per day.
+
+>>>>>>> origin/January
 ## APIs
 
 - `GET /api/products/:id/effective-bol` — effective BOL (explicit + linked). Scales sub‑product rows by `product_bom_links.scale` and resolves rates as of today (piece → product‑specific then default; hourly → job hourly).
@@ -178,6 +210,16 @@ Tables involved and their key columns and relationships. Source: Supabase MCP qu
 - Piecework line total: `piece_rate × quantity`.
 - Mixed totals: Sum hourly and piece lines together; display rate source (category hourly vs piecework) per line.
 
+<<<<<<< HEAD
+=======
+## Scheduling Utilities
+
+- File: `src/lib/laborScheduling.ts`
+  - `calculateDurationMinutes` converts job effort (time + unit + quantity or piecework) into planner bar durations, then `chooseSnapIncrement` and `buildUnscheduledBarState` provide defaults for unplaced jobs.
+  - `checkLaneConstraints` enforces per-lane overlap protection, shift window limits, capacity overruns, and availability flags before placing a job.
+  - Rendering helpers: `getCategoryColor` (hashed palette) and `buildAssignmentLabel` keep swimlane bar styling consistent; `clockToMinutes` / `minutesToClock` support time math for drop targets.
+
+>>>>>>> origin/January
 ## Current Safeguards and Constraints
 
 - DB-level:

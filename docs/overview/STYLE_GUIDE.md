@@ -108,6 +108,8 @@ This guide documents how we style the app: Tailwind CSS utilities + shadcn/ui pr
 - __Tables__: Wrap with `overflow-auto` on a rounded/bordered card.
 - __Label → input spacing__: 8–12 px. Default to Tailwind `space-y-2` (8 px). Use `space-y-3` (12 px) for airier forms.
 - __Field group gaps__: 16–24 px between rows/columns. Default `gap-6` (24 px) on desktop grids.
+- __Nav bar page chrome__: For app pages, move the page title, subtitle, and page-specific toggles into the top navbar (right side) to free vertical space. Keep the left sidebar for navigation only. Use badges/toggles inline with the username block when scoped to the current page (e.g., compact view toggle, shift window badge). Page content should omit redundant H1; leave an `sr-only` heading for a11y.
+- __TODO: Apply navbar page chrome globally__: Add “Move page title + controls into navbar” pattern to all pages (replace in-page headers/toolbars with navbar variants). Track as `todo_navbar-page-chrome-rollout` in docs/overview/todo-index.md.
 
 ## Components (shadcn/ui)
 - __Buttons__ (`components/ui/button.tsx`)

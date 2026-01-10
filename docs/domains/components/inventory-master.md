@@ -23,7 +23,11 @@
 - `inventory`
   - `inventory_id`, `component_id`, `quantity_on_hand`, `location`, `reorder_level`.
   - **One-to-one relationship.** A unique constraint on `inventory.component_id` enforces at most one inventory record per component. Frontend consumers should treat `component.inventory` as a single object (Supabase now returns an object, not an array) and fall back to `null` if the record has not been created yet.
+<<<<<<< HEAD
   - `location` is an optional free-form storage hint surfaced in the Edit Component dialog and Overview tab. `reorder_level` (aka minimum stock) drives the Low Stock alert and the reorder reference line in the stock movement chart.
+=======
+  - `location` is an optional free-form storage hint surfaced in the Edit Component dialog and Overview tab. `reorder_level` (aka minimum stock) is optional; when unset it should be stored as `NULL` and shown as a blank input (treat `NULL`/`<= 0` as “no threshold”). It drives the Low Stock alert and the reorder reference line in the stock movement chart.
+>>>>>>> origin/January
 - `inventory_transactions`
   - `transaction_id`, `component_id`, `quantity`, `transaction_type` ('IN'|'OUT'|'ADJUST'), `transaction_date`, optional `order_id`/reference.
 - `suppliercomponents`

@@ -14,6 +14,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - `components/` – Component modelling, product creation, and subcomponent execution references.
   - `timekeeping/` – Labor and time & attendance implementation notes.
   - `suppliers/` – Supplier master data standards and flows.
+- `auth/` – Auth flows, roles/RLS, admin APIs, UI guides, and SQL snippets for Supabase
 - `operations/` – Cross-cutting operational procedures such as the Bill of Labor system, sidebar updates, and logging guidance.
 - `plans/` – Implementation plans and project briefs (`*-plan.md` / `*-plan.txt`).
 - `changelogs/` – Historical release notes and change summaries.
@@ -28,12 +29,18 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - [`overview/STYLE_GUIDE.md`](overview/STYLE_GUIDE.md)
   - [`overview/auth.md`](overview/auth.md)
   - [`overview/AI Assistant.md`](overview/AI%20Assistant.md)
+- Auth
+  - [`auth/user-onboarding.md`](auth/user-onboarding.md)
+  - [`auth/roles-and-rls.md`](auth/roles-and-rls.md)
+  - [`auth/admin-api.md`](auth/admin-api.md)
+  - [`auth/ui-admin-users.md`](auth/ui-admin-users.md)
+  - [`auth/sql-snippets.md`](auth/sql-snippets.md)
 - Domains
   - Orders: [`domains/orders/orders-master.md`](domains/orders/orders-master.md)
   - Purchasing: [`domains/purchasing/purchasing-master.md`](domains/purchasing/purchasing-master.md)
   - Components: [`domains/components/components-section.md`](domains/components/components-section.md)
   - Inventory: [`domains/components/inventory-master.md`](domains/components/inventory-master.md), [`domains/components/inventory-transactions.md`](domains/components/inventory-transactions.md)
-  - Timekeeping: [`domains/timekeeping/labor-section.md`](domains/timekeeping/labor-section.md)
+  - Timekeeping: [`domains/timekeeping/labor-section.md`](domains/timekeeping/labor-section.md), [`domains/timekeeping/labor-planning-user-guide.md`](domains/timekeeping/labor-planning-user-guide.md)
   - Suppliers: [`domains/suppliers/suppliers-master.md`](domains/suppliers/suppliers-master.md)
 - Operations:
   - [`operations/deployment-guide.md`](operations/deployment-guide.md) – **Production deployment guide** (Netlify, env vars, rollback)
@@ -44,6 +51,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - [`operations/quote-email-implementation.md`](operations/quote-email-implementation.md) – ✅ Quote email implementation summary (completed)
   - [`operations/airtable-sync-runbook.md`](operations/airtable-sync-runbook.md) – Airtable migration/sync checklist and incident response guide
 - Plans: [`plans/`](plans/) – implementation briefs such as `quoting-module-plan.md`, `quote-email-plan.md`, `time-attendance-plan.md`, `cutlist-nesting-plan.md`, and other project plans
+  - New: [`plans/labor-planning-validation-plan.md`](plans/labor-planning-validation-plan.md) – guardrails + telemetry plan for the Labor Planning board
   - New: [`plans/permissions-and-logging-plan.md`](plans/permissions-and-logging-plan.md) – unified roadmap for role-based access control, permissions UI, and audit logging rollout
   - New: [`plans/todo-module-plan.md`](plans/todo-module-plan.md) – To-Do module planning doc covering cross-module task assignments
   - New: [`plans/products-section-upgrade.md`](plans/products-section-upgrade.md) – Modernize the Products area with inventory-parity tabs, transactions, and finished-good reports
@@ -79,6 +87,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
 - Analysis: [`analysis/`](analysis/)
   - [`analysis/inventory-components-performance-review.md`](analysis/inventory-components-performance-review.md) – Performance and responsiveness review of Components section
 - Technical Guides: [`technical/`](technical/)
+  - [`technical/color-system.md`](technical/color-system.md) – Centralized color palette, semantic colors, and rollback instructions
   - [`technical/supabase-query-patterns.md`](technical/supabase-query-patterns.md) – Supabase query patterns, common errors, and troubleshooting
   - [`technical/smoke-tests.md`](technical/smoke-tests.md) – How to run the Purchasing smoke test
   - [`technical/airtable-migration-guide.md`](technical/airtable-migration-guide.md) – Airtable → Supabase migration process plus MCP server configuration

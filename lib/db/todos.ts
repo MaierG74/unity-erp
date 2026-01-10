@@ -18,29 +18,29 @@ export type TodoActivityType = (typeof TODO_ACTIVITY_TYPES)[number];
 
 export const TODO_RELATION_QUERY = `
   *,
-  creator:profiles!todo_items_created_by_fkey ( id, username, avatar_url ),
-  assignee:profiles!todo_items_assigned_to_fkey ( id, username, avatar_url ),
-  completer:profiles!todo_items_completed_by_fkey ( id, username, avatar_url ),
+  creator:profiles!todo_items_created_by_fkey ( id, username, display_name, login, avatar_url ),
+  assignee:profiles!todo_items_assigned_to_fkey ( id, username, display_name, login, avatar_url ),
+  completer:profiles!todo_items_completed_by_fkey ( id, username, display_name, login, avatar_url ),
   watchers:todo_watchers (
     user_id,
     created_at,
-    profile:profiles!todo_watchers_user_id_fkey ( id, username, avatar_url )
+    profile:profiles!todo_watchers_user_id_fkey ( id, username, display_name, login, avatar_url )
   )
 `;
 
 export const TODO_ACTIVITY_QUERY = `
   *,
-  actor:profiles!todo_activity_performed_by_fkey ( id, username, avatar_url )
+  actor:profiles!todo_activity_performed_by_fkey ( id, username, display_name, login, avatar_url )
 `;
 
 export const TODO_COMMENT_QUERY = `
   *,
-  author:profiles!todo_comments_created_by_fkey ( id, username, avatar_url )
+  author:profiles!todo_comments_created_by_fkey ( id, username, display_name, login, avatar_url )
 `;
 
 export const TODO_ATTACHMENT_QUERY = `
   *,
-  uploader:profiles!todo_attachments_uploaded_by_fkey ( id, username, avatar_url )
+  uploader:profiles!todo_attachments_uploaded_by_fkey ( id, username, display_name, login, avatar_url )
 `;
 
 export const TODO_CHECKLIST_QUERY = `*`;
@@ -48,6 +48,8 @@ export const TODO_CHECKLIST_QUERY = `*`;
 export interface ProfileSummary {
   id: string;
   username?: string | null;
+  displayName?: string | null;
+  login?: string | null;
   avatarUrl?: string | null;
 }
 
@@ -132,9 +134,12 @@ export interface TodoAttachment {
 const toProfile = (row: any | null | undefined): ProfileSummary | null => {
   if (!row) return null;
   if (typeof row !== 'object') return null;
+  const displayName = row.display_name ?? row.username ?? null;
   return {
     id: String(row.id),
-    username: row.username ?? null,
+    username: displayName ?? row.username ?? null,
+    displayName,
+    login: row.login ?? null,
     avatarUrl: row.avatar_url ?? null,
   };
 };
