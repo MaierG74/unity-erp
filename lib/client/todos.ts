@@ -195,9 +195,13 @@ export async function acknowledgeTodo(todoId: string, note?: string) {
 export interface ProfileSummary {
   id: string;
   username: string | null;
+  display_name: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  login: string | null;
   avatar_url: string | null;
   email: string | null;
-  display_name: string;
+  raw_display_name?: string | null;
 }
 
 export async function fetchProfiles(): Promise<ProfileSummary[]> {

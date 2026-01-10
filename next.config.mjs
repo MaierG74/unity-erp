@@ -5,7 +5,19 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
   // Ensure server bundling of ESM packages like tailwind-merge to avoid missing vendor-chunk errors
-  transpilePackages: ['tailwind-merge'],
+  transpilePackages: [
+    'tailwind-merge',
+    '@radix-ui/react-avatar',
+    '@radix-ui/react-context',
+    'date-fns',
+    'react-day-picker',
+    'recharts',
+    'd3-shape',
+    'victory-vendor',
+  ],
+  experimental: {
+    esmExternals: 'loose',
+  },
   // Allow Supabase Storage images in <Image>
   images: {
     remotePatterns: [

@@ -71,12 +71,19 @@ interface JobCategory {
   current_hourly_rate: number;
 }
 
+interface LaborRole {
+  role_id: number;
+  name: string;
+  color: string | null;
+}
 interface Job {
   job_id: number;
   name: string;
   description: string | null;
   category_id: number;
+  role_id?: number | null;
   category?: JobCategory;
+  labor_roles?: LaborRole | null;
 }
 
 // Form schema for adding/editing jobs
@@ -95,7 +102,6 @@ export function JobsManager() {
   const [expandedJobs, setExpandedJobs] = useState<Set<number>>(new Set());
   const [isAddJobOpen, setIsAddJobOpen] = useState(false);
   const [isEditJobOpen, setIsEditJobOpen] = useState(false);
-  
   const { toast } = useToast();
   const queryClient = useQueryClient();
   
@@ -124,30 +130,67 @@ export function JobsManager() {
   });
   
   // Fetch all jobs (no pagination)
-  const { data: allJobs = [], isLoading: jobsLoading } = useQuery({
+  const { data: allJobs = [], isLoading: jobsLoading, error: jobsError } = useQuery({
     queryKey: ['jobs'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      // Try full query with role_id first, fall back if column doesn't exist
+      let { data, error } = await supabase
         .from('jobs')
         .select(`
           job_id,
           name,
           description,
           category_id,
+          role_id,
           job_categories (
             category_id,
             name,
             description,
             current_hourly_rate
+          ),
+          labor_roles (
+            role_id,
+            name,
+            color
           )
         `)
         .order('name');
-      
-      if (error) throw error;
-      
+
+      // If role_id column doesn't exist, use basic query
+      if (error && error.message?.includes('role_id')) {
+        console.warn('[JobsManager] role_id column not found, using basic query');
+        const { data: basicData, error: basicError } = await supabase
+          .from('jobs')
+          .select(`
+            job_id,
+            name,
+            description,
+            category_id,
+            job_categories (
+              category_id,
+              name,
+              description,
+              current_hourly_rate
+            )
+          `)
+          .order('name');
+
+        if (basicError) {
+          console.error('[JobsManager] Error fetching jobs:', basicError);
+          throw basicError;
+        }
+        data = basicData;
+        error = null;
+      } else if (error) {
+        console.error('[JobsManager] Error fetching jobs:', error);
+        throw error;
+      }
+
+      console.log('[JobsManager] Loaded jobs:', data);
       return (data || []).map((job: any) => ({
         ...job,
-        category: job.job_categories
+        category: job.job_categories,
+        labor_roles: job.labor_roles
       })) as Job[];
     },
   });
@@ -414,13 +457,19 @@ export function JobsManager() {
       {/* Jobs List */}
       <Card>
         <CardContent className="p-0">
-          {jobsLoading || categoriesLoading ? (
+          {jobsError && (
+            <div className="text-center py-8 text-red-600">
+              <p className="font-medium">Error loading jobs</p>
+              <p className="text-sm">{jobsError?.message || 'Unknown error'}</p>
+            </div>
+          )}
+          {!jobsError && (jobsLoading || categoriesLoading) ? (
             <div className="text-center py-8">Loading jobs...</div>
-          ) : filteredJobs.length === 0 ? (
+          ) : !jobsError && filteredJobs.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               {searchQuery || categoryFilter ? 'No jobs match your filters' : 'No jobs defined yet'}
             </div>
-          ) : (
+          ) : !jobsError && (
             <div className="divide-y">
               {filteredJobs.map((job) => {
                 const isExpanded = expandedJobs.has(job.job_id);
@@ -442,6 +491,14 @@ export function JobsManager() {
                           <div className="flex items-center gap-3 flex-wrap">
                             <h3 className="font-medium">{job.name}</h3>
                             <Badge variant="outline">{job.category?.name || 'Uncategorized'}</Badge>
+                            {job.labor_roles && (
+                              <Badge
+                                style={{ backgroundColor: job.labor_roles.color || undefined }}
+                                className="text-white text-xs"
+                              >
+                                {job.labor_roles.name}
+                              </Badge>
+                            )}
                             <span className="text-sm font-semibold text-primary">
                               {job.category ? `R${job.category.current_hourly_rate.toFixed(2)}/hr` : 'N/A'}
                             </span>

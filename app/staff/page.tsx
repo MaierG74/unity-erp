@@ -1,14 +1,23 @@
 'use client';
 
+/**
+ * Staff Page
+ *
+ * REFACTORED: Uses PageToolbar for compact header layout.
+ * - Removed separate h1 and button row
+ * - Actions consolidated into PageToolbar
+ * - Reduced vertical spacing
+ * - Removed verbose descriptions in tab content
+ */
+
 import { useState } from 'react';
-import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PlusCircle, Users, ClipboardList, Clock, DollarSign } from 'lucide-react';
-import Link from 'next/link';
 import { useAuth } from '@/components/common/auth-provider';
 import { useRouter } from 'next/navigation';
 import { StaffTable } from '@/components/features/staff/StaffTable';
 import { Suspense } from 'react';
+import { PageToolbar } from '@/components/ui/page-toolbar';
 
 export default function StaffPage() {
   const { user } = useAuth();
@@ -16,26 +25,28 @@ export default function StaffPage() {
   const [activeTab, setActiveTab] = useState('staff');
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold tracking-tight">Staff Management</h1>
-        <div className="flex gap-2">
-          <Button asChild>
-            <Link href="/staff/new">
-              <PlusCircle className="mr-2 h-4 w-4" />
-              Add Staff Member
-            </Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href="/staff/job-cards/new">
-              <ClipboardList className="mr-2 h-4 w-4" />
-              Create Job Card
-            </Link>
-          </Button>
-        </div>
-      </div>
+    // CHANGED: Reduced space-y from 6 to 2
+    <div className="space-y-2">
+      {/* NEW: PageToolbar replaces separate h1 and button row */}
+      <PageToolbar
+        title="Staff Management"
+        actions={[
+          {
+            label: 'Add Staff',
+            onClick: () => router.push('/staff/new'),
+            icon: <PlusCircle className="h-4 w-4" />,
+          },
+          {
+            label: 'Create Job Card',
+            onClick: () => router.push('/staff/job-cards/new'),
+            icon: <ClipboardList className="h-4 w-4" />,
+            variant: 'outline',
+          },
+        ]}
+      />
 
-      <Tabs defaultValue="staff" value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+      {/* CHANGED: Reduced space-y from 4 to 2 */}
+      <Tabs defaultValue="staff" value={activeTab} onValueChange={setActiveTab} className="space-y-2">
         <TabsList>
           <TabsTrigger value="staff">
             <Users className="mr-2 h-4 w-4" />
@@ -54,15 +65,11 @@ export default function StaffPage() {
             Payroll
           </TabsTrigger>
         </TabsList>
-        
-        <TabsContent value="staff" className="space-y-4">
+
+        {/* CHANGED: Reduced space-y, removed verbose description sections */}
+        <TabsContent value="staff" className="space-y-2">
           <div className="rounded-md border">
-            <div className="p-4">
-              <h2 className="text-xl font-semibold">Staff Directory</h2>
-              <p className="text-sm text-muted-foreground">
-                Manage your staff members, view their details, and track their performance.
-              </p>
-            </div>
+            {/* CHANGED: Removed description paragraph for space */}
             <div className="p-4">
               <Suspense fallback={<div>Loading staff data...</div>}>
                 <StaffTable />
@@ -70,47 +77,26 @@ export default function StaffPage() {
             </div>
           </div>
         </TabsContent>
-        
-        <TabsContent value="job-cards" className="space-y-4">
+
+        <TabsContent value="job-cards" className="space-y-2">
           <div className="rounded-md border">
             <div className="p-4">
-              <h2 className="text-xl font-semibold">Job Cards</h2>
-              <p className="text-sm text-muted-foreground">
-                Manage job cards assigned to staff members and track their progress.
-              </p>
-            </div>
-            <div className="p-4">
-              {/* Job cards list will be loaded here */}
               <p className="text-muted-foreground">Loading job cards...</p>
             </div>
           </div>
         </TabsContent>
-        
-        <TabsContent value="hours" className="space-y-4">
+
+        <TabsContent value="hours" className="space-y-2">
           <div className="rounded-md border">
             <div className="p-4">
-              <h2 className="text-xl font-semibold">Hours Tracking</h2>
-              <p className="text-sm text-muted-foreground">
-                Track staff working hours and view time reports.
-              </p>
-            </div>
-            <div className="p-4">
-              {/* Hours tracking interface will be loaded here */}
               <p className="text-muted-foreground">Loading hours data...</p>
             </div>
           </div>
         </TabsContent>
-        
-        <TabsContent value="payroll" className="space-y-4">
+
+        <TabsContent value="payroll" className="space-y-2">
           <div className="rounded-md border">
             <div className="p-4">
-              <h2 className="text-xl font-semibold">Payroll</h2>
-              <p className="text-sm text-muted-foreground">
-                Calculate and manage staff payroll based on hours worked and piece work completed.
-              </p>
-            </div>
-            <div className="p-4">
-              {/* Payroll interface will be loaded here */}
               <p className="text-muted-foreground">Loading payroll data...</p>
             </div>
           </div>
@@ -118,4 +104,4 @@ export default function StaffPage() {
       </Tabs>
     </div>
   );
-} 
+}

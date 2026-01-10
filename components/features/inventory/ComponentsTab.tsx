@@ -399,25 +399,11 @@ export function ComponentsTab() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Actions */}
-      <div className="inline-flex gap-2 p-3 bg-card rounded-xl border shadow-sm">
-        <Button onClick={refreshData} className="h-9" variant="outline">
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh
-        </Button>
-          <Button
-            className="h-9"
-            onClick={() => setDialogOpen(true)}
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Add Component
-          </Button>
-      </div>
-
-      {/* Filter row */}
-      <div className="p-3 bg-card rounded-xl border shadow-sm">
-        <div className="mx-auto flex flex-col md:flex-row max-w-5xl items-center justify-center gap-4">
+    // CHANGED: Reduced space-y from 6 to 3 for tighter layout
+    <div className="space-y-3">
+      {/* CHANGED: Combined actions and filters into single compact toolbar */}
+      <div className="p-2 bg-card rounded-xl border shadow-sm">
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
           {/* Search */}
           <div className="relative w-full md:w-[520px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -481,8 +467,8 @@ export function ComponentsTab() {
           {/* Supplier */}
           <div className="inline-flex items-center gap-2 w-full md:w-auto">
             <span className="text-sm text-muted-foreground whitespace-nowrap">Supplier</span>
-            <Select 
-              value={selectedSupplier} 
+            <Select
+              value={selectedSupplier}
               onValueChange={(value) => {
                 setSelectedSupplier(value);
                 setSupplierSearch('');
@@ -514,6 +500,22 @@ export function ComponentsTab() {
                 )}
               </SelectContent>
             </Select>
+          </div>
+
+          {/* CHANGED: Actions moved into same row as filters */}
+          <div className="flex items-center gap-2 w-full lg:w-auto">
+            <Button onClick={refreshData} className="h-9" variant="outline" size="sm">
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Refresh
+            </Button>
+            <Button
+              className="h-9"
+              size="sm"
+              onClick={() => setDialogOpen(true)}
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add Component
+            </Button>
           </div>
         </div>
       </div>
