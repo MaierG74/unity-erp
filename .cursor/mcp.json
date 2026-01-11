@@ -9,7 +9,8 @@
       ],
       "env": {
         "SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN}"
-      }
+      },
+      "autoapprove": ["execute_sql", "get_database_info", "list_tables", "query_table", "insert_rows", "update_rows", "delete_rows"]
     },
     "sequential-thinking": {
       "command": "npx",

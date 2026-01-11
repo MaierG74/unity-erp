@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AlertCircle, CheckCircle2, Loader2, Plus, Search, Link2, RotateCcw, ImageIcon, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Loader2, Plus, Search, Link2, RotateCcw, ImageIcon, X, Upload } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -76,7 +76,9 @@ export function AirtableImportTab() {
   const [customMasterCode, setCustomMasterCode] = useState('');
   const [descriptionOverride, setDescriptionOverride] = useState('');
   const [imageUrlOverride, setImageUrlOverride] = useState<string | null>(null);
-  
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+
   // Import state
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
@@ -166,12 +168,51 @@ export function AirtableImportTab() {
     }
   };
 
+  const handleImageFileSelect = async (file: File) => {
+    setImageFile(file);
+    setUploadingImage(true);
+
+    try {
+      const fileExt = file.name.split('.').pop();
+      const timestamp = new Date().getTime();
+      const fileName = `airtable_import_${airtableCode}_${timestamp}.${fileExt}`;
+      const filePath = fileName;
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('QButton')
+        .upload(filePath, file, {
+          upsert: true,
+          contentType: file.type
+        });
+
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        throw uploadError;
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('QButton')
+        .getPublicUrl(filePath);
+
+      if (urlData && urlData.publicUrl) {
+        setImageUrlOverride(urlData.publicUrl);
+      } else {
+        throw new Error('Failed to get public URL for uploaded file');
+      }
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      alert('Failed to upload image. Please try again.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
   const handleSearchUnity = useCallback(async () => {
     if (!searchQuery.trim()) {
       setSearchResults([]);
       return;
     }
-    
+
     setSearching(true);
     try {
       const searchTerm = `%${searchQuery.trim()}%`;
@@ -349,6 +390,7 @@ export function AirtableImportTab() {
     setCustomMasterCode('');
     setDescriptionOverride('');
     setImageUrlOverride(null);
+    setImageFile(null);
     setResult(null);
   };
 
@@ -590,9 +632,9 @@ export function AirtableImportTab() {
                   <div className="flex gap-4 items-start">
                     {imageUrlOverride ? (
                       <div className="relative w-32 h-32 border rounded-lg overflow-hidden bg-muted flex-shrink-0">
-                        <img 
-                          src={imageUrlOverride} 
-                          alt="Component preview" 
+                        <img
+                          src={imageUrlOverride}
+                          alt="Component preview"
                           className="w-full h-full object-contain"
                         />
                         <Button
@@ -600,7 +642,10 @@ export function AirtableImportTab() {
                           variant="destructive"
                           size="icon"
                           className="absolute top-1 right-1 h-6 w-6"
-                          onClick={() => setImageUrlOverride(null)}
+                          onClick={() => {
+                            setImageUrlOverride(null);
+                            setImageFile(null);
+                          }}
                         >
                           <X className="h-3 w-3" />
                         </Button>
@@ -611,13 +656,46 @@ export function AirtableImportTab() {
                       </div>
                     )}
                     <div className="flex-1 space-y-2">
-                      <Input
-                        placeholder="Enter image URL..."
-                        value={imageUrlOverride || ''}
-                        onChange={(e) => setImageUrlOverride(e.target.value || null)}
-                      />
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="Paste image URL..."
+                          value={imageUrlOverride || ''}
+                          onChange={(e) => {
+                            setImageUrlOverride(e.target.value || null);
+                            setImageFile(null);
+                          }}
+                          className="flex-1"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={uploadingImage}
+                          onClick={() => {
+                            const input = document.createElement('input');
+                            input.type = 'file';
+                            input.accept = 'image/*';
+                            input.onchange = (e) => {
+                              const file = (e.target as HTMLInputElement).files?.[0];
+                              if (file) {
+                                handleImageFileSelect(file);
+                              }
+                            };
+                            input.click();
+                          }}
+                        >
+                          {uploadingImage ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Upload className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
                       <p className="text-xs text-muted-foreground">
-                        Paste an image URL or leave blank for no image
+                        {imageFile ? (
+                          <span className="text-green-600">Uploaded: {imageFile.name}</span>
+                        ) : (
+                          'Paste an image URL or click upload button to browse files'
+                        )}
                       </p>
                     </div>
                   </div>

@@ -106,7 +106,7 @@ MCP (Model Context Protocol) servers let our IDE copilot run Airtable + Supabase
       "command": "npx",
       "args": ["-y", "@supabase/mcp-server-supabase@latest", "--project-ref=ttlyfhkrsjjrzxiagzpb"],
       "env": {
-        "SUPABASE_ACCESS_TOKEN": "YOUR_SUPABASE_ACCESS_TOKEN"
+        "SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN}"
       }
     },
     "sequential-thinking": {

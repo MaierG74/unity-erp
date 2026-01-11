@@ -31,7 +31,7 @@ Both files should contain the following configuration:
         "@modelcontextprotocol/server-postgres"
       ],
       "env": {
-        "POSTGRES_CONNECTION_STRING": "postgresql://postgres.ttlyfhkrsjjrzxiagzpb:ke6tOTxvv45TRNVp@aws-0-us-east-1.pooler.supabase.com:5432/postgres"
+        "POSTGRES_CONNECTION_STRING": "postgresql://postgres.ttlyfhkrsjjrzxiagzpb:YOUR_DB_PASSWORD@aws-0-us-east-1.pooler.supabase.com:5432/postgres"
       },
       "autoapprove": ["query"]
     },
