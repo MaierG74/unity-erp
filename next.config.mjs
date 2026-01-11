@@ -15,9 +15,6 @@ const nextConfig = {
     'd3-shape',
     'victory-vendor',
   ],
-  experimental: {
-    esmExternals: 'loose',
-  },
   // Allow Supabase Storage images in <Image>
   images: {
     remotePatterns: [
