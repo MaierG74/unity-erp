@@ -19,17 +19,20 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 
 interface CategoryDialogProps {
-  productId: string
+  productId?: string
   trigger?: React.ReactNode
   existingCategories: { product_cat_id: number; categoryname: string }[]
   onCategoriesChange?: () => void
+  /** When provided, skips database insert and returns selected categories directly (for new product creation) */
+  onSelectCategories?: (categories: { product_cat_id: number; categoryname: string }[]) => void
 }
 
-export function CategoryDialog({ 
-  productId, 
-  trigger, 
+export function CategoryDialog({
+  productId,
+  trigger,
   existingCategories,
-  onCategoriesChange 
+  onCategoriesChange,
+  onSelectCategories
 }: CategoryDialogProps) {
   const [dialogOpen, setDialogOpen] = React.useState(false)
   const [selectedCategories, setSelectedCategories] = React.useState<number[]>([])
@@ -73,6 +76,31 @@ export function CategoryDialog({
 
   const handleAddCategories = async () => {
     if (selectedCategories.length === 0) return
+
+    // Selection-only mode for new product creation
+    if (onSelectCategories) {
+      const selectedCategoryObjects = selectedCategories.map(categoryId => {
+        const category = categories.find(c => c.product_cat_id === categoryId)
+        return {
+          product_cat_id: categoryId,
+          categoryname: category?.categoryname || ''
+        }
+      })
+      onSelectCategories(selectedCategoryObjects)
+      setSelectedCategories([])
+      setDialogOpen(false)
+      return
+    }
+
+    // Database insert mode for existing products
+    if (!productId) {
+      toast({
+        title: "Error",
+        description: "Product ID is required to add categories",
+        variant: "destructive",
+      })
+      return
+    }
 
     try {
       const assignments = selectedCategories.map(categoryId => ({

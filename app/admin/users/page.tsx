@@ -206,8 +206,16 @@ export default function AdminUsersPage() {
     e.preventDefault();
     setError(null);
     try {
+      // Normalize login: strip @qbutton.co.za if present and any whitespace
+      let normalizedLogin = createState.login.trim();
+      if (normalizedLogin.includes('@qbutton.co.za')) {
+        normalizedLogin = normalizedLogin.replace('@qbutton.co.za', '').trim();
+      }
+      // Remove any @ symbols that might be present
+      normalizedLogin = normalizedLogin.replace('@', '').trim();
+      
       const payload = {
-        login: createState.login.trim(),
+        login: normalizedLogin,
         password: createState.password,
         display_name: createState.displayName.trim(),
         first_name: createState.firstName.trim(),
@@ -378,18 +386,26 @@ export default function AdminUsersPage() {
           <CollapsibleContent>
             <CardContent>
               <div className="mb-3 text-sm text-muted-foreground">
-                Synthetic email is derived from login (e.g. login@qbutton.co.za). Password is shown once.
+                Enter only the username (without @qbutton.co.za). Email will be automatically created as: username@qbutton.co.za. Password is shown once.
               </div>
               <form onSubmit={handleCreate} className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="login">Login</Label>
+                  <Label htmlFor="login">Login (username only)</Label>
                   <Input
                     id="login"
                     required
                     value={createState.login}
-                    onChange={e => setCreateState(prev => ({ ...prev, login: e.target.value }))}
-                    placeholder="jdoe"
+                    onChange={e => {
+                      let value = e.target.value;
+                      // Strip @qbutton.co.za if user accidentally includes it
+                      if (value.includes('@qbutton.co.za')) {
+                        value = value.replace('@qbutton.co.za', '').trim();
+                      }
+                      setCreateState(prev => ({ ...prev, login: value }));
+                    }}
+                    placeholder="lorraine"
                   />
+                  <p className="text-xs text-muted-foreground">Email will be: {createState.login || 'username'}@qbutton.co.za</p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="password">Password</Label>
@@ -446,13 +462,30 @@ export default function AdminUsersPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="org">Org ID</Label>
-                  <Input
-                    id="org"
-                    required
-                    value={createState.orgId}
-                    onChange={e => setCreateState(prev => ({ ...prev, orgId: e.target.value }))}
-                    placeholder="UUID for org"
-                  />
+                  {organizations.length ? (
+                    <select
+                      id="org"
+                      required
+                      className="h-10 w-full rounded-md border px-3 text-sm"
+                      value={createState.orgId}
+                      onChange={e => setCreateState(prev => ({ ...prev, orgId: e.target.value }))}
+                    >
+                      <option value="">Select org</option>
+                      {organizations.map(org => (
+                        <option key={org.id} value={org.id}>
+                          {org.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <Input
+                      id="org"
+                      required
+                      value={createState.orgId}
+                      onChange={e => setCreateState(prev => ({ ...prev, orgId: e.target.value }))}
+                      placeholder="UUID for org"
+                    />
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="avatar">Avatar URL (optional)</Label>

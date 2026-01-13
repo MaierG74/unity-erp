@@ -179,7 +179,7 @@ export default function NewJobCardPage() {
         .from('job_cards')
         .insert([
           {
-            order_id: data.orderId ? parseInt(data.orderId) : null,
+            order_id: data.orderId && data.orderId !== '__none__' ? parseInt(data.orderId) : null,
             staff_id: parseInt(data.staffId),
             issue_date: data.issueDate.toISOString().split('T')[0],
             due_date: data.dueDate ? data.dueDate.toISOString().split('T')[0] : null,
@@ -304,7 +304,7 @@ export default function NewJobCardPage() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="">None</SelectItem>
+                          <SelectItem value="__none__">None</SelectItem>
                           {orders.map((o) => (
                             <SelectItem key={o.order_id} value={o.order_id.toString()}>
                               {o.order_number || `Order #${o.order_id}`}

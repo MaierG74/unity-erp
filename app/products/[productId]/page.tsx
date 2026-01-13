@@ -48,8 +48,8 @@ interface Product {
 }
 
 interface ProductImage {
-  id: string;
-  product_id: string;
+  image_id: string | number;
+  product_id: string | number;
   image_url: string;
   is_primary: boolean;
 }

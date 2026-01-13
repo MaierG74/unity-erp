@@ -13,7 +13,10 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { minutesToClock } from '@/src/lib/laborScheduling';
-import { Circle, GripHorizontal, X, Calendar, Clock, User, Briefcase, CheckCircle2 } from 'lucide-react';
+import { Circle, GripHorizontal, X, Calendar, Clock, User, Briefcase, CheckCircle2, ClipboardList, Loader2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
+import { toast } from 'sonner';
 import type { LaborDragPayload, StaffAssignment, StaffLane, TimeMarker } from './types';
 import { CompleteJobDialog } from './complete-job-dialog';
 
@@ -38,8 +41,10 @@ export function StaffLaneList({
   compact = false,
   timelineWidth,
 }: StaffLaneListProps) {
+  const router = useRouter();
   const totalMinutes = endMinutes - startMinutes;
   const laneHeightClass = compact ? 'h-14' : 'h-16';
+  const [issuingJobCard, setIssuingJobCard] = useState(false);
 
   // Use fixed pixel positioning when timelineWidth is provided
   const useFixedWidth = timelineWidth != null && timelineWidth > 0;
@@ -114,6 +119,100 @@ export function StaffLaneList({
     started_at?: string;
     job_status?: string;
   } | null>(null);
+
+  // Issue job card from assignment
+  const handleIssueJobCard = async () => {
+    if (!selectedAssignment || !selectedLane) return;
+
+    setIssuingJobCard(true);
+    try {
+      // Look up BOL data if we have a bolId to get product_id and quantity
+      let productId: number | null = null;
+      let quantity = 1;
+      let jobId = selectedAssignment.jobId || null;
+
+      if (selectedAssignment.bolId) {
+        const { data: bolData } = await supabase
+          .from('billoflabour')
+          .select('product_id, job_id, quantity')
+          .eq('bol_id', selectedAssignment.bolId)
+          .single();
+        if (bolData) {
+          productId = bolData.product_id;
+          jobId = bolData.job_id || jobId;
+          quantity = bolData.quantity || 1;
+        }
+      }
+
+      // Look up piece rate if it's a piecework job
+      let pieceRate = 0;
+      if (selectedAssignment.payType === 'piece' && selectedAssignment.pieceRateId) {
+        const { data: rateData } = await supabase
+          .from('piece_work_rates')
+          .select('rate')
+          .eq('rate_id', selectedAssignment.pieceRateId)
+          .single();
+        if (rateData) {
+          pieceRate = rateData.rate;
+        }
+      }
+
+      // Create the job card
+      const { data: jobCardData, error: jobCardError } = await supabase
+        .from('job_cards')
+        .insert({
+          order_id: typeof selectedAssignment.orderId === 'number' ? selectedAssignment.orderId : null,
+          staff_id: parseInt(selectedLane.id, 10),
+          issue_date: selectedAssignment.assignmentDate || new Date().toISOString().split('T')[0],
+          status: 'pending',
+          notes: `Scheduled: ${minutesToClock(selectedAssignment.startMinutes)} - ${minutesToClock(selectedAssignment.endMinutes)}`,
+        })
+        .select()
+        .single();
+
+      if (jobCardError) throw jobCardError;
+      if (!jobCardData) throw new Error('Failed to create job card');
+
+      // Create job card item (only if we have valid job data)
+      if (jobId || productId) {
+        const { error: itemError } = await supabase
+          .from('job_card_items')
+          .insert({
+            job_card_id: jobCardData.job_card_id,
+            product_id: productId,
+            job_id: jobId,
+            quantity: quantity,
+            piece_rate: pieceRate,
+            status: 'pending',
+          });
+
+        if (itemError) throw itemError;
+      }
+
+      // Update labor_plan_assignments to mark as issued
+      if (selectedAssignment.id) {
+        await supabase
+          .from('labor_plan_assignments')
+          .update({
+            job_status: 'issued',
+            issued_at: new Date().toISOString(),
+          })
+          .eq('assignment_id', parseInt(selectedAssignment.id, 10));
+      }
+
+      toast.success('Job card created successfully');
+      setSelectedAssignment(null);
+      setSelectedLane(null);
+
+      // Navigate to the new job card
+      router.push(`/staff/job-cards/${jobCardData.job_card_id}`);
+    } catch (err: any) {
+      console.error('Failed to create job card:', err);
+      toast.error(err.message || 'Failed to create job card');
+    } finally {
+      setIssuingJobCard(false);
+    }
+  };
 
   return (
     <div className="space-y-2 p-2">
@@ -382,6 +481,19 @@ export function StaffLaneList({
               </div>
 
               <div className="flex justify-end gap-2 pt-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleIssueJobCard}
+                  disabled={issuingJobCard}
+                >
+                  {issuingJobCard ? (
+                    <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                  ) : (
+                    <ClipboardList className="h-4 w-4 mr-1.5" />
+                  )}
+                  {issuingJobCard ? 'Creating...' : 'Issue Job Card'}
+                </Button>
                 <Button
                   variant="default"
                   size="sm"

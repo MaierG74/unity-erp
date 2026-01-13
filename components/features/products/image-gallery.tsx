@@ -9,8 +9,8 @@ import { supabase } from "@/lib/supabase"
 import { Trash2 } from "lucide-react"
 
 interface ProductImage {
-  id: string
-  product_id: string
+  image_id: string | number
+  product_id: string | number
   image_url: string
   is_primary: boolean
 }
@@ -41,7 +41,7 @@ export function ImageGallery({
       setSelectedImage(null)
       return
     }
-    if (!selectedImage || !localImages.some((img) => img.id === selectedImage.id)) {
+    if (!selectedImage || !localImages.some((img) => img.image_id === selectedImage.image_id)) {
       const primary = localImages.find((img) => img.is_primary) || localImages[0]
       setSelectedImage(primary)
     }
@@ -49,7 +49,7 @@ export function ImageGallery({
 
   const handleImageUpload = (url: string) => {
     const tempImage: ProductImage = {
-      id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      image_id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       product_id: productId,
       image_url: url,
       is_primary: false,
@@ -71,18 +71,18 @@ export function ImageGallery({
       const { error } = await supabase
         .from("product_images")
         .update({ is_primary: true })
-        .eq("id", image.id)
+        .eq("image_id", image.image_id)
 
       if (error) throw error
 
       setLocalImages((prev) =>
         prev.map((img) => ({
           ...img,
-          is_primary: img.id === image.id,
+          is_primary: img.image_id === image.image_id,
         }))
       )
       setSelectedImage((prev) =>
-        prev && prev.id === image.id ? { ...prev, is_primary: true } : image
+        prev && prev.image_id === image.image_id ? { ...prev, is_primary: true } : image
       )
 
       toast({
@@ -108,13 +108,13 @@ export function ImageGallery({
       const { error } = await supabase
         .from("product_images")
         .delete()
-        .eq("id", image.id)
+        .eq("image_id", image.image_id)
 
       if (error) throw error
 
-      setLocalImages((prev) => prev.filter((img) => img.id !== image.id))
-      if (selectedImage?.id === image.id) {
-        const remainingImages = localImages.filter((img) => img.id !== image.id)
+      setLocalImages((prev) => prev.filter((img) => img.image_id !== image.image_id))
+      if (selectedImage?.image_id === image.image_id) {
+        const remainingImages = localImages.filter((img) => img.image_id !== image.image_id)
         setSelectedImage(remainingImages[0] || null)
       }
 
@@ -158,8 +158,8 @@ export function ImageGallery({
       <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-4">
         {localImages.map((image) => (
           <div
-            key={image.id}
-            className={`group relative aspect-square cursor-pointer overflow-hidden rounded-md bg-card dark:bg-white/5 ${selectedImage?.id === image.id ? "ring-2 ring-primary" : ""
+            key={image.image_id}
+            className={`group relative aspect-square cursor-pointer overflow-hidden rounded-md bg-card dark:bg-white/5 ${selectedImage?.image_id === image.image_id ? "ring-2 ring-primary" : ""
               }`}
             onClick={() => setSelectedImage(image)}
           >

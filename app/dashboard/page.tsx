@@ -15,11 +15,11 @@ import { motion } from 'framer-motion';
 
 export default function DashboardPage() {
   const { user, loading } = useAuth();
+  const router = useRouter();
   const [todayPending, setTodayPending] = useState<{ staff_id: number, first_name: string, last_name: string }[]>([]);
   const [yesterdayPending, setYesterdayPending] = useState<{ staff_id: number, first_name: string, last_name: string }[]>([]);
   const [showToday, setShowToday] = useState(true);
   const [showYesterday, setShowYesterday] = useState(true);
-  const router = useRouter();
 
   useEffect(() => {
     async function fetchPending() {
@@ -59,12 +59,7 @@ export default function DashboardPage() {
     fetchPending();
   }, []);
 
-  useEffect(() => {
-    if (!loading && !user) {
-      router.push('/auth');
-    }
-  }, [user, loading, router]);
-
+  // Auth redirects are handled by AuthProvider - no need for redundant check here
   if (loading) return null;
   if (!user) return null;
 

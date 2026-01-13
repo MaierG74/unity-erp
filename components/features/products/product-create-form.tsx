@@ -206,13 +206,15 @@ export function ProductCreateForm({ trigger, onProductCreated }: ProductCreateFo
                   })}
                 </div>
                 <CategoryDialog
-                  productId=""
                   existingCategories={selectedCategories.map(id => ({
                     product_cat_id: id,
                     categoryname: categories.find(c => c.product_cat_id === id)?.categoryname || ''
                   }))}
-                  onCategoriesChange={(newCategories) => {
-                    setSelectedCategories(newCategories.map(c => c.product_cat_id));
+                  onSelectCategories={(newCategories) => {
+                    setSelectedCategories(prev => [
+                      ...prev,
+                      ...newCategories.map(c => c.product_cat_id)
+                    ]);
                   }}
                   trigger={
                     <Button type="button" variant="outline" size="sm">

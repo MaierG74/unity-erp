@@ -18,6 +18,11 @@ import { Button } from '@/components/ui/button';
 type OptionType = {
   value: string;
   label: string;
+  componentData?: {
+    component_id: number;
+    internal_code: string;
+    description: string;
+  };
 };
 
 interface SupplierComponentsProps {
@@ -57,8 +62,11 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
 
   const pageSizeOptions = [10, 25, 50, 100];
   const [componentSearchTerm, setComponentSearchTerm] = useState('');
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   // Store selected component details so we don't lose them when search term changes
   const [selectedAddComponent, setSelectedAddComponent] = useState<{ component_id: number; internal_code: string; description: string } | null>(null);
+  // Store selected component details for edit mode
+  const [selectedEditComponent, setSelectedEditComponent] = useState<{ component_id: number; internal_code: string; description: string } | null>(null);
 
   // Async component search - only loads when dropdown is opened or search term changes
   const { data: components = [], isLoading: componentsSearchLoading } = useQuery({
@@ -147,6 +155,7 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
         setEditingId(null);
         setFormData(null);
         setUpdateError(null);
+        setSelectedEditComponent(null);
       }
     },
     onError: (err: any) => {
@@ -167,7 +176,7 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
     },
   });
 
-  const startEdit = (component: SupplierComponent) => {
+  const startEdit = (component: SupplierComponentWithDetails) => {
     setEditingId(component.supplier_component_id);
     setComponentSearchTerm(''); // Reset search when opening edit form
     setFormData({
@@ -178,6 +187,12 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
       lead_time: component.lead_time || undefined,
       min_order_quantity: component.min_order_quantity || undefined,
     });
+    // Store the initial component details so we can display them properly
+    setSelectedEditComponent({
+      component_id: component.component_id,
+      internal_code: component.component?.internal_code || '',
+      description: component.component?.description || '',
+    });
     setUpdateError(null);
   };
 
@@ -186,6 +201,7 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
     setFormData(null);
     setUpdateError(null);
     setComponentSearchTerm(''); // Reset search when closing edit form
+    setSelectedEditComponent(null); // Reset selected edit component
   };
 
   const handleUpdate = (id: number) => {
@@ -206,10 +222,19 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
 
   // Derived: options and disabled set for already-linked components
   const linkedComponentIds = useMemo(() => new Set((supplierComponents || []).map(c => c.component_id)), [supplierComponents]);
-  const componentOptions: OptionType[] = useMemo(() =>
-    (components || []).map((c: any) => ({ value: String(c.component_id), label: `${c.internal_code} - ${c.description}` })),
-    [components]
-  );
+  const componentOptions: OptionType[] = useMemo(() => {
+    const opts = (components || []).map((c: any) => ({
+      value: String(c.component_id),
+      label: `${c.internal_code || '(no code)'} - ${c.description || ''}`,
+      componentData: {
+        component_id: c.component_id,
+        internal_code: c.internal_code || '',
+        description: c.description || ''
+      }
+    }));
+    console.log('Component options updated:', opts.length, 'options, search term:', componentSearchTerm);
+    return opts;
+  }, [components, componentSearchTerm]);
 
   const supplierOptions: OptionType[] = useMemo(() =>
     (suppliers || []).map((s: any) => ({ value: String(s.supplier_id), label: s.name })),
@@ -368,7 +393,7 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
     menu: () => "z-[9999] mt-2 bg-popover text-popover-foreground rounded-md border shadow-md",
     menuList: () => "p-1",
     option: ({ isSelected, isFocused }: any) => cn(
-      "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors",
+      "relative flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors",
       isSelected && "bg-primary text-primary-foreground",
       !isSelected && isFocused && "bg-accent text-accent-foreground",
       !isSelected && !isFocused && "text-popover-foreground hover:bg-accent hover:text-accent-foreground"
@@ -404,6 +429,8 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
       minWidth: '28rem',
       width: 'max-content',
       maxWidth: '90vw',
+      position: 'absolute',
+      pointerEvents: 'auto',
     }),
     menuList: (base) => ({ ...base, padding: 4 }),
     option: (base, state) => ({
@@ -418,6 +445,8 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
         : state.isFocused
         ? 'hsl(var(--accent-foreground))'
         : 'hsl(var(--popover-foreground))',
+      cursor: 'pointer',
+      pointerEvents: 'auto',
     }),
     clearIndicator: (base) => ({ ...base, color: 'hsl(var(--muted-foreground))' }),
   };
@@ -552,24 +581,61 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
                 {/* Component select */}
                 <td className="p-4 align-top">
                   <ReactSelect<OptionType>
-                    value={selectedAddComponent ? {
+                    value={selectedAddComponent ? componentOptions.find(o => o.value === String(selectedAddComponent.component_id)) || {
                       value: String(selectedAddComponent.component_id),
-                      label: `${selectedAddComponent.internal_code} - ${selectedAddComponent.description}`
+                      label: `${selectedAddComponent.internal_code || '(no code)'} - ${selectedAddComponent.description}`
                     } : null}
+                    onMenuClose={() => {
+                      console.log('Add Component menu closed');
+                      setIsMenuOpen(false);
+                    }}
+                    onMenuOpen={() => {
+                      console.log('Add Component menu opened');
+                      setIsMenuOpen(true);
+                    }}
                     onChange={(opt) => {
+                      console.log('Add Component onChange called:', opt);
                       if (opt) {
-                        // Find the full component details from the current search results
-                        const selectedComp = (components || []).find((c: any) => String(c.component_id) === opt.value);
-                        if (selectedComp) {
-                          setSelectedAddComponent({
-                            component_id: selectedComp.component_id,
-                            internal_code: selectedComp.internal_code,
-                            description: selectedComp.description
-                          });
-                          setAddForm(prev => prev ? { ...prev, component_id: selectedComp.component_id } : prev);
+                        // Try to get componentData from the option first
+                        let componentData = opt.componentData;
+                        
+                        // If componentData is missing, try to find it from componentOptions
+                        if (!componentData && opt.value) {
+                          const foundOption = componentOptions.find(o => o.value === opt.value);
+                          console.log('Found option from componentOptions:', foundOption);
+                          componentData = foundOption?.componentData;
                         }
-                        setComponentSearchTerm(''); // Clear search term when option is selected
+                        
+                        // If we still have componentData, use it
+                        if (componentData) {
+                          console.log('Using componentData:', componentData);
+                          setSelectedAddComponent({
+                            component_id: componentData.component_id,
+                            internal_code: componentData.internal_code,
+                            description: componentData.description
+                          });
+                          setAddForm(prev => prev ? { ...prev, component_id: componentData.component_id } : prev);
+                        } else if (opt.value) {
+                          // Fallback: extract from components array if componentData is still missing
+                          const component = components.find((c: any) => String(c.component_id) === opt.value);
+                          console.log('Found component from components array:', component);
+                          if (component) {
+                            setSelectedAddComponent({
+                              component_id: component.component_id,
+                              internal_code: component.internal_code || '',
+                              description: component.description || ''
+                            });
+                            setAddForm(prev => prev ? { ...prev, component_id: component.component_id } : prev);
+                          } else {
+                            console.error('Could not find component for value:', opt.value);
+                          }
+                        } else {
+                          console.log('No value in option, clearing selection');
+                          setSelectedAddComponent(null);
+                          setAddForm(prev => prev ? { ...prev, component_id: 0 } : prev);
+                        }
                       } else {
+                        console.log('Option is null, clearing selection');
                         setSelectedAddComponent(null);
                         setAddForm(prev => prev ? { ...prev, component_id: 0 } : prev);
                       }
@@ -578,15 +644,22 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
                     isOptionDisabled={(opt) => linkedComponentIds.has(Number(opt.value))}
                     isSearchable
                     onInputChange={(newValue, actionMeta) => {
+                      console.log('Add Component onInputChange:', newValue, actionMeta.action);
+                      // Only update search term on actual input changes, not on selection/blur
                       if (actionMeta.action === 'input-change') {
                         setComponentSearchTerm(newValue);
                       }
+                      // Don't clear search term on other actions to preserve options
                     }}
-                    filterOption={() => true}
-                    inputValue={componentSearchTerm}
+                    filterOption={(option, inputValue) => {
+                      // Let all options through since we're doing server-side filtering
+                      console.log('filterOption called for:', option.label, 'with input:', inputValue);
+                      return true;
+                    }}
                     placeholder="Select"
-                    menuPortalTarget={typeof document !== 'undefined' ? document.body : undefined}
-                    menuPosition="fixed"
+                    menuPlacement="auto"
+                    closeMenuOnSelect={true}
+                    blurInputOnSelect={true}
                     className="w-full md:min-w-[14rem]"
                     classNames={selectClassNames}
                     styles={selectStyles}
@@ -683,32 +756,85 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
                         <div className="w-full">
                           <label className="text-sm font-medium mb-2 block">Component</label>
                           <ReactSelect<OptionType>
-                            value={{
-                              value: component.component_id.toString(),
-                              label: `${component.component.internal_code} - ${component.component.description}`
-                            }}
+                            value={selectedEditComponent ? componentOptions.find(o => o.value === selectedEditComponent.component_id.toString()) || {
+                              value: selectedEditComponent.component_id.toString(),
+                              label: `${selectedEditComponent.internal_code || '(no code)'} - ${selectedEditComponent.description}`
+                            } : null}
                             onChange={(newValue: OptionType | null) => {
+                              console.log('Edit Component onChange called:', newValue);
                               if (newValue) {
-                                setFormData(prev => prev ? {
-                                  ...prev,
-                                  component_id: parseInt(newValue.value)
-                                } : null);
-                                setComponentSearchTerm(''); // Clear search term when option is selected
+                                // Try to get componentData from the option first
+                                let componentData = newValue.componentData;
+                                
+                                // If componentData is missing, try to find it from componentOptions
+                                if (!componentData && newValue.value) {
+                                  const foundOption = componentOptions.find(o => o.value === newValue.value);
+                                  console.log('Edit: Found option from componentOptions:', foundOption);
+                                  componentData = foundOption?.componentData;
+                                }
+                                
+                                // If we still have componentData, use it
+                                if (componentData) {
+                                  console.log('Edit: Using componentData:', componentData);
+                                  setSelectedEditComponent({
+                                    component_id: componentData.component_id,
+                                    internal_code: componentData.internal_code,
+                                    description: componentData.description
+                                  });
+                                  setFormData(prev => prev ? {
+                                    ...prev,
+                                    component_id: componentData.component_id
+                                  } : null);
+                                } else if (newValue.value) {
+                                  // Fallback: extract from components array if componentData is still missing
+                                  const foundComponent = components.find((c: any) => String(c.component_id) === newValue.value);
+                                  console.log('Edit: Found component from components array:', foundComponent);
+                                  if (foundComponent) {
+                                    setSelectedEditComponent({
+                                      component_id: foundComponent.component_id,
+                                      internal_code: foundComponent.internal_code || '',
+                                      description: foundComponent.description || ''
+                                    });
+                                    setFormData(prev => prev ? {
+                                      ...prev,
+                                      component_id: foundComponent.component_id
+                                    } : null);
+                                  } else {
+                                    console.error('Edit: Could not find component for value:', newValue.value);
+                                  }
+                                }
+                              } else {
+                                console.log('Edit: Option is null');
                               }
+                            }}
+                            onMenuClose={() => {
+                              console.log('Edit Component menu closed');
+                              setIsMenuOpen(false);
+                            }}
+                            onMenuOpen={() => {
+                              console.log('Edit Component menu opened');
+                              setIsMenuOpen(true);
                             }}
                             options={componentOptions}
                             isOptionDisabled={(opt) => linkedComponentIds.has(Number(opt.value)) && Number(opt.value) !== component.component_id}
                             isSearchable
                             onInputChange={(newValue, actionMeta) => {
+                              console.log('Edit Component onInputChange:', newValue, actionMeta.action);
+                              // Only update search term on actual input changes, not on selection/blur
                               if (actionMeta.action === 'input-change') {
                                 setComponentSearchTerm(newValue);
                               }
+                              // Don't clear search term on other actions to preserve options
                             }}
-                            filterOption={() => true}
-                            inputValue={componentSearchTerm}
+                            filterOption={(option, inputValue) => {
+                              // Let all options through since we're doing server-side filtering
+                              console.log('Edit filterOption called for:', option.label, 'with input:', inputValue);
+                              return true;
+                            }}
                             placeholder="Select"
-                            menuPortalTarget={typeof document !== 'undefined' ? document.body : undefined}
-                            menuPosition="fixed"
+                            menuPlacement="auto"
+                            closeMenuOnSelect={true}
+                            blurInputOnSelect={true}
                             className="w-full md:min-w-[14rem]"
                             classNames={selectClassNames}
                             styles={selectStyles}
