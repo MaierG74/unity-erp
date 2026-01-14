@@ -111,6 +111,10 @@ export async function POST(
       address: addressLines || 'Your Business Address',
       phone: settings?.phone || '+27 XX XXX XXXX',
       email: settings?.email || 'info@unity-erp.com',
+      website: settings?.website || undefined,
+      logo: settings?.company_logo_path ?
+        supabaseAdmin.storage.from('QButton').getPublicUrl(settings.company_logo_path).data?.publicUrl :
+        undefined,
     };
 
     // Convert base64 PDF to buffer (PDF is generated client-side)
@@ -138,9 +142,11 @@ export async function POST(
       validityDays: 30,
       customMessage,
       companyName: companyInfo.name,
+      companyLogo: companyInfo.logo,
       companyAddress: companyInfo.address,
       companyPhone: companyInfo.phone,
       companyEmail: companyInfo.email,
+      companyWebsite: companyInfo.website,
     };
 
     // Send email with PDF attachment (if provided)

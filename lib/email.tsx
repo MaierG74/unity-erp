@@ -27,7 +27,7 @@ export async function sendPurchaseOrderEmail(
     // Send the email via Resend
     const resend = getResendClient();
     const { data: result, error } = await resend.emails.send({
-      from: `Unity Purchasing <${process.env.EMAIL_FROM || 'purchasing@example.com'}>`,
+      from: `Unity Purchasing <${process.env.EMAIL_FROM_ORDERS || process.env.EMAIL_FROM || 'purchasing@example.com'}>`,
       to: [supplierEmail],
       subject: `Purchase Order: ${data.qNumber}`,
       html,
@@ -103,12 +103,12 @@ export async function sendQuoteEmail(
 
     // Prepare email payload
     const emailPayload: any = {
-      from: `${data.companyName || 'Unity'} <${process.env.EMAIL_FROM || 'quotes@example.com'}>`,
+      from: `${data.companyName || 'Unity'} <${process.env.EMAIL_FROM_SALES || process.env.EMAIL_FROM || 'quotes@example.com'}>`,
       to: [customerEmail],
       subject: `Quotation ${data.quoteNumber} from ${data.companyName || 'Unity'}`,
       html,
       text: generateQuotePlainTextVersion(data),
-      reply_to: data.companyEmail || process.env.EMAIL_FROM || 'quotes@example.com',
+      reply_to: data.companyEmail || process.env.EMAIL_FROM_SALES || process.env.EMAIL_FROM || 'quotes@example.com',
     };
 
     // Add PDF attachment if provided

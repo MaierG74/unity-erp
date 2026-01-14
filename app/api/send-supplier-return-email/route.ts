@@ -143,7 +143,7 @@ export async function POST(request: Request) {
       logoUrl: companyLogoUrl || process.env.COMPANY_LOGO || undefined,
     };
 
-    const fromAddress = process.env.EMAIL_FROM || companyInfo.email || 'purchasing@example.com';
+    const fromAddress = process.env.EMAIL_FROM_ORDERS || process.env.EMAIL_FROM || companyInfo.email || 'purchasing@example.com';
     // Sanitize company name for email header (remove special chars that break RFC 5322)
     const sanitizedCompanyName = companyInfo.name.replace(/[<>()[\]\\,;:@"]/g, '').trim();
 

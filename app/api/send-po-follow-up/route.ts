@@ -135,7 +135,7 @@ export async function POST(request: Request) {
       website: settings?.website || undefined,
       logoUrl: companyLogoUrl || process.env.COMPANY_LOGO || undefined,
     };
-    const fromAddress = process.env.EMAIL_FROM || companyInfo.email || 'purchasing@example.com';
+    const fromAddress = process.env.EMAIL_FROM_ORDERS || process.env.EMAIL_FROM || companyInfo.email || 'purchasing@example.com';
 
     // Send follow-up email to each supplier
     const emailResults: { supplier: string; supplierId: number; success: boolean; error?: string; messageId?: string; recipientEmail?: string }[] = [];
