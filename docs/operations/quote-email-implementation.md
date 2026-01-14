@@ -76,24 +76,40 @@ const pdfBase64 = Buffer.from(pdfBuffer).toString('base64');
 #### 3. Email Template
 **File**: [`emails/quote-email.tsx`](../../emails/quote-email.tsx)
 
-**Structure:**
-- Company logo/branding header with blue accent
-- Professional greeting
-- Custom message section (highlighted blue box)
-- Quote summary table with:
-  - Quote number
-  - Date
-  - Number of items
-  - Subtotal, VAT, Grand Total
-- Validity notice (30 days)
-- Call to action
-- Company contact information footer
+**Structure (Updated January 2026):**
+- Clean white header with company logo (top-left aligned, preserves aspect ratio)
+- Subtle horizontal line separator
+- Simple greeting with customer name
+- Brief thank-you message and call to action
+- Custom message section (if provided)
+- Black footer with company contact details
+
+**Template Content:**
+```
+Dear [Customer Name],
+
+Thank you for allowing us to quote. Please find attached our quotation for your review.
+
+Please review the attached PDF and contact us if you need any adjustments.
+
+Best regards,
+[Company Name]
+```
 
 **Styling:**
 - Uses inline styles (not Tailwind classes) for email compatibility
-- Professional color scheme (grays, blues)
-- Proper typography hierarchy
+- Minimalist color scheme (white background, black footer)
+- Logo height fixed at 50px with auto width to preserve aspect ratio
 - Mobile-responsive layout
+
+**Props Added (January 2026):**
+```typescript
+export interface QuoteEmailProps {
+  // ... existing props ...
+  companyLogo?: string;    // Company logo URL from settings
+  companyWebsite?: string; // Company website URL from settings
+}
+```
 
 #### 4. PDF Document Component
 **File**: [`components/quotes/QuotePDFDocument.tsx`](../../components/quotes/QuotePDFDocument.tsx)
@@ -145,12 +161,17 @@ This ensures emails always use current company branding.
 **Required:**
 ```env
 RESEND_API_KEY=re_xxxxxxxxxxxxx
-EMAIL_FROM=noreply@apexza.net
+EMAIL_FROM=orders@qbutton.co.za
+EMAIL_FROM_ORDERS=orders@qbutton.co.za
+EMAIL_FROM_SALES=sales@qbutton.co.za
 ```
 
 **Email Provider**: Resend
-- Development domain: `apexza.net`
-- Production domain: `qbutton.co.za`
+- Production domain: `qbutton.co.za` (verified with DKIM, SPF, DMARC)
+
+**Sender Addresses:**
+- Supplier emails (purchase orders, follow-ups, returns): `orders@qbutton.co.za`
+- Customer emails (quotes): `sales@qbutton.co.za`
 
 **DNS Configuration** (for apexza.net):
 - MX record: `send` → `feedback-smtp.eu-west-1.amazonses.com` (Priority 10)
@@ -447,13 +468,21 @@ The PDF still includes the company logo - only the email HTML uses text.
 The quote email feature is fully functional and production-ready. Key achievements:
 
 ✅ Email integration with Resend
-✅ Professional email template with company branding
+✅ Professional email template with company branding (redesigned January 2026)
 ✅ Client-side PDF generation (with product images)
 ✅ Database audit logging
-✅ Domain verification for production use
+✅ Domain verification for production use (qbutton.co.za)
 ✅ Error handling and user feedback
 ✅ Company settings integration
+✅ Separate sender addresses (orders@ vs sales@)
+✅ Company logo with preserved aspect ratio
+✅ Clean minimalist email design
 
-**Total Implementation Time**: ~8 hours (including debugging and testing)
+**Total Implementation Time**: ~8 hours (initial), ~2 hours (January 2026 redesign)
 
-**Last Updated**: October 6, 2025
+**Last Updated**: January 14, 2026
+
+## Changelog
+
+- **January 14, 2026**: Migrated to qbutton.co.za domain, added separate sender addresses (EMAIL_FROM_ORDERS, EMAIL_FROM_SALES), redesigned email template to clean white header with logo and black footer. See [email-migration-qbutton-20260114.md](../changelogs/email-migration-qbutton-20260114.md).
+- **October 6, 2025**: Initial implementation with apexza.net domain.

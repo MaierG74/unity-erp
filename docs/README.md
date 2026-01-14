@@ -62,6 +62,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - Completed: [`plans/quote-email-plan.md`](plans/quote-email-plan.md) – Quote PDF email integration plan (see [`operations/quote-email-implementation.md`](operations/quote-email-implementation.md) for implementation)
   - New: [`plans/inventory-traceability-po-consolidation-plan.md`](plans/inventory-traceability-po-consolidation-plan.md) – Inventory traceability through purchase cycle, PO consolidation, and reserved inventory system
 - Changelogs: [`changelogs/`](changelogs/)
+  - [`changelogs/email-migration-qbutton-20260114.md`](changelogs/email-migration-qbutton-20260114.md) – **Email migration to qbutton.co.za** with separate sender addresses and quote template redesign
   - [`changelogs/november-2025-deployment-20251130.md`](changelogs/november-2025-deployment-20251130.md) – **November 2025 production deployment** (major release)
   - [`changelogs/inventory-component-ui-improvements-20251130.md`](changelogs/inventory-component-ui-improvements-20251130.md) – Inventory component page UI/UX improvements (header, tabs, gradients)
   - [`changelogs/inventory-issuance-and-deletion-fixes-20251202.md`](changelogs/inventory-issuance-and-deletion-fixes-20251202.md) – Manual issuance RPC, PDF workflow, and component deletion cleanup fixes

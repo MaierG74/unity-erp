@@ -18,10 +18,30 @@ Set the following environment variables in every deployment target:
 |----------|----------|-------------|
 | `RESEND_API_KEY` | **Yes** | API key from Resend dashboard for email authentication |
 | `SUPABASE_SERVICE_ROLE_KEY` | **Yes** | Service role key for server-side database access |
-| `EMAIL_FROM` | **Yes** | Verified sender email (e.g., `noreply@apexza.net`) |
+| `EMAIL_FROM` | **Yes** | Default verified sender email (e.g., `orders@qbutton.co.za`) |
+| `EMAIL_FROM_ORDERS` | Recommended | Sender for supplier communications (e.g., `orders@qbutton.co.za`) |
+| `EMAIL_FROM_SALES` | Recommended | Sender for customer communications (e.g., `sales@qbutton.co.za`) |
 | `NEXT_PUBLIC_APP_URL` | **Yes** | Production URL for email links (e.g., `https://unity-erp.windsurf.build`) |
 | `NEXT_PUBLIC_SUPABASE_LOGO_BUCKET` | No | Storage bucket for company logo. Defaults to `QButton` |
 | `NEXT_PUBLIC_PO_EMAIL_CC` | No | Default CC list for purchasing notifications |
+
+### Sender Address Configuration
+
+Unity ERP supports separate sender addresses for different communication types:
+
+| Variable | Use Case | Example |
+|----------|----------|---------|
+| `EMAIL_FROM_ORDERS` | Purchase orders, follow-ups, supplier returns | `orders@qbutton.co.za` |
+| `EMAIL_FROM_SALES` | Customer quotes | `sales@qbutton.co.za` |
+
+All email-sending code uses a fallback chain to maintain backward compatibility:
+```typescript
+// Supplier emails
+const fromAddress = process.env.EMAIL_FROM_ORDERS || process.env.EMAIL_FROM || 'purchasing@example.com';
+
+// Customer emails
+const fromAddress = process.env.EMAIL_FROM_SALES || process.env.EMAIL_FROM || 'quotes@example.com';
+```
 
 ### Production Configuration (Netlify)
 
