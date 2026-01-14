@@ -24,6 +24,9 @@ export const useAuth = () => {
 // Public routes should be accessible without auth. Note: '/staff' is a protected area and should NOT be here.
 const publicRoutes = ['/login', '/forgot-password', '/reset-password', '/bypass', '/bypass/orders', '/'];
 
+// Public routes with dynamic segments (patterns) - accessible without auth
+const publicPatternRoutes = ['/supplier-response/[token]'];
+
 // Development bypass routes - these routes will be accessible without authentication in development mode
 const devBypassRoutes = ['/orders', '/orders/new', '/orders/[orderId]', '/quotes', '/quotes/[id]'];
 
@@ -168,7 +171,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const routePattern = route.replace(/\[.*?\]/g, '[^/]+');
       return new RegExp(`^${routePattern}$`).test(pathname);
     });
-    const isPublicRoute = publicRoutes.includes(pathname);
+    const isPublicRoute = publicRoutes.includes(pathname) || publicPatternRoutes.some(route => {
+      const routePattern = route.replace(/\[.*?\]/g, '[^/]+');
+      return new RegExp(`^${routePattern}$`).test(pathname);
+    });
 
     // Determine if we should send an authenticated user to dashboard
     const shouldRedirectAuthedToDashboard = user && (pathname === '/' || pathname === '/login' || pathname === '/forgot-password' || pathname === '/reset-password');

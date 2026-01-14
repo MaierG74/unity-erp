@@ -5,40 +5,52 @@ import { Navbar } from './navbar';
 import { Sidebar, useSidebar } from './sidebar';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { usePathname } from 'next/navigation';
+
+// Standalone public routes - no navbar, no sidebar, no app chrome at all
+const standaloneRoutes = ['/supplier-response'];
 
 export function RootLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
+  const pathname = usePathname();
   const [forceShowSidebar, setForceShowSidebar] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+
   const hasSupabaseEnv = Boolean(
     process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   );
-  
+
+  // Check if this is a standalone public route (render without any app chrome)
+  const isStandaloneRoute = standaloneRoutes.some(route => pathname.startsWith(route));
+
   // Check for authentication and set force sidebar if needed
   useEffect(() => {
+    // Skip for standalone routes
+    if (isStandaloneRoute) return;
+
     // Log authentication state for debugging
     console.log('Authentication state:', { user, loading });
-    
+
     // If there's no user after loading is complete, check auth directly
     if (!loading && !user) {
       checkDirectAuth();
     }
-    
+
     // Check if the screen is mobile size
     const checkIfMobile = () => {
       setIsMobile(window.innerWidth < 768);
     };
-    
+
     // Initial check
     checkIfMobile();
-    
+
     // Add event listener for window resize
     window.addEventListener('resize', checkIfMobile);
-    
+
     // Cleanup
     return () => window.removeEventListener('resize', checkIfMobile);
-  }, [user, loading]);
-  
+  }, [user, loading, isStandaloneRoute]);
+
   // Direct auth check as a backup
   const checkDirectAuth = async () => {
     try {
@@ -60,6 +72,11 @@ export function RootLayout({ children }: { children: React.ReactNode }) {
       console.error('Error checking direct auth:', err);
     }
   };
+
+  // For standalone routes, render children directly without any layout
+  if (isStandaloneRoute) {
+    return <>{children}</>;
+  }
 
   if (loading) {
     return (
