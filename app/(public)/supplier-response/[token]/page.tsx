@@ -304,7 +304,7 @@ export default function SupplierResponsePage() {
                       className={`p-3 rounded-lg border text-left transition-all ${
                         itemResponses[idx]?.status === option.value
                           ? option.color + ' border-2 ring-2 ring-offset-1 ring-current'
-                          : 'bg-white hover:bg-gray-50 border-gray-200'
+                          : 'bg-white hover:bg-gray-50 border-gray-200 text-gray-900'
                       }`}
                     >
                       <p className="font-medium text-sm">{option.label}</p>
