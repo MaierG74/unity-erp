@@ -245,10 +245,11 @@ type PurchaseOrder = {
   supplier_orders?: SupplierOrder[];
 };
 
-// Update approvePurchaseOrder function to call the email API
+// Type for email results from the API
 type EmailResult = { supplier: string; success: boolean; error?: string; messageId?: string };
 
-async function approvePurchaseOrder(id: string, qNumber: string): Promise<{ id: string; emailResults?: EmailResult[]; emailError?: string }> {
+// Approve purchase order (emails sent via dialog after approval)
+async function approvePurchaseOrder(id: string, qNumber: string): Promise<{ id: string }> {
   try {
     // 1. Get the approved status ID
     const { data: statusData, error: statusError } = await supabase
@@ -299,31 +300,7 @@ async function approvePurchaseOrder(id: string, qNumber: string): Promise<{ id: 
       throw new Error('Failed to update supplier orders status');
     }
 
-    // 4. Call the email API to send emails to suppliers
-    try {
-      const response = await fetch('/api/send-purchase-order-email', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ purchaseOrderId: id }),
-      });
-
-      const handleOpenEmailDialog = () => { }
-
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        // Don't throw error, just log it - we don't want to fail the approval if email fails
-        console.error('Error sending emails:', payload);
-        return { id, emailError: payload?.error || 'Email dispatch failed' };
-      }
-      return { id, emailResults: payload?.results as EmailResult[] | undefined };
-    } catch (emailError) {
-      // Log the error but don't fail the approval process
-      console.error('Error calling email API:', emailError);
-      return { id, emailError: (emailError as Error).message };
-    }
-    // Fallback return if early path didn't return
+    // Return success - emails will be sent via dialog
     return { id };
   } catch (error) {
     console.error('Error in approvePurchaseOrder:', error);
@@ -815,9 +792,21 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     setEmailDialogOpen(true);
   };
 
-  const handleSendEmails = (payload: { overrides: EmailOverride[]; cc: string[] }) => {
+  const handleSendEmails = (payload: { overrides: EmailOverride[]; cc: string[]; skippedSuppliers?: number[] }) => {
+    // If all suppliers are skipped, just close the dialog
+    if (payload.overrides.length === 0 && payload.cc.length === 0) {
+      toast({
+        title: 'No emails to send',
+        description: 'All suppliers were skipped.',
+        duration: 3000,
+      });
+      setEmailDialogOpen(false);
+      return;
+    }
+
     setEmailDialogLoading(true);
-    sendEmailMutation.mutate(payload, {
+    // Only pass overrides and cc to the API (skippedSuppliers is just for UI)
+    sendEmailMutation.mutate({ overrides: payload.overrides, cc: payload.cc }, {
       onSuccess: () => {
         setEmailDialogOpen(false);
       },
@@ -883,43 +872,28 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const approveMutation = useMutation({
     mutationFn: (data: { qNumber: string }) =>
       approvePurchaseOrder(id, data.qNumber),
-    onSuccess: (result) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['purchaseOrder', id] });
       queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] });
-      const successes = result?.emailResults?.filter(r => r.success).length ?? 0;
-      const failures = result?.emailResults?.filter(r => !r.success).length ?? 0;
-      if (failures > 0) {
-        const failedSuppliers = result?.emailResults
-          ?.filter((r) => !r.success && r.supplier)
-          .map((r) => r.supplier)
-          .join(', ');
-        toast({
-          title: '✅ Purchase Order Approved',
-          description: `⚠️ Emails: ${successes} sent successfully, ${failures} failed (${failedSuppliers}). Please resend or contact suppliers manually.`,
-          variant: 'default',
-          duration: 8000,
-        });
-      } else if (successes > 0) {
-        toast({
-          title: '✅ Purchase Order Approved & Emails Sent',
-          description: `Successfully emailed to ${successes} supplier${successes === 1 ? '' : 's'}.`,
-          duration: 5000,
-        });
-      } else if (result?.emailError) {
-        toast({
-          title: '✅ Purchase Order Approved',
-          description: `⚠️ Email error: ${result.emailError}. Please send emails manually using "Send Supplier Emails" button.`,
-          variant: 'default',
-          duration: 8000,
-        });
-      } else {
-        toast({
-          title: '✅ Purchase Order Approved',
-          description: 'Order approved. No email status available.',
-          duration: 5000,
-        });
+
+      toast({
+        title: '✅ Purchase Order Approved',
+        description: 'Now configure email recipients and send to suppliers.',
+        duration: 5000,
+      });
+
+      // Open email dialog to let user configure recipients and CC
+      if (baseEmailRows.length > 0) {
+        const clonedRows = baseEmailRows.map((row) => ({
+          supplierId: row.supplierId,
+          supplierName: row.supplierName,
+          options: [...row.options],
+          selectedEmail: row.selectedEmail,
+        }));
+        setEmailRows(clonedRows);
+        setEmailDialogOpen(true);
       }
     },
     onError: (error: Error) => {
