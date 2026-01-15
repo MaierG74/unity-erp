@@ -230,10 +230,13 @@ export default function SupplierResponsePage() {
         <div className="max-w-lg w-full bg-white rounded-xl shadow-sm p-6 text-center">
           <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-gray-900 mb-2">Response Submitted</h2>
-          <p className="text-gray-600 mb-4">
+          <p className="text-gray-600 mb-2">
             Thank you for your update. We have recorded your response.
           </p>
-          
+          <p className="text-sm text-gray-500 mb-4">
+            You can close this window now.
+          </p>
+
           {/* Show summary */}
           <div className="bg-gray-50 rounded-lg p-4 text-left text-sm space-y-3">
             {items.map((item, idx) => (
