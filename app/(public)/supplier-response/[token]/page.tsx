@@ -320,7 +320,7 @@ export default function SupplierResponsePage() {
                     type="date"
                     value={itemResponses[idx]?.expected_date || ''}
                     onChange={(e) => updateItemResponse(idx, 'expected_date', e.target.value)}
-                    className="flex-1 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className="flex-1 px-3 py-2 border rounded-lg text-sm text-gray-900 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     placeholder="Expected delivery"
                   />
                 </div>
@@ -334,7 +334,7 @@ export default function SupplierResponsePage() {
                       onChange={(e) => updateItemResponse(idx, 'notes', e.target.value)}
                       placeholder="Please explain the delay or issue..."
                       rows={2}
-                      className="flex-1 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      className="flex-1 px-3 py-2 border rounded-lg text-sm text-gray-900 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
                 )}
@@ -349,7 +349,7 @@ export default function SupplierResponsePage() {
                 value={globalNotes}
                 onChange={(e) => setGlobalNotes(e.target.value)}
                 rows={3}
-                className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border rounded-lg text-sm text-gray-900 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
 
