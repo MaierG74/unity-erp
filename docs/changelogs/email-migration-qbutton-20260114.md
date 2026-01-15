@@ -14,13 +14,13 @@ Migrated the Unity ERP email infrastructure from a test Resend account (using `@
 
 **Before:**
 ```env
-RESEND_API_KEY=re_Ju2CuMCV_KUPdwpd8B8JAvvJpNZiALYpN
+RESEND_API_KEY=<REDACTED_OLD_KEY>
 EMAIL_FROM=noreply@apexza.net
 ```
 
 **After:**
 ```env
-RESEND_API_KEY=re_eM47Gzz8_9rrdnm8vuu3xCekfNvYQnsV5
+RESEND_API_KEY=<REDACTED>
 EMAIL_FROM=orders@qbutton.co.za
 EMAIL_FROM_ORDERS=orders@qbutton.co.za
 EMAIL_FROM_SALES=sales@qbutton.co.za
