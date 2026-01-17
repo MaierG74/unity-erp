@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { ComponentDialog } from '@/components/features/inventory/ComponentDialog';
@@ -121,15 +121,51 @@ const columns = [
 
 export function ComponentsTab() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Initialize state from URL parameters
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [filterText, setFilterText] = useState('');
+  const [filterText, setFilterText] = useState(() => searchParams?.get('q') || '');
   const debouncedFilterText = useDebounce(filterText, 300);
-  const [selectedCategory, setSelectedCategory] = useState<string>('_all');
-  const [selectedSupplier, setSelectedSupplier] = useState<string>('_all');
+  const [selectedCategory, setSelectedCategory] = useState<string>(() => searchParams?.get('category') || '_all');
+  const [selectedSupplier, setSelectedSupplier] = useState<string>(() => searchParams?.get('supplier') || '_all');
   const [categorySearch, setCategorySearch] = useState('');
   const [supplierSearch, setSupplierSearch] = useState('');
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  // Sync filter state to URL (debounced for search, immediate for dropdowns)
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams?.toString() || '');
+
+    // Update search query (use debounced value to avoid excessive URL updates)
+    if (debouncedFilterText) {
+      params.set('q', debouncedFilterText);
+    } else {
+      params.delete('q');
+    }
+
+    // Update category filter
+    if (selectedCategory && selectedCategory !== '_all') {
+      params.set('category', selectedCategory);
+    } else {
+      params.delete('category');
+    }
+
+    // Update supplier filter
+    if (selectedSupplier && selectedSupplier !== '_all') {
+      params.set('supplier', selectedSupplier);
+    } else {
+      params.delete('supplier');
+    }
+
+    // Build the URL - preserve tab if it exists
+    const query = params.toString();
+    const url = query ? `/inventory?${query}` : '/inventory';
+
+    // Use replace to avoid adding history entries for every keystroke
+    router.replace(url, { scroll: false });
+  }, [debouncedFilterText, selectedCategory, selectedSupplier, router, searchParams]);
 
   // Fetch components data
   const { data: components = [], isLoading, error: queryError } = useQuery({

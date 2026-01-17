@@ -53,6 +53,9 @@ export function RootLayout({ children }: { children: React.ReactNode }) {
 
   // Direct auth check as a backup
   const checkDirectAuth = async () => {
+    // Only run in browser
+    if (typeof window === 'undefined') return;
+
     try {
       if (hasSupabaseEnv) {
         const { data } = await supabase.auth.getSession();

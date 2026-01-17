@@ -8,8 +8,6 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Mail, Loader2, Eye } from 'lucide-react';
 import { Quote } from '@/lib/db/quotes';
-import { pdf } from '@react-pdf/renderer';
-import QuotePDFDocument from '@/components/quotes/QuotePDF';
 
 interface EmailQuoteDialogProps {
   open: boolean;
@@ -139,6 +137,12 @@ export default function EmailQuoteDialog({
       }
 
       console.log(`[EmailQuoteDialog] Converted ${convertedCount} of ${imageCount} images to base64`);
+
+      // Lazy-load PDF dependencies to avoid build-time network issues
+      const [{ pdf }, { default: QuotePDFDocument }] = await Promise.all([
+        import('@react-pdf/renderer'),
+        import('@/components/quotes/QuotePDF'),
+      ]);
 
       // Generate PDF client-side with base64 images
       console.log('[EmailQuoteDialog] Generating PDF...');

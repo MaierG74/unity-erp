@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { QuoteAttachment, uploadQuoteAttachment, deleteQuoteAttachment } from '@/lib/db/quotes';
+import { QuoteAttachment, uploadQuoteAttachment, deleteQuoteAttachment, updateQuoteAttachmentDisplayInQuote } from '@/lib/db/quotes';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -102,12 +102,19 @@ export default function QuoteAttachmentManager({
     }
   };
 
-  const toggleDisplayInQuote = (attachmentId: string, display: boolean) => {
-    const updatedAttachments = attachments.map(att => 
+  const toggleDisplayInQuote = async (attachmentId: string, display: boolean) => {
+    // Update database first
+    try {
+      await updateQuoteAttachmentDisplayInQuote(attachmentId, display);
+    } catch (error) {
+      console.error('Failed to update attachment display setting:', error);
+      return; // Don't update local state if DB update fails
+    }
+
+    const updatedAttachments = attachments.map(att =>
       att.id === attachmentId ? { ...att, display_in_quote: display } : att
     );
     onAttachmentsChange(updatedAttachments);
-    // TODO: Update in database
   };
 
   const isImage = (mimeType: string) => mimeType.startsWith('image/');
@@ -212,9 +219,9 @@ export default function QuoteAttachmentManager({
                     <Checkbox
                       id={`display-${attachment.id}`}
                       checked={attachment.display_in_quote !== false} // Default to true if undefined
-                      onCheckedChange={(checked) => 
-                        toggleDisplayInQuote(attachment.id, checked as boolean)
-                      }
+                      onCheckedChange={(checked) => {
+                        toggleDisplayInQuote(attachment.id, checked as boolean);
+                      }}
                     />
                     <Label 
                       htmlFor={`display-${attachment.id}`}

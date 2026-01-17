@@ -19,6 +19,7 @@ import {
 import { EmailOverrideDialog, EmailRecipientRow, EmailOverride, EmailOption } from './EmailOverrideDialog';
 import { ReceiveItemsModal } from './ReceiveItemsModal';
 import { BulkReceiveModal } from './BulkReceiveModal';
+import { EmailActivityCard } from '@/components/features/emails/EmailActivityCard';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -660,6 +661,10 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           message_id,
           error_message,
           sent_at,
+          delivery_status,
+          delivered_at,
+          bounced_at,
+          bounce_reason,
           supplier:suppliers(name)
         `)
         .eq('purchase_order_id', id)
@@ -674,6 +679,10 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
         message_id: string | null;
         error_message: string | null;
         sent_at: string;
+        delivery_status: string | null;
+        delivered_at: string | null;
+        bounced_at: string | null;
+        bounce_reason: string | null;
         supplier: { name: string } | null;
       }>;
     },
@@ -1497,6 +1506,11 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                           {emailHistory.length}
                         </Badge>
                       )}
+                      {emailHistory && emailHistory.some(e => e.delivery_status === 'bounced' || e.delivery_status === 'complained') && (
+                        <Badge variant="destructive" className="text-[10px] h-5">
+                          Issues
+                        </Badge>
+                      )}
                       {followUpResponses && followUpResponses.some(f => f.response?.responded_at) && (
                         <Badge variant="default" className="text-[10px] h-5 bg-green-600">
                           {followUpResponses.filter(f => f.response?.responded_at).length} response{followUpResponses.filter(f => f.response?.responded_at).length !== 1 ? 's' : ''}
@@ -1512,6 +1526,16 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                   
                   {emailHistoryExpanded && (
                     <div className="mt-2 space-y-3">
+                      {/* Alert for bounced/failed emails */}
+                      {emailHistory && emailHistory.some(e => e.delivery_status === 'bounced' || e.delivery_status === 'complained') && (
+                        <Alert variant="destructive" className="py-2">
+                          <AlertCircle className="h-4 w-4" />
+                          <AlertDescription className="text-xs">
+                            Some emails bounced or were marked as spam. Please verify email addresses and try resending.
+                          </AlertDescription>
+                        </Alert>
+                      )}
+
                       {/* Supplier Responses */}
                       {followUpResponses && followUpResponses.some(f => f.response?.responded_at) && (
                         <div className="space-y-2">
@@ -1559,32 +1583,74 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                         </div>
                       )}
 
-                      {/* Email History List */}
+                      {/* Email History List with Delivery Status */}
                       {emailHistory && emailHistory.length > 0 && (
                         <div className="space-y-2">
                           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Emails Sent</p>
-                          <div className="space-y-2 max-h-24 overflow-y-auto">
-                            {emailHistory.map((email) => (
-                              <div
-                                key={email.email_id}
-                                className={cn(
-                                  "text-xs p-2 rounded-md border",
-                                  email.status === 'sent' ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"
-                                )}
-                              >
-                                <div className="flex items-center justify-between">
-                                  <span className="font-medium truncate">
-                                    {email.supplier?.name || 'Unknown'}
-                                  </span>
-                                  <Badge variant={email.status === 'sent' ? 'default' : 'destructive'} className="text-[10px] ml-2">
-                                    {email.status === 'sent' ? 'Sent' : 'Failed'}
-                                  </Badge>
+                          <div className="space-y-2 max-h-32 overflow-y-auto">
+                            {emailHistory.map((email) => {
+                              const isBounced = email.delivery_status === 'bounced';
+                              const isDelivered = email.delivery_status === 'delivered';
+                              const isComplained = email.delivery_status === 'complained';
+                              const hasIssue = isBounced || isComplained;
+
+                              return (
+                                <div
+                                  key={email.email_id}
+                                  className={cn(
+                                    "text-xs p-2 rounded-md border",
+                                    hasIssue ? "bg-red-50 border-red-300 dark:bg-red-950/30 dark:border-red-800" :
+                                    isDelivered ? "bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800" :
+                                    email.status === 'sent' ? "bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800" :
+                                    "bg-red-50 border-red-200"
+                                  )}
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="font-medium truncate">
+                                      {email.supplier?.name || 'Unknown'}
+                                    </span>
+                                    <div className="flex items-center gap-1">
+                                      {isBounced && (
+                                        <Badge variant="destructive" className="text-[10px]">
+                                          Bounced
+                                        </Badge>
+                                      )}
+                                      {isComplained && (
+                                        <Badge variant="destructive" className="text-[10px]">
+                                          Spam
+                                        </Badge>
+                                      )}
+                                      {isDelivered && (
+                                        <Badge className="text-[10px] bg-green-600">
+                                          Delivered
+                                        </Badge>
+                                      )}
+                                      {!hasIssue && !isDelivered && email.status === 'sent' && (
+                                        <Badge variant="secondary" className="text-[10px]">
+                                          Sent
+                                        </Badge>
+                                      )}
+                                      {email.status === 'failed' && (
+                                        <Badge variant="destructive" className="text-[10px]">
+                                          Failed
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="text-muted-foreground mt-1">
+                                    To: {email.recipient_email}
+                                  </div>
+                                  {email.bounce_reason && (
+                                    <div className="text-red-600 dark:text-red-400 mt-1 text-[10px]">
+                                      Reason: {email.bounce_reason}
+                                    </div>
+                                  )}
+                                  <div className="text-muted-foreground">
+                                    {format(new Date(email.sent_at), 'PP · p')}
+                                  </div>
                                 </div>
-                                <div className="text-muted-foreground">
-                                  {format(new Date(email.sent_at), 'PP · p')}
-                                </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       )}

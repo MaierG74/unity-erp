@@ -752,12 +752,12 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
         </Button>
       </div>
       
-      <div className="rounded-lg border bg-card overflow-hidden">
+      <div className="rounded-lg border bg-card overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/50">
               <TableHead className="w-12 text-center"></TableHead>
-              <TableHead className="font-medium">Description</TableHead>
+              <TableHead className="font-medium min-w-[250px]">Description</TableHead>
               <TableHead className="w-32 text-center font-medium">Qty</TableHead>
               <TableHead className="w-36 text-center font-medium">Unit Price</TableHead>
               <TableHead className="w-40 text-right font-medium">Total</TableHead>

@@ -17,6 +17,7 @@ import QuoteAttachmentManager from './QuoteAttachmentManager';
 import { QuotePDFDownload } from './QuotePDF';
 import QuoteItemsTable from '@/components/features/quotes/QuoteItemsTable';
 import EmailQuoteDialog from '@/components/features/quotes/EmailQuoteDialog';
+import { EmailActivityCard } from '@/components/features/emails/EmailActivityCard';
 import { useToast } from '@/components/ui/use-toast';
 import {
   FileText,
@@ -406,6 +407,9 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
               </CardContent>
             </Card>
           </div>
+
+          {/* Email Activity */}
+          <EmailActivityCard type="quote" id={quoteId} />
         </TabsContent>
 
         {/* Line Items Tab */}

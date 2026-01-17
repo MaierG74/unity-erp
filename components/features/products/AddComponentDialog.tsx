@@ -42,7 +42,7 @@ export default function AddComponentDialog({
   const [components, setComponents] = useState<ComponentRow[]>([]);
   const [selected, setSelected] = useState<ComponentRow | null>(null);
 
-  const [quantity, setQuantity] = useState<number>(1);
+  const [quantity, setQuantity] = useState<string>("1");
 
   // supplier selection (optional)
   const [supplierSearch, setSupplierSearch] = useState("");
@@ -147,7 +147,7 @@ export default function AddComponentDialog({
       if (error) throw error;
       setOpenState(false);
       setSelected(null);
-      setQuantity(1);
+      setQuantity("1");
       setSupplierSearch("");
       setSuppliers([]);
       setSelectedSupplierId(null);
@@ -192,7 +192,7 @@ export default function AddComponentDialog({
                   step="0.01"
                   min="0.0001"
                   value={quantity}
-                  onChange={(e) => setQuantity(Math.max(0.0001, Number(e.target.value)))}
+                  onChange={(e) => setQuantity(e.target.value)}
                 />
                 <Button onClick={add} disabled={!selected || loading}>Add</Button>
               </div>

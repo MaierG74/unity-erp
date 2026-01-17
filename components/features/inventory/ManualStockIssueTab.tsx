@@ -42,8 +42,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { pdf } from '@react-pdf/renderer';
-import { ManualIssuancePDFDocument } from './ManualIssuancePDF';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 
 // Issue categories for phased rollout
@@ -412,7 +410,7 @@ export function ManualStockIssueTab() {
   // Create inventory record mutation
   const createInventoryMutation = useMutation({
     mutationFn: async (componentIds: number[]) => {
-      const results = [];
+      const results: Array<{ success: boolean; message?: string }> = [];
       for (const componentId of componentIds) {
         const { data, error } = await supabase.rpc('create_inventory_for_component', {
           p_component_id: componentId,
@@ -616,6 +614,10 @@ export function ManualStockIssueTab() {
   // Generate picking list PDF (helper function)
   const handleGeneratePickingListPdf = async () => {
     try {
+      const [{ pdf }, { ManualIssuancePDFDocument }] = await Promise.all([
+        import('@react-pdf/renderer'),
+        import('./ManualIssuancePDF'),
+      ]);
       const components = selectedComponents.map(comp => ({
         component_id: comp.component_id,
         internal_code: comp.internal_code,
@@ -1217,6 +1219,10 @@ export function ManualStockIssueTab() {
                               size="sm"
                               onClick={async () => {
                                 try {
+                                  const [{ pdf }, { ManualIssuancePDFDocument }] = await Promise.all([
+                                    import('@react-pdf/renderer'),
+                                    import('./ManualIssuancePDF'),
+                                  ]);
                                   const staffName = group.staff 
                                     ? `${group.staff.first_name} ${group.staff.last_name}`
                                     : null;

@@ -8,6 +8,7 @@ import { Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useSidebar } from './sidebar';
+import { EmailIssuesIndicator } from '@/components/features/emails/EmailIssuesIndicator';
 import { useEffect, useState } from 'react';
 import { usePathname, useSearchParams, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -150,6 +151,7 @@ export function Navbar() {
               Admin
             </Link>
           )}
+          <EmailIssuesIndicator />
           <ThemeToggle />
           {user ? (
             <div className="flex items-center space-x-4">

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -33,7 +33,9 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Save, Upload, X } from 'lucide-react';
+import { Loader2, Save, Upload, X, Check } from 'lucide-react';
+import { useDropzone } from 'react-dropzone';
+import { cn } from '@/lib/utils';
 
 const formSchema = z.object({
   internal_code: z.string().min(1, 'Component code is required'),
@@ -81,6 +83,7 @@ type EditComponentDialogProps = {
 export function EditComponentDialog({ open, onOpenChange, component }: EditComponentDialogProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(component.image_url);
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -101,6 +104,74 @@ export function EditComponentDialog({ open, onOpenChange, component }: EditCompo
     },
   });
 
+  // Dropzone handlers for image upload
+  const onDropImage = useCallback((acceptedFiles: File[]) => {
+    if (acceptedFiles.length > 0) {
+      const file = acceptedFiles[0];
+
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        toast({
+          title: 'Invalid file type',
+          description: 'Please upload an image file (JPG, PNG, GIF, etc.)',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // Validate file size
+      if (file.size > 5 * 1024 * 1024) {
+        toast({
+          title: 'File too large',
+          description: 'Please upload an image smaller than 5MB.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      setSelectedImageFile(file);
+      // Create a preview URL
+      const previewUrl = URL.createObjectURL(file);
+      setImagePreview(previewUrl);
+      console.log('Image file dropped/selected:', file.name);
+    }
+  }, [toast]);
+
+  const { getRootProps, getInputProps, isDragActive, open: openFileDialog } = useDropzone({
+    onDrop: onDropImage,
+    accept: {
+      'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.bmp', '.webp']
+    },
+    multiple: false,
+    noClick: true
+  });
+
+  const handlePaste = useCallback(async (e: React.ClipboardEvent<HTMLDivElement>) => {
+    if (isUploading) return;
+    const items = e.clipboardData?.items;
+    if (!items || items.length === 0) return;
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          // Create a new file with a meaningful name
+          const newFile = new File([file], `pasted-image-${Date.now()}.${item.type.split('/')[1]}`, {
+            type: item.type
+          });
+
+          setSelectedImageFile(newFile);
+          const previewUrl = URL.createObjectURL(newFile);
+          setImagePreview(previewUrl);
+          console.log('Image pasted from clipboard:', newFile.name);
+          break;
+        }
+      }
+    }
+  }, [isUploading]);
+
   // Reset form when dialog opens or component changes
   useEffect(() => {
     if (open) {
@@ -117,6 +188,7 @@ export function EditComponentDialog({ open, onOpenChange, component }: EditCompo
         location: component.inventory?.location || '',
       });
       setImagePreview(component.image_url);
+      setSelectedImageFile(null);
     }
   }, [open, component, form]);
 
@@ -149,6 +221,58 @@ export function EditComponentDialog({ open, onOpenChange, component }: EditCompo
   // Update component mutation
   const updateMutation = useMutation({
     mutationFn: async (values: z.infer<typeof formSchema>) => {
+      let finalImageUrl = values.image_url;
+
+      // Handle image upload if a new file is selected
+      if (selectedImageFile) {
+        setIsUploading(true);
+        try {
+          // Delete old image if exists
+          const oldImageUrl = component.image_url;
+          if (oldImageUrl) {
+            try {
+              const url = new URL(oldImageUrl);
+              const pathParts = url.pathname.split('/');
+              if (pathParts.length >= 3) {
+                const filePath = pathParts.slice(2).join('/');
+                await supabase.storage.from('QButton').remove([filePath]);
+              }
+            } catch (error) {
+              console.warn('Error deleting old image:', error);
+            }
+          }
+
+          const fileExt = selectedImageFile.name.split('.').pop();
+          const fileName = `${values.internal_code}-${Date.now()}.${fileExt}`;
+          const filePath = `component-images/${fileName}`;
+
+          const { error: uploadError } = await supabase.storage
+            .from('QButton')
+            .upload(filePath, selectedImageFile, {
+              upsert: true,
+              contentType: selectedImageFile.type,
+            });
+
+          if (uploadError) throw uploadError;
+
+          const {
+            data: { publicUrl },
+          } = supabase.storage.from('QButton').getPublicUrl(filePath);
+
+          finalImageUrl = publicUrl;
+        } catch (error) {
+          console.error('Error uploading image:', error);
+          toast({
+            title: 'Upload failed',
+            description: 'Failed to upload image. Please try again.',
+            variant: 'destructive',
+          });
+          throw error;
+        } finally {
+          setIsUploading(false);
+        }
+      }
+
       // Update component details
       const { error } = await supabase
         .from('components')
@@ -157,7 +281,7 @@ export function EditComponentDialog({ open, onOpenChange, component }: EditCompo
           description: values.description,
           unit_id: parseInt(values.unit_id),
           category_id: parseInt(values.category_id),
-          image_url: values.image_url,
+          image_url: finalImageUrl,
         })
         .eq('component_id', component.component_id);
 
@@ -197,83 +321,9 @@ export function EditComponentDialog({ open, onOpenChange, component }: EditCompo
     },
   });
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!file.type.startsWith('image/')) {
-      toast({
-        title: 'Invalid file type',
-        description: 'Please upload an image file (JPG, PNG, GIF, etc.)',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (file.size > 5 * 1024 * 1024) {
-      toast({
-        title: 'File too large',
-        description: 'Please upload an image smaller than 5MB.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setIsUploading(true);
-
-    try {
-      const oldImageUrl = component.image_url;
-      if (oldImageUrl) {
-        try {
-          const url = new URL(oldImageUrl);
-          const pathParts = url.pathname.split('/');
-          if (pathParts.length >= 3) {
-            const filePath = pathParts.slice(2).join('/');
-            await supabase.storage.from('QButton').remove([filePath]);
-          }
-        } catch (error) {
-          console.warn('Error deleting old image:', error);
-        }
-      }
-
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${component.internal_code}-${Date.now()}.${fileExt}`;
-      const filePath = `component-images/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('QButton')
-        .upload(filePath, file, {
-          upsert: true,
-          contentType: file.type,
-        });
-
-      if (uploadError) throw uploadError;
-
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from('QButton').getPublicUrl(filePath);
-
-      setImagePreview(publicUrl);
-      form.setValue('image_url', publicUrl);
-
-      toast({
-        title: 'Image uploaded',
-        description: 'Image has been uploaded. Click Save to apply changes.',
-      });
-    } catch (error) {
-      console.error('Error uploading image:', error);
-      toast({
-        title: 'Upload failed',
-        description: 'Failed to upload image. Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
   const handleRemoveImage = () => {
     setImagePreview(null);
+    setSelectedImageFile(null);
     form.setValue('image_url', null);
   };
 
@@ -425,6 +475,8 @@ export function EditComponentDialog({ open, onOpenChange, component }: EditCompo
             {/* Image Upload */}
             <div className="space-y-3">
               <FormLabel>Component Image</FormLabel>
+
+              {/* Image Preview */}
               {imagePreview && (
                 <div className="relative inline-block">
                   <img
@@ -444,23 +496,62 @@ export function EditComponentDialog({ open, onOpenChange, component }: EditCompo
                 </div>
               )}
 
-              <div>
-                <Input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageUpload}
-                  disabled={isUploading}
-                  className="cursor-pointer"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Max 5MB. JPG, PNG, GIF, WebP
-                </p>
+              {/* Dropzone Upload Area */}
+              <div
+                {...getRootProps()}
+                onPaste={handlePaste}
+                tabIndex={0}
+                title="Drag files here or paste from clipboard"
+                className={cn(
+                  "border-2 border-dashed rounded-lg p-6 text-center transition-colors focus:outline-none focus:ring-2 focus:ring-ring",
+                  "cursor-text",
+                  isDragActive ? "border-primary bg-muted/40" : "border-border hover:bg-muted/40",
+                  isUploading && "opacity-50 cursor-not-allowed"
+                )}
+              >
+                <input {...getInputProps()} disabled={isUploading} />
+                <Upload className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
+                {isUploading ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <p className="text-sm text-muted-foreground">Uploading...</p>
+                  </div>
+                ) : isDragActive ? (
+                  <p className="text-sm text-foreground">Drop image here...</p>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-foreground">
+                      Drag & drop, or paste with <span className="font-medium">Ctrl/Cmd+V</span>
+                    </p>
+                    <div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openFileDialog();
+                        }}
+                        disabled={isUploading}
+                      >
+                        Click to select
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Max 5MB. JPG, PNG, GIF, WebP
+                    </p>
+                  </div>
+                )}
               </div>
 
-              {isUploading && (
+              {/* File Selected Indicator */}
+              {selectedImageFile && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Uploading...
+                  <Check className="h-4 w-4 text-green-500" />
+                  {selectedImageFile.name}
+                  <span className="text-xs">
+                    ({(selectedImageFile.size / 1024).toFixed(1)} KB)
+                  </span>
                 </div>
               )}
             </div>

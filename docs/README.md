@@ -8,6 +8,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
 
 - `overview/` – High-level orientation docs. Start here for the overall roadmap (`master-plan.md`), platform style guide, auth overview, and the AI assistant vision.
 - `deployment/` – Production deployment guides, environment configuration, and operational procedures.
+- `features/` – Feature implementation documentation, UI redesigns, and copy-paste prompts for applying similar changes.
 - `domains/`
   - `orders/` – Day-to-day order operations, including the master guide and reset instructions.
   - `purchasing/` – Purchasing workflows and reset checklist.
@@ -42,11 +43,16 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - Inventory: [`domains/components/inventory-master.md`](domains/components/inventory-master.md), [`domains/components/inventory-transactions.md`](domains/components/inventory-transactions.md)
   - Timekeeping: [`domains/timekeeping/labor-section.md`](domains/timekeeping/labor-section.md), [`domains/timekeeping/labor-planning-user-guide.md`](domains/timekeeping/labor-planning-user-guide.md)
   - Suppliers: [`domains/suppliers/suppliers-master.md`](domains/suppliers/suppliers-master.md)
+- Features:
+  - [`features/customers-ui-redesign.md`](features/customers-ui-redesign.md) – ✅ **Customers UI redesign** with inline editing, metrics, charts, and streamlined navigation
+  - [`features/suppliers-ui-redesign-prompt.md`](features/suppliers-ui-redesign-prompt.md) – **Suppliers UI redesign prompt** (ready to apply in new conversation)
 - Operations:
   - [`operations/deployment-guide.md`](operations/deployment-guide.md) – **Production deployment guide** (Netlify, env vars, rollback)
   - [`operations/BOL_SYSTEM.md`](operations/BOL_SYSTEM.md)
   - [`operations/cutlist-standalone.md`](operations/cutlist-standalone.md)
-  - [`operations/email-integration.md`](operations/email-integration.md)
+  - [`operations/email-integration.md`](operations/email-integration.md) – Core Resend email setup and configuration
+  - [`operations/email-tracking.md`](operations/email-tracking.md) – ✅ **Email delivery tracking with Resend webhooks** (requires webhook setup)
+  - [`operations/supabase-mcp.md`](operations/supabase-mcp.md) – Unified Supabase MCP config (server-postgres, port 6543, tool-specific paths)
   - [`operations/chrome-devtools-mcp.md`](operations/chrome-devtools-mcp.md)
   - [`operations/quote-email-implementation.md`](operations/quote-email-implementation.md) – ✅ Quote email implementation summary (completed)
   - [`operations/airtable-sync-runbook.md`](operations/airtable-sync-runbook.md) – Airtable migration/sync checklist and incident response guide
@@ -62,6 +68,10 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - Completed: [`plans/quote-email-plan.md`](plans/quote-email-plan.md) – Quote PDF email integration plan (see [`operations/quote-email-implementation.md`](operations/quote-email-implementation.md) for implementation)
   - New: [`plans/inventory-traceability-po-consolidation-plan.md`](plans/inventory-traceability-po-consolidation-plan.md) – Inventory traceability through purchase cycle, PO consolidation, and reserved inventory system
 - Changelogs: [`changelogs/`](changelogs/)
+  - [`changelogs/inventory-url-filter-persistence-20260117.md`](changelogs/inventory-url-filter-persistence-20260117.md) – ✅ **Inventory URL filter persistence** (filters survive navigation to detail pages)
+  - [`changelogs/quote-line-items-description-width-fix-20260117.md`](changelogs/quote-line-items-description-width-fix-20260117.md) – ✅ **Quote line items Description column width fix** (minimum width and horizontal scroll for better readability)
+  - [`changelogs/quote-attachment-display-toggle-fix-20260117.md`](changelogs/quote-attachment-display-toggle-fix-20260117.md) – ✅ **Quote attachment "Show in PDF" toggle fix** (checkbox now persists to database)
+  - [`changelogs/email-delivery-tracking-20260116.md`](changelogs/email-delivery-tracking-20260116.md) – ✅ **Email delivery tracking with Resend webhooks** (requires webhook configuration in production)
   - [`changelogs/email-migration-qbutton-20260114.md`](changelogs/email-migration-qbutton-20260114.md) – **Email migration to qbutton.co.za** with separate sender addresses and quote template redesign
   - [`changelogs/november-2025-deployment-20251130.md`](changelogs/november-2025-deployment-20251130.md) – **November 2025 production deployment** (major release)
   - [`changelogs/inventory-component-ui-improvements-20251130.md`](changelogs/inventory-component-ui-improvements-20251130.md) – Inventory component page UI/UX improvements (header, tabs, gradients)
@@ -88,7 +98,9 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
 - Analysis: [`analysis/`](analysis/)
   - [`analysis/inventory-components-performance-review.md`](analysis/inventory-components-performance-review.md) – Performance and responsiveness review of Components section
 - Technical Guides: [`technical/`](technical/)
+  - [`technical/url-filter-persistence.md`](technical/url-filter-persistence.md) – **URL-based filter persistence pattern** for preserving filters when navigating between list/detail pages
   - [`technical/color-system.md`](technical/color-system.md) – Centralized color palette, semantic colors, and rollback instructions
+  - [`technical/dev-server-troubleshooting.md`](technical/dev-server-troubleshooting.md) – Dev server startup and build issue fixes
   - [`technical/supabase-query-patterns.md`](technical/supabase-query-patterns.md) – Supabase query patterns, common errors, and troubleshooting
   - [`technical/smoke-tests.md`](technical/smoke-tests.md) – How to run the Purchasing smoke test
   - [`technical/airtable-migration-guide.md`](technical/airtable-migration-guide.md) – Airtable → Supabase migration process plus MCP server configuration

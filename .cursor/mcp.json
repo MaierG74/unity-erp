@@ -1,33 +1,23 @@
 {
   "mcpServers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "chrome-devtools-mcp@latest"
+      ]
+    },
     "supabase": {
       "command": "npx",
       "args": [
         "-y",
-        "@supabase/mcp-server-supabase@latest",
-        "--project-ref=ttlyfhkrsjjrzxiagzpb"
+        "@modelcontextprotocol/server-postgres",
+        "--connection-string=${POSTGRES_CONNECTION_STRING}"
       ],
       "env": {
-        "SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN}"
+        "POSTGRES_CONNECTION_STRING": "${DATABASE_URL}"
       },
-      "autoapprove": ["execute_sql", "get_database_info", "list_tables", "query_table", "insert_rows", "update_rows", "delete_rows"]
-    },
-    "sequential-thinking": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-sequential-thinking"
-      ]
-    },
-    "airtable": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "airtable-mcp-server"
-      ],
-      "env": {
-        "AIRTABLE_API_KEY": "${AIRTABLE_API_KEY}"
-      }
+      "autoapprove": ["query"]
     }
   }
 }

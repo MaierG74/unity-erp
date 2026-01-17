@@ -12,7 +12,6 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { Customer } from '@/types/orders';
 import { PageToolbar } from '@/components/ui/page-toolbar';
@@ -95,25 +94,24 @@ export default function CustomersPage() {
                 <th scope="col" className="px-6 py-3 text-left text-xs font-bold text-muted-foreground uppercase tracking-wider">
                   Telephone
                 </th>
-                <th scope="col" className="px-6 py-3 text-right text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                  Actions
-                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {filteredCustomers.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-base text-muted-foreground">
+                  <td colSpan={4} className="px-6 py-8 text-center text-base text-muted-foreground">
                     {searchQuery ? 'No customers found matching your search.' : 'No customers found. Add your first customer!'}
                   </td>
                 </tr>
               ) : (
                 filteredCustomers.map((customer) => (
-                  <tr key={customer.id} className="hover:bg-accent/10 dark:hover:bg-accent/30 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap text-base font-semibold text-foreground">
-                      <Link href={`/customers/${customer.id}`} className="hover:underline">
-                        {customer.name || 'N/A'}
-                      </Link>
+                  <tr
+                    key={customer.id}
+                    className="hover:bg-accent/10 dark:hover:bg-accent/30 transition-colors cursor-pointer group"
+                    onClick={() => router.push(`/customers/${customer.id}`)}
+                  >
+                    <td className="px-6 py-4 whitespace-nowrap text-base font-semibold text-foreground group-hover:text-primary transition-colors">
+                      {customer.name || 'N/A'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-base text-muted-foreground">
                       {customer.contact || 'N/A'}
@@ -123,14 +121,6 @@ export default function CustomersPage() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-base text-muted-foreground">
                       {customer.telephone || 'N/A'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-base font-medium flex gap-2 justify-end">
-                      <Link href={`/customers/${customer.id}`} className="button-primary px-3 py-1 text-xs font-semibold">
-                        View
-                      </Link>
-                      <Link href={`/customers/${customer.id}/edit`} className="button-primary bg-secondary text-secondary-foreground px-3 py-1 text-xs font-semibold">
-                        Edit
-                      </Link>
                     </td>
                   </tr>
                 ))

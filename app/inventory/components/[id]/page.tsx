@@ -7,7 +7,6 @@ import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ArrowLeft, Loader2, Edit, Trash2 } from 'lucide-react';
-import Link from 'next/link';
 import { OverviewTab } from '@/components/features/inventory/component-detail/OverviewTab';
 import { SuppliersTab } from '@/components/features/inventory/component-detail/SuppliersTab';
 import { TransactionsTab as ComponentTransactionsTab } from '@/components/features/inventory/component-detail/TransactionsTab';
@@ -188,10 +187,8 @@ export default function ComponentDetailPage() {
       {/* Header - Customer page style */}
       <div className="flex justify-between items-center">
         <div className="flex items-center space-x-4">
-          <Button variant="outline" size="icon" asChild>
-            <Link href="/inventory">
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
+          <Button variant="outline" size="icon" onClick={() => router.back()}>
+            <ArrowLeft className="h-4 w-4" />
           </Button>
           <h1 className="text-3xl font-bold">{component.internal_code}</h1>
         </div>

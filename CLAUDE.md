@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## MCP Configuration
 
-**IMPORTANT**: This project uses multiple MCP servers for database access and browser automation.
+**IMPORTANT**: This project uses MCP servers for browser automation.
 
 ### MCP Servers Overview
 
-- **Supabase Postgres** – Read-only database access via connection pooler
 - **Chrome DevTools** – Live browser automation/debugging with visible Chrome window
+- **Supabase** – Official Supabase MCP with database CRUD, storage, functions, branching, and debugging
 
 ### MCP Files Location
 
@@ -24,17 +24,6 @@ Both files should contain the following configuration:
 ```json
 {
   "mcpServers": {
-    "supabase": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-postgres"
-      ],
-      "env": {
-        "POSTGRES_CONNECTION_STRING": "postgresql://postgres.ttlyfhkrsjjrzxiagzpb:YOUR_DB_PASSWORD@aws-0-us-east-1.pooler.supabase.com:5432/postgres"
-      },
-      "autoapprove": ["query"]
-    },
     "chrome-devtools": {
       "command": "npx",
       "args": [
@@ -69,6 +58,10 @@ Both files should contain the following configuration:
         "performance_stop_trace",
         "performance_analyze_insight"
       ]
+    },
+    "supabase": {
+      "type": "http",
+      "url": "https://mcp.supabase.com/mcp?project_ref=ttlyfhkrsjjrzxiagzpb&features=storage%2Cbranching%2Cfunctions%2Cdevelopment%2Cdebugging%2Cdatabase%2Caccount%2Cdocs"
     }
   }
 }
@@ -107,18 +100,26 @@ In addition to MCP config, you must also configure `.claude/settings.json`:
 
 ### Configuration Details
 
-**Supabase Postgres:**
-- Uses connection pooler port 5432 (session mode)
-- Connection is **read-only** due to pooler limitations
-- For write operations (DDL, migrations), use Supabase SQL Editor directly
-- Auto-approves `query` tool to prevent approval prompts
-
 **Chrome DevTools:**
 - Launches visible Chrome browser window (no `--headless` flag)
 - Uses separate profile at `~/.cache/chrome-devtools-mcp/chrome-profile`
 - **Does NOT inherit authentication** from your default Chrome profile
 - Useful for visual debugging, screenshots, and performance analysis
 - Auto-approves all 23 Chrome DevTools tools
+
+**Supabase (Official HTTP MCP):**
+- Official Supabase MCP server via HTTP
+- Connects to project `ttlyfhkrsjjrzxiagzpb`
+- **Enabled features:**
+  - `database` - Full CRUD operations on all tables
+  - `storage` - File upload/download/management
+  - `functions` - Edge function management
+  - `branching` - Database branch operations
+  - `development` - Development tools
+  - `debugging` - Debug capabilities
+  - `account` - Account management
+  - `docs` - Documentation access
+- No connection string needed (uses HTTP API)
 
 ### Authentication Limitations
 
@@ -208,10 +209,8 @@ For authenticated testing, always test manually in your regular browser.
 
 ### Important Notes
 
-- **Do NOT use** `@supabase/mcp-server-supabase` as it only provides read-only access
 - **Always update both** global and project MCP config files
 - **Always restart Claude Code** after MCP configuration changes
-- For database migrations, use Supabase SQL Editor (connection is read-only via pooler)
 
 ## Development Commands
 
@@ -307,3 +306,11 @@ If encountering dependency issues:
 - Font: Inter (Google Fonts)
 - All API routes are in `app/api/`
 - Database schema available via `npm run schema`
+
+### Known Issues
+
+**@react-pdf/renderer build issues**
+- This package causes build timeouts due to its `jay-peg` dependency making network requests during compilation
+- **Interim fix**: Use lazy/dynamic imports inside handler functions instead of static imports at the top of files
+- **Long-term solution**: Move PDF generation to server-side API routes
+- See `docs/technical/dev-server-troubleshooting.md` and `startupissue.md` for full history

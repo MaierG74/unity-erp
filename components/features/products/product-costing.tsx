@@ -1,6 +1,7 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import {
   Card,
@@ -17,6 +18,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Button } from '@/components/ui/button'
+import { Plus, Trash2 } from 'lucide-react'
+import { AddOverheadDialog } from './AddOverheadDialog'
+import { useToast } from '@/components/ui/use-toast'
 
 type BomRow = {
   bom_id: number
@@ -38,6 +43,23 @@ type BolRow = {
   }
   job_hourly_rates?: { hourly_rate: number } | null
   piece_work_rates?: { rate: number } | null
+}
+
+type OverheadElement = {
+  element_id: number
+  code: string
+  name: string
+  cost_type: 'fixed' | 'percentage'
+  default_value: number
+  percentage_basis: 'materials' | 'labor' | 'total' | null
+}
+
+type ProductOverheadItem = {
+  id: number
+  element_id: number
+  quantity: number
+  override_value: number | null
+  element: OverheadElement
 }
 type EffectiveBolItem = {
   job_id: number
@@ -75,6 +97,10 @@ function fmtMoney(v: number | null | undefined) {
 }
 
 export function ProductCosting({ productId }: { productId: number }) {
+  const [addOverheadOpen, setAddOverheadOpen] = useState(false)
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+
   // Feature flag: include linked sub-products in Effective BOM
   const featureAttach = typeof process !== 'undefined' && process.env.NEXT_PUBLIC_FEATURE_ATTACH_BOM === 'true'
 
@@ -229,12 +255,78 @@ export function ProductCosting({ productId }: { productId: number }) {
   })
   const labourCost = labour.reduce((sum, l) => sum + l.lineTotal, 0)
 
-  const unitCost = materialsCost + labourCost
+  // Overhead Costs
+  const { data: overheadData = [], isLoading: overheadLoading } = useQuery({
+    queryKey: ['product-overhead', productId],
+    queryFn: async () => {
+      const res = await fetch(`/api/products/${productId}/overhead`)
+      if (!res.ok) return []
+      const json = await res.json()
+      // API returns { items: [...] }, extract the items array
+      const items = json?.items ?? json
+      return Array.isArray(items) ? items : []
+    },
+  })
+  // Safety: ensure overheadItems is always an array
+  const overheadItems: ProductOverheadItem[] = Array.isArray(overheadData) ? overheadData : []
+
+  function calculateOverheadLine(item: ProductOverheadItem): number {
+    const value = item.override_value ?? item.element.default_value
+    const qty = item.quantity
+
+    if (item.element.cost_type === 'fixed') {
+      return value * qty
+    }
+
+    // Percentage type
+    const basis =
+      item.element.percentage_basis === 'materials'
+        ? materialsCost
+        : item.element.percentage_basis === 'labor'
+        ? labourCost
+        : materialsCost + labourCost // 'total'
+
+    return (basis * value / 100) * qty
+  }
+
+  const overhead = overheadItems.map((item) => ({
+    element_id: item.element_id,
+    code: item.element.code,
+    name: item.element.name,
+    type: item.element.cost_type,
+    value: item.override_value ?? item.element.default_value,
+    quantity: item.quantity,
+    lineTotal: calculateOverheadLine(item),
+  }))
+  const overheadCost = overhead.reduce((sum, o) => sum + o.lineTotal, 0)
+
+  const unitCost = materialsCost + labourCost + overheadCost
+
+  async function handleRemoveOverhead(elementId: number) {
+    try {
+      const res = await fetch(`/api/products/${productId}/overhead?element_id=${elementId}`, {
+        method: 'DELETE',
+      })
+      if (!res.ok) {
+        throw new Error('Failed to remove overhead')
+      }
+      queryClient.invalidateQueries({ queryKey: ['product-overhead', productId] })
+      toast({ title: 'Overhead removed', description: 'The overhead cost has been removed from this product.' })
+    } catch (error) {
+      console.error('Failed to remove overhead:', error)
+      toast({ title: 'Error', description: 'Failed to remove overhead cost.', variant: 'destructive' })
+    }
+  }
+
+  function handleOverheadAdded() {
+    queryClient.invalidateQueries({ queryKey: ['product-overhead', productId] })
+    setAddOverheadOpen(false)
+  }
 
   return (
     <div className="space-y-6">
       {/* Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardHeader><CardTitle>Materials Cost</CardTitle></CardHeader>
           <CardContent>
@@ -248,6 +340,12 @@ export function ProductCosting({ productId }: { productId: number }) {
           <CardHeader><CardTitle>Labor Cost</CardTitle></CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{fmtMoney(labourCost)}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Overhead Cost</CardTitle></CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{fmtMoney(overheadCost)}</div>
           </CardContent>
         </Card>
         <Card>
@@ -348,15 +446,81 @@ export function ProductCosting({ productId }: { productId: number }) {
         </CardContent>
       </Card>
 
-      {/* Placeholder for future markups */}
+      {/* Overhead Breakdown */}
       <Card>
-        <CardHeader>
-          <CardTitle>Markups (Planned)</CardTitle>
-          <CardDescription>
-            We will add configurable overhead and margin here to project price and profit.
-          </CardDescription>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Overhead Breakdown</CardTitle>
+            <CardDescription>Indirect costs and overhead allocations</CardDescription>
+          </div>
+          <Button size="sm" onClick={() => setAddOverheadOpen(true)}>
+            <Plus className="h-4 w-4 mr-1" />
+            Add Overhead
+          </Button>
         </CardHeader>
+        <CardContent>
+          {overheadLoading ? (
+            <div className="py-4">Loading overhead…</div>
+          ) : overhead.length === 0 ? (
+            <div className="py-4 text-muted-foreground">No overhead costs assigned. Click "Add Overhead" to assign overhead elements to this product.</div>
+          ) : (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Code</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead className="text-right">Value</TableHead>
+                    <TableHead className="text-right">Qty</TableHead>
+                    <TableHead className="text-right">Line Total</TableHead>
+                    <TableHead className="w-10"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {overhead.map((o, idx) => (
+                    <TableRow key={idx}>
+                      <TableCell className="font-mono text-sm">{o.code}</TableCell>
+                      <TableCell>{o.name}</TableCell>
+                      <TableCell className="capitalize">{o.type === 'fixed' ? 'Fixed' : 'Percentage'}</TableCell>
+                      <TableCell className="text-right">
+                        {o.type === 'fixed' ? fmtMoney(o.value) : `${o.value}%`}
+                      </TableCell>
+                      <TableCell className="text-right">{o.quantity}</TableCell>
+                      <TableCell className="text-right font-medium">{fmtMoney(o.lineTotal)}</TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive hover:text-destructive"
+                          onClick={() => handleRemoveOverhead(o.element_id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {overhead.length > 1 && (
+                    <TableRow className="font-semibold bg-muted/50">
+                      <TableCell colSpan={6} className="text-right">Total Overhead</TableCell>
+                      <TableCell className="text-right">{fmtMoney(overheadCost)}</TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
       </Card>
+
+      {/* Add Overhead Dialog */}
+      <AddOverheadDialog
+        open={addOverheadOpen}
+        onOpenChange={setAddOverheadOpen}
+        productId={productId}
+        existingElementIds={overheadItems.map(item => item.element_id)}
+        onSuccess={handleOverheadAdded}
+      />
     </div>
   )
 }

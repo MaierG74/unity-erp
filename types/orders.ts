@@ -12,6 +12,18 @@ export interface Customer {
   // Optional fields used in some UI surfaces
   contact_person?: string | null;
   phone?: string | null;
+  // Address fields
+  address_line_1?: string | null;
+  address_line_2?: string | null;
+  city?: string | null;
+  state_province?: string | null;
+  postal_code?: string | null;
+  country?: string | null;
+  // Additional fields
+  notes?: string | null;
+  payment_terms?: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Product {

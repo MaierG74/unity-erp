@@ -364,7 +364,7 @@ export function ReportsTab() {
                           <TableCell className="text-sm">
                             {component.description || '-'}
                           </TableCell>
-                          <TableCell className="text-right text-amber-600 font-semibold">
+                          <TableCell className="text-right text-amber-600 dark:text-amber-400 font-semibold">
                             {inv?.quantity_on_hand || 0}
                           </TableCell>
                           <TableCell className="text-right">
@@ -483,8 +483,8 @@ export function ReportsTab() {
                         <TableRow
                           className={
                             component.severity === 'critical'
-                              ? 'bg-red-50 hover:bg-red-100'
-                              : 'bg-amber-50 hover:bg-amber-100'
+                              ? 'bg-red-50 hover:bg-red-100 dark:bg-muted/30 dark:hover:bg-muted/50 dark:border-l-2 dark:border-l-red-500'
+                              : 'bg-amber-50 hover:bg-amber-100 dark:bg-muted/30 dark:hover:bg-muted/50 dark:border-l-2 dark:border-l-amber-500'
                           }
                         >
                           <TableCell>
@@ -504,30 +504,30 @@ export function ReportsTab() {
                           <TableCell className="font-medium">
                             <a
                               href={`/inventory/components/${component.component_id}`}
-                              className="text-blue-600 hover:underline"
+                              className="text-blue-600 dark:text-blue-400 hover:underline"
                             >
                               {component.internal_code}
                             </a>
                           </TableCell>
-                          <TableCell className="text-sm max-w-[200px] truncate">
+                          <TableCell className="text-sm text-foreground max-w-[200px] truncate">
                             {component.description || '-'}
                           </TableCell>
                           <TableCell className="text-right font-semibold">
                             {component.currentStock}
                           </TableCell>
-                          <TableCell className="text-right text-blue-600">
+                          <TableCell className="text-right text-blue-600 dark:text-blue-400">
                             {component.onOrder}
                           </TableCell>
                           <TableCell className="text-right">
                             {component.draftPOQuantity > 0 ? (
-                              <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-100 text-amber-800 border border-amber-200">
+                              <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-100 text-amber-800 border border-amber-200 dark:bg-amber-900/50 dark:text-amber-200 dark:border-amber-700">
                                 {component.draftPOQuantity}
                               </span>
                             ) : (
                               <span className="text-muted-foreground">—</span>
                             )}
                           </TableCell>
-                          <TableCell className="text-right text-purple-600 font-semibold">
+                          <TableCell className="text-right text-purple-600 dark:text-purple-400 font-semibold">
                             {component.required}
                           </TableCell>
                           <TableCell className="text-right">
@@ -597,7 +597,7 @@ export function ReportsTab() {
 
                     return (
                       <Fragment key={component.component_id}>
-                        <TableRow className="bg-blue-50 hover:bg-blue-100">
+                        <TableRow className="bg-blue-50 hover:bg-blue-100 dark:bg-muted/30 dark:hover:bg-muted/50 dark:border-l-2 dark:border-l-blue-500">
                           <TableCell>
                             <Button
                               variant="ghost"
@@ -615,34 +615,34 @@ export function ReportsTab() {
                           <TableCell className="font-medium">
                             <a
                               href={`/inventory/components/${component.component_id}`}
-                              className="text-blue-600 hover:underline"
+                              className="text-blue-600 dark:text-blue-400 hover:underline"
                             >
                               {component.internal_code}
                             </a>
                           </TableCell>
-                          <TableCell className="text-sm max-w-[200px] truncate">
+                          <TableCell className="text-sm text-foreground max-w-[200px] truncate">
                             {component.description || '-'}
                           </TableCell>
                           <TableCell className="text-right font-semibold">
                             {component.currentStock}
                           </TableCell>
-                          <TableCell className="text-right text-blue-600 font-semibold">
+                          <TableCell className="text-right text-blue-600 dark:text-blue-400 font-semibold">
                             {component.onOrder}
                           </TableCell>
                           <TableCell className="text-right">
                             {component.draftPOQuantity > 0 ? (
-                              <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-100 text-amber-800 border border-amber-200">
+                              <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-100 text-amber-800 border border-amber-200 dark:bg-amber-900/50 dark:text-amber-200 dark:border-amber-700">
                                 {component.draftPOQuantity}
                               </span>
                             ) : (
                               <span className="text-muted-foreground">—</span>
                             )}
                           </TableCell>
-                          <TableCell className="text-right text-purple-600">
+                          <TableCell className="text-right text-purple-600 dark:text-purple-400">
                             {component.required}
                           </TableCell>
                           <TableCell className="text-right">
-                            <Badge variant="outline" className="bg-blue-100 text-blue-700 border-blue-300">
+                            <Badge variant="outline" className="bg-blue-100 text-blue-700 border-blue-300 dark:bg-blue-900/50 dark:text-blue-200 dark:border-blue-700">
                               +{surplus} surplus
                             </Badge>
                           </TableCell>
@@ -650,7 +650,7 @@ export function ReportsTab() {
                             <Button
                               variant="outline"
                               size="sm"
-                              className="h-8 px-2 text-blue-600 border-blue-300 hover:bg-blue-100"
+                              className="h-8 px-2 text-blue-600 border-blue-300 hover:bg-blue-100 dark:text-blue-400 dark:border-blue-700 dark:hover:bg-blue-900/50"
                               onClick={() => sendFollowUpEmail(component.component_id, component.internal_code)}
                               disabled={isSending}
                             >

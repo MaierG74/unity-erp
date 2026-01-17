@@ -2,12 +2,16 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getSupplier, updateSupplier } from '@/lib/api/suppliers';
+import { supabase } from '@/lib/supabase';
+import { formatCurrency } from '@/lib/quotes';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Package, DollarSign, Clock, Layers, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, useMemo } from 'react';
+import type { SupplierPurchaseOrder } from '@/types/suppliers';
 
 // Lazy load tab components
 const SupplierForm = lazy(() => import('@/components/features/suppliers/supplier-form').then(m => ({ default: m.SupplierForm })));
@@ -30,6 +34,50 @@ const TabSkeleton = () => (
     </div>
   </div>
 );
+
+// Metric card component
+interface MetricCardProps {
+  title: string;
+  value: string;
+  icon: React.ReactNode;
+  subtitle?: string;
+  isLoading?: boolean;
+}
+
+function MetricCard({ title, value, icon, subtitle, isLoading }: MetricCardProps) {
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div className="space-y-2">
+              <div className="h-4 w-20 bg-muted animate-pulse rounded" />
+              <div className="h-7 w-24 bg-muted animate-pulse rounded" />
+            </div>
+            <div className="h-10 w-10 rounded-full bg-muted animate-pulse" />
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm text-muted-foreground">{title}</p>
+            <p className="text-2xl font-bold">{value}</p>
+            {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+          </div>
+          <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+            {icon}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function SupplierDetailPage() {
   const params = useParams();
@@ -54,6 +102,99 @@ export default function SupplierDetailPage() {
     },
   });
 
+  // Fetch purchase orders for metrics
+  const { data: purchaseOrders = [], isLoading: isLoadingOrders } = useQuery({
+    queryKey: ['supplier-purchase-orders-metrics', supplierId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('purchase_orders')
+        .select(`
+          purchase_order_id,
+          order_date,
+          created_at,
+          status:supplier_order_statuses!purchase_orders_status_id_fkey(status_name),
+          supplier_orders!inner(
+            order_id,
+            order_quantity,
+            total_received,
+            supplier_component:suppliercomponents!inner(
+              supplier_component_id,
+              price,
+              supplier_id
+            )
+          )
+        `)
+        .eq('supplier_orders.suppliercomponents.supplier_id', supplierId);
+
+      if (error) throw error;
+      return (data || []) as SupplierPurchaseOrder[];
+    },
+    enabled: !!supplierId,
+  });
+
+  // Fetch component count for metrics
+  const { data: componentCount = 0, isLoading: isLoadingComponents } = useQuery({
+    queryKey: ['supplier-component-count', supplierId],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('suppliercomponents')
+        .select('*', { count: 'exact', head: true })
+        .eq('supplier_id', supplierId);
+
+      if (error) throw error;
+      return count || 0;
+    },
+    enabled: !!supplierId,
+  });
+
+  // Calculate metrics
+  const metrics = useMemo(() => {
+    const totalOrders = purchaseOrders.length;
+
+    // Calculate total spend
+    const totalSpend = purchaseOrders.reduce((sum, order) => {
+      return sum + order.supplier_orders.reduce((lineSum, line) => {
+        return lineSum + (line.order_quantity * (line.supplier_component?.price || 0));
+      }, 0);
+    }, 0);
+
+    // Calculate outstanding orders (orders with items not fully received)
+    let outstandingOrders = 0;
+    let outstandingValue = 0;
+
+    purchaseOrders.forEach(order => {
+      const statusName = order.status?.status_name?.toLowerCase() || '';
+      // Only count as outstanding if not fully received or cancelled
+      if (statusName !== 'fully received' && statusName !== 'cancelled') {
+        const hasOutstanding = order.supplier_orders.some(line => line.total_received < line.order_quantity);
+        if (hasOutstanding) {
+          outstandingOrders++;
+          order.supplier_orders.forEach(line => {
+            const outstandingQty = line.order_quantity - line.total_received;
+            if (outstandingQty > 0) {
+              outstandingValue += outstandingQty * (line.supplier_component?.price || 0);
+            }
+          });
+        }
+      }
+    });
+
+    // Get last order date
+    const lastOrderDate = purchaseOrders.length > 0
+      ? new Date(purchaseOrders[0].order_date || purchaseOrders[0].created_at)
+      : null;
+
+    return {
+      totalOrders,
+      totalSpend,
+      outstandingOrders,
+      outstandingValue,
+      lastOrderDate,
+    };
+  }, [purchaseOrders]);
+
+  const isLoadingMetrics = isLoadingOrders || isLoadingComponents;
+
   if (isLoading) {
     return (
       <div className="space-y-6">
@@ -62,7 +203,12 @@ export default function SupplierDetailPage() {
         </div>
         <div>
           <div className="h-9 w-64 bg-muted animate-pulse rounded mb-2" />
-          <div className="h-4 w-96 bg-muted animate-pulse rounded" />
+        </div>
+        {/* Metrics skeleton */}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <MetricCard key={i} title="" value="" icon={null} isLoading={true} />
+          ))}
         </div>
         <div className="space-y-4">
           <div className="flex gap-2">
@@ -124,6 +270,43 @@ export default function SupplierDetailPage() {
       </div>
       <div>
         <h1 className="text-3xl font-bold">{supplier.name}</h1>
+      </div>
+
+      {/* Metrics Row */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <MetricCard
+          title="Total Orders"
+          value={metrics.totalOrders.toString()}
+          icon={<Package className="h-5 w-5" />}
+          isLoading={isLoadingMetrics}
+        />
+        <MetricCard
+          title="Total Spend"
+          value={formatCurrency(metrics.totalSpend)}
+          icon={<DollarSign className="h-5 w-5" />}
+          isLoading={isLoadingMetrics}
+        />
+        <MetricCard
+          title="Outstanding"
+          value={metrics.outstandingOrders.toString()}
+          icon={<AlertCircle className="h-5 w-5" />}
+          subtitle={metrics.outstandingValue > 0 ? formatCurrency(metrics.outstandingValue) : undefined}
+          isLoading={isLoadingMetrics}
+        />
+        <MetricCard
+          title="Components"
+          value={componentCount.toString()}
+          icon={<Layers className="h-5 w-5" />}
+          isLoading={isLoadingMetrics}
+        />
+        <MetricCard
+          title="Last Order"
+          value={metrics.lastOrderDate
+            ? metrics.lastOrderDate.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })
+            : 'Never'}
+          icon={<Clock className="h-5 w-5" />}
+          isLoading={isLoadingMetrics}
+        />
       </div>
 
       <Tabs

@@ -11,7 +11,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getSuppliers } from '@/lib/api/suppliers';
-import Link from 'next/link';
 import { Plus } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { PricelistPreviewModal } from './pricelist-preview-modal';
@@ -235,15 +234,12 @@ export function SupplierList() {
               <th scope="col" className="px-6 py-3 text-left text-xs font-bold text-muted-foreground uppercase tracking-wider">
                 Price Lists
               </th>
-              <th scope="col" className="px-6 py-3 text-right text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                Actions
-              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {filteredSuppliers.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-6 py-8 text-center text-base text-muted-foreground">
+                <td colSpan={4} className="px-6 py-8 text-center text-base text-muted-foreground">
                   {searchTerm ? 'No suppliers found matching your search.' : 'No suppliers found. Add your first supplier!'}
                 </td>
               </tr>
@@ -251,11 +247,13 @@ export function SupplierList() {
               filteredSuppliers.map((supplier) => {
                 const email = supplier.emails?.find((e) => e.is_primary)?.email || supplier.emails?.[0]?.email || '';
                 return (
-                  <tr key={supplier.supplier_id} className="hover:bg-accent/10 dark:hover:bg-accent/30 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap text-base font-semibold text-foreground">
-                      <Link href={`/suppliers/${supplier.supplier_id}`} className="hover:underline">
-                        {supplier.name || 'N/A'}
-                      </Link>
+                  <tr
+                    key={supplier.supplier_id}
+                    className="hover:bg-accent/10 dark:hover:bg-accent/30 transition-colors cursor-pointer group"
+                    onClick={() => router.push(`/suppliers/${supplier.supplier_id}`)}
+                  >
+                    <td className="px-6 py-4 whitespace-nowrap text-base font-semibold text-foreground group-hover:text-primary transition-colors">
+                      {supplier.name || 'N/A'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-base text-muted-foreground">
                       {supplier.contact_info || 'N/A'}
@@ -271,14 +269,6 @@ export function SupplierList() {
                       ) : (
                         'None'
                       )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-base font-medium flex gap-2 justify-end">
-                      <Link href={`/suppliers/${supplier.supplier_id}`} className="button-primary px-3 py-1 text-xs font-semibold">
-                        View
-                      </Link>
-                      <Link href={`/suppliers/${supplier.supplier_id}/edit`} className="button-primary bg-secondary text-secondary-foreground px-3 py-1 text-xs font-semibold">
-                        Edit
-                      </Link>
                     </td>
                   </tr>
                 );

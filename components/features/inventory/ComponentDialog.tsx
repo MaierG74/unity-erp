@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/popover"
 import ReactSelect from "react-select"
 import { useToast } from "@/components/ui/use-toast"
+import { useDropzone } from "react-dropzone"
 
 type OptionType = {
   value: string
@@ -151,6 +152,47 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
   const form = useComponentForm(selectedItem)
   const storageBucket = 'QButton';
   const { toast } = useToast();
+
+  // Dropzone handlers for image upload
+  const onDropImage = useCallback((acceptedFiles: File[]) => {
+    if (acceptedFiles.length > 0) {
+      const file = acceptedFiles[0]
+      form.setValue('image', file)
+      console.log('Image file dropped/selected:', file.name)
+    }
+  }, [form])
+
+  const { getRootProps, getInputProps, isDragActive, open: openFileDialog } = useDropzone({
+    onDrop: onDropImage,
+    accept: {
+      'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.bmp', '.webp']
+    },
+    multiple: false,
+    noClick: true // Prevent auto-opening file dialog on click
+  })
+
+  const handlePaste = useCallback(async (e: React.ClipboardEvent<HTMLDivElement>) => {
+    if (isUploading) return
+    const items = e.clipboardData?.items
+    if (!items || items.length === 0) return
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile()
+        if (file) {
+          e.preventDefault()
+          // Create a new file with a meaningful name
+          const newFile = new File([file], `pasted-image-${Date.now()}.${item.type.split('/')[1]}`, {
+            type: item.type
+          })
+          form.setValue('image', newFile)
+          console.log('Image pasted from clipboard:', newFile.name)
+          break
+        }
+      }
+    }
+  }, [form, isUploading])
 
   const { data: units = [] } = useQuery<{ unit_id: number; unit_code?: string; unit_name: string }[]>({
     queryKey: ["units"],
@@ -913,77 +955,49 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                   <FormItem>
                     <FormLabel>Image</FormLabel>
                     <FormControl>
-                      <div className="flex flex-col gap-4">
+                      <div className="flex flex-col gap-2">
                         <div
-                          className={cn(
-                            "border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors",
-                            "hover:border-muted-foreground/50",
-                            "text-muted-foreground"
-                          )}
-                          onDragOver={(e) => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                          }}
-                          onDrop={(e) => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                            const file = e.dataTransfer.files?.[0]
-                            if (file && file.type.startsWith('image/')) {
-                              onChange(file)
-                              console.log('Image file dropped:', file.name)
-                            }
-                          }}
-                          onClick={() => {
-                            const input = document.createElement('input')
-                            input.type = 'file'
-                            input.accept = 'image/*'
-                            input.onchange = (e) => {
-                              const file = (e.target as HTMLInputElement).files?.[0]
-                              if (file) {
-                                onChange(file)
-                                console.log('Image file selected:', file.name)
-                              }
-                            }
-                            input.click()
-                          }}
-                          onPaste={(e) => {
-                            e.preventDefault()
-                            e.stopPropagation()
-
-                            // Handle pasted files
-                            const pastedFile = e.clipboardData?.files?.[0]
-                            if (pastedFile?.type.startsWith('image/')) {
-                              onChange(pastedFile)
-                              console.log('Image pasted:', pastedFile.name)
-                              return
-                            }
-
-                            // Handle pasted image data
-                            const items = e.clipboardData?.items
-                            for (const item of Array.from(items || [])) {
-                              if (item.type.startsWith('image/')) {
-                                const blob = item.getAsFile()
-                                if (blob) {
-                                  // Create a new file with a meaningful name
-                                  const file = new File([blob], `pasted-image.${item.type.split('/')[1]}`, {
-                                    type: item.type
-                                  })
-                                  onChange(file)
-                                  console.log('Image data pasted and converted to file')
-                                  break
-                                }
-                              }
-                            }
-                          }}
+                          {...getRootProps()}
+                          onPaste={handlePaste}
                           tabIndex={0}
+                          title="Drag files here or paste from clipboard"
+                          className={cn(
+                            "border-2 border-dashed rounded-lg p-4 text-center transition-colors focus:outline-none focus:ring-2 focus:ring-ring",
+                            "cursor-text",
+                            isDragActive ? "border-primary bg-muted/40" : "border-border hover:bg-muted/40",
+                            isUploading && "opacity-50 cursor-not-allowed"
+                          )}
                         >
-                          <Upload className="h-4 w-4" />
-                          <div className="text-sm font-medium">
-                            Click, drag and drop, or paste
-                          </div>
-                          <div className="text-xs">
-                            SVG, PNG, JPG or GIF (max. 800x400px)
-                          </div>
+                          <input {...getInputProps()} disabled={isUploading} />
+                          <Upload className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
+                          {isUploading ? (
+                            <p className="text-sm text-muted-foreground">Uploading...</p>
+                          ) : isDragActive ? (
+                            <p className="text-sm text-foreground">Drop image here...</p>
+                          ) : (
+                            <div className="space-y-1">
+                              <p className="text-sm text-muted-foreground">
+                                Drag & drop, or paste with <span className="font-medium">Ctrl/Cmd+V</span>
+                              </p>
+                              <div>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    openFileDialog()
+                                  }}
+                                  disabled={isUploading}
+                                >
+                                  Click to select
+                                </Button>
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                SVG, PNG, JPG or GIF (max. 800×400px)
+                              </p>
+                            </div>
+                          )}
                         </div>
 
                         <div className="flex items-center gap-2">
@@ -1018,7 +1032,6 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                                 className="h-4 w-4 p-0"
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  // Clear the image_url from the component
                                   form.setValue('image_url', null);
                                   console.log('Current image marked for deletion');
                                 }}

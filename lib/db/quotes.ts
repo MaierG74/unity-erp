@@ -326,6 +326,17 @@ export async function deleteQuoteAttachment(id: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function updateQuoteAttachmentDisplayInQuote(
+  id: string,
+  displayInQuote: boolean
+): Promise<void> {
+  const { error } = await supabase
+    .from('quote_attachments')
+    .update({ display_in_quote: displayInQuote })
+    .eq('id', id);
+  if (error) throw error;
+}
+
 export async function createQuoteAttachmentFromUrl(params: {
   quoteId: string;
   quoteItemId?: string | null;

@@ -1,13 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { fetchComponents, Component, fetchSupplierComponentsForComponent, SupplierComponent, fetchProducts, Product, formatCurrency } from '@/lib/db/quotes';
 import SupplierBrowseModal from './SupplierBrowseModal';
-import { Building2 } from 'lucide-react';
+import { Building2, FileText, Database, Package, Layers } from 'lucide-react';
 
 interface ComponentSelectionDialogProps {
   open: boolean;
@@ -60,6 +59,11 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
   const [includeLabor, setIncludeLabor] = useState(true);
   const [showSupplierBrowse, setShowSupplierBrowse] = useState(false);
 
+  // Refs for auto-focus
+  const descriptionInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const productSearchInputRef = useRef<HTMLInputElement>(null);
+
   // Load components/products when dialog opens and specific type is selected
   useEffect(() => {
     if (!open) return;
@@ -77,6 +81,21 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
       loadCollections();
     }
   }, [open, entryType]);
+
+  // Auto-focus appropriate input when tab changes
+  useEffect(() => {
+    if (!open) return;
+    const timer = setTimeout(() => {
+      if (entryType === 'manual') {
+        descriptionInputRef.current?.focus();
+      } else if (entryType === 'database' && !selectedComponent) {
+        searchInputRef.current?.focus();
+      } else if (entryType === 'product') {
+        productSearchInputRef.current?.focus();
+      }
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [open, entryType, selectedComponent]);
 
   const loadComponents = async () => {
     setLoading(true);
@@ -252,29 +271,63 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
         <DialogHeader>
           <div className="flex items-center justify-between">
             <DialogTitle>Add Component</DialogTitle>
-            {entryType === 'database' && (
-              <Button type="button" variant="outline" size="sm" className="h-8 mr-10" onClick={() => setShowSupplierBrowse(true)}>
-                <Building2 className="h-4 w-4 mr-2" /> Browse by supplier
-              </Button>
-            )}
+            <Button type="button" variant="outline" size="sm" className="h-8 mr-10" onClick={() => setShowSupplierBrowse(true)}>
+              <Building2 className="h-4 w-4 mr-2" /> Browse by supplier
+            </Button>
           </div>
         </DialogHeader>
-        
+
         <div className="space-y-3 max-h-[70vh] overflow-y-auto overflow-x-visible px-1">
-          {/* Entry Type Selection */}
-          <div>
-            <Label htmlFor="entry-type">Component Type</Label>
-            <Select value={entryType} onValueChange={(value: any) => setEntryType(value)}>
-              <SelectTrigger className="h-9 bg-background text-foreground border-input focus:ring-inset focus:ring-offset-0">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="manual">Manual Entry</SelectItem>
-                <SelectItem value="database">Database Component</SelectItem>
-                <SelectItem value="product">Product</SelectItem>
-                <SelectItem value="collection">Costing Cluster</SelectItem>
-              </SelectContent>
-            </Select>
+          {/* Tab-based Entry Type Selection */}
+          <div className="flex gap-1 p-1 bg-muted rounded-lg">
+            <button
+              type="button"
+              onClick={() => setEntryType('manual')}
+              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                entryType === 'manual'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
+              }`}
+            >
+              <FileText className="h-4 w-4" />
+              Manual
+            </button>
+            <button
+              type="button"
+              onClick={() => setEntryType('database')}
+              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                entryType === 'database'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
+              }`}
+            >
+              <Database className="h-4 w-4" />
+              Component
+            </button>
+            <button
+              type="button"
+              onClick={() => setEntryType('product')}
+              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                entryType === 'product'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
+              }`}
+            >
+              <Package className="h-4 w-4" />
+              Product
+            </button>
+            <button
+              type="button"
+              onClick={() => setEntryType('collection')}
+              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                entryType === 'collection'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
+              }`}
+            >
+              <Layers className="h-4 w-4" />
+              Cluster
+            </button>
           </div>
 
           {entryType === 'manual' ? (
@@ -283,6 +336,7 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
               <div>
                 <Label htmlFor="description">Description</Label>
                 <Input
+                  ref={descriptionInputRef}
                   id="description"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
@@ -299,6 +353,7 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
                 <div>
                   <Label htmlFor="search">Search Components</Label>
                   <Input
+                    ref={searchInputRef}
                     id="search"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
@@ -434,6 +489,7 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
               <div>
                 <Label htmlFor="product-search">Search Products</Label>
                 <Input
+                  ref={productSearchInputRef}
                   id="product-search"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
