@@ -7,6 +7,8 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
 ## Directory structure
 
 - `overview/` – High-level orientation docs. Start here for the overall roadmap (`master-plan.md`), platform style guide, auth overview, and the AI assistant vision.
+- `instructions/` – End-user guides for configuring and using Unity ERP features.
+  - `emails/` – Email template configuration and customization guides.
 - `deployment/` – Production deployment guides, environment configuration, and operational procedures.
 - `features/` – Feature implementation documentation, UI redesigns, and copy-paste prompts for applying similar changes.
 - `domains/`
@@ -30,6 +32,8 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - [`overview/STYLE_GUIDE.md`](overview/STYLE_GUIDE.md)
   - [`overview/auth.md`](overview/auth.md)
   - [`overview/AI Assistant.md`](overview/AI%20Assistant.md)
+- Instructions (End-User Guides)
+  - [`instructions/emails/email-templates.md`](instructions/emails/email-templates.md) – **Email template configuration** (customize PO emails, quote terms)
 - Auth
   - [`auth/user-onboarding.md`](auth/user-onboarding.md)
   - [`auth/roles-and-rls.md`](auth/roles-and-rls.md)

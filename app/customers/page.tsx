@@ -53,6 +53,13 @@ export default function CustomersPage() {
 
   // Update URL when debounced search changes
   useEffect(() => {
+    const currentUrlQuery = searchParams?.get('q') || '';
+
+    // Only update URL if debounced value differs from current URL
+    if (debouncedSearchQuery === currentUrlQuery) {
+      return;
+    }
+
     const params = new URLSearchParams(searchParams?.toString() || '');
 
     if (debouncedSearchQuery) {

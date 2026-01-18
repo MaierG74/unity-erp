@@ -48,7 +48,6 @@ export default function SettingsPage() {
     po_contact_email: '',
   });
   const [savingTemplates, setSavingTemplates] = useState(false);
-  const [templatesExpanded, setTemplatesExpanded] = useState(true);
   const [quoteExpanded, setQuoteExpanded] = useState(true);
   const [poExpanded, setPoExpanded] = useState(true);
 
@@ -209,20 +208,22 @@ export default function SettingsPage() {
 
   return (
     <div className="min-h-screen bg-background py-8">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
+        {/* Global alerts */}
+        {error && (
+          <div className="rounded border border-red-200 bg-red-50 dark:bg-red-950/50 dark:border-red-800 p-3 text-sm text-red-800 dark:text-red-200">{error}</div>
+        )}
+        {success && (
+          <div className="rounded border border-green-200 bg-green-50 dark:bg-green-950/50 dark:border-green-800 p-3 text-sm text-green-800 dark:text-green-200">{success}</div>
+        )}
+
+        {/* Company Settings Card */}
         <div className="bg-card shadow rounded-lg">
           <div className="px-6 py-4 border-b">
             <h1 className="text-lg font-semibold">Company Settings</h1>
-            <p className="text-sm text-muted-foreground">Branding and details used in quotes</p>
+            <p className="text-sm text-muted-foreground">Branding and details used in quotes and emails</p>
           </div>
           <div className="p-6 space-y-6">
-            {error && (
-              <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>
-            )}
-            {success && (
-              <div className="rounded border border-green-200 bg-green-50 p-3 text-sm text-green-800">{success}</div>
-            )}
-
             {/* Logo */}
             <div>
               <label className="block text-sm font-medium mb-2">Company Logo</label>
@@ -307,125 +308,6 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* Document Templates Section */}
-            <div className="border-t pt-6">
-              <button
-                type="button"
-                onClick={() => setTemplatesExpanded(!templatesExpanded)}
-                className="flex items-center gap-2 w-full text-left"
-              >
-                {templatesExpanded ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
-                <h2 className="text-base font-semibold">Document Templates</h2>
-              </button>
-              <p className="text-sm text-muted-foreground mt-1 ml-7">
-                Configurable text content for quotes, purchase orders, and emails
-              </p>
-
-              {templatesExpanded && (
-                <div className="mt-4 space-y-4 ml-7">
-                  {/* Quote Templates */}
-                  <div className="border rounded-lg">
-                    <button
-                      type="button"
-                      onClick={() => setQuoteExpanded(!quoteExpanded)}
-                      className="flex items-center gap-2 w-full text-left px-4 py-3 hover:bg-muted/50 rounded-t-lg"
-                    >
-                      {quoteExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                      <FileText className="h-4 w-4 text-blue-500" />
-                      <span className="font-medium">Quote Templates</span>
-                    </button>
-
-                    {quoteExpanded && (
-                      <div className="px-4 pb-4 space-y-4">
-                        <div>
-                          <label className="block text-sm font-medium mb-1">Default Terms & Conditions</label>
-                          <p className="text-xs text-muted-foreground mb-2">
-                            Shown on quote PDFs when no quote-specific terms are provided
-                          </p>
-                          <textarea
-                            className="w-full px-3 py-2 rounded border bg-background h-32 font-mono text-sm"
-                            value={templateEdits.quote_default_terms}
-                            onChange={(e) => onTemplateChange('quote_default_terms', e.target.value)}
-                            placeholder="• Payment terms: 30 days from invoice date&#10;• All prices exclude VAT unless otherwise stated"
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Purchase Order Templates */}
-                  <div className="border rounded-lg">
-                    <button
-                      type="button"
-                      onClick={() => setPoExpanded(!poExpanded)}
-                      className="flex items-center gap-2 w-full text-left px-4 py-3 hover:bg-muted/50 rounded-t-lg"
-                    >
-                      {poExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                      <ShoppingCart className="h-4 w-4 text-green-500" />
-                      <span className="font-medium">Purchase Order Templates</span>
-                    </button>
-
-                    {poExpanded && (
-                      <div className="px-4 pb-4 space-y-4">
-                        {/* Contact Information */}
-                        <div>
-                          <label className="block text-sm font-medium mb-1">Contact Information</label>
-                          <p className="text-xs text-muted-foreground mb-2">
-                            Contact details shown in the Important Notice section of PO emails
-                          </p>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                              <label className="block text-xs text-muted-foreground mb-1">Contact Name</label>
-                              <input
-                                className="w-full px-3 py-2 rounded border bg-background"
-                                value={templateEdits.po_contact_name}
-                                onChange={(e) => onTemplateChange('po_contact_name', e.target.value)}
-                                placeholder="e.g., Mignon"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs text-muted-foreground mb-1">Contact Email</label>
-                              <input
-                                type="email"
-                                className="w-full px-3 py-2 rounded border bg-background"
-                                value={templateEdits.po_contact_email}
-                                onChange={(e) => onTemplateChange('po_contact_email', e.target.value)}
-                                placeholder="e.g., orders@company.com"
-                              />
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Important Notice */}
-                        <div>
-                          <label className="block text-sm font-medium mb-1">Important Notice Text</label>
-                          <p className="text-xs text-muted-foreground mb-2">
-                            Yellow notice box in PO emails to suppliers. Use <code className="bg-muted px-1 rounded">{'{{contact_name}}'}</code> and <code className="bg-muted px-1 rounded">{'{{contact_email}}'}</code> as placeholders.
-                          </p>
-                          <textarea
-                            className="w-full px-3 py-2 rounded border bg-background h-24 font-mono text-sm"
-                            value={templateEdits.po_email_notice}
-                            onChange={(e) => onTemplateChange('po_email_notice', e.target.value)}
-                            placeholder="Please verify all quantities, pricing, and specifications before processing this order..."
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex justify-end">
-                    <button
-                      onClick={saveTemplates}
-                      disabled={savingTemplates}
-                      className="px-4 py-2 rounded bg-primary text-primary-foreground disabled:opacity-50"
-                    >
-                      {savingTemplates ? 'Saving…' : 'Save Templates'}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
             {/* Inventory & Finished Goods */}
             <div className="border-t pt-6">
               <h2 className="text-base font-semibold mb-2">Inventory & Finished Goods</h2>
@@ -450,6 +332,115 @@ export default function SettingsPage() {
             <div className="flex justify-end">
               <button onClick={() => save()} disabled={saving} className="px-4 py-2 rounded bg-primary text-primary-foreground disabled:opacity-50">
                 {saving ? 'Saving…' : 'Save Settings'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Document Templates Card */}
+        <div className="bg-card shadow rounded-lg">
+          <div className="px-6 py-4 border-b">
+            <h1 className="text-lg font-semibold">Document Templates</h1>
+            <p className="text-sm text-muted-foreground">Configurable text content for quotes, purchase orders, and emails</p>
+          </div>
+          <div className="p-6 space-y-4">
+            {/* Quote Templates */}
+            <div className="border rounded-lg">
+              <button
+                type="button"
+                onClick={() => setQuoteExpanded(!quoteExpanded)}
+                className="flex items-center gap-2 w-full text-left px-4 py-3 hover:bg-muted/50 rounded-t-lg"
+              >
+                {quoteExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                <FileText className="h-4 w-4 text-blue-500" />
+                <span className="font-medium">Quote Templates</span>
+              </button>
+
+              {quoteExpanded && (
+                <div className="px-4 pb-4 space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Default Terms & Conditions</label>
+                    <p className="text-xs text-muted-foreground mb-2">
+                      Shown on quote PDFs when no quote-specific terms are provided
+                    </p>
+                    <textarea
+                      className="w-full px-3 py-2 rounded border bg-background h-32 font-mono text-sm"
+                      value={templateEdits.quote_default_terms}
+                      onChange={(e) => onTemplateChange('quote_default_terms', e.target.value)}
+                      placeholder="• Payment terms: 30 days from invoice date&#10;• All prices exclude VAT unless otherwise stated"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Purchase Order Templates */}
+            <div className="border rounded-lg">
+              <button
+                type="button"
+                onClick={() => setPoExpanded(!poExpanded)}
+                className="flex items-center gap-2 w-full text-left px-4 py-3 hover:bg-muted/50 rounded-t-lg"
+              >
+                {poExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                <ShoppingCart className="h-4 w-4 text-green-500" />
+                <span className="font-medium">Purchase Order Templates</span>
+              </button>
+
+              {poExpanded && (
+                <div className="px-4 pb-4 space-y-4">
+                  {/* Contact Information */}
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Contact Information</label>
+                    <p className="text-xs text-muted-foreground mb-2">
+                      Contact details shown in the Important Notice section of PO emails
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs text-muted-foreground mb-1">Contact Name</label>
+                        <input
+                          className="w-full px-3 py-2 rounded border bg-background"
+                          value={templateEdits.po_contact_name}
+                          onChange={(e) => onTemplateChange('po_contact_name', e.target.value)}
+                          placeholder="e.g., Mignon"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-muted-foreground mb-1">Contact Email</label>
+                        <input
+                          type="email"
+                          className="w-full px-3 py-2 rounded border bg-background"
+                          value={templateEdits.po_contact_email}
+                          onChange={(e) => onTemplateChange('po_contact_email', e.target.value)}
+                          placeholder="e.g., orders@company.com"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Important Notice */}
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Important Notice Text</label>
+                    <p className="text-xs text-muted-foreground mb-2">
+                      Yellow notice box in PO emails to suppliers. Use <code className="bg-muted px-1 rounded">{'{{contact_name}}'}</code> and <code className="bg-muted px-1 rounded">{'{{contact_email}}'}</code> as placeholders.
+                    </p>
+                    <textarea
+                      className="w-full px-3 py-2 rounded border bg-background h-24 font-mono text-sm"
+                      value={templateEdits.po_email_notice}
+                      onChange={(e) => onTemplateChange('po_email_notice', e.target.value)}
+                      placeholder="Please verify all quantities, pricing, and specifications before processing this order..."
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={saveTemplates}
+                disabled={savingTemplates}
+                className="px-4 py-2 rounded bg-primary text-primary-foreground disabled:opacity-50"
+              >
+                {savingTemplates ? 'Saving…' : 'Save Templates'}
               </button>
             </div>
           </div>
