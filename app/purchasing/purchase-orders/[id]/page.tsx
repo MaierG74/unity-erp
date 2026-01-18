@@ -2,8 +2,7 @@
 
 import { use, useState, useEffect, useMemo, useLayoutEffect, useRef } from 'react';
 import { useToast } from '@/components/ui/use-toast';
-import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { useRouter, notFound } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
@@ -584,6 +583,7 @@ function getOrderStatus(order: PurchaseOrder) {
 export default function PurchaseOrderPage({ params }: { params: Promise<{ id: string }> }) {
   // Unwrap the params Promise (Next.js 15 requirement)
   const { id } = use(params);
+  const router = useRouter();
 
   const [qNumber, setQNumber] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -1351,11 +1351,9 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     return (
       <div className="space-y-4">
         <div className="flex items-center">
-          <Link href="/purchasing/purchase-orders" className="mr-4">
-            <Button variant="outline" size="icon">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
+          <Button variant="outline" size="icon" className="mr-4" onClick={() => router.back()}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
           <h1 className="text-2xl font-bold">Purchase Order Not Found</h1>
         </div>
 
@@ -1366,9 +1364,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           </AlertDescription>
         </Alert>
 
-        <Link href="/purchasing/purchase-orders">
-          <Button>Return to Purchase Orders</Button>
-        </Link>
+        <Button onClick={() => router.back()}>Return to Purchase Orders</Button>
       </div>
     );
   }
@@ -1398,11 +1394,9 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
         styles.stickyHeader
       )} ref={headerRef}>
         <div className="flex items-center">
-          <Link href="/purchasing/purchase-orders" className="mr-4">
-            <Button variant="outline" size="icon">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
+          <Button variant="outline" size="icon" className="mr-4" onClick={() => router.back()}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
           <div>
             <div className="text-xs sm:text-sm text-muted-foreground">Purchasing / Purchase Orders</div>
             <div className="flex flex-wrap items-center gap-2">

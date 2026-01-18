@@ -225,10 +225,9 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
     return map;
   }, [orderAttachments]);
 
-  // Handle back button
+  // Handle back button - use router.back() to preserve URL params (filters)
   const handleBack = () => {
-    console.log('Back button clicked');
-    router.push('/products');
+    router.back();
   };
 
   const openEdit = () => {

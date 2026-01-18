@@ -183,8 +183,8 @@ Change the back button to use `router.back()` instead of a hard-coded Link:
 | ✅ Customers | `/customers` | `q` |
 | ✅ Orders | `/orders` | `q`, `status`, `section` |
 | ✅ Suppliers | `/suppliers` | `q`, `hasPricelist` |
-| Products | `/products` | `q`, `category` |
-| Purchase Orders | `/purchasing/purchase-orders` | `q`, `status`, `supplier` |
+| ✅ Products | `/products` | `q`, `category`, `page`, `pageSize`, `sort`, `sortDir` |
+| ✅ Purchase Orders | `/purchasing/purchase-orders` | `tab`, `status`, `q`, `supplier`, `startDate`, `endDate` |
 
 ### Priority 2: Secondary Pages
 
@@ -246,6 +246,12 @@ These files already implement the pattern and can be used as reference:
 
 6. **Suppliers**: `components/features/suppliers/supplier-list.tsx` + `app/suppliers/[id]/page.tsx`
    - Search filter, "has pricelist" checkbox filter
+
+7. **Products**: `src/pages.old/products/ProductsPage.tsx` + `app/products/[productId]/page.tsx`
+   - Search, category, pagination, and sort filters
+
+8. **Purchase Orders**: `app/purchasing/purchase-orders/page.tsx` + `app/purchasing/purchase-orders/[id]/page.tsx`
+   - Tab (In Progress/Completed), status, Q number search, supplier, date range filters
 
 ## Troubleshooting
 

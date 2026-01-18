@@ -1,8 +1,16 @@
 'use client';
 
+/**
+ * Purchase Orders Page
+ *
+ * URL-based filter persistence for navigating back from detail pages.
+ * Filters stored: tab, status, q (Q number search), supplier, startDate, endDate
+ */
+
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useDebounce } from '@/hooks/use-debounce';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { PurchaseOrdersList } from '@/components/features/purchasing/purchase-orders-list';
@@ -184,18 +192,72 @@ function formatQNumber(qNumber: string | undefined): string {
 
 export default function PurchaseOrdersPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [activeTab, setActiveTab] = useState<OrderTab>('inProgress');
-  const [qNumberSearch, setQNumberSearch] = useState<string>('');
-  const [supplierSearch, setSupplierSearch] = useState<string>('all');
-  const [startDate, setStartDate] = useState<Date | undefined>(undefined);
-  const [endDate, setEndDate] = useState<Date | undefined>(undefined);
+
+  // Initialize state from URL parameters
+  const [activeTab, setActiveTab] = useState<OrderTab>(() => {
+    const tab = searchParams?.get('tab');
+    return tab === 'completed' ? 'completed' : 'inProgress';
+  });
+  const [statusFilter, setStatusFilter] = useState<string>(() => searchParams?.get('status') || 'all');
+  const [qNumberSearch, setQNumberSearch] = useState<string>(() => searchParams?.get('q') || '');
+  const [supplierSearch, setSupplierSearch] = useState<string>(() => searchParams?.get('supplier') || 'all');
+  const [startDate, setStartDate] = useState<Date | undefined>(() => {
+    const sd = searchParams?.get('startDate');
+    return sd ? new Date(sd) : undefined;
+  });
+  const [endDate, setEndDate] = useState<Date | undefined>(() => {
+    const ed = searchParams?.get('endDate');
+    return ed ? new Date(ed) : undefined;
+  });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [poToDelete, setPoToDelete] = useState<PurchaseOrder | null>(null);
-  
+
   // Fetch all suppliers for the dropdown
   const [uniqueSuppliers, setUniqueSuppliers] = useState<string[]>([]);
+
+  // Debounce Q number search
+  const debouncedQNumberSearch = useDebounce(qNumberSearch, 300);
+
+  // Re-read URL params when navigating back (component doesn't remount)
+  const searchParamsString = searchParams?.toString() || '';
+  useEffect(() => {
+    const urlTab = searchParams?.get('tab');
+    const urlStatus = searchParams?.get('status') || 'all';
+    const urlQ = searchParams?.get('q') || '';
+    const urlSupplier = searchParams?.get('supplier') || 'all';
+    const urlStartDate = searchParams?.get('startDate');
+    const urlEndDate = searchParams?.get('endDate');
+
+    const newTab = urlTab === 'completed' ? 'completed' : 'inProgress';
+    const newStartDate = urlStartDate ? new Date(urlStartDate) : undefined;
+    const newEndDate = urlEndDate ? new Date(urlEndDate) : undefined;
+
+    if (newTab !== activeTab) setActiveTab(newTab);
+    if (urlStatus !== statusFilter) setStatusFilter(urlStatus);
+    if (urlQ !== qNumberSearch) setQNumberSearch(urlQ);
+    if (urlSupplier !== supplierSearch) setSupplierSearch(urlSupplier);
+    if (urlStartDate !== (startDate ? startDate.toISOString().split('T')[0] : undefined)) setStartDate(newStartDate);
+    if (urlEndDate !== (endDate ? endDate.toISOString().split('T')[0] : undefined)) setEndDate(newEndDate);
+  }, [searchParamsString]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync filter state to URL
+  useEffect(() => {
+    const params = new URLSearchParams();
+
+    // Only add non-default values to keep URL clean
+    if (activeTab === 'completed') params.set('tab', 'completed');
+    if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter);
+    if (debouncedQNumberSearch) params.set('q', debouncedQNumberSearch);
+    if (supplierSearch && supplierSearch !== 'all') params.set('supplier', supplierSearch);
+    if (startDate) params.set('startDate', startDate.toISOString().split('T')[0]);
+    if (endDate) params.set('endDate', endDate.toISOString().split('T')[0]);
+
+    const query = params.toString();
+    const url = query ? `/purchasing/purchase-orders?${query}` : '/purchasing/purchase-orders';
+    router.replace(url, { scroll: false });
+  }, [activeTab, statusFilter, debouncedQNumberSearch, supplierSearch, startDate, endDate, router]);
 
   const { data: purchaseOrders, isLoading, error, refetch } = useQuery({
     queryKey: ['purchaseOrders'],
@@ -657,7 +719,7 @@ export default function PurchaseOrdersPage() {
         </Link>
       </div>
 
-      <Tabs defaultValue="inProgress" onValueChange={handleTabChange}>
+      <Tabs value={activeTab} onValueChange={handleTabChange}>
         <TabsList className="grid w-full grid-cols-2 mb-4">
           <TabsTrigger value="inProgress">In Progress</TabsTrigger>
           <TabsTrigger value="completed">Completed</TabsTrigger>
