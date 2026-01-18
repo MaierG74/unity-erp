@@ -33,7 +33,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Paperclip, FileText, Trash2 } from 'lucide-react';
+import { Loader2, Paperclip, FileText, Trash2, AlertTriangle } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import InlineAttachmentsCell from './InlineAttachmentsCell';
 import AddQuoteItemDialog from './AddQuoteItemDialog';
@@ -143,7 +143,7 @@ function QuoteItemRow({
 }: {
   item: QuoteItem;
   quoteId: string;
-  onUpdate: (id: string, field: keyof Pick<QuoteItem, 'description' | 'qty' | 'unit_price' | 'bullet_points'>, value: string | number) => void;
+  onUpdate: (id: string, field: keyof Pick<QuoteItem, 'description' | 'qty' | 'unit_price' | 'bullet_points' | 'internal_notes'>, value: string | number) => void;
   onDelete: (id: string) => void;
   onAddClusterLine: (clusterId: string, component: {
     type: 'manual' | 'database' | 'product' | 'collection';
@@ -171,11 +171,13 @@ function QuoteItemRow({
   const [isExpanded, setIsExpanded] = React.useState(false);
   const [detailsOpen, setDetailsOpen] = React.useState(false);
   const [bpText, setBpText] = React.useState<string>(item.bullet_points || '');
+  const [internalNotes, setInternalNotes] = React.useState<string>(item.internal_notes || '');
 
   React.useEffect(() => { setDesc(item.description); }, [item.description]);
   React.useEffect(() => { setQty(String(item.qty)); }, [item.qty]);
   React.useEffect(() => { setUnitPrice(String(Math.round((item.unit_price || 0) * 100) / 100)); }, [item.unit_price]);
   React.useEffect(() => { setBpText(item.bullet_points || ''); }, [item.bullet_points]);
+  React.useEffect(() => { setInternalNotes(item.internal_notes || ''); }, [item.internal_notes]);
 
   const sortedClusters = React.useMemo(() => {
     if (!Array.isArray(item.quote_item_clusters) || item.quote_item_clusters.length === 0) {
@@ -284,8 +286,11 @@ function QuoteItemRow({
         </TableCell>
         <TableCell className="text-center">
           <div className="flex items-center justify-center gap-2">
-            <Button variant="secondary" size="sm" className="px-3 py-1.5" onClick={() => setDetailsOpen(true)}>
+            <Button variant="secondary" size="sm" className="px-3 py-1.5 relative" onClick={() => setDetailsOpen(true)}>
               Details
+              {item.internal_notes && (
+                <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-500" title="Has internal notes" />
+              )}
             </Button>
             <Button
               variant="outline"
@@ -312,22 +317,46 @@ function QuoteItemRow({
       </TableRow>
       {/* Item Details Dialog */}
       <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Item Details</DialogTitle>
           </DialogHeader>
-          <div className="space-y-2">
-            <div className="text-sm text-muted-foreground">Bullet points (one per line)</div>
-            <Textarea
-              value={bpText}
-              onChange={e => setBpText(e.target.value)}
-              rows={6}
-              placeholder={"e.g.\nSize: 2m x 3m\nMaterial: Solid wood\nFinish: Walnut"}
-            />
+          <div className="space-y-4">
+            {/* Customer-facing bullet points */}
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Bullet Points</div>
+              <div className="text-xs text-muted-foreground">Visible on quote PDF (one per line)</div>
+              <Textarea
+                value={bpText}
+                onChange={e => setBpText(e.target.value)}
+                rows={4}
+                placeholder={"e.g.\nSize: 2m x 3m\nMaterial: Solid wood\nFinish: Walnut"}
+              />
+            </div>
+
+            {/* Internal notes - staff only */}
+            <div className="space-y-2 p-3 rounded-md bg-amber-500/10 border border-amber-500/20">
+              <div className="flex items-center gap-2 text-sm font-medium text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="h-4 w-4" />
+                Internal Notes
+              </div>
+              <div className="text-xs text-muted-foreground">Staff only - NOT visible on quote PDF</div>
+              <Textarea
+                value={internalNotes}
+                onChange={e => setInternalNotes(e.target.value)}
+                rows={3}
+                placeholder="e.g. Check stock with supplier, customer may want alternatives..."
+                className="bg-background"
+              />
+            </div>
           </div>
           <div className="mt-4 flex justify-end gap-2">
             <Button variant="outline" onClick={() => setDetailsOpen(false)}>Cancel</Button>
-            <Button onClick={() => { onUpdate(item.id, 'bullet_points', bpText); setDetailsOpen(false); }}>Save</Button>
+            <Button onClick={() => {
+              onUpdate(item.id, 'bullet_points', bpText);
+              onUpdate(item.id, 'internal_notes', internalNotes);
+              setDetailsOpen(false);
+            }}>Save</Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -543,7 +572,7 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
     }
   };
 
-  const handleUpdateItem = async (id: string, field: keyof Pick<QuoteItem, 'description' | 'qty' | 'unit_price' | 'bullet_points'>, value: string | number) => {
+  const handleUpdateItem = async (id: string, field: keyof Pick<QuoteItem, 'description' | 'qty' | 'unit_price' | 'bullet_points' | 'internal_notes'>, value: string | number) => {
     const updated = await updateQuoteItem(id, { [field]: value });
     onItemsChange(items.map(i => (i.id === id ? { ...i, ...updated } : i)));
   };

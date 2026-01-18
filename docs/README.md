@@ -118,5 +118,12 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - [`scopes/scope_dashboard_reporting.md`](scopes/scope_dashboard_reporting.md) – Dashboard & Reporting mini scope
   - [`scopes/scope_invoicing_payments.md`](scopes/scope_invoicing_payments.md) – Invoicing & Payments mini scope
   - [`scopes/scope_integrations_automation.md`](scopes/scope_integrations_automation.md) – Integrations & Automation mini scope
+- Sales Documents (Module Pricing & Specs):
+  - [`sales/UNITY_MODULE_PRICING.md`](sales/UNITY_MODULE_PRICING.md) – **Module pricing breakdown** with bundles, dependencies, and professional services
+  - [`sales/MODULE_STAFF_TIME_ANALYSIS.md`](sales/MODULE_STAFF_TIME_ANALYSIS.md) – Staff Time Analysis module documentation
+  - [`sales/MODULE_INVENTORY.md`](sales/MODULE_INVENTORY.md) – Inventory module documentation
+  - [`sales/SPEC_QUOTES_MODULE.md`](sales/SPEC_QUOTES_MODULE.md) – **Quotes Module project specification** for client delivery
+  - [`sales/SPEC_USER_CONTROL_MODULE.md`](sales/SPEC_USER_CONTROL_MODULE.md) – **User Control & Access Management** module specification
+  - [`sales/COWORK_STARTER.md`](sales/COWORK_STARTER.md) – **Co-Work starter document** for proposals, user manuals, and documentation collaboration
 
 Use relative links when creating new docs so that navigation remains stable across moves. When referencing plans, prefer `docs/plans/...` paths to keep the directory consistent.

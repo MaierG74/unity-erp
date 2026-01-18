@@ -59,6 +59,7 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
     email: 'info@unity-erp.com',
   };
   const [settingsCompanyInfo, setSettingsCompanyInfo] = useState<any | null>(null);
+  const [defaultTermsTemplate, setDefaultTermsTemplate] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -89,7 +90,23 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
         console.warn('Failed to load company settings for PDF');
       }
     };
+
+    const loadTemplates = async () => {
+      try {
+        const res = await fetch('/api/document-templates?type=quote_default_terms', { headers: { 'Accept': 'application/json' } });
+        if (!res.ok) return;
+        const json = await res.json();
+        const template = json?.templates?.[0];
+        if (template?.content) {
+          setDefaultTermsTemplate(template.content);
+        }
+      } catch (e) {
+        console.warn('Failed to load quote terms template');
+      }
+    };
+
     loadSettings();
+    loadTemplates();
   }, []);
 
   const refreshAttachments = React.useCallback(async () => {
@@ -301,6 +318,7 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
           <QuotePDFDownload
             quote={pdfQuote}
             companyInfo={settingsCompanyInfo || defaultCompanyInfo}
+            defaultTermsTemplate={defaultTermsTemplate}
           />
           <Button
             variant="outline"
@@ -516,9 +534,10 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
                 <p className="text-muted-foreground mb-6">
                   Click the button below to generate and download the PDF quote
                 </p>
-                <QuotePDFDownload 
+                <QuotePDFDownload
                   quote={pdfQuote}
                   companyInfo={settingsCompanyInfo || defaultCompanyInfo}
+                  defaultTermsTemplate={defaultTermsTemplate}
                 />
                 <div className="mt-6 p-4 bg-gray-50 rounded-lg text-left">
                   <h4 className="font-medium mb-2">PDF will include:</h4>

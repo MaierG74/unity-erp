@@ -61,7 +61,26 @@ Both files should contain the following configuration:
     },
     "supabase": {
       "type": "http",
-      "url": "https://mcp.supabase.com/mcp?project_ref=ttlyfhkrsjjrzxiagzpb&features=storage%2Cbranching%2Cfunctions%2Cdevelopment%2Cdebugging%2Cdatabase%2Caccount%2Cdocs"
+      "url": "https://mcp.supabase.com/mcp?project_ref=ttlyfhkrsjjrzxiagzpb&features=storage%2Cbranching%2Cfunctions%2Cdevelopment%2Cdebugging%2Cdatabase%2Caccount%2Cdocs",
+      "autoapprove": [
+        "select",
+        "insert",
+        "update",
+        "delete",
+        "query",
+        "execute_sql",
+        "create_table",
+        "alter_table",
+        "drop_table",
+        "upload_file",
+        "download_file",
+        "delete_file",
+        "list_files",
+        "create_function",
+        "update_function",
+        "delete_function",
+        "invoke_function"
+      ]
     }
   }
 }

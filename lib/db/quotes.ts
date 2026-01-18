@@ -20,6 +20,7 @@ export interface QuoteItem {
   unit_price: number;
   total: number;
   bullet_points?: string | null;
+  internal_notes?: string | null;
   selected_options?: Record<string, string> | null;
   quote_item_clusters?: QuoteItemCluster[];
   cutlist_snapshot?: QuoteItemCutlist | null;

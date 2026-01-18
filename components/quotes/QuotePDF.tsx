@@ -196,10 +196,18 @@ interface QuotePDFProps {
     customer?: { id: number; name: string; email?: string | null; telephone?: string | null };
   };
   companyInfo?: Partial<CompanyInfo>;
+  /** Default terms template from settings, used when quote has no specific terms */
+  defaultTermsTemplate?: string;
 }
 
+// Hardcoded fallback terms if no template provided
+const FALLBACK_TERMS = `• Payment terms: 30 days from invoice date
+• All prices exclude VAT unless otherwise stated
+• This quotation is valid for 30 days from the date above
+• Delivery times may vary depending on stock availability`;
+
 // PDF Document Component
-const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo }) => {
+const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, defaultTermsTemplate }) => {
   const defaultCompanyInfo: CompanyInfo = {
     name: 'Your Company Name',
     address: 'Your Address\nYour City, Postal Code',
@@ -362,16 +370,9 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo }) => {
         {/* Terms and Conditions */}
         <View style={styles.terms}>
           <Text style={styles.termsTitle}>Terms & Conditions:</Text>
-          {((quote as any).terms || (quote as any).notes) ? (
-            <Text>{((quote as any).terms || (quote as any).notes) as string}</Text>
-          ) : (
-            <Text>
-              • Payment terms: 30 days from invoice date{'\n'}
-              • All prices exclude VAT unless otherwise stated{'\n'}
-              • This quotation is valid for 30 days from the date above{'\n'}
-              • Delivery times may vary depending on stock availability
-            </Text>
-          )}
+          <Text>
+            {(quote as any).terms || (quote as any).notes || defaultTermsTemplate || FALLBACK_TERMS}
+          </Text>
         </View>
 
         {/* Footer with page numbers */}
@@ -389,10 +390,11 @@ interface QuotePDFDownloadProps extends QuotePDFProps {
   fileName?: string;
 }
 
-export const QuotePDFDownload: React.FC<QuotePDFDownloadProps> = ({ 
-  quote, 
+export const QuotePDFDownload: React.FC<QuotePDFDownloadProps> = ({
+  quote,
   companyInfo,
-  fileName 
+  fileName,
+  defaultTermsTemplate
 }) => {
   const date = new Date(quote.created_at);
   const y = date.getFullYear();
@@ -429,7 +431,7 @@ export const QuotePDFDownload: React.FC<QuotePDFDownloadProps> = ({
       setDownloading(true);
       // Generate the PDF as a Blob in the browser
       const blob = await pdf(
-        <QuotePDFDocument quote={quote} companyInfo={mergedCompanyInfo} />
+        <QuotePDFDocument quote={quote} companyInfo={mergedCompanyInfo} defaultTermsTemplate={defaultTermsTemplate} />
       ).toBlob();
       // Force correct MIME type and extension
       const pdfBlob = new Blob([blob], { type: 'application/pdf' });
@@ -475,7 +477,7 @@ export const QuotePDFDownload: React.FC<QuotePDFDownloadProps> = ({
       try {
         // Fallback: open in a new tab for manual save (Safari/iOS)
         const blob = await pdf(
-          <QuotePDFDocument quote={quote} companyInfo={companyInfo} />
+          <QuotePDFDocument quote={quote} companyInfo={companyInfo} defaultTermsTemplate={defaultTermsTemplate} />
         ).toBlob();
         const pdfBlob = new Blob([blob], { type: 'application/pdf' });
         const url = URL.createObjectURL(pdfBlob);
@@ -493,7 +495,7 @@ export const QuotePDFDownload: React.FC<QuotePDFDownloadProps> = ({
     try {
       setDownloading(true);
       const blob = await pdf(
-        <QuotePDFDocument quote={quote} companyInfo={mergedCompanyInfo} />
+        <QuotePDFDocument quote={quote} companyInfo={mergedCompanyInfo} defaultTermsTemplate={defaultTermsTemplate} />
       ).toBlob();
       const pdfBlob = new Blob([blob], { type: 'application/pdf' });
       const url = URL.createObjectURL(pdfBlob);

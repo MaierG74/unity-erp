@@ -64,6 +64,14 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const productSearchInputRef = useRef<HTMLInputElement>(null);
 
+  // Helper: tokenized search - matches if ALL words in query appear somewhere in any field
+  const matchesAllTokens = (query: string, ...fields: (string | undefined | null)[]): boolean => {
+    const tokens = query.toLowerCase().split(/\s+/).filter(t => t.length > 0);
+    if (tokens.length === 0) return true;
+    const combined = fields.map(f => (f || '').toLowerCase()).join(' ');
+    return tokens.every(token => combined.includes(token));
+  };
+
   // Load components/products when dialog opens and specific type is selected
   useEffect(() => {
     if (!open) return;
@@ -134,10 +142,9 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
     }
   };
 
-  // Filter components based on search
+  // Filter components based on search (tokenized - all words must match)
   const filteredComponents = components.filter(component =>
-    component.internal_code?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    component.description?.toLowerCase().includes(searchQuery.toLowerCase())
+    matchesAllTokens(searchQuery, component.internal_code, component.description)
   );
 
   const handleComponentSelect = async (component: Component) => {
@@ -502,10 +509,9 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
                 <div className="text-center py-4">Loading products...</div>
               ) : (
                 <div className="max-h-48 overflow-y-auto border border-input rounded bg-card">
-                  {(products.filter(p =>
-                    (p.internal_code || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                    (p.name || '').toLowerCase().includes(searchQuery.toLowerCase())
-                  )).map((p) => (
+                  {products.filter(p =>
+                    matchesAllTokens(searchQuery, p.internal_code, p.name)
+                  ).map((p) => (
                     <div
                       key={p.product_id}
                       className={`p-3 border-b border-input cursor-pointer hover:bg-muted/40 ${

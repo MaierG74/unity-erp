@@ -2,6 +2,9 @@
 
 import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import type { DocumentTemplate, POContactInfo } from '@/types/templates';
+import { parsePOContactInfo } from '@/lib/templates';
+import { ChevronDown, ChevronRight, FileText, Mail, ShoppingCart } from 'lucide-react';
 
 interface Settings {
   setting_id: number;
@@ -21,6 +24,13 @@ interface Settings {
   fg_auto_consume_on_add?: boolean;
 }
 
+interface TemplateState {
+  quote_default_terms: string;
+  po_email_notice: string;
+  po_contact_name: string;
+  po_contact_email: string;
+}
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -29,11 +39,25 @@ export default function SettingsPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
 
+  // Template state
+  const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
+  const [templateEdits, setTemplateEdits] = useState<TemplateState>({
+    quote_default_terms: '',
+    po_email_notice: '',
+    po_contact_name: '',
+    po_contact_email: '',
+  });
+  const [savingTemplates, setSavingTemplates] = useState(false);
+  const [templatesExpanded, setTemplatesExpanded] = useState(true);
+  const [quoteExpanded, setQuoteExpanded] = useState(true);
+  const [poExpanded, setPoExpanded] = useState(true);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
       setError(null);
       try {
+        // Fetch company settings
         const res = await fetch('/api/settings', { headers: { Accept: 'application/json' } });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
@@ -43,6 +67,27 @@ export default function SettingsPage() {
             .from('QButton')
             .getPublicUrl(json.settings.company_logo_path);
           setLogoUrl(data.publicUrl);
+        }
+
+        // Fetch document templates
+        const templatesRes = await fetch('/api/document-templates', { headers: { Accept: 'application/json' } });
+        if (templatesRes.ok) {
+          const templatesJson = await templatesRes.json();
+          const loadedTemplates = templatesJson.templates as DocumentTemplate[];
+          setTemplates(loadedTemplates);
+
+          // Initialize template edits from loaded data
+          const quoteTerms = loadedTemplates.find(t => t.template_type === 'quote_default_terms');
+          const poNotice = loadedTemplates.find(t => t.template_type === 'po_email_notice');
+          const poContact = loadedTemplates.find(t => t.template_type === 'po_contact_info');
+          const contactInfo = poContact ? parsePOContactInfo(poContact.content) : { name: '', email: '' };
+
+          setTemplateEdits({
+            quote_default_terms: quoteTerms?.content || '',
+            po_email_notice: poNotice?.content || '',
+            po_contact_name: contactInfo.name,
+            po_contact_email: contactInfo.email,
+          });
         }
       } catch (e: any) {
         setError(e?.message ?? 'Failed to load settings');
@@ -94,6 +139,56 @@ export default function SettingsPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const saveTemplates = async () => {
+    setSavingTemplates(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      // Save quote default terms
+      await fetch('/api/document-templates', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          template_type: 'quote_default_terms',
+          content: templateEdits.quote_default_terms,
+        }),
+      });
+
+      // Save PO email notice
+      await fetch('/api/document-templates', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          template_type: 'po_email_notice',
+          content: templateEdits.po_email_notice,
+        }),
+      });
+
+      // Save PO contact info as JSON
+      await fetch('/api/document-templates', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          template_type: 'po_contact_info',
+          content: JSON.stringify({
+            name: templateEdits.po_contact_name,
+            email: templateEdits.po_contact_email,
+          }),
+        }),
+      });
+
+      setSuccess('Templates saved');
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to save templates');
+    } finally {
+      setSavingTemplates(false);
+    }
+  };
+
+  const onTemplateChange = (key: keyof TemplateState, value: string) => {
+    setTemplateEdits({ ...templateEdits, [key]: value });
   };
 
   if (loading) {
@@ -212,10 +307,123 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* Terms */}
-            <div>
-              <label className="block text-sm font-medium mb-1">Terms & Conditions</label>
-              <textarea className="w-full px-3 py-2 rounded border bg-background h-28" value={settings.terms_conditions || ''} onChange={(e) => onChange('terms_conditions', e.target.value)} />
+            {/* Document Templates Section */}
+            <div className="border-t pt-6">
+              <button
+                type="button"
+                onClick={() => setTemplatesExpanded(!templatesExpanded)}
+                className="flex items-center gap-2 w-full text-left"
+              >
+                {templatesExpanded ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+                <h2 className="text-base font-semibold">Document Templates</h2>
+              </button>
+              <p className="text-sm text-muted-foreground mt-1 ml-7">
+                Configurable text content for quotes, purchase orders, and emails
+              </p>
+
+              {templatesExpanded && (
+                <div className="mt-4 space-y-4 ml-7">
+                  {/* Quote Templates */}
+                  <div className="border rounded-lg">
+                    <button
+                      type="button"
+                      onClick={() => setQuoteExpanded(!quoteExpanded)}
+                      className="flex items-center gap-2 w-full text-left px-4 py-3 hover:bg-muted/50 rounded-t-lg"
+                    >
+                      {quoteExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                      <FileText className="h-4 w-4 text-blue-500" />
+                      <span className="font-medium">Quote Templates</span>
+                    </button>
+
+                    {quoteExpanded && (
+                      <div className="px-4 pb-4 space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Default Terms & Conditions</label>
+                          <p className="text-xs text-muted-foreground mb-2">
+                            Shown on quote PDFs when no quote-specific terms are provided
+                          </p>
+                          <textarea
+                            className="w-full px-3 py-2 rounded border bg-background h-32 font-mono text-sm"
+                            value={templateEdits.quote_default_terms}
+                            onChange={(e) => onTemplateChange('quote_default_terms', e.target.value)}
+                            placeholder="• Payment terms: 30 days from invoice date&#10;• All prices exclude VAT unless otherwise stated"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Purchase Order Templates */}
+                  <div className="border rounded-lg">
+                    <button
+                      type="button"
+                      onClick={() => setPoExpanded(!poExpanded)}
+                      className="flex items-center gap-2 w-full text-left px-4 py-3 hover:bg-muted/50 rounded-t-lg"
+                    >
+                      {poExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                      <ShoppingCart className="h-4 w-4 text-green-500" />
+                      <span className="font-medium">Purchase Order Templates</span>
+                    </button>
+
+                    {poExpanded && (
+                      <div className="px-4 pb-4 space-y-4">
+                        {/* Contact Information */}
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Contact Information</label>
+                          <p className="text-xs text-muted-foreground mb-2">
+                            Contact details shown in the Important Notice section of PO emails
+                          </p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs text-muted-foreground mb-1">Contact Name</label>
+                              <input
+                                className="w-full px-3 py-2 rounded border bg-background"
+                                value={templateEdits.po_contact_name}
+                                onChange={(e) => onTemplateChange('po_contact_name', e.target.value)}
+                                placeholder="e.g., Mignon"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-muted-foreground mb-1">Contact Email</label>
+                              <input
+                                type="email"
+                                className="w-full px-3 py-2 rounded border bg-background"
+                                value={templateEdits.po_contact_email}
+                                onChange={(e) => onTemplateChange('po_contact_email', e.target.value)}
+                                placeholder="e.g., orders@company.com"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Important Notice */}
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Important Notice Text</label>
+                          <p className="text-xs text-muted-foreground mb-2">
+                            Yellow notice box in PO emails to suppliers. Use <code className="bg-muted px-1 rounded">{'{{contact_name}}'}</code> and <code className="bg-muted px-1 rounded">{'{{contact_email}}'}</code> as placeholders.
+                          </p>
+                          <textarea
+                            className="w-full px-3 py-2 rounded border bg-background h-24 font-mono text-sm"
+                            value={templateEdits.po_email_notice}
+                            onChange={(e) => onTemplateChange('po_email_notice', e.target.value)}
+                            placeholder="Please verify all quantities, pricing, and specifications before processing this order..."
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      onClick={saveTemplates}
+                      disabled={savingTemplates}
+                      className="px-4 py-2 rounded bg-primary text-primary-foreground disabled:opacity-50"
+                    >
+                      {savingTemplates ? 'Saving…' : 'Save Templates'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Inventory & Finished Goods */}

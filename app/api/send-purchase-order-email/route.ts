@@ -3,6 +3,7 @@ import { renderAsync } from '@react-email/render';
 import { Resend } from 'resend';
 import { createClient } from '@supabase/supabase-js';
 import PurchaseOrderEmail, { PurchaseOrderEmailProps, SupplierOrderItem } from '@/emails/purchase-order-email';
+import { processTemplate, parsePOContactInfo, DEFAULT_TEMPLATES } from '@/lib/templates';
 
 
 
@@ -87,6 +88,22 @@ export async function POST(request: Request) {
       const { data: logoData } = supabase.storage.from(logoBucket).getPublicUrl(settings.company_logo_path);
       companyLogoUrl = logoData?.publicUrl || undefined;
     }
+
+    // Fetch document templates for PO email
+    const { data: templates } = await supabase
+      .from('document_templates')
+      .select('template_type, content')
+      .in('template_type', ['po_email_notice', 'po_contact_info']);
+
+    const poNoticeTemplate = templates?.find(t => t.template_type === 'po_email_notice')?.content || DEFAULT_TEMPLATES.po_email_notice;
+    const poContactTemplate = templates?.find(t => t.template_type === 'po_contact_info')?.content || DEFAULT_TEMPLATES.po_contact_info;
+    const contactInfo = parsePOContactInfo(poContactTemplate);
+
+    // Process the notice template with contact info
+    const processedNotice = processTemplate(poNoticeTemplate, {
+      contact_name: contactInfo.name,
+      contact_email: contactInfo.email,
+    });
 
     const companyAddressParts = [
       settings?.address_line1,
@@ -196,6 +213,9 @@ export async function POST(request: Request) {
         companyEmail: companyInfo.email,
         companyWebsite: companyInfo.website,
         supplierEmail: toEmail,
+        importantNotice: processedNotice,
+        contactName: contactInfo.name,
+        contactEmail: contactInfo.email,
       };
       
       try {

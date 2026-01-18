@@ -138,6 +138,20 @@ export default function EmailQuoteDialog({
 
       console.log(`[EmailQuoteDialog] Converted ${convertedCount} of ${imageCount} images to base64`);
 
+      // Fetch default terms template
+      let defaultTermsTemplate: string | undefined;
+      try {
+        const templatesRes = await fetch('/api/document-templates?type=quote_default_terms', {
+          headers: { Accept: 'application/json' },
+        });
+        if (templatesRes.ok) {
+          const templatesJson = await templatesRes.json();
+          defaultTermsTemplate = templatesJson?.templates?.[0]?.content;
+        }
+      } catch (e) {
+        console.warn('Failed to load quote terms template for email PDF');
+      }
+
       // Lazy-load PDF dependencies to avoid build-time network issues
       const [{ pdf }, { default: QuotePDFDocument }] = await Promise.all([
         import('@react-pdf/renderer'),
@@ -147,7 +161,7 @@ export default function EmailQuoteDialog({
       // Generate PDF client-side with base64 images
       console.log('[EmailQuoteDialog] Generating PDF...');
       const pdfBlob = await pdf(
-        <QuotePDFDocument quote={quoteWithBase64Images as any} companyInfo={companyInfo} />
+        <QuotePDFDocument quote={quoteWithBase64Images as any} companyInfo={companyInfo} defaultTermsTemplate={defaultTermsTemplate} />
       ).toBlob();
       console.log('[EmailQuoteDialog] PDF generated, size:', pdfBlob.size);
 

@@ -5,19 +5,58 @@
       "args": [
         "-y",
         "chrome-devtools-mcp@latest"
+      ],
+      "autoapprove": [
+        "navigate_page",
+        "take_snapshot",
+        "take_screenshot",
+        "click",
+        "fill",
+        "fill_form",
+        "press_key",
+        "hover",
+        "drag",
+        "evaluate_script",
+        "get_console_message",
+        "list_console_messages",
+        "get_network_request",
+        "list_network_requests",
+        "list_pages",
+        "select_page",
+        "new_page",
+        "close_page",
+        "resize_page",
+        "emulate",
+        "wait_for",
+        "upload_file",
+        "handle_dialog",
+        "performance_start_trace",
+        "performance_stop_trace",
+        "performance_analyze_insight"
       ]
     },
     "supabase": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-postgres",
-        "--connection-string=${POSTGRES_CONNECTION_STRING}"
-      ],
-      "env": {
-        "POSTGRES_CONNECTION_STRING": "${DATABASE_URL}"
-      },
-      "autoapprove": ["query"]
+      "type": "http",
+      "url": "https://mcp.supabase.com/mcp?project_ref=ttlyfhkrsjjrzxiagzpb&features=storage%2Cbranching%2Cfunctions%2Cdevelopment%2Cdebugging%2Cdatabase%2Caccount%2Cdocs",
+      "autoapprove": [
+        "select",
+        "insert",
+        "update",
+        "delete",
+        "query",
+        "execute_sql",
+        "create_table",
+        "alter_table",
+        "drop_table",
+        "upload_file",
+        "download_file",
+        "delete_file",
+        "list_files",
+        "create_function",
+        "update_function",
+        "delete_function",
+        "invoke_function"
+      ]
     }
   }
 }

@@ -42,9 +42,18 @@ export interface PurchaseOrderEmailProps {
   companyEmail?: string;
   companyWebsite?: string;
   supplierEmail?: string;
+  /** Pre-processed important notice text (placeholders already replaced) */
+  importantNotice?: string;
+  /** Contact name for PO queries */
+  contactName?: string;
+  /** Contact email for PO queries */
+  contactEmail?: string;
 }
 
 const formatCurrency = (amount: number) => `R ${amount.toFixed(2)}`;
+
+// Default notice text if none provided
+const DEFAULT_NOTICE = 'Please verify all quantities, pricing, and specifications before processing this order. If you notice any discrepancies or have questions, contact Mignon at orders@qbutton.co.za before proceeding.';
 
 export default function PurchaseOrderEmail({
   qNumber,
@@ -57,6 +66,9 @@ export default function PurchaseOrderEmail({
   companyPhone = '+44 123 456 7890',
   companyEmail = 'purchasing@example.com',
   supplierEmail,
+  importantNotice,
+  contactName = 'Mignon',
+  contactEmail = 'orders@qbutton.co.za',
 }: PurchaseOrderEmailProps) {
   const formattedDate = new Date(createdAt).toLocaleDateString('en-GB', {
     day: '2-digit',
@@ -192,7 +204,22 @@ export default function PurchaseOrderEmail({
                 <div style={{ backgroundColor: '#fef3c7', border: '1px solid #fbbf24', borderRadius: '8px', padding: '12px 16px' }}>
                   <Text style={{ fontSize: '11px', fontWeight: 600, color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 4px 0' }}>Important Notice</Text>
                   <Text style={{ fontSize: '12px', color: '#78350f', lineHeight: '1.5', margin: 0 }}>
-                    Please verify all quantities, pricing, and specifications before processing this order. If you notice any discrepancies or have questions, contact Mignon at <Link href="mailto:orders@qbutton.co.za" style={{ color: '#92400e', fontWeight: 600, textDecoration: 'none' }}>orders@qbutton.co.za</Link> before proceeding.
+                    {importantNotice ? (
+                      // Use the pre-processed notice text, but render contact email as a link
+                      importantNotice.split(contactEmail).map((part, index, array) =>
+                        index < array.length - 1 ? (
+                          <span key={index}>
+                            {part}
+                            <Link href={`mailto:${contactEmail}`} style={{ color: '#92400e', fontWeight: 600, textDecoration: 'none' }}>{contactEmail}</Link>
+                          </span>
+                        ) : part
+                      )
+                    ) : (
+                      // Fallback to default notice
+                      <>
+                        Please verify all quantities, pricing, and specifications before processing this order. If you notice any discrepancies or have questions, contact {contactName} at <Link href={`mailto:${contactEmail}`} style={{ color: '#92400e', fontWeight: 600, textDecoration: 'none' }}>{contactEmail}</Link> before proceeding.
+                      </>
+                    )}
                   </Text>
                 </div>
               </Section>
