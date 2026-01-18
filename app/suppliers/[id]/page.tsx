@@ -5,7 +5,6 @@ import { getSupplier, updateSupplier } from '@/lib/api/suppliers';
 import { supabase } from '@/lib/supabase';
 import { formatCurrency } from '@/lib/quotes';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
 import { ArrowLeft, Package, DollarSign, Clock, Layers, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -227,10 +226,8 @@ export default function SupplierDetailPage() {
     return (
       <div className="space-y-6">
         <div>
-          <Button asChild variant="outline" size="sm">
-            <Link href="/suppliers" aria-label="Back to Suppliers">
-              <ArrowLeft className="mr-2 h-4 w-4" /> Back to Suppliers
-            </Link>
+          <Button variant="outline" size="sm" onClick={() => router.back()}>
+            <ArrowLeft className="mr-2 h-4 w-4" /> Back to Suppliers
           </Button>
         </div>
         <div className="border border-destructive/50 rounded-lg p-6 bg-destructive/10">
@@ -245,10 +242,8 @@ export default function SupplierDetailPage() {
     return (
       <div className="space-y-6">
         <div>
-          <Button asChild variant="outline" size="sm">
-            <Link href="/suppliers" aria-label="Back to Suppliers">
-              <ArrowLeft className="mr-2 h-4 w-4" /> Back to Suppliers
-            </Link>
+          <Button variant="outline" size="sm" onClick={() => router.back()}>
+            <ArrowLeft className="mr-2 h-4 w-4" /> Back to Suppliers
           </Button>
         </div>
         <div className="border rounded-lg p-6 bg-card">

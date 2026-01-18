@@ -1,8 +1,16 @@
 'use client';
 
+/**
+ * ProductsPage Component
+ *
+ * URL-based filter persistence for navigating back from detail pages.
+ * Filters stored: q (search), category, page, pageSize, sort, sortDir
+ */
+
 import { motion, AnimatePresence } from 'framer-motion';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ProductsTable } from './ProductsTable';
 import { ProductSearchBar } from './ProductSearchBar';
 import { useToast } from '@/components/ui/use-toast';
@@ -144,14 +152,70 @@ async function fetchCategories(): Promise<CategoryOption[]> {
 const skeletonRows = Array.from({ length: 10 }, (_, index) => index);
 
 export function ProductsPage() {
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-  const [search, setSearch] = useState('');
-  const [categoryId, setCategoryId] = useState('all');
-  const [sortKey, setSortKey] = useState<'internal_code' | 'name'>('internal_code');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-  const debouncedSearch = useDebounce(search, 300);
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
+
+  // Initialize state from URL parameters
+  const [page, setPage] = useState(() => {
+    const p = searchParams?.get('page');
+    return p ? parseInt(p, 10) : 1;
+  });
+  const [pageSize, setPageSize] = useState(() => {
+    const ps = searchParams?.get('pageSize');
+    return ps ? parseInt(ps, 10) : 10;
+  });
+  const [search, setSearch] = useState(() => searchParams?.get('q') || '');
+  const [categoryId, setCategoryId] = useState(() => searchParams?.get('category') || 'all');
+  const [sortKey, setSortKey] = useState<'internal_code' | 'name'>(() => {
+    const sk = searchParams?.get('sort');
+    return sk === 'name' ? 'name' : 'internal_code';
+  });
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>(() => {
+    const sd = searchParams?.get('sortDir');
+    return sd === 'desc' ? 'desc' : 'asc';
+  });
+  const debouncedSearch = useDebounce(search, 300);
+
+  // Re-read URL params when navigating back (component doesn't remount)
+  const searchParamsString = searchParams?.toString() || '';
+  useEffect(() => {
+    const urlPage = searchParams?.get('page');
+    const urlPageSize = searchParams?.get('pageSize');
+    const urlQuery = searchParams?.get('q') || '';
+    const urlCategory = searchParams?.get('category') || 'all';
+    const urlSort = searchParams?.get('sort');
+    const urlSortDir = searchParams?.get('sortDir');
+
+    const newPage = urlPage ? parseInt(urlPage, 10) : 1;
+    const newPageSize = urlPageSize ? parseInt(urlPageSize, 10) : 10;
+    const newSortKey = urlSort === 'name' ? 'name' : 'internal_code';
+    const newSortDir = urlSortDir === 'desc' ? 'desc' : 'asc';
+
+    if (newPage !== page) setPage(newPage);
+    if (newPageSize !== pageSize) setPageSize(newPageSize);
+    if (urlQuery !== search) setSearch(urlQuery);
+    if (urlCategory !== categoryId) setCategoryId(urlCategory);
+    if (newSortKey !== sortKey) setSortKey(newSortKey);
+    if (newSortDir !== sortDirection) setSortDirection(newSortDir);
+  }, [searchParamsString]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync filter state to URL
+  useEffect(() => {
+    const params = new URLSearchParams();
+
+    // Only add non-default values to keep URL clean
+    if (debouncedSearch) params.set('q', debouncedSearch);
+    if (categoryId && categoryId !== 'all') params.set('category', categoryId);
+    if (page > 1) params.set('page', page.toString());
+    if (pageSize !== 10) params.set('pageSize', pageSize.toString());
+    if (sortKey !== 'internal_code') params.set('sort', sortKey);
+    if (sortDirection !== 'asc') params.set('sortDir', sortDirection);
+
+    const query = params.toString();
+    const url = query ? `/products?${query}` : '/products';
+    router.replace(url, { scroll: false });
+  }, [debouncedSearch, categoryId, page, pageSize, sortKey, sortDirection, router]);
 
   const queryParams = useMemo<ProductsQueryParams>(
     () => ({

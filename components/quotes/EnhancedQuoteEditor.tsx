@@ -47,15 +47,8 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
   const { toast } = useToast();
 
   const handleBack = () => {
-    try {
-      const ref = document.referrer;
-      const sameOrigin = ref && new URL(ref).origin === window.location.origin;
-      if (sameOrigin && ref.includes('/quotes')) {
-        router.back();
-        return;
-      }
-    } catch {}
-    router.push('/quotes');
+    // Use router.back() to preserve URL params (filters) when returning to quotes list
+    router.back();
   };
 
   // Company info for PDF (loaded from settings if available)

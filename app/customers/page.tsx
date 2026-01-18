@@ -7,15 +7,17 @@
  * - Removed separate h1, search input, and button rows
  * - All header elements consolidated into single PageToolbar
  * - Reduced vertical spacing for more data visibility
+ * - URL-based filter persistence for navigating back from detail pages
  */
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { Customer } from '@/types/orders';
 import { PageToolbar } from '@/components/ui/page-toolbar';
 import { Plus } from 'lucide-react';
+import { useDebounce } from '@/hooks/use-debounce';
 
 // Function to fetch customers from Supabase
 async function fetchCustomers(): Promise<Customer[]> {
@@ -34,7 +36,35 @@ async function fetchCustomers(): Promise<Customer[]> {
 
 export default function CustomersPage() {
   const router = useRouter();
-  const [searchQuery, setSearchQuery] = useState('');
+  const searchParams = useSearchParams();
+
+  // Initialize search from URL params
+  const [searchQuery, setSearchQuery] = useState(() => searchParams?.get('q') || '');
+  const debouncedSearchQuery = useDebounce(searchQuery, 300);
+
+  // Sync search to URL (re-read when URL changes, e.g., on back navigation)
+  const searchParamsString = searchParams?.toString() || '';
+  useEffect(() => {
+    const urlQuery = searchParams?.get('q') || '';
+    if (urlQuery !== searchQuery) {
+      setSearchQuery(urlQuery);
+    }
+  }, [searchParamsString]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Update URL when debounced search changes
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams?.toString() || '');
+
+    if (debouncedSearchQuery) {
+      params.set('q', debouncedSearchQuery);
+    } else {
+      params.delete('q');
+    }
+
+    const query = params.toString();
+    const url = query ? `/customers?${query}` : '/customers';
+    router.replace(url, { scroll: false });
+  }, [debouncedSearchQuery, router, searchParams]);
 
   // Use React Query to fetch customers
   const { data: customers = [], isLoading, error } = useQuery({

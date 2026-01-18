@@ -66,7 +66,7 @@ interface BackgroundPathsProps {
 
 export function BackgroundPaths({ children, className = "" }: BackgroundPathsProps) {
   return (
-    <div className={`relative min-h-screen w-full flex items-center justify-center overflow-hidden bg-white dark:bg-neutral-950 ${className}`}>
+    <div className={`relative min-h-screen w-full flex items-center justify-center overflow-hidden bg-background ${className}`}>
       {/* Animated SVG path layers - creates depth with mirrored positions */}
       <div className="absolute inset-0">
         <FloatingPaths position={1} />
@@ -74,7 +74,7 @@ export function BackgroundPaths({ children, className = "" }: BackgroundPathsPro
       </div>
 
       {/* Semi-transparent overlay for better text readability */}
-      <div className="absolute inset-0 bg-white/60 dark:bg-neutral-950/60" />
+      <div className="absolute inset-0 bg-background/60" />
 
       {/* Content layer */}
       <div className="relative z-10 w-full">

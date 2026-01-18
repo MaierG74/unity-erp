@@ -15,9 +15,10 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
+import { useAuth } from '@/components/common/auth-provider'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -44,6 +45,7 @@ type LoginForm = z.infer<typeof loginSchema>
 
 export default function LoginPage() {
   const router = useRouter()
+  const { user, loading: authLoading } = useAuth()
   const [error, setError] = useState<string | null>(null)
   const [isRedirecting, setIsRedirecting] = useState(false)
 
@@ -54,6 +56,14 @@ export default function LoginPage() {
   } = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
   })
+
+  // Redirect if user is already authenticated (handles auth state changes)
+  useEffect(() => {
+    if (user && !authLoading) {
+      setIsRedirecting(true)
+      router.replace('/dashboard')
+    }
+  }, [user, authLoading, router])
 
   const onSubmit = async (data: LoginForm) => {
     try {
@@ -70,13 +80,9 @@ export default function LoginPage() {
 
       if (authError) throw authError
 
-      console.log('Login successful, showing redirect screen')
+      console.log('Login successful, waiting for auth state to update')
       setIsRedirecting(true)
-
-      // Small delay to ensure auth state propagates
-      await new Promise(resolve => setTimeout(resolve, 800))
-
-      router.push('/dashboard')
+      // The useEffect will handle the redirect when auth state updates
     } catch (error: any) {
       console.error('Login error:', error)
       setError(error?.message || 'Failed to sign in')
@@ -91,11 +97,14 @@ export default function LoginPage() {
     { icon: Package, label: 'Inventory Control' },
   ]
 
+  // Show loading overlay when redirecting OR when auth state shows user is logged in
+  const showLoadingOverlay = isRedirecting || (user && !authLoading)
+
   return (
     <BackgroundPaths className="fixed inset-0 w-screen h-screen">
       {/* Loading overlay - shows during redirect transition */}
-      {isRedirecting && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/90 dark:bg-neutral-950/90 backdrop-blur-sm">
+      {showLoadingOverlay && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -106,8 +115,8 @@ export default function LoginPage() {
               <div className="absolute top-0 left-0 w-16 h-16 border-4 border-t-teal-500 rounded-full animate-spin"></div>
             </div>
             <div className="text-center">
-              <p className="text-slate-900 dark:text-white text-lg font-medium mb-1">Signing in</p>
-              <p className="text-slate-500 dark:text-slate-400 text-sm">Redirecting to dashboard...</p>
+              <p className="text-foreground text-lg font-medium mb-1">Signing in</p>
+              <p className="text-muted-foreground text-sm">Redirecting to dashboard...</p>
             </div>
           </motion.div>
         </div>

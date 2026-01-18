@@ -87,9 +87,10 @@ export default function QuotesPage() {
     fetchQuotes();
   }, []);
 
-  // Initialize state from query params
+  // Initialize state from query params (re-runs when URL changes, e.g., on back navigation)
+  const searchParamsString = searchParams.toString();
   useEffect(() => {
-    const p = new URLSearchParams(searchParams.toString());
+    const p = new URLSearchParams(searchParamsString);
     const s = p.get('q') || '';
     const st = (p.get('status') || 'all') as any;
     const sortQ = (p.get('sort') || 'created_desc') as any;
@@ -101,8 +102,7 @@ export default function QuotesPage() {
     setSort(['created_desc','created_asc','total_desc','total_asc'].includes(sortQ) ? sortQ : 'created_desc');
     setPage(Number.isFinite(pg) && pg > 0 ? pg : 1);
     setPageSize([10,20,50].includes(ps) ? ps : 10);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParamsString]);
 
   // Push state to query params
   useEffect(() => {

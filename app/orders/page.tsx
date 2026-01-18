@@ -1,9 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+/**
+ * Orders Page
+ *
+ * URL-based filter persistence for navigating back from detail pages.
+ * Filters stored: status, q (search), section
+ */
+
+import { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useDebounce } from '@/hooks/use-debounce';
 import { format } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { Order, OrderStatus } from '@/types/orders';
@@ -696,24 +704,65 @@ function OrderAttachments({ order }: { order: Order }): JSX.Element {
 }
 
 export default function OrdersPage() {
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [debouncedSearch, setDebouncedSearch] = useState<string>('');
-  const [activeSection, setActiveSection] = useState<string | null>(null);
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
+
+  // Initialize state from URL parameters
+  const [statusFilter, setStatusFilter] = useState<string>(() => searchParams?.get('status') || 'all');
+  const [searchQuery, setSearchQuery] = useState<string>(() => searchParams?.get('q') || '');
+  const [activeSection, setActiveSection] = useState<string | null>(() => searchParams?.get('section') || null);
   const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  const router = useRouter();
-  
-  // Handle search input change with debounce
+
+  // Debounce search input to avoid excessive URL/API updates
+  const debouncedSearch = useDebounce(searchQuery, 300);
+
+  // Re-read URL params when navigating back (component doesn't remount)
+  const searchParamsString = searchParams?.toString() || '';
+  useEffect(() => {
+    const urlStatus = searchParams?.get('status') || 'all';
+    const urlQuery = searchParams?.get('q') || '';
+    const urlSection = searchParams?.get('section') || null;
+
+    if (urlStatus !== statusFilter) setStatusFilter(urlStatus);
+    if (urlQuery !== searchQuery) setSearchQuery(urlQuery);
+    if (urlSection !== activeSection) setActiveSection(urlSection);
+  }, [searchParamsString]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync filter state to URL
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams?.toString() || '');
+
+    // Update status filter
+    if (statusFilter && statusFilter !== 'all') {
+      params.set('status', statusFilter);
+    } else {
+      params.delete('status');
+    }
+
+    // Update search query (use debounced value)
+    if (debouncedSearch) {
+      params.set('q', debouncedSearch);
+    } else {
+      params.delete('q');
+    }
+
+    // Update section filter
+    if (activeSection) {
+      params.set('section', activeSection);
+    } else {
+      params.delete('section');
+    }
+
+    const query = params.toString();
+    const url = query ? `/orders?${query}` : '/orders';
+    router.replace(url, { scroll: false });
+  }, [debouncedSearch, statusFilter, activeSection, router, searchParams]);
+
+  // Handle search input change
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(e.target.value);
-    
-    // Debounce search to avoid excessive API calls
-    clearTimeout((window as any).searchTimeout);
-    (window as any).searchTimeout = setTimeout(() => {
-      setDebouncedSearch(e.target.value);
-    }, 500);
   };
   
   // Fetch order statuses for filter dropdown

@@ -10,6 +10,9 @@ import { usePathname } from 'next/navigation';
 // Standalone public routes - no navbar, no sidebar, no app chrome at all
 const standaloneRoutes = ['/supplier-response'];
 
+// Full-bleed routes - have navbar but no container wrapper (they handle their own full-screen layout)
+const fullBleedRoutes = ['/', '/login'];
+
 export function RootLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const pathname = usePathname();
@@ -22,6 +25,9 @@ export function RootLayout({ children }: { children: React.ReactNode }) {
 
   // Check if this is a standalone public route (render without any app chrome)
   const isStandaloneRoute = standaloneRoutes.some(route => pathname.startsWith(route));
+
+  // Check if this is a full-bleed route (navbar but no container wrapper)
+  const isFullBleedRoute = fullBleedRoutes.includes(pathname);
 
   // Check for authentication and set force sidebar if needed
   useEffect(() => {
@@ -98,7 +104,18 @@ export function RootLayout({ children }: { children: React.ReactNode }) {
   }
 
   // Show sidebar if user is authenticated OR if force sidebar is set
-  const shouldShowSidebar = !!user || forceShowSidebar;
+  // BUT not on full-bleed routes (they handle their own layout and redirects)
+  const shouldShowSidebar = (!!user || forceShowSidebar) && !isFullBleedRoute;
+
+  // Full-bleed routes render with minimal wrapper (page handles its own full-screen layout)
+  if (isFullBleedRoute) {
+    return (
+      <div className="h-screen w-screen overflow-hidden">
+        <Navbar />
+        {children}
+      </div>
+    );
+  }
 
   return shouldShowSidebar ? (
     <div className="flex h-screen w-screen bg-background overflow-hidden">

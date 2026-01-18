@@ -179,10 +179,10 @@ Change the back button to use `router.back()` instead of a hard-coded Link:
 | Page | Route | Filters to Persist |
 |------|-------|-------------------|
 | ✅ Inventory | `/inventory` | `q`, `category`, `supplier`, `tab` |
-| Customers | `/customers` | `q`, `status` |
-| Orders | `/orders` | `q`, `status`, `customer` |
-| Quotes | `/quotes` | Already implemented |
-| Suppliers | `/suppliers` | Already implemented |
+| ✅ Quotes | `/quotes` | `q`, `status`, `sort`, `page`, `pageSize` |
+| ✅ Customers | `/customers` | `q` |
+| ✅ Orders | `/orders` | `q`, `status`, `section` |
+| ✅ Suppliers | `/suppliers` | `q`, `hasPricelist` |
 | Products | `/products` | `q`, `category` |
 | Purchase Orders | `/purchasing/purchase-orders` | `q`, `status`, `supplier` |
 
@@ -227,8 +227,10 @@ For each page, complete these steps:
 
 These files already implement the pattern and can be used as reference:
 
-1. **Quotes Page**: `app/quotes/page.tsx`
+1. **Quotes Page**: `app/quotes/page.tsx` + `components/quotes/EnhancedQuoteEditor.tsx`
    - Full implementation with search, status, sort, pagination
+   - **Key fix**: Changed `useEffect` dependency from `[]` to `[searchParamsString]` to re-read URL on back navigation
+   - **Key fix**: Simplified `handleBack()` to just use `router.back()` instead of conditional referrer checking
 
 2. **Supplier List**: `components/features/suppliers/supplier-list.tsx`
    - Simple implementation with checkbox filter
@@ -236,11 +238,22 @@ These files already implement the pattern and can be used as reference:
 3. **Inventory (new)**: `app/inventory/page.tsx` + `components/features/inventory/ComponentsTab.tsx`
    - Tab management + multi-filter implementation
 
+4. **Customers**: `app/customers/page.tsx` + `app/customers/[id]/page.tsx`
+   - Search filter with unsaved changes detection on detail page
+
+5. **Orders**: `app/orders/page.tsx` + `app/orders/[orderId]/page.tsx`
+   - Status filter, search filter, section filter (section pills for product categories)
+
+6. **Suppliers**: `components/features/suppliers/supplier-list.tsx` + `app/suppliers/[id]/page.tsx`
+   - Search filter, "has pricelist" checkbox filter
+
 ## Troubleshooting
 
 ### Filters not persisting on back navigation
-- Ensure detail page uses `router.back()` not `<Link href="...">`
+- Ensure detail page uses `router.back()` not `<Link href="...">` or `router.push('/path')`
 - Check that URL is being updated on filter change
+- **Common issue**: The initialization effect has `[]` dependency array (runs only on mount)
+  - Fix: Add `searchParams` or `searchParamsString` to the dependency array so it re-runs when URL changes
 
 ### URL updates cause scroll to top
 - Add `{ scroll: false }` to `router.replace()` call

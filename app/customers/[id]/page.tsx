@@ -403,13 +403,13 @@ export default function CustomerDetailPage() {
     }
   };
 
-  // Handle back navigation
+  // Handle back navigation - use router.back() to preserve URL filters
   const handleBack = () => {
     if (hasUnsavedChanges) {
       setUnsavedDialogOpen(true);
-      setPendingNavigation('/customers');
+      setPendingNavigation('back');
     } else {
-      router.push('/customers');
+      router.back();
     }
   };
 
@@ -436,6 +436,9 @@ export default function CustomerDetailPage() {
           payment_terms: customer.payment_terms || '',
         });
       }
+    } else if (pendingNavigation === 'back') {
+      // Use router.back() to preserve URL filters when navigating back
+      router.back();
     } else if (pendingNavigation) {
       router.push(pendingNavigation);
     }

@@ -68,6 +68,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - Completed: [`plans/quote-email-plan.md`](plans/quote-email-plan.md) – Quote PDF email integration plan (see [`operations/quote-email-implementation.md`](operations/quote-email-implementation.md) for implementation)
   - New: [`plans/inventory-traceability-po-consolidation-plan.md`](plans/inventory-traceability-po-consolidation-plan.md) – Inventory traceability through purchase cycle, PO consolidation, and reserved inventory system
 - Changelogs: [`changelogs/`](changelogs/)
+  - [`changelogs/auth-and-landing-ui-improvements-20250117.md`](changelogs/auth-and-landing-ui-improvements-20250117.md) – ✅ **Auth flow & landing page UI improvements** (background color uniformity, login/logout flow fixes)
   - [`changelogs/nextjs-cve-upgrade-20260117.md`](changelogs/nextjs-cve-upgrade-20260117.md) – ✅ **Next.js CVE upgrade** (Netlify unblock by upgrading to patched Next.js)
   - [`changelogs/inventory-url-filter-persistence-20260117.md`](changelogs/inventory-url-filter-persistence-20260117.md) – ✅ **Inventory URL filter persistence** (filters survive navigation to detail pages)
   - [`changelogs/quote-line-items-description-width-fix-20260117.md`](changelogs/quote-line-items-description-width-fix-20260117.md) – ✅ **Quote line items Description column width fix** (minimum width and horizontal scroll for better readability)

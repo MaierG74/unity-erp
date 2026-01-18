@@ -160,8 +160,23 @@ export function Navbar() {
               </span>
               <button
                 onClick={async () => {
-                  await supabase.auth.signOut();
-                  router.push('/login');
+                  try {
+                    // Sign out from Supabase (use global scope to invalidate all sessions)
+                    await supabase.auth.signOut({ scope: 'global' });
+                  } catch (error) {
+                    console.error('Sign out error:', error);
+                  }
+
+                  // Manually clear all Supabase-related localStorage keys
+                  if (typeof window !== 'undefined') {
+                    const keysToRemove = Object.keys(localStorage).filter(
+                      key => key.startsWith('sb-') || key === 'returnTo'
+                    );
+                    keysToRemove.forEach(key => localStorage.removeItem(key));
+                  }
+
+                  // Hard redirect to fully reset app state
+                  window.location.href = '/login';
                 }}
                 className="text-sm text-muted-foreground hover:text-foreground"
               >

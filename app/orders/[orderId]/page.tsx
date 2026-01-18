@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useMemo, useEffect, useCallback, use } from 'react';
-import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { supabase } from '@/lib/supabase';
@@ -2363,6 +2362,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  const router = useRouter();
   const [orderComponentsOpen, setOrderComponentsOpen] = useState<boolean>(false);
   const [statusOptions, setStatusOptions] = useState<any[]>([]);
   // Add state for expanded rows
@@ -2971,11 +2971,9 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Link href="/orders">
-            <Button variant="ghost" size="icon" className="h-8 w-8">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => router.back()}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
           <div>
             <h1 className="text-3xl font-bold tracking-tight">
               {order?.order_number || `Order #${orderId}`}

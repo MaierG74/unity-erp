@@ -7,12 +7,14 @@
  * - Removed separate h1, search input, and button rows
  * - All header elements consolidated into PageToolbar
  * - Checkbox filter passed as children to toolbar
+ * - URL-based filter persistence for navigating back from detail pages
  */
 import { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getSuppliers } from '@/lib/api/suppliers';
 import { Plus } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useDebounce } from '@/hooks/use-debounce';
 import { PricelistPreviewModal } from './pricelist-preview-modal';
 import type { SupplierWithDetails } from '@/types/suppliers';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -23,27 +25,51 @@ import { PageToolbar } from '@/components/ui/page-toolbar';
 export function SupplierList() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [searchTerm, setSearchTerm] = useState('');
+
+  // Initialize state from URL parameters
+  const [searchTerm, setSearchTerm] = useState(() => searchParams?.get('q') || '');
   const [selectedSupplier, setSelectedSupplier] = useState<SupplierWithDetails | null>(null);
   const [hasPricelistOnly, setHasPricelistOnly] = useState(() => {
     const param = searchParams?.get('hasPricelist');
     return param === '1' || param === 'true';
   });
 
-  // Keep URL in sync when the checkbox changes
+  // Debounce search input to avoid excessive URL updates
+  const debouncedSearchTerm = useDebounce(searchTerm, 300);
+
+  // Re-read URL params when navigating back (component doesn't remount)
+  const searchParamsString = searchParams?.toString() || '';
   useEffect(() => {
-    // Build new query string while preserving existing params
-    const sp = new URLSearchParams(Array.from(searchParams?.entries?.() || []));
-    if (hasPricelistOnly) {
-      sp.set('hasPricelist', '1');
+    const urlQuery = searchParams?.get('q') || '';
+    const urlHasPricelist = searchParams?.get('hasPricelist');
+    const urlHasPricelistBool = urlHasPricelist === '1' || urlHasPricelist === 'true';
+
+    if (urlQuery !== searchTerm) setSearchTerm(urlQuery);
+    if (urlHasPricelistBool !== hasPricelistOnly) setHasPricelistOnly(urlHasPricelistBool);
+  }, [searchParamsString]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync filter state to URL
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams?.toString() || '');
+
+    // Update search query (use debounced value)
+    if (debouncedSearchTerm) {
+      params.set('q', debouncedSearchTerm);
     } else {
-      sp.delete('hasPricelist');
+      params.delete('q');
     }
-    const query = sp.toString();
+
+    // Update pricelist filter
+    if (hasPricelistOnly) {
+      params.set('hasPricelist', '1');
+    } else {
+      params.delete('hasPricelist');
+    }
+
+    const query = params.toString();
     const url = query ? `/suppliers?${query}` : '/suppliers';
-    router.replace(url);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasPricelistOnly]);
+    router.replace(url, { scroll: false });
+  }, [debouncedSearchTerm, hasPricelistOnly, router, searchParams]);
 
   const { data: suppliers, isLoading, error } = useQuery({
     queryKey: ['suppliers'],
