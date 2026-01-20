@@ -18,6 +18,21 @@ import { Input } from '@/components/ui/input';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 
+// Helper functions for South African date format (dd/mm/yyyy)
+const formatToSA = (isoDate: string): string => {
+  if (!isoDate) return '';
+  const [year, month, day] = isoDate.split('-');
+  return `${day}/${month}/${year}`;
+};
+
+const formatToISO = (saDate: string): string => {
+  if (!saDate) return '';
+  const parts = saDate.split('/');
+  if (parts.length !== 3) return '';
+  const [day, month, year] = parts;
+  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+};
+
 export default function NewOrderPage() {
   const router = useRouter();
   const { mutateAsync: createOrderMutation, isPending: isCreating } = useMutation({
@@ -48,6 +63,7 @@ export default function NewOrderPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [orderNumber, setOrderNumber] = useState<string>('');
   const [deliveryDate, setDeliveryDate] = useState<string>('');
+  const [deliveryDateDisplay, setDeliveryDateDisplay] = useState<string>('');
 
   const handleCreateFromScratch = () => {
     const payload: Record<string, any> = {};
@@ -74,7 +90,7 @@ export default function NewOrderPage() {
 
   const filteredCustomers = useMemo(
     () => customersSorted.filter(c =>
-      c.name.toLowerCase().startsWith(searchTerm.toLowerCase())
+      c.name.toLowerCase().includes(searchTerm.toLowerCase())
     ),
     [customersSorted, searchTerm]
   );
@@ -195,7 +211,43 @@ export default function NewOrderPage() {
                     </div>
                     <div>
                       <Label htmlFor="delivery-date">Delivery Date (optional)</Label>
-                      <Input id="delivery-date" type="date" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} />
+                      <div className="relative flex">
+                        <Input
+                          id="delivery-date"
+                          type="text"
+                          placeholder="dd/mm/yyyy"
+                          value={deliveryDateDisplay}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            // Allow typing in dd/mm/yyyy format
+                            if (value === '' || /^[\d/]*$/.test(value)) {
+                              setDeliveryDateDisplay(value);
+                              const iso = formatToISO(value);
+                              if (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+                                setDeliveryDate(iso);
+                              } else if (value === '') {
+                                setDeliveryDate('');
+                              }
+                            }
+                          }}
+                          className="pr-10"
+                        />
+                        <input
+                          type="date"
+                          className="absolute right-0 top-0 h-full w-10 opacity-0 cursor-pointer"
+                          value={deliveryDate}
+                          onChange={(e) => {
+                            setDeliveryDate(e.target.value);
+                            setDeliveryDateDisplay(formatToSA(e.target.value));
+                          }}
+                          aria-label="Open date picker"
+                        />
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                          <svg className="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <Button variant="secondary" onClick={handleCreateFromScratch} disabled={isCreating || !customerId}>

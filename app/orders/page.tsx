@@ -292,18 +292,62 @@ function UploadAttachmentDialog({ order, onSuccess }: { order: Order, onSuccess:
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [displayName, setDisplayName] = useState('');
+  const [isDragOver, setIsDragOver] = useState(false);
 
-  // Handle file selection
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  // Handle file from any source (input, paste, or drop)
+  const handleFile = (file: File) => {
     setSelectedFile(file);
-    
     if (!displayName) {
       // Use file name without extension as default display name
-      setDisplayName(file.name.split('.').slice(0, -1).join('.'));
+      const nameParts = file.name.split('.');
+      if (nameParts.length > 1) {
+        setDisplayName(nameParts.slice(0, -1).join('.'));
+      } else {
+        setDisplayName(file.name);
+      }
     }
+  };
+
+  // Handle file selection from input
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleFile(file);
+  };
+
+  // Handle paste event
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === 'file') {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          handleFile(file);
+          break;
+        }
+      }
+    }
+  };
+
+  // Handle drag and drop
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const file = e.dataTransfer?.files?.[0];
+    if (file) handleFile(file);
   };
 
   // Handle file upload
@@ -315,17 +359,17 @@ function UploadAttachmentDialog({ order, onSuccess }: { order: Order, onSuccess:
       // Generate a unique filename with timestamp and random string
       const timestamp = new Date().getTime();
       const randomStr = Math.random().toString(36).substring(2, 10);
-      const fileExt = selectedFile.name.split('.').pop();
+      const fileExt = selectedFile.name.split('.').pop() || 'file';
       const fileName = `${order.order_number || order.order_id}_${timestamp}_${randomStr}.${fileExt}`;
       const filePath = `Orders/Customer/${order.customer?.id}/${fileName}`;
-      
+
       // Options including content type
       const fileOptions = {
         cacheControl: '3600',
         contentType: selectedFile.type || undefined,
         upsert: false
       };
-      
+
       // Upload file to storage with proper content type
       const { error: uploadError } = await supabase.storage
         .from('qbutton')
@@ -361,7 +405,7 @@ function UploadAttachmentDialog({ order, onSuccess }: { order: Order, onSuccess:
       setSelectedFile(null);
       setDisplayName('');
       onSuccess();
-      
+
       // Reset the file input
       const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
       if (fileInput) fileInput.value = '';
@@ -373,13 +417,25 @@ function UploadAttachmentDialog({ order, onSuccess }: { order: Order, onSuccess:
   };
 
   return (
-    <div className="p-4 border rounded-lg bg-card">
+    <div
+      className={`p-4 border-2 border-dashed rounded-lg bg-card transition-colors ${
+        isDragOver ? 'border-primary bg-primary/5' : 'border-muted'
+      }`}
+      onPaste={handlePaste}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      <div className="text-center text-sm text-muted-foreground mb-4">
+        Drag & drop a file here, or paste from clipboard (Ctrl+V / Cmd+V)
+      </div>
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
         <input
           type="text"
           placeholder="Display name"
           value={displayName}
           onChange={(e) => setDisplayName(e.target.value)}
+          onPaste={handlePaste}
           className="flex-1 px-3 py-2 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring focus:border-input"
         />
         <input
@@ -406,7 +462,7 @@ function UploadAttachmentDialog({ order, onSuccess }: { order: Order, onSuccess:
         </button>
       </div>
       {selectedFile && (
-        <div className="mt-2 text-sm text-muted-foreground flex items-center gap-2">
+        <div className="mt-3 text-sm text-muted-foreground flex items-center gap-2">
           <Check className="h-4 w-4 text-green-500" />
           <span>Selected: {selectedFile.name}</span>
         </div>
@@ -636,22 +692,64 @@ function OrderAttachments({ order }: { order: Order }): JSX.Element {
     queryClient.invalidateQueries({ queryKey: ['orderAttachments', order.order_id] });
   };
 
+  // Find the first PDF attachment for thumbnail display
+  const firstPdfAttachment = attachments.find(
+    (a) => a.file_name?.toLowerCase().endsWith('.pdf')
+  );
+
   return (
     <>
       <td className="p-4 text-center align-middle">
         {attachments.length > 0 ? (
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              setSelectedOrder(order);
-            }}
-            className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary transition-colors hover:bg-primary/20 focus:outline-none focus:ring-2 focus:ring-primary/40"
-            aria-label={`View ${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`}
-          >
-            <FileText className="h-4 w-4" />
-            <span>{attachments.length}</span>
-          </button>
+          firstPdfAttachment ? (
+            <a
+              href={firstPdfAttachment.file_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(event) => event.stopPropagation()}
+              className="inline-block transition-transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-primary/40 rounded"
+              aria-label="Open PDF"
+              title="Click to open PDF"
+            >
+              <div className="relative w-12 h-16 overflow-hidden rounded border bg-white shadow-sm hover:shadow-md transition-shadow">
+                <div className="pointer-events-none w-full h-full">
+                  <PdfThumbnailClient
+                    url={firstPdfAttachment.file_url}
+                    width={48}
+                    height={64}
+                    className="w-full h-full"
+                  />
+                </div>
+                {attachments.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setSelectedOrder(order);
+                    }}
+                    className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center shadow hover:bg-primary/80"
+                    title={`View all ${attachments.length} attachments`}
+                  >
+                    {attachments.length}
+                  </button>
+                )}
+              </div>
+            </a>
+          ) : (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setSelectedOrder(order);
+              }}
+              className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary transition-colors hover:bg-primary/20"
+              aria-label={`View ${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`}
+            >
+              <FileText className="h-4 w-4" />
+              <span>{attachments.length}</span>
+            </button>
+          )
         ) : (
           <span className="inline-flex items-center justify-center rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
             None
@@ -752,28 +850,22 @@ export default function OrdersPage() {
     // Update status filter
     if (statusFilter && statusFilter !== 'all') {
       params.set('status', statusFilter);
-    } else {
-      params.delete('status');
     }
 
     // Update search query (use debounced value)
     if (debouncedSearch) {
       params.set('q', debouncedSearch);
-    } else {
-      params.delete('q');
     }
 
     // Update section filter
     if (activeSection) {
       params.set('section', activeSection);
-    } else {
-      params.delete('section');
     }
 
     const query = params.toString();
     const url = query ? `/orders?${query}` : '/orders';
     router.replace(url, { scroll: false });
-  }, [debouncedSearch, statusFilter, activeSection, router, searchParams]);
+  }, [debouncedSearch, statusFilter, activeSection, router]);
 
   // Handle search input change
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
