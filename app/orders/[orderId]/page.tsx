@@ -1373,7 +1373,7 @@ const OrderComponentsDialog = ({
                                       {component.component.internal_code}
                                     </span>
                                     {isForStock && (
-                                      <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-50 text-amber-700 border border-amber-200">
+                                      <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30">
                                         For Stock
                                       </span>
                                     )}
@@ -1538,8 +1538,8 @@ const OrderComponentsDialog = ({
                   Either no components have shortfalls, or components with shortfalls don't have configured suppliers.
                 </p>
                 {apparentShortfallExists && (
-                  <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-md">
-                    <p className="text-amber-800">
+                  <div className="mt-4 p-4 bg-amber-500/10 border border-amber-500/30 rounded-md">
+                    <p className="text-amber-700 dark:text-amber-400">
                       <AlertCircle className="h-4 w-4 inline-block mr-2" />
                       Some components show shortfall but they're already on order. Check the "On Order" column in the Component Requirements table.
                     </p>
@@ -3224,7 +3224,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
               <CollapsibleContent>
                 <CardContent>
               {applyFgCoverage && (
-                <Badge variant="outline" className="mb-3 bg-blue-50 text-blue-700">
+                <Badge variant="outline" className="mb-3 bg-blue-500/15 text-blue-700 dark:text-blue-400">
                   Stock reservations applied
                 </Badge>
               )}
@@ -3520,9 +3520,9 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
               {/* Critical Shortfalls Table */}
               {totals.criticalShortfalls.length > 0 && (
                 <div className="border rounded-lg overflow-hidden">
-                  <div className="bg-red-50 px-3 py-2 border-b flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 text-red-500" />
-                    <span className="text-sm font-medium text-red-700">Components Needing Attention</span>
+                  <div className="bg-destructive/10 px-3 py-2 border-b flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-destructive" />
+                    <span className="text-sm font-medium text-destructive">Components Needing Attention</span>
                   </div>
                   <table className="w-full text-sm">
                     <thead className="bg-muted/50">
@@ -3568,13 +3568,13 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
               
               {/* All good message */}
               {totals.totalShortfall === 0 && totals.totalComponents > 0 && totals.componentsPendingDeliveries === 0 && (
-                <div className="flex items-center gap-2 text-green-600 bg-green-50 rounded-lg p-3">
+                <div className="flex items-center gap-2 text-green-600 dark:text-green-400 bg-green-500/10 rounded-lg p-3">
                   <CheckCircle className="w-5 h-5" />
                   <span className="font-medium">All components available in stock</span>
                 </div>
               )}
               {totals.totalShortfall === 0 && totals.totalComponents > 0 && totals.componentsPendingDeliveries > 0 && (
-                <div className="flex items-center gap-2 text-amber-700 bg-amber-50 rounded-lg p-3">
+                <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 bg-amber-500/10 rounded-lg p-3">
                   <AlertCircle className="w-5 h-5" />
                   <span className="font-medium">
                     All components will be available once pending deliveries arrive for {totals.componentsPendingDeliveries === 1
@@ -3815,7 +3815,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                                 <div
                                   className={cn(
                                     "p-4 flex justify-between items-center cursor-pointer",
-                                    hasShortfall ? 'bg-red-50' : 'bg-white'
+                                    hasShortfall ? 'bg-destructive/10' : 'bg-card'
                                   )}
                                   onClick={() => toggleRowExpansion(productId)}
                                 >
@@ -3885,7 +3885,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                                               <TableRow
                                                 key={component.component_id || `comp-${compIndex}`}
                                                 className={cn(
-                                                  compIndex % 2 === 0 ? "bg-white" : "bg-muted/20",
+                                                  compIndex % 2 === 0 ? "bg-card" : "bg-muted/20",
                                                   "hover:bg-muted/30 transition-all duration-200 ease-in-out"
                                                 )}
                                               >
@@ -3933,7 +3933,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                                                     <Popover>
                                                       <PopoverTrigger>
                                                         <div className="cursor-help inline-flex items-center">
-                                                          <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-100 text-amber-800 border border-amber-200">
+                                                          <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30">
                                                             {formatQuantity(component.draft_po_quantity)}
                                                           </span>
                                                         </div>

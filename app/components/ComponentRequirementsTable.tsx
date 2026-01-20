@@ -90,10 +90,10 @@ export function ComponentRequirementsTable({ requirements }: { requirements: Com
           </TableHeader>
           <TableBody>
             {requirements.map((req, index) => (
-              <TableRow 
+              <TableRow
                 key={req.component_id}
                 className={cn(
-                  index % 2 === 0 ? "bg-white" : "bg-muted/20",
+                  index % 2 === 0 ? "bg-card" : "bg-muted/20",
                   "hover:bg-muted/30 transition-all duration-200 ease-in-out"
                 )}
               >

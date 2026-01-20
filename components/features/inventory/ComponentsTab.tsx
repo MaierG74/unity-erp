@@ -136,6 +136,25 @@ export function ComponentsTab() {
 
   // Sync filter state to URL (debounced for search, immediate for dropdowns)
   useEffect(() => {
+    const currentUrlQuery = searchParams?.get('q') || '';
+    const currentUrlCategory = searchParams?.get('category') || '_all';
+    const currentUrlSupplier = searchParams?.get('supplier') || '_all';
+
+    // Normalize values for comparison
+    const categoryToSet = selectedCategory === '_all' ? '' : selectedCategory;
+    const currentCategoryNormalized = currentUrlCategory === '_all' ? '' : currentUrlCategory;
+    const supplierToSet = selectedSupplier === '_all' ? '' : selectedSupplier;
+    const currentSupplierNormalized = currentUrlSupplier === '_all' ? '' : currentUrlSupplier;
+
+    // Only update URL if values differ from current URL
+    if (
+      debouncedFilterText === currentUrlQuery &&
+      categoryToSet === currentCategoryNormalized &&
+      supplierToSet === currentSupplierNormalized
+    ) {
+      return;
+    }
+
     const params = new URLSearchParams(searchParams?.toString() || '');
 
     // Update search query (use debounced value to avoid excessive URL updates)

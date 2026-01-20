@@ -503,7 +503,7 @@ function AttachmentModalWithRefresh({
                             </div>
                           </div>
                         ) : isImage ? (
-                          <div className="mb-3 aspect-[3/4] border rounded overflow-hidden bg-white flex items-center justify-center relative">
+                          <div className="mb-3 aspect-[3/4] border rounded overflow-hidden bg-muted flex items-center justify-center relative">
                             {/* Simple, reliable image thumbnail */}
                             <div className="w-full h-full flex items-center justify-center p-3">
                               <div className="relative w-full h-full flex items-center justify-center">
@@ -513,13 +513,12 @@ function AttachmentModalWithRefresh({
                                 </div>
                                 
                                 {/* Actual image */}
-                                <img 
+                                <img
                                   key={`img-${key}`}
                                   src={attachment.file_url}
                                   alt={attachment.file_name}
                                   className="max-w-full max-h-full object-contain z-10"
-                                  style={{ 
-                                    backgroundColor: 'white',
+                                  style={{
                                     maxHeight: '100%'
                                   }}
                                   onLoad={(e) => {
@@ -732,6 +731,22 @@ export default function OrdersPage() {
 
   // Sync filter state to URL
   useEffect(() => {
+    const currentUrlStatus = searchParams?.get('status') || 'all';
+    const currentUrlQuery = searchParams?.get('q') || '';
+    const currentUrlSection = searchParams?.get('section') || null;
+
+    // Only update URL if values differ from current URL
+    const statusToSet = statusFilter === 'all' ? '' : statusFilter;
+    const currentStatusNormalized = currentUrlStatus === 'all' ? '' : currentUrlStatus;
+
+    if (
+      statusToSet === currentStatusNormalized &&
+      debouncedSearch === currentUrlQuery &&
+      activeSection === currentUrlSection
+    ) {
+      return;
+    }
+
     const params = new URLSearchParams(searchParams?.toString() || '');
 
     // Update status filter

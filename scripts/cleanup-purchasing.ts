@@ -140,6 +140,21 @@ async function main() {
   }
   console.log(`Components with inventory to reverse: ${deltas.size}`);
 
+  // 5b) Count email-related records
+  const { count: poEmailCount } = await supabase
+    .from('purchase_order_emails')
+    .select('*', { count: 'exact', head: true })
+    .in('purchase_order_id', targetPoIds);
+  const { count: emailEventCount } = await supabase
+    .from('email_events')
+    .select('*', { count: 'exact', head: true })
+    .in('purchase_order_id', targetPoIds);
+  const { count: followUpEmailCount } = await supabase
+    .from('component_follow_up_emails')
+    .select('*', { count: 'exact', head: true })
+    .in('purchase_order_id', targetPoIds);
+  console.log(`PO Emails: ${poEmailCount ?? 0} Email Events: ${emailEventCount ?? 0} Follow-up Emails: ${followUpEmailCount ?? 0}`);
+
   // 6) Dry run reporting
   if (dryRun) {
     console.log('--- DRY RUN SUMMARY ---');
@@ -150,6 +165,9 @@ async function main() {
       returns: returns?.length ?? 0,
       transactions: txIds.length,
       componentsToAdjust: deltas.size,
+      poEmails: poEmailCount ?? 0,
+      emailEvents: emailEventCount ?? 0,
+      followUpEmails: followUpEmailCount ?? 0,
     });
     // Show first few deltas
     let shown = 0;
@@ -229,7 +247,30 @@ async function main() {
     }
   }
 
-  // 7h) Delete purchase orders
+  // 7h) Delete email-related records (must be before PO deletion due to FK)
+  if ((poEmailCount ?? 0) > 0) {
+    for (let i = 0; i < targetPoIds.length; i += 1000) {
+      const chunk = targetPoIds.slice(i, i + 1000);
+      const { error: delPOEmailErr } = await supabase.from('purchase_order_emails').delete().in('purchase_order_id', chunk);
+      if (delPOEmailErr) throw delPOEmailErr;
+    }
+  }
+  if ((emailEventCount ?? 0) > 0) {
+    for (let i = 0; i < targetPoIds.length; i += 1000) {
+      const chunk = targetPoIds.slice(i, i + 1000);
+      const { error: delEmailEventErr } = await supabase.from('email_events').delete().in('purchase_order_id', chunk);
+      if (delEmailEventErr) throw delEmailEventErr;
+    }
+  }
+  if ((followUpEmailCount ?? 0) > 0) {
+    for (let i = 0; i < targetPoIds.length; i += 1000) {
+      const chunk = targetPoIds.slice(i, i + 1000);
+      const { error: delFollowUpErr } = await supabase.from('component_follow_up_emails').delete().in('purchase_order_id', chunk);
+      if (delFollowUpErr) throw delFollowUpErr;
+    }
+  }
+
+  // 7i) Delete purchase orders
   for (let i = 0; i < targetPoIds.length; i += 1000) {
     const chunk = targetPoIds.slice(i, i + 1000);
     const { error: delPOErr } = await supabase.from('purchase_orders').delete().in('purchase_order_id', chunk);

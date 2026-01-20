@@ -25,6 +25,7 @@
 - Deletes `supplier_order_returns` and their linked `inventory_transactions`.
 - Deletes `supplier_order_receipts` and their linked `inventory_transactions`.
 - Deletes junction rows in `supplier_order_customer_orders` for affected supplier orders.
+- Deletes email-related records: `purchase_order_emails`, `email_events`, `component_follow_up_emails`.
 - Deletes `supplier_orders`, then parent `purchase_orders`.
 - Leaves all other modules and lookup tables untouched.
 
@@ -39,6 +40,9 @@
 | `inventory_transactions` | Receipt and return transactions deleted |
 | `inventory` | `quantity_on_hand` reversed |
 | `supplier_order_customer_orders` | Junction links deleted |
+| `purchase_order_emails` | Deleted |
+| `email_events` | PO-related email events deleted |
+| `component_follow_up_emails` | Deleted |
 
 **Safeguards**
 

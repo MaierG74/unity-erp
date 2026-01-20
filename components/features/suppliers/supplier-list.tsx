@@ -50,6 +50,15 @@ export function SupplierList() {
 
   // Sync filter state to URL
   useEffect(() => {
+    const currentUrlQuery = searchParams?.get('q') || '';
+    const currentUrlHasPricelist = searchParams?.get('hasPricelist');
+    const currentUrlHasPricelistBool = currentUrlHasPricelist === '1' || currentUrlHasPricelist === 'true';
+
+    // Only update URL if values differ from current URL
+    if (debouncedSearchTerm === currentUrlQuery && hasPricelistOnly === currentUrlHasPricelistBool) {
+      return;
+    }
+
     const params = new URLSearchParams(searchParams?.toString() || '');
 
     // Update search query (use debounced value)

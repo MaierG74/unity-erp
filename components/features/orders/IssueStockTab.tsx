@@ -514,7 +514,7 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                     className={cn(
                       "flex items-center space-x-3 p-3 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors",
                       isSelected && "bg-muted border-primary",
-                      allComponentsIssued && "border-green-200 bg-green-50/50"
+                      allComponentsIssued && "border-green-500/30 bg-green-500/10"
                     )}
                     onClick={() => toggleOrderDetail(orderDetailId)}
                   >
@@ -639,14 +639,14 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                         const isManual = manualComponents.some(m => m.component_id === comp.component_id);
                         return (
                           <TableRow key={comp.component_id} className={cn(
-                            comp.has_warning && 'bg-amber-50',
-                            isManual && 'bg-blue-50/50'
+                            comp.has_warning && 'bg-amber-500/10',
+                            isManual && 'bg-blue-500/10'
                           )}>
                             <TableCell>
                               <div className="flex items-center gap-2">
                                 <div className="font-medium">{comp.internal_code}</div>
                                 {isManual && (
-                                  <Badge variant="outline" className="text-xs bg-blue-100 text-blue-700 border-blue-200">
+                                  <Badge variant="outline" className="text-xs bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30">
                                     Manual
                                   </Badge>
                                 )}

@@ -5,6 +5,7 @@ import { getSupplier, updateSupplier } from '@/lib/api/suppliers';
 import { supabase } from '@/lib/supabase';
 import { formatCurrency } from '@/lib/quotes';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { ArrowLeft, Package, DollarSign, Clock, Layers, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';

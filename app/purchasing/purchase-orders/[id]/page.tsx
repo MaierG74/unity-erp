@@ -2,6 +2,7 @@
 
 import { use, useState, useEffect, useMemo, useLayoutEffect, useRef } from 'react';
 import { useToast } from '@/components/ui/use-toast';
+import Link from 'next/link';
 import { useRouter, notFound } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';

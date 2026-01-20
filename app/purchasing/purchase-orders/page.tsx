@@ -244,6 +244,35 @@ export default function PurchaseOrdersPage() {
 
   // Sync filter state to URL
   useEffect(() => {
+    const currentUrlTab = searchParams?.get('tab');
+    const currentUrlStatus = searchParams?.get('status') || 'all';
+    const currentUrlQ = searchParams?.get('q') || '';
+    const currentUrlSupplier = searchParams?.get('supplier') || 'all';
+    const currentUrlStartDate = searchParams?.get('startDate') || '';
+    const currentUrlEndDate = searchParams?.get('endDate') || '';
+
+    // Normalize values for comparison
+    const tabToSet = activeTab === 'inProgress' ? '' : activeTab;
+    const currentTabNormalized = currentUrlTab === 'completed' ? 'completed' : '';
+    const statusToSet = statusFilter === 'all' ? '' : statusFilter;
+    const currentStatusNormalized = currentUrlStatus === 'all' ? '' : currentUrlStatus;
+    const supplierToSet = supplierSearch === 'all' ? '' : supplierSearch;
+    const currentSupplierNormalized = currentUrlSupplier === 'all' ? '' : currentUrlSupplier;
+    const startDateToSet = startDate ? startDate.toISOString().split('T')[0] : '';
+    const endDateToSet = endDate ? endDate.toISOString().split('T')[0] : '';
+
+    // Only update URL if values differ from current URL
+    if (
+      tabToSet === currentTabNormalized &&
+      statusToSet === currentStatusNormalized &&
+      debouncedQNumberSearch === currentUrlQ &&
+      supplierToSet === currentSupplierNormalized &&
+      startDateToSet === currentUrlStartDate &&
+      endDateToSet === currentUrlEndDate
+    ) {
+      return;
+    }
+
     const params = new URLSearchParams();
 
     // Only add non-default values to keep URL clean
@@ -257,7 +286,7 @@ export default function PurchaseOrdersPage() {
     const query = params.toString();
     const url = query ? `/purchasing/purchase-orders?${query}` : '/purchasing/purchase-orders';
     router.replace(url, { scroll: false });
-  }, [activeTab, statusFilter, debouncedQNumberSearch, supplierSearch, startDate, endDate, router]);
+  }, [activeTab, statusFilter, debouncedQNumberSearch, supplierSearch, startDate, endDate, router, searchParams]);
 
   const { data: purchaseOrders, isLoading, error, refetch } = useQuery({
     queryKey: ['purchaseOrders'],

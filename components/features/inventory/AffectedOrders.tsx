@@ -171,7 +171,7 @@ export function AffectedOrders({ componentId }: AffectedOrdersProps) {
                         {followUpEmails.map((email) => (
                             <div
                                 key={email.id}
-                                className="bg-white rounded-md px-3 py-2 border"
+                                className="bg-card rounded-md px-3 py-2 border"
                             >
                                 <div className="flex items-center justify-between text-sm">
                                     <div className="flex items-center gap-2">
@@ -194,8 +194,8 @@ export function AffectedOrders({ componentId }: AffectedOrdersProps) {
                                 
                                 {/* Supplier Response */}
                                 {email.response?.responded_at && (
-                                    <div className="mt-2 pt-2 border-t bg-green-50 -mx-3 -mb-2 px-3 py-2 rounded-b-md">
-                                        <div className="flex items-center gap-2 text-xs text-green-700 mb-2">
+                                    <div className="mt-2 pt-2 border-t bg-green-500/10 -mx-3 -mb-2 px-3 py-2 rounded-b-md">
+                                        <div className="flex items-center gap-2 text-xs text-green-700 dark:text-green-400 mb-2">
                                             <CheckCircle className="h-3 w-3" />
                                             <span className="font-medium">Supplier Response</span>
                                             <span className="text-green-600">
@@ -207,9 +207,9 @@ export function AffectedOrders({ componentId }: AffectedOrdersProps) {
                                         {email.response.line_item_responses && email.response.line_item_responses.length > 0 ? (
                                             <div className="space-y-2">
                                                 {email.response.line_item_responses.map((item, idx) => (
-                                                    <div key={idx} className="bg-white/60 rounded p-2 text-xs border border-green-200">
+                                                    <div key={idx} className="bg-card/60 rounded p-2 text-xs border border-green-500/30">
                                                         <div className="flex items-center justify-between mb-1">
-                                                            <span className="font-medium text-gray-800">
+                                                            <span className="font-medium text-foreground">
                                                                 {item.po_number} • {item.supplier_code}
                                                             </span>
                                                             <span className="font-medium">
@@ -220,17 +220,17 @@ export function AffectedOrders({ componentId }: AffectedOrdersProps) {
                                                                  item.item_status || '✅ On Track'}
                                                             </span>
                                                         </div>
-                                                        <div className="text-gray-600 space-y-0.5">
+                                                        <div className="text-muted-foreground space-y-0.5">
                                                             {item.item_expected_date && (
                                                                 <p>
-                                                                    <span className="text-gray-500">Expected:</span>{' '}
+                                                                    <span className="text-muted-foreground">Expected:</span>{' '}
                                                                     <span className="font-medium">
                                                                         {format(new Date(item.item_expected_date), "MMM d, yyyy")}
                                                                     </span>
                                                                 </p>
                                                             )}
                                                             {item.item_notes && (
-                                                                <p className="italic text-gray-600">&ldquo;{item.item_notes}&rdquo;</p>
+                                                                <p className="italic text-muted-foreground">&ldquo;{item.item_notes}&rdquo;</p>
                                                             )}
                                                         </div>
                                                     </div>
@@ -240,7 +240,7 @@ export function AffectedOrders({ componentId }: AffectedOrdersProps) {
                                             // Fallback to overall status if no per-item responses
                                             <div className="text-xs space-y-0.5">
                                                 <p>
-                                                    <span className="text-gray-500">Status:</span>{' '}
+                                                    <span className="text-muted-foreground">Status:</span>{' '}
                                                     <span className="font-medium">
                                                         {email.response.status === 'on_track' ? '✅ On Track' :
                                                          email.response.status === 'shipped' ? '📦 Shipped' :
@@ -251,7 +251,7 @@ export function AffectedOrders({ componentId }: AffectedOrdersProps) {
                                                 </p>
                                                 {email.response.expected_delivery_date && (
                                                     <p>
-                                                        <span className="text-gray-500">Expected:</span>{' '}
+                                                        <span className="text-muted-foreground">Expected:</span>{' '}
                                                         <span className="font-medium">
                                                             {format(new Date(email.response.expected_delivery_date), "MMM d, yyyy")}
                                                         </span>
@@ -262,7 +262,7 @@ export function AffectedOrders({ componentId }: AffectedOrdersProps) {
                                         
                                         {/* Global notes */}
                                         {email.response.notes && (
-                                            <p className="mt-2 pt-2 border-t border-green-200 text-xs text-gray-600 italic">
+                                            <p className="mt-2 pt-2 border-t border-green-500/30 text-xs text-muted-foreground italic">
                                                 &ldquo;{email.response.notes}&rdquo;
                                             </p>
                                         )}
