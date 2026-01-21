@@ -639,6 +639,7 @@ const ComponentSelectionDialog: React.FC<ComponentSelectionDialogProps> = ({
           setUnitCost(String(sc.price || 0));
           setSearchQuery('');
           setOverrideUnitCost(false);
+          setEntryType('database'); // Switch to Component tab to show selection
         }}
       />
     </Dialog>

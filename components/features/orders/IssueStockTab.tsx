@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
@@ -13,7 +13,7 @@ import { Table, TableHeader, TableBody, TableCell, TableHead, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Textarea } from '@/components/ui/textarea';
-import { Loader2, Warehouse, AlertCircle, CheckCircle, Printer, RotateCcw, Info, Plus, X, Search, User, Users } from 'lucide-react';
+import { Loader2, Warehouse, AlertCircle, CheckCircle, Printer, RotateCcw, Info, Plus, X, Search, User, Users, ChevronRight } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
@@ -59,6 +59,56 @@ interface StockIssuance {
   } | null;
 }
 
+// Grouped issuance for consolidated display (like inventory page)
+interface GroupedIssuance {
+  groupKey: string;
+  issuance_date: string;
+  staff_id: number | null;
+  staff: { first_name: string; last_name: string } | null;
+  notes: string | null;
+  items: Array<{
+    issuance_id: number;
+    component_id: number;
+    component: { internal_code: string; description: string | null };
+    quantity_issued: number;
+  }>;
+}
+
+// Group issuances by staff and timestamp (within same minute) - same pattern as inventory page
+function groupIssuances(issuances: StockIssuance[]): GroupedIssuance[] {
+  const groups = new Map<string, GroupedIssuance>();
+
+  for (const issuance of issuances) {
+    // Create group key from staff_id, notes, and timestamp (truncated to minute)
+    const dateMinute = issuance.issuance_date.substring(0, 16); // YYYY-MM-DDTHH:mm
+    const groupKey = `${issuance.staff_id || ''}_${issuance.notes || ''}_${dateMinute}`;
+
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, {
+        groupKey,
+        issuance_date: issuance.issuance_date,
+        staff_id: issuance.staff_id,
+        staff: issuance.staff,
+        notes: issuance.notes,
+        items: [],
+      });
+    }
+
+    const group = groups.get(groupKey)!;
+    group.items.push({
+      issuance_id: issuance.issuance_id,
+      component_id: issuance.component_id,
+      component: issuance.component,
+      quantity_issued: issuance.quantity_issued,
+    });
+  }
+
+  // Sort by date descending and return as array
+  return Array.from(groups.values()).sort(
+    (a, b) => new Date(b.issuance_date).getTime() - new Date(a.issuance_date).getTime()
+  );
+}
+
 function formatQuantity(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return '0';
@@ -87,6 +137,22 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
   
   // Staff assignment state
   const [selectedStaffId, setSelectedStaffId] = useState<number | null>(null);
+
+  // Expanded rows state for issuance history
+  const [expandedIssuances, setExpandedIssuances] = useState<Set<string>>(new Set());
+
+  // Toggle expanded state for an issuance group
+  const toggleIssuanceExpanded = useCallback((groupKey: string) => {
+    setExpandedIssuances(prev => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) {
+        next.delete(groupKey);
+      } else {
+        next.add(groupKey);
+      }
+      return next;
+    });
+  }, []);
 
   // Fetch company info for PDF
   useEffect(() => {
@@ -391,6 +457,12 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
 
     return completedSet;
   }, [order?.details, componentRequirements, issuedQuantitiesByComponent]);
+
+  // Group issuance history for consolidated display (like inventory page)
+  const groupedIssuanceHistory = useMemo(
+    () => groupIssuances(issuanceHistory),
+    [issuanceHistory]
+  );
 
   // Issue stock mutation
   const issueStockMutation = useMutation({
@@ -842,7 +914,7 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
           </div>
         </CardHeader>
         <CardContent>
-          {issuanceHistory.length === 0 ? (
+          {groupedIssuanceHistory.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">
               No stock has been issued for this order yet.
             </p>
@@ -860,71 +932,124 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {issuanceHistory.map((issuance) => (
-                    <TableRow key={issuance.issuance_id}>
-                      <TableCell>
-                        {format(new Date(issuance.issuance_date), 'MMM d, yyyy HH:mm')}
-                      </TableCell>
-                      <TableCell>
-                        <div className="font-medium">{issuance.component?.internal_code || 'Unknown'}</div>
-                        {issuance.component?.description && (
-                          <div className="text-sm text-muted-foreground">{issuance.component.description}</div>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">{formatQuantity(issuance.quantity_issued)}</TableCell>
-                      <TableCell>
-                        {issuance.staff ? (
-                          <div className="flex items-center gap-1.5">
-                            <User className="h-3.5 w-3.5 text-muted-foreground" />
-                            <span>{issuance.staff.first_name} {issuance.staff.last_name}</span>
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell>{issuance.notes || '-'}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          {order && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={async () => {
-                                try {
-                                  const blob = await pdf(
-                                    <StockIssuancePDFDocument
-                                      order={order}
-                                      issuances={[issuance]}
-                                      issuanceDate={issuance.issuance_date}
-                                      companyInfo={companyInfo}
-                                    />
-                                  ).toBlob();
-                                  const pdfBlob = new Blob([blob], { type: 'application/pdf' });
-                                  const url = URL.createObjectURL(pdfBlob);
-                                  window.open(url, '_blank');
-                                  setTimeout(() => URL.revokeObjectURL(url), 5000);
-                                } catch (err) {
-                                  console.error('Failed to generate PDF:', err);
-                                  toast.error('Failed to generate PDF');
-                                }
-                              }}
-                              title="Print PDF"
-                            >
-                              <Printer className="h-4 w-4" />
-                            </Button>
-                          )}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleOpenReversalDialog(issuance)}
-                            title="Reverse Issuance"
-                          >
-                            <RotateCcw className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {groupedIssuanceHistory.map((group) => {
+                    const isExpanded = expandedIssuances.has(group.groupKey);
+                    return (
+                      <React.Fragment key={group.groupKey}>
+                        {/* Summary row - always visible */}
+                        <TableRow
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() => toggleIssuanceExpanded(group.groupKey)}
+                        >
+                          <TableCell>
+                            {format(new Date(group.issuance_date), 'MMM d, yyyy HH:mm')}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <ChevronRight
+                                className={cn(
+                                  "h-4 w-4 text-muted-foreground transition-transform",
+                                  isExpanded && "rotate-90"
+                                )}
+                              />
+                              <span className="font-medium">
+                                {group.items.length} {group.items.length === 1 ? 'item' : 'items'}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <span className="text-muted-foreground">—</span>
+                          </TableCell>
+                          <TableCell>
+                            {group.staff ? (
+                              <div className="flex items-center gap-1.5">
+                                <User className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span>{group.staff.first_name} {group.staff.last_name}</span>
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell>{group.notes || '-'}</TableCell>
+                          <TableCell className="text-right">
+                            {order && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={async (e) => {
+                                  e.stopPropagation(); // Prevent row toggle
+                                  try {
+                                    const groupIssuances = group.items.map(item => {
+                                      const fullIssuance = issuanceHistory.find(i => i.issuance_id === item.issuance_id);
+                                      return fullIssuance!;
+                                    }).filter(Boolean);
+
+                                    const blob = await pdf(
+                                      <StockIssuancePDFDocument
+                                        order={order}
+                                        issuances={groupIssuances}
+                                        issuanceDate={group.issuance_date}
+                                        companyInfo={companyInfo}
+                                      />
+                                    ).toBlob();
+                                    const pdfBlob = new Blob([blob], { type: 'application/pdf' });
+                                    const url = URL.createObjectURL(pdfBlob);
+                                    window.open(url, '_blank');
+                                    setTimeout(() => URL.revokeObjectURL(url), 5000);
+                                  } catch (err) {
+                                    console.error('Failed to generate PDF:', err);
+                                    toast.error('Failed to generate PDF');
+                                  }
+                                }}
+                                title="Print PDF for this issuance"
+                              >
+                                <Printer className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+
+                        {/* Expanded detail rows */}
+                        {isExpanded && group.items.map((item) => (
+                          <TableRow key={item.issuance_id} className="bg-muted/30">
+                            <TableCell></TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2 pl-6">
+                                <div className="flex-1">
+                                  <div className="font-medium">{item.component?.internal_code || 'Unknown'}</div>
+                                  {item.component?.description && (
+                                    <div className="text-xs text-muted-foreground truncate max-w-[200px]">
+                                      {item.component.description}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right font-medium">
+                              {formatQuantity(item.quantity_issued)}
+                            </TableCell>
+                            <TableCell></TableCell>
+                            <TableCell></TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0 opacity-50 hover:opacity-100"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const fullIssuance = issuanceHistory.find(i => i.issuance_id === item.issuance_id);
+                                  if (fullIssuance) handleOpenReversalDialog(fullIssuance);
+                                }}
+                                title="Reverse this item"
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </React.Fragment>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
