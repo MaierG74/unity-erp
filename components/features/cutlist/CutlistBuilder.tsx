@@ -95,10 +95,18 @@ export function CutlistBuilder({ productId, className, fullPage = false }: Cutli
     enabled: !!productId,
   });
 
+  // Special group name for storing ungrouped parts
+  const UNGROUPED_GROUP_NAME = '__ungrouped__';
+
   // Load groups from database when data arrives
   useEffect(() => {
     if (savedGroups && savedGroups.length > 0) {
-      const loadedGroups: CutlistGroup[] = savedGroups.map((dbGroup) => ({
+      // Separate ungrouped parts (stored as special group) from regular groups
+      const ungroupedGroup = savedGroups.find((g) => g.name === UNGROUPED_GROUP_NAME);
+      const regularGroups = savedGroups.filter((g) => g.name !== UNGROUPED_GROUP_NAME);
+
+      // Load regular groups
+      const loadedGroups: CutlistGroup[] = regularGroups.map((dbGroup) => ({
         id: `db-${dbGroup.id}`,
         name: dbGroup.name,
         boardType: dbGroup.board_type,
@@ -109,30 +117,53 @@ export function CutlistBuilder({ productId, className, fullPage = false }: Cutli
         parts: dbGroup.parts || [],
       }));
       setGroups(loadedGroups);
+
+      // Load ungrouped parts
+      if (ungroupedGroup && ungroupedGroup.parts) {
+        setUngroupedParts(ungroupedGroup.parts);
+      }
+
       setHasUnsavedChanges(false);
     }
   }, [savedGroups]);
 
   // Save mutation
   const saveMutation = useMutation({
-    mutationFn: async (groupsToSave: CutlistGroup[]) => {
+    mutationFn: async ({ groupsToSave, ungroupedToSave }: { groupsToSave: CutlistGroup[]; ungroupedToSave: CutlistPart[] }) => {
       if (!productId) throw new Error('No product ID');
+
+      // Build groups array including ungrouped parts as a special group
+      const allGroups = [
+        ...groupsToSave.map((group, index) => ({
+          name: group.name,
+          board_type: group.boardType,
+          primary_material_id: group.primaryMaterialId || null,
+          primary_material_name: group.primaryMaterialName || null,
+          backer_material_id: group.backerMaterialId || null,
+          backer_material_name: group.backerMaterialName || null,
+          parts: group.parts,
+          sort_order: index,
+        })),
+      ];
+
+      // Add ungrouped parts as a special group if there are any
+      if (ungroupedToSave.length > 0) {
+        allGroups.push({
+          name: UNGROUPED_GROUP_NAME,
+          board_type: '16mm' as const,
+          primary_material_id: null,
+          primary_material_name: null,
+          backer_material_id: null,
+          backer_material_name: null,
+          parts: ungroupedToSave,
+          sort_order: 9999, // Put at end
+        });
+      }
 
       const response = await fetch(`/api/products/${productId}/cutlist-groups`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          groups: groupsToSave.map((group, index) => ({
-            name: group.name,
-            board_type: group.boardType,
-            primary_material_id: group.primaryMaterialId || null,
-            primary_material_name: group.primaryMaterialName || null,
-            backer_material_id: group.backerMaterialId || null,
-            backer_material_name: group.backerMaterialName || null,
-            parts: group.parts,
-            sort_order: index,
-          })),
-        }),
+        body: JSON.stringify({ groups: allGroups }),
       });
 
       if (!response.ok) throw new Error('Failed to save cutlist groups');
@@ -220,8 +251,7 @@ export function CutlistBuilder({ productId, className, fullPage = false }: Cutli
         }));
 
       setUngroupedParts((prev) => [...prev, ...newParts]);
-      // Don't mark as unsaved for imports - ungrouped parts don't get saved to database
-      setResult(null);
+      markUnsaved(); // Mark as unsaved since new parts were imported
     };
     reader.readAsText(file);
   }, []);
@@ -362,8 +392,8 @@ export function CutlistBuilder({ productId, className, fullPage = false }: Cutli
       });
       return;
     }
-    saveMutation.mutate(groups);
-  }, [productId, groups, saveMutation, toast]);
+    saveMutation.mutate({ groupsToSave: groups, ungroupedToSave: ungroupedParts });
+  }, [productId, groups, ungroupedParts, saveMutation, toast]);
 
   // Drop handler for ungrouped area
   const handleDropOnUngrouped = useCallback((e: DragEvent<HTMLDivElement>) => {
@@ -459,7 +489,7 @@ export function CutlistBuilder({ productId, className, fullPage = false }: Cutli
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {productId && groups.length > 0 && (
+            {productId && hasPartsOrGroups && (
               <Button
                 variant={hasUnsavedChanges ? 'default' : 'outline'}
                 size="sm"
@@ -500,7 +530,7 @@ export function CutlistBuilder({ productId, className, fullPage = false }: Cutli
           </TabsList>
           {fullPage && (
             <div className="flex items-center gap-2">
-              {productId && groups.length > 0 && (
+              {productId && hasPartsOrGroups && (
                 <Button
                   variant={hasUnsavedChanges ? 'default' : 'outline'}
                   size="sm"
