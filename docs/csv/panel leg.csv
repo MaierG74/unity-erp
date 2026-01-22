@@ -1,0 +1,17 @@
+﻿No.;Designation;Quantity;Length - raw;Width - raw;Thickness - raw;Length;Width;Thickness;Area - final;Material type;Material name;Material description;URL of the material;Instance names;Description;URL;Badges;Edge Length 1;Edge Length 2;Edge Width 1;Edge Width 2;Frontside;Backside;Tags
+A;top#35;1;900 mm;600 mm;16 mm;900 mm;600 mm;16 mm;0,54 m²;Sheet Goods;Natural Oak;"";"";"";"";"";"";36MM EDGING (1 mm x 36 mm);36MM EDGING (1 mm x 36 mm);36MM EDGING (1 mm x 36 mm);36MM EDGING (1 mm x 36 mm);"";"";Layer0
+B;MODESTY #22;1;848 mm;400 mm;16 mm;848 mm;400 mm;16 mm;0,34 m²;Sheet Goods;Natural Oak;"";"";"";"";"";"";20MM EDGING (1 mm x 20 mm);"";"";"";"";"";Layer0
+C;side#6;1;700 mm;580 mm;16 mm;700 mm;580 mm;16 mm;0,41 m²;Sheet Goods;Natural Oak;"";"";"";"";"";"";20MM EDGING (1 mm x 20 mm);20MM EDGING (1 mm x 20 mm);20MM EDGING (1 mm x 20 mm);"";"";"";Layer0
+D;side#7;1;700 mm;580 mm;16 mm;700 mm;580 mm;16 mm;0,41 m²;Sheet Goods;Natural Oak;"";"";"";"";"";"";20MM EDGING (1 mm x 20 mm);20MM EDGING (1 mm x 20 mm);20MM EDGING (1 mm x 20 mm);"";"";"";Layer0
+A;MODESTY #22 - Edge Length 1;1;848 mm;20 mm;1 mm;848 mm;20 mm;1 mm;"";Edge Banding;20MM EDGING;"";"";"";"";"";"";"";"";"";"";"";"";""
+B;side#6 - Edge Length 1;1;700 mm;20 mm;1 mm;700 mm;20 mm;1 mm;"";Edge Banding;20MM EDGING;"";"";"";"";"";"";"";"";"";"";"";"";""
+C;side#6 - Edge Length 2;1;700 mm;20 mm;1 mm;700 mm;20 mm;1 mm;"";Edge Banding;20MM EDGING;"";"";"";"";"";"";"";"";"";"";"";"";""
+D;side#7 - Edge Length 1;1;700 mm;20 mm;1 mm;700 mm;20 mm;1 mm;"";Edge Banding;20MM EDGING;"";"";"";"";"";"";"";"";"";"";"";"";""
+E;side#7 - Edge Length 2;1;700 mm;20 mm;1 mm;700 mm;20 mm;1 mm;"";Edge Banding;20MM EDGING;"";"";"";"";"";"";"";"";"";"";"";"";""
+F;side#6 - Edge Width 1;1;580 mm;20 mm;1 mm;580 mm;20 mm;1 mm;"";Edge Banding;20MM EDGING;"";"";"";"";"";"";"";"";"";"";"";"";""
+G;side#7 - Edge Width 1;1;580 mm;20 mm;1 mm;580 mm;20 mm;1 mm;"";Edge Banding;20MM EDGING;"";"";"";"";"";"";"";"";"";"";"";"";""
+A;top#35 - Edge Length 1;1;900 mm;36 mm;1 mm;900 mm;36 mm;1 mm;"";Edge Banding;36MM EDGING;"";"";"";"";"";"";"";"";"";"";"";"";""
+B;top#35 - Edge Length 2;1;900 mm;36 mm;1 mm;900 mm;36 mm;1 mm;"";Edge Banding;36MM EDGING;"";"";"";"";"";"";"";"";"";"";"";"";""
+C;top#35 - Edge Width 1;1;600 mm;36 mm;1 mm;600 mm;36 mm;1 mm;"";Edge Banding;36MM EDGING;"";"";"";"";"";"";"";"";"";"";"";"";""
+D;top#35 - Edge Width 2;1;600 mm;36 mm;1 mm;600 mm;36 mm;1 mm;"";Edge Banding;36MM EDGING;"";"";"";"";"";"";"";"";"";"";"";"";""
+A;top#36;1;900 mm;600 mm;16 mm;900 mm;600 mm;16 mm;"";Undefined;"";"";"";"";"";"";"";"";"";"";"";"";"";Layer0

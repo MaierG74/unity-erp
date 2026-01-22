@@ -9,6 +9,8 @@ interface SheetPreviewProps {
   maxHeight?: number;
   showDimensions?: boolean;
   showSheetDimensions?: boolean;
+  /** When true, SVG scales to fill container width */
+  responsive?: boolean;
 }
 
 export function SheetPreview({
@@ -19,6 +21,7 @@ export function SheetPreview({
   maxHeight = 240,
   showDimensions = true,
   showSheetDimensions = true,
+  responsive = false,
 }: SheetPreviewProps) {
   const padding = 12; // px
   const scale = Math.min((maxWidth - padding * 2) / sheetWidth, (maxHeight - padding * 2) / sheetLength);
@@ -29,7 +32,13 @@ export function SheetPreview({
   const subFont = Math.max(8, baseFont * 0.8);
 
   return (
-    <svg width={widthPx} height={heightPx} viewBox={`0 0 ${widthPx} ${heightPx}`}>
+    <svg
+      width={responsive ? '100%' : widthPx}
+      height={responsive ? 'auto' : heightPx}
+      viewBox={`0 0 ${widthPx} ${heightPx}`}
+      preserveAspectRatio="xMidYMid meet"
+      style={responsive ? { maxWidth: '100%', height: 'auto' } : undefined}
+    >
       <rect x={padding} y={padding} width={sheetWidth * scale} height={sheetLength * scale} fill="#fafafa" stroke="#222" strokeWidth={1} />
       {showSheetDimensions && (
         <>

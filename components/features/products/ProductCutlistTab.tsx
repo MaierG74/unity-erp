@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
   Card,
@@ -42,7 +43,21 @@ import {
   CutlistDimensions,
 } from '@/lib/cutlist/cutlistDimensions';
 import { cn } from '@/lib/utils';
-import { Loader2, Palette, RefreshCw, Trash2 } from 'lucide-react';
+import { Calculator, Loader2, Palette, RefreshCw, Trash2, Wrench } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import dynamic from 'next/dynamic';
+
+// Dynamically import the calculator to avoid SSR issues
+const ProductCutlistCalculator = dynamic(() => import('./ProductCutlistCalculator'), { ssr: false });
 
 interface ProductCutlistTabProps {
   productId: number;
@@ -97,8 +112,11 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
   const [showLinked, setShowLinked] = useState(false);
   const [activePickerKey, setActivePickerKey] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [calculatorOpen, setCalculatorOpen] = useState(false);
+  const [deleteDialogRow, setDeleteDialogRow] = useState<CutlistRow | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const router = useRouter();
 
   const {
     data: effectiveBom,
@@ -309,12 +327,48 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
     },
   });
 
+  // Delete row mutation - removes entire BOM entry
+  const deleteRowMutation = useMutation({
+    mutationFn: async ({ row }: { row: CutlistRow }) => {
+      if (!row.bomId) {
+        throw new Error('Only direct BOM rows can be deleted from here.');
+      }
+
+      const { error } = await supabase
+        .from('billofmaterials')
+        .delete()
+        .eq('bom_id', row.bomId);
+
+      if (error) {
+        throw error;
+      }
+      return { rowKey: row.key };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] });
+      queryClient.invalidateQueries({ queryKey: ['productBOM', productId] });
+      queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
+      toast({
+        title: 'Cutlist row deleted',
+        description: 'The cutlist item has been removed from the BOM.',
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Unable to delete',
+        description: error?.message ?? 'Failed to delete cutlist row.',
+        variant: 'destructive',
+      });
+    },
+  });
+
   const isBusy =
     bomLoading ||
     componentsLoading ||
     bomRefetching ||
     componentsRefetching ||
-    updateMaterialMutation.isPending;
+    updateMaterialMutation.isPending ||
+    deleteRowMutation.isPending;
 
   return (
     <div className="space-y-4">
@@ -340,15 +394,32 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
               <div className="text-xs text-muted-foreground">Linked rows</div>
               <div className="text-sm font-semibold text-foreground">{linkedCount}</div>
             </div>
-            <div className="ml-auto flex items-center gap-2">
-              <Switch
-                id="cutlist-show-linked"
-                checked={showLinked}
-                onCheckedChange={setShowLinked}
-              />
-              <Label htmlFor="cutlist-show-linked" className="text-sm text-muted-foreground">
-                Show linked parts
-              </Label>
+            <div className="ml-auto flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="cutlist-show-linked"
+                  checked={showLinked}
+                  onCheckedChange={setShowLinked}
+                />
+                <Label htmlFor="cutlist-show-linked" className="text-sm text-muted-foreground">
+                  Show linked parts
+                </Label>
+              </div>
+              <Button
+                variant="outline"
+                onClick={() => router.push(`/products/${productId}/cutlist-builder`)}
+                disabled={isBusy}
+              >
+                <Wrench className="h-4 w-4 mr-2" />
+                Cutlist Builder
+              </Button>
+              <Button
+                onClick={() => setCalculatorOpen(true)}
+                disabled={allCutlistRows.length === 0 || isBusy}
+              >
+                <Calculator className="h-4 w-4 mr-2" />
+                Generate Cutlist
+              </Button>
             </div>
           </div>
         </CardContent>
@@ -533,14 +604,26 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
                                         <CommandItem
                                           key={component.component_id}
                                           value={`${component.internal_code ?? ''} ${component.description ?? ''}`}
-                                          onSelect={() =>
+                                          onSelect={() => {
                                             updateMaterialMutation.mutate({
                                               row,
                                               component,
-                                            })
-                                          }
+                                            });
+                                            setActivePickerKey(null);
+                                          }}
+                                          className="cursor-pointer"
                                         >
-                                          <div className="flex flex-col">
+                                          <div
+                                            className="flex flex-col w-full"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              updateMaterialMutation.mutate({
+                                                row,
+                                                component,
+                                              });
+                                              setActivePickerKey(null);
+                                            }}
+                                          >
                                             <span className="text-sm font-medium text-foreground">
                                               {component.internal_code ?? `Component #${component.component_id}`}
                                             </span>
@@ -559,16 +642,12 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
                               type="button"
                               variant="ghost"
                               size="sm"
-                              disabled={!row.isEditable || !row.dimensions?.material_code}
-                              onClick={() =>
-                                updateMaterialMutation.mutate({
-                                  row,
-                                  component: null,
-                                })
-                              }
+                              disabled={!row.isEditable}
+                              title="Delete cutlist row"
+                              onClick={() => setDeleteDialogRow(row)}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
-                              <span className="sr-only">Clear material</span>
+                              <span className="sr-only">Delete row</span>
                             </Button>
                           </div>
                           {!row.isEditable ? (
@@ -638,6 +717,45 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
           </CardContent>
         ) : null}
       </Card>
+
+      {/* Cutlist Calculator Dialog */}
+      <ProductCutlistCalculator
+        open={calculatorOpen}
+        onOpenChange={setCalculatorOpen}
+        cutlistRows={displayRows}
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteDialogRow} onOpenChange={(open) => !open && setDeleteDialogRow(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete cutlist row?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove this cutlist item from the Bill of Materials.
+              {deleteDialogRow?.dimensions?.notes && (
+                <span className="block mt-2 font-medium text-foreground">
+                  Part: {deleteDialogRow.dimensions.notes}
+                </span>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDeleteDialogRow(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (deleteDialogRow) {
+                  deleteRowMutation.mutate({ row: deleteDialogRow });
+                }
+                setDeleteDialogRow(null);
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
     </div>
   );
 }

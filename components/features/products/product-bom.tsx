@@ -55,7 +55,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Trash2, Edit, Save, X, Search, Loader2, Building2, SlidersHorizontal, XCircle } from 'lucide-react';
+import { Plus, Trash2, Edit, Save, X, Search, Loader2, Building2, SlidersHorizontal, XCircle, Upload } from 'lucide-react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -75,6 +75,7 @@ const AddFromCollectionDialog = dynamic(() => import('./AddFromCollectionDialog'
 const AddProductToBOMDialog = dynamic(() => import('./AddProductToBOMDialog'), { ssr: false });
 const AddComponentDialog = dynamic(() => import('./AddComponentDialog'), { ssr: false });
 const BOMOverrideDialog = dynamic(() => import('./BOMOverrideDialog'), { ssr: false });
+const ImportCutlistCSVDialog = dynamic(() => import('./ImportCutlistCSVDialog'), { ssr: false });
 
 // Define types
 interface Component {
@@ -1632,6 +1633,16 @@ const renderCutlistEditor = () => {
               <Button variant="outline" onClick={() => setBrowseOpen(true)}>
                 <Building2 className="h-4 w-4 mr-2" /> Browse by supplier
               </Button>
+              {/* Import CSV (SketchUp cutlist) */}
+              <ImportCutlistCSVDialog
+                productId={productId}
+                onApplied={() => {
+                  queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] })
+                  queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
+                  queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] })
+                  queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] })
+                }}
+              />
               {/* Add Component */}
               <AddComponentDialog
                 productId={productId}

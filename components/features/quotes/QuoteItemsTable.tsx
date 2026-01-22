@@ -33,7 +33,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Paperclip, FileText, Trash2, AlertTriangle } from 'lucide-react';
+import { Loader2, Paperclip, FileText, Trash2, AlertTriangle, Copy } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import InlineAttachmentsCell from './InlineAttachmentsCell';
 import AddQuoteItemDialog from './AddQuoteItemDialog';
@@ -132,6 +132,7 @@ function QuoteItemRow({
   quoteId,
   onUpdate,
   onDelete,
+  onDuplicate,
   onAddClusterLine,
   onUpdateClusterLine,
   onDeleteClusterLine,
@@ -140,11 +141,14 @@ function QuoteItemRow({
   onOpenCutlist,
   attachmentsVersion,
   onItemAttachmentsChange,
+  isDuplicating,
 }: {
   item: QuoteItem;
   quoteId: string;
   onUpdate: (id: string, field: keyof Pick<QuoteItem, 'description' | 'qty' | 'unit_price' | 'bullet_points' | 'internal_notes'>, value: string | number) => void;
   onDelete: (id: string) => void;
+  onDuplicate: (id: string) => void;
+  isDuplicating?: boolean;
   onAddClusterLine: (clusterId: string, component: {
     type: 'manual' | 'database' | 'product' | 'collection';
     description: string;
@@ -303,6 +307,21 @@ function QuoteItemRow({
               Cutlist
             </Button>
             <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              title="Duplicate item"
+              aria-label="Duplicate item"
+              onClick={() => onDuplicate(item.id)}
+              disabled={isDuplicating}
+            >
+              {isDuplicating ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Copy className="h-4 w-4" />
+              )}
+            </Button>
+            <Button
               variant="destructiveSoft"
               size="icon"
               className="h-8 w-8"
@@ -384,6 +403,7 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
   const { toast } = useToast();
   const [showAddItemDialog, setShowAddItemDialog] = React.useState(false);
   const [cutlistOpen, setCutlistOpen] = React.useState<{ open: boolean; itemId?: string | null }>({ open: false, itemId: null });
+  const [duplicatingItemId, setDuplicatingItemId] = React.useState<string | null>(null);
 
   const handleAddItem = () => setShowAddItemDialog(true);
 
@@ -580,6 +600,142 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
   const handleDeleteItem = async (id: string) => {
     await deleteQuoteItem(id);
     onItemsChange(items.filter(i => i.id !== id));
+  };
+
+  const handleDuplicateItem = async (id: string) => {
+    setDuplicatingItemId(id);
+    try {
+      // Find the original item
+      const originalItem = items.find(i => i.id === id);
+      if (!originalItem) {
+        toast({ variant: 'destructive', title: 'Error', description: 'Item not found' });
+        setDuplicatingItemId(null);
+        return;
+      }
+
+      console.log('Duplicating item:', originalItem);
+
+      // Create a new item with the same data
+      let newItem;
+      try {
+        newItem = await createQuoteItem({
+          quote_id: quoteId,
+          description: originalItem.description,
+          qty: originalItem.qty,
+          unit_price: originalItem.unit_price,
+          total: originalItem.total,
+          bullet_points: originalItem.bullet_points,
+          internal_notes: originalItem.internal_notes,
+          selected_options: originalItem.selected_options,
+        });
+        console.log('Created new item:', newItem);
+      } catch (error) {
+        console.error('Failed to create item:', error);
+        throw new Error('Failed to create new item: ' + (error as Error).message);
+      }
+
+      // Duplicate clusters and their lines if they exist
+      const clustersToCreate = originalItem.quote_item_clusters || [];
+      const newClusters: QuoteItemCluster[] = [];
+
+      for (const originalCluster of clustersToCreate) {
+        try {
+          // Create a new cluster (only copy valid fields)
+          const newCluster = await createQuoteItemCluster({
+            quote_item_id: newItem.id,
+            name: originalCluster.name,
+            position: originalCluster.position,
+            markup_percent: originalCluster.markup_percent,
+            notes: originalCluster.notes,
+          });
+          console.log('Created cluster:', newCluster);
+
+          // Duplicate all cluster lines
+          const linesToCreate = originalCluster.quote_cluster_lines || [];
+          const newLines: QuoteClusterLine[] = [];
+
+          for (const originalLine of linesToCreate) {
+            try {
+              const newLine = await createQuoteClusterLine({
+                cluster_id: newCluster.id,
+                line_type: originalLine.line_type,
+                description: originalLine.description,
+                qty: originalLine.qty,
+                unit_cost: originalLine.unit_cost,
+                component_id: originalLine.component_id,
+                supplier_component_id: originalLine.supplier_component_id,
+                include_in_markup: originalLine.include_in_markup,
+                sort_order: originalLine.sort_order,
+                labor_type: originalLine.labor_type as any,
+                hours: originalLine.hours,
+                rate: originalLine.rate,
+                cutlist_slot: originalLine.cutlist_slot,
+              });
+              newLines.push(newLine);
+            } catch (error) {
+              console.error('Failed to create cluster line:', error);
+              throw new Error('Failed to create cluster line: ' + (error as Error).message);
+            }
+          }
+
+          newClusters.push({
+            ...newCluster,
+            quote_cluster_lines: newLines,
+          });
+        } catch (error) {
+          console.error('Failed to create cluster:', error);
+          throw new Error('Failed to create cluster: ' + (error as Error).message);
+        }
+      }
+
+      // Duplicate attachments
+      try {
+        const attachmentsToCreate = await fetchQuoteItemAttachments(quoteId, id);
+        console.log('Attachments to duplicate:', attachmentsToCreate);
+
+        for (const originalAttachment of attachmentsToCreate) {
+          try {
+            await createQuoteAttachmentFromUrl({
+              quoteId: quoteId,
+              quoteItemId: newItem.id,
+              url: originalAttachment.file_url,
+              originalName: originalAttachment.original_name,
+              mimeType: originalAttachment.mime_type,
+              displayInQuote: originalAttachment.display_in_quote,
+            });
+          } catch (error) {
+            console.warn('Failed to duplicate attachment (non-fatal):', error);
+            // Continue with other attachments even if one fails
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to fetch attachments (non-fatal):', error);
+        // Continue without attachments
+      }
+
+      // Add the new item to the list with its clusters
+      const newItemWithClusters: QuoteItem = {
+        ...newItem,
+        quote_item_clusters: newClusters,
+      };
+
+      onItemsChange([...items, newItemWithClusters]);
+
+      toast({
+        title: 'Item duplicated',
+        description: 'The item and all its costing details have been copied successfully.'
+      });
+    } catch (error) {
+      console.error('Error duplicating item:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      toast({
+        variant: 'destructive',
+        title: 'Duplication failed',
+        description: errorMessage
+      });
+    } finally {
+      setDuplicatingItemId(null);
+    }
   };
 
   const handleAddClusterLine = async (clusterId: string, component: {
@@ -802,6 +958,7 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
                 quoteId={quoteId}
                 onUpdate={handleUpdateItem}
                 onDelete={handleDeleteItem}
+                onDuplicate={handleDuplicateItem}
                 onAddClusterLine={handleAddClusterLine}
                 onUpdateClusterLine={handleUpdateClusterLine}
                 onDeleteClusterLine={handleDeleteClusterLine}
@@ -810,6 +967,7 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
                 onOpenCutlist={handleOpenCutlist}
                 attachmentsVersion={attachmentsVersion}
                 onItemAttachmentsChange={onItemAttachmentsChange}
+                isDuplicating={duplicatingItemId === item.id}
               />
             ))}
           </TableBody>
