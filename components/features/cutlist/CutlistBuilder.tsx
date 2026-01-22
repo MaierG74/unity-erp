@@ -374,13 +374,43 @@ export function CutlistBuilder({ productId, className, fullPage = false }: Cutli
     markUnsaved();
   }, [markUnsaved]);
 
-  // Clear all
+  // Clear all mutation (deletes from database)
+  const clearMutation = useMutation({
+    mutationFn: async () => {
+      if (!productId) return;
+      const response = await fetch(`/api/products/${productId}/cutlist-groups`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) throw new Error('Failed to clear cutlist');
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cutlist-groups', productId] });
+      toast({
+        title: 'Cutlist cleared',
+        description: 'All parts and groups have been removed.',
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Clear failed',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Clear all (local state + database)
   const clearAll = useCallback(() => {
     setUngroupedParts([]);
     setGroups([]);
     setResult(null);
-    markUnsaved();
-  }, [markUnsaved]);
+    setHasUnsavedChanges(false);
+    // Also delete from database if we have a productId
+    if (productId) {
+      clearMutation.mutate();
+    }
+  }, [productId, clearMutation]);
 
   // Save to database
   const handleSave = useCallback(() => {
