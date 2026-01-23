@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Eye, Pencil, Trash2, Search, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Copy, Trash2, Search, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -26,6 +26,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useRef, useState as useReactState } from 'react';
 import { cn } from '@/lib/utils';
 import { formatCurrency } from '@/lib/quotes';
+import { CopyQuoteDialog } from '@/components/features/quotes/CopyQuoteDialog';
 
 interface Quote {
   id: string;
@@ -49,6 +50,8 @@ export default function QuotesPage() {
   const [pageSize, setPageSize] = useState(10);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [copyDialogOpen, setCopyDialogOpen] = useState(false);
+  const [copySource, setCopySource] = useState<{ id: string; quote_number: string } | null>(null);
   const { toast } = useToast();
   const routerNav = useRouter();
   const searchParams = useSearchParams();
@@ -173,6 +176,36 @@ export default function QuotesPage() {
   const requestDelete = (id: string) => {
     setDeleteId(id);
     setConfirmOpen(true);
+  };
+
+  const requestCopy = (quote: Quote) => {
+    setCopySource({ id: quote.id, quote_number: quote.quote_number });
+    setCopyDialogOpen(true);
+  };
+
+  const handleCopyComplete = (newQuote: { id: string; quote_number: string }) => {
+    // Refresh quotes list to show the new copy
+    const fetchQuotes = async () => {
+      try {
+        const res = await fetch('/api/quotes', { headers: { 'Accept': 'application/json' } });
+        if (res.ok) {
+          const json = await res.json();
+          const list: Quote[] = (json?.quotes || []).map((q: any) => ({
+            id: q.id,
+            quote_number: q.quote_number,
+            customer_id: String(q.customer_id ?? ''),
+            status: q.status ?? 'draft',
+            created_at: q.created_at,
+            grand_total: Number(q.grand_total ?? 0),
+            customer: q.customer || undefined,
+          }));
+          setQuotes(list);
+        }
+      } catch (err) {
+        console.error('Failed to refresh quotes after copy:', err);
+      }
+    };
+    fetchQuotes();
   };
 
   const performDelete = async () => {
@@ -417,10 +450,20 @@ export default function QuotesPage() {
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
                           <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 px-2"
+                            onClick={(e) => { e.stopPropagation(); requestCopy(quote); }}
+                            title="Copy quote"
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                          <Button
                             variant="destructiveSoft"
                             size="sm"
                             className="h-8 px-2"
                             onClick={(e) => { e.stopPropagation(); requestDelete(quote.id); }}
+                            title="Delete quote"
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -502,6 +545,16 @@ export default function QuotesPage() {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
+
+            {/* Copy quote dialog */}
+            {copySource && (
+              <CopyQuoteDialog
+                open={copyDialogOpen}
+                onOpenChange={setCopyDialogOpen}
+                sourceQuote={copySource}
+                onCopyComplete={handleCopyComplete}
+              />
+            )}
           </CardContent>
         </Card>
       </div>
