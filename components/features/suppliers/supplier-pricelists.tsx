@@ -2,9 +2,9 @@
 
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { uploadPricelist, deletePricelist } from '@/lib/api/suppliers';
+import { uploadPricelist, deletePricelist, togglePricelistActive } from '@/lib/api/suppliers';
 import type { SupplierWithDetails, SupplierPricelist } from '@/types/suppliers';
-import { FileUp, Trash2, X } from 'lucide-react';
+import { FileUp, Trash2, X, Star } from 'lucide-react';
 import { PdfThumbnailClient } from '@/components/ui/pdf-thumbnail-client';
 import { FileIcon } from '@/components/ui/file-icon';
 import { AttachmentPreviewModal } from '@/components/ui/attachment-preview-modal';
@@ -26,6 +26,7 @@ export function SupplierPricelists({ supplier }: SupplierPricelistsProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['supplier', supplier.supplier_id] });
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
       setIsUploading(false);
       setDisplayName('');
     },
@@ -35,6 +36,16 @@ export function SupplierPricelists({ supplier }: SupplierPricelistsProps) {
     mutationFn: deletePricelist,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['supplier', supplier.supplier_id] });
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+    },
+  });
+
+  const toggleActiveMutation = useMutation({
+    mutationFn: ({ pricelistId, isActive }: { pricelistId: number; isActive: boolean }) =>
+      togglePricelistActive(pricelistId, isActive),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['supplier', supplier.supplier_id] });
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
     },
   });
 
@@ -64,8 +75,14 @@ export function SupplierPricelists({ supplier }: SupplierPricelistsProps) {
     return 'other';
   };
 
+  // Sort pricelists: active first, then by upload date (newest first)
+  const sortedPricelists = [...(supplier.pricelists || [])].sort((a, b) => {
+    if (a.is_active !== b.is_active) return a.is_active ? -1 : 1;
+    return new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime();
+  });
+
   // Convert pricelists to attachment format for the preview modal
-  const attachmentsForModal = (supplier.pricelists || []).map(pricelist => ({
+  const attachmentsForModal = sortedPricelists.map(pricelist => ({
     attachment_id: pricelist.pricelist_id,
     file_name: pricelist.display_name || pricelist.file_name,
     file_url: pricelist.file_url,
@@ -123,7 +140,7 @@ export function SupplierPricelists({ supplier }: SupplierPricelistsProps) {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {supplier.pricelists?.map((pricelist) => {
+        {sortedPricelists.map((pricelist) => {
           const fileType = getFileType(pricelist);
           const isPdf = fileType === 'pdf';
           const isImage = fileType === 'image';
@@ -131,7 +148,9 @@ export function SupplierPricelists({ supplier }: SupplierPricelistsProps) {
           return (
             <div
               key={pricelist.pricelist_id}
-              className="relative border rounded-lg bg-card hover:bg-muted/50 transition-colors group overflow-hidden"
+              className={`relative border rounded-lg bg-card hover:bg-muted/50 transition-colors group overflow-hidden ${
+                pricelist.is_active ? 'ring-2 ring-primary' : 'opacity-60'
+              }`}
             >
               {/* Thumbnail Container */}
               <div
@@ -180,23 +199,49 @@ export function SupplierPricelists({ supplier }: SupplierPricelistsProps) {
                 </div>
               </div>
 
-              {/* Delete Button */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteMutation.mutate(pricelist);
-                }}
-                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 bg-destructive text-destructive-foreground p-2 rounded-lg hover:bg-destructive/90 transition-all shadow-lg"
-                title="Delete price list"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
+              {/* Action Buttons */}
+              <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleActiveMutation.mutate({
+                      pricelistId: pricelist.pricelist_id,
+                      isActive: !pricelist.is_active,
+                    });
+                  }}
+                  className={`p-2 rounded-lg transition-all shadow-lg ${
+                    pricelist.is_active
+                      ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                      : 'bg-muted text-muted-foreground hover:bg-muted/90'
+                  }`}
+                  title={pricelist.is_active ? 'Remove from active' : 'Set as active'}
+                >
+                  <Star className={`h-4 w-4 ${pricelist.is_active ? 'fill-current' : ''}`} />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteMutation.mutate(pricelist);
+                  }}
+                  className="bg-destructive text-destructive-foreground p-2 rounded-lg hover:bg-destructive/90 transition-all shadow-lg"
+                  title="Delete price list"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Active Badge */}
+              {pricelist.is_active && (
+                <div className="absolute top-2 left-2 bg-primary text-primary-foreground text-xs px-2 py-1 rounded-full font-medium">
+                  Active
+                </div>
+              )}
             </div>
           );
         })}
       </div>
 
-      {(!supplier.pricelists || supplier.pricelists.length === 0) && !isUploading && (
+      {sortedPricelists.length === 0 && !isUploading && (
         <div className="text-center p-8 border rounded-lg bg-muted/10">
           <p className="text-muted-foreground">No price lists uploaded yet.</p>
         </div>

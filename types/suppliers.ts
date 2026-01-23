@@ -19,6 +19,7 @@ export type SupplierPricelist = {
   file_url: string;
   file_type: string;
   uploaded_at: string;
+  is_active: boolean;
 };
 
 export type SupplierComponent = {

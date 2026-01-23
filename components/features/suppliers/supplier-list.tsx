@@ -131,11 +131,13 @@ export function SupplierList() {
   };
 
   const renderPricelistStrip = (supplier: SupplierWithDetails) => {
-    const pricelists = supplier.pricelists || [];
-    if (!pricelists.length) return null;
+    const allPricelists = supplier.pricelists || [];
+    // Only show active pricelists as thumbnails
+    const activePricelists = allPricelists.filter(p => p.is_active);
+    if (!activePricelists.length) return null;
 
-    const visible = pricelists.slice(0, 6);
-    const remaining = pricelists.length - visible.length;
+    const visible = activePricelists.slice(0, 6);
+    const remaining = activePricelists.length - visible.length;
 
     return (
       <div className="flex items-center gap-2">
@@ -298,9 +300,9 @@ export function SupplierList() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-base text-muted-foreground">
                       {supplier.pricelists && supplier.pricelists.length > 0 ? (
-                        <div className="inline-flex items-center gap-2">
-                          {renderPricelistStrip(supplier)}
-                        </div>
+                        renderPricelistStrip(supplier) || (
+                          <span className="text-muted-foreground/60">None active</span>
+                        )
                       ) : (
                         'None'
                       )}

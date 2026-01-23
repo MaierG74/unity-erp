@@ -232,4 +232,16 @@ export async function deletePricelist(pricelist: SupplierPricelist) {
     .eq('pricelist_id', pricelist.pricelist_id);
 
   if (dbError) throw dbError;
+}
+
+export async function togglePricelistActive(pricelistId: number, isActive: boolean) {
+  const { data, error } = await supabase
+    .from('supplier_pricelists')
+    .update({ is_active: isActive })
+    .eq('pricelist_id', pricelistId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data as SupplierPricelist;
 } 
