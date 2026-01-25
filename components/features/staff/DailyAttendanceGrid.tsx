@@ -234,6 +234,13 @@ const getDefaultTimes = (date: Date) => {
   }
 };
 
+// Stable empty arrays to prevent infinite useEffect loops when queries return no data
+const EMPTY_STAFF_ARRAY: { staff_id: number; first_name: string; last_name: string; job_description: string | null; is_active: boolean; current_staff: boolean }[] = [];
+const EMPTY_HOLIDAYS_ARRAY: { holiday_id: number; holiday_date: string; holiday_name: string }[] = [];
+const EMPTY_EVENTS_ARRAY: any[] = [];
+const EMPTY_SEGMENTS_ARRAY: any[] = [];
+const EMPTY_SUMMARIES_ARRAY: any[] = [];
+
 export function DailyAttendanceGrid() {
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -359,7 +366,7 @@ export function DailyAttendanceGrid() {
   }, [queryClient, selectedDate]);
 
   // Fetch active staff
-  const { data: activeStaff = [], isLoading: isLoadingStaff } = useQuery({
+  const { data: activeStaff = EMPTY_STAFF_ARRAY, isLoading: isLoadingStaff } = useQuery({
     queryKey: ['staff', 'active'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -377,7 +384,7 @@ export function DailyAttendanceGrid() {
   // console.log('STAFF QUERY:', activeStaff);
 
   // Fetch public holidays
-  const { data: publicHolidays = [] } = useQuery({
+  const { data: publicHolidays = EMPTY_HOLIDAYS_ARRAY } = useQuery({
     queryKey: ['public_holidays'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -394,7 +401,7 @@ export function DailyAttendanceGrid() {
   // Removed staff_hours fetching. All hour calculations now use dailySummaries (from time_daily_summary).
   
   // Fetch clock events for the selected date
-  const { data: clockEvents = [], isLoading: isLoadingClockEvents } = useQuery({
+  const { data: clockEvents = EMPTY_EVENTS_ARRAY, isLoading: isLoadingClockEvents } = useQuery({
     queryKey: ['time_clock_events', format(selectedDate, 'yyyy-MM-dd')],
     queryFn: async () => {
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
@@ -421,7 +428,7 @@ export function DailyAttendanceGrid() {
   });
   
   // Fetch time segments for the selected date
-  const { data: timeSegments = [], isLoading: isLoadingSegments } = useQuery({
+  const { data: timeSegments = EMPTY_SEGMENTS_ARRAY, isLoading: isLoadingSegments } = useQuery({
     queryKey: ['time_segments', format(selectedDate, 'yyyy-MM-dd')],
     queryFn: async () => {
       // Dynamically compute UTC range for the selected local day
@@ -449,7 +456,7 @@ export function DailyAttendanceGrid() {
 
 
   // BACKUP: Original query for all staff summaries (keeping as fallback)
-  const { data: dailySummaries = [], isLoading: isLoadingSummaries } = useQuery({
+  const { data: dailySummaries = EMPTY_SUMMARIES_ARRAY, isLoading: isLoadingSummaries } = useQuery({
     queryKey: ['time_daily_summary_all', format(selectedDate, 'yyyy-MM-dd')],
     queryFn: async () => {
       const dateStr = format(selectedDate, 'yyyy-MM-dd');

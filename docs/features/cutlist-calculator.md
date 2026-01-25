@@ -74,12 +74,14 @@ Click the grain icon to cycle through options:
 
 #### Lamination Types
 
-| Type | Description |
-|------|-------------|
-| **None** | Single layer, no lamination |
-| **With Backer** | Primary board + default backer board |
-| **Same Board** | Two layers of the same primary material |
-| **Custom** | Opens modal for 3+ layer configurations (48mm+) |
+Lamination indicates how pieces will be assembled after cutting. It does NOT multiply quantity.
+
+| Type | Description | Edge Thickness |
+|------|-------------|----------------|
+| **None** | Single layer, no lamination | 16mm |
+| **With Backer** | Primary + matching backer (Qty applies to both) | 32mm |
+| **Same Board** | Pieces paired during assembly | 32mm |
+| **Custom** | Opens modal for 3+ layer configurations | 48mm+ |
 
 ---
 
@@ -194,15 +196,29 @@ The quick-add row was creating a new part on every keystroke. Root cause: activa
 
 ---
 
+## Quantity Model
+
+**Qty = Pieces to Cut**
+
+The quantity field always represents actual pieces to cut from sheet goods. Lamination type is assembly metadata that affects edge thickness, NOT quantity multiplication.
+
+| Qty | Lamination | Pieces Cut | Edge Thickness | Finished Parts |
+|-----|------------|------------|----------------|----------------|
+| 4 | None | 4 | 16mm | 4 single-layer parts |
+| 4 | Same Board | 4 | 32mm | 2 laminated parts |
+| 4 | With Backer | 4+4 | 32mm | 4 parts (each with backer) |
+
+**Example:** 32mm desk legs
+- Need: 2 finished legs, each made from 2×16mm boards
+- Enter: Qty=4, Lamination="Same Board"
+- System: Cuts 4 pieces, uses 32mm edging
+- Result: 4 pieces → 2 finished legs after assembly
+
+This model ensures CSV imports and manual entry work identically.
+
+---
+
 ## Known Considerations
-
-### Lamination & Quantity
-
-Current behavior needs verification:
-- When `Qty=4` with `lamination=Same Board`, does this mean:
-  - 4 finished laminated assemblies (8 pieces cut)?
-  - Or 4 pieces to cut (2 finished assemblies)?
-- See "Lamination Handling" section in development notes
 
 ### Board Thickness for Edging
 

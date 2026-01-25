@@ -15,7 +15,7 @@ Three key improvements identified during cutlist testing:
 
 ---
 
-## Issue 1: CSV Import + Lamination Double-Counting
+## Issue 1: CSV Import + Lamination Double-Counting ✅ COMPLETE
 
 ### Problem
 
@@ -24,47 +24,36 @@ When importing from SketchUp CSV:
 - If user then sets "Same Board" lamination, system doubles to 8 pieces
 - This is incorrect - the CSV already accounts for lamination
 
-### Current Behavior
+### Solution Implemented (2026-01-25)
 
-```
-CSV Import: 4 × 700×600 parts (for 2 laminated legs)
-User sets: Lamination = "Same Board"
-System calculates: 4 × 2 = 8 pieces ❌
-```
+**Unified Model: Qty = Pieces to Cut**
 
-### Expected Behavior
+Rather than adding an `is_pre_expanded` flag that creates two different behaviors, we unified the system so that quantity ALWAYS means "pieces to cut":
 
-```
-CSV Import: 4 × 700×600 parts
-Parts marked as: is_pre_expanded = true
-Lamination info: for display only, doesn't double quantity
-System calculates: 4 pieces ✓
-```
+| Input Method | User Enters | Lamination | System Calculates |
+|--------------|-------------|------------|-------------------|
+| CSV Import | 4 pieces | Same Board | 4 pieces ✓ |
+| Manual Entry | 4 pieces | Same Board | 4 pieces ✓ |
 
-### Proposed Solution
-
-Add `is_pre_expanded?: boolean` field to `CutlistPart`:
-
-```typescript
-export interface CutlistPart {
-  // ... existing fields
-
-  /** If true, quantity already reflects lamination (imported from CSV) */
-  is_pre_expanded?: boolean;
-}
-```
+**Key Changes:**
+1. Removed quantity doubling from `expandPartsWithLamination()` for `same-board` type
+2. Removed quantity doubling from `expandGroupsToPartSpecs()` for `32mm-both` type
+3. Lamination type now only affects edge thickness calculation (16mm → 32mm)
 
 **Behavior:**
-- CSV import sets `is_pre_expanded: true`
-- Manual entry leaves it `false` or undefined
-- When `is_pre_expanded: true`:
-  - Lamination dropdown shows the type for reference
-  - But `expandPartsWithLamination()` does NOT double the quantity
-  - Edge thickness still calculated based on lamination type
+- Qty always = actual pieces to cut from sheet goods
+- Lamination = assembly metadata (how pieces are paired after cutting)
+- Edge thickness still calculated based on lamination type
 
-**UI Indication:**
-- Parts with `is_pre_expanded: true` could show a subtle indicator
-- Or the Lam dropdown could be disabled with tooltip "Imported from CSV"
+**Example:**
+```
+32mm desk legs (2 finished legs, each made from 2×16mm):
+- Enter: Qty=4, Lamination="Same Board"
+- System: Cuts 4 pieces, uses 32mm edging
+- Result: 4 pieces → 2 finished legs after assembly
+```
+
+See also: `docs/plans/cutlist-qty-as-pieces-plan.md` for full implementation details.
 
 ---
 
@@ -191,23 +180,20 @@ With dynamic board thickness, we need edging for:
 | Priority | Issue | Effort | Impact | Status |
 |----------|-------|--------|--------|--------|
 | 1 | Grain Direction Toggle | Low | High - essential for production | ✅ Complete |
-| 2 | Board Thickness Field | Medium | High - required for accurate edging | Pending |
-| 3 | CSV Import Flag | Medium | Medium - prevents errors on import | Pending |
+| 2 | CSV Import / Qty Consistency | Medium | High - prevents double-counting | ✅ Complete |
+| 3 | Board Thickness Field | Medium | High - required for accurate edging | Pending |
 
 ---
 
-## Files to Modify
+## Files Modified
 
-### Issue 1 (CSV Import)
-- `lib/cutlist/types.ts` - Add `is_pre_expanded` field
-- `lib/cutlist/csvParser.ts` - Set flag on import
-- `lib/cutlist/boardCalculator.ts` - Check flag before doubling
-- `components/features/cutlist/primitives/CompactPartsTable.tsx` - Visual indicator
+### Issue 1 (CSV Import / Qty = Pieces to Cut) ✅ COMPLETE
+- `lib/cutlist/boardCalculator.ts` - Removed quantity doubling for `same-board` and `32mm-both`
 
 ### Issue 2 (Grain Direction) ✅ COMPLETE
 - `components/features/cutlist/primitives/CompactPartsTable.tsx` - Added Grain toggle column
 
-### Issue 3 (Board Thickness)
+### Issue 3 (Board Thickness) - Pending
 - `components/features/cutlist/primitives/MaterialsPanel.tsx` - Add/display thickness field
 - `lib/cutlist/boardCalculator.ts` - Use dynamic thickness
 - `app/cutlist/page.tsx` - Pass thickness to calculator

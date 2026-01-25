@@ -89,6 +89,10 @@ type AttendanceReport = {
   attendance_rate: string;
 };
 
+// Stable empty arrays to prevent infinite useEffect loops
+const EMPTY_STAFF_ARRAY: Staff[] = [];
+const EMPTY_SUMMARIES_ARRAY: DailySummary[] = [];
+
 // Function to export data to CSV
 const exportToCSV = (data: any[], filename: string) => {
   if (!data || data.length === 0) return;
@@ -210,7 +214,7 @@ export function StaffReports() {
   });
   
   // Fetch staff data
-  const { data: staffData = [], isLoading: isLoadingStaff } = useQuery({
+  const { data: staffData = EMPTY_STAFF_ARRAY, isLoading: isLoadingStaff } = useQuery({
     queryKey: ['staff'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -235,7 +239,7 @@ export function StaffReports() {
   }, [staffData, selectedStaffType]);
   
   // Fetch daily summaries (hours data) for the selected date range
-  const { data: hoursData = [], isLoading: isLoadingHours } = useQuery({
+  const { data: hoursData = EMPTY_SUMMARIES_ARRAY, isLoading: isLoadingHours } = useQuery({
     queryKey: ['time_daily_summary', startDate, endDate],
     queryFn: async () => {
       if (!startDate || !endDate) return [];

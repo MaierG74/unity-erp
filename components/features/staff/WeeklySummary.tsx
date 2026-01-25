@@ -125,6 +125,12 @@ type WeeklySummaryRow = {
 type SortField = 'name' | 'job' | 'regular' | 'doubletime' | 'overtime' | 'total';
 type SortDirection = 'asc' | 'desc';
 
+// Stable empty arrays to prevent infinite useEffect loops
+const EMPTY_STAFF_ARRAY: Staff[] = [];
+const EMPTY_SUMMARIES_ARRAY: { staff_id: number; date_worked: string; total_hours_worked: number; dt_minutes: number }[] = [];
+const EMPTY_HOLIDAYS_ARRAY: PublicHoliday[] = [];
+const EMPTY_EVENTS_ARRAY: { staff_id: number; event_time: string; event_type: string }[] = [];
+
 export function WeeklySummary() {
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -159,7 +165,7 @@ export function WeeklySummary() {
   }, [weekStart, weekEnd]);
 
   // Fetch active staff
-  const { data: activeStaff = [], isLoading: isLoadingStaff } = useQuery({
+  const { data: activeStaff = EMPTY_STAFF_ARRAY, isLoading: isLoadingStaff } = useQuery({
     queryKey: ['staff', 'active'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -175,7 +181,7 @@ export function WeeklySummary() {
   });
 
   // Fetch public holidays
-  const { data: publicHolidays = [] } = useQuery({
+  const { data: publicHolidays = EMPTY_HOLIDAYS_ARRAY } = useQuery({
     queryKey: ['public_holidays'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -188,7 +194,7 @@ export function WeeklySummary() {
   });
 
   // Fetch daily summaries for the selected week
-  const { data: weeklySummaries = [], isLoading: isLoadingSummaries } = useQuery({
+  const { data: weeklySummaries = EMPTY_SUMMARIES_ARRAY, isLoading: isLoadingSummaries } = useQuery({
     queryKey: ['time_daily_summary', 'weekly', format(weekStart, 'yyyy-MM-dd'), format(weekEnd, 'yyyy-MM-dd')],
     queryFn: async () => {
       const startDateStr = format(weekStart, 'yyyy-MM-dd');
@@ -204,7 +210,7 @@ export function WeeklySummary() {
   });
 
   // Fetch clock events for the week to detect duplicate entries
-  const { data: weeklyClockEvents = [] } = useQuery({
+  const { data: weeklyClockEvents = EMPTY_EVENTS_ARRAY } = useQuery({
     queryKey: ['time_clock_events', 'weekly', format(weekStart, 'yyyy-MM-dd'), format(weekEnd, 'yyyy-MM-dd')],
     queryFn: async () => {
       // Calculate SAST boundaries for the week

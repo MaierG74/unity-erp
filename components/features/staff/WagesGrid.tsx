@@ -55,6 +55,10 @@ type StaffRow = {
 
 type FilterType = 'all' | 'not_clocked_in' | 'not_clocked_out' | 'incomplete';
 
+// Stable empty arrays to prevent infinite useEffect loops
+const EMPTY_STAFF_ARRAY: { staff_id: number; first_name: string; last_name: string; job_description: string | null; is_active: boolean; current_staff: boolean }[] = [];
+const EMPTY_EVENTS_ARRAY: { staff_id: number; event_time: string; event_type: string }[] = [];
+
 export function WagesGrid() {
     const [selectedDate, setSelectedDate] = useState<Date>(new Date());
     const [staffData, setStaffData] = useState<StaffRow[]>([]);
@@ -73,7 +77,7 @@ export function WagesGrid() {
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
 
     // Fetch active staff
-    const { data: activeStaff = [], isLoading: isLoadingStaff } = useQuery({
+    const { data: activeStaff = EMPTY_STAFF_ARRAY, isLoading: isLoadingStaff } = useQuery({
         queryKey: ['staff', 'active'],
         queryFn: async () => {
             const { data, error } = await supabase
@@ -89,7 +93,7 @@ export function WagesGrid() {
     });
 
     // Fetch clock events for selected date
-    const { data: clockEvents = [], isLoading: isLoadingEvents, refetch: refetchEvents } = useQuery({
+    const { data: clockEvents = EMPTY_EVENTS_ARRAY, isLoading: isLoadingEvents, refetch: refetchEvents } = useQuery({
         queryKey: ['time_clock_events', 'quick_entry', dateStr],
         queryFn: async () => {
             const { data, error } = await supabase

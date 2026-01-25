@@ -1,17 +1,19 @@
 /**
  * Board Calculator for Cutlist Builder
  *
- * Handles expansion of parts based on lamination type:
+ * IMPORTANT: Qty = Pieces to Cut
+ * The quantity field always represents actual pieces to cut from sheet goods.
+ * Lamination type is assembly metadata that affects edge thickness, NOT quantity.
  *
- * Part-Level Lamination (NEW):
+ * Part-Level Lamination:
  * - none: Single 16mm board, 16mm edging
- * - with-backer: 32mm (1× primary + 1× backer), 32mm edging
- * - same-board: 32mm (2× primary board), 32mm edging
+ * - with-backer: 1× primary + 1× backer (same qty each), 32mm edging
+ * - same-board: Pieces will be paired during assembly, 32mm edging (NO quantity doubling)
  * - custom: 48mm+ (multiple layers via CustomLaminationModal)
  *
- * Group-Level Board Types (LEGACY, for backward compatibility):
+ * Group-Level Board Types (LEGACY, for grouped mode):
  * - 16mm Single: Parts as-is, 16mm edging
- * - 32mm Both Sides: Parts doubled (same board), 32mm edging
+ * - 32mm Both Sides: Parts paired during assembly, 32mm edging (NO quantity doubling)
  * - 32mm With Backer: Parts for primary + duplicate for backer, 32mm edging
  */
 
@@ -213,10 +215,12 @@ export function expandPartsWithLamination(
       }
 
       case 'same-board': {
-        // 2× same board - doubled primary quantity
-        const expandedPart = toExpandedPart(part, baseQty * 2, { materialId: materialKey });
+        // Same board lamination - pieces are paired during assembly
+        // Qty represents actual pieces to cut, NOT finished assemblies
+        // Example: Qty=4 means 4 pieces to cut, which become 2 finished 32mm legs
+        const expandedPart = toExpandedPart(part, baseQty, { materialId: materialKey });
         addToMaterialMap(primaryPartsByMaterial, materialKey, expandedPart);
-        totalPrimaryParts += baseQty * 2;
+        totalPrimaryParts += baseQty;
         break;
       }
 
@@ -369,16 +373,17 @@ export function expandGroupsToPartSpecs(groups: CutlistGroup[]): BoardCalculatio
         }
 
         case '32mm-both': {
-          // Doubled: 2× same board per part, 32mm edging
-          const doubledQty = baseQty * 2;
-          const partSpec = toPartSpec(part, doubledQty, true);
+          // Same board lamination - pieces are paired during assembly
+          // Qty represents actual pieces to cut, NOT finished assemblies
+          // Example: Qty=4 means 4 pieces to cut → 2 finished 32mm parts
+          const partSpec = toPartSpec(part, baseQty, true);
           const existing = primaryByMaterial.get(materialKey) || [];
           existing.push(partSpec);
           primaryByMaterial.set(materialKey, existing);
 
           const edging = calculateEdgeBanding(part, baseQty);
           edging32mm += edging.length16mm; // Same edge count, but 32mm width
-          totalPrimaryParts += doubledQty;
+          totalPrimaryParts += baseQty;
           break;
         }
 
@@ -480,7 +485,7 @@ export function getBoardTypeDescription(boardType: BoardType): string {
     case '16mm':
       return 'Standard single board, 16mm edging';
     case '32mm-both':
-      return '2× same board laminated, both sides visible (e.g., desk legs)';
+      return 'Paired during assembly, both sides visible (e.g., desk legs)';
     case '32mm-backer':
       return '1× primary + 1× backer board, only top visible (e.g., desk tops)';
   }
@@ -523,7 +528,7 @@ export function getLaminationTypeDescription(
     case 'with-backer':
       return '1× primary + 1× backer board, 32mm edging';
     case 'same-board':
-      return '2× same board laminated, 32mm edging';
+      return 'Paired during assembly (32mm finished), 32mm edging';
     case 'custom':
       if (laminationConfig) {
         const layerCount = laminationConfig.layers.length;

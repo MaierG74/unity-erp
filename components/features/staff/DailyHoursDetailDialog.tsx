@@ -103,6 +103,10 @@ interface DailyHoursDetailDialogProps {
   initialHours: number;
 }
 
+// Stable empty arrays to prevent infinite useEffect loops
+const EMPTY_CLOCK_EVENTS: ClockEvent[] = [];
+const EMPTY_TIME_SEGMENTS: TimeSegment[] = [];
+
 export function DailyHoursDetailDialog({
   isOpen,
   onClose,
@@ -149,7 +153,7 @@ export function DailyHoursDetailDialog({
   }, [isOpen]);
 
   // Fetch clock events for the day
-  const { data: clockEvents = [], isLoading: isLoadingEvents, refetch: refetchEvents } = useQuery({
+  const { data: clockEvents = EMPTY_CLOCK_EVENTS, isLoading: isLoadingEvents, refetch: refetchEvents } = useQuery({
     queryKey: ['time_clock_events', staffId, date],
     queryFn: async () => {
       // Calculate SAST day boundaries
@@ -171,7 +175,7 @@ export function DailyHoursDetailDialog({
   });
 
   // Fetch time segments for the day
-  const { data: timeSegments = [], isLoading: isLoadingSegments, refetch: refetchSegments } = useQuery({
+  const { data: timeSegments = EMPTY_TIME_SEGMENTS, isLoading: isLoadingSegments, refetch: refetchSegments } = useQuery({
     queryKey: ['time_segments', staffId, date],
     queryFn: async () => {
       const { data, error } = await supabase
