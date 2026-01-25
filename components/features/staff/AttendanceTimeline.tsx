@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, memo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/use-toast';
 import { format } from 'date-fns';
@@ -14,7 +14,8 @@ import {
   DialogTitle,
   DialogClose
 } from '@/components/ui/dialog';
-import { ChevronDown, ChevronUp, Edit3, Trash2, Plus, User, RefreshCw, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Edit3, Trash2, Plus, User, RefreshCw, Loader2, AlertTriangle } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ClockEvent, TimeSegment } from '@/lib/types/attendance';
 
 import { DailySummary } from '@/lib/types/attendance';
@@ -31,11 +32,11 @@ interface AttendanceTimelineProps {
   summary?: DailySummary | null;
 };
 
-export function AttendanceTimeline({ 
-  staffId, 
+export const AttendanceTimeline = memo(function AttendanceTimeline({
+  staffId,
   staffName,
-  date, 
-  clockEvents, 
+  date,
+  clockEvents,
   segments,
   onAddManualEvent,
   onSegmentsChanged,
@@ -73,6 +74,19 @@ export function AttendanceTimeline({
       missingClockOut = true;
     }
   }
+
+  // Detect multiple clock-ins or clock-outs (potential errors)
+  const duplicateEventInfo = useMemo(() => {
+    const clockInCount = staffEvents.filter(e => e.event_type === 'clock_in').length;
+    const clockOutCount = staffEvents.filter(e => e.event_type === 'clock_out').length;
+    return {
+      hasMultipleClockIns: clockInCount > 1,
+      hasMultipleClockOuts: clockOutCount > 1,
+      clockInCount,
+      clockOutCount,
+    };
+  }, [staffEvents]);
+
   const staffSegments = useMemo(() => segments.filter(segment => segment.staff_id === staffId), [segments, staffId]);
   // Only include segments with positive duration
   const validSegments = useMemo(
@@ -433,6 +447,33 @@ export function AttendanceTimeline({
                   Missing clock-out
                 </span>
               )}
+              {(duplicateEventInfo.hasMultipleClockIns || duplicateEventInfo.hasMultipleClockOuts) && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="ml-2 inline-flex items-center align-middle rounded-full bg-orange-500/15 px-2 py-1 text-xs font-semibold text-orange-700 dark:text-orange-100 cursor-help">
+                        <AlertTriangle className="w-3 h-3 mr-1" />
+                        {duplicateEventInfo.hasMultipleClockIns && duplicateEventInfo.hasMultipleClockOuts
+                          ? 'Multiple entries'
+                          : duplicateEventInfo.hasMultipleClockIns
+                            ? `${duplicateEventInfo.clockInCount} clock-ins`
+                            : `${duplicateEventInfo.clockOutCount} clock-outs`}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p className="max-w-xs">
+                        {duplicateEventInfo.hasMultipleClockIns && (
+                          <span className="block">{duplicateEventInfo.clockInCount} clock-in events detected</span>
+                        )}
+                        {duplicateEventInfo.hasMultipleClockOuts && (
+                          <span className="block">{duplicateEventInfo.clockOutCount} clock-out events detected</span>
+                        )}
+                        <span className="block text-muted-foreground mt-1">This may indicate a data entry error. Please review the events below.</span>
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
             </div>
             <div>
               <div className="text-xs uppercase tracking-wide text-muted-foreground">Total</div>
@@ -643,7 +684,8 @@ export function AttendanceTimeline({
           <Button
             size="sm"
             onClick={() => {
-              // console.log('Add Event button clicked, setting isAddingEvent to true');
+              // Smart default: if missing clock-out, default to clock_out; otherwise clock_in
+              setEventType(missingClockOut ? 'clock_out' : 'clock_in');
               setIsAddingEvent(true);
             }}
             className="flex items-center gap-1"
@@ -766,4 +808,4 @@ export function AttendanceTimeline({
       </Dialog>
     </div>
   );
-}
+});

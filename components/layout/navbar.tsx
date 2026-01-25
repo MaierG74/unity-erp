@@ -4,7 +4,7 @@ import { useAuth } from '@/components/common/auth-provider';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { ThemeToggle } from '@/components/common/theme-toggle';
-import { Menu } from 'lucide-react';
+import { Menu, ChevronLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useSidebar } from './sidebar';
@@ -23,6 +23,7 @@ export function Navbar() {
   const router = useRouter();
   const compactOn = searchParams?.get('compact') !== '0';
   const isLaborPlanning = pathname?.startsWith('/labor-planning');
+  const isQuoteDetail = pathname?.startsWith('/quotes/') && pathname !== '/quotes/new';
   const userRole = (user as any)?.app_metadata?.role || (user as any)?.user_metadata?.role;
 
   useEffect(() => {
@@ -100,9 +101,18 @@ export function Navbar() {
           <span className="text-xl font-bold md:hidden">Unity ERP</span>
         </div>
 
-        <div className="flex flex-1 items-center justify-center">
+        <div className="flex flex-1 items-center">
+          {isQuoteDetail && (
+            <Link
+              href="/quotes"
+              className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              <span>Quotes</span>
+            </Link>
+          )}
           {isLaborPlanning && (
-            <div className="flex flex-col items-start gap-1 text-left">
+            <div className="flex flex-col items-start gap-1 text-left mx-auto">
               <span className="text-base font-semibold leading-none sm:text-lg">Labor Planning Board</span>
               <span className="text-[12px] text-muted-foreground">
                 Drag jobs into swimlanes; compact view trims labels and grid clutter.

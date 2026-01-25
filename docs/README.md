@@ -48,6 +48,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - Timekeeping: [`domains/timekeeping/labor-section.md`](domains/timekeeping/labor-section.md), [`domains/timekeeping/labor-planning-user-guide.md`](domains/timekeeping/labor-planning-user-guide.md)
   - Suppliers: [`domains/suppliers/suppliers-master.md`](domains/suppliers/suppliers-master.md)
 - Features:
+  - [`features/cutlist-calculator.md`](features/cutlist-calculator.md) – **Cutlist Calculator** documentation: materials panel, parts table, edge banding popover, lamination types
   - [`features/customers-ui-redesign.md`](features/customers-ui-redesign.md) – ✅ **Customers UI redesign** with inline editing, metrics, charts, and streamlined navigation
   - [`features/suppliers-ui-redesign-prompt.md`](features/suppliers-ui-redesign-prompt.md) – **Suppliers UI redesign prompt** (ready to apply in new conversation)
 - Operations:
@@ -62,6 +63,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - [`operations/airtable-sync-runbook.md`](operations/airtable-sync-runbook.md) – Airtable migration/sync checklist and incident response guide
 - Plans: [`plans/`](plans/) – implementation briefs such as `quoting-module-plan.md`, `quote-email-plan.md`, `time-attendance-plan.md`, `cutlist-nesting-plan.md`, and other project plans
   - Completed: [`plans/product-cutlist-calculator-plan.md`](plans/product-cutlist-calculator-plan.md) – Product cutlist calculator and **Cutlist Builder** with drag-and-drop grouping, CSV import, and 16mm/32mm board type support
+  - New: [`plans/cutlist-improvements.md`](plans/cutlist-improvements.md) – Cutlist improvements: CSV import flag, grain direction toggle, dynamic board thickness for edging
   - New: [`plans/labor-planning-validation-plan.md`](plans/labor-planning-validation-plan.md) – guardrails + telemetry plan for the Labor Planning board
   - New: [`plans/permissions-and-logging-plan.md`](plans/permissions-and-logging-plan.md) – unified roadmap for role-based access control, permissions UI, and audit logging rollout
   - New: [`plans/todo-module-plan.md`](plans/todo-module-plan.md) – To-Do module planning doc covering cross-module task assignments

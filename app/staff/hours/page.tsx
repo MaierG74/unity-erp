@@ -1,5 +1,7 @@
 'use client';
 
+import { useState, useEffect } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ArrowLeft, Clock, CalendarDays, BarChart3, Table as TableIcon } from 'lucide-react';
@@ -10,6 +12,23 @@ import { StaffReports } from '@/components/features/staff/StaffReports';
 import { WagesGrid } from '@/components/features/staff/WagesGrid';
 
 export default function HoursTrackingPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Get tab from URL or default to 'daily'
+  const tabParam = searchParams.get('tab');
+  const validTabs = ['daily', 'wages-grid', 'weekly', 'reports'];
+  const [activeTab, setActiveTab] = useState(
+    tabParam && validTabs.includes(tabParam) ? tabParam : 'daily'
+  );
+
+  // Update URL when tab changes
+  const handleTabChange = (value: string) => {
+    setActiveTab(value);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('tab', value);
+    router.replace(`?${params.toString()}`, { scroll: false });
+  };
 
   return (
     <div className="space-y-6">
@@ -23,7 +42,7 @@ export default function HoursTrackingPage() {
         <h1 className="text-3xl font-bold tracking-tight">Hours Tracking</h1>
       </div>
 
-      <Tabs defaultValue="daily" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
         <TabsList>
           <TabsTrigger value="daily" className="flex items-center gap-2">
             <Clock className="h-4 w-4" />

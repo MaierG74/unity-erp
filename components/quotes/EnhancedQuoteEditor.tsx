@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { Quote, QuoteItem, QuoteAttachment, fetchQuote, updateQuote, fetchAllQuoteAttachments } from '@/lib/db/quotes';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
@@ -25,7 +24,6 @@ import {
   Eye,
   Image as ImageIcon,
   Calculator,
-  ChevronLeft,
   Mail
 } from 'lucide-react';
 
@@ -43,13 +41,7 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
   const [activeTab, setActiveTab] = useState('details');
   const [showItemAttachmentSections, setShowItemAttachmentSections] = useState(false);
   const [showEmailDialog, setShowEmailDialog] = useState(false);
-  const router = useRouter();
   const { toast } = useToast();
-
-  const handleBack = () => {
-    // Use router.back() to preserve URL params (filters) when returning to quotes list
-    router.back();
-  };
 
   // Company info for PDF (loaded from settings if available)
   const defaultCompanyInfo = {
@@ -127,23 +119,17 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
 
   useEffect(() => {
     if (quoteId) {
-      console.log('Fetching quote with ID:', quoteId);
-      
       // Fetch quote data using API route that bypasses RLS
       const fetchQuoteViaAPI = async () => {
         try {
-          console.log('Fetching quote via API with ID:', quoteId);
-          
           const response = await fetch(`/api/quotes/${quoteId}`);
-          
+
           if (!response.ok) {
             const errorData = await response.json();
-            console.error('API error:', errorData);
             throw new Error(errorData.error || 'Failed to fetch quote');
           }
-          
+
           const quoteData = await response.json();
-          console.log('Quote data received from API:', quoteData);
 
           setQuote(quoteData);
           setItems(quoteData.items || []);
@@ -153,58 +139,15 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
             ...(quoteData.attachments || []), // Quote-level attachments
             ...(quoteData.items || []).flatMap((item: any) => item.attachments || []) // Item-level attachments
           ];
-          console.log('Flattened attachments:', allAttachments);
           setAttachments(allAttachments);
           
         } catch (error) {
-          console.error('Failed to fetch quote via API:', error);
-          
-          // Fallback to mock data if API fails
-          console.log('Falling back to mock data for testing');
-          const mockQuote = {
-            id: quoteId,
-            quote_number: 'DEMO-001',
-            customer_id: '134',
-            status: 'draft',
-            created_at: '2025-01-13T16:09:48.000Z',
-            updated_at: '2025-01-13T16:09:48.000Z',
-            grand_total: 1500.00,
-            subtotal: 1250.00,
-            vat_rate: 15,
-            vat_amount: 187.50,
-            notes: 'Demo quote - API fallback',
-            terms: 'Payment due within 30 days'
-          };
-
-          const mockItems = [
-            {
-              id: '1',
-              quote_id: quoteId,
-              description: 'Premium Widget - High Quality Component',
-              qty: 2,
-              unit_price: 625.00,
-              total: 1250.00
-            }
-          ];
-
-          const mockAttachments = [
-            {
-              id: '1',
-              quote_id: quoteId,
-              quote_item_id: '1',
-              scope: 'item' as const,
-              file_url: '/placeholder-image.jpg',
-              mime_type: 'image/jpeg',
-              uploaded_at: '2025-01-13T16:09:48.000Z',
-              original_name: 'product-image.jpg',
-              display_in_quote: true,
-              display_order: 1
-            }
-          ];
-
-          setQuote(mockQuote);
-          setItems(mockItems);
-          setAttachments(mockAttachments);
+          console.error('Failed to fetch quote:', error);
+          toast({
+            variant: 'destructive',
+            title: 'Failed to load quote',
+            description: error instanceof Error ? error.message : 'Please try again or contact support.',
+          });
         }
       };
 
@@ -293,46 +236,60 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-6 space-y-6">
-      {/* Back control (top-left) */}
-      <div>
-        <Button variant="ghost" size="sm" className="h-8 px-2" onClick={handleBack}>
-          <ChevronLeft className="h-4 w-4 mr-1" />
-          Back to Quotes
-        </Button>
-      </div>
+    <div className="max-w-7xl mx-auto px-6 pt-4 pb-6 space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Quote #{quote.quote_number}</h1>
-          <div className="flex items-center gap-4 mt-2">
-            <Badge variant={quote.status === 'draft' ? 'secondary' : 'default'}>
-              {quote.status}
-            </Badge>
-            <span className="text-sm text-muted-foreground">
-              Created: {new Date(quote.created_at).toLocaleDateString()}
-            </span>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <QuotePDFDownload
-            quote={pdfQuote}
-            companyInfo={settingsCompanyInfo || defaultCompanyInfo}
-            defaultTermsTemplate={defaultTermsTemplate}
-          />
-          <Button
-            variant="outline"
-            onClick={() => setShowEmailDialog(true)}
-            disabled={!quote.customer?.email && !quote.customer}
-            className="flex items-center gap-2"
+      <div className="space-y-4">
+        {/* Top row: Quote ID + Customer + Status */}
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-4">
+          <h1 className="text-2xl font-bold text-foreground">
+            Quote {quote.quote_number}
+          </h1>
+          {quote.customer?.name && (
+            <>
+              <span className="hidden sm:inline text-muted-foreground">•</span>
+              <span className="text-lg text-muted-foreground">
+                {quote.customer.name}
+              </span>
+            </>
+          )}
+          <Badge
+            variant={quote.status === 'draft' ? 'outline' : quote.status === 'sent' ? 'warning' : 'default'}
+            className="w-fit"
           >
-            <Mail size={16} />
-            Email Quote
-          </Button>
-          <Button onClick={handleSave} disabled={isSaving}>
-            <Save size={16} className="mr-2" />
-            {isSaving ? 'Saving...' : 'Save Changes'}
-          </Button>
+            {quote.status}
+          </Badge>
+        </div>
+
+        {/* Bottom row: Meta info + Actions */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+            <span>Created {new Date(quote.created_at).toLocaleDateString()}</span>
+            {quote.customer?.email && (
+              <span className="hidden md:inline">{quote.customer.email}</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <QuotePDFDownload
+              quote={pdfQuote}
+              companyInfo={settingsCompanyInfo || defaultCompanyInfo}
+              defaultTermsTemplate={defaultTermsTemplate}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowEmailDialog(true)}
+              disabled={!quote.customer?.email && !quote.customer}
+              className="flex items-center gap-2"
+            >
+              <Mail size={16} />
+              <span className="hidden sm:inline">Email Quote</span>
+              <span className="sm:hidden">Email</span>
+            </Button>
+            <Button size="sm" onClick={handleSave} disabled={isSaving}>
+              <Save size={16} className="mr-2" />
+              {isSaving ? 'Saving...' : 'Save'}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -362,12 +319,22 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
                   />
                 </div>
                 <div>
-                  <Label htmlFor="customer_id">Customer ID</Label>
-                  <Input
-                    id="customer_id"
-                    value={quote.customer_id}
-                    onChange={(e) => handleQuoteChange('customer_id', e.target.value)}
-                  />
+                  <Label>Customer</Label>
+                  {quote.customer?.name ? (
+                    <div className="space-y-1">
+                      <div className="text-lg font-medium">{quote.customer.name}</div>
+                      {quote.customer.email && (
+                        <div className="text-sm text-muted-foreground">{quote.customer.email}</div>
+                      )}
+                      {quote.customer.telephone && (
+                        <div className="text-sm text-muted-foreground">{quote.customer.telephone}</div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">
+                      Customer #{quote.customer_id}
+                    </div>
+                  )}
                 </div>
                 <div>
                   <Label htmlFor="status">Status</Label>
@@ -561,15 +528,10 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
         open={showEmailDialog}
         onOpenChange={setShowEmailDialog}
         quote={(() => {
-          console.log('[EnhancedQuoteEditor] Building quote for email dialog');
-          console.log('[EnhancedQuoteEditor] Total attachments:', attachments.length);
-          console.log('[EnhancedQuoteEditor] All attachments:', attachments);
-
           const itemsWithAttachments = items.map((item: any) => {
             const itemAttachments = attachments.filter(
               (att) => att.scope === 'item' && att.quote_item_id === item.id
             );
-            console.log(`[EnhancedQuoteEditor] Item ${item.description} (${item.id}): found ${itemAttachments.length} attachments`);
             return {
               ...item,
               attachments: itemAttachments,
@@ -588,22 +550,6 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
             title: 'Email sent successfully',
             description: `Quote ${quote.quote_number} has been emailed to ${quote.customer?.email || 'the customer'}.`,
           });
-        }}
-        onPreviewPDF={() => {
-          // Open PDF in new tab using existing PDF download component logic
-          const pdfQuote = {
-            ...quote,
-            items: items.map((item: any) => ({
-              ...item,
-              attachments: attachments.filter(
-                (att) => att.scope === 'item' && att.quote_item_id === item.id
-              ),
-            })),
-            attachments: attachments.filter((att) => att.scope === 'quote'),
-            customer: quote.customer,
-          };
-          // This is a simplified preview - in production you might want to generate and open the PDF
-          console.log('Preview PDF clicked', pdfQuote);
         }}
       />
     </div>

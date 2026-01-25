@@ -27,13 +27,8 @@ import {
   CommandList,
 } from '@/components/ui/command';
 import { PartCard } from './PartCard';
-import {
-  type CutlistGroup,
-  type CutlistPart,
-  type BoardType,
-  getBoardTypeLabel,
-  getBoardTypeDescription,
-} from '@/lib/cutlist/boardCalculator';
+import type { CutlistGroup, CutlistPart, BoardType } from '@/lib/cutlist/types';
+import { getBoardTypeLabel, getBoardTypeDescription } from '@/lib/cutlist/boardCalculator';
 
 interface MaterialOption {
   id: string;

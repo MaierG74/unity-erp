@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState, useMemo } from 'react';
+import { useCallback, useEffect, useState, useMemo, memo } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { processClockEventsIntoSegments } from '@/lib/utils/attendance';
+import { processClockEventsIntoSegments, processAttendanceBatch } from '@/lib/utils/attendance';
 import { useToast } from '@/components/ui/use-toast';
 import { format, parseISO, isToday, isSunday } from 'date-fns';
 import { formatTimeToSAST, getSASTDayBoundaries } from '@/lib/utils/timezone';
@@ -61,6 +62,70 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 // Import our custom AttendanceTimeline component
 import { AttendanceTimeline } from '@/components/features/staff/AttendanceTimeline';
 import { MassClockActionDialog } from '@/components/features/staff/MassClockActionDialog';
+
+// Memoized wrapper for AttendanceTimeline with staff-specific summary query
+// Defined OUTSIDE of DailyAttendanceGrid to prevent remounting on parent re-renders
+interface OptimizedTimelineProps {
+  staffId: number;
+  staffName: string;
+  segments: TimeSegment[];
+  clockEvents: ClockEvent[];
+  date: Date;
+  onAddManualEvent: (staffId: number, eventType: string, time: string, breakType?: string | null) => Promise<void>;
+  onSegmentsChanged: () => void;
+  onProcessStaff: (staffId?: number) => Promise<void>;
+}
+
+const OptimizedAttendanceTimeline = memo(function OptimizedAttendanceTimeline({
+  staffId,
+  staffName,
+  segments,
+  clockEvents,
+  date,
+  onAddManualEvent,
+  onSegmentsChanged,
+  onProcessStaff,
+}: OptimizedTimelineProps) {
+  const dateStr = format(date, 'yyyy-MM-dd');
+
+  // Staff-specific daily summary query (only affects this component)
+  const { data: staffSummary } = useQuery({
+    queryKey: ['time_daily_summary', dateStr, staffId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('time_daily_summary')
+        .select('*')
+        .eq('date_worked', dateStr)
+        .eq('staff_id', staffId)
+        .single();
+
+      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+        throw error;
+      }
+      return data || null;
+    },
+  });
+
+  // Memoize filtered events to prevent unnecessary re-renders
+  const staffClockEvents = useMemo(
+    () => clockEvents.filter(e => e.staff_id === staffId),
+    [clockEvents, staffId]
+  );
+
+  return (
+    <AttendanceTimeline
+      staffId={staffId}
+      staffName={staffName}
+      date={date}
+      clockEvents={staffClockEvents}
+      segments={segments}
+      onAddManualEvent={onAddManualEvent}
+      onSegmentsChanged={onSegmentsChanged}
+      onProcessStaff={onProcessStaff}
+      summary={staffSummary}
+    />
+  );
+});
 
 // Import centralized types
 import { 
@@ -171,7 +236,24 @@ const getDefaultTimes = (date: Date) => {
 
 export function DailyAttendanceGrid() {
   const queryClient = useQueryClient();
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Get date from URL or default to today
+  const dateParam = searchParams.get('date');
+  const initialDate = dateParam ? parseISO(dateParam) : new Date();
+  const [selectedDate, setSelectedDate] = useState<Date>(
+    isNaN(initialDate.getTime()) ? new Date() : initialDate
+  );
+
+  // Update URL when date changes
+  const handleDateChange = useCallback((date: Date | undefined) => {
+    if (!date) return;
+    setSelectedDate(date);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('date', format(date, 'yyyy-MM-dd'));
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [router, searchParams]);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [isHoliday, setIsHoliday] = useState(false);
   const [holidayName, setHolidayName] = useState('');
@@ -382,48 +464,6 @@ export function DailyAttendanceGrid() {
     },
   });
 
-  // NEW: Wrapper component for AttendanceTimeline that uses staff-specific queries
-  const OptimizedAttendanceTimeline = ({ staffId, staffName, segments }: { 
-    staffId: number, 
-    staffName: string, 
-    segments: any[] 
-  }) => {
-    const dateStr = format(selectedDate, 'yyyy-MM-dd');
-    
-    // Staff-specific daily summary query (only affects this component)
-    const { data: staffSummary } = useQuery({
-      queryKey: ['time_daily_summary', dateStr, staffId],
-      queryFn: async () => {
-        const { data, error } = await supabase
-          .from('time_daily_summary')
-          .select('*')
-          .eq('date_worked', dateStr)
-          .eq('staff_id', staffId)
-          .single();
-        
-        if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
-          throw error;
-        }
-        return data || null;
-      },
-    });
-
-    return (
-      <AttendanceTimeline 
-        key={staffId}
-        staffId={staffId}
-        staffName={staffName}
-        date={selectedDate}
-        clockEvents={clockEvents.filter(e => e.staff_id === staffId)}
-        segments={segments}
-        onAddManualEvent={handleManualClockEvent}
-        onSegmentsChanged={handleSegmentsChanged}
-        onProcessStaff={processClockEventsData}
-        summary={staffSummary}
-      />
-    );
-  };
-  
   // console.log('LOADING FLAGS', {
     // isLoadingStaff,
     // isLoadingClockEvents,
@@ -456,21 +496,11 @@ export function DailyAttendanceGrid() {
           description: `${eventType.replace('_', ' ')} event added for ${time}`
         });
 
-        // Refresh cached data for this staff member so the UI updates immediately
-        console.log(`[handleManualClockEvent] Refreshing cached queries for staff ${staffId}`);
-        try {
-          await refreshStaffAttendanceCaches(dateStr, staffId);
-          console.log(`[handleManualClockEvent] Completed cache refresh for staff ${staffId}`);
-        } catch (refreshError) {
-          console.error('[handleManualClockEvent] Cache refresh failed, falling back to invalidation:', refreshError);
-          await Promise.all([
-            queryClient.invalidateQueries({ queryKey: ['time_clock_events', dateStr] }),
-            queryClient.invalidateQueries({ queryKey: ['time_segments', dateStr] }),
-            queryClient.invalidateQueries({ queryKey: ['time_daily_summary', dateStr, staffId] }),
-            queryClient.invalidateQueries({ queryKey: ['time_daily_summary_all', dateStr] }),
-            queryClient.invalidateQueries({ queryKey: ['time_daily_summary', dateStr] }),
-          ]);
-        }
+        // Process this staff member's attendance to regenerate segments and daily summary
+        // This also handles cache refresh internally
+        console.log(`[handleManualClockEvent] Processing attendance for staff ${staffId} after adding event`);
+        await processClockEventsData(staffId);
+        console.log(`[handleManualClockEvent] Completed processing for staff ${staffId}`);
       } else {
         toast({
           title: 'Error',
@@ -545,6 +575,7 @@ export function DailyAttendanceGrid() {
   };
 
   // Process clock events and refresh related daily summary data
+  // Uses batch RPC for performance, with fallback to sequential processing
   const processClockEventsData = async (staffId?: number) => {
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
     const isTargeted = typeof staffId === 'number';
@@ -556,10 +587,19 @@ export function DailyAttendanceGrid() {
     }
 
     try {
-      // Process clock events into segments (for specific staff if provided)
-      console.log(`[DailyAttendanceGrid] Calling processClockEventsIntoSegments (with summary refresh) for dateStr: ${dateStr}, staffId: ${staffId}`);
-      await processClockEventsIntoSegments(dateStr, staffId);
+      // Try the fast batch RPC first
+      console.log(`[DailyAttendanceGrid] Calling processAttendanceBatch for dateStr: ${dateStr}, staffId: ${staffId}`);
+      const result = await processAttendanceBatch(dateStr, staffId);
 
+      if (!result.success) {
+        // Fallback to old sequential processing if RPC fails
+        console.warn('[DailyAttendanceGrid] RPC failed, falling back to sequential processing:', result.error);
+        await processClockEventsIntoSegments(dateStr, staffId);
+      } else {
+        console.log(`[DailyAttendanceGrid] Batch processing complete: ${result.staffProcessed} staff, ${result.segmentsCreated} segments`);
+      }
+
+      // Refresh caches
       if (isTargeted && typeof staffId === 'number') {
         console.log(`[processClockEventsData] Targeted processing complete for staff ${staffId} - refreshing cached queries`);
         try {
@@ -585,9 +625,14 @@ export function DailyAttendanceGrid() {
         ]);
       }
 
-      const successMessage = staffId
-        ? `Clock events processed for staff member!`
-        : `Clock events processed for all staff on ${dateStr}!`;
+      // Show success message with stats if available
+      const successMessage = result.success && result.staffProcessed !== undefined
+        ? staffId
+          ? `Processed attendance for staff member`
+          : `Processed ${result.staffProcessed} staff, created ${result.segmentsCreated} segments`
+        : staffId
+          ? `Clock events processed for staff member!`
+          : `Clock events processed for all staff on ${dateStr}!`;
 
       toast({
         title: 'Success',
@@ -606,44 +651,7 @@ export function DailyAttendanceGrid() {
       }
     }
   };
-  
-  // Function to fix time segments
-  const fixTimeSegments = async () => {
-    try {
-      setIsSaving(true);
-      const dateStr = format(selectedDate, 'yyyy-MM-dd');
-      console.log(`[FRONTEND] Fixing time segments for date: ${dateStr}`);
 
-      // Process clock events for the selected date
-      await processClockEventsData();
-
-      // Invalidate only time segments and daily summary for this date
-      const dateKey = dateStr;
-      console.log(`[FRONTEND] Invalidating queries for date: ${dateKey}`);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['time_segments', dateKey] }),
-        queryClient.invalidateQueries({ queryKey: ['time_daily_summary', dateKey] }),
-      ]);
-      console.log('[FRONTEND] Time segments fixed and queries invalidated');
-
-      toast({
-        title: 'Success',
-        description: 'Time segments have been fixed successfully!',
-      });
-    } catch (error: any) {
-      console.error('Error fixing time segments:', error);
-      toast({
-        title: 'Error',
-        description: 'Error fixing time segments. Please check the console for details.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-
-  
   // Automatically fix time segments when clock events exist but segments are missing
   // TEMPORARILY DISABLED to prevent mass re-renders when adding manual events
   useEffect(() => {
@@ -1523,9 +1531,10 @@ export function DailyAttendanceGrid() {
     );
   };
 
-  // Loading state
-  // Check if any data is loading
-  if (isLoading) {
+  // Loading state - only show full loading spinner on INITIAL load (when no data exists yet)
+  // This prevents dialogs from closing when queries refetch after edits/deletes
+  const hasData = activeStaff && activeStaff.length > 0;
+  if (isLoading && !hasData) {
     return (
       <div className="flex justify-center items-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -1579,7 +1588,7 @@ export function DailyAttendanceGrid() {
                 <Calendar
                   mode="single"
                   selected={selectedDate}
-                  onSelect={(date) => date && setSelectedDate(date)}
+                  onSelect={handleDateChange}
                   initialFocus
                   defaultMonth={selectedDate}
                   fixedWeeks={true}
@@ -1641,25 +1650,6 @@ export function DailyAttendanceGrid() {
                 </>
               )}
             </Button>
-            
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={fixTimeSegments}
-              disabled={isSaving}
-            >
-              {isSaving ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Fixing...
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                  Fix Time Segments
-                </>
-              )}
-            </Button>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Input
@@ -1696,14 +1686,18 @@ export function DailyAttendanceGrid() {
           <div className="space-y-4">
             {filteredRecords.map((record) => {
               const staffSegments = timeSegments.filter(seg => seg.staff_id === record.staff_id);
-              
-              // Using OptimizedAttendanceTimeline with staff-specific queries
+
               return (
                 <OptimizedAttendanceTimeline
                   key={record.staff_id}
                   staffId={record.staff_id}
                   staffName={record.staff_name}
                   segments={staffSegments}
+                  clockEvents={clockEvents}
+                  date={selectedDate}
+                  onAddManualEvent={handleManualClockEvent}
+                  onSegmentsChanged={handleSegmentsChanged}
+                  onProcessStaff={processClockEventsData}
                 />
               );
             })}

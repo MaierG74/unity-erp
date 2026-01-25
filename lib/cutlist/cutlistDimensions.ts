@@ -1,43 +1,23 @@
-export type CutlistGrain = 'any' | 'length' | 'width';
-export type CutlistFinishSide = 'single' | 'double' | 'none';
+// Import and re-export types from consolidated types file
+export type {
+  CutlistGrain,
+  CutlistFinishSide,
+  CutlistBandEdges,
+  CutlistLaminateOptions,
+  CutlistDimensions,
+  ValidateCutlistDimensionsOptions,
+  ValidateCutlistDimensionsResult,
+} from '@/lib/cutlist/types';
 
-export interface CutlistBandEdges {
-  top?: boolean;
-  right?: boolean;
-  bottom?: boolean;
-  left?: boolean;
-}
-
-export interface CutlistLaminateOptions {
-  enabled?: boolean;
-  backer_component_id?: number | null;
-}
-
-export interface CutlistDimensions {
-  length_mm?: number;
-  width_mm?: number;
-  thickness_mm?: number;
-  quantity_per?: number;
-  grain?: CutlistGrain;
-  band_edges?: CutlistBandEdges;
-  laminate?: CutlistLaminateOptions;
-  material_code?: string;
-  material_label?: string;
-  colour_family?: string;
-  finish_side?: CutlistFinishSide;
-  notes?: string;
-}
-
-export interface ValidateCutlistDimensionsOptions {
-  requireDimensions?: boolean;
-}
-
-export interface ValidateCutlistDimensionsResult {
-  valid: boolean;
-  value: CutlistDimensions | null;
-  errors: string[];
-  warnings: string[];
-}
+import type {
+  CutlistGrain,
+  CutlistFinishSide,
+  CutlistBandEdges,
+  CutlistLaminateOptions,
+  CutlistDimensions,
+  ValidateCutlistDimensionsOptions,
+  ValidateCutlistDimensionsResult,
+} from '@/lib/cutlist/types';
 
 export const CUTLIST_DIMENSIONS_TEMPLATE = JSON.stringify(
   {

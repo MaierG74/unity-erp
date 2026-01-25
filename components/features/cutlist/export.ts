@@ -1,16 +1,7 @@
-export type CutlistLineRefs = {
-  primary?: string | null;
-  backer?: string | null;
-  band16?: string | null;
-  band32?: string | null;
-};
+// Import and re-export types from consolidated types file
+export type { CutlistLineRefs, CutlistLineInput } from '@/lib/cutlist/types';
 
-export type CutlistLineInput = {
-  description: string;
-  qty: number;
-  unit_cost?: number | null;
-  component_id?: number;
-};
+import type { CutlistLineRefs, CutlistLineInput } from '@/lib/cutlist/types';
 
 export async function exportCutlistToQuote(params: {
   quoteItemId: string;

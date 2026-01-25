@@ -27,19 +27,36 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { 
-  Clock, 
-  Edit3, 
-  Save, 
-  X, 
-  Coffee, 
+import {
+  Clock,
+  Edit3,
+  Save,
+  X,
+  Coffee,
   Utensils,
   AlertCircle,
-  Calculator
+  Calculator,
+  Trash2,
+  AlertTriangle,
+  LogIn,
+  LogOut,
+  Plus
 } from 'lucide-react';
+import { processAttendanceBatch } from '@/lib/utils/attendance';
 
 // Types
+type ClockEvent = {
+  id: string;
+  staff_id: number;
+  event_time: string;
+  event_type: 'clock_in' | 'clock_out' | 'break_start' | 'break_end';
+  verification_method: string;
+  break_type: string | null;
+  notes: string | null;
+};
+
 type TimeSegment = {
   id: string;
   staff_id: number;
@@ -97,6 +114,13 @@ export function DailyHoursDetailDialog({
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [editingSegments, setEditingSegments] = useState<Record<string, EditableSegment>>({});
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
+  const [editEventTime, setEditEventTime] = useState<string>('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [deleteConfirmEvent, setDeleteConfirmEvent] = useState<ClockEvent | null>(null);
+  const [isAddingEvent, setIsAddingEvent] = useState(false);
+  const [newEventType, setNewEventType] = useState<'clock_in' | 'clock_out'>('clock_in');
+  const [newEventTime, setNewEventTime] = useState<string>('');
 
   // Add CSS to prevent AI assistant overlays on time inputs
   React.useEffect(() => {
@@ -123,6 +147,28 @@ export function DailyHoursDetailDialog({
       };
     }
   }, [isOpen]);
+
+  // Fetch clock events for the day
+  const { data: clockEvents = [], isLoading: isLoadingEvents, refetch: refetchEvents } = useQuery({
+    queryKey: ['time_clock_events', staffId, date],
+    queryFn: async () => {
+      // Calculate SAST day boundaries
+      const sastStart = `${date}T00:00:00+02:00`;
+      const sastEnd = `${date}T23:59:59+02:00`;
+
+      const { data, error } = await supabase
+        .from('time_clock_events')
+        .select('*')
+        .eq('staff_id', staffId)
+        .gte('event_time', sastStart)
+        .lte('event_time', sastEnd)
+        .order('event_time');
+
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: isOpen && !!staffId && !!date,
+  });
 
   // Fetch time segments for the day
   const { data: timeSegments = [], isLoading: isLoadingSegments, refetch: refetchSegments } = useQuery({
@@ -285,6 +331,215 @@ export function DailyHoursDetailDialog({
     },
   });
 
+  // Detect clock event anomalies
+  const eventAnomalies = React.useMemo(() => {
+    const clockIns = clockEvents.filter(e => e.event_type === 'clock_in');
+    const clockOuts = clockEvents.filter(e => e.event_type === 'clock_out');
+    return {
+      clockInCount: clockIns.length,
+      clockOutCount: clockOuts.length,
+      hasMultipleClockIns: clockIns.length > 1,
+      hasMultipleClockOuts: clockOuts.length > 1,
+      hasDuplicates: clockIns.length > 1 || clockOuts.length > 1,
+      missingClockIn: clockOuts.length > 0 && clockIns.length === 0,
+      missingClockOut: clockIns.length > 0 && clockOuts.length === 0,
+      hasAnyAnomaly: clockIns.length > 1 || clockOuts.length > 1 ||
+                     (clockOuts.length > 0 && clockIns.length === 0) ||
+                     (clockIns.length > 0 && clockOuts.length === 0),
+    };
+  }, [clockEvents]);
+
+  // For backward compatibility
+  const duplicateInfo = eventAnomalies;
+
+  // Reprocess attendance after event changes
+  const reprocessAttendance = async () => {
+    setIsProcessing(true);
+    try {
+      await processAttendanceBatch(date, staffId);
+      // Refresh all data
+      await Promise.all([
+        refetchEvents(),
+        refetchSegments(),
+        refetchSummary(),
+      ]);
+      // Invalidate weekly summary to update the main table
+      queryClient.invalidateQueries({ queryKey: ['time_daily_summary', 'weekly'] });
+      queryClient.invalidateQueries({ queryKey: ['time_clock_events', 'weekly'] });
+    } catch (error) {
+      console.error('Error reprocessing attendance:', error);
+      throw error;
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Start editing a clock event
+  const startEditingEvent = (event: ClockEvent) => {
+    const eventDate = new Date(event.event_time);
+    setEditingEventId(event.id);
+    setEditEventTime(format(eventDate, 'HH:mm'));
+  };
+
+  // Cancel editing event
+  const cancelEditingEvent = () => {
+    setEditingEventId(null);
+    setEditEventTime('');
+  };
+
+  // Save edited clock event
+  const saveEventEdit = async (eventId: string) => {
+    const event = clockEvents.find(e => e.id === eventId);
+    if (!event) return;
+
+    setIsProcessing(true);
+    try {
+      // Parse the time and create new timestamp
+      const [hours, minutes] = editEventTime.split(':').map(Number);
+      const originalDate = new Date(event.event_time);
+      const newDate = new Date(originalDate);
+      newDate.setHours(hours);
+      newDate.setMinutes(minutes);
+
+      const { error } = await supabase
+        .from('time_clock_events')
+        .update({ event_time: newDate.toISOString() })
+        .eq('id', eventId);
+
+      if (error) throw error;
+
+      toast({
+        title: 'Success',
+        description: 'Clock event updated',
+      });
+
+      cancelEditingEvent();
+      await reprocessAttendance();
+    } catch (error: any) {
+      console.error('Error updating clock event:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update clock event',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Open delete confirmation dialog
+  const openDeleteConfirm = (event: ClockEvent) => {
+    setDeleteConfirmEvent(event);
+  };
+
+  // Close delete confirmation dialog
+  const closeDeleteConfirm = () => {
+    setDeleteConfirmEvent(null);
+  };
+
+  // Delete a clock event (called after confirmation)
+  const confirmDeleteEvent = async () => {
+    if (!deleteConfirmEvent) return;
+
+    const eventId = deleteConfirmEvent.id;
+    closeDeleteConfirm();
+    setIsProcessing(true);
+
+    try {
+      const { error } = await supabase
+        .from('time_clock_events')
+        .delete()
+        .eq('id', eventId);
+
+      if (error) throw error;
+
+      toast({
+        title: 'Success',
+        description: 'Clock event deleted',
+      });
+
+      await reprocessAttendance();
+    } catch (error: any) {
+      console.error('Error deleting clock event:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete clock event',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Add a new clock event
+  const addNewEvent = async () => {
+    if (!newEventTime) {
+      toast({
+        title: 'Error',
+        description: 'Please enter a time for the event',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      // Parse the time and create timestamp for the date
+      const [hours, minutes] = newEventTime.split(':').map(Number);
+      const eventDateTime = new Date(`${date}T00:00:00+02:00`); // SAST
+      eventDateTime.setHours(hours);
+      eventDateTime.setMinutes(minutes);
+
+      const { error } = await supabase
+        .from('time_clock_events')
+        .insert({
+          staff_id: staffId,
+          event_time: eventDateTime.toISOString(),
+          event_type: newEventType,
+          verification_method: 'manual',
+          notes: 'Added via Weekly Summary',
+        });
+
+      if (error) throw error;
+
+      toast({
+        title: 'Success',
+        description: `${newEventType === 'clock_in' ? 'Clock in' : 'Clock out'} event added`,
+      });
+
+      // Reset form
+      setIsAddingEvent(false);
+      setNewEventTime('');
+
+      await reprocessAttendance();
+    } catch (error: any) {
+      console.error('Error adding clock event:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to add clock event',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Get event type display info
+  const getEventTypeInfo = (eventType: string) => {
+    switch (eventType) {
+      case 'clock_in':
+        return { icon: LogIn, color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400', label: 'Clock In' };
+      case 'clock_out':
+        return { icon: LogOut, color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400', label: 'Clock Out' };
+      case 'break_start':
+        return { icon: Coffee, color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400', label: 'Break Start' };
+      case 'break_end':
+        return { icon: Coffee, color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400', label: 'Break End' };
+      default:
+        return { icon: Clock, color: 'bg-gray-100 text-gray-800', label: eventType };
+    }
+  };
+
   // Calculate duration between two times
   const calculateDuration = (startTime: string, endTime: string | null): number => {
     if (!endTime) return 0;
@@ -322,7 +577,7 @@ export function DailyHoursDetailDialog({
 
     try {
       const dateStr = date;
-      const startTime = createSASTTimestamp(dateStr, editingSegment.tempStartTime);
+      const startTime = createSASTTimestamp(dateStr, editingSegment.tempStartTime || '00:00');
       const endTime = editingSegment.tempEndTime ? createSASTTimestamp(dateStr, editingSegment.tempEndTime) : null;
       
       const duration = endTime ? calculateDuration(startTime, endTime) : null;
@@ -396,7 +651,7 @@ export function DailyHoursDetailDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {isLoadingSegments || isLoadingSummary ? (
+        {isLoadingSegments || isLoadingSummary || isLoadingEvents ? (
           <div className="flex justify-center py-8">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           </div>
@@ -452,11 +707,264 @@ export function DailyHoursDetailDialog({
               </div>
             )}
 
+            {/* Clock Events Section - for viewing/editing raw events */}
+            <Separator />
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold flex items-center gap-2">
+                  <Clock className="h-4 w-4" />
+                  Clock Events
+                  {eventAnomalies.hasDuplicates && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/15 px-2 py-0.5 text-xs font-medium text-orange-700 dark:text-orange-300">
+                      <AlertTriangle className="h-3 w-3" />
+                      {eventAnomalies.hasMultipleClockIns && `${eventAnomalies.clockInCount} clock-ins`}
+                      {eventAnomalies.hasMultipleClockIns && eventAnomalies.hasMultipleClockOuts && ' & '}
+                      {eventAnomalies.hasMultipleClockOuts && `${eventAnomalies.clockOutCount} clock-outs`}
+                    </span>
+                  )}
+                  {eventAnomalies.missingClockIn && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2 py-0.5 text-xs font-medium text-red-700 dark:text-red-300">
+                      <AlertTriangle className="h-3 w-3" />
+                      Missing clock-in
+                    </span>
+                  )}
+                  {eventAnomalies.missingClockOut && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2 py-0.5 text-xs font-medium text-red-700 dark:text-red-300">
+                      <AlertTriangle className="h-3 w-3" />
+                      Missing clock-out
+                    </span>
+                  )}
+                </h3>
+                <div className="flex items-center gap-2">
+                  {isProcessing && (
+                    <span className="text-sm text-muted-foreground flex items-center gap-1">
+                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary"></div>
+                      Processing...
+                    </span>
+                  )}
+                  {!isAddingEvent && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        // Smart default: suggest clock_out only if there's a clock-in without clock-out
+                        // Otherwise default to clock_in (no events, or missing clock-in, etc.)
+                        setNewEventType(eventAnomalies.missingClockOut ? 'clock_out' : 'clock_in');
+                        setIsAddingEvent(true);
+                      }}
+                      disabled={isProcessing}
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      Add Event
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {/* Warning for missing clock-in */}
+              {eventAnomalies.missingClockIn && (
+                <div className="mb-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="font-medium text-red-700 dark:text-red-300">Missing clock-in</p>
+                      <p className="text-muted-foreground mt-1">
+                        This staff member has a clock-out recorded but no clock-in for this day.
+                        Click "Add Event" to manually add the missing clock-in.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Warning for missing clock-out */}
+              {eventAnomalies.missingClockOut && (
+                <div className="mb-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="font-medium text-red-700 dark:text-red-300">Missing clock-out</p>
+                      <p className="text-muted-foreground mt-1">
+                        This staff member has a clock-in recorded but no clock-out for this day.
+                        Click "Add Event" to manually add the missing clock-out.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Warning for duplicate events */}
+              {eventAnomalies.hasDuplicates && (
+                <div className="mb-3 p-3 rounded-lg bg-orange-500/10 border border-orange-500/20 text-sm">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-orange-500 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="font-medium text-orange-700 dark:text-orange-300">Potential data entry error detected</p>
+                      <p className="text-muted-foreground mt-1">
+                        Multiple {eventAnomalies.hasMultipleClockIns ? 'clock-in' : ''}{eventAnomalies.hasMultipleClockIns && eventAnomalies.hasMultipleClockOuts ? ' and ' : ''}{eventAnomalies.hasMultipleClockOuts ? 'clock-out' : ''} entries found.
+                        Review the events below and delete any duplicates.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Add Event Form */}
+              {isAddingEvent && (
+                <div className="mb-3 p-3 rounded-lg border bg-muted/30">
+                  <div className="flex items-end gap-3">
+                    <div className="flex-1">
+                      <Label className="text-xs text-muted-foreground mb-1 block">Event Type</Label>
+                      <Select value={newEventType} onValueChange={(v) => setNewEventType(v as 'clock_in' | 'clock_out')}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="clock_in">
+                            <span className="flex items-center gap-2">
+                              <LogIn className="h-3 w-3 text-green-500" />
+                              Clock In
+                            </span>
+                          </SelectItem>
+                          <SelectItem value="clock_out">
+                            <span className="flex items-center gap-2">
+                              <LogOut className="h-3 w-3 text-red-500" />
+                              Clock Out
+                            </span>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex-1">
+                      <Label className="text-xs text-muted-foreground mb-1 block">Time (24h)</Label>
+                      <Input
+                        type="time"
+                        value={newEventTime}
+                        onChange={(e) => setNewEventTime(e.target.value)}
+                        className="w-full"
+                      />
+                    </div>
+                    <div className="flex gap-1">
+                      <Button size="sm" onClick={addNewEvent} disabled={isProcessing || !newEventTime}>
+                        <Save className="h-3 w-3 mr-1" />
+                        Save
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => { setIsAddingEvent(false); setNewEventTime(''); }}>
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Clock Events Table */}
+              {clockEvents.length > 0 ? (
+                <div className="border rounded-lg overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Event Type</TableHead>
+                        <TableHead>Time</TableHead>
+                        <TableHead>Method</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {clockEvents.map((event: ClockEvent) => {
+                        const eventInfo = getEventTypeInfo(event.event_type);
+                        const EventIcon = eventInfo.icon;
+                        const isEditing = editingEventId === event.id;
+                        const isDuplicate =
+                          (event.event_type === 'clock_in' && eventAnomalies.hasMultipleClockIns) ||
+                          (event.event_type === 'clock_out' && eventAnomalies.hasMultipleClockOuts);
+
+                        return (
+                          <TableRow key={event.id} className={isDuplicate ? 'bg-orange-500/5' : ''}>
+                            <TableCell>
+                              <Badge className={eventInfo.color}>
+                                <EventIcon className="h-3 w-3 mr-1" />
+                                {eventInfo.label}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              {isEditing ? (
+                                <Input
+                                  type="time"
+                                  value={editEventTime}
+                                  onChange={(e) => setEditEventTime(e.target.value)}
+                                  className="w-28"
+                                  autoComplete="off"
+                                />
+                              ) : (
+                                <span className="font-mono">
+                                  {format(new Date(event.event_time), 'HH:mm')}
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className="capitalize">
+                                {event.verification_method === 'facial' ? 'Facial Recognition' : event.verification_method || 'Manual'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              {isEditing ? (
+                                <div className="flex gap-1">
+                                  <Button
+                                    size="sm"
+                                    onClick={() => saveEventEdit(event.id)}
+                                    disabled={isProcessing}
+                                  >
+                                    <Save className="h-3 w-3" />
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={cancelEditingEvent}
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="flex gap-1">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => startEditingEvent(event)}
+                                    disabled={isProcessing}
+                                  >
+                                    <Edit3 className="h-3 w-3" />
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-red-500 hover:text-red-600 hover:bg-red-500/10"
+                                    onClick={() => openDeleteConfirm(event)}
+                                    disabled={isProcessing}
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              ) : (
+                <div className="text-center py-4 text-muted-foreground border rounded-lg">
+                  <p>No clock events recorded for this day</p>
+                  <p className="text-xs mt-1">Use the "Add Event" button above to add a clock-in or clock-out</p>
+                </div>
+              )}
+            </div>
+
             <Separator />
 
             {/* Time Segments Table */}
             <div>
-              <h3 className="font-semibold mb-3">Time Entries</h3>
+              <h3 className="font-semibold mb-3">Time Entries (Processed Segments)</h3>
               {timeSegments.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <AlertCircle className="h-8 w-8 mx-auto mb-2" />
@@ -577,6 +1085,78 @@ export function DailyHoursDetailDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      {/* Delete Confirmation Dialog */}
+      {deleteConfirmEvent && (
+        <Dialog open={!!deleteConfirmEvent} onOpenChange={closeDeleteConfirm}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-red-600">
+                <AlertTriangle className="h-5 w-5" />
+                Delete Clock Event
+              </DialogTitle>
+              <DialogDescription>
+                Are you sure you want to delete this clock event? This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="my-4 p-4 rounded-lg bg-muted/50 border">
+              <div className="flex items-center gap-3">
+                {(() => {
+                  const info = getEventTypeInfo(deleteConfirmEvent.event_type);
+                  const Icon = info.icon;
+                  return (
+                    <>
+                      <Badge className={info.color}>
+                        <Icon className="h-3 w-3 mr-1" />
+                        {info.label}
+                      </Badge>
+                      <span className="font-mono text-lg font-semibold">
+                        {format(new Date(deleteConfirmEvent.event_time), 'HH:mm')}
+                      </span>
+                      <Badge variant="outline" className="capitalize">
+                        {deleteConfirmEvent.verification_method === 'facial' ? 'Facial Recognition' : deleteConfirmEvent.verification_method || 'Manual'}
+                      </Badge>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+
+            <div className="text-sm text-muted-foreground bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
+              <p className="flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 text-amber-500 mt-0.5 flex-shrink-0" />
+                <span>
+                  After deletion, the daily summary will be automatically recalculated based on the remaining clock events.
+                </span>
+              </p>
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={closeDeleteConfirm}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={confirmDeleteEvent}
+                disabled={isProcessing}
+              >
+                {isProcessing ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete Event
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </Dialog>
   );
 }

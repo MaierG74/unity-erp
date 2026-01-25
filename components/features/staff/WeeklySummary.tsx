@@ -1,16 +1,17 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { pdf } from '@react-pdf/renderer';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
-import { 
-  format, 
-  startOfWeek, 
-  endOfWeek, 
-  eachDayOfInterval, 
-  addWeeks, 
+import { useSearchParams, useRouter } from 'next/navigation';
+import {
+  format,
+  startOfWeek,
+  endOfWeek,
+  eachDayOfInterval,
+  addWeeks,
   subWeeks,
   isSunday,
   isSaturday,
@@ -44,12 +45,13 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Switch } from '@/components/ui/switch';
-import { 
-  CalendarIcon, 
-  ChevronLeft, 
-  ChevronRight, 
-  Download, 
+import {
+  CalendarIcon,
+  ChevronLeft,
+  ChevronRight,
+  Download,
   Printer,
   Loader2,
   Columns,
@@ -58,7 +60,8 @@ import {
   ArrowUp,
   ArrowDown,
   Search,
-  X
+  X,
+  AlertTriangle
 } from 'lucide-react';
 import { DailyHoursDetailDialog } from '@/components/features/staff/DailyHoursDetailDialog';
 import React from 'react';
@@ -107,6 +110,10 @@ type WeeklySummaryRow = {
       isHoliday: boolean;
       isWeekend: boolean;
       isSunday: boolean;
+      hasMultipleClockIns?: boolean;
+      hasMultipleClockOuts?: boolean;
+      missingClockIn?: boolean;  // Has clock-out but no clock-in
+      missingClockOut?: boolean; // Has clock-in but no clock-out
     }
   };
   totalRegularHours: number;
@@ -120,7 +127,13 @@ type SortDirection = 'asc' | 'desc';
 
 export function WeeklySummary() {
   const queryClient = useQueryClient();
-  const [selectedWeek, setSelectedWeek] = useState<Date>(new Date());
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Get week from URL or default to current week
+  const weekParam = searchParams.get('week');
+  const initialWeek = weekParam ? parseISO(weekParam) : new Date();
+  const [selectedWeek, setSelectedWeek] = useState<Date>(initialWeek);
   const [summaryData, setSummaryData] = useState<WeeklySummaryRow[]>([]);
   const [filteredData, setFilteredData] = useState<WeeklySummaryRow[]>([]);
   const [isExporting, setIsExporting] = useState(false);
@@ -137,11 +150,11 @@ export function WeeklySummary() {
   const { toast } = useToast();
 
   // Calculate week range (start on Friday)
-  const weekStart = React.useMemo(() => startOfWeek(selectedWeek, { weekStartsOn: 5 }), [selectedWeek]); // Start on Friday
-  const weekEnd = React.useMemo(() => endOfWeek(selectedWeek, { weekStartsOn: 5 }), [selectedWeek]); // End on Thursday
-  
+  const weekStart = useMemo(() => startOfWeek(selectedWeek, { weekStartsOn: 5 }), [selectedWeek]); // Start on Friday
+  const weekEnd = useMemo(() => endOfWeek(selectedWeek, { weekStartsOn: 5 }), [selectedWeek]); // End on Thursday
+
   // Memoize the days of week calculation to prevent infinite updates
-  const daysOfWeek = React.useMemo(() => {
+  const daysOfWeek = useMemo(() => {
     return eachDayOfInterval({ start: weekStart, end: weekEnd });
   }, [weekStart, weekEnd]);
 
@@ -190,12 +203,58 @@ export function WeeklySummary() {
     },
   });
 
+  // Fetch clock events for the week to detect duplicate entries
+  const { data: weeklyClockEvents = [] } = useQuery({
+    queryKey: ['time_clock_events', 'weekly', format(weekStart, 'yyyy-MM-dd'), format(weekEnd, 'yyyy-MM-dd')],
+    queryFn: async () => {
+      // Calculate SAST boundaries for the week
+      const startDateStr = format(weekStart, 'yyyy-MM-dd');
+      const endDateStr = format(weekEnd, 'yyyy-MM-dd');
+      const sastStart = `${startDateStr}T00:00:00+02:00`;
+      const sastEnd = `${endDateStr}T23:59:59+02:00`;
+
+      const { data, error } = await supabase
+        .from('time_clock_events')
+        .select('staff_id, event_time, event_type')
+        .gte('event_time', sastStart)
+        .lte('event_time', sastEnd)
+        .in('event_type', ['clock_in', 'clock_out']);
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // Build a map of duplicate events: { "staffId_date" -> { clockIns: number, clockOuts: number } }
+  const duplicateEventsMap = useMemo(() => {
+    const map: Record<string, { clockIns: number; clockOuts: number }> = {};
+
+    weeklyClockEvents.forEach(event => {
+      // Extract date from event_time (convert to SAST date)
+      const eventDate = new Date(event.event_time);
+      // Format as YYYY-MM-DD in local time (SAST)
+      const dateStr = format(eventDate, 'yyyy-MM-dd');
+      const key = `${event.staff_id}_${dateStr}`;
+
+      if (!map[key]) {
+        map[key] = { clockIns: 0, clockOuts: 0 };
+      }
+
+      if (event.event_type === 'clock_in') {
+        map[key].clockIns++;
+      } else if (event.event_type === 'clock_out') {
+        map[key].clockOuts++;
+      }
+    });
+
+    return map;
+  }, [weeklyClockEvents]);
+
   // Process data for weekly summary
   useEffect(() => {
     if (!activeStaff || activeStaff.length === 0) return;
     const processed = activeStaff.map(staff => {
       const staffSummaries = weeklySummaries.filter(s => s.staff_id === staff.staff_id);
-      const dailyHours: Record<string, { hours: number; isHoliday: boolean; isWeekend: boolean; isSunday: boolean }> = {};
+      const dailyHours: Record<string, { hours: number; isHoliday: boolean; isWeekend: boolean; isSunday: boolean; hasMultipleClockIns?: boolean; hasMultipleClockOuts?: boolean; missingClockIn?: boolean; missingClockOut?: boolean }> = {};
       let weekWorkMin = 0, weekDoubleMin = 0;
       daysOfWeek.forEach(day => {
         const dateStr = format(day, 'yyyy-MM-dd');
@@ -205,7 +264,29 @@ export function WeeklySummary() {
         const isSat = isSaturday(day);
         const isSun = isSunday(day);
         const isHoliday = !!publicHolidays.find(h => h.holiday_date === dateStr);
-        dailyHours[dateStr] = { hours: Math.round((workMin / 60) * 100) / 100, isHoliday, isWeekend: isSat || isSun, isSunday: isSun };
+
+        // Check for clock event anomalies
+        const duplicateKey = `${staff.staff_id}_${dateStr}`;
+        const eventCounts = duplicateEventsMap[duplicateKey];
+        const clockIns = eventCounts?.clockIns || 0;
+        const clockOuts = eventCounts?.clockOuts || 0;
+
+        // Detect anomalies
+        const hasMultipleClockIns = clockIns > 1;
+        const hasMultipleClockOuts = clockOuts > 1;
+        const missingClockIn = clockOuts > 0 && clockIns === 0;  // Has clock-out but no clock-in
+        const missingClockOut = clockIns > 0 && clockOuts === 0; // Has clock-in but no clock-out
+
+        dailyHours[dateStr] = {
+          hours: Math.round((workMin / 60) * 100) / 100,
+          isHoliday,
+          isWeekend: isSat || isSun,
+          isSunday: isSun,
+          hasMultipleClockIns,
+          hasMultipleClockOuts,
+          missingClockIn,
+          missingClockOut,
+        };
         if (isSun) {
           weekDoubleMin += workMin;
         } else {
@@ -232,7 +313,7 @@ export function WeeklySummary() {
     });
     setSummaryData(processed);
 
-  }, [activeStaff, weeklySummaries, publicHolidays, daysOfWeek]);
+  }, [activeStaff, weeklySummaries, publicHolidays, daysOfWeek, duplicateEventsMap]);
 
   // Sort and filter data
   useEffect(() => {
@@ -309,16 +390,14 @@ export function WeeklySummary() {
     setFilterText('');
   };
 
-  // Handle daily hours cell click
+  // Handle daily hours cell click - always open to allow adding times
   const handleDayClick = (staffId: number, staffName: string, dateStr: string, hours: number) => {
-    if (hours > 0) {
-      setSelectedDayDetail({
-        staffId,
-        staffName,
-        date: dateStr,
-        hours
-      });
-    }
+    setSelectedDayDetail({
+      staffId,
+      staffName,
+      date: dateStr,
+      hours
+    });
   };
 
   // Close daily detail dialog
@@ -328,15 +407,37 @@ export function WeeklySummary() {
 
 
 
+  // Helper to update URL with new week
+  const updateWeekUrl = useCallback((newDate: Date) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('week', format(newDate, 'yyyy-MM-dd'));
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [router, searchParams]);
+
   // Navigate to previous week
-  const goToPreviousWeek = React.useCallback(() => {
-    setSelectedWeek(prev => subWeeks(prev, 1));
-  }, []);
+  const goToPreviousWeek = useCallback(() => {
+    setSelectedWeek(prev => {
+      const newWeek = subWeeks(prev, 1);
+      updateWeekUrl(newWeek);
+      return newWeek;
+    });
+  }, [updateWeekUrl]);
 
   // Navigate to next week
-  const goToNextWeek = React.useCallback(() => {
-    setSelectedWeek(prev => addWeeks(prev, 1));
-  }, []);
+  const goToNextWeek = useCallback(() => {
+    setSelectedWeek(prev => {
+      const newWeek = addWeeks(prev, 1);
+      updateWeekUrl(newWeek);
+      return newWeek;
+    });
+  }, [updateWeekUrl]);
+
+  // Navigate to current week
+  const goToCurrentWeek = useCallback(() => {
+    const now = new Date();
+    setSelectedWeek(now);
+    updateWeekUrl(now);
+  }, [updateWeekUrl]);
 
   // Export to CSV
   const exportToCSV = () => {
@@ -473,7 +574,7 @@ export function WeeklySummary() {
   };
 
   // Calculate daily totals
-  const getDailyTotal = React.useCallback((dateStr: string) => {
+  const getDailyTotal = useCallback((dateStr: string) => {
     return filteredData.reduce((total, staff) => {
       return total + (staff.dailyHours[dateStr]?.hours || 0);
     }, 0);
@@ -514,7 +615,7 @@ export function WeeklySummary() {
             <Button variant="outline" size="icon" onClick={goToPreviousWeek}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <Button variant="outline" onClick={() => setSelectedWeek(new Date())}>
+            <Button variant="outline" onClick={goToCurrentWeek}>
               Current Week
             </Button>
             <Button variant="outline" size="icon" onClick={goToNextWeek}>
@@ -689,13 +790,51 @@ export function WeeklySummary() {
                       return null;
                     }
                     
+                    // Check for any anomalies
+                    const hasDuplicateWarning = dayData?.hasMultipleClockIns || dayData?.hasMultipleClockOuts;
+                    const hasMissingEvent = dayData?.missingClockIn || dayData?.missingClockOut;
+                    const hasAnyWarning = hasDuplicateWarning || hasMissingEvent;
+
+                    // Build warning message
+                    const warningParts: string[] = [];
+                    if (dayData?.hasMultipleClockIns) warningParts.push('Multiple clock-ins');
+                    if (dayData?.hasMultipleClockOuts) warningParts.push('Multiple clock-outs');
+                    if (dayData?.missingClockIn) warningParts.push('Missing clock-in (only clock-out recorded)');
+                    if (dayData?.missingClockOut) warningParts.push('Missing clock-out (only clock-in recorded)');
+                    const warningMessage = warningParts.join('\n');
+
+                    // Determine warning color - orange for duplicates, red for missing events
+                    const warningColor = hasMissingEvent ? 'text-red-500' : 'text-amber-500';
+                    const bgColor = hasMissingEvent ? 'bg-red-500/10' : hasDuplicateWarning ? 'bg-amber-500/10' : '';
+
                     return (
-                      <TableCell 
-                        key={dateStr} 
-                        className={`text-center ${isWeekend ? 'bg-muted' : ''} ${isHoliday ? 'bg-muted-foreground/10' : ''} ${dayData?.isSunday ? 'text-red-500 font-semibold' : ''} ${isToday ? 'bg-primary/10' : ''} ${dayData?.hours > 0 ? 'cursor-pointer hover:bg-primary/20 transition-colors' : ''}`}
+                      <TableCell
+                        key={dateStr}
+                        className={`text-center cursor-pointer hover:bg-primary/20 transition-colors ${isWeekend ? 'bg-muted' : ''} ${isHoliday ? 'bg-muted-foreground/10' : ''} ${dayData?.isSunday ? 'text-red-500 font-semibold' : ''} ${isToday ? 'bg-primary/10' : ''} ${bgColor}`}
                         onClick={() => handleDayClick(row.staff_id, row.staff_name, dateStr, dayData?.hours || 0)}
                       >
-                        {dayData?.hours > 0 ? dayData.hours : '-'}
+                        {hasAnyWarning ? (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="inline-flex items-center gap-1">
+                                  {dayData?.hours > 0 ? dayData.hours : (hasMissingEvent ? '!' : '-')}
+                                  <AlertTriangle className={`h-3 w-3 ${warningColor}`} />
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent className="max-w-xs">
+                                <div className="space-y-1">
+                                  {warningParts.map((part, i) => (
+                                    <p key={i}>{part}</p>
+                                  ))}
+                                  <p className="text-muted-foreground text-xs mt-1">Click to view and fix</p>
+                                </div>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        ) : (
+                          dayData?.hours > 0 ? dayData.hours : '-'
+                        )}
                       </TableCell>
                     );
                   })}

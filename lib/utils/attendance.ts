@@ -2,6 +2,59 @@ import { supabase } from '@/lib/supabase';
 import { getSASTDayBoundaries, createSASTTimestamp } from './timezone';
 
 /**
+ * Result type for batch attendance processing
+ */
+export interface ProcessAttendanceBatchResult {
+  success: boolean;
+  staffProcessed?: number;
+  segmentsCreated?: number;
+  summariesUpdated?: number;
+  error?: string;
+}
+
+/**
+ * Batch process attendance for a date using server-side RPC
+ * This replaces the slow sequential processing with a single database call
+ *
+ * @param dateStr - Date in YYYY-MM-DD format
+ * @param staffId - Optional staff ID to process only one staff member
+ * @returns Processing result with stats
+ */
+export const processAttendanceBatch = async (
+  dateStr: string,
+  staffId?: number
+): Promise<ProcessAttendanceBatchResult> => {
+  try {
+    const { data, error } = await supabase.rpc('process_attendance_for_date', {
+      p_date_worked: dateStr,
+      p_staff_id: staffId ?? null
+    });
+
+    if (error) {
+      console.error('[processAttendanceBatch] RPC error:', error);
+      return { success: false, error: error.message };
+    }
+
+    if (!data || !data.success) {
+      return {
+        success: false,
+        error: data?.error || 'Unknown error from RPC'
+      };
+    }
+
+    return {
+      success: true,
+      staffProcessed: data.staff_processed,
+      segmentsCreated: data.segments_created,
+      summariesUpdated: data.summaries_updated
+    };
+  } catch (err: any) {
+    console.error('[processAttendanceBatch] Exception:', err);
+    return { success: false, error: err.message || 'Unknown error' };
+  }
+};
+
+/**
  * Calculate duration in minutes between two timestamps
  */
 export const calculateDurationMinutes = (startTime: string, endTime: string): number => {

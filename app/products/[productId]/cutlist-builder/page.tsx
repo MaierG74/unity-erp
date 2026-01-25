@@ -5,10 +5,11 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import dynamic from 'next/dynamic';
+import { useProductCutlistAdapter } from '@/components/features/cutlist/adapters';
 
 // Dynamically import to avoid SSR issues with drag-and-drop
-const CutlistBuilder = dynamic(
-  () => import('@/components/features/cutlist/CutlistBuilder'),
+const CutlistWorkspace = dynamic(
+  () => import('@/components/features/cutlist/CutlistWorkspace'),
   { ssr: false }
 );
 
@@ -22,6 +23,9 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
   const { productId: productIdParam } = use(params);
   const productId = parseInt(productIdParam, 10);
   const router = useRouter();
+
+  // Use the product cutlist adapter for persistence
+  const adapter = useProductCutlistAdapter(productId);
 
   const handleBack = () => {
     router.back();
@@ -43,8 +47,15 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
       </div>
 
       {/* Main Content - takes remaining height */}
-      <div className="flex-1 min-h-0 overflow-hidden">
-        <CutlistBuilder productId={productId} fullPage />
+      <div className="flex-1 min-h-0 overflow-auto">
+        <CutlistWorkspace
+          mode="grouped"
+          showCSVImport={true}
+          showCosting={false}
+          showResults={true}
+          showMaterialPalette={false}
+          persistenceAdapter={adapter}
+        />
       </div>
     </div>
   );

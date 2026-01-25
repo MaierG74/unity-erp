@@ -4,7 +4,7 @@ import { memo, DragEvent, useState } from 'react';
 import { GripVertical, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import type { CutlistPart } from '@/lib/cutlist/boardCalculator';
+import type { CutlistPart } from '@/lib/cutlist/types';
 
 interface PartCardProps {
   part: CutlistPart;

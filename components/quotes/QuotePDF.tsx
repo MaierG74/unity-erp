@@ -508,20 +508,10 @@ export const QuotePDFDownload: React.FC<QuotePDFDownloadProps> = ({
 
   return (
     <div className="flex items-center gap-2">
-      <input
-        type="file"
-        accept="image/*"
-        onChange={onPickLogo}
-        className="text-sm"
-        aria-label="Choose logo image"
-      />
-      <Button onClick={handleDownload} disabled={downloading} className="flex items-center gap-2">
+      <Button size="sm" variant="outline" onClick={handleDownload} disabled={downloading} className="flex items-center gap-2">
         <Download size={16} />
-        {downloading ? 'Generating PDF...' : 'Download PDF'}
-      </Button>
-      <Button variant="outline" onClick={handleOpen} disabled={downloading} className="flex items-center gap-2">
-        <Eye size={16} />
-        Open PDF
+        <span className="hidden sm:inline">{downloading ? 'Generating...' : 'Download PDF'}</span>
+        <span className="sm:hidden">PDF</span>
       </Button>
     </div>
   );

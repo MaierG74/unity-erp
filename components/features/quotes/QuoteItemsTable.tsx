@@ -39,8 +39,7 @@ import InlineAttachmentsCell from './InlineAttachmentsCell';
 import AddQuoteItemDialog from './AddQuoteItemDialog';
 import { createQuoteAttachmentFromUrl, fetchPrimaryProductImage } from '@/lib/db/quotes';
 import type { ProductOptionSelection } from '@/lib/db/products';
-import CutlistTool from '@/components/features/cutlist/CutlistTool';
-import { exportCutlistToQuote } from '@/components/features/cutlist/export';
+import QuoteCutlistModal from '@/components/features/cutlist/QuoteCutlistModal';
 
 interface Props {
   quoteId: string;
@@ -613,8 +612,6 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
         return;
       }
 
-      console.log('Duplicating item:', originalItem);
-
       // Create a new item with the same data
       let newItem;
       try {
@@ -628,7 +625,6 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
           internal_notes: originalItem.internal_notes,
           selected_options: originalItem.selected_options,
         });
-        console.log('Created new item:', newItem);
       } catch (error) {
         console.error('Failed to create item:', error);
         throw new Error('Failed to create new item: ' + (error as Error).message);
@@ -648,7 +644,6 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
             markup_percent: originalCluster.markup_percent,
             notes: originalCluster.notes,
           });
-          console.log('Created cluster:', newCluster);
 
           // Duplicate all cluster lines
           const linesToCreate = originalCluster.quote_cluster_lines || [];
@@ -691,7 +686,6 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
       // Duplicate attachments
       try {
         const attachmentsToCreate = await fetchQuoteItemAttachments(quoteId, id);
-        console.log('Attachments to duplicate:', attachmentsToCreate);
 
         for (const originalAttachment of attachmentsToCreate) {
           try {
@@ -981,33 +975,26 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
       />
 
       {/* Cutlist Calculator Modal */}
-      <Dialog open={cutlistOpen.open} onOpenChange={(o) => setCutlistOpen({ open: o, itemId: cutlistOpen.itemId })}>
-        <DialogContent className="max-w-5xl max-h-[calc(100vh-4rem)] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Cutlist Calculator</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <CutlistTool
-              quoteItemId={cutlistOpen.itemId || undefined}
-              onExportSuccess={() => {
-                toast({ title: 'Exported to Costing Cluster' });
-                const itemId = cutlistOpen.itemId;
-                if (itemId) {
-                  // Refresh just this item's clusters and merge into local state
-                  fetchQuoteItemClusters(itemId).then((clusters) => {
-                    const updatedItems = items.map(i => i.id === itemId ? { ...i, quote_item_clusters: clusters } : i);
-                    onItemsChange(updatedItems);
-                  }).finally(() => {
-                    setCutlistOpen({ open: false, itemId: null });
-                  });
-                } else {
-                  setCutlistOpen({ open: false, itemId: null });
-                }
-              }}
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
+      <QuoteCutlistModal
+        open={cutlistOpen.open}
+        onOpenChange={(o) => setCutlistOpen({ open: o, itemId: cutlistOpen.itemId })}
+        quoteItemId={cutlistOpen.itemId}
+        onExportSuccess={() => {
+          toast({ title: 'Exported to Costing Cluster' });
+          const itemId = cutlistOpen.itemId;
+          if (itemId) {
+            // Refresh just this item's clusters and merge into local state
+            fetchQuoteItemClusters(itemId).then((clusters) => {
+              const updatedItems = items.map(i => i.id === itemId ? { ...i, quote_item_clusters: clusters } : i);
+              onItemsChange(updatedItems);
+            }).finally(() => {
+              setCutlistOpen({ open: false, itemId: null });
+            });
+          } else {
+            setCutlistOpen({ open: false, itemId: null });
+          }
+        }}
+      />
     </div>
   );
 }

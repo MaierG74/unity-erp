@@ -39,17 +39,6 @@ export default function EmailQuoteDialog({
       setRecipientEmail(quote.customer?.email || '');
       setCustomMessage('');
       setError(null);
-      console.log('[EmailQuoteDialog] Dialog opened with quote:', quote);
-      console.log('[EmailQuoteDialog] Quote has', quote.items?.length || 0, 'items');
-      if (quote.items && quote.items.length > 0) {
-        quote.items.forEach((item: any, index: number) => {
-          console.log(`[EmailQuoteDialog] Item ${index} (${item.description}):`, {
-            id: item.id,
-            attachments: item.attachments,
-            attachmentCount: item.attachments?.length || 0
-          });
-        });
-      }
     }
   }, [open, quote]);
 
@@ -93,27 +82,14 @@ export default function EmailQuoteDialog({
 
     try {
       // Prefetch and convert all images to base64
-      console.log('[EmailQuoteDialog] Starting image conversion...');
-      console.log('[EmailQuoteDialog] Quote items:', quote.items);
-
       const quoteWithBase64Images = JSON.parse(JSON.stringify(quote)); // Deep clone
-
-      let imageCount = 0;
-      let convertedCount = 0;
 
       if (quoteWithBase64Images.items && Array.isArray(quoteWithBase64Images.items)) {
         for (const item of quoteWithBase64Images.items) {
           if (item.attachments && Array.isArray(item.attachments)) {
-            console.log(`[EmailQuoteDialog] Item "${item.description}" has ${item.attachments.length} attachments`);
             for (const attachment of item.attachments) {
               if (attachment.file_url && attachment.mime_type?.startsWith('image/')) {
-                imageCount++;
-                console.log(`[EmailQuoteDialog] Converting image ${imageCount}: ${attachment.file_url}`);
                 const base64 = await imageUrlToBase64(attachment.file_url);
-                if (base64 !== attachment.file_url) {
-                  convertedCount++;
-                  console.log(`[EmailQuoteDialog] Successfully converted image ${convertedCount}`);
-                }
                 attachment.file_url = base64;
               }
             }
@@ -125,18 +101,11 @@ export default function EmailQuoteDialog({
       if (quoteWithBase64Images.attachments && Array.isArray(quoteWithBase64Images.attachments)) {
         for (const attachment of quoteWithBase64Images.attachments) {
           if (attachment.file_url && attachment.mime_type?.startsWith('image/')) {
-            imageCount++;
-            console.log(`[EmailQuoteDialog] Converting quote-level image: ${attachment.file_url}`);
             const base64 = await imageUrlToBase64(attachment.file_url);
-            if (base64 !== attachment.file_url) {
-              convertedCount++;
-            }
             attachment.file_url = base64;
           }
         }
       }
-
-      console.log(`[EmailQuoteDialog] Converted ${convertedCount} of ${imageCount} images to base64`);
 
       // Fetch default terms template
       let defaultTermsTemplate: string | undefined;
@@ -159,11 +128,9 @@ export default function EmailQuoteDialog({
       ]);
 
       // Generate PDF client-side with base64 images
-      console.log('[EmailQuoteDialog] Generating PDF...');
       const pdfBlob = await pdf(
         <QuotePDFDocument quote={quoteWithBase64Images as any} companyInfo={companyInfo} defaultTermsTemplate={defaultTermsTemplate} />
       ).toBlob();
-      console.log('[EmailQuoteDialog] PDF generated, size:', pdfBlob.size);
 
       // Convert PDF blob to base64
       const pdfBuffer = await pdfBlob.arrayBuffer();

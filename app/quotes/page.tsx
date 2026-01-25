@@ -7,11 +7,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Copy, Trash2, Search, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Copy, Trash2, Search, X, ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/use-toast';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -132,7 +133,7 @@ export default function QuotesPage() {
     const key = status?.toLowerCase?.() || 'draft';
     if (key === 'accepted') return <Badge variant="success" className="capitalize">{status}</Badge>;
     if (key === 'rejected') return <Badge variant="destructive" className="capitalize">{status}</Badge>;
-    if (key === 'sent') return <Badge variant="secondary" className="capitalize">Pending</Badge>;
+    if (key === 'sent') return <Badge variant="warning" className="capitalize">Pending</Badge>;
     return <Badge variant="outline" className="capitalize">{status || 'draft'}</Badge>;
   };
 
@@ -327,13 +328,25 @@ export default function QuotesPage() {
 
             {/* Stats */}
             <div className="grid grid-cols-1 gap-4 mb-6 md:grid-cols-4">
-              <Card className="rounded-xl border bg-background/80 shadow-sm">
+              <Card
+                className={cn(
+                  "rounded-xl border bg-background/80 shadow-sm cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
+                  status === 'all' && "ring-2 ring-primary"
+                )}
+                onClick={() => { setStatus('all'); setPage(1); }}
+              >
                 <CardContent className="space-y-2 p-4">
                   <div className="text-sm text-muted-foreground">Total Quotes</div>
                   <div className="text-2xl font-semibold text-foreground">{quotes.length}</div>
                 </CardContent>
               </Card>
-              <Card className="rounded-xl border bg-background/80 shadow-sm">
+              <Card
+                className={cn(
+                  "rounded-xl border bg-background/80 shadow-sm cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
+                  status === 'accepted' && "ring-2 ring-primary"
+                )}
+                onClick={() => { setStatus('accepted'); setPage(1); }}
+              >
                 <CardContent className="space-y-2 p-4">
                   <div className="flex items-center justify-between">
                     <div className="text-sm text-muted-foreground">Accepted</div>
@@ -344,18 +357,30 @@ export default function QuotesPage() {
                   </div>
                 </CardContent>
               </Card>
-              <Card className="rounded-xl border bg-background/80 shadow-sm">
+              <Card
+                className={cn(
+                  "rounded-xl border bg-background/80 shadow-sm cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
+                  status === 'sent' && "ring-2 ring-primary"
+                )}
+                onClick={() => { setStatus('sent'); setPage(1); }}
+              >
                 <CardContent className="space-y-2 p-4">
                   <div className="flex items-center justify-between">
                     <div className="text-sm text-muted-foreground">Pending</div>
-                    <Badge variant="secondary">Awaiting</Badge>
+                    <Badge variant="warning">Awaiting</Badge>
                   </div>
                   <div className="text-2xl font-semibold text-foreground">
                     {quotes.filter(q => q.status === 'sent').length}
                   </div>
                 </CardContent>
               </Card>
-              <Card className="rounded-xl border bg-background/80 shadow-sm">
+              <Card
+                className={cn(
+                  "rounded-xl border bg-background/80 shadow-sm cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
+                  status === 'draft' && "ring-2 ring-primary"
+                )}
+                onClick={() => { setStatus('draft'); setPage(1); }}
+              >
                 <CardContent className="space-y-2 p-4">
                   <div className="text-sm text-muted-foreground">Draft</div>
                   <div className="text-2xl font-semibold text-foreground">
@@ -423,7 +448,7 @@ export default function QuotesPage() {
                   {!loading && paged.map((quote) => (
                     <TableRow
                       key={quote.id}
-                      className="cursor-pointer transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="cursor-pointer transition-all duration-150 hover:bg-muted/60 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group"
                       onClick={() => routerNav.push(`/quotes/${quote.id}`)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
@@ -435,8 +460,9 @@ export default function QuotesPage() {
                       aria-label={`Open quote ${quote.quote_number}`}
                     >
                       <TableCell>
-                        <Link href={`/quotes/${quote.id}`} className="font-medium text-primary hover:underline">
+                        <Link href={`/quotes/${quote.id}`} className="font-medium text-primary hover:underline inline-flex items-center gap-1">
                           {quote.quote_number}
+                          <ArrowRight className="h-3 w-3 opacity-0 -translate-x-1 transition-all group-hover:opacity-100 group-hover:translate-x-0" />
                         </Link>
                       </TableCell>
                       <TableCell className="text-foreground">
@@ -449,24 +475,40 @@ export default function QuotesPage() {
                       <TableCell className="font-medium text-foreground text-right">{formatCurrency(quote.grand_total)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 px-2"
-                            onClick={(e) => { e.stopPropagation(); requestCopy(quote); }}
-                            title="Copy quote"
-                          >
-                            <Copy className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="destructiveSoft"
-                            size="sm"
-                            className="h-8 px-2"
-                            onClick={(e) => { e.stopPropagation(); requestDelete(quote.id); }}
-                            title="Delete quote"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          <TooltipProvider delayDuration={300}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 px-2"
+                                  onClick={(e) => { e.stopPropagation(); requestCopy(quote); }}
+                                >
+                                  <Copy className="h-4 w-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>Duplicate quote</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          <TooltipProvider delayDuration={300}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="destructiveSoft"
+                                  size="sm"
+                                  className="h-8 px-2"
+                                  onClick={(e) => { e.stopPropagation(); requestDelete(quote.id); }}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>Delete quote</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                         </div>
                       </TableCell>
                     </TableRow>
