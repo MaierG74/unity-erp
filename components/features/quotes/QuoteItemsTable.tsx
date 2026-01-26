@@ -45,6 +45,7 @@ interface Props {
   quoteId: string;
   items: QuoteItem[];
   onItemsChange: (items: QuoteItem[]) => void;
+  onRefresh?: () => Promise<void>; // refresh all data from server after mutations
   attachmentsVersion?: number; // bump to force cells to refresh their local attachments
   onItemAttachmentsChange?: (itemId: string, attachments: QuoteAttachment[]) => void;
 }
@@ -398,7 +399,7 @@ function QuoteItemRow({
 }
 
 // --- Main Table Component ---
-export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachmentsVersion, onItemAttachmentsChange }: Props) {
+export default function QuoteItemsTable({ quoteId, items, onItemsChange, onRefresh, attachmentsVersion, onItemAttachmentsChange }: Props) {
   const { toast } = useToast();
   const [showAddItemDialog, setShowAddItemDialog] = React.useState(false);
   const [cutlistOpen, setCutlistOpen] = React.useState<{ open: boolean; itemId?: string | null }>({ open: false, itemId: null });
@@ -613,6 +614,7 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
       }
 
       // Create a new item with the same data
+      // Skip default cluster creation since we'll duplicate clusters from the original
       let newItem;
       try {
         newItem = await createQuoteItem({
@@ -624,7 +626,7 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
           bullet_points: originalItem.bullet_points,
           internal_notes: originalItem.internal_notes,
           selected_options: originalItem.selected_options,
-        });
+        }, { skipDefaultCluster: true });
       } catch (error) {
         console.error('Failed to create item:', error);
         throw new Error('Failed to create new item: ' + (error as Error).message);
@@ -707,13 +709,17 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, attachm
         // Continue without attachments
       }
 
-      // Add the new item to the list with its clusters
-      const newItemWithClusters: QuoteItem = {
-        ...newItem,
-        quote_item_clusters: newClusters,
-      };
-
-      onItemsChange([...items, newItemWithClusters]);
+      // Refresh all data from server to ensure UI is in sync
+      if (onRefresh) {
+        await onRefresh();
+      } else {
+        // Fallback: add the new item to the list with its clusters
+        const newItemWithClusters: QuoteItem = {
+          ...newItem,
+          quote_item_clusters: newClusters,
+        };
+        onItemsChange([...items, newItemWithClusters]);
+      }
 
       toast({
         title: 'Item duplicated',

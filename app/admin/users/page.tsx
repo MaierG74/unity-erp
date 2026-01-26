@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/lib/supabase";
-import { ChevronDown, MoreHorizontal, UserPlus } from "lucide-react";
+import { ChevronDown, MoreHorizontal, Trash2, UserPlus } from "lucide-react";
 
 type Membership = {
   org_id: string | null;
@@ -145,6 +145,11 @@ export default function AdminUsersPage() {
     orgId: string;
     bannedUntilLocal: string;
   }>({ user: null, isActive: true, orgId: "", bannedUntilLocal: "" });
+
+  const [deleteDialog, setDeleteDialog] = useState<{
+    user: ProfileEntry | null;
+    loading: boolean;
+  }>({ user: null, loading: false });
 
   useEffect(() => {
     try {
@@ -349,6 +354,27 @@ export default function AdminUsersPage() {
       await loadProfiles();
     } catch (err: any) {
       alert(err?.message ?? "Failed to update status");
+    }
+  };
+
+  const openDeleteDialog = (user: ProfileEntry) => {
+    setDeleteDialog({ user, loading: false });
+  };
+
+  const handleDeleteUser = async () => {
+    if (!deleteDialog.user) return;
+    setDeleteDialog(prev => ({ ...prev, loading: true }));
+    try {
+      const res = await authorizedFetch(`/api/admin/users/${deleteDialog.user.id}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Failed to delete user");
+      setDeleteDialog({ user: null, loading: false });
+      await loadProfiles();
+    } catch (err: any) {
+      setDeleteDialog(prev => ({ ...prev, loading: false }));
+      alert(err?.message ?? "Failed to delete user");
     }
   };
 
@@ -582,6 +608,13 @@ export default function AdminUsersPage() {
                           <DropdownMenuItem onSelect={() => openDeactivateDialog(profile)}>
                             {profile.is_active === false ? "Reactivate" : "Deactivate"}
                           </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() => openDeleteDialog(profile)}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete user
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </td>
@@ -811,6 +844,41 @@ export default function AdminUsersPage() {
             </Button>
             <Button onClick={handleSaveDeactivate} disabled={!deactivateDialog.orgId}>
               Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(deleteDialog.user)}
+        onOpenChange={open => !open && setDeleteDialog({ user: null, loading: false })}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete user</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to permanently delete{" "}
+              <span className="font-semibold">{deleteDialog.user ? displayForProfile(deleteDialog.user) : ""}</span>?
+              This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+            This will permanently remove the user and all their organization memberships from the system.
+          </div>
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              onClick={() => setDeleteDialog({ user: null, loading: false })}
+              disabled={deleteDialog.loading}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteUser}
+              disabled={deleteDialog.loading}
+            >
+              {deleteDialog.loading ? "Deleting..." : "Delete user"}
             </Button>
           </DialogFooter>
         </DialogContent>

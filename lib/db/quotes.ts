@@ -245,7 +245,17 @@ export async function deleteQuote(id: string): Promise<void> {
   if (error) throw error;
 }
 
-export async function createQuoteItem(item: Partial<QuoteItem>): Promise<QuoteItem> {
+/**
+ * Creates a new quote item.
+ *
+ * @param options.skipDefaultCluster - Set to true when duplicating items to avoid
+ *   creating duplicate clusters. The duplicate flow copies clusters separately.
+ *   DB constraint: unique(quote_item_id, position) prevents duplicates.
+ */
+export async function createQuoteItem(
+  item: Partial<QuoteItem>,
+  options?: { skipDefaultCluster?: boolean }
+): Promise<QuoteItem> {
   // Create the quote item first
   const { data: newItem, error: itemError } = await supabase
     .from('quote_items')
@@ -254,8 +264,8 @@ export async function createQuoteItem(item: Partial<QuoteItem>): Promise<QuoteIt
     .single();
   if (itemError) throw itemError;
 
-  // Automatically create a default cluster for the new item
-  if (newItem) {
+  // Automatically create a default cluster for the new item (unless skipped)
+  if (newItem && !options?.skipDefaultCluster) {
     await createQuoteItemCluster({
       quote_item_id: newItem.id,
       name: 'Costing Cluster',

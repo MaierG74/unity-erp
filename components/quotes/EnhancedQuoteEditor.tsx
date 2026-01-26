@@ -112,6 +112,29 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
     }
   }, [quote?.id]);
 
+  // Refresh all quote data from the server
+  const refreshQuoteData = React.useCallback(async () => {
+    if (!quoteId) return;
+    try {
+      const response = await fetch(`/api/quotes/${quoteId}`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch quote');
+      }
+      const quoteData = await response.json();
+      setQuote(quoteData);
+      setItems(quoteData.items || []);
+      const allAttachments = [
+        ...(quoteData.attachments || []),
+        ...(quoteData.items || []).flatMap((item: any) => item.attachments || [])
+      ];
+      setAttachments(allAttachments);
+      setAttachmentsVersion((v) => v + 1);
+    } catch (error) {
+      console.error('Failed to refresh quote:', error);
+    }
+  }, [quoteId]);
+
   // Refresh attachments when item count changes (captures auto-attached product images)
   useEffect(() => {
     refreshAttachments();
@@ -119,41 +142,9 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
 
   useEffect(() => {
     if (quoteId) {
-      // Fetch quote data using API route that bypasses RLS
-      const fetchQuoteViaAPI = async () => {
-        try {
-          const response = await fetch(`/api/quotes/${quoteId}`);
-
-          if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Failed to fetch quote');
-          }
-
-          const quoteData = await response.json();
-
-          setQuote(quoteData);
-          setItems(quoteData.items || []);
-
-          // Flatten attachments from both quote-level and item-level
-          const allAttachments = [
-            ...(quoteData.attachments || []), // Quote-level attachments
-            ...(quoteData.items || []).flatMap((item: any) => item.attachments || []) // Item-level attachments
-          ];
-          setAttachments(allAttachments);
-          
-        } catch (error) {
-          console.error('Failed to fetch quote:', error);
-          toast({
-            variant: 'destructive',
-            title: 'Failed to load quote',
-            description: error instanceof Error ? error.message : 'Please try again or contact support.',
-          });
-        }
-      };
-
-      fetchQuoteViaAPI();
+      refreshQuoteData();
     }
-  }, [quoteId]);
+  }, [quoteId, refreshQuoteData]);
 
   const handleSave = async () => {
     if (!quote) return;
@@ -397,9 +388,10 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
               <CardTitle>Line Items</CardTitle>
             </CardHeader>
             <CardContent>
-              <QuoteItemsTable 
+              <QuoteItemsTable
                 items={items}
                 onItemsChange={handleItemsChange}
+                onRefresh={refreshQuoteData}
                 quoteId={quote.id}
                 attachmentsVersion={attachmentsVersion}
                 onItemAttachmentsChange={handleItemAttachmentsChange}
