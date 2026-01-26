@@ -17,6 +17,7 @@ import {
   type BoardMaterial,
   type EdgingMaterial,
   CompactPartsTable,
+  type CompactPartsTableRef,
   type CompactPart,
   CustomLaminationModal,
   type LaminationConfig,
@@ -50,8 +51,8 @@ import type {
   CutlistPart,
 } from '@/lib/cutlist/types';
 
-// Import packing
-import { packPartsIntoSheets } from '@/components/features/cutlist/packing';
+// Import packing - using guillotine algorithm for better waste consolidation
+import { packPartsSmartOptimized } from '@/components/features/cutlist/packing';
 
 // =============================================================================
 // Formatters
@@ -129,6 +130,8 @@ export default function CutlistPage() {
   // ============== Parts State ==============
   const [parts, setParts] = React.useState<CompactPart[]>([]);
   const partsLoadedRef = React.useRef(false);
+  const partsTableRef = React.useRef<CompactPartsTableRef>(null);
+  const [hasQuickAddPending, setHasQuickAddPending] = React.useState(false);
 
   // ============== Stock sheet (derived from default primary board) ==============
   const defaultPrimaryBoard = React.useMemo(
@@ -390,12 +393,19 @@ export default function CutlistPage() {
       }
       const bucket = materialStats.get(key)!;
       bucket.area += area;
-      const hasLamination = part.lamination_type && part.lamination_type !== 'none';
-      if (hasLamination) {
+      // Check if part uses 32mm edging (any lamination type)
+      const has32mmEdging = part.lamination_type && part.lamination_type !== 'none';
+      // Check if part needs a SEPARATE backer board (only with-backer, NOT same-board)
+      const needsBackerBoard = part.lamination_type === 'with-backer';
+
+      if (has32mmEdging) {
         bucket.band32 += totalBandLen;
-        bucket.laminateArea += area;
       } else {
         bucket.band16 += totalBandLen;
+      }
+      // Only count backer area for parts that actually need a separate backer
+      if (needsBackerBoard) {
+        bucket.laminateArea += area;
       }
     }
 
@@ -575,9 +585,12 @@ export default function CutlistPage() {
     );
   };
 
-  const handleCalculate = () => {
+  // Flag to trigger calculation after quick-add activation
+  const pendingCalculateRef = React.useRef(false);
+
+  const runCalculation = React.useCallback((partsToUse: CompactPart[]) => {
     // Convert CompactPart to PartSpec for packing
-    const partSpecs: PartSpec[] = parts
+    const partSpecs: PartSpec[] = partsToUse
       .filter((p) => p.length_mm > 0 && p.width_mm > 0 && p.quantity > 0)
       .map((p) => ({
         id: p.id,
@@ -587,6 +600,7 @@ export default function CutlistPage() {
         grain: p.grain,
         band_edges: p.band_edges,
         laminate: p.lamination_type !== 'none' && p.lamination_type !== undefined,
+        lamination_type: p.lamination_type, // Include lamination_type for backer filtering
         material_id: p.material_id,
         label: p.name,
       }));
@@ -599,25 +613,100 @@ export default function CutlistPage() {
 
     const normalized: StockSheetSpec[] = [{ ...stock[0], kerf_mm: Math.max(0, kerf) }];
 
-    // Pack primary parts
-    const res = packPartsIntoSheets(partSpecs, normalized, { allowRotation, singleSheetOnly });
+    // Pack primary parts using guillotine algorithm for better waste consolidation
+    const res = packPartsSmartOptimized(partSpecs, normalized, { allowRotation, singleSheetOnly });
+
+    // Calculate edging correctly based on lamination type
+    // The packing algorithm doesn't know about same-board vs with-backer,
+    // so we calculate edging separately here
+    let edging16mm = 0;
+    let edging32mm = 0;
+
+    for (const part of partsToUse) {
+      if (part.length_mm <= 0 || part.width_mm <= 0 || part.quantity <= 0) continue;
+
+      const laminationType = part.lamination_type || 'none';
+
+      // Calculate edge length for one part
+      // Convention: top/bottom edges = length, left/right edges = width
+      const be = part.band_edges;
+      const singlePartEdge =
+        (be.top ? part.length_mm : 0) +
+        (be.bottom ? part.length_mm : 0) +
+        (be.left ? part.width_mm : 0) +
+        (be.right ? part.width_mm : 0);
+
+      // Determine finished part count based on lamination type
+      // Edge banding goes on FINISHED parts, not individual pieces
+      let finishedPartCount: number;
+      switch (laminationType) {
+        case 'same-board':
+          // 2 pieces become 1 finished part
+          finishedPartCount = Math.floor(part.quantity / 2);
+          break;
+        case 'with-backer':
+        case 'none':
+        case 'custom':
+        default:
+          // Each piece/entry is a finished part
+          finishedPartCount = part.quantity;
+          break;
+      }
+
+      const totalEdge = singlePartEdge * finishedPartCount;
+
+      // Assign to correct thickness based on lamination
+      if (laminationType === 'none') {
+        edging16mm += totalEdge;
+      } else {
+        edging32mm += totalEdge;
+      }
+    }
+
+    // Override the packing result's edging values with our corrected calculation
+    if (res.stats) {
+      res.stats.edgebanding_16mm_mm = edging16mm;
+      res.stats.edgebanding_32mm_mm = edging32mm;
+    }
+
     setResult(res);
     setSheetOverrides({});
     setGlobalFullBoard(false);
 
-    // Pack backer parts if any have lamination
+    // Pack backer parts - ONLY for 'with-backer' lamination (NOT same-board)
+    // Same-board uses the SAME primary material, with-backer uses a separate backer material
     const backerParts: PartSpec[] = partSpecs
-      .filter((p) => p.laminate)
+      .filter((p) => p.lamination_type === 'with-backer')
       .map((p) => ({ ...p, grain: 'any', require_grain: undefined, band_edges: undefined } as PartSpec));
 
     if (backerParts.length > 0) {
-      const resBacker = packPartsIntoSheets(backerParts, normalized, { allowRotation: true, singleSheetOnly });
+      const resBacker = packPartsSmartOptimized(backerParts, normalized, { allowRotation: true, singleSheetOnly });
       setBackerResult(resBacker);
     } else {
       setBackerResult(null);
     }
 
     setActiveTab('preview');
+  }, [stock, kerf, allowRotation, singleSheetOnly]);
+
+  // Handle pending calculation after quick-add activation
+  React.useEffect(() => {
+    if (pendingCalculateRef.current && parts.length > 0) {
+      pendingCalculateRef.current = false;
+      runCalculation(parts);
+    }
+  }, [parts, runCalculation]);
+
+  const handleCalculate = () => {
+    // If there's pending quick-add data, activate it first
+    if (hasQuickAddPending) {
+      pendingCalculateRef.current = true;
+      partsTableRef.current?.activateQuickAdd();
+      return;
+    }
+
+    // Otherwise calculate directly
+    runCalculation(parts);
   };
 
   const handleCSVImport = (importedParts: CutlistPart[]) => {
@@ -737,7 +826,7 @@ export default function CutlistPage() {
                 <Button
                   type="button"
                   onClick={handleCalculate}
-                  disabled={parts.length === 0}
+                  disabled={parts.length === 0 && !hasQuickAddPending}
                   className="gap-1.5"
                 >
                   <Calculator className="h-4 w-4" />
@@ -758,10 +847,12 @@ export default function CutlistPage() {
               {/* Compact Parts Table */}
               {primaryBoards.length > 0 && (
                 <CompactPartsTable
+                  ref={partsTableRef}
                   parts={parts}
                   onPartsChange={setParts}
                   materialOptions={materialOptions}
                   onOpenCustomLamination={handleOpenCustomLamination}
+                  onQuickAddPending={setHasQuickAddPending}
                 />
               )}
 
@@ -950,7 +1041,7 @@ export default function CutlistPage() {
               Material settings are saved automatically, so your boards and edging are ready next time.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 text-sm text-muted-foreground">
+          <div className="space-y-4 text-sm text-muted-foreground">
             <p>
               <strong>Materials tab:</strong> Configure your primary boards, backer boards, and edging materials. The
               default board for each section is used for new parts and calculations.
@@ -968,6 +1059,56 @@ export default function CutlistPage() {
               <strong>CSV Import:</strong> Import parts from SketchUp or other tools using the CSV import button. Parts
               will be assigned the default material automatically.
             </p>
+
+            {/* Keyboard Shortcuts */}
+            <div className="pt-3 border-t">
+              <p className="font-semibold text-foreground mb-3">Keyboard shortcuts</p>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs">
+                <div className="flex justify-between">
+                  <span>Next field</span>
+                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">Tab</kbd>
+                </div>
+                <div className="flex justify-between">
+                  <span>Next row / Add part</span>
+                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">Enter</kbd>
+                </div>
+                <div className="flex justify-between">
+                  <span>Cycle grain direction</span>
+                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">Space</kbd>
+                </div>
+                <div className="flex justify-between">
+                  <span>Open dropdown</span>
+                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">Space / ↓</kbd>
+                </div>
+                <div className="col-span-2 mt-2 pt-2 border-t border-dashed">
+                  <span className="font-medium text-foreground">Edge banding (when focused):</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Toggle top edge</span>
+                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">↑</kbd>
+                </div>
+                <div className="flex justify-between">
+                  <span>Toggle bottom edge</span>
+                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">↓</kbd>
+                </div>
+                <div className="flex justify-between">
+                  <span>Toggle left edge</span>
+                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">←</kbd>
+                </div>
+                <div className="flex justify-between">
+                  <span>Toggle right edge</span>
+                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">→</kbd>
+                </div>
+                <div className="flex justify-between">
+                  <span>Toggle all edges</span>
+                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">A</kbd>
+                </div>
+                <div className="flex justify-between">
+                  <span>Open edge popover</span>
+                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">Space</kbd>
+                </div>
+              </div>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

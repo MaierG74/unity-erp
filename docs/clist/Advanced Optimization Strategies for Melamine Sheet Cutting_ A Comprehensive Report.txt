@@ -1,0 +1,426 @@
+﻿Advanced Optimization Strategies for Melamine Sheet Cutting: A Comprehensive Report on 2D Bin Packing with Guillotine and Waste Constraints
+Executive Summary
+This technical report provides an exhaustive analysis of the Two-Dimensional Bin Packing Problem (2DBPP) specifically tailored for the furniture manufacturing industry. The analysis addresses the development of a cutlist calculator within a TypeScript/JavaScript ERP environment, optimizing for melamine-faced chipboard (MFC) sheets of standard dimensions (2700mm x 1800mm).
+The core challenge identified is the inefficiency of standard "greedy" algorithms, which, while computationally fast, produce fragmented, unusable waste—a phenomenon often referred to in industry as "Swiss cheese" patterns. This report proposes a paradigm shift from pure Area Minimization to Residual Value Maximization.
+Key recommendations include:
+1. Algorithmic Core: Adoption of a Constructive Guillotine Packing Algorithm utilizing a Free Rectangle List (FRL) data structure. This offers the optimal balance between the strict geometric constraints of panel saws (guillotine cuts) and the <1s execution requirement.1
+2. Waste Consolidation: Implementation of the Split-Shorter-Leftover-Axis (SSLAS) heuristic combined with a Remnant-Aware Scoring Function. This approach actively drives the creation of large, contiguous offcuts by penalizing placements that fracture free space into unusable strips.2
+3. Constraint Handling: Utilization of the Item Inflation Method for kerf compensation (3-4mm) and a strict Dimension Locking protocol for grain direction (anisotropy) enforcement.4
+4. Cut Complexity: Enforcement of 2-Stage or 3-Stage Cutting Patterns where possible to minimize saw cycle times, prioritizing long "rip" cuts followed by "cross" cuts, which aligns with standard beam saw operations.6
+The following sections detail the mathematical foundations, algorithmic architectures, implementation strategies, and trade-off analyses necessary to engineer this solution.
+________________
+1. Industrial Context and Problem Formalization
+The optimization of cutting rectangular parts from standard sheets of raw material is a classic problem in Operations Research, typically classified under the Cutting Stock Problem (CSP). However, the specific constraints of the furniture industry—specifically working with melamine—introduce physical and economic variables that distinguish this from abstract packing problems.
+1.1 The Melamine Manufacturing Environment
+Melamine-faced chipboard is the standard material for modern cabinetry and furniture. Its processing involves specific machinery and material properties that dictate the feasibility of any generated cutlist.
+1.1.1 Machinery Constraints: The Guillotine Requirement
+Unlike CNC routers or laser cutters, which can trace arbitrary vectors, the primary machinery for cutting melamine is the Panel Saw (either a horizontal beam saw or a vertical sliding table saw). These machines utilize a circular blade that traverses the entire length or width of the material on the bed.
+* The Guillotine Constraint: Every cut must be a straight line extending from one edge of the board (or the current sub-segment) to the opposite edge.1 A cut cannot stop in the middle of the board and turn 90 degrees. This renders "L-shaped" nesting patterns physically impossible without manual intervention or specialized (and slower) nesting CNC routers.7
+* Implication: The algorithm must strictly generate "Guillotine-Cuttable" patterns. A pattern is guillotine-cuttable if the set of items can be separated by a sequence of edge-to-edge cuts. Recursive verification of this property is computationally expensive; thus, the algorithm itself should be constructive in a way that guarantees this property by design.8
+1.1.2 Material Constraints: Anisotropy (Grain Direction)
+Melamine surfaces often feature woodgrain patterns. This makes the material anisotropic: the orientation of the part relative to the sheet is fixed.10
+* Length-Wise Grain: The aesthetic pattern runs parallel to the   mm dimension. A part requiring vertical grain cannot be rotated    to fit a hole, even if it fits geometrically.
+* Width-Wise Grain: The pattern runs parallel to the   mm dimension.
+* Solid Colors: Materials like "White" or "Grey" are isotropic. They possess rotational freedom (  ), doubling the potential orientations for each part and expanding the search space.11
+1.1.3 Economic Objectives: The "Usable Waste" Paradox
+In standard CSP, the objective is to minimize   . However, this metric is flawed for melamine production. A solution that uses 1.8 sheets (leaving 20% of sheet 2 as a single large offcut) is economically superior to a solution that uses 1.7 sheets (leaving 30% of sheet 2 as fragmented 50mm strips).
+   * Fragmented Waste: Thin strips or small rectangles are "garbage" (zero value). They incur disposal costs.
+   * Consolidated Waste: Large rectangles (e.g.,   mm x   mm) are "stock" (positive value). They reduce the raw material requirement for future jobs.12
+   * Objective Redefinition: The goal is to solve the Residual Bin Packing Problem (RBPP), maximizing the utility of the leftovers rather than just minimizing the area of the used bin.13
+1.2 Mathematical Formulation
+We formally define the problem as a 2D Bin Packing Problem with Guillotine Constraints (2BP|O|G and 2BP|R|G).
+Let    be the set of rectangular items. Each item    has:
+      * Width    and Height   .
+      * Grain constraint    (Length, Width, Any).
+      * Demand    (quantity).
+Let    be a supply of identical bins (sheets) of width    and height   .
+The formulation seeks to determine the minimum number of bins    and the position    and orientation    (where    implies rotation) for all items, subject to:
+         1. Geometric Containment:
+  
+  
+         2. Non-Overlapping:
+  
+Where    and    denote the effective dimensions after rotation.
+         3. Guillotine Constraint: For any subset of items packed into a rectangle   , there exists a line    (horizontal or vertical) that separates the subset into two non-empty disjoint subsets, each contained within the two sub-rectangles formed by    partitioning   .7
+         4. Grain Constraint:
+  
+  
+  
+         5. Objective Function (Standard):
+Minimize   .
+         6. Objective Function (Revised for Usable Waste):
+Maximize   
+Where    is a step function that drops to 0 if   .14
+1.3 The Complexity Landscape
+The 2D Bin Packing Problem is strongly NP-Hard. The number of possible arrangements grows factorially with   .
+            * For    to    parts, an exhaustive search (Exact Algorithm) is computationally infeasible within a <1s timeframe.15 Even advanced Integer Linear Programming (ILP) solvers (like CPLEX or Gurobi) often require minutes to prove optimality for instances of this size.
+            * Implication for Engineering: We must rely on Heuristic or Meta-heuristic approaches. These do not guarantee the mathematically optimal solution but provide "good enough" solutions within milliseconds. The challenge is tuning the heuristic to respect the complex "usable waste" objective, which is harder to quantify than simple area density.7
+________________
+2. Algorithmic Paradigms for Panel Optimization
+To satisfy the <1s execution requirement for up to 200 parts, we must filter out algorithms with high time complexities. We analyze three primary families of packing algorithms relevant to this domain.
+2.1 Shelf Algorithms
+Shelf algorithms simplify the 2D problem into a pseudo-1D problem.
+               * Mechanism: The bin is divided into horizontal strips ("shelves") of fixed height determined by the first item placed on the shelf. Subsequent items are placed on the shelf if their height    shelf height.
+               * Pros: Extremely fast (  ). Naturally produces guillotine-compatible patterns (long rip cuts).
+               * Cons: High Waste Fragmentation. If a shelf is 400mm high and an item is 300mm high, the 100mm strip above the item is often "lost" or hard to reclaim. It struggles with heterogeneous part mixes.
+               * Verdict: Suitable only as a fallback or for initial sorting, but poor for maximizing usable offcut area due to the rigid shelf structure.9
+2.2 Maximal Rectangles (MaxRects)
+MaxRects attempts to keep track of all maximal empty rectangles in the bin.
+                  * Mechanism: When an item is placed, it intersects with existing free rectangles. The algorithm generates new free rectangles from the non-intersecting areas.
+                  * Pros: Achieves the highest theoretical packing density for general 2D packing.
+                  * Cons: Violates Guillotine Constraint. MaxRects packs items into "caves" and complex interlocked positions. While it is possible to filter for guillotine cuts, checking the cuttablity of a MaxRects layout is computationally expensive and complex to implement.17
+                  * Verdict: Rejected. The risk of generating non-cuttable patterns is too high, and the overhead to prevent them defeats the speed advantage.
+2.3 Constructive Guillotine Packing
+This family of algorithms mimics the actual cutting process.
+                  * Mechanism: The bin starts as one large free rectangle. When an item is placed, the remaining space is split into two disjoint free rectangles (e.g., one to the right, one above). This recursive splitting guarantees that every placement preserves the guillotine property.8
+                  * Pros:
+                  1. Guaranteed Cuttablity: The data structure itself enforces the constraint.
+                  2. Flexible Waste Management: The decision of how to split the remaining space (horizontally vs. vertically) gives the algorithm direct control over the shape of the waste.3
+                  3. Performance: Efficient list-based implementations run in   , easily handling 200 parts in <50ms.
+                     * Verdict: Recommended. This is the industry standard for panel saws and matches the user's constraints perfectly.
+Table 1: Comparative Analysis of Algorithmic Approaches
+Feature
+	Shelf Packing
+	Maximal Rectangles
+	Guillotine Packing
+	Packing Density
+	Low-Medium
+	High
+	Medium-High
+	Guillotine Guarantee
+	Yes (Naturally)
+	No (Requires checks)
+	Yes (By design)
+	Waste Consolidation
+	Poor (Strip waste)
+	Poor (Fragmented)
+	Excellent (Tunable)
+	Time Complexity
+	  
+
+	  
+ (with checks)
+	  
+
+	Implementation
+	Simple
+	Complex
+	Moderate
+	Suitability
+	Fallback
+	Laser/Jet Cutting
+	Panel Saws
+	________________
+3. The Guillotine Packing Algorithm: Deep Dive
+The recommended solution is a Best-Fit Decreasing (BFD) Constructive Guillotine Packer. This section details the internal mechanics required to build this in TypeScript, utilizing concepts found in libraries such as rectangle-packer.2
+3.1 The Free Rectangle List (FRL) Data Structure
+Unlike a grid-based approach (which consumes varying memory based on sheet size and resolution), the FRL approach stores only the geometry of the empty spaces.8
+                     * Initial State: FRL = [{ x: 0, y: 0, w: 2700, h: 1800 }]
+                     * Placement: When a part (  ) is placed into a free rectangle    (  ) at its bottom-left corner:
+                        1. The part occupies region   .
+                        2. The used rectangle    is removed from the FRL.
+                        3. Two new rectangles are created from the L-shaped residue.
+3.2 Split Rules: The Geometry of Waste
+The "Split Rule" determines how the L-shaped residue is divided. This is the single most important factor for waste consolidation.2
+Let the placed item have size    and the free rectangle have size   .
+                           1. Split Horizontally (Bottom-Parallel Split):
+                           * Right Remnant:    at   
+                           * Top Remnant:    at   
+                           * Result: Creates a full-width strip above the part.
+                              2. Split Vertically (Side-Parallel Split):
+                              * Right Remnant:    at   
+                              * Top Remnant:    at   
+                              * Result: Creates a full-height strip beside the part.
+Critical Insight: A static choice (always split horizontal) is suboptimal. The choice must be dynamic based on the dimensions of the leftovers.3
+3.3 Selection Heuristics
+When placing an item, we scan the FRL to find a "Best Fit".
+                                 * Best Area Fit (BAF): Choose the free rectangle with the smallest area that fits the item.
+                                 * Analysis: Good for density, but tends to fill "useful" medium holes with small parts, fragmenting the waste.
+                                 * Best Short Side Fit (BSSF): Choose the free rectangle where the minimum leftover dimension is minimized.
+                                 * Formula:   
+                                 * Analysis: This is superior for waste consolidation. It encourages "snug" fits. If a part width matches the free space width exactly, the leftover is 0 on that axis, leaving a perfect rectangular remnant on the other axis. It prevents the creation of thin, useless strips.3
+________________
+4. Heuristics for Maximizing Usable Offcut Area
+This section addresses the user's primary pain point: maximizing usable offcut area. Standard bin packing algorithms treats all waste as equal (minimize total area). We must treat waste as Weighted Value.
+4.1 Defining "Usability": The Utility Function
+We define a threshold    (e.g., 300mm). Any dimension    is "scrap". Any dimension    is "stock".
+We introduce a Waste Penalty Function    for a potential remnant of size   :
+  
+
+This function is too aggressive for a constructive heuristic (it might block all moves). A softer version is used in the scoring:
+The Usable-Waste Score:
+When evaluating a placement of item    into free rect    with split rule   :
+                                    1. Calculate dimensions of resulting remnants   .
+                                    2. Calculate fragmentation score:   .
+                                    3. Calculate fit score: BSSF score (minimized leftover).
+                                    4. Total Score = Fragmentation Score + Fit Score.
+This drives the algorithm to choose placements that do not generate scrap strips, even if the fit is slightly looser area-wise.14
+4.2 The Split-Shorter-Leftover-Axis (SSLAS) Heuristic
+The most effective static heuristic for waste consolidation is Split Shorter Leftover Axis (SSLAS), available in standard libraries like rectangle-packer.2
+                                       * Logic: When splitting the L-shape, calculate the dimensions of the potential "Right" and "Top" remnants.
+                                       * Action: Choose the split axis (Horizontal or Vertical) that maximizes the dimension of the smaller remnant.
+                                       * Example:
+                                       * Free Rect:   . Part:   .
+                                       * Option A (Split Vertical):
+                                          * Right Remnant:    (Long strip).
+                                          * Top Remnant:    (Large block).
+                                          * Result: One huge block, one narrow strip.
+                                             * Option B (Split Horizontal):
+                                             * Right Remnant:    (Tiny square).
+                                             * Top Remnant:    (Huge block).
+                                             * Result: Option B creates a tiny unusable square. Option A creates a useful 100mm strip (if T=100) or just a better distribution.
+                                                * SSLAS refinement: The standard definition actually says "Split along the axis that minimizes the wasted side," but for offcuts, we modify it to: Split along the axis that keeps the largest contiguous area intact.
+Recommendation: Implement Split to Maximize Major Remnant (or SplitShorterLeftoverAxis). Always check both split orientations. Choose the one where the Area of the largest resulting rectangle is maximized. This creates "Big Holes" rather than "Many Small Holes".2
+4.3 The "Touching Perimeter" Heuristic
+To consolidate waste, we want parts to cluster together.
+                                                * Concept: A placement is better if the part touches existing boundaries (sheet edges or other parts).
+                                                * Implementation: In the BSSF score, subtract a bonus for every unit of perimeter that is coincident with a blocked edge.
+  
+                                                * Effect: This acts like "gravity," pulling parts into corners and against each other, naturally pushing the free space to the periphery of the sheet where it remains contiguous.14
+________________
+5. Minimizing Cut Complexity and Machine Constraints
+The user requested minimizing "cut length and number of cuts." This relates to the Cutting Complexity or Stage Complexity of the pattern.
+5.1 Stage Constraints: 2-Stage vs. 3-Stage
+Panel saws operate most efficiently with 2-Stage or 3-Stage patterns.
+                                                   * 2-Stage (Rip and Cross): The saw makes long "Rip" cuts along the length of the board (creating strips), then "Cross" cuts across those strips to make parts.
+                                                   * Speed: Fastest.
+                                                   * Yield: Lowest.
+                                                   * 3-Stage: Allows the cross-cut strips to be cut again (e.g., for head-cuts or nesting smaller parts).
+                                                   * Recursive Guillotine (N-Stage): Allows infinite sub-division.6
+                                                   * Speed: Slowest (requires manual handling of offcuts during cutting).
+                                                   * Yield: Highest.
+Recommendation: To satisfy the "minimize cuts" requirement, the algorithm should implicitly favor aligned splits.
+                                                   * When placing a part, check if its edge aligns with the edge of a neighbor. If yes, it effectively extends an existing cut line rather than creating a new one.
+                                                   * This can be enforced by a "Corner Priority" sorting. Sort free rectangles by their coordinates (bottom-left first). This fills the sheet progressively, naturally forming strips (pseudo-shelves) which are 2-stage or 3-stage compatible.7
+5.2 Optimizing for Cut Length
+Total Cut Length is the distance the saw blade travels.
+                                                   * Guillotine Efficiency: Guillotine cuts traverse the entire remaining stock.
+                                                   * Minimization Strategy: To minimize cut length, we must minimize the number of long cuts. This implies we should prioritize filling the width of the sheet before the length (or vice-versa), creating fewer, longer strips rather than many short, complex sub-divisions.7
+                                                   * Heuristic: Sort parts by Length (Decreasing). Place long parts first. This establishes the major cut lines early. Small parts fill the remaining gaps. This drastically reduces the number of cuts compared to placing small parts first (which fragments the board into a grid requiring many cuts).
+________________
+6. Constraint Management: Kerf and Grain
+6.1 The Item Inflation Method for Kerf Management
+The kerf (  mm) is the material turned into sawdust.
+                                                   * Why Inflation? Coordinate-based kerf management (calculating gaps between    and   ) is error-prone in recursive splitting.
+                                                   * Implementation:
+                                                      1. Input: Part   .
+                                                      2. Process: Internally treat part as   ,   .
+                                                      3. Bin: Effectively, the bin is also "infinite" in internal cuts, but bounded by external dimensions.
+                                                      4. Edge Case (The "Rim"): The standard inflation method assumes a cut on every side. However, the first part placed against the sheet edge might not need a trim cut (if the sheet is pre-squared) or the trim cut is handled globally.
+                                                         * Safe Approach: Assume every part needs a kerf on all sides (Inflation). This guarantees fit.
+                                                         * Optimization: If the manufacturing process performs a "Trim Cut" on the raw board first to square it (e.g., 10mm off all sides), then the bin size should be defined as the Net size (  ,   ). Then use Item Inflation.4
+                                                         * Output: When generating the G-Code or Cutlist, the coordinate is    (centering the blade).
+6.2 Anisotropy: Handling Grain Direction
+The grain constraint filters the valid orientations.
+                                                            * Data Structure: Extend the Part object.
+TypeScript
+interface Part { w: number, h: number, grain: 'length' | 'width' | 'any' }
+
+                                                            * Logic:
+                                                               * Length: Force part.h parallel to Bin.H. No rotation allowed.
+                                                               * Width: Force part.h parallel to Bin.W. Rotate   .
+                                                               * Any: The algorithm attempts both orientations.
+                                                                  * Combinatorial Note: If a user has 200 parts all with grain='any', the search space expands by   .
+                                                                  * Pruning: We do not need to check all combinations globally. We only check both orientations locally during the greedy placement step.
+                                                                  * "Does    fit better? Or   ?" Select the one that minimizes the BSSF score (tightest fit). This keeps complexity at    instead of exponential.7
+________________
+7. Implementation Architecture in TypeScript
+This section provides the blueprint for the <1s execution solver. Note that off-the-shelf libraries like rectangle-packer 2 already implement the GuillotineBinPack class with SplitShorterLeftoverAxis, which can be adapted for this use case.
+7.1 Data Structures and Memory Management
+JavaScript/TypeScript runs on a garbage-collected heap (V8 engine). Creating and destroying millions of object instances (Rectangles) can trigger GC pauses.
+                                                                     * Optimization: Use Object Pooling for Rect objects if running in a tight loop (e.g., genetic algorithm). For a single pass heuristic (  ), standard allocation is fine.
+                                                                     * Floating Point Issues: JavaScript numbers are IEEE 754 floats.    might result in   .
+                                                                        * Solution: Implement an Epsilon comparator or work exclusively in integers (microns) by multiplying inputs by 1000.   .
+7.2 The Packing Engine: Logic Flow
+The architecture consists of a GuillotinePacker class.
+Algorithm: Constructive Guillotine Packer with SSLAS
+
+
+TypeScript
+
+
+
+
+// Core Types
+type Fit = { freeRectIndex: number, rotated: boolean, score: number };
+
+class GuillotinePacker {
+   private freeRects: Rect =;
+   private usedRects: Rect =;
+   private binW: number;
+   private binH: number;
+   private kerf: number;
+
+   constructor(w: number, h: number, kerf: number) {
+       this.binW = w;
+       this.binH = h;
+       this.kerf = kerf;
+       this.freeRects.push({ x: 0, y: 0, w: w, h: h });
+   }
+
+   public pack(parts: Part): void {
+       // 1. Sort Parts (Heuristic: Longest Side Decreasing)
+       parts.sort((a, b) => Math.max(b.w, b.h) - Math.max(a.w, a.h));
+
+       for (const part of parts) {
+           // Adjust for Kerf
+           const pW = part.w + this.kerf;
+           const pH = part.h + this.kerf;
+
+           // 2. Find Best Fit
+           let bestFit: Fit | null = null;
+           let minScore = Number.MAX_VALUE;
+
+           for (let i = 0; i < this.freeRects.length; i++) {
+               const free = this.freeRects[i];
+               
+               // Check Normal Orientation
+               if (this.canPlace(pW, pH, free, part.grain)) {
+                   const score = this.calculateScore(pW, pH, free);
+                   if (score < minScore) {
+                       minScore = score;
+                       bestFit = { freeRectIndex: i, rotated: false, score };
+                   }
+               }
+               
+               // Check Rotated Orientation (if grain allows)
+               if (this.canPlace(pH, pW, free, part.grain, true)) {
+                   const score = this.calculateScore(pH, pW, free);
+                   if (score < minScore) {
+                       minScore = score;
+                       bestFit = { freeRectIndex: i, rotated: true, score };
+                   }
+               }
+           }
+
+           // 3. Place or Fail
+           if (bestFit) {
+               this.placePart(part, bestFit);
+           } else {
+               // Add new sheet logic here
+               this.handleOverflow(part);
+           }
+       }
+   }
+
+   // Heuristic: Best Short Side Fit + Waste Penalty
+   private calculateScore(w: number, h: number, free: Rect): number {
+       const remW = free.w - w;
+       const remH = free.h - h;
+       
+       // Base BSSF Score
+       let score = Math.min(remW, remH);
+
+       // Waste Penalty (Crucial for User Goal 1)
+       const WASTE_THRESHOLD = 300; // mm
+       
+       // Penalize creating narrow strips
+       if (remW > 0 && remW < WASTE_THRESHOLD) score += 5000;
+       if (remH > 0 && remH < WASTE_THRESHOLD) score += 5000;
+
+       return score;
+   }
+
+   private placePart(part: Part, fit: Fit) {
+       const free = this.freeRects;
+       const w = fit.rotated? part.h + this.kerf : part.w + this.kerf;
+       const h = fit.rotated? part.w + this.kerf : part.h + this.kerf;
+
+       // Add to Used
+       this.usedRects.push({ x: free.x, y: free.y, w: part.w, h: part.h });
+
+       // Split Logic (SSLAS) - similar to GuillotineSplitHeuristic.SplitShorterLeftoverAxis
+       // Decide whether to cut Horizontally or Vertically
+       const remRightW = free.w - w;
+       const remTopH = free.h - h;
+       
+       // Calculate the "Major Remnant Area" for both split types
+       // Split Horizontal: Top Rect is full width (free.w * remTopH)
+       // Split Vertical: Right Rect is full height (remRightW * free.h)
+       
+       const areaIfSplitHorz = free.w * remTopH;
+       const areaIfSplitVert = remRightW * free.h;
+
+       let splitHorizontal = areaIfSplitHorz > areaIfSplitVert;
+
+       // Update Free Rects List
+       this.splitFreeRect(free, w, h, splitHorizontal);
+       this.freeRects.splice(fit.freeRectIndex, 1);
+       
+       // Optimization: Merge newly created rects with neighbors if dimensions align
+       this.mergeFreeRects();
+   }
+}
+
+7.3 Iterative Improvement
+To ensure the best result within 1s:
+                                                                           1. Multiple Sort Strategies: Run the packer 3 times with different sort orders:
+                                                                           * Longest Side Descending (Usually best for cut length minimization).
+                                                                           * Area Descending (Good for general density).
+                                                                           * Widest Descending (Good for filling width first).
+                                                                           2. Pick Best: Select the result that maximizes (Used_Area + Usable_Offcut_Area).
+                                                                           3. Timing: Each run takes ~10-20ms. Total time < 100ms. Well within the 1000ms budget.
+________________
+8. Trade-off Analysis and Benchmarking
+8.1 Efficiency vs. Remnant Utility
+The user must understand the inherent conflict in their goals.
+                                                                           * Scenario A (Pure Efficiency): Pack small parts into every available gap.
+                                                                           * Result: 95% Sheet Usage. 0% Usable Offcut. Waste is sawdust and thin slivers.
+                                                                           * Scenario B (Usable Waste): Reserve large gaps.
+                                                                           * Result: 85% Sheet Usage. 10% Usable Offcut. 5% Waste.
+                                                                           * Trade-off: Scenario B requires purchasing more sheets upfront but recovers value later.
+                                                                           * Recommendation: Expose this as a "Waste Aggressiveness" slider in the ERP UI. High aggressiveness increases the WASTE_THRESHOLD in the scoring function.
+8.2 Execution Time Analysis
+                                                                           * Parts: 50 - 200.
+                                                                           * Algorithm Complexity:    due to linear scan of Free Rects (which grows linearly with   ).
+                                                                           * Operations:    checks.
+                                                                           * JS Performance: Modern V8 can execute    ops/sec. 40,000 checks is negligible.
+                                                                           * Latency: Estimated execution time is 5-10ms. This is far below the 1s limit, allowing for significant iterative optimization (running the packer 100 times with randomized inputs if desired).
+8.3 Edge Case: The "Perfect Fit"
+When an item matches the free rect dimension exactly (  ).
+                                                                              * Heuristic Failure: BSSF returns 0.
+                                                                              * Benefit: This is the ideal case. It creates no waste on that axis. The algorithm should prioritize score 0 above all else.
+________________
+Conclusion
+To build a high-performance cutlist calculator for melamine manufacturing that satisfies the "usable waste" requirement, a Guillotine Bin Packing Algorithm with Split-Shorter-Leftover-Axis (SSLAS) splitting is the optimal engineering choice.
+This approach:
+                                                                              1. Guarantees Manufacturability: Strictly enforces guillotine cuts required by panel saws.
+                                                                              2. Maximizes Utility: Using the SSLAS split rule and waste-aware scoring drives the system to consolidate leftovers into large, reusable rectangles rather than maximizing pure density.
+                                                                              3. Minimizes Complexity: By sorting parts by length and utilizing a constructive heuristic, it naturally produces 2-stage or 3-stage cutting patterns that are efficient to cut.
+                                                                              4. Exceeds Performance Targets: The    complexity ensures execution in milliseconds for 200 parts, enabling a responsive user experience in the ERP system.
+By implementing the GuillotinePacker class with the specific calculateScore logic provided in Section 7.2, the system will transition from producing "Swiss cheese" waste to generating valuable stock, directly impacting the manufacturer's material efficiency and bottom line.
+Bibliography & References
+                                                                                 * 9
+Omega (2015). Guillotine bin packing kerf subtraction logic.
+                                                                                 * 2
+NPM (rectangle-packer). GuillotineSplitHeuristic.SplitShorterLeftoverAxis.
+                                                                                 * 14
+LIPIcs (2025). Touching Perimeter Objective for reusability.
+                                                                                 * 7
+ArXiv (2025). Variable-Sized Bin Packing Problem with Guillotine Constraints.
+                                                                                 * 13
+ResearchGate (2013). Two-stage two-dimensional guillotine cutting stock problems with usable leftover.
+                                                                                 * 1
+Wikipedia. Guillotine cutting definitions.
+                                                                                 * 13
+ResearchGate. Residual bin-packing problem.
+Works cited
+                                                                                    1. Guillotine cutting - Wikipedia, accessed January 25, 2026, https://en.wikipedia.org/wiki/Guillotine_cutting
+                                                                                    2. rectangle-packer - npm, accessed January 25, 2026, https://www.npmjs.com/package/rectangle-packer
+                                                                                    3. Rectangle Bin Pack | PDF | Time Complexity | Algorithms - Scribd, accessed January 25, 2026, https://www.scribd.com/document/334389310/Rectangle-Bin-Pack
+                                                                                    4. Perfect fitting laser parts by adjusting the Kerf in Lightburn - YouTube, accessed January 25, 2026, https://www.youtube.com/watch?v=xG6sgEZbtVg
+                                                                                    5. Adjusting Your Laser Cutter's Kerf Settings for Press-Fit Finger Joints - Instructables, accessed January 25, 2026, https://www.instructables.com/Adjusting-Your-Laser-Cutters-Kerf-Settings-for-Pre/
+                                                                                    6. A Constraint Programming Solution to the Guillotine Rectangular Cutting Problem, accessed January 25, 2026, https://ojs.aaai.org/index.php/ICAPS/article/download/27213/26986/31282
+                                                                                    7. A goal-driven ruin and recreate heuristic for the 2D variable-sized bin packing problem with guillotine constraints - arXiv, accessed January 25, 2026, https://arxiv.org/pdf/2508.19306
+                                                                                    8. A Thousand Ways to Pack the Bin - A Practical Approach to Two-Dimensional Rectangle Bin Packing - GitHub, accessed January 25, 2026, https://raw.githubusercontent.com/rougier/freetype-gl/master/doc/RectangleBinPack.pdf
+                                                                                    9. Constructive procedures to solve 2-dimensional bin packing problems with irregular pieces and guillotine cuts - Sci-Hub, accessed January 25, 2026, https://sci-hub.box/10.1016/j.omega.2014.10.007
+                                                                                    10. Two-Dimensional Cutting Problem - IIASA PURE, accessed January 25, 2026, https://pure.iiasa.ac.at/id/file/7168
+                                                                                    11. The Cutting Stock Problem in the Wood Industry - AMS Dottorato, accessed January 25, 2026, https://amsdottorato.unibo.it/id/eprint/3734/1/MedinaDuran_Rosa_tesi.pdf
+                                                                                    12. Cutting Melamine Chip Free Strategy | Festool Owners Group, accessed January 25, 2026, https://festoolownersgroup.com/threads/cutting-melamine-chip-free-strategy.53808/
+                                                                                    13. (PDF) Two-stage two-dimensional guillotine cutting stock problems with usable leftover, accessed January 25, 2026, https://www.researchgate.net/publication/260412722_Two-stage_two-dimensional_guillotine_cutting_stock_problems_with_usable_leftover
+                                                                                    14. Optimizing 2D Cutting: A Bin Packing Approach to Minimize Scraps and Maximize Their Reusability - DROPS, accessed January 25, 2026, https://drops.dagstuhl.de/storage/00lipics/lipics-vol340-cp2025/LIPIcs.CP.2025.7/LIPIcs.CP.2025.7.pdf
+                                                                                    15. Bin packing problem - Wikipedia, accessed January 25, 2026, https://en.wikipedia.org/wiki/Bin_packing_problem
+                                                                                    16. Understanding the Bin Packing Problem and Its Optimization Strategies - 3DBinPacking, accessed January 25, 2026, https://www.3dbinpacking.com/en/blog/bin-packing-optimization-strategies/
+                                                                                    17. Two-Dimensional Bin Packing Problem with Guillotine Restrictions - AMS Tesi di Dottorato, accessed January 25, 2026, https://amsdottorato.unibo.it/id/eprint/6810/1/PhD_Pietrobuoni.pdf
+                                                                                    18. Rectangle Packing: An Incredibly Difficult Problem - Gorilla Sun, accessed January 25, 2026, https://www.gorillasun.de/blog/rectangle-packing-an-incredibly-difficult-problem/
+                                                                                    19. Texture packing algorithm - Game Development Stack Exchange, accessed January 25, 2026, https://gamedev.stackexchange.com/questions/2829/texture-packing-algorithm

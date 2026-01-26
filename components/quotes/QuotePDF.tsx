@@ -508,6 +508,11 @@ export const QuotePDFDownload: React.FC<QuotePDFDownloadProps> = ({
 
   return (
     <div className="flex items-center gap-2">
+      <Button size="sm" variant="outline" onClick={handleOpen} disabled={downloading} className="flex items-center gap-2">
+        <Eye size={16} />
+        <span className="hidden sm:inline">Preview PDF</span>
+        <span className="sm:hidden">Preview</span>
+      </Button>
       <Button size="sm" variant="outline" onClick={handleDownload} disabled={downloading} className="flex items-center gap-2">
         <Download size={16} />
         <span className="hidden sm:inline">{downloading ? 'Generating...' : 'Download PDF'}</span>

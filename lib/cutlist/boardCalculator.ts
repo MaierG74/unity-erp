@@ -57,7 +57,8 @@ const LAYER_THICKNESS_MM = 16;
 // ============================================================================
 
 /**
- * Calculate edge banding length for a single part
+ * Calculate edge banding length for a single part (legacy function).
+ * Convention: top/bottom edges = length dimension, left/right edges = width dimension.
  */
 function calculateEdgeBanding(
   part: CutlistPart,
@@ -66,10 +67,10 @@ function calculateEdgeBanding(
   const { length_mm, width_mm, band_edges } = part;
 
   let edgeLength = 0;
-  if (band_edges.top) edgeLength += width_mm;
-  if (band_edges.bottom) edgeLength += width_mm;
-  if (band_edges.left) edgeLength += length_mm;
-  if (band_edges.right) edgeLength += length_mm;
+  if (band_edges.top) edgeLength += length_mm;
+  if (band_edges.bottom) edgeLength += length_mm;
+  if (band_edges.left) edgeLength += width_mm;
+  if (band_edges.right) edgeLength += width_mm;
 
   return {
     length16mm: edgeLength * quantity,
@@ -79,6 +80,7 @@ function calculateEdgeBanding(
 
 /**
  * Calculate edge banding length for a part with specific edge config.
+ * Convention: top/bottom edges = length dimension, left/right edges = width dimension.
  */
 function calculateEdgeLengthMm(
   length_mm: number,
@@ -87,10 +89,10 @@ function calculateEdgeLengthMm(
   quantity: number
 ): number {
   let edgeLength = 0;
-  if (band_edges.top) edgeLength += width_mm;
-  if (band_edges.bottom) edgeLength += width_mm;
-  if (band_edges.left) edgeLength += length_mm;
-  if (band_edges.right) edgeLength += length_mm;
+  if (band_edges.top) edgeLength += length_mm;
+  if (band_edges.bottom) edgeLength += length_mm;
+  if (band_edges.left) edgeLength += width_mm;
+  if (band_edges.right) edgeLength += width_mm;
   return edgeLength * quantity;
 }
 
@@ -192,22 +194,29 @@ export function expandPartsWithLamination(
     const materialKey = part.material_id || defaultMaterialId || 'unassigned';
     const baseQty = part.quantity;
 
-    // Calculate edge thickness and add to edging requirements
+    // Calculate edge thickness based on lamination type
     const edgeThickness = getEdgeThickness(laminationType, part.lamination_config);
-    const edgeLength = calculateEdgeLengthMm(
-      part.length_mm,
-      part.width_mm,
-      part.band_edges,
-      baseQty
-    );
-    if (edgeLength > 0) {
-      const currentEdging = edgingByThickness.get(edgeThickness) || 0;
-      edgingByThickness.set(edgeThickness, currentEdging + edgeLength);
-    }
+
+    // Helper to add edging with correct quantity
+    const addEdging = (finishedPartCount: number) => {
+      // Edge banding goes on FINISHED parts, not individual pieces
+      const edgeLength = calculateEdgeLengthMm(
+        part.length_mm,
+        part.width_mm,
+        part.band_edges,
+        finishedPartCount
+      );
+      if (edgeLength > 0) {
+        const currentEdging = edgingByThickness.get(edgeThickness) || 0;
+        edgingByThickness.set(edgeThickness, currentEdging + edgeLength);
+      }
+    };
 
     switch (laminationType) {
       case 'none': {
-        // Single board - 1× primary
+        // Single board - each piece is a finished part
+        // Edge qty = piece qty
+        addEdging(baseQty);
         const expandedPart = toExpandedPart(part, baseQty, { materialId: materialKey });
         addToMaterialMap(primaryPartsByMaterial, materialKey, expandedPart);
         totalPrimaryParts += baseQty;
@@ -216,8 +225,10 @@ export function expandPartsWithLamination(
 
       case 'same-board': {
         // Same board lamination - pieces are paired during assembly
-        // Qty represents actual pieces to cut, NOT finished assemblies
-        // Example: Qty=4 means 4 pieces to cut, which become 2 finished 32mm legs
+        // Qty = pieces to cut, Finished parts = Qty ÷ 2
+        // Example: Qty=4 pieces → 2 finished 32mm legs → edge for 2 parts
+        const finishedParts = Math.floor(baseQty / 2);
+        addEdging(finishedParts);
         const expandedPart = toExpandedPart(part, baseQty, { materialId: materialKey });
         addToMaterialMap(primaryPartsByMaterial, materialKey, expandedPart);
         totalPrimaryParts += baseQty;
@@ -225,7 +236,10 @@ export function expandPartsWithLamination(
       }
 
       case 'with-backer': {
-        // 1× primary + 1× backer
+        // 1× primary + 1× backer per finished part
+        // Each piece becomes a finished part (primary + backer)
+        // Edge qty = piece qty (edging goes on the assembled part)
+        addEdging(baseQty);
         const backerKey = defaultBackerMaterialId || materialKey;
 
         // Primary part
@@ -249,11 +263,16 @@ export function expandPartsWithLamination(
         const config = part.lamination_config;
         if (!config || !config.layers || config.layers.length === 0) {
           // Fallback to single board if no config
+          addEdging(baseQty);
           const expandedPart = toExpandedPart(part, baseQty, { materialId: materialKey });
           addToMaterialMap(primaryPartsByMaterial, materialKey, expandedPart);
           totalPrimaryParts += baseQty;
           break;
         }
+
+        // Custom lamination: each "part" becomes one finished multi-layer assembly
+        // Edge qty = baseQty (one finished part per entry)
+        addEdging(baseQty);
 
         // Process each layer
         for (let layerIdx = 0; layerIdx < config.layers.length; layerIdx++) {
@@ -374,15 +393,17 @@ export function expandGroupsToPartSpecs(groups: CutlistGroup[]): BoardCalculatio
 
         case '32mm-both': {
           // Same board lamination - pieces are paired during assembly
-          // Qty represents actual pieces to cut, NOT finished assemblies
-          // Example: Qty=4 means 4 pieces to cut → 2 finished 32mm parts
+          // Qty = pieces to cut, Finished parts = Qty ÷ 2
+          // Example: Qty=4 pieces → 2 finished 32mm parts → edge for 2 parts
           const partSpec = toPartSpec(part, baseQty, true);
           const existing = primaryByMaterial.get(materialKey) || [];
           existing.push(partSpec);
           primaryByMaterial.set(materialKey, existing);
 
-          const edging = calculateEdgeBanding(part, baseQty);
-          edging32mm += edging.length16mm; // Same edge count, but 32mm width
+          // Edging is for FINISHED parts, not pieces
+          const finishedParts = Math.floor(baseQty / 2);
+          const edging = calculateEdgeBanding(part, finishedParts);
+          edging32mm += edging.length16mm;
           totalPrimaryParts += baseQty;
           break;
         }

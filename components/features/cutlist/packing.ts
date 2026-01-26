@@ -51,8 +51,37 @@ import {
   expandedPartsToPartSpecs,
 } from '@/lib/cutlist/boardCalculator';
 
+import { packWithStrips } from '@/lib/cutlist/stripPacker';
+
 // Re-export lamination expansion functions
 export { expandPartsWithLamination, expandedPartsToPartSpecs };
+
+// Export sort strategy type for external use
+export type SortStrategy = 'area' | 'length' | 'width' | 'perimeter';
+
+// =============================================================================
+// Guillotine Packer (NEW - Waste-Optimized)
+// =============================================================================
+
+// Re-export the new guillotine packer
+export {
+  GuillotinePacker,
+  packPartsGuillotine,
+  packWithStrategy,
+  toLayoutResult,
+  DEFAULT_PACKING_CONFIG,
+  type PackingConfig,
+  type GuillotinePackResult,
+  type SortStrategy as GuillotineSortStrategy,
+} from '@/lib/cutlist/guillotinePacker';
+
+// Re-export the strip packer (cut-minimizing algorithm)
+export {
+  packWithStrips,
+  calculateStripScore,
+  type StripPackResult,
+  type StripPackerConfig,
+} from '@/lib/cutlist/stripPacker';
 
 // ============================================================================
 // Internal Types
@@ -124,6 +153,54 @@ function shouldUse32mmEdging(part: PartSpec): boolean {
 // ============================================================================
 
 /**
+ * Sort parts using the specified strategy.
+ * All strategies sort descending (largest first) with deterministic tie-breakers.
+ */
+function sortByStrategy(
+  parts: Array<PartSpec & { uid: string }>,
+  strategy: SortStrategy
+): void {
+  parts.sort((a, b) => {
+    let primary: number;
+
+    switch (strategy) {
+      case 'area':
+        // Primary: area descending
+        primary = (b.length_mm * b.width_mm) - (a.length_mm * a.width_mm);
+        if (primary !== 0) return primary;
+        // Secondary: max edge descending
+        return Math.max(b.length_mm, b.width_mm) - Math.max(a.length_mm, a.width_mm) || a.id.localeCompare(b.id);
+
+      case 'length':
+        // Primary: length descending (good for grain-constrained tall parts)
+        primary = b.length_mm - a.length_mm;
+        if (primary !== 0) return primary;
+        // Secondary: width descending
+        return b.width_mm - a.width_mm || a.id.localeCompare(b.id);
+
+      case 'width':
+        // Primary: width descending
+        primary = b.width_mm - a.width_mm;
+        if (primary !== 0) return primary;
+        // Secondary: length descending
+        return b.length_mm - a.length_mm || a.id.localeCompare(b.id);
+
+      case 'perimeter':
+        // Primary: perimeter descending
+        const perimA = 2 * (a.length_mm + a.width_mm);
+        const perimB = 2 * (b.length_mm + b.width_mm);
+        primary = perimB - perimA;
+        if (primary !== 0) return primary;
+        // Secondary: area descending
+        return (b.length_mm * b.width_mm) - (a.length_mm * a.width_mm) || a.id.localeCompare(b.id);
+
+      default:
+        return 0;
+    }
+  });
+}
+
+/**
  * Greedy best-fit into free rectangles. Creates new sheet when needed (unless singleSheetOnly).
  * Not optimal; intended as fast MVP.
  *
@@ -132,10 +209,11 @@ function shouldUse32mmEdging(part: PartSpec): boolean {
 export function packPartsIntoSheets(
   parts: PartSpec[],
   stock: StockSheetSpec[],
-  opts: PackOptions = {}
+  opts: PackOptions & { sortStrategy?: SortStrategy } = {}
 ): LayoutResult {
   const allowRotation = opts.allowRotation !== false;
   const kerf = Math.max(0, stock[0]?.kerf_mm || 0);
+  const sortStrategy = opts.sortStrategy || 'area';
   // Thresholds for pruning tiny scraps and avoiding slivers
   const MIN_DIMENSION_MM = Math.max(kerf, 10);
 
@@ -146,16 +224,8 @@ export function packPartsIntoSheets(
     for (let i = 0; i < count; i++) expanded.push({ ...p, uid: `${p.id}#${i + 1}` });
   }
 
-  // Sort by area desc then max edge desc
-  expanded.sort((a, b) => {
-    const areaA = a.length_mm * a.width_mm;
-    const areaB = b.length_mm * b.width_mm;
-    if (areaA !== areaB) return areaB - areaA;
-    const edgeCmp = Math.max(b.length_mm, b.width_mm) - Math.max(a.length_mm, a.width_mm);
-    if (edgeCmp !== 0) return edgeCmp;
-    // Deterministic tie-breaker
-    return a.id.localeCompare(b.id);
-  });
+  // Sort using the specified strategy
+  sortByStrategy(expanded, sortStrategy);
 
   // Initialize result with edging tracking by thickness
   const edgingByThickness = new Map<number, number>();
@@ -307,6 +377,158 @@ export function packPartsIntoSheets(
   }
 
   return result;
+}
+
+// ============================================================================
+// Multi-Sort Optimized Packing
+// ============================================================================
+
+/**
+ * Pack parts using multiple sort strategies and return the best result.
+ *
+ * This function tries 4 different sorting strategies:
+ * - area: Largest area first (default, good for general use)
+ * - length: Longest parts first (good for grain-constrained tall parts)
+ * - width: Widest parts first (good for grain-constrained wide parts)
+ * - perimeter: Largest perimeter first (balances tall and wide)
+ *
+ * The strategy that produces the fewest sheets wins.
+ * In case of a tie, the one with highest yield (least waste) wins.
+ *
+ * For jobs with strict grain requirements, this can save 1+ sheets by finding
+ * a better packing order.
+ */
+export function packPartsOptimized(
+  parts: PartSpec[],
+  stock: StockSheetSpec[],
+  opts: PackOptions = {}
+): LayoutResult & { strategyUsed: SortStrategy } {
+  const strategies: SortStrategy[] = ['area', 'length', 'width', 'perimeter'];
+
+  let bestResult: LayoutResult | null = null;
+  let bestStrategy: SortStrategy = 'area';
+  let bestSheetCount = Infinity;
+  let bestYield = 0;
+
+  for (const strategy of strategies) {
+    const result = packPartsIntoSheets(parts, stock, { ...opts, sortStrategy: strategy });
+
+    const sheetCount = result.sheets.length;
+    const totalSheetArea = sheetCount * (stock[0]?.length_mm || 0) * (stock[0]?.width_mm || 0);
+    const yieldPct = totalSheetArea > 0 ? result.stats.used_area_mm2 / totalSheetArea : 0;
+
+    // Better if: fewer sheets, or same sheets with higher yield
+    const isBetter =
+      sheetCount < bestSheetCount ||
+      (sheetCount === bestSheetCount && yieldPct > bestYield);
+
+    if (isBetter) {
+      bestResult = result;
+      bestStrategy = strategy;
+      bestSheetCount = sheetCount;
+      bestYield = yieldPct;
+    }
+  }
+
+  // Return best result (fallback to area strategy if something went wrong)
+  if (!bestResult) {
+    bestResult = packPartsIntoSheets(parts, stock, { ...opts, sortStrategy: 'area' });
+  }
+
+  return {
+    ...bestResult,
+    strategyUsed: bestStrategy,
+  };
+}
+
+// ============================================================================
+// Guillotine Optimized Packing (NEW - Waste-Consolidated)
+// ============================================================================
+
+import {
+  packPartsGuillotine as packGuillotine,
+  toLayoutResult as guillotineToLayout,
+  type GuillotinePackResult,
+  type PackingConfig,
+} from '@/lib/cutlist/guillotinePacker';
+
+/**
+ * Algorithm choice for packing.
+ * - 'strip': Cut-minimizing algorithm using vertical sections (best for guillotine cutting)
+ * - 'guillotine': Waste-optimized guillotine packer
+ * - 'legacy': Original greedy best-fit algorithm
+ */
+export type PackingAlgorithm = 'strip' | 'guillotine' | 'legacy';
+
+/**
+ * Extended pack options with algorithm choice.
+ */
+export interface ExtendedPackOptions extends PackOptions {
+  /** Which packing algorithm to use. Default: 'guillotine' */
+  algorithm?: PackingAlgorithm;
+  /** Configuration for guillotine packer (only used if algorithm='guillotine') */
+  packingConfig?: Partial<PackingConfig>;
+}
+
+/**
+ * Pack parts using the best available algorithm.
+ *
+ * This is the recommended entry point for packing. It uses the strip
+ * algorithm by default, which produces optimal layouts for guillotine cutting
+ * (minimizes cuts and matches Cutlist Optimizer quality).
+ *
+ * @param parts - Parts to pack
+ * @param stock - Available stock sheets
+ * @param opts - Packing options including algorithm choice
+ * @returns LayoutResult with best packing found
+ */
+export function packPartsSmartOptimized(
+  parts: PartSpec[],
+  stock: StockSheetSpec[],
+  opts: ExtendedPackOptions = {}
+): LayoutResult & { strategyUsed: string; algorithm: PackingAlgorithm } {
+  const algorithm = opts.algorithm ?? 'strip';
+
+  if (algorithm === 'strip') {
+    // Use the new strip-based packer for optimal guillotine cutting
+    const sheet = stock[0];
+    if (!sheet) {
+      return {
+        sheets: [],
+        stats: {
+          used_area_mm2: 0,
+          waste_area_mm2: 0,
+          cuts: 0,
+          cut_length_mm: 0,
+          edgebanding_length_mm: 0,
+        },
+        strategyUsed: 'strip',
+        algorithm: 'strip',
+      };
+    }
+    const result = packWithStrips(parts, sheet);
+    return {
+      ...result,
+      strategyUsed: 'vertical-first',
+      algorithm: 'strip',
+    };
+  }
+
+  if (algorithm === 'guillotine') {
+    const result = packGuillotine(parts, stock, opts.packingConfig);
+    return {
+      ...guillotineToLayout(result),
+      strategyUsed: result.strategyUsed,
+      algorithm: 'guillotine',
+    };
+  }
+
+  // Legacy algorithm
+  const legacyResult = packPartsOptimized(parts, stock, opts);
+  return {
+    ...legacyResult,
+    algorithm: 'legacy',
+  };
 }
 
 // ============================================================================

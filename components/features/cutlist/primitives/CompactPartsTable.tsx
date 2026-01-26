@@ -1,8 +1,8 @@
 'use client';
 
 import * as React from 'react';
-import { memo, useCallback, useRef, useState } from 'react';
-import { Copy, MoreVertical, Trash2 } from 'lucide-react';
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { Copy, MoreVertical, Plus, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -78,6 +78,14 @@ export interface CompactPartsTableProps {
   edgingOptions?: EdgeBandingOption[];
   /** Optional className for the container */
   className?: string;
+  /** Callback when quick-add row has pending data (true) or is empty (false) */
+  onQuickAddPending?: (hasPending: boolean) => void;
+}
+
+/** Ref handle for CompactPartsTable */
+export interface CompactPartsTableRef {
+  /** Activate the quick-add row (converts pending data to a real part) */
+  activateQuickAdd: () => void;
 }
 
 // =============================================================================
@@ -132,7 +140,7 @@ function createEmptyPart(materialId?: string): CompactPart {
     length_mm: 0,
     width_mm: 0,
     quantity: 1,
-    grain: 'any',
+    grain: 'length',
     band_edges: { ...DEFAULT_BAND_EDGES },
     material_id: materialId,
     lamination_type: 'none',
@@ -227,6 +235,13 @@ const CompactSelect = memo(function CompactSelect({
   placeholder,
   className,
 }: CompactSelectProps) {
+  // Stop Enter key from bubbling to parent row (which would create new row)
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.stopPropagation();
+    }
+  }, []);
+
   return (
     <Select value={value} onValueChange={onValueChange}>
       <SelectTrigger
@@ -237,6 +252,7 @@ const CompactSelect = memo(function CompactSelect({
           'transition-colors',
           className
         )}
+        onKeyDown={handleKeyDown}
       >
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
@@ -283,6 +299,44 @@ const PartRow = memo(function PartRow({
   const [edgePopoverOpen, setEdgePopoverOpen] = useState(false);
   const [grainTooltipOpen, setGrainTooltipOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const rowRef = useRef<HTMLTableRowElement>(null);
+
+  // Auto-add when focus leaves the quick-add row (if it has data)
+  const handleRowBlur = useCallback(
+    (e: React.FocusEvent) => {
+      if (!isQuickAdd || !onQuickAddActivate) return;
+
+      // Use setTimeout to allow focus to settle on the new element
+      setTimeout(() => {
+        const activeElement = document.activeElement;
+        const rowElement = rowRef.current;
+
+        // Check if focus moved outside this row
+        if (rowElement && !rowElement.contains(activeElement)) {
+          // Don't auto-add if focus moved to a popover/dropdown portal
+          // Radix UI renders these outside the DOM tree, so we check for their data attributes
+          const isInRadixPortal = activeElement?.closest(
+            '[data-radix-popper-content-wrapper], [data-radix-select-content], [data-radix-dropdown-menu-content], [data-radix-popover-content], [role="listbox"], [role="dialog"]'
+          );
+
+          if (isInRadixPortal) {
+            return; // Focus is in a dropdown/popover, don't auto-add yet
+          }
+
+          // Check if the part has meaningful data (not just defaults)
+          const hasData =
+            part.name.trim() !== '' ||
+            part.length_mm > 0 ||
+            part.width_mm > 0;
+
+          if (hasData) {
+            onQuickAddActivate();
+          }
+        }
+      }, 0);
+    },
+    [isQuickAdd, onQuickAddActivate, part.name, part.length_mm, part.width_mm]
+  );
 
   // Material options for select
   const materialSelectOptions = materialOptions.map((m) => ({
@@ -353,14 +407,119 @@ const PartRow = memo(function PartRow({
     [index, onUpdate]
   );
 
+  // Toggle a single edge
+  const toggleEdge = useCallback(
+    (edge: 'top' | 'right' | 'bottom' | 'left') => {
+      const currentEdges = part.band_edges || DEFAULT_BAND_EDGES;
+      onUpdate(index, {
+        band_edges: {
+          ...currentEdges,
+          [edge]: !currentEdges[edge],
+        } as Required<BandEdges>,
+      });
+    },
+    [index, onUpdate, part.band_edges]
+  );
+
+  // Toggle all edges
+  const toggleAllEdges = useCallback(() => {
+    const currentEdges = part.band_edges || DEFAULT_BAND_EDGES;
+    const allActive = currentEdges.top && currentEdges.right && currentEdges.bottom && currentEdges.left;
+    const newState = !allActive;
+    onUpdate(index, {
+      band_edges: {
+        top: newState,
+        right: newState,
+        bottom: newState,
+        left: newState,
+      },
+    });
+  }, [index, onUpdate, part.band_edges]);
+
+  // Keyboard handler for edge banding
+  const handleEdgeKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      // Arrow keys toggle edges
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleEdge('top');
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleEdge('bottom');
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleEdge('left');
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleEdge('right');
+      } else if (e.key === 'a' || e.key === 'A') {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleAllEdges();
+      } else if (e.key === ' ') {
+        // Space opens the popover for visual editing
+        e.preventDefault();
+        e.stopPropagation();
+        setEdgePopoverOpen(true);
+      } else if (e.key === 'Enter') {
+        // Enter moves to next row (don't open popover)
+        e.stopPropagation();
+        // Let the row's keydown handle moving to next row
+        if (isQuickAdd && onQuickAddActivate) {
+          onQuickAddActivate();
+        }
+        const nextRow = document.querySelector<HTMLInputElement>(
+          `[data-row-index="${index + 1}"] input:first-of-type`
+        );
+        nextRow?.focus();
+      }
+    },
+    [toggleEdge, toggleAllEdges, isQuickAdd, onQuickAddActivate, index]
+  );
+
   const handleGrainToggle = useCallback(() => {
     const newGrain = nextGrainOrientation(part.grain || 'any');
     onUpdate(index, { grain: newGrain });
   }, [index, onUpdate, part.grain]);
 
+  const handleGrainKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      // Space or Enter to toggle
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        handleGrainToggle();
+      }
+      // Arrow keys to cycle
+      if (e.key === 'ArrowUp' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        handleGrainToggle();
+      }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        // Reverse cycle
+        const order: GrainOrientation[] = ['any', 'length', 'width'];
+        const currentIndex = order.indexOf(part.grain || 'any');
+        const newGrain = order[(currentIndex - 1 + order.length) % order.length];
+        onUpdate(index, { grain: newGrain });
+      }
+    },
+    [handleGrainToggle, index, onUpdate, part.grain]
+  );
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Enter') {
+        // Don't handle Enter if it's from a select/dropdown - let them handle it
+        const target = e.target as HTMLElement;
+        const isInSelect = target.closest('[role="combobox"], [data-radix-select-trigger], [data-radix-collection-item]');
+        if (isInSelect) {
+          return; // Let the select handle Enter
+        }
+
         // If quick-add row, activate it first (convert to real part)
         if (isQuickAdd && onQuickAddActivate) {
           onQuickAddActivate();
@@ -386,22 +545,45 @@ const PartRow = memo(function PartRow({
 
   return (
     <TableRow
+      ref={isQuickAdd ? rowRef : undefined}
       data-row-index={index}
       className={cn(
         'h-10',
         isQuickAdd && 'bg-muted/30 hover:bg-muted/50'
       )}
       onKeyDown={handleKeyDown}
+      onBlur={isQuickAdd ? handleRowBlur : undefined}
     >
       {/* ID / Name */}
       <TableCell className="p-1">
-        <CompactInput
-          ref={inputRef}
-          value={part.name}
-          onChange={handleNameChange}
-          placeholder={isQuickAdd ? 'Add part...' : 'ID'}
-          className="min-w-[80px]"
-        />
+        {isQuickAdd ? (
+          <TooltipProvider delayDuration={500}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div>
+                  <CompactInput
+                    ref={inputRef}
+                    value={part.name}
+                    onChange={handleNameChange}
+                    placeholder="Add part..."
+                    className="min-w-[80px]"
+                  />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" align="start">
+                <p className="text-xs">Enter details, then press <kbd className="px-1 py-0.5 bg-muted rounded text-[10px]">Enter</kbd> or click <Plus className="inline h-3 w-3" /> to add</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
+          <CompactInput
+            ref={inputRef}
+            value={part.name}
+            onChange={handleNameChange}
+            placeholder="ID"
+            className="min-w-[80px]"
+          />
+        )}
       </TableCell>
 
       {/* Material */}
@@ -423,7 +605,7 @@ const PartRow = memo(function PartRow({
           onChange={handleLengthChange}
           placeholder="L"
           min={0}
-          className="w-16"
+          className="w-20"
         />
       </TableCell>
 
@@ -435,7 +617,7 @@ const PartRow = memo(function PartRow({
           onChange={handleWidthChange}
           placeholder="W"
           min={0}
-          className="w-16"
+          className="w-20"
         />
       </TableCell>
 
@@ -458,8 +640,12 @@ const PartRow = memo(function PartRow({
               <button
                 type="button"
                 onClick={handleGrainToggle}
+                onKeyDown={handleGrainKeyDown}
                 onMouseEnter={() => setGrainTooltipOpen(true)}
                 onMouseLeave={() => setGrainTooltipOpen(false)}
+                onFocus={() => setGrainTooltipOpen(true)}
+                onBlur={() => setGrainTooltipOpen(false)}
+                tabIndex={0}
                 className={cn(
                   'flex items-center justify-center',
                   'h-8 w-8 rounded-md',
@@ -472,13 +658,14 @@ const PartRow = memo(function PartRow({
                   part.grain === 'length' && 'text-primary',
                   part.grain === 'width' && 'text-primary'
                 )}
-                aria-label={getGrainOption(part.grain || 'any').label}
+                aria-label={`Grain: ${getGrainOption(part.grain || 'any').label}. Press Space to toggle.`}
               >
                 {getGrainOption(part.grain || 'any').icon}
               </button>
             </TooltipTrigger>
             <TooltipContent side="top" className="text-xs">
-              {getGrainOption(part.grain || 'any').label}
+              <p>{getGrainOption(part.grain || 'any').label}</p>
+              <p className="text-muted-foreground">Space/arrows to change</p>
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -503,38 +690,71 @@ const PartRow = memo(function PartRow({
 
       {/* Edge Banding */}
       <TableCell className="p-1">
-        <EdgeBandingPopover
-          length={part.length_mm || 0}
-          width={part.width_mm || 0}
-          edges={part.band_edges}
-          onEdgesChange={handleEdgesChange}
-          edgingOptions={edgingOptions}
-          open={edgePopoverOpen}
-          onOpenChange={setEdgePopoverOpen}
-          trigger={
-            <button
-              type="button"
-              className={cn(
-                'flex items-center justify-center',
-                'h-8 w-8 rounded-md',
-                'border-transparent bg-transparent',
-                'hover:bg-muted/50',
-                'transition-colors',
-                'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1'
-              )}
-            >
-              <EdgeIndicator
-                edges={part.band_edges}
-                size="sm"
-              />
-            </button>
-          }
-        />
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div>
+                <EdgeBandingPopover
+                  length={part.length_mm || 0}
+                  width={part.width_mm || 0}
+                  edges={part.band_edges}
+                  onEdgesChange={handleEdgesChange}
+                  edgingOptions={edgingOptions}
+                  open={edgePopoverOpen}
+                  onOpenChange={setEdgePopoverOpen}
+                  trigger={
+                    <button
+                      type="button"
+                      onKeyDown={handleEdgeKeyDown}
+                      tabIndex={0}
+                      className={cn(
+                        'flex items-center justify-center',
+                        'h-8 w-8 rounded-md',
+                        'border-transparent bg-transparent',
+                        'hover:bg-muted/50',
+                        'transition-colors',
+                        'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1'
+                      )}
+                    >
+                      <EdgeIndicator
+                        edges={part.band_edges}
+                        size="sm"
+                      />
+                    </button>
+                  }
+                />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs">
+              <p className="font-medium">Edge Banding</p>
+              <p className="text-muted-foreground">Arrows: toggle edges | A: all | Space: popover</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </TableCell>
 
       {/* Actions */}
       <TableCell className="p-1 w-10">
-        {!isQuickAdd && (
+        {isQuickAdd ? (
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-muted-foreground hover:text-primary"
+                  onClick={onQuickAddActivate}
+                >
+                  <Plus className="h-4 w-4" />
+                  <span className="sr-only">Add part</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">
+                <p>Add part (Enter)</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -594,18 +814,41 @@ const PartRow = memo(function PartRow({
  *
  * Note: Consider virtualization for large part lists (100+ parts)
  */
-export const CompactPartsTable = memo(function CompactPartsTable({
+export const CompactPartsTable = memo(forwardRef<CompactPartsTableRef, CompactPartsTableProps>(function CompactPartsTable({
   parts,
   onPartsChange,
   materialOptions,
   onOpenCustomLamination,
   edgingOptions,
   className,
-}: CompactPartsTableProps) {
+  onQuickAddPending,
+}, ref) {
   // Quick-add state
   const [quickAddPart, setQuickAddPart] = useState<CompactPart>(() =>
     createEmptyPart(materialOptions[0]?.id)
   );
+
+  // Notify parent when quick-add has pending data
+  useEffect(() => {
+    if (onQuickAddPending) {
+      const hasPending = !isPartEmpty(quickAddPart);
+      onQuickAddPending(hasPending);
+    }
+  }, [quickAddPart, onQuickAddPending]);
+
+  // Expose activateQuickAdd to parent via ref
+  useImperativeHandle(ref, () => ({
+    activateQuickAdd: () => {
+      if (!isPartEmpty(quickAddPart)) {
+        const newPart: CompactPart = {
+          ...quickAddPart,
+          id: generatePartId(),
+        };
+        onPartsChange([...parts, newPart]);
+        setQuickAddPart(createEmptyPart(materialOptions[0]?.id));
+      }
+    },
+  }), [quickAddPart, parts, onPartsChange, materialOptions]);
 
   // Update handler
   const handleUpdate = useCallback(
@@ -675,8 +918,8 @@ export const CompactPartsTable = memo(function CompactPartsTable({
           <TableRow className="h-10">
             <TableHead className="px-2 py-1 font-medium text-xs">ID</TableHead>
             <TableHead className="px-2 py-1 font-medium text-xs">Material</TableHead>
-            <TableHead className="px-2 py-1 font-medium text-xs w-16">L</TableHead>
-            <TableHead className="px-2 py-1 font-medium text-xs w-16">W</TableHead>
+            <TableHead className="px-2 py-1 font-medium text-xs w-20">L</TableHead>
+            <TableHead className="px-2 py-1 font-medium text-xs w-20">W</TableHead>
             <TableHead className="px-2 py-1 font-medium text-xs w-12">Qty</TableHead>
             <TableHead className="px-2 py-1 font-medium text-xs w-10" title="Grain Direction">Grain</TableHead>
             <TableHead className="px-2 py-1 font-medium text-xs">Lam</TableHead>
@@ -717,6 +960,6 @@ export const CompactPartsTable = memo(function CompactPartsTable({
       </Table>
     </div>
   );
-});
+}));
 
 export default CompactPartsTable;

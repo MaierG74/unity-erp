@@ -7,6 +7,7 @@ export { GroupCard } from './GroupCard';
 export {
   CompactPartsTable,
   type CompactPartsTableProps,
+  type CompactPartsTableRef,
   type CompactPart,
   type LaminationType,
   type MaterialOption as CompactMaterialOption,

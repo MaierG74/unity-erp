@@ -231,6 +231,48 @@ For authenticated testing, always test manually in your regular browser.
 - **Always update both** global and project MCP config files
 - **Always restart Claude Code** after MCP configuration changes
 
+### Troubleshooting Claude in Chrome Extension
+
+**Problem: "Browser extension is not connected" error**
+
+This happens when the Chrome extension's native messaging host is configured to point to Claude Desktop instead of Claude Code CLI. Both apps use the same Chrome extension, but the config can only point to one at a time.
+
+**Diagnosis:**
+```bash
+# Check the native messaging host configs
+cat ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/com.anthropic.claude_browser_extension.json
+```
+
+If the `path` points to `/Applications/Claude.app/...`, it's configured for Claude Desktop, not Claude Code CLI.
+
+**Fix:**
+```bash
+# 1. Backup the original config
+cp ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/com.anthropic.claude_browser_extension.json \
+   ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/com.anthropic.claude_browser_extension.json.backup
+
+# 2. Update the config to point to Claude Code CLI
+cat > ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/com.anthropic.claude_browser_extension.json << 'EOF'
+{
+  "name": "com.anthropic.claude_browser_extension",
+  "description": "Claude Browser Extension Native Host",
+  "path": "/Users/gregmaier/.claude/chrome/chrome-native-host",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://dihbgbndebgnbjfmelmegjepbnfkhlgni/",
+    "chrome-extension://fcoeoabgfenejglbffodgkkbkcdhcgfn/",
+    "chrome-extension://dngcpimnedloihjnnfngkgjoidhnaolf/"
+  ]
+}
+EOF
+
+# 3. Fully quit Chrome (Cmd+Q) and restart it
+```
+
+**Note:** If you update or reinstall Claude Desktop, it may overwrite this config and you'll need to re-apply the fix.
+
+**Reference:** https://github.com/anthropics/claude-code/issues/20298
+
 ## Development Commands
 
 ### Core Commands

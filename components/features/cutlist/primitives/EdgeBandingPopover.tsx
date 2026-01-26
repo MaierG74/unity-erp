@@ -155,7 +155,19 @@ export const EdgeBandingPopover = memo(function EdgeBandingPopover({
     [edges, onEdgesChange]
   );
 
+  const toggleAll = useCallback(() => {
+    const allActive = edges.top && edges.right && edges.bottom && edges.left;
+    const newState = !allActive;
+    onEdgesChange({
+      top: newState,
+      right: newState,
+      bottom: newState,
+      left: newState,
+    });
+  }, [edges, onEdgesChange]);
+
   const activeCount = Object.values(edges).filter(Boolean).length;
+  const allActive = activeCount === 4;
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -196,8 +208,22 @@ export const EdgeBandingPopover = memo(function EdgeBandingPopover({
                 'bg-card',
               )}
             >
-              {/* Center dimension label */}
-              <div className="absolute inset-0 flex items-center justify-center">
+              {/* Center: All button + dimension label */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
+                <button
+                  type="button"
+                  onClick={toggleAll}
+                  className={cn(
+                    'px-3 py-1 rounded-md text-xs font-medium',
+                    'transition-all duration-150',
+                    allActive
+                      ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                      : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground border border-dashed border-muted-foreground/30',
+                  )}
+                  title={allActive ? 'Remove all edge banding' : 'Add banding to all edges'}
+                >
+                  {allActive ? 'Clear All' : 'All Edges'}
+                </button>
                 <span className="text-xs text-muted-foreground">
                   {length} x {width}
                 </span>
