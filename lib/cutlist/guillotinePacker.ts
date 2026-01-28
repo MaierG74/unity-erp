@@ -51,6 +51,10 @@ export interface PackingConfig {
   touchingBonus: number;
   /** Bonus for perfect fit (one dimension matches exactly). Default: 1,000 */
   perfectFitBonus: number;
+  /** Weight for offcut concentration bonus (higher = favor consolidated waste). Default: 2000 */
+  concentrationWeight: number;
+  /** Penalty per additional free rectangle created. Default: 150 */
+  fragmentationPenalty: number;
 }
 
 /**
@@ -64,6 +68,8 @@ export const DEFAULT_PACKING_CONFIG: PackingConfig = {
   subOptimalPenalty: 2_000,
   touchingBonus: 500,
   perfectFitBonus: 1_000,
+  concentrationWeight: 2000,
+  fragmentationPenalty: 150,
 };
 
 // =============================================================================
@@ -127,13 +133,17 @@ export type SortStrategy =
  */
 export interface GuillotinePackResult extends LayoutResult {
   /** The sort strategy that produced this result */
-  strategyUsed: SortStrategy;
+  strategyUsed: SortStrategy | string;
   /** Remaining free rectangles (for visualization/debugging) */
   freeRects: FreeRect[];
   /** Usable offcuts above threshold */
   usableOffcuts: FreeRect[];
   /** Largest single offcut area */
   largestOffcutArea: number;
+  /** Concentration ratio: largestOffcutArea / totalOffcutArea (1.0 = all waste in one piece) */
+  offcutConcentration: number;
+  /** Number of free rectangle fragments */
+  fragmentCount: number;
 }
 
 // =============================================================================
@@ -174,7 +184,113 @@ function getValidOrientations(
 }
 
 /**
- * Calculate placement score using BSSF with waste penalties.
+ * Result of simulating a split operation.
+ */
+interface SplitSimulation {
+  /** Free rectangles that would result from this split */
+  rects: FreeRect[];
+  /** Area of the largest resulting rectangle */
+  largestArea: number;
+  /** Total area of all resulting rectangles */
+  totalArea: number;
+  /** Concentration ratio: largestArea / totalArea (1.0 = all waste in one piece) */
+  concentration: number;
+  /** Number of resulting fragments */
+  fragmentCount: number;
+}
+
+/**
+ * Simulate a split operation without modifying state.
+ * Used for offcut-aware scoring.
+ */
+function simulateSplit(
+  freeRect: FreeRect,
+  partW: number,
+  partH: number,
+  minDimension: number,
+  splitHorizontal: boolean
+): SplitSimulation {
+  const remRightW = freeRect.w - partW;
+  const remTopH = freeRect.h - partH;
+  const rects: FreeRect[] = [];
+
+  if (splitHorizontal) {
+    // Split horizontally - top remnant gets full width
+    if (remRightW > minDimension) {
+      rects.push({
+        x: freeRect.x + partW,
+        y: freeRect.y,
+        w: remRightW,
+        h: partH,
+      });
+    }
+    if (remTopH > minDimension) {
+      rects.push({
+        x: freeRect.x,
+        y: freeRect.y + partH,
+        w: freeRect.w,
+        h: remTopH,
+      });
+    }
+  } else {
+    // Split vertically - right remnant gets full height
+    if (remTopH > minDimension) {
+      rects.push({
+        x: freeRect.x,
+        y: freeRect.y + partH,
+        w: partW,
+        h: remTopH,
+      });
+    }
+    if (remRightW > minDimension) {
+      rects.push({
+        x: freeRect.x + partW,
+        y: freeRect.y,
+        w: remRightW,
+        h: freeRect.h,
+      });
+    }
+  }
+
+  const areas = rects.map((r) => r.w * r.h);
+  const largestArea = areas.length > 0 ? Math.max(...areas) : 0;
+  const totalArea = areas.reduce((sum, a) => sum + a, 0);
+  const concentration = totalArea > 0 ? largestArea / totalArea : 1;
+
+  return {
+    rects,
+    largestArea,
+    totalArea,
+    concentration,
+    fragmentCount: rects.length,
+  };
+}
+
+/**
+ * Evaluate both split directions and return the better one.
+ */
+function getBestSplit(
+  freeRect: FreeRect,
+  partW: number,
+  partH: number,
+  minDimension: number
+): { horizontal: boolean; simulation: SplitSimulation } {
+  const horizSim = simulateSplit(freeRect, partW, partH, minDimension, true);
+  const vertSim = simulateSplit(freeRect, partW, partH, minDimension, false);
+
+  // Score each split: higher concentration is better, fewer fragments is better
+  // Also prefer keeping larger areas (better for future placements)
+  const horizScore = horizSim.concentration * horizSim.largestArea - horizSim.fragmentCount * 10000;
+  const vertScore = vertSim.concentration * vertSim.largestArea - vertSim.fragmentCount * 10000;
+
+  if (horizScore >= vertScore) {
+    return { horizontal: true, simulation: horizSim };
+  }
+  return { horizontal: false, simulation: vertSim };
+}
+
+/**
+ * Calculate placement score using BSSF with waste penalties and offcut-aware scoring.
  * Lower score = better placement.
  */
 function calculatePlacementScore(
@@ -218,13 +334,31 @@ function calculatePlacementScore(
   if (freeRect.y === 0) touchingEdges++; // Bottom edge of sheet
   score -= touchingEdges * config.touchingBonus;
 
+  // === OFFCUT-AWARE SCORING ===
+  // Simulate the best split and score based on waste consolidation
+  const { simulation } = getBestSplit(freeRect, partW, partH, config.minUsableDimension);
+
+  // Concentration bonus: prefer placements that keep waste consolidated
+  // concentration of 1.0 means all remaining area is in one piece (ideal)
+  score -= simulation.concentration * config.concentrationWeight;
+
+  // Fragmentation penalty: penalize creating many small free rectangles
+  score += simulation.fragmentCount * config.fragmentationPenalty;
+
+  // Bonus for larger remaining offcut (relative to original rect)
+  // This encourages keeping big usable pieces
+  const originalArea = freeRect.w * freeRect.h;
+  if (originalArea > 0) {
+    const largestOffcutRatio = simulation.largestArea / originalArea;
+    score -= largestOffcutRatio * 500; // Bonus for preserving large offcuts
+  }
+
   return score;
 }
 
 /**
- * Split a free rectangle after placing a part using SSLAS strategy.
- * SSLAS = Split-Shorter-Leftover-Axis
- * Chooses the split that maximizes the largest remaining rectangle.
+ * Split a free rectangle after placing a part using offcut-aware strategy.
+ * Uses getBestSplit() to choose the split that best consolidates waste.
  */
 function splitFreeRect(
   freeRect: FreeRect,
@@ -233,61 +367,9 @@ function splitFreeRect(
   _kerf: number, // kerf already included in partW/partH
   minDimension: number
 ): FreeRect[] {
-  // partW and partH already include kerf, so no need to subtract it again
-  const remRightW = freeRect.w - partW;
-  const remTopH = freeRect.h - partH;
-
-  // Calculate area of largest remnant for each split option
-  // Split Horizontal: Top remnant gets full width
-  const areaIfSplitHorz = freeRect.w * Math.max(0, remTopH);
-  // Split Vertical: Right remnant gets full height
-  const areaIfSplitVert = Math.max(0, remRightW) * freeRect.h;
-
-  const result: FreeRect[] = [];
-
-  if (areaIfSplitHorz >= areaIfSplitVert) {
-    // Split horizontally - top remnant gets full width (better for waste consolidation)
-    // Right remnant (beside the part)
-    if (remRightW > minDimension) {
-      result.push({
-        x: freeRect.x + partW, // partW already includes kerf
-        y: freeRect.y,
-        w: remRightW,
-        h: partH, // Only as tall as the part
-      });
-    }
-    // Top remnant (above the part) - full width
-    if (remTopH > minDimension) {
-      result.push({
-        x: freeRect.x,
-        y: freeRect.y + partH, // partH already includes kerf
-        w: freeRect.w, // Full width of original rect
-        h: remTopH,
-      });
-    }
-  } else {
-    // Split vertically - right remnant gets full height (better for this case)
-    // Top remnant (above the part)
-    if (remTopH > minDimension) {
-      result.push({
-        x: freeRect.x,
-        y: freeRect.y + partH, // partH already includes kerf
-        w: partW, // Only as wide as the part
-        h: remTopH,
-      });
-    }
-    // Right remnant (beside the part) - full height
-    if (remRightW > minDimension) {
-      result.push({
-        x: freeRect.x + partW, // partW already includes kerf
-        y: freeRect.y,
-        w: remRightW,
-        h: freeRect.h, // Full height of original rect
-      });
-    }
-  }
-
-  return result;
+  // Use the offcut-aware split selection
+  const { simulation } = getBestSplit(freeRect, partW, partH, minDimension);
+  return simulation.rects;
 }
 
 /**
@@ -533,6 +615,7 @@ export class GuillotinePacker {
     // Record placement (store actual part dimensions, not inflated)
     this.placements.push({
       part_id: part.id,
+      label: part.label,
       x,
       y,
       w: orientation.w - this.kerf,
@@ -691,8 +774,11 @@ export function packWithStrategy(
       Math.min(r.w, r.h) >= fullConfig.minUsableDimension &&
       r.w * r.h >= fullConfig.minUsableArea
   );
-  const largestOffcutArea =
-    usableOffcuts.length > 0 ? Math.max(...usableOffcuts.map((r) => r.w * r.h)) : 0;
+  const allOffcutAreas = freeRects.map((r) => r.w * r.h);
+  const largestOffcutArea = allOffcutAreas.length > 0 ? Math.max(...allOffcutAreas) : 0;
+  const totalOffcutArea = allOffcutAreas.reduce((sum, a) => sum + a, 0);
+  const offcutConcentration = totalOffcutArea > 0 ? largestOffcutArea / totalOffcutArea : 1;
+  const fragmentCount = freeRects.length;
 
   // Calculate edge banding (basic - just sum of edges)
   let edgebandingLength = 0;
@@ -762,6 +848,159 @@ export function packWithStrategy(
     freeRects,
     usableOffcuts,
     largestOffcutArea,
+    offcutConcentration,
+    fragmentCount,
+  };
+}
+
+/**
+ * Overloaded version that accepts pre-expanded and sorted parts with a custom strategy name.
+ * Used internally for multi-pass optimization.
+ */
+function packWithExpandedParts(
+  sortedParts: ExpandedPartInstance[],
+  stock: StockSheetSpec,
+  strategyName: string,
+  originalParts: PartSpec[],
+  config: Partial<PackingConfig> = {}
+): GuillotinePackResult {
+  const kerf = stock.kerf_mm ?? 4;
+  const fullConfig = { ...DEFAULT_PACKING_CONFIG, ...config };
+
+  // Track results across multiple sheets
+  const sheets: SheetLayout[] = [];
+  let remaining = [...sortedParts];
+  let sheetIndex = 0;
+  const maxSheets = stock.qty || 100;
+
+  while (remaining.length > 0 && sheetIndex < maxSheets) {
+    const packer = new GuillotinePacker(stock.width_mm, stock.length_mm, kerf, fullConfig);
+
+    const stillUnplaced: ExpandedPartInstance[] = [];
+    for (const part of remaining) {
+      if (!packer.tryPlace(part)) {
+        stillUnplaced.push(part);
+      }
+    }
+
+    const placements = packer.getPlacements();
+    if (placements.length === 0) {
+      break;
+    }
+
+    sheets.push({
+      sheet_id: `${stock.id}:${sheetIndex + 1}`,
+      placements,
+      used_area_mm2: packer.getUsedArea(),
+    });
+
+    remaining = stillUnplaced;
+    sheetIndex++;
+  }
+
+  // Calculate stats
+  const sheetArea = stock.width_mm * stock.length_mm;
+  const totalSheetArea = sheetArea * sheets.length;
+  const usedArea = sheets.reduce((sum, s) => sum + (s.used_area_mm2 ?? 0), 0);
+  const wasteArea = Math.max(0, totalSheetArea - usedArea);
+
+  // Get final free rects from last sheet
+  const lastPacker = new GuillotinePacker(stock.width_mm, stock.length_mm, kerf, fullConfig);
+  if (sheets.length > 0) {
+    const lastSheet = sheets[sheets.length - 1];
+    for (const placement of lastSheet.placements) {
+      const part: PartSpec = {
+        id: placement.part_id,
+        length_mm: placement.rot === 90 ? placement.w : placement.h,
+        width_mm: placement.rot === 90 ? placement.h : placement.w,
+        qty: 1,
+        grain: 'any',
+      };
+      lastPacker.tryPlace(part);
+    }
+  }
+
+  const freeRects = sheets.length > 0 ? lastPacker.getFreeRects() : [];
+  const usableOffcuts = freeRects.filter(
+    (r) =>
+      Math.min(r.w, r.h) >= fullConfig.minUsableDimension &&
+      r.w * r.h >= fullConfig.minUsableArea
+  );
+  const allOffcutAreas = freeRects.map((r) => r.w * r.h);
+  const largestOffcutArea = allOffcutAreas.length > 0 ? Math.max(...allOffcutAreas) : 0;
+  const totalOffcutArea = allOffcutAreas.reduce((sum, a) => sum + a, 0);
+  const offcutConcentration = totalOffcutArea > 0 ? largestOffcutArea / totalOffcutArea : 1;
+  const fragmentCount = freeRects.length;
+
+  // Calculate edge banding
+  let edgebandingLength = 0;
+  for (const sheet of sheets) {
+    for (const p of sheet.placements) {
+      const originalPart = originalParts.find((part) => p.part_id.startsWith(part.id));
+      if (originalPart?.band_edges) {
+        const be = originalPart.band_edges;
+        if (p.rot === 0) {
+          edgebandingLength +=
+            (be.top ? p.w : 0) + (be.right ? p.h : 0) + (be.bottom ? p.w : 0) + (be.left ? p.h : 0);
+        } else {
+          edgebandingLength +=
+            (be.left ? p.w : 0) + (be.top ? p.h : 0) + (be.right ? p.w : 0) + (be.bottom ? p.h : 0);
+        }
+      }
+    }
+  }
+
+  // Build unplaced summary
+  const unplaced: UnplacedPart[] = [];
+  if (remaining.length > 0) {
+    const unplacedByPart = new Map<string, number>();
+    for (const p of remaining) {
+      const count = unplacedByPart.get(p.id) ?? 0;
+      unplacedByPart.set(p.id, count + 1);
+    }
+    Array.from(unplacedByPart.entries()).forEach(([partId, count]) => {
+      const originalPart = originalParts.find((p) => p.id === partId);
+      if (originalPart) {
+        unplaced.push({
+          part: originalPart,
+          count,
+          reason:
+            originalPart.width_mm > stock.width_mm || originalPart.length_mm > stock.length_mm
+              ? 'too_large_for_sheet'
+              : 'insufficient_sheet_capacity',
+        });
+      }
+    });
+  }
+
+  // Calculate cuts
+  let cuts = 0;
+  let cutLength = 0;
+  for (const sheet of sheets) {
+    cuts += sheet.placements.length * 2;
+    for (const p of sheet.placements) {
+      cutLength += p.w + p.h;
+    }
+  }
+
+  const stats: LayoutStats = {
+    used_area_mm2: usedArea,
+    waste_area_mm2: wasteArea,
+    cuts,
+    cut_length_mm: cutLength,
+    edgebanding_length_mm: edgebandingLength,
+  };
+
+  return {
+    sheets,
+    stats,
+    unplaced: unplaced.length > 0 ? unplaced : undefined,
+    strategyUsed: strategyName,
+    freeRects,
+    usableOffcuts,
+    largestOffcutArea,
+    offcutConcentration,
+    fragmentCount,
   };
 }
 
@@ -773,37 +1012,69 @@ export function packWithStrategy(
  * 1. Fewer sheets (primary - sheet count dominates all other factors)
  * 2. Higher utilization (secondary - efficiency per sheet)
  * 3. Quality of offcuts (tertiary - larger, fewer offcuts are better)
+ * 4. Offcut concentration (prefer waste in one contiguous piece)
  */
 function calculateResultScore(result: GuillotinePackResult, sheetArea: number): number {
   const totalSheetArea = result.sheets.length * sheetArea;
   const usedArea = result.stats.used_area_mm2;
 
   // Calculate utilization percentage (0-100)
-  const utilizationPct = (usedArea / totalSheetArea) * 100;
+  const utilizationPct = totalSheetArea > 0 ? (usedArea / totalSheetArea) * 100 : 0;
 
   // Calculate offcut quality score (normalized 0-100)
   // Larger single offcut relative to sheet area is better
   const offcutQualityPct = (result.largestOffcutArea / sheetArea) * 100;
 
+  // Offcut concentration: 1.0 = all waste in one piece (ideal), 0 = fragmented
+  const concentrationBonus = result.offcutConcentration * 100;
+
   // Fewer fragmented offcuts is better (penalty for fragmentation)
-  const fragmentationPenalty = Math.min(result.usableOffcuts.length * 2, 20);
+  const fragmentationPenalty = result.fragmentCount * 5;
 
   // Score breakdown:
   // - Sheet count: -10,000 per sheet (dominates all other factors)
   // - Utilization: +0-100 points for efficiency
-  // - Offcut quality: +0-50 points for large offcuts
-  // - Fragmentation: -0-20 points for many small offcuts
+  // - Offcut quality: +0-100 points for large offcuts (increased weight)
+  // - Concentration: +0-100 points for consolidated waste
+  // - Fragmentation: penalty per fragment
   return (
     -result.sheets.length * 10_000 + // Fewer sheets (primary)
     utilizationPct + // Higher utilization (secondary)
-    offcutQualityPct * 0.5 - // Larger offcuts (tertiary)
-    fragmentationPenalty // Fewer fragments (tertiary)
+    offcutQualityPct + // Larger offcuts (increased from 0.5 to 1.0)
+    concentrationBonus - // Consolidated waste bonus
+    fragmentationPenalty // Fragment penalty
   );
+}
+
+/**
+ * Deterministic shuffle using a seed-based approach.
+ * Produces consistent results for the same input.
+ */
+function deterministicShuffle<T>(array: T[], seed: number): T[] {
+  const result = [...array];
+  // Simple seeded random using linear congruential generator
+  let state = seed;
+  const next = () => {
+    state = (state * 1103515245 + 12345) & 0x7fffffff;
+    return state / 0x7fffffff;
+  };
+
+  // Fisher-Yates shuffle with seeded random
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(next() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
 }
 
 /**
  * Pack parts using multiple strategies and return the best result.
  * This is the main entry point for optimized packing.
+ *
+ * Multi-pass optimization:
+ * 1. Try all standard sort strategies
+ * 2. Try reversed versions of each strategy
+ * 3. Try deterministic shuffles for additional diversity
  */
 export function packPartsGuillotine(
   parts: PartSpec[],
@@ -822,19 +1093,79 @@ export function packPartsGuillotine(
 
   const sheet = stock[0]; // MVP: single sheet size
   const sheetArea = sheet.width_mm * sheet.length_mm;
+  const fullConfig = { ...DEFAULT_PACKING_CONFIG, ...config };
 
   let bestResult: GuillotinePackResult | null = null;
   let bestScore = -Infinity;
 
-  for (const strategy of strategies) {
-    const result = packWithStrategy(parts, sheet, strategy, config);
+  const updateBest = (result: GuillotinePackResult) => {
     const score = calculateResultScore(result, sheetArea);
-
     if (score > bestScore) {
       bestScore = score;
       bestResult = result;
     }
+  };
+
+  // Phase 1: Standard sort strategies
+  for (const strategy of strategies) {
+    const result = packWithStrategy(parts, sheet, strategy, config);
+    updateBest(result);
   }
+
+  // Phase 2: Expand parts and try additional orderings
+  const expanded = expandParts(parts);
+
+  // Try reversed versions of each strategy
+  for (const strategy of strategies) {
+    const sorted = sortByStrategy(expanded, strategy);
+    const reversed = [...sorted].reverse();
+    const result = packWithExpandedParts(reversed, sheet, `${strategy}-reversed`, parts, config);
+    updateBest(result);
+  }
+
+  // Phase 3: Deterministic shuffles for additional diversity
+  // Use different seeds to explore different orderings
+  const shuffleSeeds = [42, 123, 456, 789, 1337];
+  for (const seed of shuffleSeeds) {
+    // Shuffle the area-sorted list (good baseline)
+    const areaSorted = sortByStrategy(expanded, 'area');
+    const shuffled = deterministicShuffle(areaSorted, seed);
+    const result = packWithExpandedParts(shuffled, sheet, `shuffle-${seed}`, parts, config);
+    updateBest(result);
+  }
+
+  // Phase 4: Try "corner packing" - sort by position preference
+  // Parts that should go in corners first (largest parts at origin)
+  const cornerSorted = [...expanded].sort((a, b) => {
+    // Prefer larger parts first
+    const aArea = a.length_mm * a.width_mm;
+    const bArea = b.length_mm * b.width_mm;
+    if (aArea !== bArea) return bArea - aArea;
+    // Then by aspect ratio (squarer parts are more flexible)
+    const aRatio = Math.max(a.length_mm, a.width_mm) / Math.min(a.length_mm, a.width_mm);
+    const bRatio = Math.max(b.length_mm, b.width_mm) / Math.min(b.length_mm, b.width_mm);
+    return aRatio - bRatio;
+  });
+  const cornerResult = packWithExpandedParts(cornerSorted, sheet, 'corner-priority', parts, config);
+  updateBest(cornerResult);
+
+  // Phase 5: "Strip building" - group similar heights together
+  const heightGrouped = [...expanded].sort((a, b) => {
+    // Round heights to 50mm bands for grouping
+    const getPlacedHeight = (p: ExpandedPartInstance): number => {
+      const grain = p.grain ?? 'any';
+      if (grain === 'length') return p.length_mm;
+      if (grain === 'width') return p.width_mm;
+      return Math.max(p.length_mm, p.width_mm);
+    };
+    const aH = Math.floor(getPlacedHeight(a) / 50);
+    const bH = Math.floor(getPlacedHeight(b) / 50);
+    if (aH !== bH) return bH - aH; // Taller bands first
+    // Within band, sort by width descending
+    return b.width_mm - a.width_mm;
+  });
+  const stripResult = packWithExpandedParts(heightGrouped, sheet, 'height-bands', parts, config);
+  updateBest(stripResult);
 
   // Fallback to first strategy if something went wrong
   if (!bestResult) {

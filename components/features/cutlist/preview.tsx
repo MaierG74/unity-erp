@@ -23,13 +23,20 @@ export function SheetPreview({
   showSheetDimensions = true,
   responsive = false,
 }: SheetPreviewProps) {
-  const padding = 12; // px
+  const padding = 24; // Increased padding to accommodate edge labels
   const scale = Math.min((maxWidth - padding * 2) / sheetWidth, (maxHeight - padding * 2) / sheetLength);
   const widthPx = Math.max(50, sheetWidth * scale + padding * 2);
   const heightPx = Math.max(50, sheetLength * scale + padding * 2);
 
-  const baseFont = Math.max(9, 12 * Math.min(1, scale));
-  const subFont = Math.max(8, baseFont * 0.8);
+  // Font sizes based on scale
+  const labelFont = Math.max(8, Math.min(11, 10 * scale));
+  const dimFont = Math.max(7, Math.min(9, 8 * scale));
+
+  // Sheet origin in SVG coordinates
+  const sheetX = padding;
+  const sheetY = padding;
+  const sheetW = sheetWidth * scale;
+  const sheetH = sheetLength * scale;
 
   return (
     <svg
@@ -39,90 +46,120 @@ export function SheetPreview({
       preserveAspectRatio="xMidYMid meet"
       style={responsive ? { maxWidth: '100%', height: 'auto' } : undefined}
     >
-      <rect x={padding} y={padding} width={sheetWidth * scale} height={sheetLength * scale} fill="#fafafa" stroke="#222" strokeWidth={1} />
+      {/* Sheet background */}
+      <rect
+        x={sheetX}
+        y={sheetY}
+        width={sheetW}
+        height={sheetH}
+        fill="#fafafa"
+        stroke="#374151"
+        strokeWidth={1}
+      />
+
+      {/* Sheet dimensions on outside edges */}
       {showSheetDimensions && (
         <>
-          <text x={padding + (sheetWidth * scale) / 2} y={padding - 6} textAnchor="middle" fontSize={subFont} fill="#555">
-            {`${Math.round(sheetWidth)} mm`}
-          </text>
+          {/* Width label at top */}
           <text
-            x={padding - 6}
-            y={padding + (sheetLength * scale) / 2}
+            x={sheetX + sheetW / 2}
+            y={sheetY - 8}
             textAnchor="middle"
-            fontSize={subFont}
-            fill="#555"
-            transform={`rotate(-90 ${padding - 6}, ${padding + (sheetLength * scale) / 2})`}
+            fontSize={dimFont}
+            fill="#6b7280"
           >
-            {`${Math.round(sheetLength)} mm`}
+            {Math.round(sheetWidth)} mm
+          </text>
+          {/* Height label on left */}
+          <text
+            x={sheetX - 8}
+            y={sheetY + sheetH / 2}
+            textAnchor="middle"
+            fontSize={dimFont}
+            fill="#6b7280"
+            transform={`rotate(-90 ${sheetX - 8}, ${sheetY + sheetH / 2})`}
+          >
+            {Math.round(sheetLength)} mm
           </text>
         </>
       )}
+
+      {/* Part placements */}
       {layout.placements.map((pl, i) => {
-        const x = padding + pl.x * scale;
-        const y = padding + pl.y * scale;
+        const x = sheetX + pl.x * scale;
+        const y = sheetY + pl.y * scale;
         const w = pl.w * scale;
         const h = pl.h * scale;
         const centerX = x + w / 2;
         const centerY = y + h / 2;
-        const widthLabel = `${Math.round(pl.w)} mm`;
-        const lengthLabel = `${Math.round(pl.h)} mm`;
-        const showWidthLabel = showDimensions && w > 32;
-        const showLengthLabel = showDimensions && h > 32;
-        const widthLabelY = y + Math.min(h / 4, subFont + 6);
-        const lengthLabelX = x + Math.min(w / 4, subFont + 6);
+
+        // Show dimensions only for larger parts
+        const showWidth = showDimensions && w > 35;
+        const showHeight = showDimensions && h > 35;
+
+        // Display label (part name) or fall back to part_id
+        const displayLabel = pl.label || pl.part_id;
+
         return (
           <g key={i}>
+            {/* Part rectangle */}
             <rect
               x={x}
               y={y}
               width={w}
               height={h}
-              rx={2}
-              ry={2}
-              fill="#cfe8ff"
-              stroke="#1d4ed8"
-              strokeWidth={0.8}
+              rx={1}
+              ry={1}
+              fill="#dbeafe"
+              stroke="#3b82f6"
+              strokeWidth={0.75}
             />
+
+            {/* Width dimension (at top edge of part, bold) */}
+            {showWidth && (
+              <text
+                x={centerX}
+                y={y + 10}
+                fontSize={dimFont}
+                fontWeight={600}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fill="#1e293b"
+              >
+                {Math.round(pl.w)}
+              </text>
+            )}
+
+            {/* Height dimension (at left edge of part, rotated, bold) */}
+            {showHeight && (
+              <text
+                x={x + 10}
+                y={centerY}
+                fontSize={dimFont}
+                fontWeight={600}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fill="#1e293b"
+                transform={`rotate(-90 ${x + 10}, ${centerY})`}
+              >
+                {Math.round(pl.h)}
+              </text>
+            )}
+
+            {/* Part label (centered, smaller, not bold) */}
             <text
               x={centerX}
               y={centerY}
-              fontSize={baseFont}
+              fontSize={dimFont}
               textAnchor="middle"
               dominantBaseline="middle"
-              fill="#0f172a"
+              fill="#64748b"
             >
-              {pl.part_id}
+              {displayLabel}
             </text>
-            {showWidthLabel && (
-              <text
-                x={centerX}
-                y={widthLabelY}
-                fontSize={subFont}
-                textAnchor="middle"
-                dominantBaseline="middle"
-                fill="#1e293b"
-              >
-                {widthLabel}
-              </text>
-            )}
-            {showLengthLabel && (
-              <text
-                x={lengthLabelX}
-                y={centerY}
-                fontSize={subFont}
-                textAnchor="middle"
-                dominantBaseline="middle"
-                fill="#1e293b"
-                transform={`rotate(-90 ${lengthLabelX}, ${centerY})`}
-              >
-                {lengthLabel}
-              </text>
-            )}
           </g>
         );
       })}
     </svg>
   );
 }
-
-

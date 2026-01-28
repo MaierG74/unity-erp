@@ -428,14 +428,15 @@ export function ComponentsTab() {
     );
   }, [suppliers, supplierSearch]);
 
-  const refreshData = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['inventory'] });
-    queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
-    toast({
-      title: "Data refreshed",
-      description: "The inventory data has been refreshed from the database."
-    });
-  }, [queryClient, toast]);
+  const resetFilters = useCallback(() => {
+    setFilterText('');
+    setSelectedCategory('_all');
+    setSelectedSupplier('_all');
+    setCategorySearch('');
+    setSupplierSearch('');
+    // Also clear URL params
+    router.replace('/inventory', { scroll: false });
+  }, [router]);
 
   if (isLoading) {
     return (
@@ -559,9 +560,9 @@ export function ComponentsTab() {
 
           {/* CHANGED: Actions moved into same row as filters */}
           <div className="flex items-center gap-2 w-full lg:w-auto">
-            <Button onClick={refreshData} className="h-9" variant="outline" size="sm">
+            <Button onClick={resetFilters} className="h-9" variant="outline" size="sm">
               <RefreshCw className="h-4 w-4 mr-2" />
-              Refresh
+              Reset
             </Button>
             <Button
               className="h-9"

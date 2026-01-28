@@ -4,6 +4,7 @@ export interface Quote {
   quote_id: number;
   quote_number: string;
   customer_id: number | null;
+  contact_id: number | null;
   created_at: string;
   updated_at: string;
   valid_until: string | null;
@@ -15,9 +16,10 @@ export interface Quote {
   notes: string | null;
   terms_conditions: string | null;
   created_by: string | null;
-  
+
   // Relations
   customer?: Customer;
+  contact?: import('@/types/customers').CustomerContact | null;
   line_items?: QuoteLineItem[];
   reference_images?: QuoteReferenceImage[];
 }
@@ -95,6 +97,7 @@ export interface Customer {
 // Form types for creating/editing
 export interface CreateQuoteData {
   customer_id: number | null;
+  contact_id?: number | null;
   valid_until: string | null;
   notes: string | null;
   terms_conditions: string | null;

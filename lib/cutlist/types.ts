@@ -118,6 +118,8 @@ export interface PartSpec {
   material_id?: string | null;
   /** Optional label for display */
   label?: string;
+  /** Lamination group ID - parts with same group are laminated together */
+  lamination_group?: string;
 }
 
 /**
@@ -139,6 +141,8 @@ export interface CutlistPart {
   lamination_type?: LaminationType;
   /** Custom lamination configuration (only for lamination_type='custom') */
   lamination_config?: CustomLaminationConfig;
+  /** Lamination group ID - parts with same group are laminated together */
+  lamination_group?: string;
 }
 
 // =============================================================================
@@ -173,6 +177,8 @@ export interface StockSheetSpec {
  */
 export interface Placement {
   part_id: string;
+  /** Display label for the part (user-friendly name like "top#35") */
+  label?: string;
   /** X position (from left edge) */
   x: number;
   /** Y position (from top edge) */

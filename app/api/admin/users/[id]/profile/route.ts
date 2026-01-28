@@ -16,11 +16,11 @@ function normalizeLogin(raw: string | null | undefined): string | null {
   return raw.trim().toLowerCase();
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const admin = await requireAdmin(req);
   if ('error' in admin) return admin.error;
 
-  const userId = params?.id;
+  const { id: userId } = await params;
   if (!userId) {
     return NextResponse.json({ error: 'User id is required' }, { status: 400 });
   }

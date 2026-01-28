@@ -80,6 +80,9 @@ export interface QuoteAttachment {
   uploaded_at: string;
   original_name?: string | null;
   display_in_quote?: boolean; // whether to show this attachment in the generated PDF
+  crop_params?: import('@/types/image-editor').CropParams | null;
+  annotations?: import('@/types/image-editor').ArrowAnnotation[] | null;
+  display_size?: import('@/types/image-editor').ImageDisplaySize | null;
 }
 
 export async function fetchQuotes(filters?: {
@@ -115,13 +118,14 @@ export async function fetchQuote(
     items: QuoteItem[];
     attachments: QuoteAttachment[];
     customer?: { id: number; name: string; email?: string | null; telephone?: string | null };
+    contact?: { id: number; name: string; email: string | null; phone: string | null; mobile: string | null; job_title: string | null; is_primary: boolean } | null;
   }
 > {
   const client = supabaseAdmin;
 
   const { data: quote, error: quoteError } = await client
     .from('quotes')
-    .select('*, customer:customers(id, name, email, telephone)')
+    .select('*, customer:customers(id, name, email, telephone), contact:customer_contacts(id, name, email, phone, mobile, job_title, is_primary)')
     .eq('id', id)
     .single();
 
@@ -344,6 +348,19 @@ export async function updateQuoteAttachmentDisplayInQuote(
   const { error } = await supabase
     .from('quote_attachments')
     .update({ display_in_quote: displayInQuote })
+    .eq('id', id);
+  if (error) throw error;
+}
+
+export async function updateQuoteAttachmentEditorParams(
+  id: string,
+  cropParams: import('@/types/image-editor').CropParams | null,
+  annotations: import('@/types/image-editor').ArrowAnnotation[] | null,
+  displaySize?: import('@/types/image-editor').ImageDisplaySize | null
+): Promise<void> {
+  const { error } = await supabase
+    .from('quote_attachments')
+    .update({ crop_params: cropParams, annotations: annotations, display_size: displaySize ?? null })
     .eq('id', id);
   if (error) throw error;
 }

@@ -2,7 +2,7 @@
 
 > **Status**: Active development
 > **Location**: `/app/cutlist/page.tsx`
-> **Last Updated**: 2026-01-25
+> **Last Updated**: 2026-01-26
 
 ---
 
@@ -53,6 +53,7 @@ Located in the **Parts** tab. Compact table format (~40px per row).
 | **Qty** | Quantity of this part |
 | **Grain** | Grain direction toggle (click to cycle) |
 | **Lam** | Lamination type |
+| **Grp** | Lamination group (A, B, C...) |
 | **Edge** | Edge banding indicator (clickable) |
 
 #### Grain Direction Toggle
@@ -82,6 +83,28 @@ Lamination indicates how pieces will be assembled after cutting. It does NOT mul
 | **With Backer** | Primary + matching backer (Qty applies to both) | 32mm |
 | **Same Board** | Pieces paired during assembly | 32mm |
 | **Custom** | Opens modal for 3+ layer configurations | 48mm+ |
+
+#### Lamination Groups
+
+For parts that will be laminated together but need distinct names (e.g., "side#6" and "side#7"), use lamination groups instead of the lamination type dropdown.
+
+**How it works:**
+- Assign parts to the same group (A, B, C...) using the **Grp** column
+- Parts in the same group are treated as a single laminated assembly
+- Edge thickness = 16mm × number of parts in the group
+
+| Group Size | Edge Thickness | Example |
+|------------|----------------|---------|
+| 1 part | 16mm | Single layer (same as no group) |
+| 2 parts | 32mm | Two boards laminated face-to-face |
+| 3 parts | 48mm | Three-layer lamination |
+
+**Dropdown options:**
+- **None**: Part is not in any group
+- **A, B, C...**: Existing groups (click to assign)
+- **+ New (X)**: Create a new group with the next available letter
+
+**Use case:** When "side#6" and "side#7" from a CSV import need to be laminated together, assign both to Group A. The edging calculation will use 32mm edging for the combined assembly.
 
 ---
 
@@ -121,6 +144,57 @@ Shows the optimized cutting layout after clicking **Calculate Layout**:
 - Visual board layouts with parts positioned
 - Waste calculation and efficiency percentage
 - Material costs breakdown
+
+---
+
+## Packing Algorithm (Cut Layout)
+
+The `/cutlist` page uses `packPartsSmartOptimized()` in `components/features/cutlist/packing.ts`.
+
+**Default algorithm:** `strip` (cut-minimizing, guillotine-friendly)
+- Implemented in `lib/cutlist/stripPacker.ts`.
+- Expands parts by quantity and applies grain rules:
+  - `grain: length` → length aligned with sheet length (no rotation).
+  - `grain: width` → length aligned with sheet width (forced 90°).
+  - `grain: any` → rotation allowed; orientation biased to wider-than-tall for strip packing.
+- Groups parts into **height bands** (default tolerance 15%), then:
+  1. Packs each band into horizontal strips (FFD by width).
+  2. Stacks strips top-to-bottom (FFD by height).
+  3. Tries three layouts (horizontal strips, nested complementary widths, vertical-first).
+  4. Chooses the best layout by **fewest sheets**, then **fewest remaining parts**, then **fewest cuts**.
+- Optional alignment step nudges vertical cut lines to reduce total saw cuts.
+- Kerf is applied between adjacent parts/strips using the **Blade Kerf** setting from Materials.
+
+**Alternative algorithm:** `guillotine` (waste-optimized)
+- Implemented in `lib/cutlist/guillotinePacker.ts`.
+- Uses a free-rectangle list with offcut-aware scoring.
+- **Offcut consolidation**: Scores placements based on how well they keep waste in one contiguous piece.
+- **Multi-pass optimization**: Tries 20+ different orderings including:
+  - 7 sort strategies (area, longest-side, width, perimeter, height, etc.)
+  - Reversed versions of each strategy
+  - Deterministic shuffles for additional diversity
+  - Corner-priority and height-band groupings
+- **Split selection**: Evaluates both horizontal and vertical splits at each placement, choosing the one that best consolidates remaining free space.
+- **Result metrics**: Tracks `offcutConcentration` (1.0 = all waste in one piece) and `fragmentCount`.
+
+**Legacy algorithm:** `packPartsIntoSheets()` (greedy best-fit) remains for older consumers but is not used by the `/cutlist` page.
+
+### Optimization Priority Selector
+
+Located next to the **Calculate Layout** button. Controls which packing algorithm is used:
+
+| Option | Algorithm | Best For |
+|--------|-----------|----------|
+| **Fast / fewer cuts** | `strip` | Production speed, simpler cutting patterns |
+| **Best offcut** | `guillotine` | Material savings, large reusable offcuts |
+
+- **Tooltip**: Hover the `?` icon for a description of each option
+- **Persistence**: Selection is saved to localStorage and restored on page reload
+- **Indicator**: After calculation, the Preview tab shows which priority was used (e.g., "Optimized for: Fast / fewer cuts")
+
+**When to use each:**
+- **Fast / fewer cuts**: When labor cost outweighs material cost, or when cutting by hand
+- **Best offcut**: When material is expensive, or when you want a large reusable remnant piece
 
 ---
 
@@ -174,9 +248,17 @@ CREATE TABLE cutlist_material_defaults (
 | File | Purpose |
 |------|---------|
 | `materialsDefaults.ts` | Load/save pinned materials |
-| `boardCalculator.ts` | Packing/nesting algorithm |
+| `boardCalculator.ts` | Lamination expansion helpers |
 | `cutlistDimensions.ts` | Dimension parsing utilities |
 | `types.ts` | TypeScript type definitions |
+| `stripPacker.ts` | Strip-based packer (default for `/cutlist`) |
+| `guillotinePacker.ts` | Waste-optimized guillotine packer (optional) |
+
+### Packing Entry Point
+
+| File | Purpose |
+|------|---------|
+| `components/features/cutlist/packing.ts` | Packing orchestration + algorithm selection |
 
 ---
 
@@ -227,3 +309,4 @@ Currently assumes 16mm boards (32mm when laminated). See `plans/cutlist-improvem
 ---
 
 *Created: 2026-01-25*
+*Updated: 2026-01-26 - Added Lamination Groups and Optimization Priority features*

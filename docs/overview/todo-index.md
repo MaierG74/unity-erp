@@ -1,6 +1,6 @@
 ---
 title: TODO Index
-last_updated: 2025-12-07
+last_updated: 2026-01-26
 ---
 
 Unity ERP's documentation spreads TODOs and open questions across domain guides, changelogs, and technical references. Use this index as a single starting point to see what still needs attention and where the authoritative source of truth lives.
@@ -25,6 +25,9 @@ Unity ERP's documentation spreads TODOs and open questions across domain guides,
 
 ## Timekeeping
 - **Ensure double-time minutes are persisted** — Status: _Open_, Owner: _Unassigned_. Update `add_manual_clock_event_v2` (and any other summary writers) so inserts/updates to `time_daily_summary` always set `dt_minutes` (default 0 for non-Sunday days) to satisfy the new NOT NULL constraint and keep manual event entry unblocked. Also backfill existing rows. Source: [time & attendance working doc](../domains/timekeeping/time-attendance-working.md#database-tables-supabase).
+
+## Cutlist
+- **Cutlist optimizer parity** — Status: _Planned_, Owner: _Unassigned_. Benchmark strip vs guillotine, define offcut-quality metrics, and add optimization priority modes to `/cutlist`. Source: [cutlist optimizer parity plan](../plans/cutlist-optimizer-parity-plan.md).
 
 ## UI Tech Debt
 - **Avoid hard‑coded status IDs in dashboard** — Status: _Backlog_, Owner: _Unassigned_. Replace numeric `status_id` filters with name‑based joins to `supplier_order_statuses` in `app/purchasing/page.tsx` to avoid environment ID drift.

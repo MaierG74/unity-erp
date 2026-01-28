@@ -118,6 +118,30 @@ function getGrainOption(value: GrainOrientation) {
   return GRAIN_OPTIONS.find((o) => o.value === value) || GRAIN_OPTIONS[0];
 }
 
+// =============================================================================
+// Lamination Group Helpers
+// =============================================================================
+
+const GROUP_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+
+/** Get next available group letter */
+function getNextGroupLetter(parts: CompactPart[]): string {
+  const used = new Set(parts.map((p) => p.lamination_group).filter(Boolean));
+  return GROUP_LETTERS.find((l) => !used.has(l)) || `G${used.size + 1}`;
+}
+
+/** Get group options for dropdown */
+function getGroupOptions(parts: CompactPart[]): { value: string; label: string }[] {
+  const used = new Set(parts.map((p) => p.lamination_group).filter(Boolean));
+  const options: { value: string; label: string }[] = [{ value: '__none__', label: 'None' }];
+  Array.from(used)
+    .sort()
+    .forEach((g) => options.push({ value: g as string, label: g as string }));
+  const next = getNextGroupLetter(parts);
+  options.push({ value: `__new__${next}`, label: `+ New (${next})` });
+  return options;
+}
+
 const DEFAULT_BAND_EDGES: Required<BandEdges> = {
   top: false,
   right: false,
@@ -277,6 +301,7 @@ interface PartRowProps {
   materialOptions: MaterialOption[];
   edgingOptions?: EdgeBandingOption[];
   isQuickAdd?: boolean;
+  allParts: CompactPart[];
   onUpdate: (index: number, updates: Partial<CompactPart>) => void;
   onDelete: (index: number) => void;
   onDuplicate: (index: number) => void;
@@ -290,6 +315,7 @@ const PartRow = memo(function PartRow({
   materialOptions,
   edgingOptions,
   isQuickAdd = false,
+  allParts,
   onUpdate,
   onDelete,
   onDuplicate,
@@ -396,6 +422,21 @@ const PartRow = memo(function PartRow({
       }
     },
     [index, onOpenCustomLamination, onUpdate, part.id, part.lamination_config]
+  );
+
+  const handleGroupChange = useCallback(
+    (value: string) => {
+      // Handle special values
+      if (value === '__none__') {
+        onUpdate(index, { lamination_group: undefined });
+      } else if (value.startsWith('__new__')) {
+        const newLetter = value.replace('__new__', '');
+        onUpdate(index, { lamination_group: newLetter });
+      } else {
+        onUpdate(index, { lamination_group: value });
+      }
+    },
+    [index, onUpdate]
   );
 
   const handleEdgesChange = useCallback(
@@ -688,6 +729,16 @@ const PartRow = memo(function PartRow({
         />
       </TableCell>
 
+      {/* Lamination Group */}
+      <TableCell className="p-1">
+        <CompactSelect
+          value={part.lamination_group || '__none__'}
+          onValueChange={handleGroupChange}
+          options={getGroupOptions(allParts)}
+          className="min-w-[70px]"
+        />
+      </TableCell>
+
       {/* Edge Banding */}
       <TableCell className="p-1">
         <TooltipProvider delayDuration={300}>
@@ -923,6 +974,7 @@ export const CompactPartsTable = memo(forwardRef<CompactPartsTableRef, CompactPa
             <TableHead className="px-2 py-1 font-medium text-xs w-12">Qty</TableHead>
             <TableHead className="px-2 py-1 font-medium text-xs w-10" title="Grain Direction">Grain</TableHead>
             <TableHead className="px-2 py-1 font-medium text-xs">Lam</TableHead>
+            <TableHead className="px-2 py-1 font-medium text-xs w-16" title="Lamination Group">Grp</TableHead>
             <TableHead className="px-2 py-1 font-medium text-xs w-10">Edge</TableHead>
             <TableHead className="px-2 py-1 w-10"></TableHead>
           </TableRow>
@@ -936,6 +988,7 @@ export const CompactPartsTable = memo(forwardRef<CompactPartsTableRef, CompactPa
               index={index}
               materialOptions={materialOptions}
               edgingOptions={edgingOptions}
+              allParts={parts}
               onUpdate={handleUpdate}
               onDelete={handleDelete}
               onDuplicate={handleDuplicate}
@@ -950,6 +1003,7 @@ export const CompactPartsTable = memo(forwardRef<CompactPartsTableRef, CompactPa
             materialOptions={materialOptions}
             edgingOptions={edgingOptions}
             isQuickAdd
+            allParts={parts}
             onUpdate={handleQuickAddUpdate}
             onDelete={() => {}}
             onDuplicate={() => {}}

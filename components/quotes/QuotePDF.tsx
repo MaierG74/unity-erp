@@ -5,6 +5,8 @@ import { Document, Page, Text, View, StyleSheet, Image, pdf } from '@react-pdf/r
 import { Eye, Download } from 'lucide-react';
 import { Quote, QuoteItem, QuoteAttachment } from '@/lib/db/quotes';
 import { Button } from '@/components/ui/button';
+import { preprocessQuoteImages } from '@/lib/quotes/compositeImage';
+import { IMAGE_SIZE_MAP } from '@/types/image-editor';
 
 // PDF Styles
 const styles = StyleSheet.create({
@@ -304,13 +306,26 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
               .filter(Boolean);
 
             return (
-              <View key={item.id} style={index % 2 === 0 ? styles.tableRow : styles.tableRowAlt}>
+              <View key={item.id} wrap={false} style={index % 2 === 0 ? styles.tableRow : styles.tableRowAlt}>
                 <View style={styles.descriptionCol}>
                   {itemImages.length > 0 && (
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                      {itemImages.map((img, i) => (
-                        <Image key={i} style={styles.itemImage} src={img.file_url} />
-                      ))}
+                      {itemImages.map((img, i) => {
+                        const size = IMAGE_SIZE_MAP[(img as any).display_size || 'small'];
+                        return (
+                          <Image
+                            key={i}
+                            style={{
+                              width: size.width,
+                              height: size.height,
+                              objectFit: 'contain' as const,
+                              marginTop: 5,
+                              marginBottom: 5,
+                            }}
+                            src={img.file_url}
+                          />
+                        );
+                      })}
                     </View>
                   )}
                   <Text style={styles.itemDescription}>{item.description}</Text>
@@ -429,9 +444,11 @@ export const QuotePDFDownload: React.FC<QuotePDFDownloadProps> = ({
   const handleDownload = async () => {
     try {
       setDownloading(true);
+      // Pre-process images with crop/annotations before PDF generation
+      const processedQuote = await preprocessQuoteImages(quote);
       // Generate the PDF as a Blob in the browser
       const blob = await pdf(
-        <QuotePDFDocument quote={quote} companyInfo={mergedCompanyInfo} defaultTermsTemplate={defaultTermsTemplate} />
+        <QuotePDFDocument quote={processedQuote} companyInfo={mergedCompanyInfo} defaultTermsTemplate={defaultTermsTemplate} />
       ).toBlob();
       // Force correct MIME type and extension
       const pdfBlob = new Blob([blob], { type: 'application/pdf' });
@@ -494,8 +511,9 @@ export const QuotePDFDownload: React.FC<QuotePDFDownloadProps> = ({
   const handleOpen = async () => {
     try {
       setDownloading(true);
+      const processedQuote = await preprocessQuoteImages(quote);
       const blob = await pdf(
-        <QuotePDFDocument quote={quote} companyInfo={mergedCompanyInfo} defaultTermsTemplate={defaultTermsTemplate} />
+        <QuotePDFDocument quote={processedQuote} companyInfo={mergedCompanyInfo} defaultTermsTemplate={defaultTermsTemplate} />
       ).toBlob();
       const pdfBlob = new Blob([blob], { type: 'application/pdf' });
       const url = URL.createObjectURL(pdfBlob);

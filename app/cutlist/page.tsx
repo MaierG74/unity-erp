@@ -3,13 +3,26 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { ArrowLeft, BarChart3, Info, Calculator, Trash2, Save } from 'lucide-react';
+import { ArrowLeft, BarChart3, Info, Calculator, Trash2, Save, HelpCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 // Import primitives
 import {
@@ -51,7 +64,7 @@ import type {
   CutlistPart,
 } from '@/lib/cutlist/types';
 
-// Import packing - using guillotine algorithm for better waste consolidation
+// Import packing - smart packer (strip-based default)
 import { packPartsSmartOptimized } from '@/components/features/cutlist/packing';
 
 // =============================================================================
@@ -97,6 +110,9 @@ function SummaryStat({ label, value }: { label: string; value: string }) {
 // =============================================================================
 
 const PARTS_STORAGE_KEY = 'cutlist-parts';
+const OPTIMIZATION_PRIORITY_KEY = 'cutlist-optimization-priority';
+
+type OptimizationPriority = 'fast' | 'offcut';
 
 // =============================================================================
 // Helper Functions
@@ -157,6 +173,8 @@ export default function CutlistPage() {
   // ============== Packing Options ==============
   const [allowRotation] = React.useState(true);
   const [singleSheetOnly] = React.useState(false);
+  const [optimizationPriority, setOptimizationPriority] = React.useState<OptimizationPriority>('fast');
+  const optimizationLoadedRef = React.useRef(false);
 
   // ============== Results ==============
   const [result, setResult] = React.useState<LayoutResult | null>(null);
@@ -341,6 +359,31 @@ export default function CutlistPage() {
       console.warn('Failed to persist parts', err);
     }
   }, [parts]);
+
+  // ============== Load optimization priority from localStorage ==============
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = window.localStorage.getItem(OPTIMIZATION_PRIORITY_KEY);
+      if (stored === 'fast' || stored === 'offcut') {
+        setOptimizationPriority(stored);
+      }
+    } catch (err) {
+      console.warn('Failed to load optimization priority', err);
+    } finally {
+      optimizationLoadedRef.current = true;
+    }
+  }, []);
+
+  // ============== Persist optimization priority ==============
+  React.useEffect(() => {
+    if (!optimizationLoadedRef.current || typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(OPTIMIZATION_PRIORITY_KEY, optimizationPriority);
+    } catch (err) {
+      console.warn('Failed to persist optimization priority', err);
+    }
+  }, [optimizationPriority]);
 
   // ============== Update summary when results change ==============
 
@@ -613,16 +656,36 @@ export default function CutlistPage() {
 
     const normalized: StockSheetSpec[] = [{ ...stock[0], kerf_mm: Math.max(0, kerf) }];
 
-    // Pack primary parts using guillotine algorithm for better waste consolidation
-    const res = packPartsSmartOptimized(partSpecs, normalized, { allowRotation, singleSheetOnly });
+    // Map optimization priority to algorithm
+    const algorithm = optimizationPriority === 'fast' ? 'strip' : 'guillotine';
 
-    // Calculate edging correctly based on lamination type
-    // The packing algorithm doesn't know about same-board vs with-backer,
+    // Pack primary parts using selected algorithm
+    const res = packPartsSmartOptimized(partSpecs, normalized, { allowRotation, singleSheetOnly, algorithm });
+
+    // Calculate edging correctly based on lamination type AND lamination groups
+    // The packing algorithm doesn't know about same-board vs with-backer or groups,
     // so we calculate edging separately here
     let edging16mm = 0;
     let edging32mm = 0;
+    const customEdging = new Map<number, number>();
+
+    // Group parts by lamination_group
+    const laminationGroups = new Map<string, typeof partsToUse>();
+    const ungroupedParts: typeof partsToUse = [];
 
     for (const part of partsToUse) {
+      if (part.lamination_group) {
+        if (!laminationGroups.has(part.lamination_group)) {
+          laminationGroups.set(part.lamination_group, []);
+        }
+        laminationGroups.get(part.lamination_group)!.push(part);
+      } else {
+        ungroupedParts.push(part);
+      }
+    }
+
+    // Process ungrouped parts (existing logic)
+    for (const part of ungroupedParts) {
       if (part.length_mm <= 0 || part.width_mm <= 0 || part.quantity <= 0) continue;
 
       const laminationType = part.lamination_type || 'none';
@@ -663,6 +726,49 @@ export default function CutlistPage() {
       }
     }
 
+    // Process grouped parts - parts with same lamination_group are laminated together
+    for (const [, groupParts] of laminationGroups) {
+      if (groupParts.length === 0) continue;
+
+      const memberCount = groupParts.length;
+      const edgeThickness = 16 * memberCount; // 32mm for 2 parts, 48mm for 3, etc.
+
+      // Use dimensions from first part (all parts in group should have same dimensions)
+      const refPart = groupParts[0];
+      if (refPart.length_mm <= 0 || refPart.width_mm <= 0) continue;
+
+      // Merge band_edges from all parts in group (union of edges)
+      const mergedEdges = { top: false, right: false, bottom: false, left: false };
+      for (const p of groupParts) {
+        if (p.band_edges.top) mergedEdges.top = true;
+        if (p.band_edges.right) mergedEdges.right = true;
+        if (p.band_edges.bottom) mergedEdges.bottom = true;
+        if (p.band_edges.left) mergedEdges.left = true;
+      }
+
+      // Calculate edge length for one assembly
+      const singleAssemblyEdge =
+        (mergedEdges.top ? refPart.length_mm : 0) +
+        (mergedEdges.bottom ? refPart.length_mm : 0) +
+        (mergedEdges.left ? refPart.width_mm : 0) +
+        (mergedEdges.right ? refPart.width_mm : 0);
+
+      // Number of finished assemblies = minimum quantity across group parts
+      const assemblies = Math.min(...groupParts.map((p) => p.quantity));
+      const totalEdge = singleAssemblyEdge * assemblies;
+
+      // Assign to correct thickness bucket
+      if (memberCount === 1) {
+        // Single part in group = treat as ungrouped (16mm)
+        edging16mm += totalEdge;
+      } else if (edgeThickness === 32) {
+        edging32mm += totalEdge;
+      } else {
+        // Custom thickness (48mm, 64mm, etc.)
+        customEdging.set(edgeThickness, (customEdging.get(edgeThickness) || 0) + totalEdge);
+      }
+    }
+
     // Override the packing result's edging values with our corrected calculation
     if (res.stats) {
       res.stats.edgebanding_16mm_mm = edging16mm;
@@ -680,14 +786,14 @@ export default function CutlistPage() {
       .map((p) => ({ ...p, grain: 'any', require_grain: undefined, band_edges: undefined } as PartSpec));
 
     if (backerParts.length > 0) {
-      const resBacker = packPartsSmartOptimized(backerParts, normalized, { allowRotation: true, singleSheetOnly });
+      const resBacker = packPartsSmartOptimized(backerParts, normalized, { allowRotation: true, singleSheetOnly, algorithm });
       setBackerResult(resBacker);
     } else {
       setBackerResult(null);
     }
 
     setActiveTab('preview');
-  }, [stock, kerf, allowRotation, singleSheetOnly]);
+  }, [stock, kerf, allowRotation, singleSheetOnly, optimizationPriority]);
 
   // Handle pending calculation after quick-add activation
   React.useEffect(() => {
@@ -823,15 +929,46 @@ export default function CutlistPage() {
               {/* CSV Import & Calculate Row */}
               <div className="flex items-center justify-between gap-4 flex-wrap">
                 <CSVDropzone onPartsImported={handleCSVImport} collapsible buttonLabel="Import CSV" />
-                <Button
-                  type="button"
-                  onClick={handleCalculate}
-                  disabled={parts.length === 0 && !hasQuickAddPending}
-                  className="gap-1.5"
-                >
-                  <Calculator className="h-4 w-4" />
-                  Calculate Layout
-                </Button>
+                <div className="flex items-center gap-3">
+                  {/* Optimization Priority Selector */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">Optimization:</span>
+                    <Select
+                      value={optimizationPriority}
+                      onValueChange={(v) => setOptimizationPriority(v as OptimizationPriority)}
+                    >
+                      <SelectTrigger className="h-8 w-[140px] text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="fast">Fast / fewer cuts</SelectItem>
+                        <SelectItem value="offcut">Best offcut</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <TooltipProvider delayDuration={200}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="max-w-xs text-xs">
+                          <p className="font-medium">Fast / fewer cuts:</p>
+                          <p className="text-muted-foreground mb-2">Runs quickly and minimizes the number of saw cuts (strip-based).</p>
+                          <p className="font-medium">Best offcut:</p>
+                          <p className="text-muted-foreground">Trades extra computation for a larger contiguous offcut (guillotine packer).</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={handleCalculate}
+                    disabled={parts.length === 0 && !hasQuickAddPending}
+                    className="gap-1.5"
+                  >
+                    <Calculator className="h-4 w-4" />
+                    Calculate Layout
+                  </Button>
+                </div>
               </div>
 
               {/* No materials warning */}
@@ -884,6 +1021,32 @@ export default function CutlistPage() {
                     backerSheetsUsed={backerResult ? backerSheetsFractional : undefined}
                     backerSheetsBillable={backerResult ? backerChargeSheets : undefined}
                   />
+
+                  {/* Optimization selector with recalculate */}
+                  <div className="flex items-center gap-3 py-2">
+                    <span className="text-sm text-muted-foreground">Optimization:</span>
+                    <Select
+                      value={optimizationPriority}
+                      onValueChange={(v) => setOptimizationPriority(v as OptimizationPriority)}
+                    >
+                      <SelectTrigger className="w-[180px] h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="fast">Fast / fewer cuts</SelectItem>
+                        <SelectItem value="offcut">Best offcut</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleCalculate}
+                      className="h-8"
+                    >
+                      <Calculator className="h-4 w-4 mr-1" />
+                      Recalculate
+                    </Button>
+                  </div>
 
                   {/* Unplaced parts alert */}
                   {result.unplaced && result.unplaced.length > 0 && (

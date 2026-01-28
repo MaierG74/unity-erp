@@ -464,7 +464,7 @@ export type PackingAlgorithm = 'strip' | 'guillotine' | 'legacy';
  * Extended pack options with algorithm choice.
  */
 export interface ExtendedPackOptions extends PackOptions {
-  /** Which packing algorithm to use. Default: 'guillotine' */
+  /** Which packing algorithm to use. Default: 'strip' */
   algorithm?: PackingAlgorithm;
   /** Configuration for guillotine packer (only used if algorithm='guillotine') */
   packingConfig?: Partial<PackingConfig>;
@@ -698,7 +698,7 @@ function tryPlace(
         if (score < bestScore || (Math.abs(score - bestScore) < 1e-6 && tieBreak(tie, bestTie))) {
           bestScore = score;
           bestIdx = i;
-          best = { part_id: part.id, x: fr.x, y: fr.y, w, h, rot: c.rot };
+          best = { part_id: part.id, label: part.label, x: fr.x, y: fr.y, w, h, rot: c.rot };
           bestTie = tie;
         }
       }

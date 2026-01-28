@@ -65,6 +65,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - Completed: [`plans/product-cutlist-calculator-plan.md`](plans/product-cutlist-calculator-plan.md) – Product cutlist calculator and **Cutlist Builder** with drag-and-drop grouping, CSV import, and 16mm/32mm board type support
   - Active: [`plans/cutlist-improvements.md`](plans/cutlist-improvements.md) – Cutlist improvements: ✅ grain direction toggle, ✅ qty=pieces model, pending: dynamic board thickness
   - Completed: [`plans/cutlist-qty-as-pieces-plan.md`](plans/cutlist-qty-as-pieces-plan.md) – Unified quantity model (Qty = pieces to cut, not finished assemblies)
+  - New: [`plans/cutlist-optimizer-parity-plan.md`](plans/cutlist-optimizer-parity-plan.md) – Cutlist optimizer parity (strip vs guillotine, offcut quality, optimization modes)
   - New: [`plans/labor-planning-validation-plan.md`](plans/labor-planning-validation-plan.md) – guardrails + telemetry plan for the Labor Planning board
   - New: [`plans/permissions-and-logging-plan.md`](plans/permissions-and-logging-plan.md) – unified roadmap for role-based access control, permissions UI, and audit logging rollout
   - New: [`plans/todo-module-plan.md`](plans/todo-module-plan.md) – To-Do module planning doc covering cross-module task assignments
@@ -107,6 +108,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - [`changelogs/purchase-order-edit-mode-20251126.md`](changelogs/purchase-order-edit-mode-20251126.md) – Added edit mode for Draft purchase orders (edit notes, quantities, delete line items)
 - Analysis: [`analysis/`](analysis/)
   - [`analysis/inventory-components-performance-review.md`](analysis/inventory-components-performance-review.md) – Performance and responsiveness review of Components section
+  - [`analysis/cutlist-optimizer-benchmark-20260126.md`](analysis/cutlist-optimizer-benchmark-20260126.md) – Strip vs guillotine benchmark (single dataset)
 - Technical Guides: [`technical/`](technical/)
   - [`technical/url-filter-persistence.md`](technical/url-filter-persistence.md) – **URL-based filter persistence pattern** for preserving filters when navigating between list/detail pages
   - [`technical/color-system.md`](technical/color-system.md) – Centralized color palette, semantic colors, and rollback instructions

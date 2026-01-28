@@ -393,6 +393,7 @@ function stripsToPlacement(strips: Strip[]): Placement[] {
     for (const placed of strip.parts) {
       placements.push({
         part_id: placed.part.uid,
+        label: placed.part.label,
         x: placed.x,
         y: strip.y,
         w: placed.width,

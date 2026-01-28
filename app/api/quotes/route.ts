@@ -30,7 +30,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { quote_number, customer_id, status = 'draft' } = body ?? {};
+    const { quote_number, customer_id, contact_id, status = 'draft' } = body ?? {};
 
     if (!quote_number || !customer_id) {
       return NextResponse.json(
@@ -39,11 +39,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const insert = {
+    const insert: Record<string, unknown> = {
       quote_number,
       customer_id,
       status,
-    } as const;
+    };
+    if (contact_id) insert.contact_id = contact_id;
 
     const { data: newQuote, error } = await supabaseAdmin
       .from('quotes')

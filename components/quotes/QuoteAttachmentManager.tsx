@@ -9,17 +9,20 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { 
-  Upload, 
-  X, 
-  Image as ImageIcon, 
-  FileText, 
-  Eye, 
+import {
+  Upload,
+  X,
+  Image as ImageIcon,
+  FileText,
+  Eye,
   EyeOff,
-  GripVertical
+  GripVertical,
+  Pencil,
+  Crop
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import ImageEditorModal from './ImageEditorModal';
 
 interface QuoteAttachmentManagerProps {
   quoteId: string;
@@ -44,6 +47,8 @@ export default function QuoteAttachmentManager({
   const [draggedItem, setDraggedItem] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewAtt, setPreviewAtt] = useState<QuoteAttachment | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorAtt, setEditorAtt] = useState<QuoteAttachment | null>(null);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     setUploading(true);
@@ -189,7 +194,11 @@ export default function QuoteAttachmentManager({
                           className="w-12 h-12 object-cover rounded border cursor-pointer"
                           onClick={() => { setPreviewAtt(attachment); setPreviewOpen(true); }}
                         />
-                        <ImageIcon className="absolute -bottom-1 -right-1 w-4 h-4 bg-white rounded-full p-0.5" />
+                        {(attachment.crop_params || (attachment.annotations && attachment.annotations.length > 0)) ? (
+                          <Crop className="absolute -bottom-1 -right-1 w-4 h-4 bg-primary text-primary-foreground rounded-full p-0.5" />
+                        ) : (
+                          <ImageIcon className="absolute -bottom-1 -right-1 w-4 h-4 bg-white rounded-full p-0.5" />
+                        )}
                       </div>
                     ) : (
                       <a
@@ -237,6 +246,16 @@ export default function QuoteAttachmentManager({
 
                   {/* Actions */}
                   <div className="flex items-center gap-2">
+                    {isImage(attachment.mime_type) && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => { setEditorAtt(attachment); setEditorOpen(true); }}
+                        title="Crop / Annotate"
+                      >
+                        <Pencil size={16} />
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -287,6 +306,22 @@ export default function QuoteAttachmentManager({
             )}
           </DialogContent>
         </Dialog>
+
+        {/* Image Editor Modal */}
+        {editorAtt && (
+          <ImageEditorModal
+            open={editorOpen}
+            onOpenChange={setEditorOpen}
+            attachment={editorAtt}
+            onSave={(updated) => {
+              const updatedAttachments = attachments.map(att =>
+                att.id === updated.id ? updated : att
+              );
+              onAttachmentsChange(updatedAttachments);
+              setEditorAtt(null);
+            }}
+          />
+        )}
 
         {/* Quick Actions */}
         <div className="flex gap-2 pt-2 border-t">

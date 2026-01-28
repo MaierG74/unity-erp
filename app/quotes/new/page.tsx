@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select';
 import type { Customer } from '@/lib/db/customers';
 import { fetchCustomers } from '@/lib/db/customers';
+import { fetchContactsByCustomerId } from '@/lib/db/customer-contacts';
+import type { CustomerContact } from '@/types/customers';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -35,6 +37,25 @@ export default function NewQuotePage() {
     ),
     [customersSorted, searchTerm]
   );
+  const [contactId, setContactId] = useState<string>('');
+
+  // Fetch contacts for the selected customer
+  const { data: contacts = [] } = useQuery<CustomerContact[], Error>({
+    queryKey: ['customerContacts', customerId],
+    queryFn: () => fetchContactsByCustomerId(Number(customerId)),
+    enabled: !!customerId,
+  });
+
+  // Auto-select primary contact when customer changes
+  useEffect(() => {
+    if (contacts.length > 0) {
+      const primary = contacts.find(c => c.is_primary);
+      setContactId(primary ? String(primary.id) : String(contacts[0].id));
+    } else {
+      setContactId('');
+    }
+  }, [contacts]);
+
   const [status, setStatus] = useState<string>('draft');
   const [loading, setLoading] = useState<boolean>(false);
 
@@ -47,6 +68,7 @@ export default function NewQuotePage() {
         body: JSON.stringify({
           quote_number: quoteNumber,
           customer_id: Number(customerId),
+          contact_id: contactId ? Number(contactId) : undefined,
           status,
         }),
       });
@@ -135,6 +157,24 @@ export default function NewQuotePage() {
             </PopoverContent>
           </Popover>
         </div>
+        {/* Contact selector - shown after customer is selected */}
+        {customerId && contacts.length > 0 && (
+          <div>
+            <Label htmlFor="contact-select" className="block text-sm font-medium mb-1">Contact Person</Label>
+            <Select value={contactId} onValueChange={setContactId}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select a contact" />
+              </SelectTrigger>
+              <SelectContent>
+                {contacts.map((c) => (
+                  <SelectItem key={c.id} value={String(c.id)}>
+                    {c.name}{c.is_primary ? ' (Primary)' : ''}{c.job_title ? ` - ${c.job_title}` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         <div>
           <label className="block text-sm font-medium mb-1">Status</label>
           <Select value={status} onValueChange={setStatus}>

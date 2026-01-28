@@ -5,7 +5,7 @@ import { QuoteEmailProps } from '@/emails/quote-email';
 
 /**
  * POST /api/quotes/[id]/send-email
- * Send quote PDF via email to customer
+ * Send quote PDF via email to one or more recipients
  */
 export async function POST(
   req: NextRequest,
@@ -16,12 +16,21 @@ export async function POST(
   try {
     const body = await req.json();
     const {
-      recipientEmail,
+      recipientEmail,   // legacy: single string
+      recipientEmails,  // new: array of strings
       ccEmails,
       customMessage,
       pdfBase64,
       pdfFilename,
     } = body;
+
+    // Build recipient list (support both old single and new multi format)
+    let toEmails: string[] = [];
+    if (Array.isArray(recipientEmails) && recipientEmails.length > 0) {
+      toEmails = recipientEmails;
+    } else if (recipientEmail) {
+      toEmails = [recipientEmail];
+    }
 
     // Fetch quote with customer
     const { data: quote, error: quoteError } = await supabaseAdmin
@@ -34,6 +43,28 @@ export async function POST(
       return NextResponse.json(
         { error: 'Quote not found' },
         { status: 404 }
+      );
+    }
+
+    // Fallback to customer email if no recipients provided
+    if (toEmails.length === 0 && quote.customer?.email) {
+      toEmails = [quote.customer.email];
+    }
+
+    if (toEmails.length === 0) {
+      return NextResponse.json(
+        { error: 'No recipient email available. Please provide at least one recipient.' },
+        { status: 400 }
+      );
+    }
+
+    // Validate email formats
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const invalidEmail = toEmails.find(e => !emailRegex.test(e));
+    if (invalidEmail) {
+      return NextResponse.json(
+        { error: `Invalid email format: ${invalidEmail}` },
+        { status: 400 }
       );
     }
 
@@ -69,25 +100,6 @@ export async function POST(
       attachments: itemAttachmentsMap.get(item.id) || [],
     }));
     (quote as any).attachments = quoteAttachments;
-
-    // Determine recipient email
-    const toEmail = recipientEmail || quote.customer?.email;
-
-    if (!toEmail) {
-      return NextResponse.json(
-        { error: 'No customer email available. Please provide a recipient email.' },
-        { status: 400 }
-      );
-    }
-
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(toEmail)) {
-      return NextResponse.json(
-        { error: 'Invalid email format' },
-        { status: 400 }
-      );
-    }
 
     // Fetch company settings for branding
     const { data: settings } = await supabaseAdmin
@@ -149,50 +161,65 @@ export async function POST(
       companyWebsite: companyInfo.website,
     };
 
-    // Send email with PDF attachment (if provided)
-    const { success, messageId } = await sendQuoteEmail(
-      toEmail,
-      emailData,
-      pdfBuffer && pdfFilename ? {
-        content: pdfBuffer,
-        filename: pdfFilename,
-      } : undefined
-    );
+    const pdfAttachment = pdfBuffer && pdfFilename ? {
+      content: pdfBuffer,
+      filename: pdfFilename,
+    } : undefined;
 
-    if (!success) {
+    // Send to all recipients
+    const results: { email: string; success: boolean; messageId?: string; error?: string }[] = [];
+
+    for (const email of toEmails) {
+      try {
+        const { success, messageId } = await sendQuoteEmail(email, emailData, pdfAttachment);
+
+        // Log each send
+        await supabaseAdmin.from('quote_email_log').insert({
+          quote_id: quoteId,
+          recipient_email: email,
+          resend_message_id: messageId,
+          status: success ? 'sent' : 'failed',
+          sent_at: new Date().toISOString(),
+        }).then(({ error: logError }) => {
+          if (logError) console.error('Failed to log email send:', logError);
+        });
+
+        results.push({ email, success, messageId });
+      } catch (err: any) {
+        // Log failed attempt
+        await supabaseAdmin.from('quote_email_log').insert({
+          quote_id: quoteId,
+          recipient_email: email,
+          status: 'failed',
+          error_message: err.message,
+          sent_at: new Date().toISOString(),
+        }).catch(logErr => console.error('Failed to log email error:', logErr));
+
+        results.push({ email, success: false, error: err.message });
+      }
+    }
+
+    const allSucceeded = results.every(r => r.success);
+    const anySucceeded = results.some(r => r.success);
+
+    if (!anySucceeded) {
       return NextResponse.json(
-        { error: 'Failed to send email' },
+        { error: 'Failed to send email to all recipients', details: results },
         { status: 500 }
       );
     }
 
-    // Log email send to database
-    const { error: logError } = await supabaseAdmin
-      .from('quote_email_log')
-      .insert({
-        quote_id: quoteId,
-        recipient_email: toEmail,
-        resend_message_id: messageId,
-        status: 'sent',
-        sent_at: new Date().toISOString(),
-      });
-
-    if (logError) {
-      console.error('Failed to log email send:', logError);
-      // Don't fail the request if logging fails
-    }
-
     return NextResponse.json({
       success: true,
-      messageId,
-      recipient: toEmail,
-      message: 'Quote email sent successfully',
+      recipients: results,
+      message: allSucceeded
+        ? `Quote email sent to ${results.length} recipient${results.length !== 1 ? 's' : ''}`
+        : `Email sent to ${results.filter(r => r.success).length} of ${results.length} recipients`,
     });
 
   } catch (error: any) {
     console.error('Error sending quote email:', error);
 
-    // Log failed email attempt
     try {
       await supabaseAdmin.from('quote_email_log').insert({
         quote_id: quoteId,

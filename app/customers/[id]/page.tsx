@@ -7,10 +7,18 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { ArrowLeft, Trash2, Save, X, Package, DollarSign, TrendingUp, Calendar } from 'lucide-react';
+import { ArrowLeft, Trash2, Save, X, Package, DollarSign, TrendingUp, Calendar, Plus, Star, Pencil, MoreHorizontal, Phone, Mail } from 'lucide-react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { Customer } from '@/types/orders';
+import type { CustomerContact, CreateCustomerContactData, UpdateCustomerContactData } from '@/types/customers';
+import {
+  fetchContactsByCustomerId,
+  createContact,
+  updateContact,
+  deleteContact,
+  setPrimaryContact,
+} from '@/lib/db/customer-contacts';
 import { useState, useEffect, useCallback } from 'react';
 import {
   AlertDialog,
@@ -22,6 +30,21 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Badge } from '@/components/ui/badge';
 import {
   BarChart,
   Bar,
@@ -283,6 +306,98 @@ export default function CustomerDetailPage() {
     queryFn: () => fetchCustomerQuotes(customerId),
     enabled: !!customerId,
   });
+
+  // Fetch customer contacts
+  const {
+    data: contacts = [],
+    isLoading: isLoadingContacts,
+  } = useQuery({
+    queryKey: ['customerContacts', customerId],
+    queryFn: () => fetchContactsByCustomerId(Number(customerId)),
+    enabled: !!customerId,
+  });
+
+  // Contact dialog state
+  const [contactDialogOpen, setContactDialogOpen] = useState(false);
+  const [editingContact, setEditingContact] = useState<CustomerContact | null>(null);
+  const [contactForm, setContactForm] = useState({ name: '', email: '', phone: '', mobile: '', job_title: '', is_primary: false });
+  const [contactSaving, setContactSaving] = useState(false);
+  const [deleteContactDialogOpen, setDeleteContactDialogOpen] = useState(false);
+  const [contactToDelete, setContactToDelete] = useState<CustomerContact | null>(null);
+
+  const openAddContact = () => {
+    setEditingContact(null);
+    setContactForm({ name: '', email: '', phone: '', mobile: '', job_title: '', is_primary: contacts.length === 0 });
+    setContactDialogOpen(true);
+  };
+
+  const openEditContact = (contact: CustomerContact) => {
+    setEditingContact(contact);
+    setContactForm({
+      name: contact.name,
+      email: contact.email || '',
+      phone: contact.phone || '',
+      mobile: contact.mobile || '',
+      job_title: contact.job_title || '',
+      is_primary: contact.is_primary,
+    });
+    setContactDialogOpen(true);
+  };
+
+  const handleSaveContact = async () => {
+    setContactSaving(true);
+    try {
+      if (editingContact) {
+        await updateContact(editingContact.id, Number(customerId), {
+          name: contactForm.name,
+          email: contactForm.email || null,
+          phone: contactForm.phone || null,
+          mobile: contactForm.mobile || null,
+          job_title: contactForm.job_title || null,
+          is_primary: contactForm.is_primary,
+        });
+      } else {
+        await createContact({
+          customer_id: Number(customerId),
+          name: contactForm.name,
+          email: contactForm.email || null,
+          phone: contactForm.phone || null,
+          mobile: contactForm.mobile || null,
+          job_title: contactForm.job_title || null,
+          is_primary: contactForm.is_primary,
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ['customerContacts', customerId] });
+      setContactDialogOpen(false);
+    } catch (err) {
+      console.error('Error saving contact:', err);
+      alert('Failed to save contact. Please try again.');
+    } finally {
+      setContactSaving(false);
+    }
+  };
+
+  const handleDeleteContact = async () => {
+    if (!contactToDelete) return;
+    try {
+      await deleteContact(contactToDelete.id);
+      queryClient.invalidateQueries({ queryKey: ['customerContacts', customerId] });
+      setDeleteContactDialogOpen(false);
+      setContactToDelete(null);
+    } catch (err) {
+      console.error('Error deleting contact:', err);
+      alert('Failed to delete contact.');
+    }
+  };
+
+  const handleSetPrimary = async (contact: CustomerContact) => {
+    try {
+      await setPrimaryContact(contact.id, Number(customerId));
+      queryClient.invalidateQueries({ queryKey: ['customerContacts', customerId] });
+    } catch (err) {
+      console.error('Error setting primary contact:', err);
+    }
+  };
 
   // Initialize edited customer when data loads
   useEffect(() => {
@@ -677,6 +792,101 @@ export default function CustomerDetailPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Contacts / Address Book */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle>Contacts</CardTitle>
+              <Button variant="outline" size="sm" onClick={openAddContact}>
+                <Plus className="mr-1 h-4 w-4" />
+                Add Contact
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {isLoadingContacts ? (
+                <div className="flex justify-center py-4">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                </div>
+              ) : contacts.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  No contacts yet. Add your first contact.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {contacts.map((c) => (
+                    <div
+                      key={c.id}
+                      className="flex items-start justify-between p-3 rounded-lg border"
+                    >
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm">{c.name}</span>
+                          {c.is_primary && (
+                            <Badge variant="secondary" className="text-xs">
+                              <Star className="mr-1 h-3 w-3" />
+                              Primary
+                            </Badge>
+                          )}
+                          {c.job_title && (
+                            <span className="text-xs text-muted-foreground">{c.job_title}</span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                          {c.email && (
+                            <a href={`mailto:${c.email}`} className="flex items-center gap-1 hover:text-primary">
+                              <Mail className="h-3 w-3" />
+                              {c.email}
+                            </a>
+                          )}
+                          {c.phone && (
+                            <a href={`tel:${c.phone}`} className="flex items-center gap-1 hover:text-primary">
+                              <Phone className="h-3 w-3" />
+                              {c.phone}
+                            </a>
+                          )}
+                          {c.mobile && (
+                            <a href={`tel:${c.mobile}`} className="flex items-center gap-1 hover:text-primary">
+                              <Phone className="h-3 w-3" />
+                              {c.mobile}
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => openEditContact(c)}>
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Edit
+                          </DropdownMenuItem>
+                          {!c.is_primary && (
+                            <DropdownMenuItem onClick={() => handleSetPrimary(c)}>
+                              <Star className="mr-2 h-4 w-4" />
+                              Set as Primary
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuItem
+                            className="text-red-600"
+                            onClick={() => {
+                              setContactToDelete(c);
+                              setDeleteContactDialogOpen(true);
+                            }}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
         {/* Right Column */}
@@ -886,6 +1096,112 @@ export default function CustomerDetailPage() {
             </AlertDialogCancel>
             <AlertDialogAction onClick={handleDiscardChanges} className="bg-red-600 hover:bg-red-700">
               Discard Changes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Add/Edit Contact Dialog */}
+      <Dialog open={contactDialogOpen} onOpenChange={setContactDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingContact ? 'Edit Contact' : 'Add Contact'}</DialogTitle>
+            <DialogDescription>
+              {editingContact
+                ? 'Update the contact details below.'
+                : 'Add a new contact to this customer\'s address book.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="contact-name">Name <span className="text-red-500">*</span></Label>
+              <Input
+                id="contact-name"
+                value={contactForm.name}
+                onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })}
+                placeholder="Full name"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="contact-job-title">Job Title</Label>
+              <Input
+                id="contact-job-title"
+                value={contactForm.job_title}
+                onChange={(e) => setContactForm({ ...contactForm, job_title: e.target.value })}
+                placeholder="e.g. Procurement Manager"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="contact-email">Email</Label>
+                <Input
+                  id="contact-email"
+                  type="email"
+                  value={contactForm.email}
+                  onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })}
+                  placeholder="email@example.com"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="contact-phone">Phone</Label>
+                <Input
+                  id="contact-phone"
+                  type="tel"
+                  value={contactForm.phone}
+                  onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })}
+                  placeholder="+27 12 345 6789"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="contact-mobile">Mobile</Label>
+              <Input
+                id="contact-mobile"
+                type="tel"
+                value={contactForm.mobile}
+                onChange={(e) => setContactForm({ ...contactForm, mobile: e.target.value })}
+                placeholder="+27 82 345 6789"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="contact-primary"
+                checked={contactForm.is_primary}
+                onChange={(e) => setContactForm({ ...contactForm, is_primary: e.target.checked })}
+                disabled={contacts.length === 0 || (editingContact?.is_primary && contacts.length === 1)}
+                className="h-4 w-4 rounded border-gray-300"
+              />
+              <Label htmlFor="contact-primary" className="text-sm font-normal">
+                Set as primary contact
+              </Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setContactDialogOpen(false)} disabled={contactSaving}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveContact} disabled={contactSaving || !contactForm.name.trim()}>
+              {contactSaving ? 'Saving...' : editingContact ? 'Save Changes' : 'Add Contact'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Contact Confirmation */}
+      <AlertDialog open={deleteContactDialogOpen} onOpenChange={setDeleteContactDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Contact</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete {contactToDelete?.name}? This action cannot be undone.
+              {contactToDelete?.is_primary && ' The next contact will be promoted to primary.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setContactToDelete(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteContact} className="bg-red-600 hover:bg-red-700">
+              Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
