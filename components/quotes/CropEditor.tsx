@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import Cropper, { Area } from 'react-easy-crop';
 import { Slider } from '@/components/ui/slider';
 import type { CropParams } from '@/types/image-editor';
@@ -8,19 +8,26 @@ import type { CropParams } from '@/types/image-editor';
 interface CropEditorProps {
   imageUrl: string;
   initialCrop?: CropParams | null;
-  /** Aspect ratio for the crop area (default: 4/3 matching PDF item image) */
-  aspect?: number;
   onCropChange: (params: CropParams) => void;
 }
 
 export default function CropEditor({
   imageUrl,
   initialCrop,
-  aspect = 4 / 3,
   onCropChange,
 }: CropEditorProps) {
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(initialCrop?.zoom ?? 1);
+  const [imageAspect, setImageAspect] = useState<number | undefined>(undefined);
+
+  // Load image to get its natural aspect ratio
+  useEffect(() => {
+    const img = new Image();
+    img.onload = () => {
+      setImageAspect(img.naturalWidth / img.naturalHeight);
+    };
+    img.src = imageUrl;
+  }, [imageUrl]);
 
   const onCropComplete = useCallback(
     (_croppedArea: Area, croppedAreaPixels: Area) => {
@@ -35,6 +42,17 @@ export default function CropEditor({
     [onCropChange, zoom],
   );
 
+  // Don't render cropper until we know the image aspect ratio
+  if (!imageAspect) {
+    return (
+      <div className="space-y-4">
+        <div className="relative h-[400px] bg-muted rounded-lg overflow-hidden flex items-center justify-center">
+          <span className="text-muted-foreground">Loading image...</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="relative h-[400px] bg-muted rounded-lg overflow-hidden">
@@ -42,7 +60,8 @@ export default function CropEditor({
           image={imageUrl}
           crop={crop}
           zoom={zoom}
-          aspect={aspect}
+          aspect={imageAspect}
+          objectFit="contain"
           onCropChange={setCrop}
           onZoomChange={setZoom}
           onCropComplete={onCropComplete}

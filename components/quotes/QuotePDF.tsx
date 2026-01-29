@@ -202,6 +202,79 @@ interface QuotePDFProps {
   defaultTermsTemplate?: string;
 }
 
+/**
+ * Converts simple HTML (from TipTap) into @react-pdf/renderer elements.
+ * Supports nested tags: <p>, <strong>/<b>, <em>/<i>, <mark>, <br>, plain text.
+ */
+const TAG_STYLES: Record<string, Record<string, any>> = {
+  strong: { fontWeight: 'bold' },
+  b: { fontWeight: 'bold' },
+  em: { fontStyle: 'italic' },
+  i: { fontStyle: 'italic' },
+  mark: { backgroundColor: '#FFFF00' },
+};
+
+let _htmlKeyCounter = 0;
+
+/** Recursively parse inline HTML into nested <Text> elements */
+function parseInlineHtml(html: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  // Match: opening tag with content, <br>, or plain text
+  const regex = /<(strong|b|em|i|mark)(?:\s[^>]*)?>([\s\S]*?)<\/\1>|<br\s*\/?>|([^<]+)/gi;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = regex.exec(html)) !== null) {
+    const [fullMatch, tag, innerHtml, plainText] = match;
+
+    // Skip any unmatched gap (shouldn't happen normally but safety)
+    if (match.index > lastIndex) {
+      const gap = html.slice(lastIndex, match.index);
+      if (gap.trim()) nodes.push(<Text key={`h${_htmlKeyCounter++}`}>{gap}</Text>);
+    }
+    lastIndex = match.index + fullMatch.length;
+
+    if (plainText) {
+      nodes.push(<Text key={`h${_htmlKeyCounter++}`}>{plainText}</Text>);
+    } else if (tag) {
+      const style = TAG_STYLES[tag.toLowerCase()] || {};
+      // Recurse into inner HTML to handle nesting
+      const children = parseInlineHtml(innerHtml);
+      nodes.push(<Text key={`h${_htmlKeyCounter++}`} style={style}>{children}</Text>);
+    } else {
+      // <br>
+      nodes.push(<Text key={`h${_htmlKeyCounter++}`}>{'\n'}</Text>);
+    }
+  }
+
+  // Trailing text after last match
+  if (lastIndex < html.length) {
+    const rest = html.slice(lastIndex);
+    if (rest.trim()) nodes.push(<Text key={`h${_htmlKeyCounter++}`}>{rest}</Text>);
+  }
+
+  return nodes;
+}
+
+function renderHtmlToPdf(
+  html: string,
+  baseStyle: Record<string, any> = {}
+): React.ReactNode[] {
+  _htmlKeyCounter = 0;
+
+  // If no HTML tags, return as plain text
+  if (!/<[a-z][\s\S]*>/i.test(html)) {
+    return [<Text key="plain" style={baseStyle}>{html}</Text>];
+  }
+
+  // Split into paragraphs by <p> tags
+  const paragraphs = html.split(/<\/?p[^>]*>/gi).filter(s => s.trim());
+
+  return paragraphs.map((para, pIdx) => (
+    <Text key={`p${pIdx}`} style={baseStyle}>{parseInlineHtml(para)}</Text>
+  ));
+}
+
 // Hardcoded fallback terms if no template provided
 const FALLBACK_TERMS = `• Payment terms: 30 days from invoice date
 • All prices exclude VAT unless otherwise stated
@@ -347,7 +420,7 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
         </View>
 
         {/* Totals */}
-        <View style={styles.totalsSection}>
+        <View wrap={false} style={styles.totalsSection}>
           <View style={styles.totalRow}>
             <Text>Subtotal:</Text>
             <Text>{formatCurrency(subtotal)}</Text>
@@ -382,11 +455,19 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
           </View>
         )}
 
+        {/* Notes */}
+        {(quote as any).notes && (quote as any).notes.replace(/<[^>]*>/g, '').trim() ? (
+          <View wrap={false} style={{ marginTop: 15 }}>
+            <Text style={{ fontSize: 10, fontWeight: 'bold', marginBottom: 4 }}>Notes:</Text>
+            {renderHtmlToPdf((quote as any).notes, { fontSize: 9, color: '#333333', lineHeight: 1.4 })}
+          </View>
+        ) : null}
+
         {/* Terms and Conditions */}
         <View style={styles.terms}>
           <Text style={styles.termsTitle}>Terms & Conditions:</Text>
           <Text>
-            {(quote as any).terms || (quote as any).notes || defaultTermsTemplate || FALLBACK_TERMS}
+            {(quote as any).terms_conditions || defaultTermsTemplate || FALLBACK_TERMS}
           </Text>
         </View>
 

@@ -17,31 +17,36 @@ const ARROW_COLOR = '#FF0000';
 const CANVAS_WIDTH = 600;
 const CANVAS_HEIGHT = 450;
 const LABEL_FONT = 'bold 14px "Helvetica Neue", Helvetica, Arial, sans-serif';
-const LABEL_HIT_RADIUS = 20; // pixels — how close a click needs to be to grab a label
+const LABEL_HIT_RADIUS = 20;
 
-function getLabelPos(ann: ArrowAnnotation, w: number, h: number) {
-  const lx = ann.labelX != null ? ann.labelX * w : ((ann.x1 + ann.x2) / 2) * w;
-  const ly = ann.labelY != null ? ann.labelY * h : ((ann.y1 + ann.y2) / 2) * h - 16;
+interface DrawRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function getLabelPos(ann: ArrowAnnotation, rect: DrawRect) {
+  const lx = rect.x + (ann.labelX != null ? ann.labelX : (ann.x1 + ann.x2) / 2) * rect.width;
+  const ly = rect.y + (ann.labelY != null ? ann.labelY : (ann.y1 + ann.y2) / 2 - 0.05) * rect.height;
   return { lx, ly };
 }
 
 function drawArrowOnCtx(
   ctx: CanvasRenderingContext2D,
   ann: ArrowAnnotation,
-  w: number,
-  h: number,
+  rect: DrawRect,
   highlight?: boolean,
 ) {
   const color = ann.color || ARROW_COLOR;
-  const x1 = ann.x1 * w;
-  const y1 = ann.y1 * h;
-  const x2 = ann.x2 * w;
-  const y2 = ann.y2 * h;
+  const x1 = rect.x + ann.x1 * rect.width;
+  const y1 = rect.y + ann.y1 * rect.height;
+  const x2 = rect.x + ann.x2 * rect.width;
+  const y2 = rect.y + ann.y2 * rect.height;
 
   const headLen = 14;
   const angle = Math.atan2(y2 - y1, x2 - x1);
 
-  // Line
   ctx.strokeStyle = color;
   ctx.lineWidth = 3;
   ctx.beginPath();
@@ -49,7 +54,6 @@ function drawArrowOnCtx(
   ctx.lineTo(x2, y2);
   ctx.stroke();
 
-  // Arrowhead
   ctx.fillStyle = color;
   ctx.beginPath();
   ctx.moveTo(x2, y2);
@@ -64,29 +68,25 @@ function drawArrowOnCtx(
   ctx.closePath();
   ctx.fill();
 
-  // Label
   if (ann.label) {
-    const { lx, ly } = getLabelPos(ann, w, h);
+    const { lx, ly } = getLabelPos(ann, rect);
 
     ctx.font = LABEL_FONT;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    // Measure for background pill
     const metrics = ctx.measureText(ann.label);
     const padX = 6;
     const padY = 4;
     const boxW = metrics.width + padX * 2;
     const boxH = 18 + padY * 2;
 
-    // Background pill
     const bgColor = highlight ? 'rgba(59, 130, 246, 0.9)' : 'rgba(0, 0, 0, 0.75)';
     ctx.fillStyle = bgColor;
     ctx.beginPath();
     ctx.roundRect(lx - boxW / 2, ly - boxH / 2, boxW, boxH, 4);
     ctx.fill();
 
-    // Text
     ctx.fillStyle = '#FFFFFF';
     ctx.fillText(ann.label, lx, ly);
   }
@@ -102,6 +102,7 @@ export default function ArrowAnnotator({
 }: ArrowAnnotatorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
+  const drawRectRef = useRef<DrawRect>({ x: 0, y: 0, width: CANVAS_WIDTH, height: CANVAS_HEIGHT });
 
   const [mode, setMode] = useState<Mode>('idle');
   const [drawStart, setDrawStart] = useState<{ x: number; y: number } | null>(null);
@@ -110,7 +111,6 @@ export default function ArrowAnnotator({
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
   const [labelText, setLabelText] = useState('');
 
-  // Load image
   useEffect(() => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -128,35 +128,58 @@ export default function ArrowAnnotator({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    ctx.fillStyle = '#374151';
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-    // Draw cropped region or full image
+    // Calculate source and destination rectangles
+    let srcX = 0, srcY = 0, srcW = img.naturalWidth, srcH = img.naturalHeight;
     if (cropParams) {
-      ctx.drawImage(
-        img,
-        cropParams.x, cropParams.y, cropParams.width, cropParams.height,
-        0, 0, CANVAS_WIDTH, CANVAS_HEIGHT,
-      );
+      srcX = cropParams.x;
+      srcY = cropParams.y;
+      srcW = cropParams.width;
+      srcH = cropParams.height;
+    }
+
+    // Calculate draw rectangle maintaining aspect ratio
+    const srcAspect = srcW / srcH;
+    const canvasAspect = CANVAS_WIDTH / CANVAS_HEIGHT;
+
+    let drawW: number, drawH: number, drawX: number, drawY: number;
+
+    if (srcAspect > canvasAspect) {
+      // Image is wider — fit to width, letterbox top/bottom
+      drawW = CANVAS_WIDTH;
+      drawH = CANVAS_WIDTH / srcAspect;
+      drawX = 0;
+      drawY = (CANVAS_HEIGHT - drawH) / 2;
     } else {
-      ctx.drawImage(img, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      // Image is taller — fit to height, letterbox left/right
+      drawH = CANVAS_HEIGHT;
+      drawW = CANVAS_HEIGHT * srcAspect;
+      drawX = (CANVAS_WIDTH - drawW) / 2;
+      drawY = 0;
     }
 
-    // Draw existing annotations
+    drawRectRef.current = { x: drawX, y: drawY, width: drawW, height: drawH };
+
+    ctx.drawImage(img, srcX, srcY, srcW, srcH, drawX, drawY, drawW, drawH);
+
+    const rect = drawRectRef.current;
+
     for (const ann of annotations) {
-      drawArrowOnCtx(ctx, ann, CANVAS_WIDTH, CANVAS_HEIGHT, ann.id === draggingId);
+      drawArrowOnCtx(ctx, ann, rect, ann.id === draggingId);
     }
 
-    // Draw in-progress arrow
     if (drawStart && drawEnd) {
       const tempAnn: ArrowAnnotation = {
         type: 'arrow',
         id: 'temp',
-        x1: drawStart.x / CANVAS_WIDTH,
-        y1: drawStart.y / CANVAS_HEIGHT,
-        x2: drawEnd.x / CANVAS_WIDTH,
-        y2: drawEnd.y / CANVAS_HEIGHT,
+        x1: drawStart.x,
+        y1: drawStart.y,
+        x2: drawEnd.x,
+        y2: drawEnd.y,
       };
-      drawArrowOnCtx(ctx, tempAnn, CANVAS_WIDTH, CANVAS_HEIGHT);
+      drawArrowOnCtx(ctx, tempAnn, rect);
     }
   }, [cropParams, annotations, drawStart, drawEnd, draggingId]);
 
@@ -164,20 +187,31 @@ export default function ArrowAnnotator({
     redraw();
   }, [redraw]);
 
+  // Convert canvas pixel coords to normalized (0-1) coords relative to image area
+  const canvasToNormalized = (px: number, py: number): { x: number; y: number } | null => {
+    const rect = drawRectRef.current;
+    const x = (px - rect.x) / rect.width;
+    const y = (py - rect.y) / rect.height;
+    // Allow slightly outside for easier edge targeting
+    if (x < -0.05 || x > 1.05 || y < -0.05 || y > 1.05) return null;
+    return { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) };
+  };
+
   const getCanvasCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const rect = canvasRef.current!.getBoundingClientRect();
+    const canvasEl = canvasRef.current!;
+    const domRect = canvasEl.getBoundingClientRect();
     return {
-      x: ((e.clientX - rect.left) / rect.width) * CANVAS_WIDTH,
-      y: ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT,
+      px: ((e.clientX - domRect.left) / domRect.width) * CANVAS_WIDTH,
+      py: ((e.clientY - domRect.top) / domRect.height) * CANVAS_HEIGHT,
     };
   };
 
-  // Find a label near the given canvas coords
   const findLabelAt = (px: number, py: number): ArrowAnnotation | null => {
+    const rect = drawRectRef.current;
     for (let i = annotations.length - 1; i >= 0; i--) {
       const ann = annotations[i];
       if (!ann.label) continue;
-      const { lx, ly } = getLabelPos(ann, CANVAS_WIDTH, CANVAS_HEIGHT);
+      const { lx, ly } = getLabelPos(ann, rect);
       const dist = Math.sqrt((px - lx) ** 2 + (py - ly) ** 2);
       if (dist < LABEL_HIT_RADIUS + ann.label.length * 3) return ann;
     }
@@ -185,17 +219,19 @@ export default function ArrowAnnotator({
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const coords = getCanvasCoords(e);
+    const { px, py } = getCanvasCoords(e);
 
     if (mode === 'drawing') {
-      setDrawStart(coords);
-      setDrawEnd(coords);
+      const norm = canvasToNormalized(px, py);
+      if (norm) {
+        setDrawStart(norm);
+        setDrawEnd(norm);
+      }
       return;
     }
 
-    // Check if clicking on a label to drag it
     if (mode === 'idle') {
-      const hit = findLabelAt(coords.x, coords.y);
+      const hit = findLabelAt(px, py);
       if (hit) {
         setMode('dragging-label');
         setDraggingId(hit.id);
@@ -205,27 +241,28 @@ export default function ArrowAnnotator({
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const coords = getCanvasCoords(e);
+    const { px, py } = getCanvasCoords(e);
 
     if (mode === 'drawing' && drawStart) {
-      setDrawEnd(coords);
+      const norm = canvasToNormalized(px, py);
+      if (norm) setDrawEnd(norm);
       return;
     }
 
     if (mode === 'dragging-label' && draggingId) {
-      onAnnotationsChange(
-        annotations.map(a =>
-          a.id === draggingId
-            ? { ...a, labelX: coords.x / CANVAS_WIDTH, labelY: coords.y / CANVAS_HEIGHT }
-            : a,
-        ),
-      );
+      const norm = canvasToNormalized(px, py);
+      if (norm) {
+        onAnnotationsChange(
+          annotations.map(a =>
+            a.id === draggingId ? { ...a, labelX: norm.x, labelY: norm.y } : a,
+          ),
+        );
+      }
       return;
     }
 
-    // Update cursor based on hover
     if (mode === 'idle' && canvasRef.current) {
-      const hit = findLabelAt(coords.x, coords.y);
+      const hit = findLabelAt(px, py);
       canvasRef.current.style.cursor = hit ? 'grab' : 'default';
     }
   };
@@ -239,9 +276,8 @@ export default function ArrowAnnotator({
 
     if (mode !== 'drawing' || !drawStart || !drawEnd) return;
 
-    // Only create if the arrow has meaningful length
-    const dx = drawEnd.x - drawStart.x;
-    const dy = drawEnd.y - drawStart.y;
+    const dx = (drawEnd.x - drawStart.x) * drawRectRef.current.width;
+    const dy = (drawEnd.y - drawStart.y) * drawRectRef.current.height;
     if (Math.sqrt(dx * dx + dy * dy) < 10) {
       setDrawStart(null);
       setDrawEnd(null);
@@ -252,17 +288,16 @@ export default function ArrowAnnotator({
     const newArrow: ArrowAnnotation = {
       type: 'arrow',
       id: newId,
-      x1: drawStart.x / CANVAS_WIDTH,
-      y1: drawStart.y / CANVAS_HEIGHT,
-      x2: drawEnd.x / CANVAS_WIDTH,
-      y2: drawEnd.y / CANVAS_HEIGHT,
+      x1: drawStart.x,
+      y1: drawStart.y,
+      x2: drawEnd.x,
+      y2: drawEnd.y,
     };
 
     onAnnotationsChange([...annotations, newArrow]);
     setDrawStart(null);
     setDrawEnd(null);
     setMode('idle');
-    // Open label editor for the new arrow
     setEditingLabelId(newId);
     setLabelText('');
   };
@@ -326,7 +361,6 @@ export default function ArrowAnnotator({
         />
       </div>
 
-      {/* Annotation list */}
       {annotations.length > 0 && (
         <div className="space-y-2">
           <h4 className="text-sm font-medium">Annotations</h4>

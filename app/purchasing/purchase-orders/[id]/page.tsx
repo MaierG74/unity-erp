@@ -733,6 +733,21 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     enabled: !!id,
   });
 
+  // Fetch default CC email from company settings
+  const { data: companySettings } = useQuery({
+    queryKey: ['companySettings'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('quote_company_settings')
+        .select('po_default_cc_email')
+        .eq('setting_id', 1)
+        .single();
+      if (error) throw error;
+      return data as { po_default_cc_email: string | null };
+    },
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  });
+
   useEffect(() => {
     const headerEl = headerRef.current;
 
@@ -2342,7 +2357,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           open={emailDialogOpen}
           onClose={() => setEmailDialogOpen(false)}
           rows={emailRows}
-          cc={process.env.NEXT_PUBLIC_PO_EMAIL_CC || ''}
+          cc={companySettings?.po_default_cc_email || ''}
           loading={emailDialogLoading || sendEmailMutation.isPending}
           onConfirm={handleSendEmails}
         />

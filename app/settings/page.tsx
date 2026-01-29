@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { DocumentTemplate, POContactInfo } from '@/types/templates';
 import { parsePOContactInfo } from '@/lib/templates';
-import { ChevronDown, ChevronRight, FileText, Mail, ShoppingCart } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileText, Mail, ShoppingCart, Plus, Trash2 } from 'lucide-react';
 
 interface Settings {
   setting_id: number;
@@ -22,6 +22,7 @@ interface Settings {
   bank_details: string | null;
   terms_conditions: string | null;
   fg_auto_consume_on_add?: boolean;
+  po_default_cc_email?: string | null;
 }
 
 interface TemplateState {
@@ -50,6 +51,12 @@ export default function SettingsPage() {
   const [savingTemplates, setSavingTemplates] = useState(false);
   const [quoteExpanded, setQuoteExpanded] = useState(true);
   const [poExpanded, setPoExpanded] = useState(true);
+
+  // Additional quote T&C templates (beyond the default)
+  const [quoteTermsTemplates, setQuoteTermsTemplates] = useState<DocumentTemplate[]>([]);
+  const [quoteTermsEdits, setQuoteTermsEdits] = useState<Record<number, { name: string; content: string }>>({});
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [addingTemplate, setAddingTemplate] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -87,6 +94,15 @@ export default function SettingsPage() {
             po_contact_name: contactInfo.name,
             po_contact_email: contactInfo.email,
           });
+
+          // Load additional quote terms templates
+          const extraQuoteTemplates = loadedTemplates.filter(t => t.template_type === 'quote_terms');
+          setQuoteTermsTemplates(extraQuoteTemplates);
+          const edits: Record<number, { name: string; content: string }> = {};
+          for (const t of extraQuoteTemplates) {
+            edits[t.template_id] = { name: t.name, content: t.content };
+          }
+          setQuoteTermsEdits(edits);
         }
       } catch (e: any) {
         setError(e?.message ?? 'Failed to load settings');
@@ -178,6 +194,22 @@ export default function SettingsPage() {
         }),
       });
 
+      // Save additional quote terms templates
+      for (const t of quoteTermsTemplates) {
+        const edit = quoteTermsEdits[t.template_id];
+        if (edit) {
+          await fetch('/api/document-templates', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              template_id: t.template_id,
+              name: edit.name,
+              content: edit.content,
+            }),
+          });
+        }
+      }
+
       setSuccess('Templates saved');
     } catch (e: any) {
       setError(e?.message ?? 'Failed to save templates');
@@ -189,6 +221,89 @@ export default function SettingsPage() {
   const onTemplateChange = (key: keyof TemplateState, value: string) => {
     setTemplateEdits({ ...templateEdits, [key]: value });
   };
+
+  const addQuoteTermsTemplate = async () => {
+    const name = newTemplateName.trim();
+    if (!name) return;
+    setAddingTemplate(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/document-templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          content: '',
+          template_type: 'quote_terms',
+          template_category: 'quote',
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      const created = json.template as DocumentTemplate;
+      setQuoteTermsTemplates(prev => [...prev, created]);
+      setQuoteTermsEdits(prev => ({ ...prev, [created.template_id]: { name: created.name, content: created.content } }));
+      setNewTemplateName('');
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to create template');
+    } finally {
+      setAddingTemplate(false);
+    }
+  };
+
+  const deleteQuoteTermsTemplate = async (templateId: number) => {
+    setError(null);
+    try {
+      const res = await fetch(`/api/document-templates?id=${templateId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setQuoteTermsTemplates(prev => prev.filter(t => t.template_id !== templateId));
+      setQuoteTermsEdits(prev => {
+        const next = { ...prev };
+        delete next[templateId];
+        return next;
+      });
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to delete template');
+    }
+  };
+
+  // Debounced auto-save for individual quote terms templates
+  const templateSaveTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
+  const autoSaveTemplate = useCallback(async (templateId: number, name: string, content: string) => {
+    try {
+      await fetch('/api/document-templates', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ template_id: templateId, name, content }),
+      });
+    } catch (e) {
+      console.error('Auto-save template failed:', e);
+    }
+  }, []);
+
+  const handleQuoteTermsEdit = useCallback((templateId: number, field: 'name' | 'content', value: string) => {
+    setQuoteTermsEdits(prev => {
+      const current = prev[templateId] || { name: '', content: '' };
+      const updated = { ...current, [field]: value };
+
+      // Debounced auto-save
+      if (templateSaveTimers.current[templateId]) {
+        clearTimeout(templateSaveTimers.current[templateId]);
+      }
+      templateSaveTimers.current[templateId] = setTimeout(() => {
+        autoSaveTemplate(templateId, updated.name, updated.content);
+      }, 800);
+
+      return { ...prev, [templateId]: updated };
+    });
+  }, [autoSaveTemplate]);
+
+  // Clean up timers on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(templateSaveTimers.current).forEach(clearTimeout);
+    };
+  }, []);
 
   if (loading) {
     return (
@@ -358,10 +473,11 @@ export default function SettingsPage() {
 
               {quoteExpanded && (
                 <div className="px-4 pb-4 space-y-4">
+                  {/* Default template */}
                   <div>
                     <label className="block text-sm font-medium mb-1">Default Terms & Conditions</label>
                     <p className="text-xs text-muted-foreground mb-2">
-                      Shown on quote PDFs when no quote-specific terms are provided
+                      Used when no specific template is selected on a quote
                     </p>
                     <textarea
                       className="w-full px-3 py-2 rounded border bg-background h-32 font-mono text-sm"
@@ -369,6 +485,59 @@ export default function SettingsPage() {
                       onChange={(e) => onTemplateChange('quote_default_terms', e.target.value)}
                       placeholder="• Payment terms: 30 days from invoice date&#10;• All prices exclude VAT unless otherwise stated"
                     />
+                  </div>
+
+                  {/* Additional templates */}
+                  {quoteTermsTemplates.map(t => {
+                    const edit = quoteTermsEdits[t.template_id] || { name: t.name, content: t.content };
+                    return (
+                      <div key={t.template_id} className="border-t pt-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <input
+                            className="flex-1 px-3 py-1.5 rounded border bg-background text-sm font-medium"
+                            value={edit.name}
+                            onChange={(e) => handleQuoteTermsEdit(t.template_id, 'name', e.target.value)}
+                            placeholder="Template name"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => deleteQuoteTermsTemplate(t.template_id)}
+                            className="p-1.5 rounded hover:bg-red-100 dark:hover:bg-red-950 text-red-500"
+                            title="Delete template"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                        <textarea
+                          className="w-full px-3 py-2 rounded border bg-background h-28 font-mono text-sm"
+                          value={edit.content}
+                          onChange={(e) => handleQuoteTermsEdit(t.template_id, 'content', e.target.value)}
+                          placeholder="Enter terms & conditions for this template…"
+                        />
+                      </div>
+                    );
+                  })}
+
+                  {/* Add new template */}
+                  <div className="border-t pt-4">
+                    <div className="flex items-center gap-2">
+                      <input
+                        className="flex-1 px-3 py-1.5 rounded border bg-background text-sm"
+                        value={newTemplateName}
+                        onChange={(e) => setNewTemplateName(e.target.value)}
+                        placeholder="New template name (e.g. 50% Deposit)"
+                        onKeyDown={(e) => { if (e.key === 'Enter') addQuoteTermsTemplate(); }}
+                      />
+                      <button
+                        type="button"
+                        onClick={addQuoteTermsTemplate}
+                        disabled={!newTemplateName.trim() || addingTemplate}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm disabled:opacity-50"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Add
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -428,6 +597,21 @@ export default function SettingsPage() {
                       value={templateEdits.po_email_notice}
                       onChange={(e) => onTemplateChange('po_email_notice', e.target.value)}
                       placeholder="Please verify all quantities, pricing, and specifications before processing this order..."
+                    />
+                  </div>
+
+                  {/* Default CC Email */}
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Default CC Email for Purchase Orders</label>
+                    <p className="text-xs text-muted-foreground mb-2">
+                      This email will be automatically CC&apos;d on all purchase order emails sent to suppliers
+                    </p>
+                    <input
+                      type="email"
+                      className="w-full px-3 py-2 rounded border bg-background"
+                      value={settings?.po_default_cc_email || ''}
+                      onChange={(e) => onChange('po_default_cc_email', e.target.value)}
+                      placeholder="e.g., orders@qbutton.co.za"
                     />
                   </div>
                 </div>

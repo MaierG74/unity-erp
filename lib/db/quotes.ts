@@ -277,6 +277,12 @@ export async function createQuoteItem(
     });
   }
 
+  // Return item with clusters populated so client state is complete
+  if (newItem && !options?.skipDefaultCluster) {
+    const clusters = await fetchQuoteItemClusters(newItem.id);
+    return { ...newItem, quote_item_clusters: clusters } as QuoteItem;
+  }
+
   return newItem!;
 }
 

@@ -50,11 +50,11 @@ export async function GET(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { template_type, content } = body;
+    const { template_id, template_type, content, name } = body;
 
-    if (!template_type) {
+    if (!template_type && !template_id) {
       return NextResponse.json(
-        { error: 'template_type is required' },
+        { error: 'template_type or template_id is required' },
         { status: 400 }
       );
     }
@@ -66,12 +66,20 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    const { data, error } = await supabaseAdmin
+    const updates: Record<string, unknown> = { content, updated_at: new Date().toISOString() };
+    if (name !== undefined) updates.name = name;
+
+    let query = supabaseAdmin
       .from('document_templates')
-      .update({ content, updated_at: new Date().toISOString() })
-      .eq('template_type', template_type)
-      .select()
-      .single();
+      .update(updates);
+
+    if (template_id) {
+      query = query.eq('template_id', template_id);
+    } else {
+      query = query.eq('template_type', template_type);
+    }
+
+    const { data, error } = await query.select().single();
 
     if (error) {
       console.error('Error updating template:', error);
@@ -84,6 +92,84 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ template: data });
   } catch (error) {
     console.error('Error in PUT /api/document-templates:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { name, content, template_type, template_category } = body;
+
+    if (!name || content === undefined || !template_type || !template_category) {
+      return NextResponse.json(
+        { error: 'name, content, template_type, and template_category are required' },
+        { status: 400 }
+      );
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('document_templates')
+      .insert({
+        name,
+        content,
+        template_type,
+        template_category,
+        is_active: true,
+        placeholders: [],
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating template:', error);
+      return NextResponse.json(
+        { error: 'Failed to create template' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ template: data }, { status: 201 });
+  } catch (error) {
+    console.error('Error in POST /api/document-templates:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const templateId = searchParams.get('id');
+
+    if (!templateId) {
+      return NextResponse.json(
+        { error: 'id query parameter is required' },
+        { status: 400 }
+      );
+    }
+
+    const { error } = await supabaseAdmin
+      .from('document_templates')
+      .delete()
+      .eq('template_id', parseInt(templateId, 10));
+
+    if (error) {
+      console.error('Error deleting template:', error);
+      return NextResponse.json(
+        { error: 'Failed to delete template' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Error in DELETE /api/document-templates:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

@@ -93,14 +93,40 @@ export async function compositeImage(
   canvas.height = outputHeight;
   const ctx = canvas.getContext('2d')!;
 
+  // Determine source dimensions (cropped region or full image)
+  const srcW = cropParams ? cropParams.width : img.naturalWidth;
+  const srcH = cropParams ? cropParams.height : img.naturalHeight;
+
+  // Fit source into output canvas preserving aspect ratio (contain)
+  const srcAspect = srcW / srcH;
+  const outAspect = outputWidth / outputHeight;
+  let drawW: number, drawH: number, drawX: number, drawY: number;
+  if (srcAspect > outAspect) {
+    // Source is wider – fit to width
+    drawW = outputWidth;
+    drawH = outputWidth / srcAspect;
+    drawX = 0;
+    drawY = (outputHeight - drawH) / 2;
+  } else {
+    // Source is taller – fit to height
+    drawH = outputHeight;
+    drawW = outputHeight * srcAspect;
+    drawX = (outputWidth - drawW) / 2;
+    drawY = 0;
+  }
+
+  // Fill background white so letterbox areas aren't transparent
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, outputWidth, outputHeight);
+
   if (cropParams) {
     ctx.drawImage(
       img,
       cropParams.x, cropParams.y, cropParams.width, cropParams.height,
-      0, 0, outputWidth, outputHeight,
+      drawX, drawY, drawW, drawH,
     );
   } else {
-    ctx.drawImage(img, 0, 0, outputWidth, outputHeight);
+    ctx.drawImage(img, drawX, drawY, drawW, drawH);
   }
 
   if (annotations?.length) {

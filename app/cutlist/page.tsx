@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { ArrowLeft, BarChart3, Info, Calculator, Trash2, Save, HelpCircle } from 'lucide-react';
+import { ArrowLeft, BarChart3, Info, Calculator, Trash2, Save, HelpCircle, FolderOpen, FilePlus, SaveAll } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -52,6 +52,13 @@ import {
   loadMaterialDefaults,
   saveMaterialDefaults,
 } from '@/lib/cutlist/materialsDefaults';
+
+// Import save/load
+import { useSavedCutlists } from '@/hooks/useSavedCutlists';
+import type { SavedCutlistData, SavedCutlistProject } from '@/lib/cutlist/savedProjects';
+import { SaveCutlistDialog } from '@/components/features/cutlist/SaveCutlistDialog';
+import { LoadCutlistDialog } from '@/components/features/cutlist/LoadCutlistDialog';
+import { toast } from 'sonner';
 
 // Import types
 import type {
@@ -197,6 +204,24 @@ export default function CutlistPage() {
   const [activeTab, setActiveTab] = React.useState<'materials' | 'parts' | 'preview'>('parts');
   const [snapshotOpen, setSnapshotOpen] = React.useState(false);
   const [tipsOpen, setTipsOpen] = React.useState(false);
+
+  // ============== Save/Load Project State ==============
+  const [currentProjectId, setCurrentProjectId] = React.useState<string | null>(null);
+  const [currentProjectName, setCurrentProjectName] = React.useState<string | null>(null);
+  const [currentFolderId, setCurrentFolderId] = React.useState<string | null>(null);
+  const [saveDialogOpen, setSaveDialogOpen] = React.useState(false);
+  const [loadDialogOpen, setLoadDialogOpen] = React.useState(false);
+  const [isSaving, setIsSaving] = React.useState(false);
+  const {
+    folders,
+    projects,
+    saveProject,
+    updateProject,
+    deleteProject,
+    createFolder,
+    renameFolder,
+    deleteFolder,
+  } = useSavedCutlists();
 
   // ============== Summary (passed to dialog) ==============
   const [summary, setSummary] = React.useState<CutlistSummary | null>(null);
@@ -834,6 +859,95 @@ export default function CutlistPage() {
     setSummary(null);
   };
 
+  // ============== Save/Load Handlers ==============
+
+  const gatherProjectData = React.useCallback((): SavedCutlistData => ({
+    parts,
+    primaryBoards,
+    backerBoards,
+    edging,
+    kerf,
+    optimizationPriority,
+  }), [parts, primaryBoards, backerBoards, edging, kerf, optimizationPriority]);
+
+  const handleSaveProject = React.useCallback(
+    async (name: string, folderId: string | null) => {
+      setIsSaving(true);
+      try {
+        const data = gatherProjectData();
+        if (currentProjectId) {
+          const success = await updateProject(currentProjectId, { name, folderId, data });
+          if (success) {
+            setCurrentProjectName(name);
+            setCurrentFolderId(folderId);
+            toast.success(`Saved "${name}"`);
+          } else {
+            toast.error('Failed to save cutlist');
+          }
+        } else {
+          const project = await saveProject(name, data, folderId);
+          if (project) {
+            setCurrentProjectId(project.id);
+            setCurrentProjectName(name);
+            setCurrentFolderId(folderId);
+            toast.success(`Saved "${name}"`);
+          } else {
+            toast.error('Failed to save cutlist');
+          }
+        }
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [currentProjectId, gatherProjectData, saveProject, updateProject]
+  );
+
+  const handleQuickSave = React.useCallback(async () => {
+    if (!currentProjectId || !currentProjectName) {
+      setSaveDialogOpen(true);
+      return;
+    }
+    setIsSaving(true);
+    try {
+      const data = gatherProjectData();
+      const success = await updateProject(currentProjectId, { data });
+      if (success) {
+        toast.success(`Saved "${currentProjectName}"`);
+      } else {
+        toast.error('Failed to save cutlist');
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  }, [currentProjectId, currentProjectName, gatherProjectData, updateProject]);
+
+  const handleLoadProject = React.useCallback((project: SavedCutlistProject) => {
+    const d = project.data;
+    if (d.parts) setParts(d.parts);
+    if (d.primaryBoards) setPrimaryBoards(d.primaryBoards);
+    if (d.backerBoards) setBackerBoards(d.backerBoards);
+    if (d.edging) setEdging(d.edging);
+    if (d.kerf !== undefined) setKerf(d.kerf);
+    if (d.optimizationPriority) setOptimizationPriority(d.optimizationPriority);
+    setResult(null);
+    setBackerResult(null);
+    setSheetOverrides({});
+    setGlobalFullBoard(false);
+    setSummary(null);
+    setCurrentProjectId(project.id);
+    setCurrentProjectName(project.name);
+    setCurrentFolderId(project.folder_id);
+    setLoadDialogOpen(false);
+    toast.success(`Loaded "${project.name}"`);
+  }, []);
+
+  const handleNewProject = React.useCallback(() => {
+    handleClearAll();
+    setCurrentProjectId(null);
+    setCurrentProjectName(null);
+    setCurrentFolderId(null);
+  }, [handleClearAll]);
+
   // ============== Render ==============
 
   return (
@@ -846,12 +960,69 @@ export default function CutlistPage() {
           <ArrowLeft className="h-4 w-4" />
           Back to Dashboard
         </Link>
-        <div>
-          <h1 className="text-3xl font-semibold text-foreground">Cutlist Calculator</h1>
-          <p className="mt-2 text-sm text-muted-foreground max-w-3xl">
-            Run quick board calculations. Enter parts in the compact table, configure materials, and preview optimized
-            sheet layouts.
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl font-semibold text-foreground">Cutlist Calculator</h1>
+              {currentProjectName && (
+                <Badge variant="secondary" className="text-sm font-normal">
+                  {currentProjectName}
+                </Badge>
+              )}
+            </div>
+            <p className="mt-2 text-sm text-muted-foreground max-w-3xl">
+              Run quick board calculations. Enter parts in the compact table, configure materials, and preview optimized
+              sheet layouts.
+            </p>
+          </div>
+          <div className="flex gap-1.5 shrink-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleNewProject}
+              className="gap-1.5"
+              title="New cutlist"
+            >
+              <FilePlus className="h-4 w-4" />
+              New
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setLoadDialogOpen(true)}
+              className="gap-1.5"
+              title="Open saved cutlist"
+            >
+              <FolderOpen className="h-4 w-4" />
+              Open
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleQuickSave}
+              disabled={isSaving || parts.length === 0}
+              className="gap-1.5"
+              title={currentProjectId ? `Save "${currentProjectName}"` : 'Save cutlist'}
+            >
+              <Save className="h-4 w-4" />
+              Save
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setSaveDialogOpen(true)}
+              disabled={parts.length === 0}
+              className="gap-1.5"
+              title="Save as new cutlist"
+            >
+              <SaveAll className="h-4 w-4" />
+              Save As
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -1275,6 +1446,37 @@ export default function CutlistPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Save/Load Dialogs */}
+      <SaveCutlistDialog
+        open={saveDialogOpen}
+        onOpenChange={setSaveDialogOpen}
+        currentName={currentProjectName ?? undefined}
+        currentFolderId={currentFolderId}
+        folders={folders}
+        onSave={handleSaveProject}
+        onCreateFolder={createFolder}
+        saving={isSaving}
+      />
+      <LoadCutlistDialog
+        open={loadDialogOpen}
+        onOpenChange={setLoadDialogOpen}
+        folders={folders}
+        projects={projects}
+        onLoad={handleLoadProject}
+        onDeleteProject={deleteProject}
+        onRenameProject={async (id, name) => {
+          const success = await updateProject(id, { name });
+          return success;
+        }}
+        onMoveProject={async (id, folderId) => {
+          const success = await updateProject(id, { folderId });
+          return success;
+        }}
+        onCreateFolder={createFolder}
+        onRenameFolder={renameFolder}
+        onDeleteFolder={deleteFolder}
+      />
     </div>
   );
 }

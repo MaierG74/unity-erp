@@ -68,25 +68,33 @@ export default function EmailQuoteDialog({
     return emails;
   }, [emailContacts, selectedContactIds, manualEmails]);
 
-  // Reset form when dialog opens
+  // Reset form fields only when dialog opens (false → true transition)
+  const prevOpenRef = React.useRef(false);
   React.useEffect(() => {
-    if (open) {
-      // Pre-select the quote's contact, or the primary contact, or the first contact with email
-      const preselect = new Set<number>();
-      if (quote.contact?.id && emailContacts.find(c => c.id === quote.contact!.id)) {
-        preselect.add(quote.contact.id);
-      } else {
-        const primary = emailContacts.find(c => c.is_primary);
-        if (primary) preselect.add(primary.id);
-        else if (emailContacts.length > 0) preselect.add(emailContacts[0].id);
-      }
-      setSelectedContactIds(preselect);
+    if (open && !prevOpenRef.current) {
+      setSelectedContactIds(new Set());
       setManualEmails([]);
       setManualInput('');
       setCustomMessage('');
       setError(null);
     }
-  }, [open, quote, emailContacts]);
+    prevOpenRef.current = open;
+  }, [open]);
+
+  // Pre-select contacts once they load while dialog is open
+  const contactQuoteId = quote.contact?.id;
+  React.useEffect(() => {
+    if (!open || emailContacts.length === 0) return;
+    const preselect = new Set<number>();
+    if (contactQuoteId && emailContacts.find(c => c.id === contactQuoteId)) {
+      preselect.add(contactQuoteId);
+    } else {
+      const primary = emailContacts.find(c => c.is_primary);
+      if (primary) preselect.add(primary.id);
+      else preselect.add(emailContacts[0].id);
+    }
+    setSelectedContactIds(preselect);
+  }, [open, contactQuoteId, emailContacts]);
 
   const validateEmail = (email: string): boolean => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

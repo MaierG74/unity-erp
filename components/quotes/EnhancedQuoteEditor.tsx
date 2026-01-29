@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Quote, QuoteItem, QuoteAttachment, fetchQuote, updateQuote, fetchAllQuoteAttachments } from '@/lib/db/quotes';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import RichTextEditor from '@/components/ui/rich-text-editor';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -52,6 +53,7 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
   };
   const [settingsCompanyInfo, setSettingsCompanyInfo] = useState<any | null>(null);
   const [defaultTermsTemplate, setDefaultTermsTemplate] = useState<string | undefined>(undefined);
+  const [termsTemplates, setTermsTemplates] = useState<Array<{ template_id: number; name: string; content: string }>>([]);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -85,15 +87,26 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
 
     const loadTemplates = async () => {
       try {
-        const res = await fetch('/api/document-templates?type=quote_default_terms', { headers: { 'Accept': 'application/json' } });
+        const res = await fetch('/api/document-templates?category=quote', { headers: { 'Accept': 'application/json' } });
         if (!res.ok) return;
         const json = await res.json();
-        const template = json?.templates?.[0];
-        if (template?.content) {
-          setDefaultTermsTemplate(template.content);
+        const allTemplates = json?.templates ?? [];
+        // Set the default terms template
+        const defaultTemplate = allTemplates.find((t: any) => t.template_type === 'quote_default_terms');
+        if (defaultTemplate?.content) {
+          setDefaultTermsTemplate(defaultTemplate.content);
         }
+        // Collect all selectable templates (default + extras)
+        const selectable: Array<{ template_id: number; name: string; content: string }> = [];
+        if (defaultTemplate) {
+          selectable.push({ template_id: defaultTemplate.template_id, name: 'Default', content: defaultTemplate.content });
+        }
+        for (const t of allTemplates.filter((t: any) => t.template_type === 'quote_terms')) {
+          selectable.push({ template_id: t.template_id, name: t.name, content: t.content });
+        }
+        setTermsTemplates(selectable);
       } catch (e) {
-        console.warn('Failed to load quote terms template');
+        console.warn('Failed to load quote terms templates');
       }
     };
 
@@ -151,13 +164,16 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
     setIsSaving(true);
     try {
       const grandTotal = calculateGrandTotal();
-      await updateQuote(quote.id, { 
-        ...quote, 
-        grand_total: grandTotal 
+      // Only send actual quote columns — strip joined relations
+      const { customer, contact, items: _items, attachments: _att, ...quoteColumns } = quote as any;
+      await updateQuote(quote.id, {
+        ...quoteColumns,
+        grand_total: grandTotal
       });
-      // Show success message
+      toast({ title: 'Quote saved' });
     } catch (error) {
       console.error('Save failed:', error);
+      toast({ title: 'Save failed', variant: 'destructive' });
     } finally {
       setIsSaving(false);
     }
@@ -173,11 +189,32 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
     return subtotal * 0.15; // 15% VAT
   };
 
+  // Debounced auto-save: persists quote field changes after 800ms of inactivity
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoSave = useCallback(async (updated: any) => {
+    try {
+      const { customer, contact, items: _i, attachments: _a, ...cols } = updated;
+      await updateQuote(updated.id, cols);
+    } catch (e) {
+      console.error('Auto-save failed:', e);
+    }
+  }, []);
+
   const handleQuoteChange = (field: string, value: any) => {
     if (quote) {
-      setQuote({ ...quote, [field]: value });
+      const updated = { ...quote, [field]: value };
+      setQuote(updated);
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+      autoSaveTimer.current = setTimeout(() => autoSave(updated), 800);
     }
   };
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    };
+  }, []);
 
   const handleItemsChange = (newItems: QuoteItem[]) => {
     setItems(newItems);
@@ -195,6 +232,23 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
     });
     setAttachmentsVersion(v => v + 1);
   }, []);
+
+  // Stable reference for email dialog to avoid infinite re-render loop
+  // Must be before early returns to satisfy Rules of Hooks
+  const emailQuote = useMemo(() => {
+    if (!quote) return null;
+    const itemsWithAttachments = items.map((item: any) => {
+      const itemAttachments = attachments.filter(
+        (att) => att.scope === 'item' && att.quote_item_id === item.id
+      );
+      return { ...item, attachments: itemAttachments };
+    });
+    return {
+      ...quote,
+      items: itemsWithAttachments,
+      attachments: attachments.filter((att) => att.scope === 'quote'),
+    };
+  }, [quote, items, attachments]) as any;
 
   if (!quote) {
     return (
@@ -377,6 +431,65 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
             </Card>
           </div>
 
+          {/* Notes */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Notes</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <RichTextEditor
+                content={(quote as any).notes || ''}
+                onUpdate={(html) => handleQuoteChange('notes', html)}
+                placeholder="e.g. Goods to be collected from factory, Wrapped for transport…"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Notes appear on the PDF below the totals section.
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Terms & Conditions */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Terms & Conditions</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {termsTemplates.length > 0 && (
+                <Select
+                  key={`tc-${(quote as any).terms_conditions?.length ?? 0}`}
+                  onValueChange={(templateId) => {
+                    const t = termsTemplates.find(t => String(t.template_id) === templateId);
+                    if (t) {
+                      handleQuoteChange('terms_conditions', t.content);
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Load from template…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {termsTemplates.map(t => (
+                      <SelectItem key={t.template_id} value={String(t.template_id)}>
+                        {t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <Textarea
+                placeholder="Terms & conditions for this quote…"
+                value={(quote as any).terms_conditions || ''}
+                onChange={(e) => handleQuoteChange('terms_conditions', e.target.value)}
+                rows={5}
+              />
+              <p className="text-xs text-muted-foreground">
+                {(quote as any).terms_conditions
+                  ? 'Custom terms set for this quote.'
+                  : 'No custom terms — the default template from Settings will be used.'}
+              </p>
+            </CardContent>
+          </Card>
+
           {/* Email Activity */}
           <EmailActivityCard type="quote" id={quoteId} />
         </TabsContent>
@@ -519,23 +632,7 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
       <EmailQuoteDialog
         open={showEmailDialog}
         onOpenChange={setShowEmailDialog}
-        quote={(() => {
-          const itemsWithAttachments = items.map((item: any) => {
-            const itemAttachments = attachments.filter(
-              (att) => att.scope === 'item' && att.quote_item_id === item.id
-            );
-            return {
-              ...item,
-              attachments: itemAttachments,
-            };
-          });
-
-          return {
-            ...quote,
-            items: itemsWithAttachments,
-            attachments: attachments.filter((att) => att.scope === 'quote'),
-          };
-        })() as any}
+        quote={emailQuote}
         companyInfo={settingsCompanyInfo || defaultCompanyInfo}
         onEmailSent={() => {
           toast({
