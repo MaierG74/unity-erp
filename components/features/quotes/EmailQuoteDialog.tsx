@@ -160,12 +160,33 @@ export default function EmailQuoteDialog({
   const handleSend = async () => {
     setError(null);
 
-    if (allRecipients.length === 0) {
+    // Auto-add any email left in the input field before sending
+    const pendingEmail = manualInput.trim();
+    if (pendingEmail) {
+      if (!validateEmail(pendingEmail)) {
+        setError('Please enter a valid email address');
+        return;
+      }
+      if (!manualEmails.includes(pendingEmail) && !emailContacts.some(c => c.email === pendingEmail && selectedContactIds.has(c.id))) {
+        setManualEmails(prev => [...prev, pendingEmail]);
+        setManualInput('');
+        // allRecipients will update on next render, but we need it now
+        // so we compute the final list inline
+      }
+    }
+
+    // Build recipients inline to include the just-added pending email
+    const finalRecipients = [...allRecipients];
+    if (pendingEmail && validateEmail(pendingEmail) && !finalRecipients.includes(pendingEmail)) {
+      finalRecipients.push(pendingEmail);
+    }
+
+    if (finalRecipients.length === 0) {
       setError('Please select at least one recipient');
       return;
     }
 
-    const invalid = allRecipients.find(e => !validateEmail(e));
+    const invalid = finalRecipients.find(e => !validateEmail(e));
     if (invalid) {
       setError(`Invalid email address: ${invalid}`);
       return;
@@ -237,7 +258,7 @@ export default function EmailQuoteDialog({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          recipientEmails: allRecipients,
+          recipientEmails: finalRecipients,
           customMessage: customMessage.trim() || undefined,
           pdfBase64,
           pdfFilename,
