@@ -47,9 +47,6 @@ export function StaffViewModal({ staff, open, onOpenChange }: StaffViewModalProp
 
   if (!staff) return null;
 
-  // Debug: log document URLs
-  console.log('Staff documents:', staff.id_document_urls, staff.bank_account_image_urls);
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
