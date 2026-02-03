@@ -279,6 +279,9 @@ export const EdgeBandingPopover = memo(function EdgeBandingPopover({
                 <SelectValue placeholder="Default edging" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="__default__" className="text-xs">
+                  Default (auto by thickness)
+                </SelectItem>
                 {edgingOptions.map((option) => (
                   <SelectItem key={option.id} value={option.id} className="text-xs">
                     {option.name} ({option.thickness_mm}mm)

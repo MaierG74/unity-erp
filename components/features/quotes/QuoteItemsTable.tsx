@@ -39,7 +39,7 @@ import InlineAttachmentsCell from './InlineAttachmentsCell';
 import AddQuoteItemDialog from './AddQuoteItemDialog';
 import { createQuoteAttachmentFromUrl, fetchPrimaryProductImage } from '@/lib/db/quotes';
 import type { ProductOptionSelection } from '@/lib/db/products';
-import QuoteCutlistModal from '@/components/features/cutlist/QuoteCutlistModal';
+import Link from 'next/link';
 
 interface Props {
   quoteId: string;
@@ -138,7 +138,6 @@ function QuoteItemRow({
   onDeleteClusterLine,
   onUpdateCluster,
   onEnsureCluster,
-  onOpenCutlist,
   attachmentsVersion,
   onItemAttachmentsChange,
   isDuplicating,
@@ -165,7 +164,6 @@ function QuoteItemRow({
   onDeleteClusterLine: (id: string) => void;
   onUpdateCluster: (clusterId: string, updates: Partial<QuoteItemCluster>) => void;
   onEnsureCluster: (itemId: string) => void;
-  onOpenCutlist: (itemId: string) => void;
   attachmentsVersion?: number;
   onItemAttachmentsChange?: (itemId: string, attachments: QuoteAttachment[]) => void;
 }) {
@@ -302,9 +300,11 @@ function QuoteItemRow({
               className="px-3 py-1.5"
               title="Cutlist Calculator"
               aria-label="Cutlist Calculator"
-              onClick={() => onOpenCutlist(item.id)}
+              asChild
             >
-              Cutlist
+              <Link href={`/quotes/${quoteId}/cutlist/${item.id}`}>
+                Cutlist
+              </Link>
             </Button>
             <Button
               variant="outline"
@@ -402,12 +402,9 @@ function QuoteItemRow({
 export default function QuoteItemsTable({ quoteId, items, onItemsChange, onRefresh, attachmentsVersion, onItemAttachmentsChange }: Props) {
   const { toast } = useToast();
   const [showAddItemDialog, setShowAddItemDialog] = React.useState(false);
-  const [cutlistOpen, setCutlistOpen] = React.useState<{ open: boolean; itemId?: string | null }>({ open: false, itemId: null });
   const [duplicatingItemId, setDuplicatingItemId] = React.useState<string | null>(null);
 
   const handleAddItem = () => setShowAddItemDialog(true);
-
-  const handleOpenCutlist = (itemId: string) => setCutlistOpen({ open: true, itemId });
 
   const handleCreateManualItem = async ({ description, qty, unit_price }: { description: string; qty: number; unit_price: number }) => {
     const newItem = await createQuoteItem({ total: 0, quote_id: quoteId, description, qty, unit_price });
@@ -964,7 +961,6 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, onRefre
                 onDeleteClusterLine={handleDeleteClusterLine}
                 onUpdateCluster={handleUpdateCluster}
                 onEnsureCluster={ensureItemHasCluster}
-                onOpenCutlist={handleOpenCutlist}
                 attachmentsVersion={attachmentsVersion}
                 onItemAttachmentsChange={onItemAttachmentsChange}
                 isDuplicating={duplicatingItemId === item.id}
@@ -980,27 +976,6 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, onRefre
         onCreateProduct={handleCreateProductItem}
       />
 
-      {/* Cutlist Calculator Modal */}
-      <QuoteCutlistModal
-        open={cutlistOpen.open}
-        onOpenChange={(o) => setCutlistOpen({ open: o, itemId: cutlistOpen.itemId })}
-        quoteItemId={cutlistOpen.itemId}
-        onExportSuccess={() => {
-          toast({ title: 'Exported to Costing Cluster' });
-          const itemId = cutlistOpen.itemId;
-          if (itemId) {
-            // Refresh just this item's clusters and merge into local state
-            fetchQuoteItemClusters(itemId).then((clusters) => {
-              const updatedItems = items.map(i => i.id === itemId ? { ...i, quote_item_clusters: clusters } : i);
-              onItemsChange(updatedItems);
-            }).finally(() => {
-              setCutlistOpen({ open: false, itemId: null });
-            });
-          } else {
-            setCutlistOpen({ open: false, itemId: null });
-          }
-        }}
-      />
     </div>
   );
 }

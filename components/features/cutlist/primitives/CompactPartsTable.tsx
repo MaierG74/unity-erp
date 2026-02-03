@@ -448,6 +448,15 @@ const PartRow = memo(function PartRow({
     [index, onUpdate]
   );
 
+  const handleEdgingMaterialChange = useCallback(
+    (edgingId: string) => {
+      onUpdate(index, {
+        edging_material_id: edgingId === '__default__' ? undefined : edgingId,
+      });
+    },
+    [index, onUpdate]
+  );
+
   // Toggle a single edge
   const toggleEdge = useCallback(
     (edge: 'top' | 'right' | 'bottom' | 'left') => {
@@ -751,6 +760,8 @@ const PartRow = memo(function PartRow({
                   edges={part.band_edges}
                   onEdgesChange={handleEdgesChange}
                   edgingOptions={edgingOptions}
+                  selectedEdgingId={part.edging_material_id || '__default__'}
+                  onEdgingChange={handleEdgingMaterialChange}
                   open={edgePopoverOpen}
                   onOpenChange={setEdgePopoverOpen}
                   trigger={

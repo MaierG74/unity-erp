@@ -39,7 +39,6 @@ export function SheetLayoutGrid({
   const [activePage, setActivePage] = React.useState(0);
   const [zoomSheetId, setZoomSheetId] = React.useState<string | null>(null);
 
-  const sheetArea = stockSheet.width_mm * stockSheet.length_mm;
   const totalPages = Math.ceil(result.sheets.length / sheetsPerPage);
 
   // Reset to first page if current page becomes invalid
@@ -88,6 +87,10 @@ export function SheetLayoutGrid({
         {result.sheets
           .slice(activePage * sheetsPerPage, activePage * sheetsPerPage + sheetsPerPage)
           .map((sheetLayout, idx) => {
+            // Use per-sheet stock dimensions if available (multi-material support)
+            const sheetW = sheetLayout.stock_width_mm || stockSheet.width_mm;
+            const sheetL = sheetLayout.stock_length_mm || stockSheet.length_mm;
+            const sheetArea = sheetW * sheetL;
             const autoPct =
               sheetArea > 0 ? ((sheetLayout.used_area_mm2 || 0) / sheetArea) * 100 : 0;
             const override = sheetOverrides[sheetLayout.sheet_id];
@@ -98,7 +101,12 @@ export function SheetLayoutGrid({
             return (
               <div key={sheetLayout.sheet_id} className="border rounded p-2 space-y-2">
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>Sheet {activePage * sheetsPerPage + idx + 1}</span>
+                  <span>
+                    Sheet {activePage * sheetsPerPage + idx + 1}
+                    {sheetLayout.material_label && (
+                      <span className="ml-1 text-foreground font-medium">— {sheetLayout.material_label}</span>
+                    )}
+                  </span>
                   <Button
                     variant="link"
                     size="sm"
@@ -110,8 +118,8 @@ export function SheetLayoutGrid({
                 </div>
 
                 <SheetPreview
-                  sheetWidth={stockSheet.width_mm}
-                  sheetLength={stockSheet.length_mm}
+                  sheetWidth={sheetW}
+                  sheetLength={sheetL}
                   layout={sheetLayout}
                   maxWidth={260}
                   maxHeight={200}
@@ -220,17 +228,21 @@ export function SheetLayoutGrid({
           <DialogHeader>
             <DialogTitle>Sheet preview</DialogTitle>
           </DialogHeader>
-          {zoomSheetId && result.sheets.find((s) => s.sheet_id === zoomSheetId) && (
-            <div className="flex justify-center">
-              <SheetPreview
-                sheetWidth={stockSheet.width_mm}
-                sheetLength={stockSheet.length_mm}
-                layout={result.sheets.find((s) => s.sheet_id === zoomSheetId)!}
-                maxWidth={800}
-                maxHeight={600}
-              />
-            </div>
-          )}
+          {zoomSheetId && (() => {
+            const zoomSheet = result.sheets.find((s) => s.sheet_id === zoomSheetId);
+            if (!zoomSheet) return null;
+            return (
+              <div className="flex justify-center">
+                <SheetPreview
+                  sheetWidth={zoomSheet.stock_width_mm || stockSheet.width_mm}
+                  sheetLength={zoomSheet.stock_length_mm || stockSheet.length_mm}
+                  layout={zoomSheet}
+                  maxWidth={800}
+                  maxHeight={600}
+                />
+              </div>
+            );
+          })()}
         </DialogContent>
       </Dialog>
     </div>

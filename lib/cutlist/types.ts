@@ -143,6 +143,8 @@ export interface CutlistPart {
   lamination_config?: CustomLaminationConfig;
   /** Lamination group ID - parts with same group are laminated together */
   lamination_group?: string;
+  /** Edging material ID override — when set, this part uses a specific edging material instead of the default for its thickness */
+  edging_material_id?: string;
 }
 
 // =============================================================================
@@ -199,6 +201,12 @@ export interface SheetLayout {
   placements: Placement[];
   /** Total used area on this sheet in mm² */
   used_area_mm2?: number;
+  /** Stock sheet length for this sheet (when materials have different board sizes) */
+  stock_length_mm?: number;
+  /** Stock sheet width for this sheet (when materials have different board sizes) */
+  stock_width_mm?: number;
+  /** Material name label for this sheet (when multiple materials are used) */
+  material_label?: string;
 }
 
 /**
@@ -469,6 +477,18 @@ export interface CutlistSummary {
   edgebandingTotal: number;
   laminationOn: boolean;
   materials?: CutlistMaterialSummary[];
+  /** Per-edging-material breakdown for export (one entry per unique edging material used) */
+  edgingByMaterial?: EdgingSummaryEntry[];
+}
+
+/** Summary entry for a single edging material used across parts */
+export interface EdgingSummaryEntry {
+  materialId: string;
+  name: string;
+  thickness_mm: number;
+  length_mm: number;
+  cost_per_meter: number;
+  component_id?: number;
 }
 
 // =============================================================================
@@ -510,6 +530,8 @@ export interface CutlistLineRefs {
   backer?: string | null;
   band16?: string | null;
   band32?: string | null;
+  /** Dynamic edging line refs keyed by slot name (e.g., 'edging_materialId') */
+  [key: string]: string | null | undefined;
 }
 
 /**

@@ -31,3 +31,6 @@ export type { UseQuoteCutlistAdapterOptions } from './useQuoteCutlistAdapter';
 
 export { useProductCutlistAdapter } from './useProductCutlistAdapter';
 export type { UseProductCutlistAdapterOptions } from './useProductCutlistAdapter';
+
+export { useQuoteCutlistAdapterV2 } from './useQuoteCutlistAdapterV2';
+export type { QuoteCutlistLayoutV2 } from './useQuoteCutlistAdapterV2';

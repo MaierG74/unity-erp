@@ -10,6 +10,8 @@ export async function exportCutlistToQuote(params: {
   backerLine?: CutlistLineInput | null;
   band16Line?: CutlistLineInput | null;
   band32Line?: CutlistLineInput | null;
+  /** Dynamic edging lines keyed by slot name (e.g., 'edging_materialId') */
+  edgingLines?: Record<string, CutlistLineInput>;
 }): Promise<CutlistLineRefs> {
   const {
     quoteItemId,
@@ -18,19 +20,30 @@ export async function exportCutlistToQuote(params: {
     backerLine,
     band16Line,
     band32Line,
+    edgingLines,
   } = params;
+
+  // Build lines object — include fixed slots plus dynamic edging lines
+  const lines: Record<string, CutlistLineInput | null> = {
+    primary: primaryLine ?? null,
+    backer: backerLine ?? null,
+    band16: band16Line ?? null,
+    band32: band32Line ?? null,
+  };
+
+  // Add dynamic edging lines
+  if (edgingLines) {
+    for (const [slot, line] of Object.entries(edgingLines)) {
+      lines[slot] = line;
+    }
+  }
 
   const response = await fetch(`/api/quote-items/${quoteItemId}/cutlist/export`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       existingLineRefs,
-      lines: {
-        primary: primaryLine ?? null,
-        backer: backerLine ?? null,
-        band16: band16Line ?? null,
-        band32: band32Line ?? null,
-      },
+      lines,
     }),
   });
 

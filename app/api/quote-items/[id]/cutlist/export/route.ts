@@ -15,23 +15,11 @@ const lineSchema = z
   })
   .strict();
 
-const refsSchema = z
-  .object({
-    primary: z.string().uuid().nullable().optional(),
-    backer: z.string().uuid().nullable().optional(),
-    band16: z.string().uuid().nullable().optional(),
-    band32: z.string().uuid().nullable().optional(),
-  })
-  .partial();
+const refsSchema = z.record(z.string(), z.string().uuid().nullable());
 
 const payloadSchema = z.object({
   existingLineRefs: refsSchema.optional(),
-  lines: z.object({
-    primary: lineSchema.nullable().optional(),
-    backer: lineSchema.nullable().optional(),
-    band16: lineSchema.nullable().optional(),
-    band32: lineSchema.nullable().optional(),
-  }),
+  lines: z.record(z.string(), lineSchema.nullable()),
 });
 
 type LineInput = z.infer<typeof lineSchema>;
@@ -107,10 +95,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
   const updatedRefs: Record<string, string | null> = { ...existingLineRefs };
 
-  const managedSlots: Array<keyof typeof lines> = ['primary', 'backer', 'band16', 'band32'];
-
-  async function upsertLine(refKey: keyof typeof lines, line: LineInput | null | undefined) {
-    const existingId = existingLineRefs?.[refKey] ?? null;
+  async function upsertLine(refKey: string, line: LineInput | null | undefined) {
+    const existingId = (existingLineRefs as Record<string, string | null>)?.[refKey] ?? null;
 
     if (!line || !(line.qty > 0)) {
       if (existingId) {
@@ -177,10 +163,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   }
 
   try {
-    await upsertLine('primary', lines.primary ?? null);
-    await upsertLine('backer', lines.backer ?? null);
-    await upsertLine('band16', lines.band16 ?? null);
-    await upsertLine('band32', lines.band32 ?? null);
+    for (const [slot, line] of Object.entries(lines)) {
+      await upsertLine(slot, line);
+    }
   } catch (err) {
     console.error('Failed to upsert costing lines', err);
     return NextResponse.json(
