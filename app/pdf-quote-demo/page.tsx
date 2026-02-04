@@ -26,6 +26,7 @@ export default function PDFQuoteDemoPage() {
         qty: 2,
         unit_price: 625.00,
         total: 1250.00,
+        item_type: 'priced' as const,
         attachments: [
           {
             id: '1',
@@ -41,7 +42,8 @@ export default function PDFQuoteDemoPage() {
           }
         ]
       }
-    ]
+    ],
+    attachments: []
   };
 
   const mockCompanyInfo = {

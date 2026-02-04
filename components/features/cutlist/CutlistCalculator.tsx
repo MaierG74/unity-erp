@@ -122,6 +122,8 @@ export interface CutlistCalculatorData {
   optimizationPriority: OptimizationPriority;
   sheetOverrides: Record<string, SheetBillingOverride>;
   globalFullBoard: boolean;
+  backerSheetOverrides: Record<string, SheetBillingOverride>;
+  backerGlobalFullBoard: boolean;
 }
 
 export interface CutlistCalculatorProps {
@@ -162,7 +164,11 @@ const DEFAULT_KERF = 3;
 // Main Component
 // =============================================================================
 
-export function CutlistCalculator({
+export interface CutlistCalculatorHandle {
+  calculate: () => void;
+}
+
+export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, CutlistCalculatorProps>(function CutlistCalculator({
   initialData,
   onDataChange,
   onSummaryChange,
@@ -172,7 +178,7 @@ export function CutlistCalculator({
   optimizationStorageKey = null,
   headerRight,
   className,
-}: CutlistCalculatorProps) {
+}: CutlistCalculatorProps, ref) {
   // ============== Materials Panel State ==============
   const [primaryBoards, setPrimaryBoards] = React.useState<BoardMaterial[]>(
     () => initialData?.primaryBoards ?? []
@@ -199,6 +205,10 @@ export function CutlistCalculator({
     () => primaryBoards.find((b) => b.isDefault) || primaryBoards[0],
     [primaryBoards]
   );
+  const defaultBackerBoard = React.useMemo(
+    () => backerBoards.find((b) => b.isDefault) || backerBoards[0],
+    [backerBoards]
+  );
   const stock = React.useMemo<StockSheetSpec[]>(() => {
     if (!defaultPrimaryBoard) {
       return [{ id: 'S1', length_mm: 2750, width_mm: 1830, qty: 10, kerf_mm: kerf }];
@@ -214,6 +224,32 @@ export function CutlistCalculator({
     ];
   }, [defaultPrimaryBoard, kerf]);
   const sheet = stock[0];
+  const backerStock = React.useMemo<StockSheetSpec[]>(() => {
+    if (defaultBackerBoard) {
+      return [
+        {
+          id: 'B1',
+          length_mm: defaultBackerBoard.length_mm,
+          width_mm: defaultBackerBoard.width_mm,
+          qty: 10,
+          kerf_mm: kerf,
+        },
+      ];
+    }
+    if (defaultPrimaryBoard) {
+      return [
+        {
+          id: 'B1',
+          length_mm: defaultPrimaryBoard.length_mm,
+          width_mm: defaultPrimaryBoard.width_mm,
+          qty: 10,
+          kerf_mm: kerf,
+        },
+      ];
+    }
+    return [{ id: 'B1', length_mm: 2750, width_mm: 1830, qty: 10, kerf_mm: kerf }];
+  }, [defaultBackerBoard, defaultPrimaryBoard, kerf]);
+  const backerSheet = backerStock[0];
 
   // ============== Packing Options ==============
   const [allowRotation] = React.useState(true);
@@ -235,6 +271,12 @@ export function CutlistCalculator({
   );
   const [globalFullBoard, setGlobalFullBoard] = React.useState(
     () => initialData?.globalFullBoard ?? false
+  );
+  const [backerSheetOverrides, setBackerSheetOverrides] = React.useState<Record<string, SheetBillingOverride>>(
+    () => initialData?.backerSheetOverrides ?? {}
+  );
+  const [backerGlobalFullBoard, setBackerGlobalFullBoard] = React.useState(
+    () => initialData?.backerGlobalFullBoard ?? false
   );
 
   // ============== Custom Lamination Modal ==============
@@ -260,6 +302,9 @@ export function CutlistCalculator({
     () => parts.some((p) => p.lamination_type && p.lamination_type !== 'none'),
     [parts]
   );
+  const defaultPrimary = primaryBoards.find((b) => b.isDefault) || primaryBoards[0];
+  const defaultEdging16 = edging.find((e) => e.thickness_mm === 16 && e.isDefaultForThickness);
+  const defaultEdging32 = edging.find((e) => e.thickness_mm === 32 && e.isDefaultForThickness);
   const defaultSheetArea = sheet.length_mm * sheet.width_mm;
 
   const usedArea = result?.stats.used_area_mm2 || 0;
@@ -288,7 +333,11 @@ export function CutlistCalculator({
   const backerSheetsFractional = computeFractionalSheets(backerResult);
 
   const computeSheetCharge = React.useCallback(
-    (layout: LayoutResult | null): number => {
+    (
+      layout: LayoutResult | null,
+      overrides: Record<string, SheetBillingOverride>,
+      fullBoard: boolean
+    ): number => {
       if (!layout) return 0;
       return layout.sheets.reduce((sum, s) => {
         const area = (s.stock_length_mm && s.stock_width_mm)
@@ -297,9 +346,9 @@ export function CutlistCalculator({
         if (area <= 0) return sum;
         const used = s.used_area_mm2 ?? 0;
         const autoPct = Math.min(100, Math.max(0, (used / area) * 100));
-        const override = sheetOverrides[s.sheet_id];
+        const override = overrides[s.sheet_id];
         let pct = autoPct;
-        if (globalFullBoard) {
+        if (fullBoard) {
           pct = 100;
         } else if (override) {
           if (override.mode === 'full') pct = 100;
@@ -308,11 +357,11 @@ export function CutlistCalculator({
         return sum + pct / 100;
       }, 0);
     },
-    [globalFullBoard, defaultSheetArea, sheetOverrides]
+    [defaultSheetArea]
   );
 
-  const primaryChargeSheets = computeSheetCharge(result);
-  const backerChargeSheets = computeSheetCharge(backerResult);
+  const primaryChargeSheets = computeSheetCharge(result, sheetOverrides, globalFullBoard);
+  const backerChargeSheets = computeSheetCharge(backerResult, backerSheetOverrides, backerGlobalFullBoard);
 
   // ============== Material Options for CompactPartsTable ==============
 
@@ -501,6 +550,8 @@ export function CutlistCalculator({
         optimizationPriority,
         sheetOverrides,
         globalFullBoard,
+        backerSheetOverrides,
+        backerGlobalFullBoard,
       });
     }, 300);
 
@@ -509,7 +560,19 @@ export function CutlistCalculator({
         clearTimeout(dataChangeTimeoutRef.current);
       }
     };
-  }, [parts, primaryBoards, backerBoards, edging, kerf, optimizationPriority, sheetOverrides, globalFullBoard, onDataChange]);
+  }, [
+    parts,
+    primaryBoards,
+    backerBoards,
+    edging,
+    kerf,
+    optimizationPriority,
+    sheetOverrides,
+    globalFullBoard,
+    backerSheetOverrides,
+    backerGlobalFullBoard,
+    onDataChange,
+  ]);
 
   // ============== Update summary when results change ==============
 
@@ -528,8 +591,6 @@ export function CutlistCalculator({
 
     const defaultBacker = backerBoards.find((b) => b.isDefault) || backerBoards[0];
     const backerPriceNumeric = defaultBacker?.cost || 0;
-
-    const defaultPrimary = primaryBoards.find((b) => b.isDefault) || primaryBoards[0];
 
     const edging16 = edging.find((e) => e.thickness_mm === 16 && e.isDefaultForThickness);
     const edging32 = edging.find((e) => e.thickness_mm === 32 && e.isDefaultForThickness);
@@ -891,10 +952,10 @@ export function CutlistCalculator({
       const laminationType = part.lamination_type || 'none';
       const be = part.band_edges;
       const singlePartEdge =
-        (be.top ? part.length_mm : 0) +
-        (be.bottom ? part.length_mm : 0) +
-        (be.left ? part.width_mm : 0) +
-        (be.right ? part.width_mm : 0);
+        (be.top ? part.width_mm : 0) +
+        (be.bottom ? part.width_mm : 0) +
+        (be.left ? part.length_mm : 0) +
+        (be.right ? part.length_mm : 0);
 
       let finishedPartCount: number;
       switch (laminationType) {
@@ -944,10 +1005,10 @@ export function CutlistCalculator({
       }
 
       const singleAssemblyEdge =
-        (mergedEdges.top ? refPart.length_mm : 0) +
-        (mergedEdges.bottom ? refPart.length_mm : 0) +
-        (mergedEdges.left ? refPart.width_mm : 0) +
-        (mergedEdges.right ? refPart.width_mm : 0);
+        (mergedEdges.top ? refPart.width_mm : 0) +
+        (mergedEdges.bottom ? refPart.width_mm : 0) +
+        (mergedEdges.left ? refPart.length_mm : 0) +
+        (mergedEdges.right ? refPart.length_mm : 0);
 
       const assemblies = Math.min(...groupParts.map((p) => p.quantity));
       const totalEdge = singleAssemblyEdge * assemblies;
@@ -983,21 +1044,23 @@ export function CutlistCalculator({
     setEdgingByMaterialMap(edgingPerMaterial);
     setSheetOverrides({});
     setGlobalFullBoard(false);
+    setBackerSheetOverrides({});
+    setBackerGlobalFullBoard(false);
 
     const backerParts: PartSpec[] = partSpecs
       .filter((p) => p.lamination_type === 'with-backer')
       .map((p) => ({ ...p, grain: 'any', require_grain: undefined, band_edges: undefined } as PartSpec));
 
     if (backerParts.length > 0) {
-      const backerStock: StockSheetSpec[] = [{ ...stock[0], kerf_mm: Math.max(0, kerf) }];
-      const resBacker = packPartsSmartOptimized(backerParts, backerStock, { allowRotation: true, singleSheetOnly, algorithm });
+      const backerStockWithKerf: StockSheetSpec[] = [{ ...backerStock[0], kerf_mm: Math.max(0, kerf) }];
+      const resBacker = packPartsSmartOptimized(backerParts, backerStockWithKerf, { allowRotation: true, singleSheetOnly, algorithm });
       setBackerResult(resBacker);
     } else {
       setBackerResult(null);
     }
 
     setActiveTab('preview');
-  }, [stock, kerf, allowRotation, singleSheetOnly, optimizationPriority, primaryBoards, edging]);
+  }, [stock, backerStock, kerf, allowRotation, singleSheetOnly, optimizationPriority, primaryBoards, edging]);
 
   React.useEffect(() => {
     if (pendingCalculateRef.current && parts.length > 0) {
@@ -1015,6 +1078,10 @@ export function CutlistCalculator({
     runCalculation(parts);
   };
 
+  React.useImperativeHandle(ref, () => ({
+    calculate: handleCalculate,
+  }));
+
   const handleCSVImport = (importedParts: CutlistPart[]) => {
     const defaultMaterialId = primaryBoards[0]?.id;
     const newParts: CompactPart[] = importedParts.map((p) => ({
@@ -1031,6 +1098,8 @@ export function CutlistCalculator({
     setBackerResult(null);
     setSheetOverrides({});
     setGlobalFullBoard(false);
+    setBackerSheetOverrides({});
+    setBackerGlobalFullBoard(false);
     setSummary(null);
   };
 
@@ -1047,6 +1116,8 @@ export function CutlistCalculator({
     optimizationPriority,
     sheetOverrides,
     globalFullBoard,
+    backerSheetOverrides,
+    backerGlobalFullBoard,
   });
 
   // ============== Render ==============
@@ -1218,6 +1289,9 @@ export function CutlistCalculator({
                     laminationOn={laminationOn}
                     backerSheetsUsed={backerResult ? backerSheetsFractional : undefined}
                     backerSheetsBillable={backerResult ? backerChargeSheets : undefined}
+                    edgingBreakdown={summary?.edgingByMaterial}
+                    defaultEdging16Name={defaultEdging16?.name ?? null}
+                    defaultEdging32Name={defaultEdging32?.name ?? null}
                   />
 
                   {/* Optimization selector with recalculate */}
@@ -1276,6 +1350,25 @@ export function CutlistCalculator({
                     sheetOverrides={sheetOverrides}
                     onSheetOverridesChange={setSheetOverrides}
                   />
+
+                  {backerResult && (
+                    <div className="space-y-3 pt-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-sm font-semibold text-foreground">Backer Board Cutlist</div>
+                          <div className="text-xs text-muted-foreground">Sheets for parts with “With Backer” lamination.</div>
+                        </div>
+                      </div>
+                      <SheetLayoutGrid
+                        result={backerResult}
+                        stockSheet={backerSheet}
+                        globalFullBoard={backerGlobalFullBoard}
+                        onGlobalFullBoardChange={setBackerGlobalFullBoard}
+                        sheetOverrides={backerSheetOverrides}
+                        onSheetOverridesChange={setBackerSheetOverrides}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
             </TabsContent>
@@ -1475,7 +1568,7 @@ export function CutlistCalculator({
       </Dialog>
     </div>
   );
-}
+});
 
 export default CutlistCalculator;
 

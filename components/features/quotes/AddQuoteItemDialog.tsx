@@ -9,12 +9,14 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2 } from 'lucide-react';
-import { fetchProducts, type Product } from '@/lib/db/quotes';
+import { fetchProducts, type Product, type QuoteItemType, type QuoteItemTextAlign } from '@/lib/db/quotes';
+import { AlignLeft, AlignCenter, AlignRight } from 'lucide-react';
 import {
   fetchProductOptionGroups,
   type ProductOptionGroup,
   type ProductOptionSelection,
 } from '@/lib/db/products';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 
 interface AddQuoteItemDialogProps {
   open: boolean;
@@ -29,15 +31,21 @@ interface AddQuoteItemDialogProps {
     attach_image?: boolean;
     selected_options?: ProductOptionSelection;
   }) => void | Promise<void>;
+  onCreateText?: (payload: { description: string; item_type: QuoteItemType; text_align: QuoteItemTextAlign }) => void | Promise<void>;
 }
 
-export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCreateProduct }: AddQuoteItemDialogProps) {
-  const [tab, setTab] = React.useState<'manual' | 'product'>('manual');
+export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCreateProduct, onCreateText }: AddQuoteItemDialogProps) {
+  const [tab, setTab] = React.useState<'manual' | 'product' | 'text'>('manual');
 
   // manual fields
   const [description, setDescription] = React.useState('');
   const [qty, setQty] = React.useState<string>('1');
   const [unitPrice, setUnitPrice] = React.useState<string>('0');
+
+  // text/heading fields
+  const [textContent, setTextContent] = React.useState('');
+  const [textType, setTextType] = React.useState<'heading' | 'note'>('heading');
+  const [textAlign, setTextAlign] = React.useState<QuoteItemTextAlign>('left');
 
   // product fields
   const [products, setProducts] = React.useState<Product[]>([]);
@@ -133,6 +141,10 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
     setAttachImage(true);
     setIncludeLabor(true);
     setOptionsLoading(false);
+    // Reset text fields
+    setTextContent('');
+    setTextType('heading');
+    setTextAlign('left');
   }, []);
 
   const handleClose = React.useCallback(() => {
@@ -193,6 +205,25 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
       } finally {
         setSubmitting(false);
       }
+    } else if (tab === 'text') {
+      if (!textContent.trim() || !onCreateText) return;
+      setSubmitting(true);
+      let success = false;
+      try {
+        await Promise.resolve(
+          onCreateText({
+            description: textContent.trim(),
+            item_type: textType,
+            text_align: textAlign,
+          })
+        );
+        success = true;
+      } catch (error) {
+        console.error('Failed to add text/heading item:', error);
+      } finally {
+        setSubmitting(false);
+        if (success) handleClose();
+      }
     }
   };
 
@@ -212,6 +243,7 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
           <TabsList>
             <TabsTrigger value="manual">Manual</TabsTrigger>
             <TabsTrigger value="product">Product</TabsTrigger>
+            <TabsTrigger value="text">Text / Heading</TabsTrigger>
           </TabsList>
 
           <TabsContent value="manual" className="space-y-3 mt-3">
@@ -323,6 +355,66 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
               </div>
             </div>
           </TabsContent>
+
+          <TabsContent value="text" className="space-y-4 mt-3">
+            <div>
+              <Label htmlFor="text-content">Text</Label>
+              <Input
+                id="text-content"
+                value={textContent}
+                onChange={(e) => setTextContent(e.target.value)}
+                placeholder="Enter heading or note text"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Type</Label>
+              <RadioGroup value={textType} onValueChange={(v) => setTextType(v as 'heading' | 'note')} className="flex gap-4">
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem value="heading" id="type-heading" />
+                  <Label htmlFor="type-heading" className="font-normal cursor-pointer">Heading</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem value="note" id="type-note" />
+                  <Label htmlFor="type-note" className="font-normal cursor-pointer">Note</Label>
+                </div>
+              </RadioGroup>
+              <p className="text-xs text-muted-foreground">
+                Headings appear bold and larger. Notes appear as regular text. You can add images via attachments after creating.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label>Alignment</Label>
+              <div className="flex gap-1">
+                <Button
+                  type="button"
+                  variant={textAlign === 'left' ? 'default' : 'outline'}
+                  size="sm"
+                  className="px-3"
+                  onClick={() => setTextAlign('left')}
+                >
+                  <AlignLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant={textAlign === 'center' ? 'default' : 'outline'}
+                  size="sm"
+                  className="px-3"
+                  onClick={() => setTextAlign('center')}
+                >
+                  <AlignCenter className="h-4 w-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant={textAlign === 'right' ? 'default' : 'outline'}
+                  size="sm"
+                  className="px-3"
+                  onClick={() => setTextAlign('right')}
+                >
+                  <AlignRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </TabsContent>
         </Tabs>
 
         <DialogFooter className="mt-4">
@@ -336,7 +428,8 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
             disabled={
               submitting ||
               (tab === 'manual' && !description.trim()) ||
-              (tab === 'product' && !selectedProduct)
+              (tab === 'product' && !selectedProduct) ||
+              (tab === 'text' && (!textContent.trim() || !onCreateText))
             }
           >
             {submitting ? (

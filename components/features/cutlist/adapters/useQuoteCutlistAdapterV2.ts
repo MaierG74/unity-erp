@@ -24,6 +24,8 @@ export interface QuoteCutlistLayoutV2 {
   optimizationPriority: 'fast' | 'offcut';
   sheetOverrides?: Record<string, SheetBillingOverride>;
   globalFullBoard?: boolean;
+  backerSheetOverrides?: Record<string, SheetBillingOverride>;
+  backerGlobalFullBoard?: boolean;
   lineRefs?: CutlistLineRefs;
 }
 
@@ -82,6 +84,8 @@ export function useQuoteCutlistAdapterV2(quoteItemId: string | null | undefined)
       optimizationPriority: data.optimizationPriority,
       sheetOverrides: data.sheetOverrides,
       globalFullBoard: data.globalFullBoard,
+      backerSheetOverrides: data.backerSheetOverrides,
+      backerGlobalFullBoard: data.backerGlobalFullBoard,
       lineRefs,
     };
 

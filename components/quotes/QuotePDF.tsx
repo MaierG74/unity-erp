@@ -3,7 +3,7 @@
 import React from 'react';
 import { Document, Page, Text, View, StyleSheet, Image, pdf } from '@react-pdf/renderer';
 import { Eye, Download } from 'lucide-react';
-import { Quote, QuoteItem, QuoteAttachment } from '@/lib/db/quotes';
+import { Quote, QuoteItem, QuoteAttachment, QuoteItemType, QuoteItemTextAlign } from '@/lib/db/quotes';
 import { Button } from '@/components/ui/button';
 import { preprocessQuoteImages } from '@/lib/quotes/compositeImage';
 import { IMAGE_SIZE_MAP } from '@/types/image-editor';
@@ -83,7 +83,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     borderBottom: 1,
     borderBottomColor: '#CCCCCC',
-    padding: 8,
+    padding: 5,
     fontSize: 9,
   },
   tableRowAlt: {
@@ -91,8 +91,18 @@ const styles = StyleSheet.create({
     borderBottom: 1,
     borderBottomColor: '#CCCCCC',
     backgroundColor: '#f9f9f9',
-    padding: 8,
+    padding: 5,
     fontSize: 9,
+  },
+  tableRowHead: {
+    borderBottom: 0,
+    paddingBottom: 2,
+  },
+  tableRowDetail: {
+    borderBottom: 1,
+    borderBottomColor: '#CCCCCC',
+    paddingTop: 0,
+    paddingBottom: 2,
   },
   descriptionCol: {
     flex: 4,
@@ -112,12 +122,15 @@ const styles = StyleSheet.create({
   itemDescription: {
     fontSize: 9,
     fontWeight: 'bold',
-    marginBottom: 3,
+    marginBottom: 0,
   },
   itemSpecs: {
     fontSize: 8,
     color: '#666666',
     lineHeight: 1.3,
+  },
+  itemDetailBlock: {
+    marginTop: 0,
   },
   itemImage: {
     width: 80,
@@ -180,6 +193,31 @@ const styles = StyleSheet.create({
     color: '#666666',
     flexDirection: 'row',
     justifyContent: 'space-between',
+  },
+  // Heading item - bold, larger text spanning full width
+  headingRow: {
+    flexDirection: 'row',
+    paddingVertical: 8,
+    paddingTop: 12,
+    borderBottom: 1,
+    borderBottomColor: '#CCCCCC',
+  },
+  headingText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  // Note item - normal text spanning full width
+  noteRow: {
+    flexDirection: 'row',
+    paddingVertical: 4,
+  },
+  noteText: {
+    fontSize: 9,
+    color: '#333333',
+  },
+  // Full width column for non-priced items
+  fullWidthCol: {
+    flex: 1,
   },
 });
 
@@ -296,7 +334,10 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
   const formatCurrency = (n: number) => `R ${n.toFixed(2)}`;
 
   // Calculate totals using qty * unit_price when item.total is missing
+  // Only priced items contribute to totals
   const lineTotal = (item: QuoteItem) => {
+    // Non-priced items (heading, note) don't contribute to totals
+    if (item.item_type && item.item_type !== 'priced') return 0;
     const qty = Number(item.qty || 0);
     const unit = Number(item.unit_price || 0);
     const fallback = qty * unit;
@@ -304,7 +345,10 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
     return explicit > 0 ? explicit : fallback;
   };
 
-  const subtotal = quote.items.reduce((sum, item) => sum + lineTotal(item), 0);
+  // Only sum priced items
+  const subtotal = quote.items
+    .filter(item => !item.item_type || item.item_type === 'priced')
+    .reduce((sum, item) => sum + lineTotal(item), 0);
   const vatRate = typeof (quote as any).vat_rate === 'number' ? (quote as any).vat_rate : 15; // default 15%
   const vatAmount = subtotal * (vatRate / 100);
   const total = subtotal + vatAmount;
@@ -368,6 +412,12 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
           </View>
 
           {quote.items.map((item, index) => {
+            const itemType = item.item_type || 'priced';
+            const isPriced = itemType === 'priced';
+            const isHeading = itemType === 'heading';
+            const isNote = itemType === 'note';
+            const textAlign = item.text_align || 'left';
+
             // Collect all displayable image attachments ordered by display_order
             const itemImages = (item.attachments || [])
               .filter(att => att.mime_type?.startsWith('image/') && ((att as any).display_in_quote !== false))
@@ -377,14 +427,115 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
               .split(/\r?\n/)
               .map(s => s.trim())
               .filter(Boolean);
+            const hasDetails = itemImages.length > 0 || bulletLines.length > 0;
+
+            // Render heading items - bold text spanning full width, no pricing columns
+            if (isHeading) {
+              return (
+                <View key={item.id} wrap={false}>
+                  <View style={styles.headingRow}>
+                    <View style={styles.fullWidthCol}>
+                      <Text style={[styles.headingText, { textAlign }]}>{item.description}</Text>
+                    </View>
+                  </View>
+                  {hasDetails && (
+                    <View style={styles.noteRow}>
+                      <View style={styles.fullWidthCol}>
+                        {itemImages.length > 0 && (
+                          <View style={[styles.itemDetailBlock, { flexDirection: 'row', flexWrap: 'wrap', justifyContent: textAlign === 'center' ? 'center' : textAlign === 'right' ? 'flex-end' : 'flex-start' }]}>
+                            {itemImages.map((img, i) => {
+                              const size = IMAGE_SIZE_MAP[(img as any).display_size || 'small'];
+                              return (
+                                <Image
+                                  key={i}
+                                  style={{
+                                    width: size.width,
+                                    height: size.height,
+                                    objectFit: 'contain' as const,
+                                    marginTop: 1,
+                                    marginBottom: 1,
+                                  }}
+                                  src={img.file_url}
+                                />
+                              );
+                            })}
+                          </View>
+                        )}
+                        {bulletLines.length > 0 && (
+                          <Text style={[styles.itemSpecs, styles.itemDetailBlock, { textAlign }]}>
+                            {bulletLines
+                              .map((l, i) => `• ${l}${i < bulletLines.length - 1 ? '\n' : ''}`)
+                              .join('')}
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                  )}
+                </View>
+              );
+            }
+
+            // Render note items - normal text spanning full width, no pricing columns
+            if (isNote) {
+              return (
+                <View key={item.id} wrap={false}>
+                  <View style={styles.noteRow}>
+                    <View style={styles.fullWidthCol}>
+                      {item.description && <Text style={[styles.noteText, { textAlign }]}>{item.description}</Text>}
+                      {itemImages.length > 0 && (
+                        <View style={[styles.itemDetailBlock, { flexDirection: 'row', flexWrap: 'wrap', marginTop: item.description ? 4 : 0, justifyContent: textAlign === 'center' ? 'center' : textAlign === 'right' ? 'flex-end' : 'flex-start' }]}>
+                          {itemImages.map((img, i) => {
+                            const size = IMAGE_SIZE_MAP[(img as any).display_size || 'small'];
+                            return (
+                              <Image
+                                key={i}
+                                style={{
+                                  width: size.width,
+                                  height: size.height,
+                                  objectFit: 'contain' as const,
+                                  marginTop: 1,
+                                  marginBottom: 1,
+                                }}
+                                src={img.file_url}
+                              />
+                            );
+                          })}
+                        </View>
+                      )}
+                      {bulletLines.length > 0 && (
+                        <Text style={[styles.itemSpecs, styles.itemDetailBlock, { textAlign }]}>
+                          {bulletLines
+                            .map((l, i) => `• ${l}${i < bulletLines.length - 1 ? '\n' : ''}`)
+                            .join('')}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                </View>
+              );
+            }
+
+            // Render priced items - full row with qty/price/total columns
+            const rowBase = index % 2 === 0 ? styles.tableRow : styles.tableRowAlt;
+            const headerRowStyle = hasDetails ? [rowBase, styles.tableRowHead] : rowBase;
 
             return (
-              <View key={item.id} wrap={false} style={index % 2 === 0 ? styles.tableRow : styles.tableRowAlt}>
-                <View style={styles.descriptionCol}>
-                  {itemImages.length > 0 && (
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                      {itemImages.map((img, i) => {
-                        const size = IMAGE_SIZE_MAP[(img as any).display_size || 'small'];
+              <View key={item.id} wrap={false}>
+                <View style={headerRowStyle}>
+                  <View style={styles.descriptionCol}>
+                    <Text style={styles.itemDescription}>{item.description}</Text>
+                  </View>
+                  <Text style={styles.qtyCol}>{item.qty}</Text>
+                  <Text style={styles.priceCol}>{formatCurrency(Number(item.unit_price || 0))}</Text>
+                  <Text style={styles.totalCol}>{formatCurrency(lineTotal(item))}</Text>
+                </View>
+                {hasDetails && (
+                  <View style={[rowBase, styles.tableRowDetail]}>
+                    <View style={styles.descriptionCol}>
+                      {itemImages.length > 0 && (
+                        <View style={[styles.itemDetailBlock, { flexDirection: 'row', flexWrap: 'wrap' }]}>
+                          {itemImages.map((img, i) => {
+                            const size = IMAGE_SIZE_MAP[(img as any).display_size || 'small'];
                         return (
                           <Image
                             key={i}
@@ -392,28 +543,28 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
                               width: size.width,
                               height: size.height,
                               objectFit: 'contain' as const,
-                              marginTop: 5,
-                              marginBottom: 5,
+                              marginTop: 1,
+                              marginBottom: 1,
                             }}
                             src={img.file_url}
                           />
                         );
                       })}
+                        </View>
+                      )}
+                      {bulletLines.length > 0 && (
+                        <Text style={[styles.itemSpecs, styles.itemDetailBlock]}>
+                          {bulletLines
+                            .map((l, i) => `• ${l}${i < bulletLines.length - 1 ? '\n' : ''}`)
+                            .join('')}
+                        </Text>
+                      )}
                     </View>
-                  )}
-                  <Text style={styles.itemDescription}>{item.description}</Text>
-                  {/* Bullet point details (one per line) */}
-                  {bulletLines.length > 0 && (
-                    <Text style={styles.itemSpecs}>
-                      {bulletLines
-                        .map((l, i) => `• ${l}${i < bulletLines.length - 1 ? '\n' : ''}`)
-                        .join('')}
-                    </Text>
-                  )}
-                </View>
-                <Text style={styles.qtyCol}>{item.qty}</Text>
-                <Text style={styles.priceCol}>{formatCurrency(Number(item.unit_price || 0))}</Text>
-                <Text style={styles.totalCol}>{formatCurrency(lineTotal(item))}</Text>
+                    <Text style={styles.qtyCol}> </Text>
+                    <Text style={styles.priceCol}> </Text>
+                    <Text style={styles.totalCol}> </Text>
+                  </View>
+                )}
               </View>
             );
           })}

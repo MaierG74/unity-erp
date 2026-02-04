@@ -12,6 +12,9 @@ export interface Quote {
   grand_total: number;
 }
 
+export type QuoteItemType = 'priced' | 'heading' | 'note';
+export type QuoteItemTextAlign = 'left' | 'center' | 'right';
+
 export interface QuoteItem {
   id: string;
   quote_id: string;
@@ -19,6 +22,9 @@ export interface QuoteItem {
   qty: number;
   unit_price: number;
   total: number;
+  item_type: QuoteItemType;
+  text_align: QuoteItemTextAlign;
+  position: number;
   bullet_points?: string | null;
   internal_notes?: string | null;
   selected_options?: Record<string, string> | null;
@@ -135,7 +141,7 @@ export async function fetchQuote(
     .from('quote_items')
     .select('*, quote_item_clusters(*, quote_cluster_lines(*)), quote_item_cutlists(*)')
     .eq('quote_id', id)
-    .order('created_at', { ascending: true });
+    .order('position', { ascending: true });
 
   const { data: attachments, error: attachmentsError } = await client
     .from('quote_attachments')
@@ -260,16 +266,33 @@ export async function createQuoteItem(
   item: Partial<QuoteItem>,
   options?: { skipDefaultCluster?: boolean }
 ): Promise<QuoteItem> {
-  // Create the quote item first
+  // Get the max position for this quote to place new item at the end
+  let nextPosition = 0;
+  if (item.quote_id) {
+    const { data: maxPosResult } = await supabase
+      .from('quote_items')
+      .select('position')
+      .eq('quote_id', item.quote_id)
+      .order('position', { ascending: false })
+      .limit(1)
+      .single();
+    if (maxPosResult) {
+      nextPosition = (maxPosResult.position || 0) + 1;
+    }
+  }
+
+  // Create the quote item with the calculated position
   const { data: newItem, error: itemError } = await supabase
     .from('quote_items')
-    .insert([item])
+    .insert([{ ...item, position: item.position ?? nextPosition }])
     .select('*')
     .single();
   if (itemError) throw itemError;
 
-  // Automatically create a default cluster for the new item (unless skipped)
-  if (newItem && !options?.skipDefaultCluster) {
+  // Automatically create a default cluster for priced items (unless skipped)
+  // Non-priced items (heading, note) don't need clusters
+  const isPriced = !item.item_type || item.item_type === 'priced';
+  if (newItem && !options?.skipDefaultCluster && isPriced) {
     await createQuoteItemCluster({
       quote_item_id: newItem.id,
       name: 'Costing Cluster',
@@ -278,7 +301,7 @@ export async function createQuoteItem(
   }
 
   // Return item with clusters populated so client state is complete
-  if (newItem && !options?.skipDefaultCluster) {
+  if (newItem && !options?.skipDefaultCluster && isPriced) {
     const clusters = await fetchQuoteItemClusters(newItem.id);
     return { ...newItem, quote_item_clusters: clusters } as QuoteItem;
   }
@@ -320,6 +343,26 @@ export async function deleteQuoteItem(id: string): Promise<void> {
     .delete()
     .eq('id', id);
   if (error) throw error;
+}
+
+/**
+ * Reorders quote items by updating their position values.
+ * @param itemIds - Array of item IDs in the desired order
+ */
+export async function reorderQuoteItems(itemIds: string[]): Promise<void> {
+  // Update each item's position based on its index in the array
+  const updates = itemIds.map((id, index) =>
+    supabase
+      .from('quote_items')
+      .update({ position: index })
+      .eq('id', id)
+  );
+
+  const results = await Promise.all(updates);
+  const errors = results.filter(r => r.error);
+  if (errors.length > 0) {
+    throw errors[0].error;
+  }
 }
 
 /**

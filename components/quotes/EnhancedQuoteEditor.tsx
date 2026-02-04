@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { Quote, QuoteItem, QuoteAttachment, fetchQuote, updateQuote, fetchAllQuoteAttachments } from '@/lib/db/quotes';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
@@ -33,6 +34,9 @@ interface EnhancedQuoteEditorProps {
 }
 
 export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProps) {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const [quote, setQuote] = useState<Quote | null>(null);
   const [items, setItems] = useState<QuoteItem[]>([]);
   const [attachments, setAttachments] = useState<QuoteAttachment[]>([]);
@@ -40,6 +44,8 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
   const [attachmentsVersion, setAttachmentsVersion] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('details');
+  const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
+  const [autoExpandItemId, setAutoExpandItemId] = useState<string | null>(null);
   const [showItemAttachmentSections, setShowItemAttachmentSections] = useState(false);
   const [showEmailDialog, setShowEmailDialog] = useState(false);
   const { toast } = useToast();
@@ -158,6 +164,26 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
       refreshQuoteData();
     }
   }, [quoteId, refreshQuoteData]);
+
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    const item = searchParams.get('item');
+    const expand = searchParams.get('expand');
+    if (tab) setActiveTab(tab);
+    if (item) {
+      setExpandedItemId(item);
+      if (expand === '1') {
+        setAutoExpandItemId(item);
+      }
+      // Clear the item and expand params from URL after processing
+      // This prevents them from re-triggering on every re-render
+      const newParams = new URLSearchParams(searchParams.toString());
+      newParams.delete('item');
+      newParams.delete('expand');
+      const newUrl = newParams.toString() ? `${pathname}?${newParams.toString()}` : pathname;
+      router.replace(newUrl, { scroll: false });
+    }
+  }, [searchParams, pathname, router]);
 
   const handleSave = async () => {
     if (!quote) return;
@@ -501,14 +527,20 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
               <CardTitle>Line Items</CardTitle>
             </CardHeader>
             <CardContent>
-              <QuoteItemsTable
-                items={items}
-                onItemsChange={handleItemsChange}
-                onRefresh={refreshQuoteData}
-                quoteId={quote.id}
-                attachmentsVersion={attachmentsVersion}
-                onItemAttachmentsChange={handleItemAttachmentsChange}
-              />
+                <QuoteItemsTable
+                  items={items}
+                  onItemsChange={handleItemsChange}
+                  onRefresh={refreshQuoteData}
+                  quoteId={quote.id}
+                  attachmentsVersion={attachmentsVersion}
+                  onItemAttachmentsChange={handleItemAttachmentsChange}
+                  expandedItemId={expandedItemId ?? undefined}
+                  autoExpandItemId={autoExpandItemId ?? undefined}
+                  onAutoExpandHandled={() => {
+                    setAutoExpandItemId(null);
+                    setExpandedItemId(null);
+                  }}
+                />
             </CardContent>
           </Card>
 

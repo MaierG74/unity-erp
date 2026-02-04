@@ -112,7 +112,7 @@ export interface QuoteEmailProps {
 ```
 
 #### 4. PDF Document Component
-**File**: [`components/quotes/QuotePDFDocument.tsx`](../../components/quotes/QuotePDFDocument.tsx)
+**File**: [`components/quotes/QuotePDF.tsx`](../../components/quotes/QuotePDF.tsx) (default export `QuotePDFDocument`)
 
 **Features:**
 - Company branding (logo, contact info)
@@ -122,6 +122,14 @@ export interface QuoteEmailProps {
 - Totals calculation
 - Terms & conditions
 - Multi-page support
+- Line item header row keeps **Description / Qty / Unit Price / Total Excl VAT** aligned on the same row as the item name
+- Images and bullet specs render on a dedicated detail row underneath the header row
+
+### Consistency Across Preview, Download, and Email
+The PDF render is shared across all three actions:
+- **Preview PDF**: Uses `QuotePDFDownload` to generate a PDF blob in the browser and open it in a new tab.
+- **Download PDF**: Uses the same `QuotePDFDownload` renderer, then saves via the File System Access API (or a browser download fallback).
+- **Email Quote**: Uses the same `QuotePDFDocument` component (imported from `components/quotes/QuotePDF.tsx`) to generate the attachment.
 
 ### Database
 

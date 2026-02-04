@@ -1,11 +1,13 @@
 'use client';
 
 import React from 'react';
-import { useDropzone } from 'react-dropzone';
 import {
   QuoteItem,
   QuoteItemCluster,
   QuoteClusterLine,
+  QuoteAttachment,
+  QuoteItemType,
+  QuoteItemTextAlign,
   createQuoteItem,
   updateQuoteItem,
   deleteQuoteItem,
@@ -15,17 +17,15 @@ import {
   updateQuoteClusterLine,
   deleteQuoteClusterLine,
   fetchQuoteItemClusters,
-  QuoteAttachment,
-  uploadQuoteAttachment,
   fetchQuoteItemAttachments,
   formatCurrency,
-  deleteQuoteAttachment,
   Component,
   fetchComponents,
   fetchProductComponents,
   fetchProductLabor,
   fetchEffectiveBOM,
   fetchComponentsByIds,
+  reorderQuoteItems,
 } from '@/lib/db/quotes';
 import QuoteItemClusterGrid from './QuoteItemClusterGrid';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
@@ -33,7 +33,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Paperclip, FileText, Trash2, AlertTriangle, Copy } from 'lucide-react';
+import { Loader2, Trash2, AlertTriangle, Copy, ChevronUp, ChevronDown } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import InlineAttachmentsCell from './InlineAttachmentsCell';
 import AddQuoteItemDialog from './AddQuoteItemDialog';
@@ -48,6 +48,9 @@ interface Props {
   onRefresh?: () => Promise<void>; // refresh all data from server after mutations
   attachmentsVersion?: number; // bump to force cells to refresh their local attachments
   onItemAttachmentsChange?: (itemId: string, attachments: QuoteAttachment[]) => void;
+  expandedItemId?: string;
+  autoExpandItemId?: string;
+  onAutoExpandHandled?: () => void;
 }
 
 // --- Attachments Cell Component ---
@@ -59,63 +62,6 @@ interface QuoteItemAttachmentsCellProps {
 }
 
 function QuoteItemAttachmentsCell({ quoteId, itemId, version, onItemAttachmentsChange }: QuoteItemAttachmentsCellProps) {
-  const [attachments, setAttachments] = React.useState<QuoteAttachment[]>([]);
-  const [isUploading, setIsUploading] = React.useState(false);
-  const { toast } = useToast();
-  const [previewOpen, setPreviewOpen] = React.useState(false);
-  const [previewAtt, setPreviewAtt] = React.useState<QuoteAttachment | null>(null);
-  const dropRef = React.useRef<HTMLDivElement | null>(null);
-
-  const fetchAttachments = React.useCallback(async () => {
-    try {
-      const data = await fetchQuoteItemAttachments(quoteId, itemId);
-      setAttachments(data);
-    } catch (error) {
-      console.error('Fetch attachments error:', error);
-    }
-  }, [quoteId, itemId]);
-
-  React.useEffect(() => {
-    fetchAttachments();
-  }, [fetchAttachments, version]);
-
-  const onDrop = async (acceptedFiles: File[]) => {
-    if (acceptedFiles.length === 0) return;
-    setIsUploading(true);
-    try {
-      await Promise.all(acceptedFiles.map(file => uploadQuoteAttachment(file, quoteId, itemId)));
-      await fetchAttachments();
-      toast({ title: 'Uploaded attachments', description: `${acceptedFiles.length} file(s) uploaded successfully.` });
-    } catch (error) {
-      console.error('Item upload error:', error);
-      toast({ variant: 'destructive', title: 'Upload failed', description: (error as Error).message });
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
-  const handleDeleteAttachment = async (id: string) => {
-    try {
-      await deleteQuoteAttachment(id);
-      fetchAttachments();
-    } catch (error) {
-      console.error('Delete attachment error:', error);
-    }
-  };
-
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop, multiple: true, disabled: isUploading });
-
-  const handlePaste: React.ClipboardEventHandler<HTMLDivElement> = async (e) => {
-    if (isUploading) return;
-    const items = Array.from(e.clipboardData?.items || []);
-    const blobs: File[] = items.map(item => item.getAsFile()).filter((file): file is File => file !== null);
-    if (blobs.length > 0) {
-      e.preventDefault();
-      await onDrop(blobs);
-      dropRef.current?.focus();
-    }
-  };
-
   return (
     <InlineAttachmentsCell
       quoteId={quoteId}
@@ -140,13 +86,24 @@ function QuoteItemRow({
   onEnsureCluster,
   attachmentsVersion,
   onItemAttachmentsChange,
+  onMoveUp,
+  onMoveDown,
+  isFirst,
+  isLast,
   isDuplicating,
+  expandedItemId,
+  autoExpandItemId,
+  onAutoExpandHandled,
 }: {
   item: QuoteItem;
   quoteId: string;
   onUpdate: (id: string, field: keyof Pick<QuoteItem, 'description' | 'qty' | 'unit_price' | 'bullet_points' | 'internal_notes'>, value: string | number) => void;
   onDelete: (id: string) => void;
   onDuplicate: (id: string) => void;
+  onMoveUp: (id: string) => void;
+  onMoveDown: (id: string) => void;
+  isFirst: boolean;
+  isLast: boolean;
   isDuplicating?: boolean;
   onAddClusterLine: (clusterId: string, component: {
     type: 'manual' | 'database' | 'product' | 'collection';
@@ -166,11 +123,15 @@ function QuoteItemRow({
   onEnsureCluster: (itemId: string) => void;
   attachmentsVersion?: number;
   onItemAttachmentsChange?: (itemId: string, attachments: QuoteAttachment[]) => void;
+  expandedItemId?: string;
+  autoExpandItemId?: string;
+  onAutoExpandHandled?: () => void;
 }) {
   const [desc, setDesc] = React.useState(item.description);
   const [qty, setQty] = React.useState<string>(String(item.qty));
   const [unitPrice, setUnitPrice] = React.useState<string>(String(Math.round((item.unit_price || 0) * 100) / 100));
   const [isExpanded, setIsExpanded] = React.useState(false);
+  const rowRef = React.useRef<HTMLTableRowElement | null>(null);
   const [detailsOpen, setDetailsOpen] = React.useState(false);
   const [bpText, setBpText] = React.useState<string>(item.bullet_points || '');
   const [internalNotes, setInternalNotes] = React.useState<string>(item.internal_notes || '');
@@ -180,6 +141,16 @@ function QuoteItemRow({
   React.useEffect(() => { setUnitPrice(String(Math.round((item.unit_price || 0) * 100) / 100)); }, [item.unit_price]);
   React.useEffect(() => { setBpText(item.bullet_points || ''); }, [item.bullet_points]);
   React.useEffect(() => { setInternalNotes(item.internal_notes || ''); }, [item.internal_notes]);
+
+  React.useEffect(() => {
+    if (!expandedItemId && !autoExpandItemId) return;
+    if (expandedItemId === item.id || autoExpandItemId === item.id) {
+      setIsExpanded(true);
+      rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Clear both expandedItemId and autoExpandItemId after handling
+      onAutoExpandHandled?.();
+    }
+  }, [expandedItemId, autoExpandItemId, item.id, onAutoExpandHandled]);
 
   const sortedClusters = React.useMemo(() => {
     if (!Array.isArray(item.quote_item_clusters) || item.quote_item_clusters.length === 0) {
@@ -253,31 +224,80 @@ function QuoteItemRow({
   }, [clustersWithLines, manualClusters, cutlistLines, sortedClusters]);
 
   const hasClusterLines = displayClusters.length > 0;
+  const isPriced = !item.item_type || item.item_type === 'priced';
+  const isHeading = item.item_type === 'heading';
+  const isNote = item.item_type === 'note';
 
   return (
     <React.Fragment>
-      <TableRow key={item.id}>
+      <TableRow key={item.id} ref={rowRef} className={isHeading ? 'bg-muted/30' : undefined}>
         <TableCell>
-          {displayClusters.length > 0 ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsExpanded(!isExpanded)}
-              disabled={!hasClusterLines}
-              title={hasClusterLines ? 'Toggle costing clusters' : 'No costing lines yet'}
-            >
-              {isExpanded ? '▼' : '▶'}
-            </Button>
-          ) : (
-            <Button variant="outline" size="sm" onClick={() => onEnsureCluster(item.id)}>
-              + Cluster
-            </Button>
-          )}
+          <div className="flex items-center gap-1">
+            <div className="flex flex-col">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5"
+                onClick={() => onMoveUp(item.id)}
+                disabled={isFirst}
+                title="Move up"
+              >
+                <ChevronUp className="h-3 w-3" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5"
+                onClick={() => onMoveDown(item.id)}
+                disabled={isLast}
+                title="Move down"
+              >
+                <ChevronDown className="h-3 w-3" />
+              </Button>
+            </div>
+            {isPriced ? (
+              displayClusters.length > 0 ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsExpanded(!isExpanded)}
+                  disabled={!hasClusterLines}
+                  title={hasClusterLines ? 'Toggle costing clusters' : 'No costing lines yet'}
+                >
+                  {isExpanded ? '▼' : '▶'}
+                </Button>
+              ) : (
+                <Button variant="outline" size="sm" onClick={() => onEnsureCluster(item.id)}>
+                  + Cluster
+                </Button>
+              )
+            ) : (
+              <span className="text-xs text-muted-foreground px-2">{isHeading ? 'H' : 'N'}</span>
+            )}
+          </div>
         </TableCell>
-        <TableCell><Input value={desc} onChange={e => setDesc(e.target.value)} onBlur={() => { if (desc !== item.description) onUpdate(item.id, 'description', desc); }} onFocus={e => e.target.select()} /></TableCell>
-        <TableCell><Input type="number" value={qty} onChange={e => setQty(e.target.value)} onBlur={() => { const numQty = Number(qty) || 0; if (numQty !== item.qty) onUpdate(item.id, 'qty', numQty); setQty(String(numQty)); }} onFocus={e => e.target.select()} /></TableCell>
-        <TableCell><Input type="number" step="0.01" value={unitPrice} onChange={e => setUnitPrice(e.target.value)} onBlur={() => { const numPrice = Math.round((Number(unitPrice) || 0) * 100) / 100; if (numPrice !== item.unit_price) onUpdate(item.id, 'unit_price', numPrice); setUnitPrice(String(numPrice)); }} onFocus={e => e.target.select()} /></TableCell>
-        <TableCell className="text-right font-medium">{formatCurrency((Number(qty) || 0) * (Number(unitPrice) || 0))}</TableCell>
+        <TableCell>
+          <Input
+            value={desc}
+            onChange={e => setDesc(e.target.value)}
+            onBlur={() => { if (desc !== item.description) onUpdate(item.id, 'description', desc); }}
+            onFocus={e => e.target.select()}
+            className={isHeading ? 'font-semibold' : undefined}
+          />
+        </TableCell>
+        {isPriced ? (
+          <>
+            <TableCell><Input type="number" value={qty} onChange={e => setQty(e.target.value)} onBlur={() => { const numQty = Number(qty) || 0; if (numQty !== item.qty) onUpdate(item.id, 'qty', numQty); setQty(String(numQty)); }} onFocus={e => e.target.select()} /></TableCell>
+            <TableCell><Input type="number" step="0.01" value={unitPrice} onChange={e => setUnitPrice(e.target.value)} onBlur={() => { const numPrice = Math.round((Number(unitPrice) || 0) * 100) / 100; if (numPrice !== item.unit_price) onUpdate(item.id, 'unit_price', numPrice); setUnitPrice(String(numPrice)); }} onFocus={e => e.target.select()} /></TableCell>
+            <TableCell className="text-right font-medium">{formatCurrency((Number(qty) || 0) * (Number(unitPrice) || 0))}</TableCell>
+          </>
+        ) : (
+          <>
+            <TableCell className="text-center text-muted-foreground">—</TableCell>
+            <TableCell className="text-center text-muted-foreground">—</TableCell>
+            <TableCell className="text-center text-muted-foreground">—</TableCell>
+          </>
+        )}
         <TableCell>
           <QuoteItemAttachmentsCell
             quoteId={quoteId}
@@ -294,18 +314,20 @@ function QuoteItemRow({
                 <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-500" title="Has internal notes" />
               )}
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="px-3 py-1.5"
-              title="Cutlist Calculator"
-              aria-label="Cutlist Calculator"
-              asChild
-            >
-              <Link href={`/quotes/${quoteId}/cutlist/${item.id}`}>
-                Cutlist
-              </Link>
-            </Button>
+            {isPriced && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="px-3 py-1.5"
+                title="Cutlist Calculator"
+                aria-label="Cutlist Calculator"
+                asChild
+              >
+                <Link href={`/quotes/${quoteId}/cutlist/${item.id}`}>
+                  Cutlist
+                </Link>
+              </Button>
+            )}
             <Button
               variant="outline"
               size="icon"
@@ -379,7 +401,7 @@ function QuoteItemRow({
           </div>
         </DialogContent>
       </Dialog>
-      {isExpanded && displayClusters.map((cluster) => (
+      {isPriced && isExpanded && displayClusters.map((cluster) => (
         <TableRow key={`${item.id}-cluster-${cluster.id}`}>
           <TableCell colSpan={7} className="p-0">
             <QuoteItemClusterGrid
@@ -399,7 +421,17 @@ function QuoteItemRow({
 }
 
 // --- Main Table Component ---
-export default function QuoteItemsTable({ quoteId, items, onItemsChange, onRefresh, attachmentsVersion, onItemAttachmentsChange }: Props) {
+export default function QuoteItemsTable({
+  quoteId,
+  items,
+  onItemsChange,
+  onRefresh,
+  attachmentsVersion,
+  onItemAttachmentsChange,
+  expandedItemId,
+  autoExpandItemId,
+  onAutoExpandHandled,
+}: Props) {
   const { toast } = useToast();
   const [showAddItemDialog, setShowAddItemDialog] = React.useState(false);
   const [duplicatingItemId, setDuplicatingItemId] = React.useState<string | null>(null);
@@ -408,6 +440,20 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, onRefre
 
   const handleCreateManualItem = async ({ description, qty, unit_price }: { description: string; qty: number; unit_price: number }) => {
     const newItem = await createQuoteItem({ total: 0, quote_id: quoteId, description, qty, unit_price });
+    onItemsChange([...items, newItem]);
+  };
+
+  const handleCreateTextItem = async ({ description, item_type, text_align }: { description: string; item_type: QuoteItemType; text_align: QuoteItemTextAlign }) => {
+    // Create a non-priced item (heading or note) - no cluster will be created
+    const newItem = await createQuoteItem({
+      quote_id: quoteId,
+      description,
+      item_type,
+      text_align,
+      qty: 0,
+      unit_price: 0,
+      total: 0,
+    });
     onItemsChange([...items, newItem]);
   };
 
@@ -620,6 +666,8 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, onRefre
           qty: originalItem.qty,
           unit_price: originalItem.unit_price,
           total: originalItem.total,
+          item_type: originalItem.item_type,
+          text_align: originalItem.text_align,
           bullet_points: originalItem.bullet_points,
           internal_notes: originalItem.internal_notes,
           selected_options: originalItem.selected_options,
@@ -908,6 +956,35 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, onRefre
     onItemsChange(newItems);
   };
 
+  const handleMoveItem = async (id: string, direction: 'up' | 'down') => {
+    const currentIndex = items.findIndex(item => item.id === id);
+    if (currentIndex === -1) return;
+
+    const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (newIndex < 0 || newIndex >= items.length) return;
+
+    // Create new array with swapped positions
+    const newItems = [...items];
+    [newItems[currentIndex], newItems[newIndex]] = [newItems[newIndex], newItems[currentIndex]];
+
+    // Optimistically update UI
+    onItemsChange(newItems);
+
+    // Persist the new order to the database
+    try {
+      await reorderQuoteItems(newItems.map(item => item.id));
+    } catch (error) {
+      console.error('Failed to save item order:', error);
+      // Revert on failure
+      onItemsChange(items);
+      toast({
+        variant: 'destructive',
+        title: 'Reorder failed',
+        description: 'Could not save the new order. Please try again.'
+      });
+    }
+  };
+
   const handleUpdateCluster = async (clusterId: string, updates: Partial<QuoteItemCluster>) => {
     try {
       const updatedCluster = await updateQuoteItemCluster(clusterId, updates);
@@ -938,7 +1015,7 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, onRefre
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/50">
-              <TableHead className="w-12 text-center"></TableHead>
+              <TableHead className="w-20 text-center"></TableHead>
               <TableHead className="font-medium min-w-[250px]">Description</TableHead>
               <TableHead className="w-32 text-center font-medium">Qty</TableHead>
               <TableHead className="w-36 text-center font-medium">Unit Price</TableHead>
@@ -948,7 +1025,7 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, onRefre
             </TableRow>
           </TableHeader>
           <TableBody>
-            {items.map(item => (
+            {items.map((item, index) => (
               <QuoteItemRow
                 key={item.id}
                 item={item}
@@ -956,6 +1033,10 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, onRefre
                 onUpdate={handleUpdateItem}
                 onDelete={handleDeleteItem}
                 onDuplicate={handleDuplicateItem}
+                onMoveUp={(id) => handleMoveItem(id, 'up')}
+                onMoveDown={(id) => handleMoveItem(id, 'down')}
+                isFirst={index === 0}
+                isLast={index === items.length - 1}
                 onAddClusterLine={handleAddClusterLine}
                 onUpdateClusterLine={handleUpdateClusterLine}
                 onDeleteClusterLine={handleDeleteClusterLine}
@@ -964,6 +1045,9 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, onRefre
                 attachmentsVersion={attachmentsVersion}
                 onItemAttachmentsChange={onItemAttachmentsChange}
                 isDuplicating={duplicatingItemId === item.id}
+                expandedItemId={expandedItemId}
+                autoExpandItemId={autoExpandItemId}
+                onAutoExpandHandled={onAutoExpandHandled}
               />
             ))}
           </TableBody>
@@ -974,6 +1058,7 @@ export default function QuoteItemsTable({ quoteId, items, onItemsChange, onRefre
         onClose={() => setShowAddItemDialog(false)}
         onCreateManual={handleCreateManualItem}
         onCreateProduct={handleCreateProductItem}
+        onCreateText={handleCreateTextItem}
       />
 
     </div>

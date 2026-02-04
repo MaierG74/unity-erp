@@ -49,6 +49,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - Suppliers: [`domains/suppliers/suppliers-master.md`](domains/suppliers/suppliers-master.md)
 - Features:
   - [`features/cutlist-calculator.md`](features/cutlist-calculator.md) – **Cutlist Calculator** documentation: materials panel, parts table, edge banding popover, lamination types
+  - [`features/quotes.md`](features/quotes.md) – **Quotes** feature planning and implementation notes
   - [`features/customers-ui-redesign.md`](features/customers-ui-redesign.md) – ✅ **Customers UI redesign** with inline editing, metrics, charts, and streamlined navigation
   - [`features/suppliers-ui-redesign-prompt.md`](features/suppliers-ui-redesign-prompt.md) – **Suppliers UI redesign prompt** (ready to apply in new conversation)
 - Operations:

@@ -144,6 +144,7 @@ Shows the optimized cutting layout after clicking **Calculate Layout**:
 - Visual board layouts with parts positioned
 - Waste calculation and efficiency percentage
 - Material costs breakdown
+- **Backer board cutlist** when parts are set to **With Backer** lamination, with the same per-sheet billing toggles
 
 ---
 
