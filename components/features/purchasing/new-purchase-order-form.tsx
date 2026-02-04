@@ -279,7 +279,7 @@ export function NewPurchaseOrderForm() {
     defaultValues: {
       order_date: new Date().toISOString().split('T')[0],
       notes: '',
-      items: [{ component_id: 0, supplier_component_id: 0, quantity: 1, customer_order_id: null }],
+      items: [{ component_id: 0, supplier_component_id: 0, quantity: undefined as unknown as number, customer_order_id: null }],
     },
   });
 
@@ -316,12 +316,6 @@ export function NewPurchaseOrderForm() {
       const { data, error } = await supabase
         .from('orders')
         .select('order_id, order_number, customer:customers(name)')
-        .not('status_id', 'in', '(3,4)') // Assuming 3=Completed, 4=Cancelled based on typical flows, but better to filter by name if IDs vary. 
-        // Actually, let's just fetch all for now or filter by status name if possible, but IDs are safer if known.
-        // Let's try to filter by status name to be safe.
-        // .eq('status.status_name', 'New') // This is hard with simple query.
-        // Let's just fetch latest 50 open orders for now to avoid complexity, or fetch all and filter client side if small.
-        // Given the previous file read didn't show status IDs, let's just fetch recent orders.
         .order('created_at', { ascending: false })
         .limit(50);
 
@@ -584,7 +578,7 @@ export function NewPurchaseOrderForm() {
   };
 
   const addItem = () => {
-    append({ component_id: 0, supplier_component_id: 0, quantity: 1, customer_order_id: null });
+    append({ component_id: 0, supplier_component_id: 0, quantity: undefined as unknown as number, customer_order_id: null });
   };
 
   return (
@@ -719,6 +713,15 @@ export function NewPurchaseOrderForm() {
                             ...base,
                             zIndex: 50,
                             marginTop: 4,
+                            backgroundColor: 'hsl(var(--popover))',
+                            border: '1px solid hsl(var(--border))',
+                            borderRadius: '0.375rem',
+                            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
+                          }),
+                          menuList: (base) => ({
+                            ...base,
+                            backgroundColor: 'hsl(var(--popover))',
+                            padding: '0.25rem',
                           }),
                           menuPortal: (base) => ({
                             ...base,
@@ -731,14 +734,23 @@ export function NewPurchaseOrderForm() {
                               : 'transparent',
                             color: state.isFocused
                               ? 'hsl(var(--accent-foreground))'
-                              : 'inherit',
+                              : 'hsl(var(--popover-foreground))',
                             cursor: 'pointer',
+                            borderRadius: '0.25rem',
                           }),
                           singleValue: (base) => ({
                             ...base,
                             color: 'hsl(var(--foreground))',
                           }),
+                          input: (base) => ({
+                            ...base,
+                            color: 'hsl(var(--foreground))',
+                          }),
                           placeholder: (base) => ({
+                            ...base,
+                            color: 'hsl(var(--muted-foreground))',
+                          }),
+                          noOptionsMessage: (base) => ({
                             ...base,
                             color: 'hsl(var(--muted-foreground))',
                           }),
@@ -807,10 +819,14 @@ export function NewPurchaseOrderForm() {
                         type="number"
                         id={`items.${index}.quantity`}
                         className={`h-10 w-full rounded-md border ${errors.items?.[index]?.quantity ? 'border-destructive' : 'border-input'
-                          } bg-background px-3 py-2 text-sm`}
+                          } bg-background px-3 py-2 text-sm placeholder:text-muted-foreground`}
                         min="1"
-                        value={field.value || ''}
-                        onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
+                        placeholder="Qty"
+                        value={field.value ?? ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          field.onChange(val === '' ? undefined : parseInt(val) || 0);
+                        }}
                         disabled={createOrderMutation.isPending}
                       />
                     )}
@@ -842,27 +858,65 @@ export function NewPurchaseOrderForm() {
                         menuPlacement="auto"
                         classNamePrefix="customer-order-select"
                         styles={{
-                          control: (base) => ({
+                          control: (base, state) => ({
                             ...base,
                             minHeight: '2.5rem',
                             borderRadius: '0.375rem',
-                            borderColor: 'hsl(var(--input))',
+                            borderColor: state.isFocused
+                              ? 'hsl(var(--ring))'
+                              : 'hsl(var(--input))',
+                            boxShadow: state.isFocused
+                              ? '0 0 0 1px hsl(var(--ring))'
+                              : 'none',
+                            '&:hover': {
+                              borderColor: state.isFocused
+                                ? 'hsl(var(--ring))'
+                                : 'hsl(var(--input))',
+                            },
                             backgroundColor: 'hsl(var(--background))',
                           }),
                           menu: (base) => ({
                             ...base,
                             zIndex: 50,
+                            marginTop: 4,
+                            backgroundColor: 'hsl(var(--popover))',
+                            border: '1px solid hsl(var(--border))',
+                            borderRadius: '0.375rem',
+                            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
+                          }),
+                          menuList: (base) => ({
+                            ...base,
+                            backgroundColor: 'hsl(var(--popover))',
+                            padding: '0.25rem',
+                          }),
+                          menuPortal: (base) => ({
+                            ...base,
+                            zIndex: 60,
                           }),
                           option: (base, state) => ({
                             ...base,
-                            backgroundColor: state.isFocused ? 'hsl(var(--accent))' : 'transparent',
-                            color: state.isFocused ? 'hsl(var(--accent-foreground))' : 'inherit',
+                            backgroundColor: state.isFocused
+                              ? 'hsl(var(--accent))'
+                              : 'transparent',
+                            color: state.isFocused
+                              ? 'hsl(var(--accent-foreground))'
+                              : 'hsl(var(--popover-foreground))',
+                            cursor: 'pointer',
+                            borderRadius: '0.25rem',
                           }),
                           singleValue: (base) => ({
                             ...base,
                             color: 'hsl(var(--foreground))',
                           }),
+                          input: (base) => ({
+                            ...base,
+                            color: 'hsl(var(--foreground))',
+                          }),
                           placeholder: (base) => ({
+                            ...base,
+                            color: 'hsl(var(--muted-foreground))',
+                          }),
+                          noOptionsMessage: (base) => ({
                             ...base,
                             color: 'hsl(var(--muted-foreground))',
                           }),
