@@ -151,7 +151,7 @@ export async function GET(request: NextRequest) {
     const supabaseClient = 'error' in clientResult ? publicSupabase : clientResult.supabase;
 
     const [suppliersRes, categoriesRes, unitsRes] = await Promise.all([
-      supabaseClient.from('suppliers').select('supplier_id, name').order('name'),
+      supabaseClient.from('suppliers').select('supplier_id, name').eq('is_active', true).order('name'),
       supabaseClient.from('component_categories').select('cat_id, categoryname').order('categoryname'),
       supabaseClient.from('unitsofmeasure').select('unit_id, unit_name, unit_code').order('unit_name'),
     ]);

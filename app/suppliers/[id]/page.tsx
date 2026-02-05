@@ -1,16 +1,29 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getSupplier, updateSupplier } from '@/lib/api/suppliers';
+import { getSupplier, updateSupplier, deleteSupplier } from '@/lib/api/suppliers';
 import { supabase } from '@/lib/supabase';
 import { formatCurrency } from '@/lib/quotes';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Package, DollarSign, Clock, Layers, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Package, DollarSign, Clock, Layers, AlertCircle, Trash2 } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Suspense, lazy, useMemo } from 'react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { useToast } from '@/components/ui/use-toast';
+import { Suspense, lazy, useMemo, useState } from 'react';
 import type { SupplierPurchaseOrder } from '@/types/suppliers';
 
 // Lazy load tab components
@@ -84,6 +97,7 @@ export default function SupplierDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const supplierId = Number(params.id);
   const tabParam = searchParams?.get('tab');
   const allowedTabs = new Set(['details', 'components', 'pricelists', 'orders', 'reports']);
@@ -94,11 +108,26 @@ export default function SupplierDetailPage() {
     queryFn: () => getSupplier(supplierId),
   });
 
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+
   const updateMutation = useMutation({
     mutationFn: (data: Parameters<typeof updateSupplier>[1]) =>
       updateSupplier(supplierId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['supplier', supplierId] });
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteSupplier(supplierId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+      router.push('/suppliers');
+    },
+    onError: (error: Error) => {
+      setDeleteDialogOpen(false);
+      toast({ title: 'Cannot delete supplier', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -264,8 +293,33 @@ export default function SupplierDetailPage() {
           </Link>
         </Button>
       </div>
-      <div>
-        <h1 className="text-3xl font-bold">{supplier.name}</h1>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <h1 className="text-3xl font-bold">{supplier.name}</h1>
+          {!supplier.is_active && (
+            <Badge variant="secondary" className="text-xs">Inactive</Badge>
+          )}
+          <div className="flex items-center gap-2 ml-4">
+            <Switch
+              checked={supplier.is_active}
+              onCheckedChange={(checked) => {
+                updateMutation.mutate({ is_active: checked });
+              }}
+              disabled={updateMutation.isPending}
+            />
+            <span className="text-sm text-muted-foreground">
+              {supplier.is_active ? 'Active' : 'Inactive'}
+            </span>
+          </div>
+        </div>
+        <Button
+          variant="destructive"
+          size="sm"
+          onClick={() => setDeleteDialogOpen(true)}
+        >
+          <Trash2 className="mr-2 h-4 w-4" />
+          Delete Supplier
+        </Button>
       </div>
 
       {/* Metrics Row */}
@@ -326,7 +380,8 @@ export default function SupplierDetailPage() {
               <SupplierForm
                 supplier={supplier}
                 onSubmit={async (data) => {
-                  await updateMutation.mutateAsync(data);
+                  const { emails, ...supplierData } = data;
+                  await updateMutation.mutateAsync(supplierData);
                 }}
               />
             </div>
@@ -361,6 +416,31 @@ export default function SupplierDetailPage() {
           </Suspense>
         </TabsContent>
       </Tabs>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Supplier</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{supplier.name}</strong>? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                deleteMutation.mutate();
+              }}
+              disabled={deleteMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

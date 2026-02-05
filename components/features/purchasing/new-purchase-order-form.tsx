@@ -450,18 +450,28 @@ export function NewPurchaseOrderForm() {
           (sc) => sc.supplier_component_id === item.supplier_component_id
         );
 
-        if (supplierComponent?.supplier_id) {
-          if (!itemsBySupplier.has(supplierComponent.supplier_id)) {
-            itemsBySupplier.set(supplierComponent.supplier_id, []);
-          }
-          itemsBySupplier.get(supplierComponent.supplier_id)?.push({
-            supplier_component_id: item.supplier_component_id,
-            quantity: item.quantity,
-            component_id: item.component_id,
-            customer_order_id: item.customer_order_id,
-            supplierId: supplierComponent.supplier_id,
-          });
+        if (!supplierComponent) {
+          throw new Error(
+            `Missing supplier data for component ${item.component_id}. Refresh suppliers and try again.`
+          );
         }
+
+        if (!supplierComponent.supplier_id) {
+          throw new Error(
+            `Supplier selection is missing its supplier reference for component ${item.component_id}.`
+          );
+        }
+
+        if (!itemsBySupplier.has(supplierComponent.supplier_id)) {
+          itemsBySupplier.set(supplierComponent.supplier_id, []);
+        }
+        itemsBySupplier.get(supplierComponent.supplier_id)?.push({
+          supplier_component_id: item.supplier_component_id,
+          quantity: item.quantity,
+          component_id: item.component_id,
+          customer_order_id: item.customer_order_id,
+          supplierId: supplierComponent.supplier_id,
+        });
       });
 
       const orderDateISO = pendingFormData.order_date

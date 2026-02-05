@@ -1,7 +1,8 @@
 'use client';
 
 import { SupplierForm } from '@/components/features/suppliers/supplier-form';
-import { createSupplier } from '@/lib/api/suppliers';
+import type { SupplierFormSubmitData } from '@/components/features/suppliers/supplier-form';
+import { createSupplier, addSupplierEmail } from '@/lib/api/suppliers';
 import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 
@@ -9,14 +10,25 @@ export default function NewSupplierPage() {
   const router = useRouter();
   const mutation = useMutation({
     mutationFn: createSupplier,
-    onSuccess: () => {
-      router.push('/suppliers');
-      router.refresh();
-    },
   });
 
-  const handleSubmit = async (data: Parameters<typeof createSupplier>[0]) => {
-    await mutation.mutateAsync(data);
+  const handleSubmit = async (data: SupplierFormSubmitData) => {
+    const { emails, ...supplierData } = data;
+    const newSupplier = await mutation.mutateAsync(supplierData);
+
+    // Create email records if provided
+    if (emails && emails.length > 0) {
+      for (let i = 0; i < emails.length; i++) {
+        await addSupplierEmail({
+          supplier_id: newSupplier.supplier_id,
+          email: emails[i],
+          is_primary: i === 0,
+        });
+      }
+    }
+
+    router.push('/suppliers');
+    router.refresh();
   };
 
   return (
@@ -29,7 +41,7 @@ export default function NewSupplierPage() {
       </div>
 
       <div className="border rounded-lg p-6 bg-card">
-        <SupplierForm onSubmit={handleSubmit} />
+        <SupplierForm onSubmit={handleSubmit} showEmailFields />
       </div>
     </div>
   );

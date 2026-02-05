@@ -53,10 +53,13 @@ export async function GET(request: NextRequest) {
     }
 
     // Search Airtable for records matching this code
-    const filterFormula = encodeURIComponent(`{Code}="${code}"`);
-    const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(AIRTABLE_TABLE_NAME)}?filterByFormula=${filterFormula}`;
+    const trimmedCode = code.trim();
 
-    const response = await fetch(url, {
+    // Try exact match first (with TRIM to handle whitespace in Airtable data)
+    let filterFormula = encodeURIComponent(`TRIM({Code})="${trimmedCode}"`);
+    let url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(AIRTABLE_TABLE_NAME)}?filterByFormula=${filterFormula}`;
+
+    let response = await fetch(url, {
       headers: {
         'Authorization': `Bearer ${AIRTABLE_API_KEY}`,
         'Content-Type': 'application/json',
@@ -66,18 +69,39 @@ export async function GET(request: NextRequest) {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Airtable API error:', errorText);
-      return NextResponse.json({ 
-        error: 'Airtable API error', 
-        details: errorText 
+      return NextResponse.json({
+        error: 'Airtable API error',
+        details: errorText
       }, { status: response.status });
     }
 
-    const data = await response.json();
-    
+    let data = await response.json();
+
+    // Fallback: case-insensitive search if exact match fails
     if (!data.records || data.records.length === 0) {
-      return NextResponse.json({ 
-        error: 'Not found', 
-        message: `No component found with code "${code}"` 
+      console.log(`[Airtable Import] Exact match failed for "${trimmedCode}", trying case-insensitive search...`);
+      filterFormula = encodeURIComponent(`LOWER(TRIM({Code}))=LOWER("${trimmedCode}")`);
+      url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(AIRTABLE_TABLE_NAME)}?filterByFormula=${filterFormula}`;
+
+      response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${AIRTABLE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        data = await response.json();
+        if (data.records?.length > 0) {
+          console.log(`[Airtable Import] Case-insensitive match found! Airtable code: "${data.records[0].fields['Code']}"`);
+        }
+      }
+    }
+
+    if (!data.records || data.records.length === 0) {
+      return NextResponse.json({
+        error: 'Not found',
+        message: `No component found with code "${code}"`
       }, { status: 404 });
     }
 

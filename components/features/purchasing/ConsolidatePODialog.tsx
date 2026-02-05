@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import {
   Dialog,
@@ -47,7 +47,10 @@ export function ConsolidatePODialog({
   isLoading = false,
 }: ConsolidatePODialogProps) {
   // Track decision for each supplier: either a PO ID to add to, or 'new' to create new
-  const [decisions, setDecisions] = useState<Record<number, number | 'new'>>(() => {
+  const [decisions, setDecisions] = useState<Record<number, number | 'new'>>({});
+
+  useEffect(() => {
+    if (!open) return;
     const initial: Record<number, number | 'new'> = {};
     suppliersWithDrafts.forEach(supplier => {
       // Default to the most recent draft
@@ -57,8 +60,8 @@ export function ConsolidatePODialog({
         initial[supplier.supplierId] = 'new';
       }
     });
-    return initial;
-  });
+    setDecisions(initial);
+  }, [open, suppliersWithDrafts]);
 
   const handleConfirm = () => {
     onConfirm(decisions);

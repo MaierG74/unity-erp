@@ -89,7 +89,7 @@ export function AirtableImportTab() {
     async function loadLookups() {
       try {
         const [suppliersRes, categoriesRes, unitsRes] = await Promise.all([
-          supabase.from('suppliers').select('supplier_id, name').order('name'),
+          supabase.from('suppliers').select('supplier_id, name').eq('is_active', true).order('name'),
           supabase.from('component_categories').select('cat_id, categoryname').order('categoryname'),
           supabase.from('unitsofmeasure').select('unit_id, unit_name, unit_code').order('unit_name'),
         ]);

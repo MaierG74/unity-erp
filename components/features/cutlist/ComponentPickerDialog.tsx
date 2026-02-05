@@ -185,6 +185,7 @@ export function ComponentPickerDialog({
       supabase
         .from('suppliers')
         .select('supplier_id, name')
+        .eq('is_active', true)
         .order('name')
         .then(({ data }) => {
           if (data) setSuppliers(data);

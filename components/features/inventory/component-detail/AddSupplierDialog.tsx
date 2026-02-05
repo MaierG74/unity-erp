@@ -82,6 +82,7 @@ export function AddSupplierDialog({ open, onOpenChange, componentId }: AddSuppli
       const { data, error } = await supabase
         .from('suppliers')
         .select('supplier_id, name')
+        .eq('is_active', true)
         .order('name');
       if (error) throw error;
       return data as Supplier[];

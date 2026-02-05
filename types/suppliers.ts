@@ -2,6 +2,7 @@ export type Supplier = {
   supplier_id: number;
   name: string;
   contact_info: string | null;
+  is_active: boolean;
 };
 
 export type SupplierEmail = {

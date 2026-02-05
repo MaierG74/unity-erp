@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import type { Supplier, SupplierEmail, SupplierComponent, SupplierWithDetails, SupplierPricelist } from '@/types/suppliers';
+import type { Supplier, SupplierEmail, SupplierComponent, SupplierWithDetails, SupplierPricelist, SupplierPurchaseOrder } from '@/types/suppliers';
 
 // Extended SupplierComponent type that includes component details
 export type SupplierComponentWithDetails = SupplierComponent & {
@@ -85,6 +85,20 @@ export async function updateSupplier(id: number, supplier: Partial<Supplier>) {
 }
 
 export async function deleteSupplier(id: number) {
+  // Check for purchase orders referencing this supplier
+  const { count, error: checkError } = await supabase
+    .from('purchase_orders')
+    .select('*', { count: 'exact', head: true })
+    .eq('supplier_id', id);
+
+  if (checkError) throw checkError;
+
+  if (count && count > 0) {
+    throw new Error(
+      `Cannot delete this supplier because it has ${count} purchase order${count === 1 ? '' : 's'}. Remove the purchase orders first.`
+    );
+  }
+
   const { error } = await supabase
     .from('suppliers')
     .delete()
@@ -93,11 +107,12 @@ export async function deleteSupplier(id: number) {
   if (error) throw error;
 }
 
-// Lightweight function to get just supplier names and IDs for dropdowns
+// Lightweight function to get just supplier names and IDs for dropdowns (active only)
 export async function getSuppliersList() {
   const { data, error } = await supabase
     .from('suppliers')
     .select('supplier_id, name')
+    .eq('is_active', true)
     .order('name');
 
   if (error) throw error;
@@ -244,4 +259,57 @@ export async function togglePricelistActive(pricelistId: number, isActive: boole
 
   if (error) throw error;
   return data as SupplierPricelist;
+}
+
+// Open order counts per supplier (for list page indicator)
+export async function getOpenOrderCounts(): Promise<Record<number, number>> {
+  const { data, error } = await supabase
+    .from('purchase_orders')
+    .select('purchase_order_id, supplier_id, status_id')
+    .in('status_id', [1, 2, 7, 8]); // Open, In Progress, Approved, Partially Received
+
+  if (error) throw error;
+
+  const counts: Record<number, number> = {};
+  (data || []).forEach((po) => {
+    if (po.supplier_id) {
+      counts[po.supplier_id] = (counts[po.supplier_id] || 0) + 1;
+    }
+  });
+  return counts;
+}
+
+// Detailed open orders for a specific supplier (for modal)
+export async function getSupplierOpenOrders(supplierId: number) {
+  const { data, error } = await supabase
+    .from('purchase_orders')
+    .select(`
+      purchase_order_id,
+      q_number,
+      order_date,
+      created_at,
+      notes,
+      status:supplier_order_statuses!purchase_orders_status_id_fkey(status_name),
+      supplier_orders(
+        order_id,
+        order_quantity,
+        total_received,
+        supplier_component:suppliercomponents(
+          supplier_component_id,
+          supplier_code,
+          price,
+          component:components(
+            component_id,
+            internal_code,
+            description
+          )
+        )
+      )
+    `)
+    .eq('supplier_id', supplierId)
+    .in('status_id', [1, 2, 7, 8])
+    .order('order_date', { ascending: false });
+
+  if (error) throw error;
+  return (data || []) as SupplierPurchaseOrder[];
 } 
