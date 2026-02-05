@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm, Controller, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -257,6 +257,8 @@ async function createPurchaseOrder(
   return purchaseOrders;
 }
 
+const PO_DRAFT_STORAGE_KEY = 'unity-erp:po-draft';
+
 export function NewPurchaseOrderForm() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -273,6 +275,7 @@ export function NewPurchaseOrderForm() {
     handleSubmit,
     watch,
     setValue,
+    reset,
     formState: { errors },
   } = useForm<PurchaseOrderFormData>({
     resolver: zodResolver(formSchema) as Resolver<PurchaseOrderFormData>,
@@ -287,6 +290,58 @@ export function NewPurchaseOrderForm() {
     control,
     name: 'items',
   });
+
+  // Restore saved draft from sessionStorage on mount
+  const draftRestored = useRef(false);
+  useEffect(() => {
+    if (draftRestored.current) return;
+    draftRestored.current = true;
+    try {
+      const saved = sessionStorage.getItem(PO_DRAFT_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as PurchaseOrderFormData;
+        const hasContent =
+          parsed.items?.some((item) => item.component_id > 0) ||
+          (parsed.notes && parsed.notes.trim().length > 0);
+        if (hasContent) {
+          reset(parsed);
+          toast.info('Draft purchase order restored');
+        }
+      }
+    } catch {
+      sessionStorage.removeItem(PO_DRAFT_STORAGE_KEY);
+    }
+  }, [reset]);
+
+  // Auto-save form data to sessionStorage (debounced)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => {
+    const subscription = watch((values) => {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        try {
+          const formData = values as PurchaseOrderFormData;
+          const hasContent =
+            formData.items?.some((item) => item.component_id > 0) ||
+            (formData.notes && formData.notes.trim().length > 0);
+          if (hasContent) {
+            sessionStorage.setItem(PO_DRAFT_STORAGE_KEY, JSON.stringify(formData));
+          }
+        } catch {
+          // Ignore storage errors (e.g. quota exceeded)
+        }
+      }, 500);
+    });
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(saveTimerRef.current);
+    };
+  }, [watch]);
+
+  // Clear saved draft (called on successful submission)
+  const clearDraft = useCallback(() => {
+    sessionStorage.removeItem(PO_DRAFT_STORAGE_KEY);
+  }, []);
 
   // Get all components for dropdown
   const { data: components, isLoading: componentsLoading } = useQuery({
@@ -358,6 +413,7 @@ export function NewPurchaseOrderForm() {
       return createPurchaseOrder(data, draftStatusId, supplierComponentsMap ?? new Map());
     },
     onSuccess: (results) => {
+      clearDraft();
       queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
       const firstPurchaseOrderId = Array.isArray(results) && results.length > 0
         ? results[0]?.purchase_order_id
@@ -546,6 +602,7 @@ export function NewPurchaseOrderForm() {
       }
 
       toast.success(toastMessage, { id: toastId });
+      clearDraft();
       queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
 
       // Redirect to first PO
@@ -655,23 +712,9 @@ export function NewPurchaseOrderForm() {
         {fields.map((field, index) => (
           <Card key={field.id} className="overflow-hidden">
             <CardContent className="p-4">
-              <div className="flex items-start justify-between mb-4">
-                <h4 className="text-sm font-medium">Item {index + 1}</h4>
-                {fields.length > 1 && (
-                  <Button
-                    type="button"
-                    onClick={() => remove(index)}
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    disabled={createOrderMutation.isPending}
-                  >
-                    <Trash2 className="h-4 w-4 text-muted-foreground" />
-                  </Button>
-                )}
-              </div>
+              <h4 className="text-sm font-medium mb-4">Item {index + 1}</h4>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[1fr_1fr_7rem_1fr_auto] gap-4 items-end">
                 <div>
                   <label htmlFor={`items.${index}.component_id`} className="block text-sm font-medium mb-1">
                     Component
@@ -935,6 +978,30 @@ export function NewPurchaseOrderForm() {
                       />
                     )}
                   />
+                </div>
+
+                {/* Delete item button */}
+                <div className="flex items-end">
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      if (fields.length > 1) {
+                        remove(index);
+                      } else {
+                        // Last item — reset to blank rather than leaving form empty
+                        setValue(`items.0.component_id`, 0);
+                        setValue(`items.0.supplier_component_id`, 0);
+                        setValue(`items.0.quantity`, undefined as unknown as number);
+                        setValue(`items.0.customer_order_id`, null);
+                      }
+                    }}
+                    variant="ghost"
+                    size="icon"
+                    className="h-10 w-10 text-muted-foreground hover:text-destructive"
+                    disabled={createOrderMutation.isPending}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
               </div>
             </CardContent>
