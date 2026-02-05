@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ArrowLeft, ChevronsUpDown, Check } from 'lucide-react';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchQuotes } from '@/lib/db/quotes';
 import { fetchCustomers } from '@/lib/db/customers';
@@ -64,6 +64,7 @@ export default function NewOrderPage() {
   const [orderNumber, setOrderNumber] = useState<string>('');
   const [deliveryDate, setDeliveryDate] = useState<string>('');
   const [deliveryDateDisplay, setDeliveryDateDisplay] = useState<string>('');
+  const datePickerRef = useRef<HTMLInputElement>(null);
 
   const handleCreateFromScratch = () => {
     const payload: Record<string, any> = {};
@@ -212,41 +213,72 @@ export default function NewOrderPage() {
                     <div>
                       <Label htmlFor="delivery-date">Delivery Date (optional)</Label>
                       <div className="relative flex">
+                        {/* Mask template layer - shows unfilled portion of dd/mm/yyyy */}
+                        <div
+                          className="absolute left-0 top-0 h-full flex items-center pointer-events-none px-3 font-mono text-muted-foreground/50 text-sm"
+                          aria-hidden="true"
+                        >
+                          {(() => {
+                            const mask = 'dd/mm/yyyy';
+                            const digits = deliveryDateDisplay.replace(/\D/g, '');
+                            // Build the visible mask: typed digits are invisible (transparent), rest shows the template
+                            const digitPositions = [0, 1, 3, 4, 6, 7, 8, 9]; // positions of d, d, m, m, y, y, y, y in mask
+                            let digitIndex = 0;
+                            return mask.split('').map((ch, i) => {
+                              if (digitPositions.includes(i)) {
+                                const isTyped = digitIndex < digits.length;
+                                digitIndex++;
+                                return <span key={i} className={isTyped ? 'invisible' : ''}>{ch}</span>;
+                              }
+                              return <span key={i}>{ch}</span>;
+                            });
+                          })()}
+                        </div>
                         <Input
                           id="delivery-date"
                           type="text"
-                          placeholder="dd/mm/yyyy"
                           value={deliveryDateDisplay}
                           onChange={(e) => {
-                            const value = e.target.value;
-                            // Allow typing in dd/mm/yyyy format
-                            if (value === '' || /^[\d/]*$/.test(value)) {
-                              setDeliveryDateDisplay(value);
-                              const iso = formatToISO(value);
-                              if (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso)) {
-                                setDeliveryDate(iso);
-                              } else if (value === '') {
-                                setDeliveryDate('');
-                              }
+                            const raw = e.target.value.replace(/\D/g, '');
+                            // Auto-format: insert slashes after dd and mm
+                            let formatted = '';
+                            for (let i = 0; i < raw.length && i < 8; i++) {
+                              if (i === 2 || i === 4) formatted += '/';
+                              formatted += raw[i];
+                            }
+                            setDeliveryDateDisplay(formatted);
+                            const iso = formatToISO(formatted);
+                            if (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+                              setDeliveryDate(iso);
+                            } else {
+                              setDeliveryDate('');
                             }
                           }}
-                          className="pr-10"
+                          className="pr-10 font-mono text-sm bg-transparent"
+                          maxLength={10}
                         />
                         <input
+                          ref={datePickerRef}
                           type="date"
-                          className="absolute right-0 top-0 h-full w-10 opacity-0 cursor-pointer"
+                          className="sr-only"
                           value={deliveryDate}
                           onChange={(e) => {
                             setDeliveryDate(e.target.value);
                             setDeliveryDateDisplay(formatToSA(e.target.value));
                           }}
-                          aria-label="Open date picker"
+                          tabIndex={-1}
+                          aria-label="Date picker"
                         />
-                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                          <svg className="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <button
+                          type="button"
+                          className="absolute right-0 top-0 h-full w-10 flex items-center justify-center cursor-pointer hover:bg-accent/50 rounded-r-md transition-colors"
+                          onClick={() => datePickerRef.current?.showPicker()}
+                          aria-label="Open date picker"
+                        >
+                          <svg className="h-5 w-5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                           </svg>
-                        </div>
+                        </button>
                       </div>
                     </div>
                   </div>

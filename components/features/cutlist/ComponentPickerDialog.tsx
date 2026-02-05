@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Search, X } from 'lucide-react';
+import { Search, X, Filter } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import {
   Dialog,
@@ -12,6 +12,14 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
 import {
   Table,
   TableBody,
@@ -128,6 +136,19 @@ function parseDimensions(description: string | null): {
 // Component
 // =============================================================================
 
+// Category ID to name mapping
+const CATEGORY_NAMES: Record<number, string> = {
+  [CATEGORY_IDS.MELAMINE]: 'Melamine',
+  [CATEGORY_IDS.MDF]: 'MDF',
+  [CATEGORY_IDS.PLYWOOD]: 'Plywood',
+  [CATEGORY_IDS.EDGING]: 'Edging',
+};
+
+interface Supplier {
+  supplier_id: number;
+  name: string;
+}
+
 export function ComponentPickerDialog({
   open,
   onOpenChange,
@@ -139,36 +160,105 @@ export function ComponentPickerDialog({
   const [search, setSearch] = React.useState('');
   const [components, setComponents] = React.useState<ComponentRow[]>([]);
   const [loading, setLoading] = React.useState(false);
+  const [loadingMore, setLoadingMore] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [hasMore, setHasMore] = React.useState(false);
 
-  // Fetch components when dialog opens or search changes
-  const fetchComponents = React.useCallback(async () => {
-    setLoading(true);
+  // Filter state - category filter can be cleared by user
+  const [activeCategoryIds, setActiveCategoryIds] = React.useState<number[] | undefined>(categoryIds);
+  const [suppliers, setSuppliers] = React.useState<Supplier[]>([]);
+  const [selectedSupplierId, setSelectedSupplierId] = React.useState<string>('all');
+
+  const PAGE_SIZE = 50;
+
+  // Reset filters when dialog opens with new categoryIds
+  React.useEffect(() => {
+    if (open) {
+      setActiveCategoryIds(categoryIds);
+      setSelectedSupplierId('all');
+    }
+  }, [open, categoryIds]);
+
+  // Fetch suppliers list once
+  React.useEffect(() => {
+    if (open && suppliers.length === 0) {
+      supabase
+        .from('suppliers')
+        .select('supplier_id, name')
+        .order('name')
+        .then(({ data }) => {
+          if (data) setSuppliers(data);
+        });
+    }
+  }, [open, suppliers.length]);
+
+  // Fetch components when dialog opens or filters change
+  const fetchComponents = React.useCallback(async (offset = 0, append = false) => {
+    if (append) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+    }
     setError(null);
 
     try {
-      let query = supabase
-        .from('components')
-        .select(`
-          component_id,
-          internal_code,
-          description,
-          category:component_categories(categoryname),
-          suppliercomponents(price, supplier:suppliers(name))
-        `)
-        .order('internal_code')
-        .limit(50);
+      // Build query based on whether we're filtering by supplier
+      let query;
 
-      // Filter by category if specified
-      if (categoryIds && categoryIds.length > 0) {
-        query = query.in('category_id', categoryIds);
+      if (selectedSupplierId !== 'all') {
+        // When filtering by supplier, we need to join through suppliercomponents
+        query = supabase
+          .from('suppliercomponents')
+          .select(`
+            price,
+            component:components(
+              component_id,
+              internal_code,
+              description,
+              category_id,
+              category:component_categories(categoryname)
+            ),
+            supplier:suppliers(name)
+          `)
+          .eq('supplier_id', parseInt(selectedSupplierId))
+          .order('price')
+          .range(offset, offset + PAGE_SIZE); // Fetch PAGE_SIZE + 1 to check if more exist
+      } else {
+        // Standard query without supplier filter
+        query = supabase
+          .from('components')
+          .select(`
+            component_id,
+            internal_code,
+            description,
+            category_id,
+            category:component_categories(categoryname),
+            suppliercomponents(price, supplier:suppliers(name))
+          `)
+          .order('internal_code')
+          .range(offset, offset + PAGE_SIZE); // Fetch PAGE_SIZE + 1 to check if more exist
+      }
+
+      // Filter by category if active
+      if (activeCategoryIds && activeCategoryIds.length > 0) {
+        if (selectedSupplierId !== 'all') {
+          query = query.in('component.category_id', activeCategoryIds);
+        } else {
+          query = query.in('category_id', activeCategoryIds);
+        }
       }
 
       // Search filter
       if (search.trim()) {
-        query = query.or(
-          `internal_code.ilike.%${search}%,description.ilike.%${search}%`
-        );
+        if (selectedSupplierId !== 'all') {
+          query = query.or(
+            `component.internal_code.ilike.%${search}%,component.description.ilike.%${search}%`
+          );
+        } else {
+          query = query.or(
+            `internal_code.ilike.%${search}%,description.ilike.%${search}%`
+          );
+        }
       }
 
       const { data, error: fetchError } = await query;
@@ -176,33 +266,67 @@ export function ComponentPickerDialog({
       if (fetchError) throw fetchError;
 
       // Transform data to flat structure
-      const rows: ComponentRow[] = (data || []).map((item: any) => {
-        // Get lowest price from supplier components
-        const prices = item.suppliercomponents?.map((sc: any) => sc.price) || [];
-        const lowestPrice = prices.length > 0 ? Math.min(...prices) : null;
-        const supplierWithLowestPrice = item.suppliercomponents?.find(
-          (sc: any) => sc.price === lowestPrice
-        );
+      let rows: ComponentRow[];
 
-        return {
-          component_id: item.component_id,
-          internal_code: item.internal_code || '',
-          description: item.description,
-          category_name: item.category?.categoryname || null,
-          price: lowestPrice,
-          supplier_name: supplierWithLowestPrice?.supplier?.name || null,
-        };
-      });
+      if (selectedSupplierId !== 'all') {
+        // Data is from suppliercomponents join
+        rows = (data || [])
+          .filter((item: any) => item.component) // Filter out nulls from category filter
+          .map((item: any) => ({
+            component_id: item.component.component_id,
+            internal_code: item.component.internal_code || '',
+            description: item.component.description,
+            category_name: item.component.category?.categoryname || null,
+            price: item.price,
+            supplier_name: item.supplier?.name || null,
+          }));
+      } else {
+        // Data is from components table
+        rows = (data || []).map((item: any) => {
+          const prices = item.suppliercomponents?.map((sc: any) => sc.price) || [];
+          const lowestPrice = prices.length > 0 ? Math.min(...prices) : null;
+          const supplierWithLowestPrice = item.suppliercomponents?.find(
+            (sc: any) => sc.price === lowestPrice
+          );
 
-      setComponents(rows);
+          return {
+            component_id: item.component_id,
+            internal_code: item.internal_code || '',
+            description: item.description,
+            category_name: item.category?.categoryname || null,
+            price: lowestPrice,
+            supplier_name: supplierWithLowestPrice?.supplier?.name || null,
+          };
+        });
+      }
+
+      // Check if there are more results (we fetched PAGE_SIZE + 1)
+      const hasMoreResults = rows.length > PAGE_SIZE;
+      if (hasMoreResults) {
+        rows = rows.slice(0, PAGE_SIZE); // Remove the extra item
+      }
+      setHasMore(hasMoreResults);
+
+      if (append) {
+        setComponents(prev => [...prev, ...rows]);
+      } else {
+        setComponents(rows);
+      }
     } catch (err) {
       console.error('Failed to fetch components:', err);
       setError('Failed to load components');
-      setComponents([]);
+      if (!append) {
+        setComponents([]);
+      }
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
-  }, [categoryIds, search]);
+  }, [activeCategoryIds, search, selectedSupplierId]);
+
+  const handleLoadMore = () => {
+    fetchComponents(components.length, true);
+  };
 
   // Fetch on open and search change
   React.useEffect(() => {
@@ -274,6 +398,60 @@ export function ComponentPickerDialog({
           </Button>
         </div>
 
+        {/* Compact Filter Row */}
+        <div className="flex items-center gap-3 text-sm pb-1">
+          <div className="flex items-center gap-1.5">
+            <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-muted-foreground text-xs">Filters:</span>
+          </div>
+
+          {/* Category filter chip - removable */}
+          {activeCategoryIds && activeCategoryIds.length > 0 ? (
+            <Badge variant="secondary" className="gap-1 h-6 text-xs font-normal">
+              {activeCategoryIds.map(id => CATEGORY_NAMES[id] || `Cat ${id}`).join(', ')}
+              <button
+                onClick={() => setActiveCategoryIds(undefined)}
+                className="ml-0.5 hover:bg-muted-foreground/20 rounded-full p-0.5"
+                title="Show all categories"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="h-6 text-xs font-normal text-muted-foreground">
+              All categories
+            </Badge>
+          )}
+
+          {/* Supplier dropdown */}
+          <Select value={selectedSupplierId} onValueChange={setSelectedSupplierId}>
+            <SelectTrigger className="h-7 w-[160px] text-xs">
+              <SelectValue placeholder="All suppliers" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All suppliers</SelectItem>
+              {suppliers.map((s) => (
+                <SelectItem key={s.supplier_id} value={String(s.supplier_id)}>
+                  {s.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Reset filters link */}
+          {(selectedSupplierId !== 'all' || !activeCategoryIds) && categoryIds && (
+            <button
+              onClick={() => {
+                setActiveCategoryIds(categoryIds);
+                setSelectedSupplierId('all');
+              }}
+              className="text-xs text-muted-foreground hover:text-foreground underline"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+
         {/* Error Message */}
         {error && (
           <div className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">
@@ -294,7 +472,7 @@ export function ComponentPickerDialog({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loading ? (
+              {loading && !loadingMore ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                     Loading...
@@ -344,9 +522,23 @@ export function ComponentPickerDialog({
           </Table>
         </div>
 
-        {/* Footer hint */}
-        <div className="text-xs text-muted-foreground">
-          Showing up to 50 results. Use search to find specific components.
+        {/* Footer with Load More */}
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>
+            Showing {components.length} result{components.length !== 1 ? 's' : ''}
+            {hasMore && ' (more available)'}
+          </span>
+          {hasMore && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleLoadMore}
+              disabled={loadingMore}
+              className="h-7 text-xs"
+            >
+              {loadingMore ? 'Loading...' : 'Load more'}
+            </Button>
+          )}
         </div>
       </DialogContent>
     </Dialog>

@@ -515,13 +515,42 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
               );
             }
 
-            // Render priced items - full row with qty/price/total columns
+            // Render priced items - Photo first, then item name/qty/price, then details
             const rowBase = index % 2 === 0 ? styles.tableRow : styles.tableRowAlt;
-            const headerRowStyle = hasDetails ? [rowBase, styles.tableRowHead] : rowBase;
+            const hasBullets = bulletLines.length > 0;
 
             return (
               <View key={item.id} wrap={false}>
-                <View style={headerRowStyle}>
+                {/* Row 1: Image(s) - only if there are images */}
+                {itemImages.length > 0 && (
+                  <View style={[rowBase, styles.tableRowHead, { borderBottom: 0 }]}>
+                    <View style={styles.descriptionCol}>
+                      <View style={[styles.itemDetailBlock, { flexDirection: 'row', flexWrap: 'wrap' }]}>
+                        {itemImages.map((img, i) => {
+                          const size = IMAGE_SIZE_MAP[(img as any).display_size || 'small'];
+                          return (
+                            <Image
+                              key={i}
+                              style={{
+                                width: size.width,
+                                height: size.height,
+                                objectFit: 'contain' as const,
+                                marginTop: 1,
+                                marginBottom: 1,
+                              }}
+                              src={img.file_url}
+                            />
+                          );
+                        })}
+                      </View>
+                    </View>
+                    <Text style={styles.qtyCol}> </Text>
+                    <Text style={styles.priceCol}> </Text>
+                    <Text style={styles.totalCol}> </Text>
+                  </View>
+                )}
+                {/* Row 2: Item name + Qty + Price + Total */}
+                <View style={hasBullets ? [rowBase, styles.tableRowHead] : rowBase}>
                   <View style={styles.descriptionCol}>
                     <Text style={styles.itemDescription}>{item.description}</Text>
                   </View>
@@ -529,36 +558,15 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
                   <Text style={styles.priceCol}>{formatCurrency(Number(item.unit_price || 0))}</Text>
                   <Text style={styles.totalCol}>{formatCurrency(lineTotal(item))}</Text>
                 </View>
-                {hasDetails && (
+                {/* Row 3: Bullet points / details - only if there are bullets */}
+                {hasBullets && (
                   <View style={[rowBase, styles.tableRowDetail]}>
                     <View style={styles.descriptionCol}>
-                      {itemImages.length > 0 && (
-                        <View style={[styles.itemDetailBlock, { flexDirection: 'row', flexWrap: 'wrap' }]}>
-                          {itemImages.map((img, i) => {
-                            const size = IMAGE_SIZE_MAP[(img as any).display_size || 'small'];
-                        return (
-                          <Image
-                            key={i}
-                            style={{
-                              width: size.width,
-                              height: size.height,
-                              objectFit: 'contain' as const,
-                              marginTop: 1,
-                              marginBottom: 1,
-                            }}
-                            src={img.file_url}
-                          />
-                        );
-                      })}
-                        </View>
-                      )}
-                      {bulletLines.length > 0 && (
-                        <Text style={[styles.itemSpecs, styles.itemDetailBlock]}>
-                          {bulletLines
-                            .map((l, i) => `• ${l}${i < bulletLines.length - 1 ? '\n' : ''}`)
-                            .join('')}
-                        </Text>
-                      )}
+                      <Text style={[styles.itemSpecs, styles.itemDetailBlock]}>
+                        {bulletLines
+                          .map((l, i) => `• ${l}${i < bulletLines.length - 1 ? '\n' : ''}`)
+                          .join('')}
+                      </Text>
                     </View>
                     <Text style={styles.qtyCol}> </Text>
                     <Text style={styles.priceCol}> </Text>
