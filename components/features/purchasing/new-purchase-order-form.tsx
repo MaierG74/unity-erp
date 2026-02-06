@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Loader2, Plus, Trash2, AlertCircle } from 'lucide-react';
+import { Loader2, Plus, Trash2, AlertCircle, StickyNote } from 'lucide-react';
 import { PurchaseOrderFormData } from '@/types/purchasing';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import ReactSelect from 'react-select';
@@ -37,6 +37,7 @@ const formSchema = z.object({
         invalid_type_error: 'Please enter a number',
       }).min(0.01, 'Quantity must be greater than 0'),
       customer_order_id: z.number().nullable().optional(),
+      notes: z.string().optional(),
     })
   ).min(1, 'Please add at least one item to the order'),
 });
@@ -64,6 +65,7 @@ type SupplierOrderLinePayload = {
   quantity_for_order: number;
   quantity_for_stock: number;
   customer_order_id?: number | null;
+  line_notes?: string | null;
 };
 
 type PurchaseOrderCreationResult = {
@@ -175,6 +177,7 @@ async function createPurchaseOrder(
     quantity: number;
     component_id: number;
     customer_order_id?: number | null;
+    notes?: string;
   }>>();
 
   formData.items.forEach((item) => {
@@ -204,6 +207,7 @@ async function createPurchaseOrder(
       quantity: item.quantity,
       component_id: item.component_id,
       customer_order_id: item.customer_order_id,
+      notes: item.notes,
     });
   });
 
@@ -221,14 +225,11 @@ async function createPurchaseOrder(
         quantity_for_order: item.customer_order_id ? item.quantity : 0,
         quantity_for_stock: item.customer_order_id ? 0 : item.quantity,
         customer_order_id: item.customer_order_id || null,
+        line_notes: item.notes || null,
       }));
 
       const { data, error: rpcError } = await supabase.rpc('create_purchase_order_with_lines', {
         supplier_id: supplierId,
-        // customer_order_id: null, // Removed as per new RPC signature (or ignored if still present in DB, but we updated it)
-        // Wait, if I updated the RPC to accept line_items with customer_order_id, I should check if I removed the top-level param.
-        // My migration file REPLACED the function with one that DOES NOT have customer_order_id.
-        // So I MUST NOT pass it.
         line_items: lineItems,
         status_id: statusId,
         order_date: orderDateISO,
@@ -267,6 +268,7 @@ export function NewPurchaseOrderForm() {
   const [suppliersWithDrafts, setSuppliersWithDrafts] = useState<SupplierWithDrafts[]>([]);
   const [pendingFormData, setPendingFormData] = useState<PurchaseOrderFormData | null>(null);
   const [isCheckingDrafts, setIsCheckingDrafts] = useState(false);
+  const [expandedNotes, setExpandedNotes] = useState<Set<number>>(new Set());
 
   // Form setup
   const {
@@ -282,7 +284,7 @@ export function NewPurchaseOrderForm() {
     defaultValues: {
       order_date: new Date().toISOString().split('T')[0],
       notes: '',
-      items: [{ component_id: 0, supplier_component_id: 0, quantity: undefined as unknown as number, customer_order_id: null }],
+      items: [{ component_id: 0, supplier_component_id: 0, quantity: undefined as unknown as number, customer_order_id: null, notes: '' }],
     },
   });
 
@@ -497,6 +499,7 @@ export function NewPurchaseOrderForm() {
         quantity: number;
         component_id: number;
         customer_order_id?: number | null;
+        notes?: string;
         supplierId: number;
       }>>();
 
@@ -526,6 +529,7 @@ export function NewPurchaseOrderForm() {
           quantity: item.quantity,
           component_id: item.component_id,
           customer_order_id: item.customer_order_id,
+          notes: item.notes,
           supplierId: supplierComponent.supplier_id,
         });
       });
@@ -546,6 +550,7 @@ export function NewPurchaseOrderForm() {
           quantity_for_order: item.customer_order_id ? item.quantity : 0,
           quantity_for_stock: item.customer_order_id ? 0 : item.quantity,
           customer_order_id: item.customer_order_id || null,
+          line_notes: item.notes || null,
         }));
 
         if (decision !== 'new' && typeof decision === 'number') {
@@ -645,7 +650,7 @@ export function NewPurchaseOrderForm() {
   };
 
   const addItem = () => {
-    append({ component_id: 0, supplier_component_id: 0, quantity: undefined as unknown as number, customer_order_id: null });
+    append({ component_id: 0, supplier_component_id: 0, quantity: undefined as unknown as number, customer_order_id: null, notes: '' });
   };
 
   return (
@@ -994,6 +999,7 @@ export function NewPurchaseOrderForm() {
                         setValue(`items.0.supplier_component_id`, 0);
                         setValue(`items.0.quantity`, undefined as unknown as number);
                         setValue(`items.0.customer_order_id`, null);
+                        setValue(`items.0.notes`, '');
                       }
                     }}
                     variant="ghost"
@@ -1005,6 +1011,51 @@ export function NewPurchaseOrderForm() {
                   </Button>
                 </div>
               </div>
+
+              {/* Per-line-item note (expand/collapse) */}
+              {expandedNotes.has(index) || watchedItems[index]?.notes ? (
+                <div className="mt-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-medium text-muted-foreground">Item Note</label>
+                    {!watchedItems[index]?.notes && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-xs text-muted-foreground"
+                        onClick={() => {
+                          setExpandedNotes(prev => {
+                            const next = new Set(prev);
+                            next.delete(index);
+                            return next;
+                          });
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
+                  <Textarea
+                    {...register(`items.${index}.notes`)}
+                    placeholder="e.g. Size must be 1m x 2m"
+                    className="min-h-[60px] text-sm"
+                    disabled={createOrderMutation.isPending}
+                  />
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="mt-2 h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                  onClick={() => {
+                    setExpandedNotes(prev => new Set(prev).add(index));
+                  }}
+                >
+                  <StickyNote className="h-3 w-3 mr-1" />
+                  Add note
+                </Button>
+              )}
             </CardContent>
           </Card>
         ))}

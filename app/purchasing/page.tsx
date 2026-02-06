@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { ClipboardList, PlusCircle, RefreshCw, TrendingUp, ArrowLeft } from 'lucide-react';
+import { ClipboardList, PlusCircle, RefreshCw, Truck, ArrowLeft } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
@@ -25,16 +25,18 @@ interface PurchaseOrderSummary {
   q_number?: string;
   created_at: string;
   status_id: number;
-  supplier_order_statuses: OrderStatus;
+  supplier_order_statuses: OrderStatus | null;
   suppliers: string[];
   supplier_orders: any[];
 }
 
 // Define filter types
-type FilterType = 'recent' | 'pending' | 'approved';
+type FilterType = 'recent' | 'pending' | 'approved' | 'partialDelivered';
 
 const PENDING_STATUS_NAMES = ['Draft', 'Pending Approval'] as const;
 const APPROVED_STATUS_NAMES = ['Approved', 'Partially Received'] as const;
+const RECENT_ORDERS_LIMIT = 5;
+const FILTERED_ORDERS_LIMIT = 10;
 
 export default function PurchasingPage() {
   // Add state for active filter
@@ -47,6 +49,17 @@ export default function PurchasingPage() {
     return order.supplier_orders.every(
       (so: any) => so.order_quantity > 0 && so.total_received === so.order_quantity
     );
+  }
+
+  // Helper function to check if an order has been partially delivered
+  function isPartiallyDelivered(order: PurchaseOrderSummary): boolean {
+    if (!order.supplier_orders?.length) return false;
+
+    const hasAnyReceived = order.supplier_orders.some(
+      (so: any) => (so.total_received || 0) > 0
+    );
+
+    return hasAnyReceived && !isFullyReceived(order);
   }
 
   // Fetch recent or filtered purchase orders
@@ -76,20 +89,45 @@ export default function PurchasingPage() {
       
       // Apply filters based on activeFilter
       if (activeFilter === 'pending') {
-        query = query.in(
-          'supplier_order_statuses.status_name',
-          [...PENDING_STATUS_NAMES]
-        ); // Draft and Pending Approval
-        query = query.limit(10); // Show more orders when filtered
+        const { data: pendingStatuses, error: pendingStatusError } = await supabase
+          .from('supplier_order_statuses')
+          .select('status_id')
+          .in('status_name', [...PENDING_STATUS_NAMES]);
+
+        if (pendingStatusError) throw pendingStatusError;
+
+        const pendingStatusIds = (pendingStatuses || []).map((status) => status.status_id);
+        if (pendingStatusIds.length === 0) return [];
+
+        query = query.in('status_id', pendingStatusIds);
+        query = query.limit(FILTERED_ORDERS_LIMIT);
       } else if (activeFilter === 'approved') {
-        query = query.in(
-          'supplier_order_statuses.status_name',
-          [...APPROVED_STATUS_NAMES]
-        ); // Approved and Partially Received
-        query = query.limit(10); // Show more orders when filtered
+        const { data: approvedStatuses, error: approvedStatusError } = await supabase
+          .from('supplier_order_statuses')
+          .select('status_id')
+          .in('status_name', [...APPROVED_STATUS_NAMES]);
+
+        if (approvedStatusError) throw approvedStatusError;
+
+        const approvedStatusIds = (approvedStatuses || []).map((status) => status.status_id);
+        if (approvedStatusIds.length === 0) return [];
+
+        query = query.in('status_id', approvedStatusIds);
+      } else if (activeFilter === 'partialDelivered') {
+        const { data: partialStatuses, error: partialStatusError } = await supabase
+          .from('supplier_order_statuses')
+          .select('status_id')
+          .in('status_name', [...APPROVED_STATUS_NAMES]);
+
+        if (partialStatusError) throw partialStatusError;
+
+        const partialStatusIds = (partialStatuses || []).map((status) => status.status_id);
+        if (partialStatusIds.length === 0) return [];
+
+        query = query.in('status_id', partialStatusIds);
       } else {
         // Default "recent" filter - just show the most recent 5 orders
-        query = query.limit(5);
+        query = query.limit(RECENT_ORDERS_LIMIT);
       }
       
       const { data, error } = await query;
@@ -114,7 +152,15 @@ export default function PurchasingPage() {
 
       // If viewing approved orders, filter out fully received orders
       if (activeFilter === 'approved') {
-        return transformedOrders.filter(order => !isFullyReceived(order));
+        return transformedOrders
+          .filter(order => !isFullyReceived(order))
+          .slice(0, FILTERED_ORDERS_LIMIT);
+      }
+
+      if (activeFilter === 'partialDelivered') {
+        return transformedOrders
+          .filter((order) => isPartiallyDelivered(order))
+          .slice(0, FILTERED_ORDERS_LIMIT);
       }
       
       return transformedOrders;
@@ -167,18 +213,26 @@ export default function PurchasingPage() {
       return !isFullyReceived;
     }).length,
     
-    // Total orders this month
-    monthly: allOrderData.filter(order => {
-      const orderDate = new Date(order.created_at);
-      const startOfMonth = new Date();
-      startOfMonth.setDate(1);
-      startOfMonth.setHours(0, 0, 0, 0);
-      return orderDate >= startOfMonth;
+    // Partially delivered orders count (some received, not fully received)
+    partialDelivered: allOrderData.filter(order => {
+      const statusName = order.supplier_order_statuses?.status_name;
+      if (!statusName || !APPROVED_STATUS_NAMES.includes(statusName)) return false;
+
+      const hasAnyReceived = order.supplier_orders?.some(
+        (so: any) => (so.total_received || 0) > 0
+      );
+
+      const isFullyReceived = order.supplier_orders?.length > 0 &&
+        order.supplier_orders.every(
+          (so: any) => so.order_quantity > 0 && so.total_received === so.order_quantity
+        );
+
+      return Boolean(hasAnyReceived) && !isFullyReceived;
     }).length
   } : {
     pending: 0,
     approved: 0,
-    monthly: 0
+    partialDelivered: 0
   };
 
   function getOrderStatus(order: PurchaseOrderSummary) {
@@ -231,8 +285,23 @@ export default function PurchasingPage() {
         return 'Pending Orders';
       case 'approved':
         return 'Approved Orders';
+      case 'partialDelivered':
+        return 'Partially Delivered Orders';
       default:
         return 'Recent Purchase Orders';
+    }
+  }
+
+  function getEmptyStateLabel(): string {
+    switch (activeFilter) {
+      case 'pending':
+        return 'pending';
+      case 'approved':
+        return 'approved';
+      case 'partialDelivered':
+        return 'partially delivered';
+      default:
+        return 'recent';
     }
   }
 
@@ -313,19 +382,28 @@ export default function PurchasingPage() {
             </p>
           </CardContent>
         </Card>
-        <Card>
+        <Card
+          className={cn(
+            "transition-all hover:border-primary hover:shadow-md cursor-pointer",
+            activeFilter === 'partialDelivered' && "border-primary bg-primary/5"
+          )}
+          onClick={() => setActiveFilter(activeFilter === 'partialDelivered' ? 'recent' : 'partialDelivered')}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">This Month</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Partially Delivered</CardTitle>
+            <Truck className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             {metricsLoading ? (
               <div className="h-8 w-20 animate-pulse rounded-md bg-muted" />
             ) : (
-              <div className="text-2xl font-bold">{metrics?.monthly || 0}</div>
+              <div className="text-2xl font-bold">{metrics?.partialDelivered || 0}</div>
             )}
             <p className="text-xs text-muted-foreground">
-              Total orders created
+              Received, not complete
+            </p>
+            <p className="text-xs text-primary mt-2">
+              {activeFilter === 'partialDelivered' ? 'Click to show all orders' : 'Click to filter'}
             </p>
           </CardContent>
         </Card>
@@ -388,7 +466,7 @@ export default function PurchasingPage() {
             </div>
           ) : (
             <div className="text-center py-8 text-muted-foreground">
-              No {activeFilter !== 'recent' ? activeFilter : 'recent'} orders found
+              No {getEmptyStateLabel()} orders found
             </div>
           )}
           

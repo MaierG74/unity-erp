@@ -81,6 +81,8 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
 - Changelogs: [`changelogs/`](changelogs/)
   - [`changelogs/auth-and-landing-ui-improvements-20250117.md`](changelogs/auth-and-landing-ui-improvements-20250117.md) – ✅ **Auth flow & landing page UI improvements** (background color uniformity, login/logout flow fixes)
   - [`changelogs/supplier-metrics-cards-enhancement-20260206.md`](changelogs/supplier-metrics-cards-enhancement-20260206.md) – ✅ Supplier detail metric cards now support period toggles, outstanding drill-down, and spend trend chart
+  - [`changelogs/purchasing-pending-orders-status-filter-fix-20260206.md`](changelogs/purchasing-pending-orders-status-filter-fix-20260206.md) – Fixed dashboard pending/approved card drilldown showing `Unknown` statuses due to embedded relation filtering
+  - [`changelogs/purchasing-partially-delivered-card-20260206.md`](changelogs/purchasing-partially-delivered-card-20260206.md) – Replaced the purchasing “This Month” card with a clickable partially delivered orders drilldown
   - [`changelogs/nextjs-cve-upgrade-20260117.md`](changelogs/nextjs-cve-upgrade-20260117.md) – ✅ **Next.js CVE upgrade** (Netlify unblock by upgrading to patched Next.js)
   - [`changelogs/inventory-url-filter-persistence-20260117.md`](changelogs/inventory-url-filter-persistence-20260117.md) – ✅ **Inventory URL filter persistence** (filters survive navigation to detail pages)
   - [`changelogs/quote-line-items-description-width-fix-20260117.md`](changelogs/quote-line-items-description-width-fix-20260117.md) – ✅ **Quote line items Description column width fix** (minimum width and horizontal scroll for better readability)

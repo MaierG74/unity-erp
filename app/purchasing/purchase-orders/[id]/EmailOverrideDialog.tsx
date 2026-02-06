@@ -14,7 +14,9 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { Check, X } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Check, X, FileText, Paperclip } from 'lucide-react';
+import { POAttachment } from '@/lib/db/purchase-order-attachments';
 
 export type EmailOverride = { supplierId: number; email: string };
 export type EmailOption = { email: string; is_primary: boolean };
@@ -32,7 +34,8 @@ interface EmailOverrideDialogProps {
   rows: EmailRecipientRow[];
   cc: string;
   loading: boolean;
-  onConfirm: (payload: { overrides: EmailOverride[]; cc: string[]; skippedSuppliers?: number[] }) => void;
+  attachments?: POAttachment[];
+  onConfirm: (payload: { overrides: EmailOverride[]; cc: string[]; skippedSuppliers?: number[]; selectedAttachmentIds?: string[] }) => void;
 }
 
 export function EmailOverrideDialog({
@@ -41,6 +44,7 @@ export function EmailOverrideDialog({
   rows,
   cc,
   loading,
+  attachments = [],
   onConfirm,
 }: EmailOverrideDialogProps) {
   const [localRows, setLocalRows] = useState(rows);
@@ -49,6 +53,8 @@ export function EmailOverrideDialog({
   const [additionalSelections, setAdditionalSelections] = useState<Map<number, Set<string>>>(new Map());
   // Track suppliers that should be skipped (no email sent)
   const [skippedSuppliers, setSkippedSuppliers] = useState<Set<number>>(new Set());
+  // Track which uploaded attachments to include in the email
+  const [selectedAttachmentIds, setSelectedAttachmentIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setLocalRows(rows);
@@ -184,7 +190,8 @@ export function EmailOverrideDialog({
     onConfirm({
       overrides: filteredOverrides,
       cc: Array.from(ccSet),
-      skippedSuppliers: Array.from(skippedSuppliers)
+      skippedSuppliers: Array.from(skippedSuppliers),
+      selectedAttachmentIds: Array.from(selectedAttachmentIds),
     });
   };
 
@@ -340,6 +347,52 @@ export function EmailOverrideDialog({
                 })}
               </TableBody>
             </Table>
+          </div>
+        </div>
+
+        {/* Attachments section */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Paperclip className="h-4 w-4 text-muted-foreground" />
+            <label className="text-sm font-medium">Email Attachments</label>
+          </div>
+          <div className="rounded-md border p-3 space-y-2">
+            {/* PO PDF - always attached */}
+            <div className="flex items-center gap-2 text-sm">
+              <Checkbox checked disabled />
+              <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+              <span>Purchase Order PDF</span>
+              <Badge variant="secondary" className="text-[10px]">Always attached</Badge>
+            </div>
+            {/* Uploaded attachments */}
+            {attachments.map((att) => (
+              <div key={att.id} className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={selectedAttachmentIds.has(att.id)}
+                  onCheckedChange={(checked) => {
+                    setSelectedAttachmentIds((prev) => {
+                      const next = new Set(prev);
+                      if (checked) next.add(att.id);
+                      else next.delete(att.id);
+                      return next;
+                    });
+                  }}
+                  disabled={loading}
+                />
+                <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="truncate flex-1">{att.original_name || 'Attachment'}</span>
+                {att.file_size && (
+                  <span className="text-xs text-muted-foreground shrink-0">
+                    {att.file_size < 1024 * 1024
+                      ? `${(att.file_size / 1024).toFixed(0)} KB`
+                      : `${(att.file_size / (1024 * 1024)).toFixed(1)} MB`}
+                  </span>
+                )}
+              </div>
+            ))}
+            {attachments.length === 0 && (
+              <p className="text-xs text-muted-foreground">No additional attachments uploaded to this PO.</p>
+            )}
           </div>
         </div>
 

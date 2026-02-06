@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   // Initialize Resend lazily
   const resend = new Resend(process.env.RESEND_API_KEY!);
   try {
-    const { purchaseOrderId, overrides, cc } = await request.json();
+    const { purchaseOrderId, overrides, cc, pdfBase64, pdfFilename, additionalAttachments } = await request.json();
 
     if (!purchaseOrderId) {
       return NextResponse.json(
@@ -52,6 +52,7 @@ export async function POST(request: Request) {
         supplier_orders(
           order_id,
           order_quantity,
+          notes,
           supplier_component:suppliercomponents(
             supplier_code,
             price,
@@ -187,6 +188,7 @@ export async function POST(request: Request) {
         return {
           order_id: Number(order.order_id),
           order_quantity: Number(order.order_quantity),
+          notes: order.notes ?? undefined,
           supplier_component: {
             supplier_code: sc?.supplier_code ?? '',
             price: Number(sc?.price ?? 0),
@@ -222,6 +224,29 @@ export async function POST(request: Request) {
         // Render the email template to HTML
         const html = await renderAsync(PurchaseOrderEmail(emailData));
         
+        // Build attachments array for Resend
+        const emailAttachments: { content: Buffer; filename: string }[] = [];
+
+        // Add PO PDF if provided
+        if (pdfBase64 && pdfFilename) {
+          emailAttachments.push({
+            content: Buffer.from(pdfBase64, 'base64'),
+            filename: pdfFilename,
+          });
+        }
+
+        // Add any additional file attachments
+        if (Array.isArray(additionalAttachments)) {
+          for (const att of additionalAttachments) {
+            if (att?.content && att?.filename) {
+              emailAttachments.push({
+                content: Buffer.from(att.content, 'base64'),
+                filename: att.filename,
+              });
+            }
+          }
+        }
+
         // Send the email via Resend
         const { data: result, error } = await resend.emails.send({
           from: `${emailData.companyName} Purchasing <${fromAddress}>`,
@@ -229,6 +254,7 @@ export async function POST(request: Request) {
           cc: ccList.length ? ccList : undefined,
           subject: `Purchase Order: ${emailData.qNumber}`,
           html,
+          attachments: emailAttachments.length > 0 ? emailAttachments : undefined,
         });
   
         if (error) {

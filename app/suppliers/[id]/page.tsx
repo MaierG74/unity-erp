@@ -30,7 +30,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
-import { Suspense, lazy, useMemo, useState } from 'react';
+import { Suspense, lazy, useMemo, useState, useEffect, useCallback } from 'react';
 import { OpenOrdersModal } from '@/components/features/suppliers/open-orders-modal';
 import type { SupplierPurchaseOrder } from '@/types/suppliers';
 import {
@@ -73,6 +73,10 @@ interface MetricCardProps {
   icon: React.ReactNode;
   subtitle?: string;
   subtitleClassName?: string;
+  detail?: string;
+  detailClassName?: string;
+  onCardClick?: () => void;
+  cardActionLabel?: string;
   onIconClick?: () => void;
   iconActionLabel?: string;
   isLoading?: boolean;
@@ -84,6 +88,10 @@ function MetricCard({
   icon,
   subtitle,
   subtitleClassName,
+  detail,
+  detailClassName,
+  onCardClick,
+  cardActionLabel,
   onIconClick,
   iconActionLabel,
   isLoading,
@@ -108,11 +116,26 @@ function MetricCard({
     <Card>
       <CardContent className="p-4">
         <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm text-muted-foreground">{title}</p>
-            <p className="text-2xl font-bold">{value}</p>
-            {subtitle && <p className={`text-xs ${subtitleClassName || 'text-muted-foreground'}`}>{subtitle}</p>}
-          </div>
+          {onCardClick ? (
+            <button
+              type="button"
+              onClick={onCardClick}
+              aria-label={cardActionLabel || `${title} details`}
+              className="flex-1 text-left"
+            >
+              <p className="text-sm text-muted-foreground">{title}</p>
+              <p className="text-2xl font-bold">{value}</p>
+              {subtitle && <p className={`text-xs ${subtitleClassName || 'text-muted-foreground'}`}>{subtitle}</p>}
+              {detail && <p className={`text-xs ${detailClassName || 'text-muted-foreground'}`}>{detail}</p>}
+            </button>
+          ) : (
+            <div>
+              <p className="text-sm text-muted-foreground">{title}</p>
+              <p className="text-2xl font-bold">{value}</p>
+              {subtitle && <p className={`text-xs ${subtitleClassName || 'text-muted-foreground'}`}>{subtitle}</p>}
+              {detail && <p className={`text-xs ${detailClassName || 'text-muted-foreground'}`}>{detail}</p>}
+            </div>
+          )}
           {onIconClick ? (
             <button
               type="button"
@@ -229,6 +252,14 @@ function getToneClassName(tone: 'positive' | 'negative' | 'neutral') {
   return 'text-muted-foreground';
 }
 
+function toIsoDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function getMonthBucket(date: Date) {
+  return `${date.getFullYear()}-${date.getMonth() + 1}`;
+}
+
 export default function SupplierDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -242,6 +273,7 @@ export default function SupplierDetailPage() {
   const [selectedRange, setSelectedRange] = useState<SupplierMetricRange>('12m');
   const [openOrdersModalOpen, setOpenOrdersModalOpen] = useState(false);
   const [spendDialogOpen, setSpendDialogOpen] = useState(false);
+  const [selectedSpendBucket, setSelectedSpendBucket] = useState<string>('');
 
   const { data: supplier, isLoading, error } = useQuery({
     queryKey: ['supplier', supplierId],
@@ -288,8 +320,26 @@ export default function SupplierDetailPage() {
             total_received,
             supplier_component:suppliercomponents!inner(
               supplier_component_id,
+              supplier_code,
               price,
-              supplier_id
+              lead_time,
+              supplier_id,
+              component:components(
+                component_id,
+                internal_code,
+                description
+              )
+            ),
+            supplier_order_customer_orders(
+              order:orders(
+                order_id,
+                order_number,
+                customer:customers(name)
+              )
+            ),
+            receipts:supplier_order_receipts(
+              receipt_date,
+              quantity_received
             )
           )
         `)
@@ -344,9 +394,18 @@ export default function SupplierDetailPage() {
     // Calculate outstanding orders (orders with items not fully received)
     let outstandingOrders = 0;
     let outstandingValue = 0;
+    let overdueLines = 0;
+    let dueSoonLines = 0;
+    let futureLines = 0;
+
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    const nextWeek = new Date(today);
+    nextWeek.setDate(nextWeek.getDate() + 7);
 
     purchaseOrders.forEach(order => {
       const statusName = order.status?.status_name?.toLowerCase() || '';
+      const orderDate = getOrderDate(order);
       // Only count as outstanding if not fully received or cancelled
       if (statusName !== 'fully received' && statusName !== 'cancelled') {
         const hasOutstanding = order.supplier_orders.some(line => line.total_received < line.order_quantity);
@@ -356,6 +415,23 @@ export default function SupplierDetailPage() {
             const outstandingQty = line.order_quantity - line.total_received;
             if (outstandingQty > 0) {
               outstandingValue += outstandingQty * (line.supplier_component?.price || 0);
+
+              const leadTime = line.supplier_component?.lead_time || 0;
+              if (orderDate) {
+                const dueDate = new Date(orderDate);
+                dueDate.setDate(dueDate.getDate() + leadTime);
+                dueDate.setHours(0, 0, 0, 0);
+
+                if (dueDate < today) {
+                  overdueLines++;
+                } else if (dueDate <= nextWeek) {
+                  dueSoonLines++;
+                } else {
+                  futureLines++;
+                }
+              } else {
+                futureLines++;
+              }
             }
           });
         }
@@ -395,6 +471,17 @@ export default function SupplierDetailPage() {
       }
     });
 
+    const ordersByMonth = new Map<string, SupplierPurchaseOrder[]>();
+    ordersWithDates.forEach(({ order, orderDate }) => {
+      const bucket = getMonthBucket(orderDate);
+      const existing = ordersByMonth.get(bucket);
+      if (existing) {
+        existing.push(order);
+      } else {
+        ordersByMonth.set(bucket, [order]);
+      }
+    });
+
     const totalSpendInChart = monthlySpendData.reduce((sum, month) => sum + month.spend, 0);
     const averageMonthlySpend = totalSpendInChart / monthlySpendData.length;
     const peakMonth = monthlySpendData.reduce<(typeof monthlySpendData)[number] | null>((max, month) => {
@@ -409,17 +496,170 @@ export default function SupplierDetailPage() {
       spendDelta,
       outstandingOrders,
       outstandingValue,
+      outstandingSplit: {
+        overdue: overdueLines,
+        dueSoon: dueSoonLines,
+        future: futureLines,
+      },
       lastOrderDate,
       daysSinceLastOrder,
       rangeLabel: label,
       monthlySpendData,
+      ordersByMonth,
       totalSpendInChart,
       averageMonthlySpend,
       peakMonth,
     };
   }, [purchaseOrders, selectedRange]);
 
+  const defaultSpendBucket = useMemo(() => {
+    const latestWithSpend = [...metrics.monthlySpendData].reverse().find((month) => month.spend > 0);
+    return latestWithSpend?.bucket || metrics.monthlySpendData[metrics.monthlySpendData.length - 1]?.bucket || '';
+  }, [metrics.monthlySpendData]);
+
+  useEffect(() => {
+    if (!selectedSpendBucket) {
+      setSelectedSpendBucket(defaultSpendBucket);
+      return;
+    }
+
+    const exists = metrics.monthlySpendData.some((month) => month.bucket === selectedSpendBucket);
+    if (!exists) {
+      setSelectedSpendBucket(defaultSpendBucket);
+    }
+  }, [defaultSpendBucket, selectedSpendBucket, metrics.monthlySpendData]);
+
+  const selectedMonthSummary = useMemo(() => {
+    const month = metrics.monthlySpendData.find((item) => item.bucket === selectedSpendBucket);
+    return month || null;
+  }, [metrics.monthlySpendData, selectedSpendBucket]);
+
+  const monthDrilldown = useMemo(() => {
+    const monthOrders = metrics.ordersByMonth.get(selectedSpendBucket) || [];
+
+    const componentsMap = new Map<string, { code: string; description: string; spend: number; qty: number }>();
+    const customerOrdersMap = new Map<string, { id: string; label: string; spend: number; lines: number }>();
+
+    monthOrders.forEach((order) => {
+      order.supplier_orders.forEach((line) => {
+        const lineSpend = line.order_quantity * (line.supplier_component?.price || 0);
+        const componentCode = line.supplier_component?.component?.internal_code || line.supplier_component?.supplier_code || 'Unknown';
+        const componentDescription = line.supplier_component?.component?.description || '';
+
+        const existingComponent = componentsMap.get(componentCode);
+        if (existingComponent) {
+          existingComponent.spend += lineSpend;
+          existingComponent.qty += line.order_quantity;
+        } else {
+          componentsMap.set(componentCode, {
+            code: componentCode,
+            description: componentDescription,
+            spend: lineSpend,
+            qty: line.order_quantity,
+          });
+        }
+
+        const linkedOrders = (line.supplier_order_customer_orders || [])
+          .map((link) => link.order)
+          .filter((orderLink): orderLink is { order_id: number; order_number: string | null; customer: { name: string } | null } => Boolean(orderLink));
+
+        if (linkedOrders.length > 0) {
+          const allocatedSpend = lineSpend / linkedOrders.length;
+          linkedOrders.forEach((linkedOrder) => {
+            const key = String(linkedOrder.order_id);
+            const label = linkedOrder.customer?.name
+              ? `${linkedOrder.order_number || `Order ${linkedOrder.order_id}`} (${linkedOrder.customer.name})`
+              : (linkedOrder.order_number || `Order ${linkedOrder.order_id}`);
+            const existingOrder = customerOrdersMap.get(key);
+            if (existingOrder) {
+              existingOrder.spend += allocatedSpend;
+              existingOrder.lines += 1;
+            } else {
+              customerOrdersMap.set(key, { id: key, label, spend: allocatedSpend, lines: 1 });
+            }
+          });
+        } else {
+          const unlinkedKey = 'unlinked';
+          const existingOrder = customerOrdersMap.get(unlinkedKey);
+          if (existingOrder) {
+            existingOrder.spend += lineSpend;
+            existingOrder.lines += 1;
+          } else {
+            customerOrdersMap.set(unlinkedKey, { id: unlinkedKey, label: 'Unlinked to customer order', spend: lineSpend, lines: 1 });
+          }
+        }
+      });
+    });
+
+    const topComponents = Array.from(componentsMap.values())
+      .sort((a, b) => b.spend - a.spend)
+      .slice(0, 5);
+    const topCustomerOrders = Array.from(customerOrdersMap.values())
+      .sort((a, b) => b.spend - a.spend)
+      .slice(0, 5);
+
+    return { topComponents, topCustomerOrders };
+  }, [metrics.ordersByMonth, selectedSpendBucket]);
+
   const isLoadingMetrics = isLoadingOrders || isLoadingComponents;
+
+  const pushTabWithParams = useCallback((tabValue: string, updates: Record<string, string | null>) => {
+    const nextParams = new URLSearchParams(searchParams?.toString() || '');
+    nextParams.set('tab', tabValue);
+
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === null || value === '') {
+        nextParams.delete(key);
+      } else {
+        nextParams.set(key, value);
+      }
+    });
+
+    router.push(`/suppliers/${supplierId}?${nextParams.toString()}`);
+  }, [router, searchParams, supplierId]);
+
+  const openOrdersWithRange = useCallback((range: SupplierMetricRange) => {
+    const { start, end } = getMetricWindow(range, new Date());
+    pushTabWithParams('orders', {
+      ordersStatus: 'all',
+      ordersDateType: 'order',
+      ordersStart: toIsoDate(start),
+      ordersEnd: toIsoDate(end),
+      ordersQ: null,
+    });
+  }, [pushTabWithParams]);
+
+  const openOutstandingOrders = useCallback(() => {
+    pushTabWithParams('orders', {
+      ordersStatus: 'open',
+      ordersDateType: 'order',
+      ordersStart: null,
+      ordersEnd: null,
+      ordersQ: null,
+    });
+  }, [pushTabWithParams]);
+
+  const openLastOrderInOrdersTab = useCallback(() => {
+    if (!metrics.lastOrderDate) {
+      pushTabWithParams('orders', {
+        ordersStatus: 'all',
+        ordersDateType: 'order',
+        ordersStart: null,
+        ordersEnd: null,
+        ordersQ: null,
+      });
+      return;
+    }
+
+    const day = toIsoDate(metrics.lastOrderDate);
+    pushTabWithParams('orders', {
+      ordersStatus: 'all',
+      ordersDateType: 'order',
+      ordersStart: day,
+      ordersEnd: day,
+      ordersQ: null,
+    });
+  }, [metrics.lastOrderDate, pushTabWithParams]);
 
   if (isLoading) {
     return (
@@ -550,6 +790,8 @@ export default function SupplierDetailPage() {
           icon={<Package className="h-5 w-5" />}
           subtitle={metrics.ordersDelta.text}
           subtitleClassName={getToneClassName(metrics.ordersDelta.tone)}
+          onCardClick={() => openOrdersWithRange(selectedRange)}
+          cardActionLabel="Open orders for selected period"
           isLoading={isLoadingMetrics}
         />
         <MetricCard
@@ -558,6 +800,8 @@ export default function SupplierDetailPage() {
           icon={<DollarSign className="h-5 w-5" />}
           subtitle={metrics.spendDelta.text}
           subtitleClassName={getToneClassName(metrics.spendDelta.tone)}
+          onCardClick={() => openOrdersWithRange(selectedRange)}
+          cardActionLabel="Open orders for selected spend period"
           onIconClick={() => setSpendDialogOpen(true)}
           iconActionLabel="Open spend trend chart"
           isLoading={isLoadingMetrics}
@@ -567,6 +811,10 @@ export default function SupplierDetailPage() {
           value={metrics.outstandingOrders.toString()}
           icon={<AlertCircle className="h-5 w-5" />}
           subtitle={metrics.outstandingValue > 0 ? `${formatCurrency(metrics.outstandingValue)} open value` : 'No open value'}
+          detail={`${metrics.outstandingSplit.overdue} overdue • ${metrics.outstandingSplit.dueSoon} due 7d • ${metrics.outstandingSplit.future} later`}
+          detailClassName={metrics.outstandingSplit.overdue > 0 ? 'text-rose-600' : 'text-muted-foreground'}
+          onCardClick={openOutstandingOrders}
+          cardActionLabel="Open outstanding orders in Orders tab"
           onIconClick={() => setOpenOrdersModalOpen(true)}
           iconActionLabel="Open outstanding orders details"
           isLoading={isLoadingMetrics}
@@ -575,6 +823,8 @@ export default function SupplierDetailPage() {
           title="Components"
           value={componentCount.toString()}
           icon={<Layers className="h-5 w-5" />}
+          onCardClick={() => pushTabWithParams('components', {})}
+          cardActionLabel="Open components tab"
           isLoading={isLoadingMetrics}
         />
         <MetricCard
@@ -584,6 +834,8 @@ export default function SupplierDetailPage() {
             : 'Never'}
           icon={<Clock className="h-5 w-5" />}
           subtitle={metrics.daysSinceLastOrder !== null ? `${metrics.daysSinceLastOrder} day${metrics.daysSinceLastOrder === 1 ? '' : 's'} ago` : undefined}
+          onCardClick={openLastOrderInOrdersTab}
+          cardActionLabel="Open the last order in Orders tab"
           isLoading={isLoadingMetrics}
         />
       </div>
@@ -591,7 +843,7 @@ export default function SupplierDetailPage() {
       <Tabs
         value={activeTab}
         onValueChange={(value) => {
-          router.push(`/suppliers/${supplierId}?tab=${value}`);
+          pushTabWithParams(value, {});
         }}
         className="space-y-4"
       >
@@ -707,7 +959,15 @@ export default function SupplierDetailPage() {
 
           <div className="h-[320px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={metrics.monthlySpendData}>
+              <ComposedChart
+                data={metrics.monthlySpendData}
+                onClick={(state) => {
+                  const clickedBucket = state?.activePayload?.[0]?.payload?.bucket as string | undefined;
+                  if (clickedBucket) {
+                    setSelectedSpendBucket(clickedBucket);
+                  }
+                }}
+              >
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                 <XAxis dataKey="month" tick={{ fontSize: 12 }} className="text-muted-foreground" />
                 <YAxis
@@ -756,6 +1016,54 @@ export default function SupplierDetailPage() {
                 />
               </ComposedChart>
             </ResponsiveContainer>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Click a month on the chart to view its spend breakdown.
+            </p>
+            <p className="text-sm font-medium">
+              {selectedMonthSummary ? `Selected month: ${selectedMonthSummary.label}` : 'Selected month'}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <div className="rounded-lg border p-3">
+              <p className="text-sm font-medium mb-2">Top Components (Selected Month)</p>
+              {monthDrilldown.topComponents.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No component spend for this month.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {monthDrilldown.topComponents.map((component) => (
+                    <div key={component.code} className="flex items-start justify-between gap-3 text-sm">
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">{component.code}</p>
+                        {component.description && (
+                          <p className="text-xs text-muted-foreground truncate">{component.description}</p>
+                        )}
+                      </div>
+                      <p className="font-medium whitespace-nowrap">{formatCurrency(component.spend)}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-lg border p-3">
+              <p className="text-sm font-medium mb-2">Top Customer Orders (Selected Month)</p>
+              {monthDrilldown.topCustomerOrders.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No linked customer orders for this month.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {monthDrilldown.topCustomerOrders.map((customerOrder) => (
+                    <div key={customerOrder.id} className="flex items-start justify-between gap-3 text-sm">
+                      <p className="font-medium min-w-0 truncate">{customerOrder.label}</p>
+                      <p className="font-medium whitespace-nowrap">{formatCurrency(customerOrder.spend)}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </DialogContent>
       </Dialog>

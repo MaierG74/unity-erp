@@ -6,6 +6,27 @@
 
 Enhanced the supplier detail metrics cards (`/suppliers/[id]`) to support period-aware analytics and fast drill-down workflows directly from the cards.
 
+## Iteration 2 (Card-to-Orders + Risk Split + Month Drill-Down)
+
+Follow-up improvements were added on the same day to make card analytics more actionable:
+
+1. Card deep-links into Orders tab with pre-applied filters:
+   - `Total Orders` and `Total Spend` now open the Orders tab for the selected metric period (`ordersStart` / `ordersEnd`).
+   - `Outstanding` opens Orders tab with open/outstanding statuses only.
+   - `Last Order` opens Orders tab filtered to that specific order date.
+   - `Components` card opens the Components tab directly.
+2. Outstanding risk split under the Outstanding card:
+   - shows `overdue`, `due in 7 days`, and `later` counts
+   - due timing is estimated from order date + supplier lead time per line item
+3. Spend modal month drill-down:
+   - clicking a month in the chart selects that month
+   - selected month now shows:
+     - top components by spend
+     - top linked customer orders by spend allocation
+4. Orders tab deep-link support:
+   - `SupplierOrders` now reads URL params (`ordersStatus`, `ordersDateType`, `ordersStart`, `ordersEnd`, `ordersQ`)
+   - added `Open / Outstanding` status option for quick filtering
+
 ## What Changed
 
 1. Added a metric period toggle above cards:
@@ -33,6 +54,7 @@ Enhanced the supplier detail metrics cards (`/suppliers/[id]`) to support period
 
 - `app/suppliers/[id]/page.tsx`
 - `components/features/suppliers/open-orders-modal.tsx`
+- `components/features/suppliers/supplier-orders.tsx`
 
 ## Validation
 
@@ -40,4 +62,3 @@ Enhanced the supplier detail metrics cards (`/suppliers/[id]`) to support period
   - `app/suppliers/[id]/page.tsx`
   - `components/features/suppliers/open-orders-modal.tsx`
 - Result: no lint errors
-

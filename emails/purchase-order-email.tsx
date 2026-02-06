@@ -18,6 +18,7 @@ import {
 export interface SupplierOrderItem {
   order_id: number;
   order_quantity: number;
+  notes?: string | null;
   supplier_component: {
     supplier_code: string;
     price: number;
@@ -60,6 +61,7 @@ export default function PurchaseOrderEmail({
   supplierName,
   createdAt,
   supplierOrders,
+  notes,
   companyName = 'Unity',
   companyLogoUrl,
   companyAddress = '123 Unity Street, London, UK',
@@ -169,15 +171,25 @@ export default function PurchaseOrderEmail({
                   <tbody>
                     {supplierOrders.map((item, index) => {
                       const lineTotal = item.order_quantity * item.supplier_component.price;
+                      const bgColor = index % 2 === 0 ? '#ffffff' : '#f9fafb';
                       return (
-                        <tr key={item.order_id} style={{ backgroundColor: index % 2 === 0 ? '#ffffff' : '#f9fafb' }}>
-                          <td style={{ padding: '10px 8px', fontSize: '12px', borderBottom: '1px solid #f3f4f6' }}>{item.supplier_component.supplier_code}</td>
-                          <td style={{ padding: '10px 8px', fontSize: '12px', borderBottom: '1px solid #f3f4f6' }}>{item.supplier_component.component.internal_code}</td>
-                          <td style={{ padding: '10px 8px', fontSize: '12px', lineHeight: '1.5', borderBottom: '1px solid #f3f4f6' }}>{item.supplier_component.component.description}</td>
-                          <td style={{ padding: '10px 8px', fontSize: '12px', textAlign: 'right', borderBottom: '1px solid #f3f4f6' }}>{item.order_quantity}</td>
-                          <td style={{ padding: '10px 8px', fontSize: '12px', textAlign: 'right', borderBottom: '1px solid #f3f4f6', whiteSpace: 'nowrap' }}>{formatCurrency(item.supplier_component.price)}</td>
-                          <td style={{ padding: '10px 8px', fontSize: '12px', textAlign: 'right', fontWeight: 500, borderBottom: '1px solid #f3f4f6', whiteSpace: 'nowrap' }}>{formatCurrency(lineTotal)}</td>
-                        </tr>
+                        <React.Fragment key={item.order_id}>
+                          <tr style={{ backgroundColor: bgColor }}>
+                            <td style={{ padding: '10px 8px', fontSize: '12px', borderBottom: item.notes ? 'none' : '1px solid #f3f4f6' }}>{item.supplier_component.supplier_code}</td>
+                            <td style={{ padding: '10px 8px', fontSize: '12px', borderBottom: item.notes ? 'none' : '1px solid #f3f4f6' }}>{item.supplier_component.component.internal_code}</td>
+                            <td style={{ padding: '10px 8px', fontSize: '12px', lineHeight: '1.5', borderBottom: item.notes ? 'none' : '1px solid #f3f4f6' }}>{item.supplier_component.component.description}</td>
+                            <td style={{ padding: '10px 8px', fontSize: '12px', textAlign: 'right', borderBottom: item.notes ? 'none' : '1px solid #f3f4f6' }}>{item.order_quantity}</td>
+                            <td style={{ padding: '10px 8px', fontSize: '12px', textAlign: 'right', borderBottom: item.notes ? 'none' : '1px solid #f3f4f6', whiteSpace: 'nowrap' }}>{formatCurrency(item.supplier_component.price)}</td>
+                            <td style={{ padding: '10px 8px', fontSize: '12px', textAlign: 'right', fontWeight: 500, borderBottom: item.notes ? 'none' : '1px solid #f3f4f6', whiteSpace: 'nowrap' }}>{formatCurrency(lineTotal)}</td>
+                          </tr>
+                          {item.notes && (
+                            <tr style={{ backgroundColor: bgColor }}>
+                              <td colSpan={6} style={{ padding: '0 8px 10px 8px', fontSize: '11px', fontStyle: 'italic', color: '#6b7280', borderBottom: '1px solid #f3f4f6' }}>
+                                Note: {item.notes}
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
                       );
                     })}
                     {/* Subtotal, VAT, and Total */}
@@ -196,6 +208,18 @@ export default function PurchaseOrderEmail({
                   </tbody>
                 </table>
               </Section>
+
+              {/* Order Notes */}
+              {notes && (
+                <>
+                  <Section>
+                    <div style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px 16px' }}>
+                      <Text style={{ fontSize: '11px', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 4px 0' }}>Order Notes</Text>
+                      <Text style={{ fontSize: '12px', color: '#374151', lineHeight: '1.5', margin: 0, whiteSpace: 'pre-wrap' }}>{notes}</Text>
+                    </div>
+                  </Section>
+                </>
+              )}
 
               <Hr style={{ borderColor: '#e5e7eb', margin: '24px 0' }} />
 

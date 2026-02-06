@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useCallback, Fragment } from 'react';
+import { useMemo, useState, useCallback, Fragment, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import type { SupplierWithDetails, SupplierPurchaseOrder } from '@/types/suppliers';
@@ -14,12 +14,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
+import { useSearchParams } from 'next/navigation';
 
 interface SupplierOrdersProps {
   supplier: SupplierWithDetails;
 }
 
 type DateType = 'order' | 'receipt' | 'created';
+type StatusFilterType = 'all' | 'open' | 'draft' | 'pending' | 'approved' | 'partial' | 'complete' | 'cancelled';
 
 // Status badge component
 function StatusBadge({ status }: { status: string }) {
@@ -50,10 +52,12 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export function SupplierOrders({ supplier }: SupplierOrdersProps) {
+  const searchParams = useSearchParams();
+  const searchParamsString = searchParams?.toString() || '';
   const [startDate, setStartDate] = useState<Date | undefined>(undefined);
   const [endDate, setEndDate] = useState<Date | undefined>(undefined);
   const [dateType, setDateType] = useState<DateType>('order');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilterType>('all');
   const [qNumberSearch, setQNumberSearch] = useState<string>('');
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
 
@@ -110,6 +114,44 @@ export function SupplierOrders({ supplier }: SupplierOrdersProps) {
     setQNumberSearch('');
   }, []);
 
+  // Apply filters from URL when deep-linking from metric cards
+  useEffect(() => {
+    const params = new URLSearchParams(searchParamsString);
+    const tab = params.get('tab');
+    if (tab !== 'orders') return;
+
+    const status = params.get('ordersStatus');
+    const nextStatus: StatusFilterType = (
+      status === 'open' ||
+      status === 'draft' ||
+      status === 'pending' ||
+      status === 'approved' ||
+      status === 'partial' ||
+      status === 'complete' ||
+      status === 'cancelled'
+    )
+      ? status
+      : 'all';
+    setStatusFilter(nextStatus);
+
+    const dateTypeParam = params.get('ordersDateType');
+    if (dateTypeParam === 'order' || dateTypeParam === 'receipt' || dateTypeParam === 'created') {
+      setDateType(dateTypeParam);
+    } else {
+      setDateType('order');
+    }
+
+    const startParam = params.get('ordersStart');
+    const endParam = params.get('ordersEnd');
+    const start = startParam ? parseISO(startParam) : undefined;
+    const end = endParam ? parseISO(endParam) : undefined;
+    setStartDate(start && isValid(start) ? start : undefined);
+    setEndDate(end && isValid(end) ? end : undefined);
+
+    const qParam = params.get('ordersQ');
+    setQNumberSearch(qParam || '');
+  }, [searchParamsString]);
+
   // Get date for filtering based on date type
   const getFilterDate = useCallback((order: SupplierPurchaseOrder): Date | null => {
     try {
@@ -139,6 +181,7 @@ export function SupplierOrders({ supplier }: SupplierOrdersProps) {
       // Status filter
       if (statusFilter !== 'all') {
         const statusName = order.status?.status_name?.toLowerCase() || '';
+        if (statusFilter === 'open' && (statusName === 'fully received' || statusName === 'cancelled')) return false;
         if (statusFilter === 'draft' && statusName !== 'draft') return false;
         if (statusFilter === 'pending' && statusName !== 'pending approval') return false;
         if (statusFilter === 'approved' && statusName !== 'approved') return false;
@@ -288,12 +331,13 @@ export function SupplierOrders({ supplier }: SupplierOrdersProps) {
             </Popover>
 
             {/* Status Filter */}
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilterType)}>
               <SelectTrigger className="w-full md:w-[180px] h-9">
                 <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="open">Open / Outstanding</SelectItem>
                 <SelectItem value="draft">Draft</SelectItem>
                 <SelectItem value="pending">Pending Approval</SelectItem>
                 <SelectItem value="approved">Approved</SelectItem>

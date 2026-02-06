@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useState, useEffect, useMemo, useLayoutEffect, useRef } from 'react';
+import { Fragment, use, useState, useEffect, useMemo, useLayoutEffect, useRef } from 'react';
 import { useToast } from '@/components/ui/use-toast';
 import Link from 'next/link';
 import { useRouter, notFound } from 'next/navigation';
@@ -30,6 +30,8 @@ import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import styles from './page.module.css';
+import { fetchPOAttachments, POAttachment } from '@/lib/db/purchase-order-attachments';
+import POAttachmentManager from '@/components/features/purchasing/POAttachmentManager';
 // import { sendPurchaseOrderEmail } from '@/lib/email'; // not used here; email is sent via API route
 
 // Status badge component
@@ -122,6 +124,7 @@ interface SupplierOrder {
   order_id: number;
   order_quantity: number;
   total_received: number;
+  notes?: string | null;
   supplier_component: {
     supplier_code: string;
     price: number;
@@ -177,6 +180,7 @@ async function fetchPurchaseOrderById(id: string) {
         order_id,
         order_quantity,
         total_received,
+        notes,
         supplier_component:suppliercomponents(
           supplier_code,
           price,
@@ -605,6 +609,9 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const [isEditMode, setIsEditMode] = useState(false);
   const [editedNotes, setEditedNotes] = useState('');
   const [editedQuantities, setEditedQuantities] = useState<Record<number, number>>({});
+  // Inline notes editing (independent of full edit mode)
+  const [isEditingNotes, setIsEditingNotes] = useState(false);
+  const [inlineNotes, setInlineNotes] = useState('');
   const [deleteConfirmOrderId, setDeleteConfirmOrderId] = useState<number | null>(null);
   
   const handleReceiveModalChange = (open: boolean) => {
@@ -748,6 +755,13 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
   });
 
+  // Fetch PO attachments
+  const { data: poAttachments = [], refetch: refetchAttachments } = useQuery({
+    queryKey: ['poAttachments', id],
+    queryFn: () => fetchPOAttachments(Number(id)),
+    enabled: !!id,
+  });
+
   useEffect(() => {
     const headerEl = headerRef.current;
 
@@ -817,7 +831,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     setEmailDialogOpen(true);
   };
 
-  const handleSendEmails = (payload: { overrides: EmailOverride[]; cc: string[]; skippedSuppliers?: number[] }) => {
+  const handleSendEmails = async (payload: { overrides: EmailOverride[]; cc: string[]; skippedSuppliers?: number[]; selectedAttachmentIds?: string[] }) => {
     // If all suppliers are skipped, just close the dialog
     if (payload.overrides.length === 0 && payload.cc.length === 0) {
       toast({
@@ -830,15 +844,144 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     }
 
     setEmailDialogLoading(true);
-    // Only pass overrides and cc to the API (skippedSuppliers is just for UI)
-    sendEmailMutation.mutate({ overrides: payload.overrides, cc: payload.cc }, {
-      onSuccess: () => {
-        setEmailDialogOpen(false);
-      },
-      onSettled: () => {
-        setEmailDialogLoading(false);
-      },
-    });
+
+    try {
+      // Generate PO PDF (lazy import to avoid build issues)
+      let pdfBase64: string | undefined;
+      let pdfFilename: string | undefined;
+
+      if (purchaseOrder) {
+        const [{ pdf }, { default: PurchaseOrderPDFDocument }] = await Promise.all([
+          import('@react-pdf/renderer'),
+          import('@/components/features/purchasing/PurchaseOrderPDFDocument'),
+        ]);
+
+        // Build company info for PDF
+        const { data: settings } = await supabase
+          .from('quote_company_settings')
+          .select('*')
+          .eq('setting_id', 1)
+          .single();
+
+        let companyLogoUrl: string | null = null;
+        if (settings?.company_logo_path) {
+          const { data: logoData } = supabase.storage.from('QButton').getPublicUrl(settings.company_logo_path);
+          companyLogoUrl = logoData?.publicUrl || null;
+        }
+
+        const companyAddressParts = [
+          settings?.address_line1,
+          settings?.address_line2,
+          [settings?.city, settings?.postal_code].filter(Boolean).join(' ').trim(),
+          settings?.country,
+        ].filter((part) => part && part.length > 0);
+
+        const companyInfo = {
+          name: settings?.company_name || 'Unity',
+          email: settings?.email || '',
+          phone: settings?.phone || '',
+          address: companyAddressParts.join(', ') || '',
+          logoUrl: companyLogoUrl,
+        };
+
+        // Get the supplier name from the first order
+        const firstOrder = purchaseOrder.supplier_orders?.[0];
+        const supplierName = firstOrder?.supplier_component?.supplier?.name || 'Supplier';
+        const supplierEmail = payload.overrides[0]?.email || '';
+
+        // Build items for PDF
+        const pdfItems = (purchaseOrder.supplier_orders || []).map((order: SupplierOrder) => ({
+          supplierCode: order.supplier_component?.supplier_code || '',
+          internalCode: order.supplier_component?.component?.internal_code || '',
+          description: order.supplier_component?.component?.description || '',
+          quantity: order.order_quantity,
+          unitPrice: order.supplier_component?.price || 0,
+          notes: order.notes || null,
+        }));
+
+        // Fetch document templates for important notice
+        const { data: templates } = await supabase
+          .from('document_templates')
+          .select('template_type, content')
+          .in('template_type', ['po_email_notice']);
+
+        const importantNotice = templates?.find((t: any) => t.template_type === 'po_email_notice')?.content || undefined;
+
+        const pdfBlob = await pdf(
+          <PurchaseOrderPDFDocument
+            purchaseOrder={{
+              qNumber: purchaseOrder.q_number || '',
+              createdAt: purchaseOrder.order_date || purchaseOrder.created_at || new Date().toISOString(),
+              notes: purchaseOrder.notes || undefined,
+              supplierName,
+              supplierEmail,
+              items: pdfItems,
+            }}
+            companyInfo={companyInfo}
+            importantNotice={importantNotice}
+          />
+        ).toBlob();
+
+        const pdfBuffer = await pdfBlob.arrayBuffer();
+        pdfBase64 = Buffer.from(pdfBuffer).toString('base64');
+
+        const date = new Date(purchaseOrder.order_date || purchaseOrder.created_at || new Date());
+        const y = date.getFullYear();
+        const m = `${date.getMonth() + 1}`.padStart(2, '0');
+        const d = `${date.getDate()}`.padStart(2, '0');
+        pdfFilename = `PO-${purchaseOrder.q_number || id}-${y}${m}${d}.pdf`;
+      }
+
+      // Fetch selected additional attachments as base64
+      const additionalAttachments: { content: string; filename: string; contentType?: string }[] = [];
+      if (payload.selectedAttachmentIds && payload.selectedAttachmentIds.length > 0) {
+        for (const attId of payload.selectedAttachmentIds) {
+          const att = poAttachments.find((a) => a.id === attId);
+          if (!att) continue;
+          try {
+            const response = await fetch(att.file_url);
+            const blob = await response.blob();
+            const buffer = await blob.arrayBuffer();
+            const base64 = Buffer.from(buffer).toString('base64');
+            additionalAttachments.push({
+              content: base64,
+              filename: att.original_name || 'attachment',
+              contentType: att.mime_type || undefined,
+            });
+          } catch (err) {
+            console.error(`Failed to fetch attachment ${att.original_name}:`, err);
+          }
+        }
+      }
+
+      // Send emails with PDF and attachments
+      sendEmailMutation.mutate(
+        {
+          overrides: payload.overrides,
+          cc: payload.cc,
+          pdfBase64,
+          pdfFilename,
+          additionalAttachments: additionalAttachments.length > 0 ? additionalAttachments : undefined,
+        },
+        {
+          onSuccess: () => {
+            setEmailDialogOpen(false);
+          },
+          onSettled: () => {
+            setEmailDialogLoading(false);
+          },
+        }
+      );
+    } catch (error: any) {
+      console.error('Error preparing email:', error);
+      toast({
+        title: 'Error preparing email',
+        description: error.message || 'Failed to generate PDF or prepare attachments.',
+        variant: 'destructive',
+        duration: 6000,
+      });
+      setEmailDialogLoading(false);
+    }
   };
 
   // Send follow-up email for outstanding items
@@ -1053,7 +1196,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     },
   });
 
-  const sendEmailMutation = useMutation<EmailResult[] | undefined, Error, { overrides?: { supplierId: number; email: string }[]; cc?: string[] } | undefined>({
+  const sendEmailMutation = useMutation<EmailResult[] | undefined, Error, { overrides?: { supplierId: number; email: string }[]; cc?: string[]; pdfBase64?: string; pdfFilename?: string; additionalAttachments?: { content: string; filename: string; contentType?: string }[] } | undefined>({
     mutationFn: async (payload) => {
       const response = await fetch('/api/send-purchase-order-email', {
         method: 'POST',
@@ -1062,6 +1205,9 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           purchaseOrderId: id,
           overrides: payload?.overrides,
           cc: payload?.cc,
+          pdfBase64: payload?.pdfBase64,
+          pdfFilename: payload?.pdfFilename,
+          additionalAttachments: payload?.additionalAttachments,
         })
       });
       const json = await response.json().catch(() => ({}));
@@ -1463,7 +1609,23 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
               </div>
 
               <div>
-                <p className="text-sm font-medium mb-1">Notes</p>
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-sm font-medium">Notes</p>
+                  {(isDraft || isPendingApproval) && !isEditMode && !isEditingNotes && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs text-muted-foreground"
+                      onClick={() => {
+                        setInlineNotes(purchaseOrder.notes || '');
+                        setIsEditingNotes(true);
+                      }}
+                    >
+                      <Pencil className="h-3 w-3 mr-1" />
+                      Edit
+                    </Button>
+                  )}
+                </div>
                 {isEditMode ? (
                   <Textarea
                     value={editedNotes}
@@ -1471,6 +1633,43 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                     placeholder="Add notes..."
                     className="min-h-[80px]"
                   />
+                ) : isEditingNotes ? (
+                  <div className="space-y-2">
+                    <Textarea
+                      value={inlineNotes}
+                      onChange={(e) => setInlineNotes(e.target.value)}
+                      placeholder="Add notes..."
+                      className="min-h-[80px]"
+                      autoFocus
+                    />
+                    <div className="flex gap-2 justify-end">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsEditingNotes(false)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={editPurchaseOrderMutation.isPending}
+                        onClick={() => {
+                          editPurchaseOrderMutation.mutate({ notes: inlineNotes }, {
+                            onSuccess: () => {
+                              setIsEditingNotes(false);
+                            },
+                          });
+                        }}
+                      >
+                        {editPurchaseOrderMutation.isPending ? (
+                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                        ) : (
+                          <Save className="h-3 w-3 mr-1" />
+                        )}
+                        Save
+                      </Button>
+                    </div>
+                  </div>
                 ) : (
                   <p className="whitespace-pre-wrap">{purchaseOrder.notes || 'No notes'}</p>
                 )}
@@ -1791,7 +1990,8 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                       const hasStockAllocation = customerOrderLinks.some(link => Number(link.quantity_for_stock) > 0);
 
                       return (
-                        <TableRow key={order.order_id} className="odd:bg-muted/30">
+                        <Fragment key={order.order_id}>
+                        <TableRow className="odd:bg-muted/30">
                           <TableCell className="font-medium">{component?.internal_code || 'Unknown'}</TableCell>
                           <TableCell>{component?.description || 'No description'}</TableCell>
                           <TableCell>{supplier?.name || 'Unknown'}</TableCell>
@@ -1952,6 +2152,14 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                             </TableCell>
                           )}
                         </TableRow>
+                        {order.notes && (
+                          <TableRow className="border-b">
+                            <TableCell colSpan={isEditMode ? (isApproved ? 8 : 7) : (isApproved ? 10 : 9)} className="py-2 pl-8">
+                              <p className="text-xs italic text-muted-foreground">Note: {order.notes}</p>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        </Fragment>
                       );
                     })}
                     <TableRow className="bg-muted/30">
@@ -1999,6 +2207,17 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
 
           </CardContent>
         </Card>
+
+        {purchaseOrder && (
+          <div className="mt-6">
+            <POAttachmentManager
+              purchaseOrderId={purchaseOrder.purchase_order_id}
+              attachments={poAttachments}
+              onAttachmentsChange={(atts) => refetchAttachments()}
+              disabled={!isDraft && !isPendingApproval}
+            />
+          </div>
+        )}
 
         {purchaseOrder && (
           <Card className="mt-6">
@@ -2360,6 +2579,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           rows={emailRows}
           cc={companySettings?.po_default_cc_email || ''}
           loading={emailDialogLoading || sendEmailMutation.isPending}
+          attachments={poAttachments}
           onConfirm={handleSendEmails}
         />
       )}

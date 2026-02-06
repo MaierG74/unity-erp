@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -13,7 +13,8 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Loader2, Plus, ShoppingCart, Trash2, AlertCircle } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
+import { Loader2, Plus, ShoppingCart, Trash2, AlertCircle, StickyNote } from 'lucide-react';
 import { format } from 'date-fns';
 import { Component } from '@/types/purchasing';
 import { SupplierComponent } from '@/types/suppliers';
@@ -29,6 +30,7 @@ type CartItem = {
   supplier_name: string;
   price: number;
   quantity: number;
+  notes?: string;
 };
 
 // Type for component returned from API
@@ -138,6 +140,7 @@ async function createSupplierOrders(
           order_date: orderDate || new Date().toISOString(),
           status_id: statusId,
           total_received: 0,
+          notes: item.notes || null,
         })
         .select('order_id')
         .single();
@@ -163,6 +166,7 @@ export function MultiOrderForm() {
   const [quantity, setQuantity] = useState<number>(1);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [orderDate, setOrderDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
+  const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
 
   // Fetch all components
   const { data: components, isLoading: componentsLoading } = useQuery({
@@ -392,26 +396,63 @@ export function MultiOrderForm() {
                   </TableHeader>
                   <TableBody>
                     {cart.map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell className="font-medium">
-                          {item.component_code}
-                          <div className="text-xs text-muted-foreground">
-                            {item.component_description}
-                          </div>
-                        </TableCell>
-                        <TableCell>{item.supplier_name}</TableCell>
-                        <TableCell>{item.quantity}</TableCell>
-                        <TableCell>R{(item.price * item.quantity).toFixed(2)}</TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => removeFromCart(item.id)}
-                          >
-                            <Trash2 className="h-4 w-4 text-muted-foreground" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
+                      <React.Fragment key={item.id}>
+                        <TableRow>
+                          <TableCell className="font-medium">
+                            {item.component_code}
+                            <div className="text-xs text-muted-foreground">
+                              {item.component_description}
+                            </div>
+                          </TableCell>
+                          <TableCell>{item.supplier_name}</TableCell>
+                          <TableCell>{item.quantity}</TableCell>
+                          <TableCell>R{(item.price * item.quantity).toFixed(2)}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                title={item.notes ? 'Edit note' : 'Add note'}
+                                onClick={() => {
+                                  setExpandedNotes(prev => {
+                                    const next = new Set(prev);
+                                    if (next.has(item.id)) next.delete(item.id);
+                                    else next.add(item.id);
+                                    return next;
+                                  });
+                                }}
+                              >
+                                <StickyNote className={`h-3.5 w-3.5 ${item.notes ? 'text-primary' : 'text-muted-foreground'}`} />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => removeFromCart(item.id)}
+                              >
+                                <Trash2 className="h-4 w-4 text-muted-foreground" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                        {(expandedNotes.has(item.id) || item.notes) && (
+                          <TableRow>
+                            <TableCell colSpan={5} className="pt-0 pb-2">
+                              <Textarea
+                                value={item.notes || ''}
+                                onChange={(e) => {
+                                  setCart(prev => prev.map(ci =>
+                                    ci.id === item.id ? { ...ci, notes: e.target.value } : ci
+                                  ));
+                                }}
+                                placeholder="e.g. Size must be 1m x 2m"
+                                className="min-h-[50px] text-sm"
+                              />
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </React.Fragment>
                     ))}
                   </TableBody>
                 </Table>
