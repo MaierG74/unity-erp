@@ -71,6 +71,13 @@ export type SupplierOrderLineItem = {
       description: string;
     };
   };
+  supplier_order_customer_orders?: Array<{
+    order: {
+      order_id: number;
+      order_number: string;
+      customer: { name: string } | null;
+    } | null;
+  }>;
   receipts: Array<{
     receipt_date: string;
     quantity_received: number;

@@ -1,6 +1,6 @@
 ---
 title: TODO Index
-last_updated: 2026-01-26
+last_updated: 2026-02-05
 ---
 
 Unity ERP's documentation spreads TODOs and open questions across domain guides, changelogs, and technical references. Use this index as a single starting point to see what still needs attention and where the authoritative source of truth lives.
@@ -24,7 +24,8 @@ Unity ERP's documentation spreads TODOs and open questions across domain guides,
 - **Implement supplier returns** — Status: _Planning_, Owner: _Unassigned_. Build functionality to return goods to suppliers, handling both immediate rejections on delivery and later returns. Requires `supplier_order_returns` table, RPC function, and UI components. Source: [supplier returns plan](../plans/supplier-returns-plan.md).
 
 ## Timekeeping
-- **Ensure double-time minutes are persisted** — Status: _Open_, Owner: _Unassigned_. Update `add_manual_clock_event_v2` (and any other summary writers) so inserts/updates to `time_daily_summary` always set `dt_minutes` (default 0 for non-Sunday days) to satisfy the new NOT NULL constraint and keep manual event entry unblocked. Also backfill existing rows. Source: [time & attendance working doc](../domains/timekeeping/time-attendance-working.md#database-tables-supabase).
+- **Ensure double-time minutes are persisted** — Status: _Open_, Owner: _Unassigned_. Update `add_manual_clock_event_v2` (and any other summary writers) so inserts/updates to `time_daily_summary` always set `dt_minutes` (default 0 for non-Sunday days) to satisfy the new NOT NULL constraint and keep manual event entry unblocked. Also backfill existing rows. Source: [time & attendance working doc](../domains/timekeeping/time-attendance-working.md#database-tables-supabase), [Sunday + double-time payroll rollout plan](../plans/sunday-doubletime-payroll-rollout-plan.md).
+- **Unify Sunday/double-time payroll calculations across weekly summary and payroll pages** — Status: _Planning_, Owner: _Unassigned_. Align all consumers to a single summary source of truth (`time_daily_summary` minute buckets), dual-run old/new payroll calculations, and release behind a rollbackable feature flag. Source: [Sunday + double-time payroll rollout plan](../plans/sunday-doubletime-payroll-rollout-plan.md).
 
 ## Cutlist
 - **Cutlist optimizer parity** — Status: _Planned_, Owner: _Unassigned_. Benchmark strip vs guillotine, define offcut-quality metrics, and add optimization priority modes to `/cutlist`. Source: [cutlist optimizer parity plan](../plans/cutlist-optimizer-parity-plan.md).

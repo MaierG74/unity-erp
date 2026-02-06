@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertTriangle, Mail, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -17,12 +17,15 @@ interface EmailIssue {
   id: string;
   event_type: string;
   recipient_email: string;
-  subject: string;
+  subject?: string | null;
   event_timestamp: string;
-  purchase_order_id?: number;
+  purchase_order_id?: number | null;
+  purchase_order_number?: string | null;
   quote_id?: string;
   bounce_message?: string;
 }
+
+const DISMISSED_STORAGE_KEY = 'unity-email-issues-dismissed-v1';
 
 export function EmailIssuesIndicator() {
   const [open, setOpen] = useState(false);
@@ -45,6 +48,57 @@ export function EmailIssuesIndicator() {
   const activeIssues = issues.filter((issue) => !dismissed.has(issue.id));
   const issueCount = activeIssues.length;
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      const stored = window.localStorage.getItem(DISMISSED_STORAGE_KEY);
+      if (!stored) return;
+
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) {
+        const storedIds = parsed.filter(
+          (value): value is string => typeof value === 'string'
+        );
+        setDismissed(new Set(storedIds));
+      }
+    } catch (error) {
+      console.warn('Failed to load dismissed email issues', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(
+        DISMISSED_STORAGE_KEY,
+        JSON.stringify(Array.from(dismissed))
+      );
+    } catch (error) {
+      console.warn('Failed to persist dismissed email issues', error);
+    }
+  }, [dismissed]);
+
+  useEffect(() => {
+    if (issues.length === 0 || dismissed.size === 0) return;
+
+    const activeIssueIds = new Set(issues.map((issue) => issue.id));
+    let changed = false;
+    const nextDismissed = new Set<string>();
+
+    dismissed.forEach((id) => {
+      if (activeIssueIds.has(id)) {
+        nextDismissed.add(id);
+      } else {
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      setDismissed(nextDismissed);
+    }
+  }, [issues, dismissed]);
+
   const handleDismiss = (id: string) => {
     setDismissed((prev) => new Set([...prev, id]));
   };
@@ -52,6 +106,10 @@ export function EmailIssuesIndicator() {
   const handleDismissAll = () => {
     setDismissed(new Set(issues.map((i) => i.id)));
     setOpen(false);
+  };
+
+  const handleResetDismissed = () => {
+    setDismissed(new Set());
   };
 
   const formatTime = (timestamp: string) => {
@@ -67,7 +125,7 @@ export function EmailIssuesIndicator() {
     return `${diffDays}d ago`;
   };
 
-  if (isLoading || issueCount === 0) {
+  if (isLoading || issues.length === 0) {
     return null;
   }
 
@@ -78,15 +136,21 @@ export function EmailIssuesIndicator() {
           variant="ghost"
           size="icon"
           className="relative"
-          aria-label={`${issueCount} email delivery issues`}
+          aria-label={
+            issueCount > 0
+              ? `${issueCount} email delivery issues`
+              : 'Email delivery issues (all dismissed)'
+          }
         >
           <Mail className="h-5 w-5" />
-          <Badge
-            variant="destructive"
-            className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs"
-          >
-            {issueCount > 9 ? '9+' : issueCount}
-          </Badge>
+          {issueCount > 0 && (
+            <Badge
+              variant="destructive"
+              className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs"
+            >
+              {issueCount > 9 ? '9+' : issueCount}
+            </Badge>
+          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-96 p-0" align="end">
@@ -108,6 +172,18 @@ export function EmailIssuesIndicator() {
           {activeIssues.length === 0 ? (
             <div className="p-4 text-center text-sm text-muted-foreground">
               No active issues
+              {dismissed.size > 0 && (
+                <div className="mt-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-xs"
+                    onClick={handleResetDismissed}
+                  >
+                    Reset dismissed items
+                  </Button>
+                </div>
+              )}
             </div>
           ) : (
             activeIssues.map((issue) => (
@@ -149,15 +225,27 @@ export function EmailIssuesIndicator() {
                       </p>
                     )}
                     <div className="mt-2">
-                      {issue.purchase_order_id && (
-                        <Link
-                          href={`/purchasing/purchase-orders/${issue.purchase_order_id}`}
-                          className="text-xs text-primary hover:underline"
-                          onClick={() => setOpen(false)}
-                        >
-                          View Purchase Order #{issue.purchase_order_id}
-                        </Link>
-                      )}
+                      {(issue.purchase_order_id || issue.purchase_order_number) &&
+                        (issue.purchase_order_id ? (
+                          <Link
+                            href={`/purchasing/purchase-orders/${issue.purchase_order_id}`}
+                            className="text-xs text-primary hover:underline"
+                            onClick={() => setOpen(false)}
+                          >
+                            View Purchase Order{' '}
+                            {issue.purchase_order_number || `#${issue.purchase_order_id}`}
+                          </Link>
+                        ) : (
+                          <Link
+                            href={`/purchasing/purchase-orders?q=${encodeURIComponent(
+                              issue.purchase_order_number || ''
+                            )}`}
+                            className="text-xs text-primary hover:underline"
+                            onClick={() => setOpen(false)}
+                          >
+                            Find Purchase Order {issue.purchase_order_number}
+                          </Link>
+                        ))}
                       {issue.quote_id && (
                         <Link
                           href={`/quotes/${issue.quote_id}/edit`}

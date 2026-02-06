@@ -303,6 +303,13 @@ export async function getSupplierOpenOrders(supplierId: number) {
             internal_code,
             description
           )
+        ),
+        supplier_order_customer_orders(
+          order:orders(
+            order_id,
+            order_number,
+            customer:customers(name)
+          )
         )
       )
     `)

@@ -26,7 +26,9 @@ Navbar indicator shows:
 - Badge count of bounced/failed emails
 - Dropdown with issue details and timestamps
 - Direct links to affected POs/Quotes
-- Dismiss functionality (session-based)
+- PO link fallback using `Purchase Order: Q...` subject parsing when webhook linkage is missing
+- Dismiss functionality persisted in browser local storage
+- "Reset dismissed items" action when all visible issues were dismissed
 - Auto-refresh every 60 seconds
 
 ## Architecture
@@ -79,6 +81,8 @@ Both endpoints return enriched email data including:
 - Fetches recent bounced/complained emails (last 7 days)
 - Powers the global notification indicator
 - Returns up to 20 most recent issues
+- Enriches each issue with `purchase_order_number` for clearer PO labels
+- Resolves missing PO links by parsing the email subject and looking up `purchase_orders.q_number`
 
 ### UI Components
 
@@ -93,7 +97,7 @@ Both endpoints return enriched email data including:
 - Global navbar notification
 - Badge count with popover
 - Dismissible issue list
-- Session-based dismiss tracking
+- Browser-local dismiss tracking with reset support
 
 ### Integration Points
 
@@ -214,7 +218,9 @@ psql -h your-supabase-host -U postgres -d postgres -f db/migrations/20260114_ema
 1. Check navbar for mail icon with badge
 2. Click to view recent issues
 3. Click issue to navigate to affected PO/Quote
-4. Dismiss individual issues or all at once
+4. If only a PO number exists in subject (for example `Purchase Order: Q26-080`), use "Find Purchase Order ..." to open the PO list pre-filtered by that number
+5. Dismiss individual issues or all at once
+6. Use "Reset dismissed items" to restore hidden issues in the current browser
 
 ### Understanding Delivery Status
 

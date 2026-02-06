@@ -35,7 +35,7 @@ const formSchema = z.object({
       quantity: z.number({
         required_error: 'Please enter a quantity',
         invalid_type_error: 'Please enter a number',
-      }).min(1, 'Quantity must be at least 1'),
+      }).min(0.01, 'Quantity must be greater than 0'),
       customer_order_id: z.number().nullable().optional(),
     })
   ).min(1, 'Please add at least one item to the order'),
@@ -873,12 +873,13 @@ export function NewPurchaseOrderForm() {
                         id={`items.${index}.quantity`}
                         className={`h-10 w-full rounded-md border ${errors.items?.[index]?.quantity ? 'border-destructive' : 'border-input'
                           } bg-background px-3 py-2 text-sm placeholder:text-muted-foreground`}
-                        min="1"
+                        min="0.01"
+                        step="any"
                         placeholder="Qty"
                         value={field.value ?? ''}
                         onChange={(e) => {
                           const val = e.target.value;
-                          field.onChange(val === '' ? undefined : parseInt(val) || 0);
+                          field.onChange(val === '' ? undefined : parseFloat(val) || 0);
                         }}
                         disabled={createOrderMutation.isPending}
                       />

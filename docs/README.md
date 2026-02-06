@@ -69,6 +69,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - New: [`plans/cutlist-optimizer-parity-plan.md`](plans/cutlist-optimizer-parity-plan.md) – Cutlist optimizer parity (strip vs guillotine, offcut quality, optimization modes)
   - New: [`plans/labor-planning-validation-plan.md`](plans/labor-planning-validation-plan.md) – guardrails + telemetry plan for the Labor Planning board
   - New: [`plans/permissions-and-logging-plan.md`](plans/permissions-and-logging-plan.md) – unified roadmap for role-based access control, permissions UI, and audit logging rollout
+  - New: [`plans/sunday-doubletime-payroll-rollout-plan.md`](plans/sunday-doubletime-payroll-rollout-plan.md) – live-safe rollout plan to align Sunday/double-time calculations across attendance summaries, weekly views, and payroll
   - New: [`plans/todo-module-plan.md`](plans/todo-module-plan.md) – To-Do module planning doc covering cross-module task assignments
   - New: [`plans/products-section-upgrade.md`](plans/products-section-upgrade.md) – Modernize the Products area with inventory-parity tabs, transactions, and finished-good reports
   - New: [`plans/purchase-order-return-communications-plan.md`](plans/purchase-order-return-communications-plan.md) – Return Goods UX, document, and supplier email improvements
@@ -79,6 +80,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - New: [`plans/inventory-traceability-po-consolidation-plan.md`](plans/inventory-traceability-po-consolidation-plan.md) – Inventory traceability through purchase cycle, PO consolidation, and reserved inventory system
 - Changelogs: [`changelogs/`](changelogs/)
   - [`changelogs/auth-and-landing-ui-improvements-20250117.md`](changelogs/auth-and-landing-ui-improvements-20250117.md) – ✅ **Auth flow & landing page UI improvements** (background color uniformity, login/logout flow fixes)
+  - [`changelogs/supplier-metrics-cards-enhancement-20260206.md`](changelogs/supplier-metrics-cards-enhancement-20260206.md) – ✅ Supplier detail metric cards now support period toggles, outstanding drill-down, and spend trend chart
   - [`changelogs/nextjs-cve-upgrade-20260117.md`](changelogs/nextjs-cve-upgrade-20260117.md) – ✅ **Next.js CVE upgrade** (Netlify unblock by upgrading to patched Next.js)
   - [`changelogs/inventory-url-filter-persistence-20260117.md`](changelogs/inventory-url-filter-persistence-20260117.md) – ✅ **Inventory URL filter persistence** (filters survive navigation to detail pages)
   - [`changelogs/quote-line-items-description-width-fix-20260117.md`](changelogs/quote-line-items-description-width-fix-20260117.md) – ✅ **Quote line items Description column width fix** (minimum width and horizontal scroll for better readability)

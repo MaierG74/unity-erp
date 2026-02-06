@@ -22,9 +22,27 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { Suspense, lazy, useMemo, useState } from 'react';
+import { OpenOrdersModal } from '@/components/features/suppliers/open-orders-modal';
 import type { SupplierPurchaseOrder } from '@/types/suppliers';
+import {
+  Bar,
+  CartesianGrid,
+  ComposedChart,
+  Line,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 
 // Lazy load tab components
 const SupplierForm = lazy(() => import('@/components/features/suppliers/supplier-form').then(m => ({ default: m.SupplierForm })));
@@ -54,10 +72,22 @@ interface MetricCardProps {
   value: string;
   icon: React.ReactNode;
   subtitle?: string;
+  subtitleClassName?: string;
+  onIconClick?: () => void;
+  iconActionLabel?: string;
   isLoading?: boolean;
 }
 
-function MetricCard({ title, value, icon, subtitle, isLoading }: MetricCardProps) {
+function MetricCard({
+  title,
+  value,
+  icon,
+  subtitle,
+  subtitleClassName,
+  onIconClick,
+  iconActionLabel,
+  isLoading,
+}: MetricCardProps) {
   if (isLoading) {
     return (
       <Card>
@@ -81,15 +111,122 @@ function MetricCard({ title, value, icon, subtitle, isLoading }: MetricCardProps
           <div>
             <p className="text-sm text-muted-foreground">{title}</p>
             <p className="text-2xl font-bold">{value}</p>
-            {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+            {subtitle && <p className={`text-xs ${subtitleClassName || 'text-muted-foreground'}`}>{subtitle}</p>}
           </div>
-          <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-            {icon}
-          </div>
+          {onIconClick ? (
+            <button
+              type="button"
+              onClick={onIconClick}
+              aria-label={iconActionLabel || `${title} details`}
+              className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary transition-colors hover:bg-primary/20"
+            >
+              {icon}
+            </button>
+          ) : (
+            <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+              {icon}
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>
   );
+}
+
+type SupplierMetricRange = '30d' | '90d' | 'ytd' | '12m';
+
+const METRIC_RANGE_OPTIONS: Array<{ key: SupplierMetricRange; label: string; description: string }> = [
+  { key: '30d', label: '30D', description: 'Last 30 days' },
+  { key: '90d', label: '90D', description: 'Last 90 days' },
+  { key: 'ytd', label: 'YTD', description: 'Year to date' },
+  { key: '12m', label: '12M', description: 'Last 12 months' },
+];
+
+function getOrderDate(order: SupplierPurchaseOrder): Date | null {
+  const raw = order.order_date || order.created_at;
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getOrderSpend(order: SupplierPurchaseOrder): number {
+  return order.supplier_orders.reduce((lineSum, line) => {
+    return lineSum + (line.order_quantity * (line.supplier_component?.price || 0));
+  }, 0);
+}
+
+function getMetricWindow(range: SupplierMetricRange, now: Date) {
+  const end = new Date(now);
+  let start = new Date(end);
+  let previousStart = new Date(end);
+  let previousEnd = new Date(end);
+  let label = '';
+
+  switch (range) {
+    case '30d': {
+      label = 'Last 30 days';
+      start.setDate(start.getDate() - 29);
+      start.setHours(0, 0, 0, 0);
+      const durationMs = end.getTime() - start.getTime();
+      previousEnd = new Date(start.getTime() - 1);
+      previousStart = new Date(previousEnd.getTime() - durationMs);
+      break;
+    }
+    case '90d': {
+      label = 'Last 90 days';
+      start.setDate(start.getDate() - 89);
+      start.setHours(0, 0, 0, 0);
+      const durationMs = end.getTime() - start.getTime();
+      previousEnd = new Date(start.getTime() - 1);
+      previousStart = new Date(previousEnd.getTime() - durationMs);
+      break;
+    }
+    case 'ytd': {
+      label = 'Year to date';
+      start = new Date(end.getFullYear(), 0, 1);
+      const durationMs = end.getTime() - start.getTime();
+      previousStart = new Date(end.getFullYear() - 1, 0, 1);
+      previousEnd = new Date(previousStart.getTime() + durationMs);
+      break;
+    }
+    case '12m':
+    default: {
+      label = 'Last 12 months';
+      start = new Date(end.getFullYear(), end.getMonth() - 11, 1);
+      const durationMs = end.getTime() - start.getTime();
+      previousEnd = new Date(start.getTime() - 1);
+      previousStart = new Date(previousEnd.getTime() - durationMs);
+      break;
+    }
+  }
+
+  return { start, end, previousStart, previousEnd, label };
+}
+
+function formatPeriodDelta(current: number, previous: number) {
+  if (previous === 0 && current === 0) {
+    return { text: 'No change vs previous period', tone: 'neutral' as const };
+  }
+
+  if (previous === 0) {
+    return { text: 'New activity vs previous period', tone: 'positive' as const };
+  }
+
+  const percent = ((current - previous) / previous) * 100;
+  if (Math.abs(percent) < 0.5) {
+    return { text: 'Flat vs previous period', tone: 'neutral' as const };
+  }
+
+  return {
+    text: `${percent > 0 ? '+' : ''}${percent.toFixed(1)}% vs previous period`,
+    tone: percent > 0 ? ('positive' as const) : ('negative' as const),
+  };
+}
+
+function getToneClassName(tone: 'positive' | 'negative' | 'neutral') {
+  if (tone === 'positive') return 'text-emerald-600';
+  if (tone === 'negative') return 'text-rose-600';
+  return 'text-muted-foreground';
 }
 
 export default function SupplierDetailPage() {
@@ -102,6 +239,9 @@ export default function SupplierDetailPage() {
   const tabParam = searchParams?.get('tab');
   const allowedTabs = new Set(['details', 'components', 'pricelists', 'orders', 'reports']);
   const activeTab = allowedTabs.has(tabParam || '') ? (tabParam as string) : 'details';
+  const [selectedRange, setSelectedRange] = useState<SupplierMetricRange>('12m');
+  const [openOrdersModalOpen, setOpenOrdersModalOpen] = useState(false);
+  const [spendDialogOpen, setSpendDialogOpen] = useState(false);
 
   const { data: supplier, isLoading, error } = useQuery({
     queryKey: ['supplier', supplierId],
@@ -153,7 +293,8 @@ export default function SupplierDetailPage() {
             )
           )
         `)
-        .eq('supplier_orders.suppliercomponents.supplier_id', supplierId);
+        .eq('supplier_orders.suppliercomponents.supplier_id', supplierId)
+        .order('order_date', { ascending: false });
 
       if (error) throw error;
       return (data || []) as SupplierPurchaseOrder[];
@@ -178,14 +319,27 @@ export default function SupplierDetailPage() {
 
   // Calculate metrics
   const metrics = useMemo(() => {
-    const totalOrders = purchaseOrders.length;
+    const now = new Date();
+    const { start, end, previousStart, previousEnd, label } = getMetricWindow(selectedRange, now);
 
-    // Calculate total spend
-    const totalSpend = purchaseOrders.reduce((sum, order) => {
-      return sum + order.supplier_orders.reduce((lineSum, line) => {
-        return lineSum + (line.order_quantity * (line.supplier_component?.price || 0));
-      }, 0);
-    }, 0);
+    const ordersWithDates = purchaseOrders
+      .map((order) => ({ order, orderDate: getOrderDate(order) }))
+      .filter((item): item is { order: SupplierPurchaseOrder; orderDate: Date } => item.orderDate !== null);
+
+    const currentPeriodOrders = ordersWithDates
+      .filter(({ orderDate }) => orderDate >= start && orderDate <= end)
+      .map(({ order }) => order);
+    const previousPeriodOrders = ordersWithDates
+      .filter(({ orderDate }) => orderDate >= previousStart && orderDate <= previousEnd)
+      .map(({ order }) => order);
+
+    const totalOrders = currentPeriodOrders.length;
+    const previousTotalOrders = previousPeriodOrders.length;
+
+    const totalSpend = currentPeriodOrders.reduce((sum, order) => sum + getOrderSpend(order), 0);
+    const previousTotalSpend = previousPeriodOrders.reduce((sum, order) => sum + getOrderSpend(order), 0);
+    const ordersDelta = formatPeriodDelta(totalOrders, previousTotalOrders);
+    const spendDelta = formatPeriodDelta(totalSpend, previousTotalSpend);
 
     // Calculate outstanding orders (orders with items not fully received)
     let outstandingOrders = 0;
@@ -209,18 +363,61 @@ export default function SupplierDetailPage() {
     });
 
     // Get last order date
-    const lastOrderDate = purchaseOrders.length > 0
-      ? new Date(purchaseOrders[0].order_date || purchaseOrders[0].created_at)
+    const lastOrderDate = ordersWithDates.reduce<Date | null>((latest, current) => {
+      if (!latest || current.orderDate > latest) return current.orderDate;
+      return latest;
+    }, null);
+    const daysSinceLastOrder = lastOrderDate
+      ? Math.max(0, Math.floor((now.getTime() - lastOrderDate.getTime()) / (1000 * 60 * 60 * 24)))
       : null;
+
+    // Last 12 months monthly trend for spend chart
+    const chartStart = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+    const monthlySpendData = Array.from({ length: 12 }).map((_, monthOffset) => {
+      const monthDate = new Date(chartStart.getFullYear(), chartStart.getMonth() + monthOffset, 1);
+      return {
+        bucket: `${monthDate.getFullYear()}-${monthDate.getMonth() + 1}`,
+        month: monthDate.toLocaleDateString('en-ZA', { month: 'short' }),
+        label: monthDate.toLocaleDateString('en-ZA', { month: 'short', year: '2-digit' }),
+        spend: 0,
+        orders: 0,
+      };
+    });
+
+    ordersWithDates.forEach(({ order, orderDate }) => {
+      const monthIndex =
+        (orderDate.getFullYear() - chartStart.getFullYear()) * 12 +
+        (orderDate.getMonth() - chartStart.getMonth());
+
+      if (monthIndex >= 0 && monthIndex < monthlySpendData.length) {
+        monthlySpendData[monthIndex].spend += getOrderSpend(order);
+        monthlySpendData[monthIndex].orders += 1;
+      }
+    });
+
+    const totalSpendInChart = monthlySpendData.reduce((sum, month) => sum + month.spend, 0);
+    const averageMonthlySpend = totalSpendInChart / monthlySpendData.length;
+    const peakMonth = monthlySpendData.reduce<(typeof monthlySpendData)[number] | null>((max, month) => {
+      if (!max || month.spend > max.spend) return month;
+      return max;
+    }, null);
 
     return {
       totalOrders,
       totalSpend,
+      ordersDelta,
+      spendDelta,
       outstandingOrders,
       outstandingValue,
       lastOrderDate,
+      daysSinceLastOrder,
+      rangeLabel: label,
+      monthlySpendData,
+      totalSpendInChart,
+      averageMonthlySpend,
+      peakMonth,
     };
-  }, [purchaseOrders]);
+  }, [purchaseOrders, selectedRange]);
 
   const isLoadingMetrics = isLoadingOrders || isLoadingComponents;
 
@@ -322,25 +519,56 @@ export default function SupplierDetailPage() {
         </Button>
       </div>
 
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-sm font-medium">Metrics period</p>
+          <p className="text-xs text-muted-foreground">
+            Total orders and spend are currently showing {metrics.rangeLabel.toLowerCase()}.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {METRIC_RANGE_OPTIONS.map((option) => (
+            <Button
+              key={option.key}
+              type="button"
+              size="sm"
+              variant={selectedRange === option.key ? 'default' : 'outline'}
+              onClick={() => setSelectedRange(option.key)}
+              aria-label={option.description}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
+      </div>
+
       {/* Metrics Row */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <MetricCard
           title="Total Orders"
           value={metrics.totalOrders.toString()}
           icon={<Package className="h-5 w-5" />}
+          subtitle={metrics.ordersDelta.text}
+          subtitleClassName={getToneClassName(metrics.ordersDelta.tone)}
           isLoading={isLoadingMetrics}
         />
         <MetricCard
           title="Total Spend"
           value={formatCurrency(metrics.totalSpend)}
           icon={<DollarSign className="h-5 w-5" />}
+          subtitle={metrics.spendDelta.text}
+          subtitleClassName={getToneClassName(metrics.spendDelta.tone)}
+          onIconClick={() => setSpendDialogOpen(true)}
+          iconActionLabel="Open spend trend chart"
           isLoading={isLoadingMetrics}
         />
         <MetricCard
           title="Outstanding"
           value={metrics.outstandingOrders.toString()}
           icon={<AlertCircle className="h-5 w-5" />}
-          subtitle={metrics.outstandingValue > 0 ? formatCurrency(metrics.outstandingValue) : undefined}
+          subtitle={metrics.outstandingValue > 0 ? `${formatCurrency(metrics.outstandingValue)} open value` : 'No open value'}
+          onIconClick={() => setOpenOrdersModalOpen(true)}
+          iconActionLabel="Open outstanding orders details"
           isLoading={isLoadingMetrics}
         />
         <MetricCard
@@ -355,6 +583,7 @@ export default function SupplierDetailPage() {
             ? metrics.lastOrderDate.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })
             : 'Never'}
           icon={<Clock className="h-5 w-5" />}
+          subtitle={metrics.daysSinceLastOrder !== null ? `${metrics.daysSinceLastOrder} day${metrics.daysSinceLastOrder === 1 ? '' : 's'} ago` : undefined}
           isLoading={isLoadingMetrics}
         />
       </div>
@@ -441,6 +670,95 @@ export default function SupplierDetailPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <OpenOrdersModal
+        supplierId={supplierId}
+        supplierName={supplier.name}
+        open={openOrdersModalOpen}
+        onClose={() => setOpenOrdersModalOpen(false)}
+        showOnlyOutstanding
+      />
+
+      <Dialog open={spendDialogOpen} onOpenChange={setSpendDialogOpen}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Spend Trend</DialogTitle>
+            <DialogDescription>
+              Monthly spend and order count over the last 12 months for {supplier.name}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border p-3">
+              <p className="text-xs text-muted-foreground">12M Spend</p>
+              <p className="text-lg font-semibold">{formatCurrency(metrics.totalSpendInChart)}</p>
+            </div>
+            <div className="rounded-lg border p-3">
+              <p className="text-xs text-muted-foreground">Avg / Month</p>
+              <p className="text-lg font-semibold">{formatCurrency(metrics.averageMonthlySpend)}</p>
+            </div>
+            <div className="rounded-lg border p-3">
+              <p className="text-xs text-muted-foreground">Peak Month</p>
+              <p className="text-lg font-semibold">
+                {metrics.peakMonth ? `${metrics.peakMonth.label} (${formatCurrency(metrics.peakMonth.spend)})` : 'No spend'}
+              </p>
+            </div>
+          </div>
+
+          <div className="h-[320px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={metrics.monthlySpendData}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis dataKey="month" tick={{ fontSize: 12 }} className="text-muted-foreground" />
+                <YAxis
+                  yAxisId="left"
+                  tick={{ fontSize: 12 }}
+                  tickFormatter={(value) => `R${Math.round(Number(value) / 1000)}k`}
+                  className="text-muted-foreground"
+                />
+                <YAxis
+                  yAxisId="right"
+                  orientation="right"
+                  tick={{ fontSize: 12 }}
+                  allowDecimals={false}
+                  className="text-muted-foreground"
+                />
+                <Tooltip
+                  formatter={(value: number | string, name: string) => {
+                    if (name === 'spend') return [formatCurrency(Number(value)), 'Spend'];
+                    return [Number(value), 'Orders'];
+                  }}
+                  labelFormatter={(label, payload) => {
+                    const monthLabel = payload?.[0]?.payload?.label as string | undefined;
+                    return monthLabel || String(label);
+                  }}
+                  contentStyle={{
+                    backgroundColor: 'hsl(var(--card))',
+                    border: '1px solid hsl(var(--border))',
+                    borderRadius: '8px',
+                  }}
+                />
+                <Bar
+                  yAxisId="left"
+                  dataKey="spend"
+                  name="spend"
+                  fill="hsl(var(--primary))"
+                  radius={[4, 4, 0, 0]}
+                />
+                <Line
+                  yAxisId="right"
+                  type="monotone"
+                  dataKey="orders"
+                  name="orders"
+                  stroke="hsl(var(--chart-3, 20 90% 50%))"
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

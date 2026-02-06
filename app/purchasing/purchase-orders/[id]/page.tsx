@@ -1902,11 +1902,12 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                             {isEditMode ? (
                               <Input
                                 type="number"
-                                min="1"
+                                min="0.01"
+                                step="any"
                                 value={editedQty}
                                 onChange={(e) => setEditedQuantities(prev => ({
                                   ...prev,
-                                  [order.order_id]: parseInt(e.target.value) || 1
+                                  [order.order_id]: parseFloat(e.target.value) || 0
                                 }))}
                                 className="w-20 text-right ml-auto"
                               />
