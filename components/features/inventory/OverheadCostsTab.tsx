@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/use-toast';
-import { Plus, RefreshCw, Pencil, Trash2, Search, X } from 'lucide-react';
+import { Plus, RefreshCw, Pencil, Trash2, Search, X, Loader2 } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -161,7 +161,7 @@ export function OverheadCostsTab() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-lg">Loading overhead cost elements...</div>
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
   }

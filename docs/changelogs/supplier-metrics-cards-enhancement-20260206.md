@@ -27,6 +27,13 @@ Follow-up improvements were added on the same day to make card analytics more ac
    - `SupplierOrders` now reads URL params (`ordersStatus`, `ordersDateType`, `ordersStart`, `ordersEnd`, `ordersQ`)
    - added `Open / Outstanding` status option for quick filtering
 
+## Iteration 3 (Supplier Active Badge Alignment)
+
+Resolved a supplier list status mismatch where rows were appearing as inactive even when supplier detail showed active.
+
+1. Supplier list rendering now only marks inactive when `is_active === false` (not falsy).
+2. Supplier API responses are normalized so `is_active` is always a boolean for list/detail consumers.
+
 ## What Changed
 
 1. Added a metric period toggle above cards:

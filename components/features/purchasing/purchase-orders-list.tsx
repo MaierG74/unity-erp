@@ -125,7 +125,7 @@ export function PurchaseOrdersList() {
                     {order.q_number || <span className="text-muted-foreground italic">Not assigned</span>}
                   </td>
                   <td className="px-4 py-3 text-sm">
-                    {order.supplier_orders?.length ?? 0} items
+                    {order.supplier_orders?.length ?? 0} item{(order.supplier_orders?.length ?? 0) !== 1 ? 's' : ''}
                   </td>
                   <td className="px-4 py-3 text-sm">
                     {format(new Date(order.created_at), 'MMM d, yyyy')}

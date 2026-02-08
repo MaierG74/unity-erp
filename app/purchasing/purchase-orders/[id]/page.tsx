@@ -3,7 +3,7 @@
 import { Fragment, use, useState, useEffect, useMemo, useLayoutEffect, useRef } from 'react';
 import { useToast } from '@/components/ui/use-toast';
 import Link from 'next/link';
-import { useRouter, notFound } from 'next/navigation';
+import { useRouter, useSearchParams, notFound } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
@@ -601,9 +601,11 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const [emailRows, setEmailRows] = useState<EmailRecipientRow[]>([]);
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [emailHistoryExpanded, setEmailHistoryExpanded] = useState(false);
+  const searchParams = useSearchParams();
   const [receiveModalOpen, setReceiveModalOpen] = useState(false);
   const [bulkReceiveModalOpen, setBulkReceiveModalOpen] = useState(false);
   const [selectedOrderForReceive, setSelectedOrderForReceive] = useState<SupplierOrderWithParent | null>(null);
+  const [autoReceiveHandled, setAutoReceiveHandled] = useState(false);
   
   // Edit mode state
   const [isEditMode, setIsEditMode] = useState(false);
@@ -653,6 +655,32 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     refetchOnMount: true,
     staleTime: 0, // Always consider data stale so it refetches when invalidated
   });
+
+  // Auto-open receive modal when ?receive=order_id is in URL (from dashboard)
+  useEffect(() => {
+    if (autoReceiveHandled || !purchaseOrder || isLoading) return;
+    const receiveOrderId = searchParams.get('receive');
+    if (!receiveOrderId) return;
+
+    const orderId = parseInt(receiveOrderId, 10);
+    if (isNaN(orderId)) return;
+
+    const supplierOrder = purchaseOrder.supplier_orders?.find(
+      (so: SupplierOrder) => so.order_id === orderId
+    );
+
+    if (supplierOrder) {
+      setSelectedOrderForReceive({
+        ...supplierOrder,
+        purchase_order: {
+          purchase_order_id: purchaseOrder.purchase_order_id,
+          q_number: purchaseOrder.q_number || '',
+        },
+      });
+      setReceiveModalOpen(true);
+    }
+    setAutoReceiveHandled(true);
+  }, [purchaseOrder, isLoading, searchParams, autoReceiveHandled]);
 
   // Fetch email history for this purchase order
   const { data: emailHistory } = useQuery({

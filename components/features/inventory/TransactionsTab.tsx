@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
-import { RefreshCw, Search, X, Calendar } from 'lucide-react';
+import { RefreshCw, Search, X, Calendar, Loader2 } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -124,7 +124,7 @@ export function TransactionsTab() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-lg">Loading transactions...</div>
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -138,16 +138,13 @@ export function TransactionsTab() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
+    <div className="space-y-4">
+      {/* Actions */}
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold">Transaction History</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Recent inventory transactions across all components
-          </p>
-        </div>
-        <Button onClick={refreshData} className="h-9" variant="outline">
+        <p className="text-sm text-muted-foreground">
+          Recent inventory transactions across all components
+        </p>
+        <Button onClick={refreshData} className="h-9" variant="outline" size="sm">
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
         </Button>

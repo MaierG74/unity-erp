@@ -64,6 +64,65 @@ export const calculateDurationMinutes = (startTime: string, endTime: string): nu
   return Math.round(durationMs / (1000 * 60)); // Convert ms to minutes and round
 };
 
+type DailyMinuteBreakdown = {
+  regularMinutes: number;
+  otMinutes: number;
+  dtMinutes: number;
+  totalHoursWorked: number;
+};
+
+const calculateDailyMinuteBreakdown = (dateStr: string, totalWorkMinutes: number): DailyMinuteBreakdown => {
+  const dayOfWeek = new Date(dateStr).getDay(); // 0=Sunday
+  let regularMinutes: number;
+  let otMinutes: number;
+  let dtMinutes: number;
+
+  if (dayOfWeek === 0) {
+    // Sunday only for current rollout scope
+    regularMinutes = 0;
+    otMinutes = 0;
+    dtMinutes = totalWorkMinutes;
+  } else {
+    const regularThreshold = 9 * 60; // 9 hours
+    regularMinutes = Math.min(totalWorkMinutes, regularThreshold);
+    otMinutes = Math.max(totalWorkMinutes - regularMinutes, 0);
+    dtMinutes = 0;
+  }
+
+  return {
+    regularMinutes,
+    otMinutes,
+    dtMinutes,
+    totalHoursWorked: parseFloat((totalWorkMinutes / 60).toFixed(2)),
+  };
+};
+
+const calculateWageCents = (
+  regularMinutes: number,
+  otMinutes: number,
+  dtMinutes: number,
+  hourlyRate: number
+): number =>
+  Math.round(
+    ((regularMinutes / 60) * hourlyRate + (otMinutes / 60) * hourlyRate * 1.5 + (dtMinutes / 60) * hourlyRate * 2) *
+      100
+  );
+
+const fetchHourlyRate = async (staffId: number): Promise<number> => {
+  const { data, error } = await supabase
+    .from('staff')
+    .select('hourly_rate')
+    .eq('staff_id', staffId)
+    .single();
+
+  if (error || !data) {
+    return 0;
+  }
+
+  const rate = Number(data.hourly_rate);
+  return Number.isFinite(rate) ? rate : 0;
+};
+
 /**
  * Process clock events into time segments for a specific date
  */
@@ -563,38 +622,15 @@ export const generateDailySummary = async (dateStr: string, staffId?: number): P
         continue;
       }
       
-      // Convert minutes to hours for the summary
-      const totalWorkHours = parseFloat((totalWorkMinutes / 60).toFixed(2));
-      
       // Determine if the day is complete (has both clock in and out)
       const isComplete = !!lastClockOut;
 
-      // Calculate regular, overtime, and double-time based on weekday
-      const dayOfWeek = new Date(dateStr).getDay(); // 0=Sunday
-      let regularMinutes: number;
-      let otMinutes: number;
-      let dtMinutes: number;
-      if (dayOfWeek === 0) {
-        // Sunday: all work is double-time
-        regularMinutes = 0;
-        otMinutes = 0;
-        dtMinutes = totalWorkMinutes;
-      } else {
-        const regularThreshold = 9 * 60; // 9 hours
-        regularMinutes = Math.min(totalWorkMinutes, regularThreshold);
-        otMinutes = Math.max(totalWorkMinutes - regularMinutes, 0);
-        dtMinutes = 0; // double-time for holidays/future
-      }
-      
-      const { data: staffData, error: staffError } = await supabase
-        .from('staff')
-        .select('hourly_rate')
-        .eq('staff_id', staffId)
-        .single();
-      const rate = staffData && !staffError ? parseFloat(staffData.hourly_rate.toString()) : 0;
-      const wageCents = Math.round(
-        ((regularMinutes / 60) * rate + (otMinutes / 60) * rate * 1.5 + (dtMinutes / 60) * rate * 2) * 100
+      const { regularMinutes, otMinutes, dtMinutes, totalHoursWorked } = calculateDailyMinuteBreakdown(
+        dateStr,
+        totalWorkMinutes
       );
+      const rate = await fetchHourlyRate(staffId);
+      const wageCents = calculateWageCents(regularMinutes, otMinutes, dtMinutes, rate);
       
       // Create or update the summary
       if (existingSummary) {
@@ -614,7 +650,7 @@ export const generateDailySummary = async (dateStr: string, staffId?: number): P
             wage_cents: wageCents,
             is_complete: isComplete,
             updated_at: new Date().toISOString(),
-            total_hours_worked: totalWorkHours
+            total_hours_worked: totalHoursWorked
           })
           .eq('id', existingSummary.id);
           
@@ -636,9 +672,10 @@ export const generateDailySummary = async (dateStr: string, staffId?: number): P
             other_breaks_minutes: otherBreakMinutes,
             regular_minutes: regularMinutes,
             dt_minutes: dtMinutes,
-            ot_minutes: 0,
+            ot_minutes: otMinutes,
             wage_cents: wageCents,
             is_complete: isComplete,
+            total_hours_worked: totalHoursWorked,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           });
@@ -778,6 +815,7 @@ export const addManualClockEvent = async (
         if (unpaired.length > 0) {
           const matchingEvent = unpaired[0];
           const segmentType = eventType === 'clock_out' ? 'work' : 'break';
+          const insertedEventId = newEventId || eventId;
           
           // Calculate duration
           const durationMins = calculateDurationMinutes(
@@ -786,30 +824,30 @@ export const addManualClockEvent = async (
           );
 
           // Determine clock_in_event_id and clock_out_event_id based on eventType
-          let cin_id = null;
-          let cout_id = null;
-          let s_time = null;
-          let e_time = null;
+          let cin_id: string | null = null;
+          let cout_id: string | null = null;
+          let s_time: string | null = null;
+          let e_time: string | null = null;
 
           if (eventType === 'clock_out' || eventType === 'break_end') {
             cin_id = matchingEvent.id;
-            cout_id = eventId; // eventId is the ID of the manually added event
+            cout_id = insertedEventId;
             s_time = matchingEvent.event_time;
             e_time = eventTime.toISOString();
           } else { // clock_in or break_start
-            cin_id = eventId;
+            cin_id = insertedEventId;
             cout_id = matchingEvent.id;
             s_time = eventTime.toISOString();
             e_time = matchingEvent.event_time;
           }
           
           // Determine break_type for the segment
-          let segmentBreakType = null;
+          let segmentBreakType: string | null = null;
           if (segmentType === 'break') {
             if (eventType === 'break_end') {
-              segmentBreakType = matchingEvent.break_type;
+              segmentBreakType = matchingEvent.break_type || null;
             } else { // break_start
-              segmentBreakType = breakType; // breakType is a parameter of addManualClockEvent
+              segmentBreakType = breakType || null; // breakType is a parameter of addManualClockEvent
             }
           }
 
@@ -876,6 +914,12 @@ export const addManualClockEvent = async (
         
         const firstClockIn = clockInEvents.length > 0 ? clockInEvents[0].event_time : null;
         const lastClockOut = clockOutEvents.length > 0 ? clockOutEvents[0].event_time : null;
+        const { regularMinutes, otMinutes, dtMinutes, totalHoursWorked } = calculateDailyMinuteBreakdown(
+          dateStr,
+          totalWorkMinutes
+        );
+        const rate = await fetchHourlyRate(staffId);
+        const wageCents = calculateWageCents(regularMinutes, otMinutes, dtMinutes, rate);
         
         // Check if a summary exists
         const { data: existingSummaries } = await supabase
@@ -895,6 +939,11 @@ export const addManualClockEvent = async (
               total_break_minutes: totalBreakMinutes,
               lunch_break_minutes: lunchBreakMinutes,
               other_breaks_minutes: otherBreakMinutes,
+              regular_minutes: regularMinutes,
+              ot_minutes: otMinutes,
+              dt_minutes: dtMinutes,
+              wage_cents: wageCents,
+              total_hours_worked: totalHoursWorked,
               is_complete: !!lastClockOut,
               updated_at: new Date().toISOString()
             })
@@ -912,6 +961,11 @@ export const addManualClockEvent = async (
               total_break_minutes: totalBreakMinutes,
               lunch_break_minutes: lunchBreakMinutes,
               other_breaks_minutes: otherBreakMinutes,
+              regular_minutes: regularMinutes,
+              ot_minutes: otMinutes,
+              dt_minutes: dtMinutes,
+              wage_cents: wageCents,
+              total_hours_worked: totalHoursWorked,
               is_complete: !!lastClockOut,
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString()

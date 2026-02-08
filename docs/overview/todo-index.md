@@ -1,6 +1,6 @@
 ---
 title: TODO Index
-last_updated: 2026-02-05
+last_updated: 2026-02-07
 ---
 
 Unity ERP's documentation spreads TODOs and open questions across domain guides, changelogs, and technical references. Use this index as a single starting point to see what still needs attention and where the authoritative source of truth lives.
@@ -26,6 +26,7 @@ Unity ERP's documentation spreads TODOs and open questions across domain guides,
 ## Timekeeping
 - **Ensure double-time minutes are persisted** — Status: _Open_, Owner: _Unassigned_. Update `add_manual_clock_event_v2` (and any other summary writers) so inserts/updates to `time_daily_summary` always set `dt_minutes` (default 0 for non-Sunday days) to satisfy the new NOT NULL constraint and keep manual event entry unblocked. Also backfill existing rows. Source: [time & attendance working doc](../domains/timekeeping/time-attendance-working.md#database-tables-supabase), [Sunday + double-time payroll rollout plan](../plans/sunday-doubletime-payroll-rollout-plan.md).
 - **Unify Sunday/double-time payroll calculations across weekly summary and payroll pages** — Status: _Planning_, Owner: _Unassigned_. Align all consumers to a single summary source of truth (`time_daily_summary` minute buckets), dual-run old/new payroll calculations, and release behind a rollbackable feature flag. Source: [Sunday + double-time payroll rollout plan](../plans/sunday-doubletime-payroll-rollout-plan.md).
+- **Add public-holiday double-time policy after Sunday rollout** — Status: _Deferred_, Owner: _Unassigned_. Keep current rollout scoped to Sunday double-time only; add policy + implementation pass for public-holiday double-time once Sunday payroll path is stable in production. Source: [Sunday + double-time payroll rollout plan](../plans/sunday-doubletime-payroll-rollout-plan.md).
 
 ## Cutlist
 - **Cutlist optimizer parity** — Status: _Planned_, Owner: _Unassigned_. Benchmark strip vs guillotine, define offcut-quality metrics, and add optimization priority modes to `/cutlist`. Source: [cutlist optimizer parity plan](../plans/cutlist-optimizer-parity-plan.md).
