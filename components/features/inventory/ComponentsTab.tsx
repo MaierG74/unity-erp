@@ -11,7 +11,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useDebounce } from '@/hooks/use-debounce';
 import { cn } from "@/lib/utils";
-import { Plus, RefreshCw, Search, X } from 'lucide-react';
+import { Plus, RefreshCw, Search, X, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 
 type Component = {
@@ -442,7 +442,7 @@ export function ComponentsTab() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-lg">Loading components...</div>
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -464,12 +464,12 @@ export function ComponentsTab() {
           {/* Search */}
           <div className="relative w-full md:w-[520px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <input
+            <Input
               type="text"
               placeholder="Search by code or description..."
               value={filterText}
               onChange={(e) => setFilterText(e.target.value)}
-              className="w-full h-9 pl-9 pr-10 rounded-lg border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              className="h-9 pl-9 pr-10"
             />
             {filterText && (
               <button

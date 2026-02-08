@@ -243,7 +243,7 @@ export function ReportsTab() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-lg">Loading reports...</div>
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -265,16 +265,13 @@ export function ReportsTab() {
     : '0';
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
+    <div className="space-y-4">
+      {/* Actions */}
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold">Inventory Reports</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Stock status overview and analytics
-          </p>
-        </div>
-        <Button onClick={refreshData} className="h-9" variant="outline">
+        <p className="text-sm text-muted-foreground">
+          Stock status overview and analytics
+        </p>
+        <Button onClick={refreshData} className="h-9" variant="outline" size="sm">
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
         </Button>

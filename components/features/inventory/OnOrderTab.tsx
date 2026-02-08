@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
-import { RefreshCw, Package, ExternalLink } from 'lucide-react';
+import { RefreshCw, Package, ExternalLink, Loader2 } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -171,7 +171,7 @@ export function OnOrderTab() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-lg">Loading on-order data...</div>
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -185,16 +185,13 @@ export function OnOrderTab() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
+    <div className="space-y-4">
+      {/* Actions */}
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold">Components On Order</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Components with pending quantities on purchase orders
-          </p>
-        </div>
-        <Button onClick={refreshData} className="h-9" variant="outline">
+        <p className="text-sm text-muted-foreground">
+          Components with pending quantities on purchase orders
+        </p>
+        <Button onClick={refreshData} className="h-9" variant="outline" size="sm">
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
         </Button>
@@ -248,8 +245,14 @@ export function OnOrderTab() {
           <TableBody>
             {componentsOnOrder.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                  No components currently on order
+                <TableCell colSpan={6} className="py-0">
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <Package className="h-12 w-12 text-muted-foreground mb-3" />
+                    <p className="text-lg font-medium">No components on order</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      All purchase order items have been fully received.
+                    </p>
+                  </div>
                 </TableCell>
               </TableRow>
             ) : (

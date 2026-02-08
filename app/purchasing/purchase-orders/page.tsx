@@ -669,7 +669,7 @@ export default function PurchaseOrdersPage() {
               className="cursor-pointer hover:bg-muted"
             >
               <TableCell>{formatQNumber(order.q_number)}</TableCell>
-              <TableCell>{order.supplier_orders?.length || 0} items</TableCell>
+              <TableCell>{order.supplier_orders?.length || 0} item{(order.supplier_orders?.length || 0) !== 1 ? 's' : ''}</TableCell>
               <TableCell>
                 <div className="flex flex-wrap gap-1">
                   {order.suppliers?.map((supplier, index) => (

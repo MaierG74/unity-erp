@@ -256,6 +256,37 @@ export function DailyHoursDetailDialog({
       });
 
       const isComplete = !!lastClockOut;
+      const dayOfWeek = new Date(date).getDay(); // 0=Sunday
+      let regularMinutes = 0;
+      let otMinutes = 0;
+      let dtMinutes = 0;
+
+      if (dayOfWeek === 0) {
+        dtMinutes = totalWorkMinutes;
+      } else {
+        const regularThreshold = 9 * 60; // 9 hours
+        regularMinutes = Math.min(totalWorkMinutes, regularThreshold);
+        otMinutes = Math.max(totalWorkMinutes - regularMinutes, 0);
+      }
+
+      const totalHoursWorked = parseFloat((totalWorkMinutes / 60).toFixed(2));
+
+      // Keep payroll handoff hours complete even on manual segment edits.
+      const { data: staffRateData, error: staffRateError } = await supabase
+        .from('staff')
+        .select('hourly_rate')
+        .eq('staff_id', staffId)
+        .single();
+
+      if (staffRateError) {
+        console.warn('Could not load hourly rate for wage calculation, defaulting to 0:', staffRateError);
+      }
+
+      const hourlyRate = Number(staffRateData?.hourly_rate ?? 0);
+      const safeRate = Number.isFinite(hourlyRate) ? hourlyRate : 0;
+      const wageCents = Math.round(
+        ((regularMinutes / 60) * safeRate + (otMinutes / 60) * safeRate * 1.5 + (dtMinutes / 60) * safeRate * 2) * 100
+      );
 
       const summaryData = {
         staff_id: staffId,
@@ -266,6 +297,11 @@ export function DailyHoursDetailDialog({
         total_break_minutes: totalBreakMinutes,
         lunch_break_minutes: lunchBreakMinutes,
         other_breaks_minutes: otherBreaksMinutes,
+        regular_minutes: regularMinutes,
+        ot_minutes: otMinutes,
+        dt_minutes: dtMinutes,
+        wage_cents: wageCents,
+        total_hours_worked: totalHoursWorked,
         is_complete: isComplete
       };
 

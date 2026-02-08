@@ -24,7 +24,10 @@ export async function getSuppliers() {
     .order('name');
 
   if (error) throw error;
-  return data as SupplierWithDetails[];
+  return (data || []).map((supplier) => ({
+    ...supplier,
+    is_active: supplier.is_active !== false,
+  })) as SupplierWithDetails[];
 }
 
 export async function getSupplier(id: number) {
@@ -39,7 +42,10 @@ export async function getSupplier(id: number) {
     .single();
 
   if (error) throw error;
-  return data as SupplierWithDetails;
+  return {
+    ...data,
+    is_active: data.is_active !== false,
+  } as SupplierWithDetails;
 }
 
 // Fetch supplier components separately (optimized - only loads when Components tab is opened)

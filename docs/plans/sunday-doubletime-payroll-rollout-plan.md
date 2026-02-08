@@ -1,8 +1,22 @@
 # Sunday + Double-Time Payroll Implementation Plan
 
 Status: Final implementation plan (pending policy + schema sign-off)
-Last updated: 2026-02-06
+Last updated: 2026-02-07
 Owner: Unassigned
+
+## 0) Implementation progress log
+
+### 2026-02-07 (Phase 1 partial complete)
+- Fixed `generateDailySummary()` INSERT bug to persist computed `ot_minutes` instead of hardcoded `0`.
+- Added `total_hours_worked` persistence on `generateDailySummary()` INSERT.
+- Updated `addManualClockEvent()` summary INSERT/UPDATE paths to persist:
+  - `regular_minutes`
+  - `ot_minutes`
+  - `dt_minutes`
+  - `wage_cents`
+  - `total_hours_worked`
+- Updated `DailyHoursDetailDialog` segment-edit recalculation to persist the same payroll fields above.
+- Kept rollout scope aligned with Gate B (`Sunday-only` double-time).
 
 ## 1) Why this plan is required
 
@@ -39,6 +53,14 @@ Before any production rollout, verify actual DB schema and functions for:
 
 Note: these must be validated against live/staging DB state, not only repository snapshots.
 
+### Gate D: Payroll handoff contract
+Confirm what Unity ERP sends to the payroll system and what payroll calculates:
+1. Unity ERP sends raw hour buckets (`regular_hours`, `overtime_hours`, `doubletime_hours`) only.
+2. Payroll system applies pay multipliers/rates and calculates final double-time earnings.
+3. Payroll system is a **third-party external program** (not part of Unity ERP).
+
+Default for this plan: **Unity ERP outputs raw hours; payroll system performs pay calculation**.
+
 ## 2.1) Gate decision record (lock before Phase 0 execution)
 
 ### Gate A lock
@@ -53,15 +75,16 @@ Note: these must be validated against live/staging DB state, not only repository
 - Approved by technical owner: `Name` on `YYYY-MM-DD`
 
 ### Gate B lock
-- Status: `PENDING`
+- Status: `LOCKED (user-confirmed on 2026-02-07)`
 - Selected policy:
-  - [ ] `B1` Sundays only are double-time
+  - [x] `B1` Sundays only are double-time
   - [ ] `B2` Sundays + public holidays are double-time
-- Effective date for policy: `YYYY-MM-DD`
-- Decision owner: `Name / Role`
-- Rationale: `Short business rationale`
-- Approved by payroll owner: `Name` on `YYYY-MM-DD`
-- Approved by technical owner: `Name` on `YYYY-MM-DD`
+- Effective date for policy: `2026-02-07`
+- Decision owner: `User confirmed in chat (formal owner name pending)`
+- Rationale: `Implement Sunday correctness first for live-payroll safety; public-holiday double-time is explicitly deferred to follow-up scope.`
+- Approved by payroll owner: `Pending name` on `2026-02-07`
+- Approved by technical owner: `Pending name` on `2026-02-07`
+- Deferred follow-up: `Add public-holiday double-time (B2) in a later implementation phase after Sunday rollout stabilizes.`
 
 ### Gate C lock
 - Status: `PENDING`
@@ -77,15 +100,28 @@ Note: these must be validated against live/staging DB state, not only repository
 - Signed off by technical owner: `Name` on `YYYY-MM-DD`
 - Signed off by operations owner: `Name` on `YYYY-MM-DD`
 
+### Gate D lock
+- Status: `LOCKED (user-confirmed on 2026-02-07)`
+- Selected payroll handoff:
+  - [x] `D1` Unity ERP exports raw `Regular/Overtime/Double Time` hours; payroll system calculates pay amounts
+  - [ ] `D2` Unity ERP calculates pay amounts and payroll system imports final amounts
+- Effective date for handoff contract: `2026-02-07`
+- Decision owner: `User confirmed in chat (formal owner name pending)`
+- Rationale: `Payroll system is authoritative for pay multiplier calculations; ERP provides raw hours only.`
+- Integration boundary note: `Payroll program is third-party and not tied to Unity ERP code/runtime.`
+- Approved by payroll owner: `Pending name` on `2026-02-07`
+- Approved by operations owner: `Pending name` on `2026-02-07`
+
 ### Gate readiness summary
 - Gate A: `NOT LOCKED`
-- Gate B: `NOT LOCKED`
+- Gate B: `LOCKED (B1)`
 - Gate C: `NOT LOCKED`
-- Phase 0 implementation start allowed: `NO` (must be `YES` only when all three gates are locked)
+- Gate D: `LOCKED (D1)`
+- Phase 0 implementation start allowed: `NO` (must be `YES` only when all gates are locked)
 
 ## 3) Canonical calculation spec (target state)
 
-Assuming Gate A = daily 9-hour and Gate B policy is confirmed.
+Assuming Gate A = daily 9-hour, Gate B policy is confirmed, and Gate D is locked.
 
 1. Week boundary for reporting: Friday -> Thursday.
 2. Tea deduction:
@@ -97,7 +133,13 @@ Assuming Gate A = daily 9-hour and Gate B policy is confirmed.
 4. Reconciliation:
 - `net_work_minutes = regular_minutes + ot_minutes + dt_minutes`
 - `total_hours_worked = round(net_work_minutes / 60, 2)`
-5. Wages:
+5. Payroll handoff:
+- Unity ERP exports/stores raw hour buckets for payroll handoff:
+  - `regular_hours`
+  - `overtime_hours`
+  - `doubletime_hours`
+- External third-party payroll system applies the pay multipliers and final currency calculations.
+6. Optional internal wage preview (non-authoritative for payroll payout):
 - `wage_cents = round(((regular_minutes/60 * rate) + (ot_minutes/60 * rate * 1.5) + (dt_minutes/60 * rate * 2.0)) * 100)`
 
 ## 4) Implementation phases
@@ -149,18 +191,19 @@ Exit:
 
 ### Phase 3: Consumer alignment
 1. Update weekly summary to consume persisted minute buckets directly (no day-of-week re-derivation for totals).
-2. Update payroll page to derive hourly totals from `time_daily_summary` buckets.
-3. Define `staff_hours` role explicitly:
+2. Update payroll page/export to derive raw hour totals from `time_daily_summary` buckets.
+3. Ensure payroll handoff output includes explicit `Regular`, `Overtime`, and `D/Time` hour fields (raw hours only; no payout math).
+4. Define `staff_hours` role explicitly:
 - either legacy/manual capture only, or
 - fully aligned schema + reconciliation.
-4. Ensure all outputs (weekly summary, reports, payroll) agree for same staff/week.
+5. Ensure all outputs (weekly summary, reports, payroll handoff) agree for same staff/week.
 
 Exit:
 - All consumers show consistent regular/OT/DT totals.
 
 ### Phase 4: Dual-run validation
 1. Run old and new payroll logic in parallel for minimum 2 payroll cycles.
-2. Produce per-staff diff reports (hours and currency).
+2. Produce per-staff diff reports (raw hours as primary; currency optional secondary check).
 3. Investigate all non-zero diffs and document rationale/fix.
 
 Exit:
@@ -227,8 +270,9 @@ Exit:
 
 1. Payroll/business owner: Gate A and Gate B policies.
 2. Technical owner: Gate C schema/function verification sign-off.
-3. Operations owner: dual-run parity acceptance.
-4. Final go-live approval: payroll + operations.
+3. Payroll/business owner: Gate D payroll handoff contract sign-off.
+4. Operations owner: dual-run parity acceptance.
+5. Final go-live approval: payroll + operations.
 
 ---
 

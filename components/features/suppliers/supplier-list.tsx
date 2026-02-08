@@ -354,14 +354,14 @@ export function SupplierList() {
                   <tr
                     key={supplier.supplier_id}
                     className={`hover:bg-accent/10 dark:hover:bg-accent/30 transition-colors cursor-pointer group ${
-                      !supplier.is_active ? 'opacity-50' : ''
+                      supplier.is_active === false ? 'opacity-50' : ''
                     }`}
                     onClick={() => router.push(`/suppliers/${supplier.supplier_id}`)}
                   >
                     <td className="px-6 py-4 whitespace-nowrap text-base font-semibold text-foreground group-hover:text-primary transition-colors">
                       <span className="flex items-center gap-2">
                         {supplier.name || 'N/A'}
-                        {!supplier.is_active && (
+                        {supplier.is_active === false && (
                           <Badge variant="secondary" className="text-[10px] px-1.5 py-0">Inactive</Badge>
                         )}
                       </span>
