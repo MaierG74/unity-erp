@@ -14,7 +14,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getSuppliers, deleteSupplier, getOpenOrderCounts } from '@/lib/api/suppliers';
-import { Plus, Trash2, Package, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Trash2, Package, ChevronLeft, ChevronRight, Loader2, Users } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useDebounce } from '@/hooks/use-debounce';
 import { PricelistPreviewModal } from './pricelist-preview-modal';
@@ -28,6 +28,14 @@ import { useToast } from '@/components/ui/use-toast';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -271,8 +279,8 @@ export function SupplierList() {
 
   if (isLoading) {
     return (
-      <div className="flex justify-center items-center py-12">
-        <span className="text-muted-foreground animate-pulse text-lg">Loading...</span>
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -318,55 +326,55 @@ export function SupplierList() {
         </label>
       </PageToolbar>
 
-      <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
-        <table className="min-w-full divide-y divide-border bg-background dark:bg-card">
-          <thead className="bg-muted dark:bg-muted/20">
-            <tr>
-              <th scope="col" className="px-6 py-3 text-left text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                Name
-              </th>
-              <th scope="col" className="px-6 py-3 text-center text-xs font-bold text-muted-foreground uppercase tracking-wider w-32">
-                Open Orders
-              </th>
-              <th scope="col" className="px-6 py-3 text-left text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                Email
-              </th>
-              <th scope="col" className="px-6 py-3 text-left text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                Price Lists
-              </th>
-              <th scope="col" className="px-6 py-3 text-right text-xs font-bold text-muted-foreground uppercase tracking-wider w-20">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
+      <div className="rounded-xl border bg-card shadow-sm">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead className="text-center w-32">Open Orders</TableHead>
+              <TableHead>Email</TableHead>
+              <TableHead>Price Lists</TableHead>
+              <TableHead className="text-right w-20">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {paginatedSuppliers.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="px-6 py-8 text-center text-base text-muted-foreground">
-                  {searchTerm ? 'No suppliers found matching your search.' : 'No suppliers found. Add your first supplier!'}
-                </td>
-              </tr>
+              <TableRow>
+                <TableCell colSpan={5} className="py-0">
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <Users className="h-12 w-12 text-muted-foreground mb-3" />
+                    <p className="text-lg font-medium">
+                      {searchTerm ? 'No suppliers found' : 'No suppliers yet'}
+                    </p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {searchTerm
+                        ? 'Try adjusting your search or filters.'
+                        : 'Add your first supplier to get started.'}
+                    </p>
+                  </div>
+                </TableCell>
+              </TableRow>
             ) : (
               paginatedSuppliers.map((supplier) => {
                 const email = supplier.emails?.find((e) => e.is_primary)?.email || supplier.emails?.[0]?.email || '';
                 const orderCount = openOrderCounts[supplier.supplier_id] || 0;
                 return (
-                  <tr
+                  <TableRow
                     key={supplier.supplier_id}
-                    className={`hover:bg-accent/10 dark:hover:bg-accent/30 transition-colors cursor-pointer group ${
+                    className={`cursor-pointer group ${
                       supplier.is_active === false ? 'opacity-50' : ''
                     }`}
                     onClick={() => router.push(`/suppliers/${supplier.supplier_id}`)}
                   >
-                    <td className="px-6 py-4 whitespace-nowrap text-base font-semibold text-foreground group-hover:text-primary transition-colors">
+                    <TableCell className="font-semibold text-foreground group-hover:text-primary transition-colors">
                       <span className="flex items-center gap-2">
                         {supplier.name || 'N/A'}
                         {supplier.is_active === false && (
                           <Badge variant="secondary" className="text-[10px] px-1.5 py-0">Inactive</Badge>
                         )}
                       </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
+                    </TableCell>
+                    <TableCell className="text-center">
                       {orderCount > 0 ? (
                         <button
                           onClick={(e) => {
@@ -382,11 +390,11 @@ export function SupplierList() {
                       ) : (
                         <span className="text-muted-foreground/40">&mdash;</span>
                       )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-base text-muted-foreground">
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
                       {email || 'N/A'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-base text-muted-foreground">
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
                       {supplier.pricelists && supplier.pricelists.length > 0 ? (
                         renderPricelistStrip(supplier) || (
                           <span className="text-muted-foreground/60">None active</span>
@@ -394,27 +402,29 @@ export function SupplierList() {
                       ) : (
                         'None'
                       )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right">
+                    </TableCell>
+                    <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           onClick={(e) => {
                             e.stopPropagation();
                             setSupplierToDelete(supplier);
                           }}
-                          className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                           title="Delete supplier"
                         >
                           <Trash2 className="h-4 w-4" />
-                        </button>
+                        </Button>
                       </div>
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 );
               })
             )}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
 
       {/* Pagination controls */}
