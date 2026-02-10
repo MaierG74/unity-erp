@@ -5,7 +5,8 @@ import { useDropzone } from 'react-dropzone';
 import { POAttachment, uploadPOAttachment, deletePOAttachment } from '@/lib/db/purchase-order-attachments';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Upload, X, FileText, Image as ImageIcon, FileSpreadsheet, Loader2 } from 'lucide-react';
+import { Upload, X, FileText, Image as ImageIcon, FileSpreadsheet, Loader2, Truck } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -107,21 +108,41 @@ export default function POAttachmentManager({
         {attachments.length > 0 && (
           <div className="space-y-2">
             {attachments.map((att) => {
-              const Icon = getFileIcon(att.mime_type);
+              const isDeliveryNote = att.attachment_type === 'delivery_note';
+              const Icon = isDeliveryNote ? Truck : getFileIcon(att.mime_type);
               return (
                 <div
                   key={att.id}
                   className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
                 >
-                  <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <a
-                    href={att.file_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-1 truncate hover:underline"
-                  >
-                    {att.original_name || 'Attachment'}
-                  </a>
+                  <Icon className={cn('h-4 w-4 shrink-0', isDeliveryNote ? 'text-primary' : 'text-muted-foreground')} />
+                  <div className="flex-1 min-w-0">
+                    <a
+                      href={att.file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="truncate hover:underline block"
+                    >
+                      {att.original_name || 'Attachment'}
+                    </a>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {isDeliveryNote && (
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                          Delivery Note
+                        </Badge>
+                      )}
+                      {att.receipt_id && (
+                        <span className="text-[10px] text-muted-foreground">
+                          Receipt #{att.receipt_id}
+                        </span>
+                      )}
+                      {att.notes && (
+                        <span className="text-[10px] text-muted-foreground truncate">
+                          {att.notes}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                   <span className="shrink-0 text-xs text-muted-foreground">
                     {formatFileSize(att.file_size)}
                   </span>

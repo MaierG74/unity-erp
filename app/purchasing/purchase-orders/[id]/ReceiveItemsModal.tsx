@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { format } from 'date-fns';
-import { Loader2, Download, Eye, Mail, X } from 'lucide-react';
+import { Loader2, Download, Eye, Mail, X, CheckCircle2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -19,6 +19,8 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { supabase } from '@/lib/supabase';
 import { ReturnGoodsPDFDownload } from '@/components/features/purchasing/ReturnGoodsPDFDownload';
+import DeliveryNoteUpload from '@/components/features/purchasing/DeliveryNoteUpload';
+import { uploadPOAttachment } from '@/lib/db/purchase-order-attachments';
 import { useQuery } from '@tanstack/react-query';
 
 // Helper to format company info
@@ -121,6 +123,9 @@ export function ReceiveItemsModal({
   } | null>(null);
   const [emailStatus, setEmailStatus] = useState<'idle' | 'sending' | 'sent' | 'skipped' | 'error'>('idle');
   const [emailError, setEmailError] = useState<string | null>(null);
+  const [deliveryNoteFile, setDeliveryNoteFile] = useState<File | null>(null);
+  const [isUploadingNote, setIsUploadingNote] = useState(false);
+  const [noteUploaded, setNoteUploaded] = useState(false);
 
   const remainingToReceive = Math.max(0, supplierOrder.order_quantity - (supplierOrder.total_received || 0));
 
@@ -235,6 +240,37 @@ export function ReceiveItemsModal({
         }
       }
 
+      // Upload delivery note if one was selected
+      if (deliveryNoteFile) {
+        setIsUploadingNote(true);
+        try {
+          // Get the latest receipt for this order to link the attachment
+          const { data: latestReceipt } = await supabase
+            .from('supplier_order_receipts')
+            .select('receipt_id')
+            .eq('order_id', supplierOrder.order_id)
+            .order('receipt_id', { ascending: false })
+            .limit(1)
+            .single();
+
+          await uploadPOAttachment(
+            deliveryNoteFile,
+            supplierOrder.purchase_order.purchase_order_id,
+            {
+              receiptId: latestReceipt?.receipt_id,
+              attachmentType: 'delivery_note',
+              notes: data.notes || undefined,
+            }
+          );
+          setNoteUploaded(true);
+        } catch (uploadErr) {
+          console.error('Failed to upload delivery note:', uploadErr);
+          // Don't fail the whole receipt — note the error but continue
+        } finally {
+          setIsUploadingNote(false);
+        }
+      }
+
       // Success! Don't close the modal yet, show success state
       setSuccessData(nextSuccessState);
       reset();
@@ -292,6 +328,8 @@ export function ReceiveItemsModal({
     setSuccessData(null);
     setEmailStatus('idle');
     setEmailError(null);
+    setDeliveryNoteFile(null);
+    setNoteUploaded(false);
     onOpenChange(false);
   };
 
@@ -412,6 +450,12 @@ export function ReceiveItemsModal({
                   <p className="text-sm text-destructive mt-1">{errors.notes.message}</p>
                 )}
               </div>
+
+              <DeliveryNoteUpload
+                onFileSelect={setDeliveryNoteFile}
+                selectedFile={deliveryNoteFile}
+                disabled={isSubmitting}
+              />
             </div>
 
             <div className="flex justify-between items-center pt-4 border-t">
@@ -432,12 +476,12 @@ export function ReceiveItemsModal({
                 </Button>
                 <Button
                   type="submit"
-                  disabled={isSubmitting || receiveTooHigh || !hasQuantity}
+                  disabled={isSubmitting || isUploadingNote || receiveTooHigh || !hasQuantity}
                 >
-                  {isSubmitting ? (
+                  {isSubmitting || isUploadingNote ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Processing...
+                      {isUploadingNote ? 'Uploading note...' : 'Processing...'}
                     </>
                   ) : (
                     'Record Receipt'
@@ -459,6 +503,12 @@ export function ReceiveItemsModal({
               {successData.grn && (
                 <div className="text-sm text-green-700">
                   Goods Return Number: <span className="font-mono font-bold">{successData.grn}</span>
+                </div>
+              )}
+              {noteUploaded && (
+                <div className="text-sm text-green-700 flex items-center gap-1">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Delivery note attached
                 </div>
               )}
             </div>
