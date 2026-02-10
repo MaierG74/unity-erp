@@ -22,6 +22,14 @@ export const metadata: Metadata = {
   description: "Internal ERP system built with modern React stack",
   icons: {
     icon: "/favicon.ico",
+    apple: "/icon-192.png",
+  },
+  manifest: "/manifest.webmanifest",
+  themeColor: "#09090b",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Unity ERP",
   },
 };
 

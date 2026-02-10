@@ -263,6 +263,9 @@ export function useQuoteCutlistAdapter(
       // Convert API layout format to CutlistSnapshot
       const partialSnapshot = layoutToSnapshot(layout);
 
+      // Restore billing overrides if present
+      const billing = cutlist.billing_overrides as SnapshotBilling | null | undefined;
+
       // Build full snapshot with defaults
       const snapshot: CutlistSnapshot = {
         parts: partialSnapshot.parts ?? [],
@@ -294,6 +297,12 @@ export function useQuoteCutlistAdapter(
           singleSheetOnly: false,
         },
         inputMode: 'manual', // Quote cutlist uses manual mode
+        billingOverrides: billing
+          ? {
+              globalFullBoard: billing.globalFullBoard ?? false,
+              sheetOverrides: billing.sheetOverrides ?? {},
+            }
+          : undefined,
       };
 
       return snapshot;
@@ -321,13 +330,20 @@ export function useQuoteCutlistAdapter(
         singleSheetOnly: snapshot.options.singleSheetOnly,
       });
 
+      const billingOverrides: SnapshotBilling | null = snapshot.billingOverrides
+        ? {
+            globalFullBoard: snapshot.billingOverrides.globalFullBoard,
+            sheetOverrides: snapshot.billingOverrides.sheetOverrides,
+          }
+        : null;
+
       const res = await fetch(`/api/quote-items/${quoteItemId}/cutlist`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           layout,
           optionsHash,
-          billingOverrides: null,
+          billingOverrides,
         }),
       });
 

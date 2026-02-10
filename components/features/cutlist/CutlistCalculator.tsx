@@ -1042,10 +1042,11 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
 
     setResult(res);
     setEdgingByMaterialMap(edgingPerMaterial);
-    setSheetOverrides({});
-    setGlobalFullBoard(false);
-    setBackerSheetOverrides({});
-    setBackerGlobalFullBoard(false);
+    // NOTE: Do NOT reset sheetOverrides/globalFullBoard here.
+    // Billing overrides are keyed by sheet_id — stale keys for sheets
+    // that no longer exist are harmlessly ignored by computeSheetCharge.
+    // Resetting them here would destroy manual % adjustments when the
+    // user recalculates (e.g. during "Recalculate & Replace" export).
 
     const backerParts: PartSpec[] = partSpecs
       .filter((p) => p.lamination_type === 'with-backer')

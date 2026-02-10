@@ -88,6 +88,10 @@ export interface CutlistSnapshot {
     singleSheetOnly: boolean;
   };
   inputMode: 'manual' | 'grouped';
+  billingOverrides?: {
+    globalFullBoard: boolean;
+    sheetOverrides: Record<string, SheetBillingOverride>;
+  };
 }
 
 /**
@@ -415,6 +419,15 @@ export function CutlistWorkspace({
         setInputMode(snapshot.inputMode);
       }
 
+      if (snapshot.billingOverrides) {
+        if (typeof snapshot.billingOverrides.globalFullBoard === 'boolean') {
+          setGlobalFullBoard(snapshot.billingOverrides.globalFullBoard);
+        }
+        if (snapshot.billingOverrides.sheetOverrides) {
+          setSheetOverrides(snapshot.billingOverrides.sheetOverrides);
+        }
+      }
+
       materialsLoadedRef.current = true;
     }).catch((err) => {
       console.warn('Failed to load cutlist snapshot', err);
@@ -454,6 +467,10 @@ export function CutlistWorkspace({
         singleSheetOnly,
       },
       inputMode,
+      billingOverrides: {
+        globalFullBoard,
+        sheetOverrides,
+      },
     };
 
     persistenceAdapter.save(snapshot).catch((err) => {
@@ -482,6 +499,8 @@ export function CutlistWorkspace({
     allowRotation,
     singleSheetOnly,
     inputMode,
+    globalFullBoard,
+    sheetOverrides,
   ]);
 
   // Update parts with default material when materials change

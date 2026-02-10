@@ -24,6 +24,10 @@ export function Navbar() {
   const compactOn = searchParams?.get('compact') !== '0';
   const isLaborPlanning = pathname?.startsWith('/labor-planning');
   const isQuoteDetail = pathname?.startsWith('/quotes/') && pathname !== '/quotes/new';
+  // On cutlist sub-pages (/quotes/[id]/cutlist/...), link back to the specific quote
+  const quoteCutlistMatch = pathname?.match(/^\/quotes\/([^/]+)\/cutlist\//);
+  const quoteBackHref = quoteCutlistMatch ? `/quotes/${quoteCutlistMatch[1]}` : '/quotes';
+  const quoteBackLabel = quoteCutlistMatch ? 'Quote' : 'Quotes';
   const userRole = (user as any)?.app_metadata?.role || (user as any)?.user_metadata?.role;
 
   useEffect(() => {
@@ -104,11 +108,11 @@ export function Navbar() {
         <div className="flex flex-1 items-center">
           {isQuoteDetail && (
             <Link
-              href="/quotes"
+              href={quoteBackHref}
               className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
               <ChevronLeft className="h-4 w-4" />
-              <span>Quotes</span>
+              <span>{quoteBackLabel}</span>
             </Link>
           )}
           {isLaborPlanning && (
