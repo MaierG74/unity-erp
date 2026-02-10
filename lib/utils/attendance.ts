@@ -123,6 +123,13 @@ const fetchHourlyRate = async (staffId: number): Promise<number> => {
   return Number.isFinite(rate) ? rate : 0;
 };
 
+const normalizeSupabaseError = (error: any) => ({
+  message: error?.message ?? 'Unknown Supabase error',
+  code: error?.code ?? null,
+  details: error?.details ?? null,
+  hint: error?.hint ?? null,
+});
+
 /**
  * Process clock events into time segments for a specific date
  */
@@ -730,28 +737,60 @@ export const addManualClockEvent = async (
         p_notes: notesValue
       }
     );
+    let insertedEventId: string | null = null;
     if (!rpcError) {
+      insertedEventId = (insertedEvent as any)?.id ?? null;
       eventInserted = true;
     } else {
-      console.log('RPC failed, trying direct insert:', rpcError);
-      const { data: directInsert, error: directError } = await supabase
+      console.log('RPC failed, trying direct insert:', normalizeSupabaseError(rpcError));
+      const baseInsertPayload: Record<string, any> = {
+        id: eventId,
+        staff_id: staffId,
+        event_time: eventTime.toISOString(),
+        event_type: eventType,
+        break_type: breakType || null,
+        verification_method: 'manual',
+        notes: notesValue,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      // Do NOT chain .select() here. Some environments allow INSERT but block SELECT under RLS.
+      let { error: directError } = await supabase
         .from('time_clock_events')
-        .insert({
-          id: eventId,
-          staff_id: staffId,
-          event_time: eventTime.toISOString(),
-          event_type: eventType,
-          break_type: breakType || null,
-          verification_method: 'manual',
-          notes: notesValue,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .select();
+        .insert(baseInsertPayload);
+
+      const needsOrgIdRetry =
+        !!directError &&
+        /org_id|row-level security|RLS|null value in column/i.test(
+          `${directError.message ?? ''} ${directError.details ?? ''} ${directError.hint ?? ''}`
+        );
+
+      if (needsOrgIdRetry) {
+        try {
+          const { data: authData } = await supabase.auth.getUser();
+          const orgId =
+            (authData?.user as any)?.app_metadata?.org_id ??
+            (authData?.user as any)?.user_metadata?.org_id ??
+            null;
+
+          if (orgId) {
+            const { error: retryError } = await supabase.from('time_clock_events').insert({
+              ...baseInsertPayload,
+              org_id: orgId,
+            } as any);
+            directError = retryError ?? null;
+          }
+        } catch (authRetryError) {
+          console.warn('Org-aware retry failed while reading user metadata:', authRetryError);
+        }
+      }
+
       if (directError) {
-        console.error('Direct insert also failed:', directError);
+        console.error('Direct insert also failed:', normalizeSupabaseError(directError));
         return { success: false, error: directError };
       }
+      insertedEventId = eventId;
       eventInserted = true;
     }
     if (!eventInserted) {
@@ -777,6 +816,7 @@ export const addManualClockEvent = async (
       
     if (recentEvents && recentEvents.length > 0) {
       newEventId = recentEvents[0].id;
+      insertedEventId = newEventId ?? null;
     }
     
     if (eventType === 'clock_out' || eventType === 'break_end') {
@@ -815,7 +855,7 @@ export const addManualClockEvent = async (
         if (unpaired.length > 0) {
           const matchingEvent = unpaired[0];
           const segmentType = eventType === 'clock_out' ? 'work' : 'break';
-          const insertedEventId = newEventId || eventId;
+          const resolvedInsertedEventId = insertedEventId;
           
           // Calculate duration
           const durationMins = calculateDurationMinutes(
@@ -831,11 +871,11 @@ export const addManualClockEvent = async (
 
           if (eventType === 'clock_out' || eventType === 'break_end') {
             cin_id = matchingEvent.id;
-            cout_id = insertedEventId;
+            cout_id = resolvedInsertedEventId;
             s_time = matchingEvent.event_time;
             e_time = eventTime.toISOString();
           } else { // clock_in or break_start
-            cin_id = insertedEventId;
+            cin_id = resolvedInsertedEventId;
             cout_id = matchingEvent.id;
             s_time = eventTime.toISOString();
             e_time = matchingEvent.event_time;

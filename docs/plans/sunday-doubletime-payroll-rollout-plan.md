@@ -17,6 +17,10 @@ Owner: Unassigned
   - `total_hours_worked`
 - Updated `DailyHoursDetailDialog` segment-edit recalculation to persist the same payroll fields above.
 - Kept rollout scope aligned with Gate B (`Sunday-only` double-time).
+- Hardened `addManualClockEvent()` fallback insert path:
+  - removed `.select()` from direct insert to avoid RLS/select-return failures,
+  - added normalized error logging for actionable diagnostics,
+  - added retry path with `org_id` when insert fails due org/RLS constraints.
 
 ## 1) Why this plan is required
 

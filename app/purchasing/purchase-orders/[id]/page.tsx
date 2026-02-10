@@ -23,7 +23,7 @@ import { EmailActivityCard } from '@/components/features/emails/EmailActivityCar
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertCircle, ArrowLeft, Loader2, CheckCircle2, Mail, Pencil, Save, X, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Loader2, CheckCircle2, Mail, Pencil, Save, X, Trash2, ChevronDown, ChevronRight, Paperclip } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -1566,6 +1566,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const isPendingApproval = purchaseOrder.status?.status_name === 'Pending Approval';
   const isDraft = purchaseOrder.status?.status_name === 'Draft';
   const isApproved = purchaseOrder.status?.status_name === 'Approved';
+  const isCancelled = purchaseOrder.status?.status_name === 'Cancelled';
 
   // Calculate totals
   const totalItems = purchaseOrder.supplier_orders?.reduce((sum, order) => sum + order.order_quantity, 0) || 0;
@@ -2242,7 +2243,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
               purchaseOrderId={purchaseOrder.purchase_order_id}
               attachments={poAttachments}
               onAttachmentsChange={(atts) => refetchAttachments()}
-              disabled={!isDraft && !isPendingApproval}
+              disabled={isCancelled}
             />
           </div>
         )}
@@ -2288,27 +2289,46 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                             <TableHead>Quantity</TableHead>
                             <TableHead>Date Received</TableHead>
                             <TableHead>Transaction ID</TableHead>
+                            <TableHead className="w-10"></TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {order.receipts.map((receipt) => (
-                            <TableRow key={receipt.receipt_id}>
-                              <TableCell>#{receipt.receipt_id}</TableCell>
-                              <TableCell>{receipt.quantity_received}</TableCell>
-                              <TableCell>
-                                {new Date(receipt.receipt_date).toLocaleString('en-ZA', {
-                                  timeZone: 'Africa/Johannesburg',
-                                  year: 'numeric',
-                                  month: 'short',
-                                  day: 'numeric',
-                                  hour: 'numeric',
-                                  minute: '2-digit',
-                                  hour12: true
-                                })}
-                              </TableCell>
-                              <TableCell>#{receipt.transaction_id}</TableCell>
-                            </TableRow>
-                          ))}
+                          {order.receipts.map((receipt) => {
+                            const receiptAttachment = poAttachments.find(
+                              (att) => att.receipt_id === receipt.receipt_id
+                            );
+                            return (
+                              <TableRow key={receipt.receipt_id}>
+                                <TableCell>#{receipt.receipt_id}</TableCell>
+                                <TableCell>{receipt.quantity_received}</TableCell>
+                                <TableCell>
+                                  {new Date(receipt.receipt_date).toLocaleString('en-ZA', {
+                                    timeZone: 'Africa/Johannesburg',
+                                    year: 'numeric',
+                                    month: 'short',
+                                    day: 'numeric',
+                                    hour: 'numeric',
+                                    minute: '2-digit',
+                                    hour12: true
+                                  })}
+                                </TableCell>
+                                <TableCell>#{receipt.transaction_id}</TableCell>
+                                <TableCell>
+                                  {receiptAttachment && (
+                                    <a
+                                      href={receiptAttachment.file_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      title={receiptAttachment.original_name || 'Delivery note'}
+                                      className="text-muted-foreground hover:text-primary transition-colors"
+                                    >
+                                      <Paperclip className="h-4 w-4" />
+                                    </a>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
                         </TableBody>
                       </Table>
                     </div>

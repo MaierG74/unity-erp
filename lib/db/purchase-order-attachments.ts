@@ -8,6 +8,10 @@ export type POAttachment = {
   original_name: string | null;
   file_size: number | null;
   uploaded_at: string;
+  receipt_id: number | null;
+  uploaded_by: string | null;
+  notes: string | null;
+  attachment_type: string | null;
 };
 
 const STORAGE_BUCKET = 'QButton';
@@ -30,7 +34,12 @@ export async function fetchPOAttachments(purchaseOrderId: number): Promise<POAtt
 
 export async function uploadPOAttachment(
   file: File,
-  purchaseOrderId: number
+  purchaseOrderId: number,
+  options?: {
+    receiptId?: number;
+    notes?: string;
+    attachmentType?: 'general' | 'delivery_note';
+  }
 ): Promise<POAttachment> {
   const fileExt = file.name.split('.').pop() || 'bin';
   const uniqueName = `${crypto.randomUUID()}.${fileExt}`;
@@ -68,6 +77,9 @@ export async function uploadPOAttachment(
       mime_type: file.type || null,
       original_name: file.name,
       file_size: file.size,
+      receipt_id: options?.receiptId ?? null,
+      notes: options?.notes ?? null,
+      attachment_type: options?.attachmentType ?? 'general',
     })
     .select('*')
     .single();

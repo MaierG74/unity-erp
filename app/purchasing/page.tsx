@@ -13,6 +13,7 @@ import {
   Download,
   CheckCircle2,
   Filter,
+  Paperclip,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useQuery } from '@tanstack/react-query';
@@ -313,6 +314,12 @@ export default function PurchasingPage() {
         >
           <Download className="h-4 w-4 mr-2" />
           Receive Stock
+        </Button>
+        <Button variant="outline" asChild>
+          <Link href="/purchasing/quick-upload">
+            <Paperclip className="h-4 w-4 mr-2" />
+            Upload Delivery Note
+          </Link>
         </Button>
         <Button variant="outline" asChild>
           <Link href="/purchasing/purchase-orders">
