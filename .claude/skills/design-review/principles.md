@@ -87,6 +87,12 @@ Use this checklist when auditing any page:
 - [ ] Lists over 10-15 items have pagination or "Load More"
 - [ ] Count text uses correct pluralization
 - [ ] Page size selector available for paginated lists
+- [ ] **URL-based state persistence**: Pagination and filters are persisted in URL query parameters
+  - When navigating to detail pages and back, users return to the same page with filters intact
+  - Page number stored as `?page=N` (1-based), defaults omitted for clean URLs
+  - Page size stored as `?pageSize=N` if not default (10)
+  - Filters stored as `?category=X&supplier=Y&q=search` etc.
+  - Reference implementation: `components/features/inventory/ComponentsTab.tsx`
 
 ### Responsiveness
 - [ ] Page stacks vertically on mobile

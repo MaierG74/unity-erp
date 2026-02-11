@@ -129,28 +129,42 @@ export function ComponentsTab() {
   const debouncedFilterText = useDebounce(filterText, 300);
   const [selectedCategory, setSelectedCategory] = useState<string>(() => searchParams?.get('category') || '_all');
   const [selectedSupplier, setSelectedSupplier] = useState<string>(() => searchParams?.get('supplier') || '_all');
+  const [currentPage, setCurrentPage] = useState(() => {
+    const pageParam = searchParams?.get('page');
+    return pageParam ? parseInt(pageParam, 10) - 1 : 0; // Convert to 0-based index
+  });
+  const [pageSize, setPageSize] = useState(() => {
+    const sizeParam = searchParams?.get('pageSize');
+    return sizeParam ? parseInt(sizeParam, 10) : 10;
+  });
   const [categorySearch, setCategorySearch] = useState('');
   const [supplierSearch, setSupplierSearch] = useState('');
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  // Sync filter state to URL (debounced for search, immediate for dropdowns)
+  // Sync filter and pagination state to URL (debounced for search, immediate for dropdowns/pagination)
   useEffect(() => {
     const currentUrlQuery = searchParams?.get('q') || '';
     const currentUrlCategory = searchParams?.get('category') || '_all';
     const currentUrlSupplier = searchParams?.get('supplier') || '_all';
+    const currentUrlPage = searchParams?.get('page') || '1';
+    const currentUrlPageSize = searchParams?.get('pageSize') || '10';
 
     // Normalize values for comparison
     const categoryToSet = selectedCategory === '_all' ? '' : selectedCategory;
     const currentCategoryNormalized = currentUrlCategory === '_all' ? '' : currentUrlCategory;
     const supplierToSet = selectedSupplier === '_all' ? '' : selectedSupplier;
     const currentSupplierNormalized = currentUrlSupplier === '_all' ? '' : currentUrlSupplier;
+    const pageToSet = (currentPage + 1).toString(); // Convert 0-based to 1-based for URL
+    const pageSizeToSet = pageSize.toString();
 
     // Only update URL if values differ from current URL
     if (
       debouncedFilterText === currentUrlQuery &&
       categoryToSet === currentCategoryNormalized &&
-      supplierToSet === currentSupplierNormalized
+      supplierToSet === currentSupplierNormalized &&
+      pageToSet === currentUrlPage &&
+      pageSizeToSet === currentUrlPageSize
     ) {
       return;
     }
@@ -178,13 +192,26 @@ export function ComponentsTab() {
       params.delete('supplier');
     }
 
+    // Update pagination - only include in URL if not default values
+    if (currentPage > 0) {
+      params.set('page', pageToSet);
+    } else {
+      params.delete('page');
+    }
+
+    if (pageSize !== 10) {
+      params.set('pageSize', pageSizeToSet);
+    } else {
+      params.delete('pageSize');
+    }
+
     // Build the URL - preserve tab if it exists
     const query = params.toString();
     const url = query ? `/inventory?${query}` : '/inventory';
 
     // Use replace to avoid adding history entries for every keystroke
     router.replace(url, { scroll: false });
-  }, [debouncedFilterText, selectedCategory, selectedSupplier, router, searchParams]);
+  }, [debouncedFilterText, selectedCategory, selectedSupplier, currentPage, pageSize, router, searchParams]);
 
   // Fetch components data
   const { data: components = [], isLoading, error: queryError } = useQuery({
@@ -429,12 +456,23 @@ export function ComponentsTab() {
     );
   }, [suppliers, supplierSearch]);
 
+  const handlePageChange = useCallback((newPageIndex: number) => {
+    setCurrentPage(newPageIndex);
+  }, []);
+
+  const handlePageSizeChange = useCallback((newPageSize: number) => {
+    setPageSize(newPageSize);
+    setCurrentPage(0); // Reset to first page when changing page size
+  }, []);
+
   const resetFilters = useCallback(() => {
     setFilterText('');
     setSelectedCategory('_all');
     setSelectedSupplier('_all');
     setCategorySearch('');
     setSupplierSearch('');
+    setCurrentPage(0);
+    setPageSize(10);
     // Also clear URL params
     router.replace('/inventory', { scroll: false });
   }, [router]);
@@ -468,7 +506,10 @@ export function ComponentsTab() {
               type="text"
               placeholder="Search by code or description..."
               value={filterText}
-              onChange={(e) => setFilterText(e.target.value)}
+              onChange={(e) => {
+                setFilterText(e.target.value);
+                setCurrentPage(0); // Reset to first page when search changes
+              }}
               className="h-9 pl-9 pr-10"
             />
             {filterText && (
@@ -486,11 +527,12 @@ export function ComponentsTab() {
           {/* Category */}
           <div className="inline-flex items-center gap-2 w-full md:w-auto">
             <span className="text-sm text-muted-foreground whitespace-nowrap">Category</span>
-            <Select 
-              value={selectedCategory} 
+            <Select
+              value={selectedCategory}
               onValueChange={(value) => {
                 setSelectedCategory(value);
                 setCategorySearch('');
+                setCurrentPage(0); // Reset to first page when filter changes
               }}
             >
               <SelectTrigger className="h-9 w-full md:w-44">
@@ -529,6 +571,7 @@ export function ComponentsTab() {
               onValueChange={(value) => {
                 setSelectedSupplier(value);
                 setSupplierSearch('');
+                setCurrentPage(0); // Reset to first page when filter changes
               }}
             >
               <SelectTrigger className="h-9 w-full md:w-48">
@@ -586,6 +629,10 @@ export function ComponentsTab() {
             router.push(`/inventory/components/${component.component_id}`);
           }}
           hideFilters={true}
+          pageIndex={currentPage}
+          pageSize={pageSize}
+          onPageChange={handlePageChange}
+          onPageSizeChange={handlePageSizeChange}
         />
       </div>
 

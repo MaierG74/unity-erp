@@ -187,6 +187,81 @@ Use these mappings everywhere (list views AND detail views):
 </div>
 ```
 
+### URL-Based State Persistence
+
+**Reference:** `components/features/inventory/ComponentsTab.tsx`
+
+Persist pagination and filters in URL query parameters so users return to the same page when navigating back from detail pages.
+
+**1. Initialize state from URL parameters:**
+```tsx
+const searchParams = useSearchParams();
+const [currentPage, setCurrentPage] = useState(() => {
+  const pageParam = searchParams?.get('page');
+  return pageParam ? parseInt(pageParam, 10) - 1 : 0; // Convert to 0-based
+});
+const [pageSize, setPageSize] = useState(() => {
+  const sizeParam = searchParams?.get('pageSize');
+  return sizeParam ? parseInt(sizeParam, 10) : 10;
+});
+const [filterText, setFilterText] = useState(() => searchParams?.get('q') || '');
+const [selectedCategory, setSelectedCategory] = useState(() =>
+  searchParams?.get('category') || '_all'
+);
+```
+
+**2. Sync changes to URL:**
+```tsx
+useEffect(() => {
+  const params = new URLSearchParams(searchParams?.toString() || '');
+
+  // Update filters
+  if (filterText) params.set('q', filterText);
+  else params.delete('q');
+
+  if (selectedCategory !== '_all') params.set('category', selectedCategory);
+  else params.delete('category');
+
+  // Update pagination (only include if not default)
+  if (currentPage > 0) params.set('page', (currentPage + 1).toString());
+  else params.delete('page');
+
+  if (pageSize !== 10) params.set('pageSize', pageSize.toString());
+  else params.delete('pageSize');
+
+  const query = params.toString();
+  const url = query ? `/inventory?${query}` : '/inventory';
+  router.replace(url, { scroll: false });
+}, [filterText, selectedCategory, currentPage, pageSize, router, searchParams]);
+```
+
+**3. Reset to page 1 when filters change:**
+```tsx
+// In filter change handlers
+const handleCategoryChange = (value: string) => {
+  setSelectedCategory(value);
+  setCurrentPage(0); // Reset to first page
+};
+```
+
+**4. Use controlled DataTable:**
+```tsx
+<DataTable
+  data={filteredData}
+  pageIndex={currentPage}
+  pageSize={pageSize}
+  onPageChange={setCurrentPage}
+  onPageSizeChange={setPageSize}
+  // ... other props
+/>
+```
+
+**Benefits:**
+- Users return to the exact page + filters after viewing details
+- Shareable URLs with filters applied
+- Browser back/forward works correctly
+- Clean URLs (default values omitted)
+
 ## Loading States
 
 **Skeleton:** `<Skeleton className="h-8 w-16" />` (adjust size per context)

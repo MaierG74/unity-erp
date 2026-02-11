@@ -38,6 +38,11 @@ interface DataTableProps<T> {
   onRowClick?: (row: T) => void
   selectedId?: string | number
   hideFilters?: boolean
+  // Controlled pagination (optional)
+  pageIndex?: number
+  pageSize?: number
+  onPageChange?: (pageIndex: number) => void
+  onPageSizeChange?: (pageSize: number) => void
 }
 
 function getValue(obj: any, path: string) {
@@ -50,12 +55,40 @@ export function DataTable<T extends { [key: string]: any }>({
   onRowClick,
   selectedId,
   hideFilters = false,
+  pageIndex: controlledPageIndex,
+  pageSize: controlledPageSize,
+  onPageChange,
+  onPageSizeChange,
 }: DataTableProps<T>) {
-  const [pageIndex, setPageIndex] = useState(0)
-  const [pageSize, setPageSize] = useState(10)
+  // Use controlled state if provided, otherwise use internal state
+  const [internalPageIndex, setInternalPageIndex] = useState(0)
+  const [internalPageSize, setInternalPageSize] = useState(10)
   const [sortBy, setSortBy] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null)
   const [filterValue, setFilterValue] = useState('')
   const [columnFilters, setColumnFilters] = useState<{ [key: string]: string }>({})
+
+  // Determine which state to use
+  const pageIndex = controlledPageIndex !== undefined ? controlledPageIndex : internalPageIndex
+  const pageSize = controlledPageSize !== undefined ? controlledPageSize : internalPageSize
+
+  // Helper to update page index (controlled or internal)
+  const handlePageIndexChange = (newPageIndex: number) => {
+    if (onPageChange) {
+      onPageChange(newPageIndex)
+    } else {
+      setInternalPageIndex(newPageIndex)
+    }
+  }
+
+  // Helper to update page size (controlled or internal)
+  const handlePageSizeChange = (newPageSize: number) => {
+    if (onPageSizeChange) {
+      onPageSizeChange(newPageSize)
+    } else {
+      setInternalPageSize(newPageSize)
+      setInternalPageIndex(0)
+    }
+  }
 
   // Hooks for inline editing
   const updateComponent = useUpdateComponent()
@@ -259,7 +292,7 @@ export function DataTable<T extends { [key: string]: any }>({
               value={filterValue}
               onChange={(e) => {
                 setFilterValue(e.target.value)
-                setPageIndex(0) // Reset to first page when filtering
+                handlePageIndexChange(0) // Reset to first page when filtering
               }}
               className="max-w-sm"
             />
@@ -273,7 +306,7 @@ export function DataTable<T extends { [key: string]: any }>({
                     ...prev,
                     [column.accessorKey]: value === 'all' ? '_all' : value
                   }))
-                  setPageIndex(0)
+                  handlePageIndexChange(0)
                 }}
               >
                 <SelectTrigger className="w-full">
@@ -295,8 +328,8 @@ export function DataTable<T extends { [key: string]: any }>({
           <Select
             value={pageSize.toString()}
             onValueChange={(value) => {
-              setPageSize(Number(value))
-              setPageIndex(0)
+              handlePageSizeChange(Number(value))
+              handlePageIndexChange(0)
             }}
           >
             <SelectTrigger className="w-[180px]">
@@ -398,7 +431,7 @@ export function DataTable<T extends { [key: string]: any }>({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setPageIndex(Math.max(0, pageIndex - 1))}
+            onClick={() => handlePageIndexChange(Math.max(0, pageIndex - 1))}
             disabled={pageIndex === 0}
           >
             Previous
@@ -406,7 +439,7 @@ export function DataTable<T extends { [key: string]: any }>({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setPageIndex(Math.min(pageCount - 1, pageIndex + 1))}
+            onClick={() => handlePageIndexChange(Math.min(pageCount - 1, pageIndex + 1))}
             disabled={pageIndex === pageCount - 1}
           >
             Next
