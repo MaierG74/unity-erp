@@ -9,7 +9,7 @@ export async function POST(
   try {
     const { id: sourceQuoteId } = await context.params;
     const body = await request.json();
-    const { quote_number } = body ?? {};
+    const { quote_number, customer_id } = body ?? {};
 
     if (!quote_number) {
       return NextResponse.json(
@@ -22,6 +22,7 @@ export async function POST(
     const { data: newQuoteId, error: rpcError } = await supabaseAdmin.rpc('copy_quote', {
       source_quote_id: sourceQuoteId,
       new_quote_number: quote_number,
+      new_customer_id: customer_id || null,
     });
 
     if (!rpcError && newQuoteId) {
@@ -71,7 +72,7 @@ export async function POST(
       .from('quotes')
       .insert([{
         quote_number,
-        customer_id: sourceQuote.customer_id,
+        customer_id: customer_id || sourceQuote.customer_id,
         status: 'draft',
         grand_total: sourceQuote.grand_total || 0,
       }])

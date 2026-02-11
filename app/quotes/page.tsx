@@ -52,7 +52,7 @@ export default function QuotesPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [copyDialogOpen, setCopyDialogOpen] = useState(false);
-  const [copySource, setCopySource] = useState<{ id: string; quote_number: string } | null>(null);
+  const [copySource, setCopySource] = useState<{ id: string; quote_number: string; customer_id?: string } | null>(null);
   const { toast } = useToast();
   const routerNav = useRouter();
   const searchParams = useSearchParams();
@@ -180,7 +180,7 @@ export default function QuotesPage() {
   };
 
   const requestCopy = (quote: Quote) => {
-    setCopySource({ id: quote.id, quote_number: quote.quote_number });
+    setCopySource({ id: quote.id, quote_number: quote.quote_number, customer_id: quote.customer_id });
     setCopyDialogOpen(true);
   };
 
