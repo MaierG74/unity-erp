@@ -170,6 +170,57 @@ export default function PurchasingPage() {
     staleTime: 30_000,
   });
 
+  // --- Pending approval POs query (shown when pending filter is active) ---
+  const { data: pendingOrders, isLoading: pendingLoading } = useQuery({
+    queryKey: ['purchasing-dashboard', 'pending-approval'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('purchase_orders')
+        .select(`
+          purchase_order_id,
+          created_at,
+          notes,
+          status_id,
+          supplier_orders(
+            order_id,
+            order_quantity,
+            supplier_component:suppliercomponents(
+              price,
+              supplier:suppliers(name)
+            )
+          )
+        `)
+        .in('status_id', [5, 6])
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      return (data || []).map((po: any) => {
+        const suppliers = new Set<string>();
+        let totalValue = 0;
+        let totalItems = 0;
+        for (const so of po.supplier_orders || []) {
+          const sc = Array.isArray(so.supplier_component) ? so.supplier_component[0] : so.supplier_component;
+          const sup = Array.isArray(sc?.supplier) ? sc.supplier[0] : sc?.supplier;
+          if (sup?.name) suppliers.add(sup.name);
+          totalValue += (sc?.price || 0) * (so.order_quantity || 0);
+          totalItems += so.order_quantity || 0;
+        }
+        return {
+          purchase_order_id: po.purchase_order_id,
+          created_at: po.created_at,
+          status_id: po.status_id,
+          supplier_names: Array.from(suppliers),
+          total_value: totalValue,
+          total_items: totalItems,
+          line_count: (po.supplier_orders || []).length,
+        };
+      });
+    },
+    staleTime: 30_000,
+    enabled: activeFilter === 'pending',
+  });
+
   // --- Filtered items based on active card ---
 
   const filteredAwaitingItems = (() => {
@@ -375,10 +426,21 @@ export default function PurchasingPage() {
       <Card id="awaiting-receipt">
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
           <div>
-            <CardTitle>Awaiting Receipt</CardTitle>
-            {!awaitingLoading && awaitingItems && (
+            <CardTitle>{activeFilter === 'pending' ? 'Pending Approval' : 'Awaiting Receipt'}</CardTitle>
+            {!awaitingLoading && (activeFilter === 'pending' ? pendingOrders : awaitingItems) && (
               <p className="text-sm text-muted-foreground mt-1">
-                {hasAnyFilter ? (
+                {activeFilter === 'pending' ? (
+                  <>
+                    {pendingOrders?.length || 0} order{(pendingOrders?.length || 0) !== 1 ? 's' : ''} awaiting review
+                    {' '}
+                    <button
+                      className="text-primary hover:underline"
+                      onClick={clearAllFilters}
+                    >
+                      (clear filter)
+                    </button>
+                  </>
+                ) : hasAnyFilter ? (
                   <>
                     {filteredAwaitingItems.length} of {awaitingItems.length} item{awaitingItems.length !== 1 ? 's' : ''}
                     {supplierFilter && (
@@ -454,7 +516,83 @@ export default function PurchasingPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {awaitingLoading ? (
+          {activeFilter === 'pending' ? (
+            pendingLoading ? (
+              <div className="space-y-3">
+                {[...Array(3)].map((_, i) => (
+                  <Skeleton key={i} className="h-12 w-full" />
+                ))}
+              </div>
+            ) : !pendingOrders?.length ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <CheckCircle2 className="h-12 w-12 text-green-500 mb-3" />
+                <p className="text-lg font-medium">No pending orders</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  All orders have been reviewed.
+                </p>
+                <Button variant="outline" className="mt-4" onClick={clearAllFilters}>
+                  Clear Filter
+                </Button>
+              </div>
+            ) : (
+              <>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>PO #</TableHead>
+                      <TableHead>Supplier(s)</TableHead>
+                      <TableHead>Created</TableHead>
+                      <TableHead className="text-right">Items</TableHead>
+                      <TableHead className="text-right">Value</TableHead>
+                      <TableHead className="text-right w-[120px]">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pendingOrders.map((po) => (
+                      <TableRow key={po.purchase_order_id} className="group hover:bg-muted/50">
+                        <TableCell>
+                          <Link
+                            href={`/purchasing/purchase-orders/${po.purchase_order_id}`}
+                            className="text-primary hover:underline font-medium"
+                          >
+                            PO #{po.purchase_order_id}
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1">
+                            {po.supplier_names.map((name) => (
+                              <Badge key={name} variant="outline">{name}</Badge>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {new Date(po.created_at).toLocaleDateString('en-ZA', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                          })}
+                        </TableCell>
+                        <TableCell className="text-right">{po.line_count}</TableCell>
+                        <TableCell className="text-right font-medium">
+                          R{po.total_value.toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            size="sm"
+                            asChild
+                          >
+                            <Link href={`/purchasing/purchase-orders/${po.purchase_order_id}`}>
+                              Review
+                            </Link>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </>
+            )
+          ) : awaitingLoading ? (
             <div className="space-y-3">
               {[...Array(5)].map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />
@@ -467,9 +605,7 @@ export default function PurchasingPage() {
                 <>
                   <p className="text-lg font-medium">No matching items</p>
                   <p className="text-sm text-muted-foreground mt-1">
-                    {activeFilter === 'pending'
-                      ? 'Pending orders are not yet approved for receiving.'
-                      : 'No items match this filter.'}
+                    No items match this filter.
                   </p>
                   <Button
                     variant="outline"

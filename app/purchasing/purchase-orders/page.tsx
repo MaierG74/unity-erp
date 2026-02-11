@@ -211,6 +211,14 @@ export default function PurchaseOrdersPage() {
     const ed = searchParams?.get('endDate');
     return ed ? new Date(ed) : undefined;
   });
+  const [currentPage, setCurrentPage] = useState(() => {
+    const pageParam = searchParams?.get('page');
+    return pageParam ? parseInt(pageParam, 10) - 1 : 0; // Convert to 0-based index
+  });
+  const [pageSize, setPageSize] = useState(() => {
+    const sizeParam = searchParams?.get('pageSize');
+    return sizeParam ? parseInt(sizeParam, 10) : 10;
+  });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [poToDelete, setPoToDelete] = useState<PurchaseOrder | null>(null);
 
@@ -229,10 +237,14 @@ export default function PurchaseOrdersPage() {
     const urlSupplier = searchParams?.get('supplier') || 'all';
     const urlStartDate = searchParams?.get('startDate');
     const urlEndDate = searchParams?.get('endDate');
+    const urlPage = searchParams?.get('page');
+    const urlPageSize = searchParams?.get('pageSize');
 
     const newTab = urlTab === 'completed' ? 'completed' : 'inProgress';
     const newStartDate = urlStartDate ? new Date(urlStartDate) : undefined;
     const newEndDate = urlEndDate ? new Date(urlEndDate) : undefined;
+    const newPage = urlPage ? parseInt(urlPage, 10) - 1 : 0;
+    const newPageSize = urlPageSize ? parseInt(urlPageSize, 10) : 10;
 
     if (newTab !== activeTab) setActiveTab(newTab);
     if (urlStatus !== statusFilter) setStatusFilter(urlStatus);
@@ -240,9 +252,11 @@ export default function PurchaseOrdersPage() {
     if (urlSupplier !== supplierSearch) setSupplierSearch(urlSupplier);
     if (urlStartDate !== (startDate ? startDate.toISOString().split('T')[0] : undefined)) setStartDate(newStartDate);
     if (urlEndDate !== (endDate ? endDate.toISOString().split('T')[0] : undefined)) setEndDate(newEndDate);
+    if (newPage !== currentPage) setCurrentPage(newPage);
+    if (newPageSize !== pageSize) setPageSize(newPageSize);
   }, [searchParamsString]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Sync filter state to URL
+  // Sync filter and pagination state to URL
   useEffect(() => {
     const currentUrlTab = searchParams?.get('tab');
     const currentUrlStatus = searchParams?.get('status') || 'all';
@@ -250,6 +264,8 @@ export default function PurchaseOrdersPage() {
     const currentUrlSupplier = searchParams?.get('supplier') || 'all';
     const currentUrlStartDate = searchParams?.get('startDate') || '';
     const currentUrlEndDate = searchParams?.get('endDate') || '';
+    const currentUrlPage = searchParams?.get('page') || '1';
+    const currentUrlPageSize = searchParams?.get('pageSize') || '10';
 
     // Normalize values for comparison
     const tabToSet = activeTab === 'inProgress' ? '' : activeTab;
@@ -260,6 +276,8 @@ export default function PurchaseOrdersPage() {
     const currentSupplierNormalized = currentUrlSupplier === 'all' ? '' : currentUrlSupplier;
     const startDateToSet = startDate ? startDate.toISOString().split('T')[0] : '';
     const endDateToSet = endDate ? endDate.toISOString().split('T')[0] : '';
+    const pageToSet = (currentPage + 1).toString(); // Convert 0-based to 1-based
+    const pageSizeToSet = pageSize.toString();
 
     // Only update URL if values differ from current URL
     if (
@@ -268,7 +286,9 @@ export default function PurchaseOrdersPage() {
       debouncedQNumberSearch === currentUrlQ &&
       supplierToSet === currentSupplierNormalized &&
       startDateToSet === currentUrlStartDate &&
-      endDateToSet === currentUrlEndDate
+      endDateToSet === currentUrlEndDate &&
+      pageToSet === currentUrlPage &&
+      pageSizeToSet === currentUrlPageSize
     ) {
       return;
     }
@@ -283,10 +303,14 @@ export default function PurchaseOrdersPage() {
     if (startDate) params.set('startDate', startDate.toISOString().split('T')[0]);
     if (endDate) params.set('endDate', endDate.toISOString().split('T')[0]);
 
+    // Add pagination params (only if not default)
+    if (currentPage > 0) params.set('page', pageToSet);
+    if (pageSize !== 10) params.set('pageSize', pageSizeToSet);
+
     const query = params.toString();
     const url = query ? `/purchasing/purchase-orders?${query}` : '/purchasing/purchase-orders';
     router.replace(url, { scroll: false });
-  }, [activeTab, statusFilter, debouncedQNumberSearch, supplierSearch, startDate, endDate, router, searchParams]);
+  }, [activeTab, statusFilter, debouncedQNumberSearch, supplierSearch, startDate, endDate, currentPage, pageSize, router, searchParams]);
 
   const { data: purchaseOrders, isLoading, error, refetch } = useQuery({
     queryKey: ['purchaseOrders'],
@@ -360,6 +384,7 @@ export default function PurchaseOrdersPage() {
     setSupplierSearch('all');
     setStartDate(undefined);
     setEndDate(undefined);
+    setCurrentPage(0);
   };
 
   // Filter orders based on all filters
@@ -443,6 +468,13 @@ export default function PurchaseOrdersPage() {
     return true;
   });
 
+  // Paginate filtered orders
+  const pageCount = Math.ceil((filteredOrders?.length || 0) / pageSize);
+  const paginatedOrders = filteredOrders?.slice(
+    currentPage * pageSize,
+    (currentPage + 1) * pageSize
+  );
+
   // Get status filter options based on active tab
   const getStatusFilterOptions = () => {
     if (activeTab === 'inProgress') {
@@ -466,10 +498,11 @@ export default function PurchaseOrdersPage() {
     }
   };
 
-  // Reset status filter when changing tabs
+  // Reset status filter and page when changing tabs
   const handleTabChange = (value: string) => {
     setActiveTab(value as OrderTab);
     setStatusFilter('all');
+    setCurrentPage(0);
   };
 
   // Handle row click to navigate to order details
@@ -486,7 +519,10 @@ export default function PurchaseOrdersPage() {
           <Label>Status</Label>
           <Select
             value={statusFilter}
-            onValueChange={setStatusFilter}
+            onValueChange={(value) => {
+              setStatusFilter(value);
+              setCurrentPage(0);
+            }}
             disabled={isLoading}
           >
             <SelectTrigger disabled={isLoading}>
@@ -507,7 +543,10 @@ export default function PurchaseOrdersPage() {
               type="text"
               placeholder="Search by Q Number"
               value={qNumberSearch}
-              onChange={(e) => setQNumberSearch(e.target.value)}
+              onChange={(e) => {
+                setQNumberSearch(e.target.value);
+                setCurrentPage(0);
+              }}
               className="pl-8"
               disabled={isLoading}
             />
@@ -519,7 +558,10 @@ export default function PurchaseOrdersPage() {
           <Label>Supplier</Label>
           <Select
             value={supplierSearch}
-            onValueChange={setSupplierSearch}
+            onValueChange={(value) => {
+              setSupplierSearch(value);
+              setCurrentPage(0);
+            }}
             disabled={isLoading}
           >
             <SelectTrigger disabled={isLoading}>
@@ -556,7 +598,10 @@ export default function PurchaseOrdersPage() {
               <Calendar
                 mode="single"
                 selected={startDate}
-                onSelect={setStartDate}
+                onSelect={(date) => {
+                  setStartDate(date);
+                  setCurrentPage(0);
+                }}
                 initialFocus
               />
             </PopoverContent>
@@ -580,7 +625,10 @@ export default function PurchaseOrdersPage() {
               <Calendar
                 mode="single"
                 selected={endDate}
-                onSelect={setEndDate}
+                onSelect={(date) => {
+                  setEndDate(date);
+                  setCurrentPage(0);
+                }}
                 initialFocus
               />
             </PopoverContent>
@@ -649,20 +697,21 @@ export default function PurchaseOrdersPage() {
 
   // Render table with clickable rows for both tabs
   const renderTable = () => (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Q Number</TableHead>
-          <TableHead>Items</TableHead>
-          <TableHead>Suppliers</TableHead>
-          <TableHead>Created</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead className="text-right">Actions</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {filteredOrders?.length ? (
-          filteredOrders.map((order) => (
+    <>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Q Number</TableHead>
+            <TableHead>Items</TableHead>
+            <TableHead>Suppliers</TableHead>
+            <TableHead>Created</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead className="text-right">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {paginatedOrders?.length ? (
+            paginatedOrders.map((order) => (
             <TableRow 
               key={order.purchase_order_id}
               onClick={() => handleRowClick(order.purchase_order_id)}
@@ -723,6 +772,55 @@ export default function PurchaseOrdersPage() {
         )}
       </TableBody>
     </Table>
+
+    {/* Pagination Controls */}
+    {filteredOrders && filteredOrders.length > 0 && (
+      <div className="flex items-center justify-between pt-4 border-t">
+        <p className="text-sm text-muted-foreground">
+          Showing {Math.min((currentPage * pageSize) + 1, filteredOrders.length)}-{Math.min((currentPage + 1) * pageSize, filteredOrders.length)} of {filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''}
+        </p>
+        <div className="flex items-center gap-2">
+          <Select
+            value={String(pageSize)}
+            onValueChange={(value) => {
+              setPageSize(Number(value));
+              setCurrentPage(0);
+            }}
+          >
+            <SelectTrigger className="h-9 w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="10">10 per page</SelectItem>
+              <SelectItem value="20">20 per page</SelectItem>
+              <SelectItem value="50">50 per page</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9"
+            onClick={() => setCurrentPage(Math.max(0, currentPage - 1))}
+            disabled={currentPage === 0}
+          >
+            Previous
+          </Button>
+          <div className="text-sm w-20 text-center">
+            {currentPage + 1} / {pageCount || 1}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9"
+            onClick={() => setCurrentPage(Math.min(pageCount - 1, currentPage + 1))}
+            disabled={currentPage >= pageCount - 1}
+          >
+            Next
+          </Button>
+        </div>
+      </div>
+    )}
+  </>
   );
 
   return (

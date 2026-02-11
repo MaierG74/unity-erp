@@ -23,7 +23,7 @@ import { EmailActivityCard } from '@/components/features/emails/EmailActivityCar
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertCircle, ArrowLeft, Loader2, CheckCircle2, Mail, Pencil, Save, X, Trash2, ChevronDown, ChevronRight, Paperclip } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Loader2, CheckCircle2, Mail, Pencil, Save, X, Trash2, ChevronDown, ChevronRight, Paperclip, Ban, XCircle } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -124,6 +124,7 @@ interface SupplierOrder {
   order_id: number;
   order_quantity: number;
   total_received: number;
+  status_id?: number;
   notes?: string | null;
   supplier_component: {
     supplier_code: string;
@@ -180,6 +181,7 @@ async function fetchPurchaseOrderById(id: string) {
         order_id,
         order_quantity,
         total_received,
+        status_id,
         notes,
         supplier_component:suppliercomponents(
           supplier_code,
@@ -615,6 +617,14 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const [isEditingNotes, setIsEditingNotes] = useState(false);
   const [inlineNotes, setInlineNotes] = useState('');
   const [deleteConfirmOrderId, setDeleteConfirmOrderId] = useState<number | null>(null);
+
+  // Reject / Cancel state
+  const [showRejectDialog, setShowRejectDialog] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelLineItemId, setCancelLineItemId] = useState<number | null>(null);
+  const [cancelLineReason, setCancelLineReason] = useState('');
   
   const handleReceiveModalChange = (open: boolean) => {
     setReceiveModalOpen(open);
@@ -1109,6 +1119,184 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     },
   });
 
+  // Reject purchase order mutation (Pending Approval → Cancelled)
+  const rejectMutation = useMutation({
+    mutationFn: async (reason?: string) => {
+      const { data: statusData, error: statusError } = await supabase
+        .from('supplier_order_statuses')
+        .select('status_id')
+        .eq('status_name', 'Cancelled')
+        .single();
+      if (statusError || !statusData) throw new Error('Could not find Cancelled status');
+
+      const updateData: Record<string, any> = { status_id: statusData.status_id };
+      if (reason?.trim()) {
+        const existingNotes = purchaseOrder?.notes || '';
+        updateData.notes = existingNotes
+          ? `${existingNotes}\n\n[REJECTED] ${reason.trim()}`
+          : `[REJECTED] ${reason.trim()}`;
+      }
+
+      const { error: updateError } = await supabase
+        .from('purchase_orders')
+        .update(updateData)
+        .eq('purchase_order_id', id);
+      if (updateError) throw new Error(`Failed to reject order: ${updateError.message}`);
+
+      const { error: ordersError } = await supabase
+        .from('supplier_orders')
+        .update({ status_id: statusData.status_id })
+        .eq('purchase_order_id', id);
+      if (ordersError) throw new Error('Failed to update supplier orders');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrder', id] });
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
+      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] });
+      setShowRejectDialog(false);
+      setRejectReason('');
+      toast({
+        title: 'Order Rejected',
+        description: 'The purchase order has been cancelled.',
+      });
+    },
+    onError: (error: Error) => {
+      setError(error.message);
+    },
+  });
+
+  // Cancel approved order mutation (Approved → Cancelled + send emails)
+  const cancelOrderMutation = useMutation({
+    mutationFn: async (reason?: string) => {
+      const { data: statusData, error: statusError } = await supabase
+        .from('supplier_order_statuses')
+        .select('status_id')
+        .eq('status_name', 'Cancelled')
+        .single();
+      if (statusError || !statusData) throw new Error('Could not find Cancelled status');
+
+      const updateData: Record<string, any> = { status_id: statusData.status_id };
+      if (reason?.trim()) {
+        const existingNotes = purchaseOrder?.notes || '';
+        updateData.notes = existingNotes
+          ? `${existingNotes}\n\n[CANCELLED] ${reason.trim()}`
+          : `[CANCELLED] ${reason.trim()}`;
+      }
+
+      const { error: updateError } = await supabase
+        .from('purchase_orders')
+        .update(updateData)
+        .eq('purchase_order_id', id);
+      if (updateError) throw new Error(`Failed to cancel order: ${updateError.message}`);
+
+      const { error: ordersError } = await supabase
+        .from('supplier_orders')
+        .update({ status_id: statusData.status_id })
+        .eq('purchase_order_id', id);
+      if (ordersError) throw new Error('Failed to update supplier orders');
+
+      // Send cancellation emails to suppliers
+      const response = await fetch('/api/send-po-cancellation-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          purchaseOrderId: id,
+          cancellationReason: reason?.trim() || undefined,
+        }),
+      });
+      const emailResult = await response.json();
+      return emailResult;
+    },
+    onSuccess: (emailResult) => {
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrder', id] });
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
+      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrderEmails', id] });
+      setShowCancelDialog(false);
+      setCancelReason('');
+
+      const successes = emailResult?.results?.filter((r: any) => r.success).length || 0;
+      const failures = emailResult?.results?.filter((r: any) => !r.success).length || 0;
+
+      if (failures > 0) {
+        toast({
+          title: 'Order Cancelled (Email Issues)',
+          description: `Order cancelled. Cancellation emails: ${successes} sent, ${failures} failed.`,
+          variant: 'destructive',
+          duration: 8000,
+        });
+      } else {
+        toast({
+          title: 'Order Cancelled',
+          description: successes > 0
+            ? `Order cancelled and ${successes} cancellation email${successes === 1 ? '' : 's'} sent to supplier${successes === 1 ? '' : 's'}.`
+            : 'Order cancelled.',
+          duration: 5000,
+        });
+      }
+    },
+    onError: (error: Error) => {
+      setError(error.message);
+    },
+  });
+
+  // Cancel individual line item mutation
+  const cancelLineItemMutation = useMutation({
+    mutationFn: async ({ orderId, reason }: { orderId: number; reason?: string }) => {
+      const { data: statusData, error: statusError } = await supabase
+        .from('supplier_order_statuses')
+        .select('status_id')
+        .eq('status_name', 'Cancelled')
+        .single();
+      if (statusError || !statusData) throw new Error('Could not find Cancelled status');
+
+      const updateData: Record<string, any> = { status_id: statusData.status_id };
+      if (reason?.trim()) {
+        const existingNotes = purchaseOrder?.supplier_orders?.find(o => o.order_id === orderId)?.notes || '';
+        updateData.notes = existingNotes
+          ? `${existingNotes}\n[CANCELLED] ${reason.trim()}`
+          : `[CANCELLED] ${reason.trim()}`;
+      }
+
+      const { error: updateError } = await supabase
+        .from('supplier_orders')
+        .update(updateData)
+        .eq('order_id', orderId);
+      if (updateError) throw new Error(`Failed to cancel line item: ${updateError.message}`);
+
+      // Check if all line items are now cancelled - if so, cancel the whole PO
+      const { data: remainingActive } = await supabase
+        .from('supplier_orders')
+        .select('order_id, status_id')
+        .eq('purchase_order_id', id)
+        .neq('status_id', statusData.status_id);
+
+      if (!remainingActive || remainingActive.length === 0) {
+        await supabase
+          .from('purchase_orders')
+          .update({ status_id: statusData.status_id })
+          .eq('purchase_order_id', id);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrder', id] });
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
+      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] });
+      setCancelLineItemId(null);
+      setCancelLineReason('');
+      toast({
+        title: 'Line Item Cancelled',
+        description: 'The line item has been cancelled.',
+      });
+    },
+    onError: (error: Error) => {
+      setError(error.message);
+    },
+  });
+
   // Add receipt mutation
   const receiptMutation = useMutation({
     mutationFn: () => receiveStock(id, receiptQuantities),
@@ -1568,14 +1756,15 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const isApproved = purchaseOrder.status?.status_name === 'Approved';
   const isCancelled = purchaseOrder.status?.status_name === 'Cancelled';
 
-  // Calculate totals
-  const totalItems = purchaseOrder.supplier_orders?.reduce((sum, order) => sum + order.order_quantity, 0) || 0;
-  const totalAmount = purchaseOrder.supplier_orders?.reduce((sum, order) => {
+  // Calculate totals (exclude cancelled line items)
+  const activeOrders = purchaseOrder.supplier_orders?.filter(o => o.status_id !== 4) || [];
+  const totalItems = activeOrders.reduce((sum, order) => sum + order.order_quantity, 0);
+  const totalAmount = activeOrders.reduce((sum, order) => {
     return sum + (order.supplier_component?.price || 0) * order.order_quantity;
-  }, 0) || 0;
-  const totalReceived = purchaseOrder.supplier_orders?.reduce((sum, order) => {
+  }, 0);
+  const totalReceived = activeOrders.reduce((sum, order) => {
     return sum + (order.total_received || 0);
-  }, 0) || 0;
+  }, 0);
 
   return (
     <div className="space-y-6">
@@ -1967,7 +2156,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-xl font-bold">Order Items</CardTitle>
             <div className="flex items-center gap-2">
-              {isDraft && !isEditMode && (
+              {(isDraft || isPendingApproval) && !isEditMode && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -2039,6 +2228,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                   {isApproved && <TableHead className="text-right">Receive Now</TableHead>}
                   <TableHead className="text-right">Total</TableHead>
                   {isEditMode && <TableHead className="text-right">Actions</TableHead>}
+                  {isApproved && !isEditMode && <TableHead className="text-right w-[80px]"></TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -2049,6 +2239,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                       const supplier = order.supplier_component?.supplier;
                       const price = order.supplier_component?.price || 0;
                       const lineTotal = price * order.order_quantity;
+                      const isLineCancelled = order.status_id === 4;
                       const remainingToReceive = Math.max(0, order.order_quantity - (order.total_received || 0));
 
                       const editedQty = editedQuantities[order.order_id] ?? order.order_quantity;
@@ -2061,10 +2252,13 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
 
                       return (
                         <Fragment key={order.order_id}>
-                        <TableRow className="odd:bg-muted/30">
-                          <TableCell className="font-medium">{component?.internal_code || 'Unknown'}</TableCell>
-                          <TableCell>{component?.description || 'No description'}</TableCell>
-                          <TableCell>{supplier?.name || 'Unknown'}</TableCell>
+                        <TableRow className={cn("odd:bg-muted/30", isLineCancelled && "opacity-50")}>
+                          <TableCell className={cn("font-medium", isLineCancelled && "line-through")}>
+                            {component?.internal_code || 'Unknown'}
+                            {isLineCancelled && <Badge variant="destructive" className="ml-2 text-[10px]">Cancelled</Badge>}
+                          </TableCell>
+                          <TableCell className={cn(isLineCancelled && "line-through")}>{component?.description || 'No description'}</TableCell>
+                          <TableCell className={cn(isLineCancelled && "line-through")}>{supplier?.name || 'Unknown'}</TableCell>
                           <TableCell>
                             {(() => {
                               const orderLinks = customerOrderLinks.filter(link => link.customer_order);
@@ -2195,17 +2389,19 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                           )}
                           {isApproved && (
                             <TableCell className="text-right">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleOpenReceiveModal(order)}
-                                disabled={remainingToReceive <= 0}
-                              >
-                                Receive
-                              </Button>
+                              {!isLineCancelled && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleOpenReceiveModal(order)}
+                                  disabled={remainingToReceive <= 0}
+                                >
+                                  Receive
+                                </Button>
+                              )}
                             </TableCell>
                           )}
-                          <TableCell className="text-right font-medium">
+                          <TableCell className={cn("text-right font-medium", isLineCancelled && "line-through")}>
                             R{(isEditMode ? editedLineTotal : lineTotal).toFixed(2)}
                           </TableCell>
                           {isEditMode && (
@@ -2221,10 +2417,25 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                               </Button>
                             </TableCell>
                           )}
+                          {isApproved && !isEditMode && (
+                            <TableCell className="text-right">
+                              {!isLineCancelled && remainingToReceive > 0 && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setCancelLineItemId(order.order_id)}
+                                  disabled={cancelLineItemMutation.isPending}
+                                  title="Cancel this line item"
+                                >
+                                  <XCircle className="h-4 w-4 text-destructive" />
+                                </Button>
+                              )}
+                            </TableCell>
+                          )}
                         </TableRow>
                         {order.notes && (
                           <TableRow className="border-b">
-                            <TableCell colSpan={isEditMode ? (isApproved ? 8 : 7) : (isApproved ? 10 : 9)} className="py-2 pl-8">
+                            <TableCell colSpan={isEditMode ? (isApproved ? 8 : 7) : (isApproved ? 11 : 9)} className="py-2 pl-8">
                               <p className="text-xs italic text-muted-foreground">Note: {order.notes}</p>
                             </TableCell>
                           </TableRow>
@@ -2250,8 +2461,8 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                       )}
                       {isApproved && <TableCell />}
                       <TableCell className="text-right font-semibold">
-                        R{isEditMode 
-                          ? purchaseOrder.supplier_orders?.reduce((sum, order) => {
+                        R{isEditMode
+                          ? purchaseOrder.supplier_orders?.filter(o => o.status_id !== 4).reduce((sum, order) => {
                               const qty = editedQuantities[order.order_id] ?? order.order_quantity;
                               const price = order.supplier_component?.price || 0;
                               return sum + (price * qty);
@@ -2260,12 +2471,13 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                         }
                       </TableCell>
                       {isEditMode && <TableCell />}
+                      {isApproved && !isEditMode && <TableCell />}
                     </TableRow>
                   </>
                 ) : (
                   <TableRow>
                     <TableCell
-                      colSpan={isApproved ? 10 : 9}
+                      colSpan={isApproved ? 11 : 9}
                       className="text-center py-6 text-muted-foreground"
                     >
                       No items in this purchase order
@@ -2624,6 +2836,15 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           )}
           {isPendingApproval && (
             <div className="flex items-center gap-2">
+              <Button
+                variant="destructive"
+                onClick={() => setShowRejectDialog(true)}
+                disabled={rejectMutation.isPending}
+              >
+                {rejectMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                <Ban className="h-4 w-4 mr-2" />
+                Reject Order
+              </Button>
               <input
                 id="qNumber"
                 value={qNumber}
@@ -2641,6 +2862,15 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           )}
           {isApproved && (
             <>
+              <Button
+                variant="destructive"
+                onClick={() => setShowCancelDialog(true)}
+                disabled={cancelOrderMutation.isPending}
+              >
+                {cancelOrderMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                <Ban className="h-4 w-4 mr-2" />
+                Cancel Order
+              </Button>
               <Button
                 variant="outline"
                 onClick={handleOpenEmailDialog}
@@ -2727,6 +2957,120 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
             >
               {deleteLineItemMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reject order dialog */}
+      <Dialog open={showRejectDialog} onOpenChange={(open) => { if (!open) { setShowRejectDialog(false); setRejectReason(''); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reject Purchase Order</DialogTitle>
+            <DialogDescription>
+              This will cancel PO #{purchaseOrder?.purchase_order_id}. The order and all line items will be set to Cancelled.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Reason (optional)</label>
+            <Textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="Enter reason for rejection..."
+              className="min-h-[80px]"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => { setShowRejectDialog(false); setRejectReason(''); }}
+              disabled={rejectMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => rejectMutation.mutate(rejectReason || undefined)}
+              disabled={rejectMutation.isPending}
+            >
+              {rejectMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Reject Order
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cancel approved order dialog */}
+      <Dialog open={showCancelDialog} onOpenChange={(open) => { if (!open) { setShowCancelDialog(false); setCancelReason(''); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancel Purchase Order</DialogTitle>
+            <DialogDescription>
+              This will cancel {purchaseOrder?.q_number || `PO #${purchaseOrder?.purchase_order_id}`} and send cancellation emails to all suppliers.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Reason (optional)</label>
+            <Textarea
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Enter reason for cancellation..."
+              className="min-h-[80px]"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => { setShowCancelDialog(false); setCancelReason(''); }}
+              disabled={cancelOrderMutation.isPending}
+            >
+              Keep Order
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => cancelOrderMutation.mutate(cancelReason || undefined)}
+              disabled={cancelOrderMutation.isPending}
+            >
+              {cancelOrderMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Cancel Order & Email Suppliers
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cancel individual line item dialog */}
+      <Dialog open={cancelLineItemId !== null} onOpenChange={(open) => { if (!open) { setCancelLineItemId(null); setCancelLineReason(''); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancel Line Item</DialogTitle>
+            <DialogDescription>
+              This will cancel the selected line item. The item will remain visible but marked as cancelled.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Reason (optional)</label>
+            <Textarea
+              value={cancelLineReason}
+              onChange={(e) => setCancelLineReason(e.target.value)}
+              placeholder="Enter reason for cancellation..."
+              className="min-h-[80px]"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => { setCancelLineItemId(null); setCancelLineReason(''); }}
+              disabled={cancelLineItemMutation.isPending}
+            >
+              Keep Item
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => cancelLineItemId && cancelLineItemMutation.mutate({ orderId: cancelLineItemId, reason: cancelLineReason || undefined })}
+              disabled={cancelLineItemMutation.isPending}
+            >
+              {cancelLineItemMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Cancel Line Item
             </Button>
           </DialogFooter>
         </DialogContent>
