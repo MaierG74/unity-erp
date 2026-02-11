@@ -22,7 +22,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { Table, TableHeader, TableBody, TableCell, TableHead, TableRow, TableFooter } from '@/components/ui/table';
 import React from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { clsx } from 'clsx';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
@@ -30,6 +30,7 @@ import { Switch } from '@/components/ui/switch';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { IssueStockTab } from '@/components/features/orders/IssueStockTab';
 import { OrderDocumentsTab } from '@/components/features/orders/OrderDocumentsTab';
+import { ProcurementTab } from '@/components/features/orders/ProcurementTab';
 import { ConsolidatePODialog, SupplierWithDrafts, ExistingDraftPO } from '@/components/features/purchasing/ConsolidatePODialog';
 
 type OrderDetailPageProps = {
@@ -2357,8 +2358,10 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   // Unwrap the params Promise (Next.js 16 requirement)
   const { orderId: orderIdParam } = use(params);
   const orderId = parseInt(orderIdParam, 10);
-  // Set initial tab back to details
-  const [activeTab, setActiveTab] = useState<string>('details');
+  // Tab state — support deep-linking via ?tab= query param
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get('tab') || 'details';
+  const [activeTab, setActiveTab] = useState<string>(initialTab);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const queryClient = useQueryClient();
@@ -2933,10 +2936,15 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     setActiveSection(section);
   };
 
-  // Debug log for tab changes
   const handleTabChange = (value: string) => {
-    console.log('Tab changed to:', value);
     setActiveTab(value);
+    const url = new URL(window.location.href);
+    if (value === 'details') {
+      url.searchParams.delete('tab');
+    } else {
+      url.searchParams.set('tab', value);
+    }
+    window.history.replaceState({}, '', url.toString());
   };
 
   const handleDeleteAttachment = async (attachmentId: number) => {
@@ -3000,6 +3008,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
           <TabsTrigger value="components">Components</TabsTrigger>
           <TabsTrigger value="issue-stock">Issue Stock</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
+          <TabsTrigger value="procurement">Procurement</TabsTrigger>
         </TabsList>
         
         <TabsContent value="details" className="space-y-6">
@@ -4039,6 +4048,10 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
         
         <TabsContent value="documents" className="space-y-4">
           <OrderDocumentsTab orderId={orderId} />
+        </TabsContent>
+
+        <TabsContent value="procurement" className="space-y-4">
+          <ProcurementTab orderId={orderId} />
         </TabsContent>
       </Tabs>
 

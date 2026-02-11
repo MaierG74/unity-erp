@@ -1812,6 +1812,47 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                                 {resp?.notes && (
                                   <div className="mt-1 italic">"{resp.notes}"</div>
                                 )}
+                                {/* Per-item responses */}
+                                {resp?.line_item_responses && Array.isArray(resp.line_item_responses) && resp.line_item_responses.some((item: any) => item.item_status || item.item_notes || item.item_expected_date) && (
+                                  <div className="mt-2 space-y-1.5">
+                                    {(resp.line_item_responses as any[]).map((item: any, idx: number) => {
+                                      const itemStatusColors: Record<string, string> = {
+                                        on_track: 'text-green-700',
+                                        shipped: 'text-blue-700',
+                                        delayed: 'text-amber-700',
+                                        issue: 'text-red-700',
+                                      };
+                                      const itemStatusLabels: Record<string, string> = {
+                                        on_track: 'On Track',
+                                        shipped: 'Shipped',
+                                        delayed: 'Delayed',
+                                        issue: 'Issue',
+                                      };
+                                      return (
+                                        <div key={idx} className="flex items-start gap-2 pl-2 border-l-2 border-border/50">
+                                          <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2">
+                                              <span className="font-mono text-[10px]">{item.supplier_code || item.description}</span>
+                                              {item.item_status && (
+                                                <span className={`text-[10px] font-medium ${itemStatusColors[item.item_status] || ''}`}>
+                                                  {itemStatusLabels[item.item_status] || item.item_status}
+                                                </span>
+                                              )}
+                                              {item.item_expected_date && (
+                                                <span className="text-[10px] text-muted-foreground">
+                                                  ETA: {format(new Date(item.item_expected_date), 'PP')}
+                                                </span>
+                                              )}
+                                            </div>
+                                            {item.item_notes && (
+                                              <p className="text-[10px] text-muted-foreground italic mt-0.5">"{item.item_notes}"</p>
+                                            )}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
                                 <div className="text-muted-foreground mt-1">
                                   Responded: {resp?.responded_at ? format(new Date(resp.responded_at), 'PP · p') : 'Unknown'}
                                 </div>

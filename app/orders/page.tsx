@@ -7,15 +7,16 @@
  * Filters stored: status, q (search), section
  */
 
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from 'react';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useDebounce } from '@/hooks/use-debounce';
-import { format, parseISO, isValid, isBefore, isAfter } from 'date-fns';
+import { format, parseISO, isValid, isBefore, isAfter, differenceInDays, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { Order, OrderStatus } from '@/types/orders';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   Table,
   TableBody,
@@ -38,8 +39,8 @@ import {
 import {
   PlusCircle, Search, Package, Layers, Wrench, PaintBucket, Paperclip,
   Upload, FileText, ImageIcon, Eye, Download, FileUp, Check, RefreshCw,
-  Trash2, ChevronRight, ChevronLeft, MoreHorizontal, ArrowUp, ArrowDown,
-  ArrowUpDown, Calendar as CalendarIcon, FilterX,
+  Trash2, ChevronRight, ChevronLeft, ChevronDown, MoreHorizontal, ArrowUp, ArrowDown,
+  ArrowUpDown, Calendar as CalendarIcon, FilterX, Loader2, ClipboardList, Undo2, ExternalLink, X,
 } from 'lucide-react';
 import { AttachmentPreviewModal } from '@/components/ui/attachment-preview-modal';
 import { FileIcon } from '@/components/ui/file-icon';
@@ -159,27 +160,512 @@ async function fetchOrderStatuses(): Promise<OrderStatus[]> {
   }
 }
 
-// Status Badge component with dark-mode-aware colors
-function StatusBadge({ status }: { status: string }) {
-  const getStatusColor = (status: string) => {
-    switch (status.toLowerCase()) {
-      case 'new':
-        return 'bg-blue-500/15 text-blue-700 dark:text-blue-400 border border-blue-500/25';
-      case 'in progress':
-        return 'bg-yellow-500/15 text-yellow-700 dark:text-yellow-400 border border-yellow-500/25';
-      case 'completed':
-        return 'bg-green-500/15 text-green-700 dark:text-green-400 border border-green-500/25';
-      case 'cancelled':
-        return 'bg-red-500/15 text-red-700 dark:text-red-400 border border-red-500/25';
-      default:
-        return 'bg-muted text-muted-foreground border border-border';
-    }
-  };
+// Procurement summary per order (one query for all orders)
+interface ProcurementSummary {
+  customer_order_id: number;
+  total_po_lines: number;
+  fully_received_lines: number;
+}
 
+async function fetchProcurementSummaries(): Promise<Record<number, ProcurementSummary>> {
+  try {
+    const { data, error } = await supabase.rpc('get_procurement_summaries_raw' as any);
+
+    // Fallback: direct query if RPC doesn't exist
+    if (error) {
+      const { data: rawData, error: rawError } = await supabase
+        .from('supplier_order_customer_orders')
+        .select(`
+          order_id,
+          supplier_order:supplier_orders(order_id, order_quantity, total_received)
+        `);
+
+      if (rawError || !rawData) return {};
+
+      const grouped: Record<number, ProcurementSummary> = {};
+      for (const row of rawData as any[]) {
+        const orderId = row.order_id;
+        if (!orderId) continue;
+        if (!grouped[orderId]) {
+          grouped[orderId] = { customer_order_id: orderId, total_po_lines: 0, fully_received_lines: 0 };
+        }
+        const so = row.supplier_order;
+        if (so) {
+          grouped[orderId].total_po_lines++;
+          if ((so.total_received || 0) >= (so.order_quantity || 0)) {
+            grouped[orderId].fully_received_lines++;
+          }
+        }
+      }
+      return grouped;
+    }
+
+    const result: Record<number, ProcurementSummary> = {};
+    for (const row of (data || []) as any[]) {
+      result[row.customer_order_id] = row;
+    }
+    return result;
+  } catch (err) {
+    console.error('Error fetching procurement summaries:', err);
+    return {};
+  }
+}
+
+// Detailed procurement lines for a single order (fetched lazily on expand)
+interface ProcurementLine {
+  supplier_order_id: number;
+  order_quantity: number;
+  total_received: number;
+  po_number: string | null;
+  purchase_order_id: number;
+  component_code: string | null;
+  component_name: string | null;
+  line_status: string | null;
+}
+
+async function fetchProcurementDetails(orderId: number): Promise<ProcurementLine[]> {
+  try {
+    const { data, error } = await supabase
+      .from('supplier_order_customer_orders')
+      .select(`
+        supplier_order:supplier_orders(
+          order_id,
+          order_quantity,
+          total_received,
+          purchase_order:purchase_orders(purchase_order_id, q_number),
+          supplier_component:suppliercomponents(
+            component:components(internal_code, description)
+          ),
+          status:supplier_order_statuses(status_name)
+        )
+      `)
+      .eq('order_id', orderId);
+
+    if (error || !data) return [];
+
+    return (data as any[]).map(row => {
+      const so = row.supplier_order;
+      if (!so) return null;
+      return {
+        supplier_order_id: so.order_id,
+        order_quantity: Number(so.order_quantity) || 0,
+        total_received: Number(so.total_received) || 0,
+        po_number: so.purchase_order?.q_number || `PO-${so.purchase_order?.purchase_order_id}`,
+        purchase_order_id: so.purchase_order?.purchase_order_id,
+        component_code: so.supplier_component?.component?.internal_code || null,
+        component_name: so.supplier_component?.component?.description || null,
+        line_status: so.status?.status_name || null,
+      };
+    }).filter(Boolean) as ProcurementLine[];
+  } catch (err) {
+    console.error('Error fetching procurement details:', err);
+    return [];
+  }
+}
+
+// Status colour mapping for all 7 statuses
+function getStatusColorClasses(status: string): string {
+  switch (status.toLowerCase()) {
+    case 'new':
+      return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border-blue-200 dark:border-blue-800/30';
+    case 'in production':
+      return 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400 border-orange-200 dark:border-orange-800/30';
+    case 'in progress':
+      return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800/30';
+    case 'on hold':
+      return 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400 border-gray-200 dark:border-gray-800/30';
+    case 'ready for delivery':
+      return 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400 border-teal-200 dark:border-teal-800/30';
+    case 'completed':
+      return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/30';
+    case 'cancelled':
+      return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800/30';
+    default:
+      return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400 border-gray-200 dark:border-gray-700';
+  }
+}
+
+function getStatusDotColor(status: string): string {
+  switch (status.toLowerCase()) {
+    case 'new': return 'bg-blue-500';
+    case 'in production': return 'bg-orange-500';
+    case 'in progress': return 'bg-yellow-500';
+    case 'on hold': return 'bg-gray-500';
+    case 'ready for delivery': return 'bg-teal-500';
+    case 'completed': return 'bg-emerald-500';
+    case 'cancelled': return 'bg-red-500';
+    default: return 'bg-gray-400';
+  }
+}
+
+// Status Badge component with dark-mode-aware colors for all 7 statuses
+function StatusBadge({ status }: { status: string }) {
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(status)}`}>
+    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getStatusColorClasses(status)}`}>
       {status}
     </span>
+  );
+}
+
+// Delivery date info helper
+function getDeliveryDateInfo(deliveryDate: string | null, statusName: string) {
+  if (!deliveryDate) return { colorClass: 'text-muted-foreground', relativeText: '', isOverdue: false };
+
+  const isTerminal = ['completed', 'cancelled'].includes(statusName.toLowerCase());
+  const date = new Date(deliveryDate);
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const daysDiff = differenceInDays(date, now);
+
+  if (isTerminal) {
+    return { colorClass: 'text-muted-foreground', relativeText: '', isOverdue: false };
+  }
+
+  if (daysDiff < 0) {
+    const absDays = Math.abs(daysDiff);
+    return {
+      colorClass: 'text-red-600 dark:text-red-400',
+      relativeText: `${absDays} day${absDays === 1 ? '' : 's'} overdue`,
+      isOverdue: true,
+    };
+  }
+
+  if (daysDiff === 0) {
+    return { colorClass: 'text-amber-600 dark:text-amber-400', relativeText: 'today', isOverdue: false };
+  }
+
+  if (daysDiff === 1) {
+    return { colorClass: 'text-amber-600 dark:text-amber-400', relativeText: 'tomorrow', isOverdue: false };
+  }
+
+  if (daysDiff <= 5) {
+    return { colorClass: `text-amber-600 dark:text-amber-400`, relativeText: `in ${daysDiff} days`, isOverdue: false };
+  }
+
+  return { colorClass: 'text-emerald-600 dark:text-emerald-400', relativeText: `in ${daysDiff} days`, isOverdue: false };
+}
+
+// Delivery date cell with colour coding + relative time
+function DeliveryDateCell({ order }: { order: Order }) {
+  if (!order.delivery_date) {
+    return <span className="text-muted-foreground">Not set</span>;
+  }
+
+  const statusName = order.status?.status_name || 'Unknown';
+  const { colorClass, relativeText, isOverdue } = getDeliveryDateInfo(order.delivery_date, statusName);
+
+  return (
+    <div className={colorClass}>
+      <div className="flex items-center gap-1.5">
+        <span>{format(new Date(order.delivery_date), 'MMM d, yyyy')}</span>
+        {isOverdue && (
+          <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-4 leading-none">
+            OVERDUE
+          </Badge>
+        )}
+      </div>
+      {relativeText && (
+        <div className="text-xs opacity-75 mt-0.5">{relativeText}</div>
+      )}
+    </div>
+  );
+}
+
+// Stats filter type
+type StatsFilterType = 'overdue' | 'dueThisWeek' | 'inProduction' | 'readyForDelivery' | 'onHold' | 'awaitingParts' | null;
+
+// Summary statistics bar
+function SummaryStatsBar({ stats, activeFilter, onFilterChange }: {
+  stats: { total: number; overdue: number; dueThisWeek: number; inProduction: number; readyForDelivery: number; onHold: number; awaitingParts: number };
+  activeFilter: StatsFilterType;
+  onFilterChange: (filter: StatsFilterType) => void;
+}) {
+  const statItems: { key: StatsFilterType; label: string; value: number; colorClass: string; borderClass: string; show: boolean }[] = [
+    { key: null, label: 'Total Orders', value: stats.total, colorClass: 'text-foreground', borderClass: 'border-l-foreground/30', show: true },
+    { key: 'overdue', label: 'Overdue', value: stats.overdue, colorClass: 'text-red-600 dark:text-red-400', borderClass: 'border-l-red-500', show: stats.overdue > 0 },
+    { key: 'dueThisWeek', label: 'Due This Week', value: stats.dueThisWeek, colorClass: 'text-amber-600 dark:text-amber-400', borderClass: 'border-l-amber-500', show: true },
+    { key: 'awaitingParts', label: 'Awaiting Parts', value: stats.awaitingParts, colorClass: 'text-purple-600 dark:text-purple-400', borderClass: 'border-l-purple-500', show: stats.awaitingParts > 0 },
+    { key: 'inProduction', label: 'In Production', value: stats.inProduction, colorClass: 'text-blue-600 dark:text-blue-400', borderClass: 'border-l-blue-500', show: true },
+    { key: 'readyForDelivery', label: 'Ready For Delivery', value: stats.readyForDelivery, colorClass: 'text-teal-600 dark:text-teal-400', borderClass: 'border-l-teal-500', show: true },
+    { key: 'onHold', label: 'On Hold', value: stats.onHold, colorClass: 'text-gray-600 dark:text-gray-400', borderClass: 'border-l-gray-500', show: stats.onHold > 0 },
+  ];
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {statItems.filter(s => s.show).map(stat => (
+        <button
+          key={stat.key || 'total'}
+          onClick={() => stat.key !== null ? onFilterChange(activeFilter === stat.key ? null : stat.key) : onFilterChange(null)}
+          className={`flex items-center gap-3 px-3 py-2 rounded-lg border border-l-4 ${stat.borderClass} transition-all duration-150 hover:bg-muted/50 ${
+            activeFilter === stat.key ? 'bg-muted ring-1 ring-primary/30' : 'bg-card/50'
+          } cursor-pointer`}
+        >
+          <span className={`text-xl font-bold tabular-nums ${stat.colorClass}`}>{stat.value}</span>
+          <span className="text-xs text-muted-foreground whitespace-nowrap">{stat.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Compact procurement indicator for the table row
+function ProcurementIndicator({ summary }: { summary?: ProcurementSummary }) {
+  if (!summary || summary.total_po_lines === 0) {
+    return <span className="text-muted-foreground/40">—</span>;
+  }
+
+  const { total_po_lines, fully_received_lines } = summary;
+  const allReceived = fully_received_lines >= total_po_lines;
+  const someReceived = fully_received_lines > 0;
+
+  let colorClass = 'text-muted-foreground'; // none received
+  if (allReceived) colorClass = 'text-emerald-600 dark:text-emerald-400';
+  else if (someReceived) colorClass = 'text-amber-600 dark:text-amber-400';
+
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs font-medium ${colorClass}`} title={`${fully_received_lines} of ${total_po_lines} supplier lines received`}>
+      {allReceived && <Check className="h-3 w-3" />}
+      <span className="tabular-nums">{fully_received_lines}/{total_po_lines}</span>
+    </span>
+  );
+}
+
+// Detailed procurement section for expanded panel (lazy loaded)
+function ProcurementDetail({ orderId }: { orderId: number }) {
+  const VISIBLE_LIMIT = 5;
+  const [showAll, setShowAll] = useState(false);
+
+  const { data: lines = [], isLoading } = useQuery({
+    queryKey: ['procurementDetails', orderId],
+    queryFn: () => fetchProcurementDetails(orderId),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Loading procurement data...
+      </div>
+    );
+  }
+
+  if (lines.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground italic">No supplier orders placed for this order</p>
+    );
+  }
+
+  const fullyReceived = lines.filter(l => l.total_received >= l.order_quantity).length;
+  const hasMore = lines.length > VISIBLE_LIMIT;
+  const visibleLines = showAll ? lines : lines.slice(0, VISIBLE_LIMIT);
+  const hiddenCount = lines.length - VISIBLE_LIMIT;
+
+  return (
+    <div>
+      <h4 className="text-sm font-semibold mb-2">
+        Procurement ({fullyReceived}/{lines.length} lines received)
+      </h4>
+      <div className="space-y-1">
+        {visibleLines.map((line) => {
+          const pct = line.order_quantity > 0 ? Math.min(100, (line.total_received / line.order_quantity) * 100) : 0;
+          const isComplete = line.total_received >= line.order_quantity;
+          const isPartial = line.total_received > 0 && !isComplete;
+
+          return (
+            <div key={line.supplier_order_id} className="flex items-center gap-3 text-sm py-1.5 px-2 rounded hover:bg-muted/50">
+              {/* Status dot */}
+              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isComplete ? 'bg-emerald-500' : isPartial ? 'bg-amber-500' : 'bg-gray-300 dark:bg-gray-600'}`} />
+
+              {/* Component name */}
+              <span className="font-medium truncate flex-1 min-w-0">
+                {line.component_name || line.component_code || 'Unknown component'}
+              </span>
+
+              {/* PO number */}
+              <span className="text-xs text-muted-foreground flex-shrink-0">{line.po_number}</span>
+
+              {/* Quantity fraction */}
+              <span className={`text-xs tabular-nums flex-shrink-0 font-medium ${isComplete ? 'text-emerald-600 dark:text-emerald-400' : isPartial ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
+                {Number(line.total_received)}/{Number(line.order_quantity)}
+              </span>
+
+              {/* Mini progress bar */}
+              <div className="w-12 h-1.5 rounded-full bg-muted flex-shrink-0 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${isComplete ? 'bg-emerald-500' : isPartial ? 'bg-amber-500' : 'bg-gray-300'}`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {hasMore && (
+        <button
+          onClick={() => setShowAll(prev => !prev)}
+          className="mt-2 text-xs text-primary hover:underline flex items-center gap-1 px-2"
+        >
+          {showAll ? (
+            <>Show less</>
+          ) : (
+            <>Show {hiddenCount} more line{hiddenCount === 1 ? '' : 's'}</>
+          )}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Expanded order panel (items list, delivery countdown, quick actions)
+function ExpandedOrderPanel({ order, onViewFull }: { order: Order; onViewFull: () => void }) {
+  const panelRouter = useRouter();
+  const details = order.details || [];
+  const statusName = order.status?.status_name || 'Unknown';
+  const deliveryInfo = getDeliveryDateInfo(order.delivery_date, statusName);
+
+  return (
+    <div className="px-6 py-4 bg-muted/30 border-l-4 border-l-primary/30">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Products/Items */}
+        <div className="md:col-span-2">
+          <h4 className="text-sm font-semibold mb-2">Order Items ({details.length})</h4>
+          {details.length > 0 ? (
+            <div className="space-y-1">
+              {details.map((detail) => (
+                <div key={detail.order_detail_id} className="flex items-center justify-between text-sm py-1.5 px-2 rounded hover:bg-muted/50">
+                  <span className="font-medium truncate flex-1">{detail.product?.name || `Product #${detail.product_id}`}</span>
+                  <div className="flex items-center gap-4 ml-4 text-muted-foreground">
+                    <span>Qty: {detail.quantity}</span>
+                    {detail.unit_price != null && <span>R {Number(detail.unit_price).toFixed(2)}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground italic">No products added to this order yet</p>
+          )}
+
+          {/* Procurement Status */}
+          <div className="mt-4 pt-3 border-t border-border/50">
+            <ProcurementDetail orderId={order.order_id} />
+            <button
+              onClick={() => panelRouter.push(`/orders/${order.order_id}?tab=procurement`)}
+              className="mt-2 text-xs text-primary hover:underline flex items-center gap-1"
+            >
+              View Procurement <ExternalLink className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+
+        {/* Right side: Delivery countdown + actions */}
+        <div className="space-y-4">
+          {order.delivery_date && (
+            <div className={`text-center p-3 rounded-lg bg-background/50 border ${deliveryInfo.colorClass}`}>
+              <div className="text-lg font-bold">
+                {deliveryInfo.isOverdue
+                  ? 'Overdue'
+                  : deliveryInfo.relativeText === 'today'
+                    ? 'Due Today'
+                    : `Due ${deliveryInfo.relativeText}`}
+              </div>
+              <div className="text-xs opacity-75">{format(new Date(order.delivery_date), 'EEEE, MMM d, yyyy')}</div>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2">
+            <Button variant="outline" size="sm" onClick={onViewFull} className="w-full justify-start">
+              <ExternalLink className="h-3.5 w-3.5 mr-2" />
+              View Full Order
+            </Button>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground px-2">
+              <ClipboardList className="h-3.5 w-3.5" />
+              <span>No job cards issued</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Undo toast for status changes
+function UndoToast({ message, onUndo, onDismiss }: { message: string; onUndo: () => void; onDismiss: () => void }) {
+  useEffect(() => {
+    const timer = setTimeout(onDismiss, 5000);
+    return () => clearTimeout(timer);
+  }, [onDismiss]);
+
+  return (
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-foreground text-background px-4 py-3 rounded-lg shadow-lg">
+      <span className="text-sm">{message}</span>
+      <Button variant="secondary" size="sm" onClick={onUndo} className="h-7 px-2 text-xs">
+        <Undo2 className="h-3 w-3 mr-1" />
+        Undo
+      </Button>
+      <button onClick={onDismiss} className="text-background/60 hover:text-background">
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
+// Inline status dropdown for quick status change
+function InlineStatusDropdown({
+  order,
+  statuses,
+  isUpdating,
+  onStatusChange,
+}: {
+  order: Order;
+  statuses: OrderStatus[];
+  isUpdating: boolean;
+  onStatusChange: (orderId: number, newStatusId: number, newStatusName: string, oldStatusId: number, oldStatusName: string) => void;
+}) {
+  const currentStatus = order.status?.status_name || 'Unknown';
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          onClick={(e) => e.stopPropagation()}
+          className="focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 rounded-full"
+          disabled={isUpdating}
+        >
+          {isUpdating ? (
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border bg-muted text-muted-foreground">
+              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              Updating...
+            </span>
+          ) : (
+            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border cursor-pointer hover:ring-2 hover:ring-ring/30 transition-all ${getStatusColorClasses(currentStatus)}`}>
+              {currentStatus}
+            </span>
+          )}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" onClick={(e) => e.stopPropagation()}>
+        {statuses.map((s) => (
+          <DropdownMenuItem
+            key={s.status_id}
+            disabled={s.status_name === currentStatus}
+            onClick={() => {
+              onStatusChange(
+                order.order_id,
+                s.status_id,
+                s.status_name,
+                order.status_id,
+                currentStatus,
+              );
+            }}
+            className="flex items-center gap-2"
+          >
+            <span className={`w-2 h-2 rounded-full ${getStatusDotColor(s.status_name)}`} />
+            {s.status_name}
+            {s.status_name === currentStatus && <Check className="h-3.5 w-3.5 ml-auto" />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -784,6 +1270,24 @@ export default function OrdersPage() {
   const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Expandable row state
+  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+
+  // Summary stats filter
+  const [statsFilter, setStatsFilter] = useState<StatsFilterType>(null);
+
+  // Undo toast state for inline status changes
+  const [undoToast, setUndoToast] = useState<{
+    orderId: number;
+    orderNumber: string;
+    oldStatusId: number;
+    oldStatusName: string;
+    newStatusName: string;
+  } | null>(null);
+
+  // Status being updated (for loading indicator)
+  const [updatingOrderId, setUpdatingOrderId] = useState<number | null>(null);
+
   // Pagination state - restored from URL
   const [currentPage, setCurrentPage] = useState(() => {
     const p = parseInt(searchParams?.get('page') || '');
@@ -871,7 +1375,7 @@ export default function OrdersPage() {
   }, [buildUrl, router, searchParams]);
 
   // Track previous filter values to know when to reset page
-  const prevFiltersRef = useRef({ debouncedSearch, statusFilter, activeSection, startDate, endDate, sortField, sortDirection });
+  const prevFiltersRef = useRef({ debouncedSearch, statusFilter, activeSection, startDate, endDate, sortField, sortDirection, statsFilter });
   useEffect(() => {
     const prev = prevFiltersRef.current;
     const filtersChanged =
@@ -881,13 +1385,14 @@ export default function OrdersPage() {
       prev.startDate !== startDate ||
       prev.endDate !== endDate ||
       prev.sortField !== sortField ||
-      prev.sortDirection !== sortDirection;
+      prev.sortDirection !== sortDirection ||
+      prev.statsFilter !== statsFilter;
 
     if (filtersChanged && currentPage !== 1) {
       setCurrentPage(1);
     }
-    prevFiltersRef.current = { debouncedSearch, statusFilter, activeSection, startDate, endDate, sortField, sortDirection };
-  }, [debouncedSearch, statusFilter, activeSection, startDate, endDate, sortField, sortDirection]); // eslint-disable-line react-hooks/exhaustive-deps
+    prevFiltersRef.current = { debouncedSearch, statusFilter, activeSection, startDate, endDate, sortField, sortDirection, statsFilter };
+  }, [debouncedSearch, statusFilter, activeSection, startDate, endDate, sortField, sortDirection, statsFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle search input change
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -904,6 +1409,19 @@ export default function OrdersPage() {
     }
   }, [sortField]);
 
+  // Toggle row expansion
+  const toggleExpand = useCallback((orderId: number) => {
+    setExpandedRows(prev => {
+      const next = new Set(prev);
+      if (next.has(orderId)) {
+        next.delete(orderId);
+      } else {
+        next.add(orderId);
+      }
+      return next;
+    });
+  }, []);
+
   // Reset all filters and pagination
   const resetFilters = () => {
     setStatusFilter('all');
@@ -913,12 +1431,13 @@ export default function OrdersPage() {
     setEndDate(undefined);
     setSortField(null);
     setSortDirection('asc');
+    setStatsFilter(null);
     setCurrentPage(1);
     setPageSize(25);
     router.replace('/orders', { scroll: false });
   };
 
-  const hasActiveFilters = statusFilter !== 'all' || searchQuery || activeSection || startDate || endDate;
+  const hasActiveFilters = statusFilter !== 'all' || searchQuery || activeSection || startDate || endDate || statsFilter;
 
   // Fetch order statuses for filter dropdown
   const { data: statuses = [] } = useQuery({
@@ -930,15 +1449,81 @@ export default function OrdersPage() {
   const { data: orders = [], isLoading, error } = useQuery({
     queryKey: ['orders', statusFilter, debouncedSearch],
     queryFn: () => fetchOrders(statusFilter, debouncedSearch),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
+
+  // Fetch procurement summaries (one query for all orders)
+  const { data: procurementSummaries = {} } = useQuery({
+    queryKey: ['procurementSummaries'],
+    queryFn: fetchProcurementSummaries,
+  });
+
+  // Inline status change handler
+  const handleStatusChange = useCallback(async (
+    orderId: number,
+    newStatusId: number,
+    newStatusName: string,
+    oldStatusId: number,
+    oldStatusName: string,
+  ) => {
+    setUpdatingOrderId(orderId);
+    try {
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update({ status_id: newStatusId })
+        .eq('order_id', orderId);
+
+      if (updateError) throw updateError;
+
+      // Find order number for toast
+      const order = orders.find(o => o.order_id === orderId);
+      const orderNumber = order?.order_number || `#${orderId}`;
+
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+
+      setUndoToast({
+        orderId,
+        orderNumber,
+        oldStatusId,
+        oldStatusName,
+        newStatusName,
+      });
+    } catch (err) {
+      console.error('Failed to update status:', err);
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  }, [orders, queryClient]);
+
+  // Undo status change
+  const handleUndoStatusChange = useCallback(async () => {
+    if (!undoToast) return;
+    const { orderId, oldStatusId } = undoToast;
+    setUndoToast(null);
+    setUpdatingOrderId(orderId);
+    try {
+      const { error: undoError } = await supabase
+        .from('orders')
+        .update({ status_id: oldStatusId })
+        .eq('order_id', orderId);
+
+      if (undoError) throw undoError;
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+    } catch (err) {
+      console.error('Failed to undo status change:', err);
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  }, [undoToast, queryClient]);
 
   // Function to handle section filter clicks
   const handleSectionFilter = (section: string | null) => {
     setActiveSection(section);
   };
 
-  // Filter, sort, and paginate orders
-  const { paginatedOrders, totalCount, totalPages } = useMemo(() => {
+  // Filter, sort, compute stats, and paginate orders
+  const { paginatedOrders, totalCount, totalPages, orderStats } = useMemo(() => {
     // Section filter
     let filtered = orders.filter(order => {
       if (!activeSection) return true;
@@ -952,9 +1537,9 @@ export default function OrdersPage() {
       filtered = filtered.filter(order => {
         if (!order.delivery_date) return false;
         const deliveryDate = parseISO(order.delivery_date);
-        const start = new Date(startDate);
-        start.setHours(0, 0, 0, 0);
-        return !isBefore(deliveryDate, start);
+        const s = new Date(startDate);
+        s.setHours(0, 0, 0, 0);
+        return !isBefore(deliveryDate, s);
       });
     }
 
@@ -962,15 +1547,80 @@ export default function OrdersPage() {
       filtered = filtered.filter(order => {
         if (!order.delivery_date) return false;
         const deliveryDate = parseISO(order.delivery_date);
-        const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
-        return !isAfter(deliveryDate, end);
+        const e = new Date(endDate);
+        e.setHours(23, 59, 59, 999);
+        return !isAfter(deliveryDate, e);
+      });
+    }
+
+    // Compute stats from filtered orders (before statsFilter)
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const weekStart = startOfWeek(now, { weekStartsOn: 1 });
+    const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
+
+    const stats = { total: filtered.length, overdue: 0, dueThisWeek: 0, inProduction: 0, readyForDelivery: 0, onHold: 0, awaitingParts: 0 };
+    for (const order of filtered) {
+      const status = order.status?.status_name?.toLowerCase() || '';
+      const isTerminal = status === 'completed' || status === 'cancelled';
+
+      if (!isTerminal && order.delivery_date) {
+        const dd = new Date(order.delivery_date);
+        dd.setHours(0, 0, 0, 0);
+        if (isBefore(dd, now)) stats.overdue++;
+        if (isWithinInterval(dd, { start: weekStart, end: weekEnd })) stats.dueThisWeek++;
+      }
+
+      if (status === 'in production' || status === 'in progress') stats.inProduction++;
+      if (status === 'ready for delivery') stats.readyForDelivery++;
+      if (status === 'on hold') stats.onHold++;
+
+      // Awaiting parts: has supplier orders placed but not all fully received
+      const ps = procurementSummaries[order.order_id];
+      if (!isTerminal && ps && ps.total_po_lines > 0 && ps.fully_received_lines < ps.total_po_lines) {
+        stats.awaitingParts++;
+      }
+    }
+
+    // Apply statsFilter
+    let display = filtered;
+    if (statsFilter) {
+      display = filtered.filter(order => {
+        const status = order.status?.status_name?.toLowerCase() || '';
+        const isTerminal = status === 'completed' || status === 'cancelled';
+        switch (statsFilter) {
+          case 'overdue': {
+            if (isTerminal || !order.delivery_date) return false;
+            const dd = new Date(order.delivery_date);
+            dd.setHours(0, 0, 0, 0);
+            return isBefore(dd, now);
+          }
+          case 'dueThisWeek': {
+            if (isTerminal || !order.delivery_date) return false;
+            const dd = new Date(order.delivery_date);
+            dd.setHours(0, 0, 0, 0);
+            return isWithinInterval(dd, { start: weekStart, end: weekEnd });
+          }
+          case 'inProduction':
+            return status === 'in production' || status === 'in progress';
+          case 'readyForDelivery':
+            return status === 'ready for delivery';
+          case 'onHold':
+            return status === 'on hold';
+          case 'awaitingParts': {
+            if (isTerminal) return false;
+            const ps = procurementSummaries[order.order_id];
+            return !!ps && ps.total_po_lines > 0 && ps.fully_received_lines < ps.total_po_lines;
+          }
+          default:
+            return true;
+        }
       });
     }
 
     // Sort
     if (sortField) {
-      filtered = [...filtered].sort((a, b) => {
+      display = [...display].sort((a, b) => {
         let valueA: any;
         let valueB: any;
 
@@ -1018,13 +1668,13 @@ export default function OrdersPage() {
       });
     }
 
-    const total = filtered.length;
+    const total = display.length;
     const pages = Math.max(1, Math.ceil(total / pageSize));
-    const start = (currentPage - 1) * pageSize;
-    const paginated = filtered.slice(start, start + pageSize);
+    const startIdx = (currentPage - 1) * pageSize;
+    const paginated = display.slice(startIdx, startIdx + pageSize);
 
-    return { paginatedOrders: paginated, totalCount: total, totalPages: pages };
-  }, [orders, activeSection, startDate, endDate, sortField, sortDirection, pageSize, currentPage]);
+    return { paginatedOrders: paginated, totalCount: total, totalPages: pages, orderStats: stats };
+  }, [orders, activeSection, startDate, endDate, statsFilter, sortField, sortDirection, pageSize, currentPage, procurementSummaries]);
 
   return (
     <div className="space-y-6 w-full max-w-7xl mx-auto p-6">
@@ -1199,6 +1849,15 @@ export default function OrdersPage() {
         </div>
       </div>
 
+      {/* Summary Stats Bar */}
+      {!isLoading && !error && orders.length > 0 && (
+        <SummaryStatsBar
+          stats={orderStats}
+          activeFilter={statsFilter}
+          onFilterChange={setStatsFilter}
+        />
+      )}
+
       {/* Table */}
       <div>
         {isLoading ? (
@@ -1219,86 +1878,151 @@ export default function OrdersPage() {
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/50">
+                    <TableHead className="w-8"></TableHead>
                     <SortableHeader label="Order #" field="order_number" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
                     <SortableHeader label="Customer" field="customer" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
                     <SortableHeader label="Created" field="created_at" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
                     <SortableHeader label="Delivery Date" field="delivery_date" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
                     <SortableHeader label="Total Amount" field="total_amount" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
+                    <TableHead className="font-semibold">Items</TableHead>
+                    <TableHead className="font-semibold">Supplier</TableHead>
                     <SortableHeader label="Status" field="status" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
                     <TableHead className="font-semibold text-center">Files</TableHead>
                     <TableHead className="font-semibold text-right w-10"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {paginatedOrders.map((order) => (
-                    <TableRow
-                      key={order.order_id}
-                      className="group cursor-pointer transition-colors duration-150 hover:bg-muted/50"
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => router.push(`/orders/${order.order_id}`)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          router.push(`/orders/${order.order_id}`);
-                        }
-                      }}
-                    >
-                      <TableCell className="align-middle font-semibold tracking-tight text-foreground py-2">
-                        {order.order_number || `#${order.order_id}`}
-                      </TableCell>
-                      <TableCell className="align-middle py-2">
-                        {order.customer?.name || 'N/A'}
-                      </TableCell>
-                      <TableCell className="align-middle text-sm text-muted-foreground py-2">
-                        {order.created_at ? format(new Date(order.created_at), 'MMM d, yyyy') : 'N/A'}
-                      </TableCell>
-                      <TableCell className="align-middle text-sm text-muted-foreground py-2">
-                        {order.delivery_date
-                          ? format(new Date(order.delivery_date), 'MMM d, yyyy')
-                          : 'Not set'}
-                      </TableCell>
-                      <TableCell className="align-middle text-sm font-medium text-foreground py-2">
-                        {order.total_amount !== null && order.total_amount !== undefined
-                          ? `R ${Number(order.total_amount).toFixed(2)}`
-                          : '—'}
-                      </TableCell>
-                      <TableCell className="align-middle py-2">
-                        <StatusBadge status={order.status?.status_name || 'Unknown'} />
-                      </TableCell>
-                      <OrderAttachments order={order} />
-                      <TableCell className="text-right align-middle py-2">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => router.push(`/orders/${order.order_id}`)}>
-                              <Eye className="h-4 w-4 mr-2" />
-                              View details
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="text-destructive focus:text-destructive"
+                  {paginatedOrders.map((order) => {
+                    const isExpanded = expandedRows.has(order.order_id);
+                    const itemCount = order.details?.length || 0;
+
+                    return (
+                      <Fragment key={order.order_id}>
+                        <TableRow
+                          className="group cursor-pointer transition-colors duration-150 hover:bg-muted/50"
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => router.push(`/orders/${order.order_id}`)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              router.push(`/orders/${order.order_id}`);
+                            }
+                          }}
+                        >
+                          {/* Expand chevron */}
+                          <TableCell className="align-middle py-2 w-8 px-2">
+                            <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setDeleteTargetId(order.order_id);
+                                toggleExpand(order.order_id);
                               }}
+                              className="p-1 rounded hover:bg-muted transition-colors"
+                              aria-label={isExpanded ? 'Collapse order details' : 'Expand order details'}
                             >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                              {isExpanded ? (
+                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </button>
+                          </TableCell>
+                          <TableCell className="align-middle font-semibold tracking-tight text-foreground py-2">
+                            {order.order_number || `#${order.order_id}`}
+                          </TableCell>
+                          <TableCell className="align-middle py-2">
+                            {order.customer?.name || 'N/A'}
+                          </TableCell>
+                          <TableCell className="align-middle text-sm text-muted-foreground py-2">
+                            {order.created_at ? format(new Date(order.created_at), 'MMM d, yyyy') : 'N/A'}
+                          </TableCell>
+                          {/* Delivery Date with colour coding */}
+                          <TableCell className="align-middle text-sm py-2">
+                            <DeliveryDateCell order={order} />
+                          </TableCell>
+                          <TableCell className="align-middle text-sm font-medium text-foreground py-2">
+                            {order.total_amount !== null && order.total_amount !== undefined
+                              ? `R ${Number(order.total_amount).toFixed(2)}`
+                              : '—'}
+                          </TableCell>
+                          {/* Items count */}
+                          <TableCell className="align-middle text-sm py-2">
+                            <span className={itemCount === 0 ? 'text-amber-500' : 'text-muted-foreground'}>
+                              {itemCount} {itemCount === 1 ? 'item' : 'items'}
+                            </span>
+                          </TableCell>
+                          {/* Procurement indicator */}
+                          <TableCell className="align-middle text-sm py-2">
+                            {procurementSummaries[order.order_id]?.total_po_lines > 0 ? (
+                              <span
+                                className="cursor-pointer hover:underline"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  router.push(`/orders/${order.order_id}?tab=procurement`);
+                                }}
+                              >
+                                <ProcurementIndicator summary={procurementSummaries[order.order_id]} />
+                              </span>
+                            ) : (
+                              <ProcurementIndicator summary={procurementSummaries[order.order_id]} />
+                            )}
+                          </TableCell>
+                          {/* Clickable status badge for inline change */}
+                          <TableCell className="align-middle py-2">
+                            <InlineStatusDropdown
+                              order={order}
+                              statuses={statuses}
+                              isUpdating={updatingOrderId === order.order_id}
+                              onStatusChange={handleStatusChange}
+                            />
+                          </TableCell>
+                          <OrderAttachments order={order} />
+                          <TableCell className="text-right align-middle py-2">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => router.push(`/orders/${order.order_id}`)}>
+                                  <Eye className="h-4 w-4 mr-2" />
+                                  View details
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="text-destructive focus:text-destructive"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDeleteTargetId(order.order_id);
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+
+                        {/* Expanded panel row */}
+                        {isExpanded && (
+                          <TableRow className="hover:bg-transparent">
+                            <TableCell colSpan={11} className="p-0 border-b">
+                              <ExpandedOrderPanel
+                                order={order}
+                                onViewFull={() => router.push(`/orders/${order.order_id}`)}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -1361,6 +2085,15 @@ export default function OrdersPage() {
           </div>
         )}
       </div>
+
+      {/* Undo toast for inline status changes */}
+      {undoToast && (
+        <UndoToast
+          message={`Order ${undoToast.orderNumber} status changed to "${undoToast.newStatusName}"`}
+          onUndo={handleUndoStatusChange}
+          onDismiss={() => setUndoToast(null)}
+        />
+      )}
 
       {/* Delete confirmation dialog */}
       <Dialog open={deleteTargetId !== null} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
