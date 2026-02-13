@@ -5,6 +5,14 @@ import { createClient } from '@supabase/supabase-js';
 import PurchaseOrderCancellationEmail from '@/emails/purchase-order-cancellation-email';
 import { processTemplate, parsePOContactInfo, DEFAULT_TEMPLATES } from '@/lib/templates';
 
+const normalizeEmail = (value: string): string => value.trim().toLowerCase();
+
+const parseEmailList = (value: string | null | undefined): string[] =>
+  (value || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
 export async function POST(request: Request) {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -13,7 +21,14 @@ export async function POST(request: Request) {
   const resend = new Resend(process.env.RESEND_API_KEY!);
 
   try {
-    const { purchaseOrderId, cancellationReason, overrides, cc } = await request.json();
+    const {
+      purchaseOrderId,
+      cancellationReason,
+      overrides,
+      cc,
+      supplierOrderIds,
+      emailType,
+    } = await request.json();
 
     if (!purchaseOrderId) {
       return NextResponse.json(
@@ -37,6 +52,14 @@ export async function POST(request: Request) {
       ? cc.map((value: any) => (typeof value === 'string' ? value.trim() : ''))
           .filter((value: string) => value.length > 0)
       : [] as string[];
+
+    const scopedSupplierOrderIds = Array.isArray(supplierOrderIds)
+      ? supplierOrderIds
+          .map((value: any) => Number(value))
+          .filter((value: number) => Number.isFinite(value))
+      : [];
+    const cancellationScope: 'order' | 'line' =
+      emailType === 'po_line_cancel' || scopedSupplierOrderIds.length > 0 ? 'line' : 'order';
 
     // Fetch the purchase order with all necessary details
     const { data: purchaseOrder, error: poError } = await supabase
@@ -71,6 +94,20 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: `Failed to fetch purchase order: ${poError?.message || 'Not found'}` },
         { status: 404 }
+      );
+    }
+
+    const filteredSupplierOrders =
+      scopedSupplierOrderIds.length > 0
+        ? (purchaseOrder.supplier_orders || []).filter((order: any) =>
+            scopedSupplierOrderIds.includes(Number(order.order_id))
+          )
+        : purchaseOrder.supplier_orders || [];
+
+    if (filteredSupplierOrders.length === 0) {
+      return NextResponse.json(
+        { error: 'No supplier order lines found for cancellation email' },
+        { status: 400 }
       );
     }
 
@@ -111,9 +148,13 @@ export async function POST(request: Request) {
       logoUrl: companyLogoUrl || process.env.COMPANY_LOGO || undefined,
     };
     const fromAddress = process.env.EMAIL_FROM_ORDERS || process.env.EMAIL_FROM || companyInfo.email || 'purchasing@example.com';
+    const defaultCcEmails = parseEmailList(settings?.po_default_cc_email);
+    const mergedCcList = Array.from(
+      new Set([...defaultCcEmails, ...ccList].map((email) => normalizeEmail(email)))
+    );
 
     // Extract unique suppliers
-    const uniqueSuppliers = (purchaseOrder.supplier_orders || [])
+    const uniqueSuppliers = filteredSupplierOrders
       .map((order: any) => {
         const sc = Array.isArray(order.supplier_component)
           ? order.supplier_component[0]
@@ -161,7 +202,7 @@ export async function POST(request: Request) {
       }
 
       // Get only the orders for this supplier
-      const supplierOrdersRaw = purchaseOrder.supplier_orders.filter((order: any) => {
+      const supplierOrdersRaw = filteredSupplierOrders.filter((order: any) => {
         const sc = Array.isArray(order.supplier_component)
           ? order.supplier_component[0]
           : order.supplier_component;
@@ -204,13 +245,17 @@ export async function POST(request: Request) {
           supplierEmail: toEmail,
           contactName: contactInfo.name,
           contactEmail: contactInfo.email,
+          cancellationScope,
         }));
 
         const { data: result, error } = await resend.emails.send({
           from: `${companyInfo.name} Purchasing <${fromAddress}>`,
           to: [toEmail],
-          cc: ccList.length ? ccList : undefined,
-          subject: `CANCELLED: Purchase Order ${purchaseOrder.q_number || `PO-${purchaseOrder.purchase_order_id}`}`,
+          cc: mergedCcList.length ? mergedCcList : undefined,
+          subject:
+            cancellationScope === 'line'
+              ? `LINE ITEM CANCELLED: Purchase Order ${purchaseOrder.q_number || `PO-${purchaseOrder.purchase_order_id}`}`
+              : `CANCELLED: Purchase Order ${purchaseOrder.q_number || `PO-${purchaseOrder.purchase_order_id}`}`,
           html,
         });
 
@@ -245,11 +290,15 @@ export async function POST(request: Request) {
     // Log all email results
     for (const result of emailResults) {
       if (result.recipientEmail) {
+        const scopedSupplierOrderId =
+          scopedSupplierOrderIds.length === 1 ? scopedSupplierOrderIds[0] : null;
         await supabase.from('purchase_order_emails').insert({
           purchase_order_id: purchaseOrderId,
           supplier_id: result.supplierId,
+          supplier_order_id: scopedSupplierOrderId,
           recipient_email: result.recipientEmail,
-          cc_emails: ccList.length > 0 ? ccList : [],
+          cc_emails: mergedCcList.length > 0 ? mergedCcList : [],
+          email_type: cancellationScope === 'line' ? 'po_line_cancel' : 'po_cancel',
           status: result.success ? 'sent' : 'failed',
           message_id: result.messageId || null,
           error_message: result.error || null,

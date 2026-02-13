@@ -3,9 +3,81 @@ import { renderAsync } from '@react-email/render';
 import { Resend } from 'resend';
 import { createClient } from '@supabase/supabase-js';
 import PurchaseOrderEmail, { PurchaseOrderEmailProps, SupplierOrderItem } from '@/emails/purchase-order-email';
+import PurchaseOrderInternalEmail, {
+  InternalSupplierOrderItem,
+  PurchaseOrderInternalEmailProps,
+} from '@/emails/purchase-order-internal-email';
 import { processTemplate, parsePOContactInfo, DEFAULT_TEMPLATES } from '@/lib/templates';
 
 
+const normalizeEmail = (value: string): string => value.trim().toLowerCase();
+
+const parseEmailList = (value: string | null | undefined): string[] =>
+  (value || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+const normalizeOrderReference = (value: string | number | null | undefined): string => {
+  const raw = String(value ?? '').trim();
+  return raw.replace(/^#+/, '');
+};
+
+const buildForOrderReference = (order: any): string => {
+  const links = Array.isArray(order?.supplier_order_customer_orders)
+    ? order.supplier_order_customer_orders
+    : [];
+
+  const orderReferences = Array.from(
+    new Set(
+      links
+        .map((link: any) => {
+          const customerOrder = Array.isArray(link?.customer_order)
+            ? link.customer_order[0]
+            : link?.customer_order;
+          if (!customerOrder) return '';
+          return normalizeOrderReference(customerOrder.order_number || customerOrder.order_id);
+        })
+        .filter((value: string) => value.length > 0)
+    )
+  );
+
+  const stockQuantity = links.reduce(
+    (sum: number, link: any) => sum + Number(link?.quantity_for_stock || 0),
+    0
+  );
+
+  if (orderReferences.length > 0 && stockQuantity > 0) {
+    return `${orderReferences.join(', ')} + Stock`;
+  }
+  if (orderReferences.length > 0) {
+    return orderReferences.join(', ');
+  }
+  if (stockQuantity > 0) {
+    return 'Stock';
+  }
+  return '—';
+};
+
+const mapSupplierOrderItem = (order: any): SupplierOrderItem => {
+  const sc = Array.isArray(order.supplier_component)
+    ? order.supplier_component[0]
+    : order.supplier_component;
+
+  return {
+    order_id: Number(order.order_id),
+    order_quantity: Number(order.order_quantity),
+    notes: order.notes ?? undefined,
+    supplier_component: {
+      supplier_code: sc?.supplier_code ?? '',
+      price: Number(sc?.price ?? 0),
+      component: {
+        internal_code: sc?.component?.internal_code ?? '',
+        description: sc?.component?.description ?? '',
+      },
+    },
+  };
+};
 
 export async function POST(request: Request) {
   // Initialize Supabase client lazily to ensure env vars exist at runtime
@@ -53,6 +125,14 @@ export async function POST(request: Request) {
           order_id,
           order_quantity,
           notes,
+          supplier_order_customer_orders(
+            quantity_for_order,
+            quantity_for_stock,
+            customer_order:orders(
+              order_id,
+              order_number
+            )
+          ),
           supplier_component:suppliercomponents(
             supplier_code,
             price,
@@ -122,6 +202,30 @@ export async function POST(request: Request) {
       logoUrl: companyLogoUrl || process.env.COMPANY_LOGO || undefined,
     };
     const fromAddress = process.env.EMAIL_FROM_ORDERS || process.env.EMAIL_FROM || companyInfo.email || 'purchasing@example.com';
+    const defaultCcSet = new Set(
+      parseEmailList(settings?.po_default_cc_email).map((entry) => normalizeEmail(entry))
+    );
+    const internalCcList = ccList.filter((entry) => defaultCcSet.has(normalizeEmail(entry)));
+    const supplierCcList = ccList.filter((entry) => !defaultCcSet.has(normalizeEmail(entry)));
+
+    // Build attachments array for Resend once and reuse for supplier + internal copies.
+    const emailAttachments: { content: Buffer; filename: string }[] = [];
+    if (pdfBase64 && pdfFilename) {
+      emailAttachments.push({
+        content: Buffer.from(pdfBase64, 'base64'),
+        filename: pdfFilename,
+      });
+    }
+    if (Array.isArray(additionalAttachments)) {
+      for (const att of additionalAttachments) {
+        if (att?.content && att?.filename) {
+          emailAttachments.push({
+            content: Buffer.from(att.content, 'base64'),
+            filename: att.filename,
+          });
+        }
+      }
+    }
 
     // Extract unique suppliers from the order (handle array/object shapes from Supabase)
     const uniqueSuppliers = (purchaseOrder.supplier_orders || [])
@@ -181,29 +285,21 @@ export async function POST(request: Request) {
         return sup?.supplier_id === supplier.supplier_id;
       });
 
-      const supplierOrdersForEmail: SupplierOrderItem[] = supplierOrdersRaw.map((order: any) => {
-        const sc = Array.isArray(order.supplier_component)
-          ? order.supplier_component[0]
-          : order.supplier_component;
-        return {
-          order_id: Number(order.order_id),
-          order_quantity: Number(order.order_quantity),
-          notes: order.notes ?? undefined,
-          supplier_component: {
-            supplier_code: sc?.supplier_code ?? '',
-            price: Number(sc?.price ?? 0),
-            component: {
-              internal_code: sc?.component?.internal_code ?? '',
-              description: sc?.component?.description ?? '',
-            },
-          },
-        };
-      });
+      const supplierOrdersForEmail: SupplierOrderItem[] = supplierOrdersRaw.map((order: any) =>
+        mapSupplierOrderItem(order)
+      );
+      const internalSupplierOrdersForEmail: InternalSupplierOrderItem[] = supplierOrdersRaw.map((order: any) => ({
+        ...mapSupplierOrderItem(order),
+        forOrder: buildForOrderReference(order),
+      }));
+      const purchaseOrderNumber = String(
+        purchaseOrder.q_number || `PO-${purchaseOrder.purchase_order_id}`
+      );
 
       // Prepare email data in the exact shape expected by the template
       const emailData: PurchaseOrderEmailProps = {
         purchaseOrderId: Number(purchaseOrder.purchase_order_id),
-        qNumber: String(purchaseOrder.q_number),
+        qNumber: purchaseOrderNumber,
         supplierName: String(supplier.name),
         createdAt: String(purchaseOrder.created_at),
         supplierOrders: supplierOrdersForEmail,
@@ -223,35 +319,12 @@ export async function POST(request: Request) {
       try {
         // Render the email template to HTML
         const html = await renderAsync(PurchaseOrderEmail(emailData));
-        
-        // Build attachments array for Resend
-        const emailAttachments: { content: Buffer; filename: string }[] = [];
-
-        // Add PO PDF if provided
-        if (pdfBase64 && pdfFilename) {
-          emailAttachments.push({
-            content: Buffer.from(pdfBase64, 'base64'),
-            filename: pdfFilename,
-          });
-        }
-
-        // Add any additional file attachments
-        if (Array.isArray(additionalAttachments)) {
-          for (const att of additionalAttachments) {
-            if (att?.content && att?.filename) {
-              emailAttachments.push({
-                content: Buffer.from(att.content, 'base64'),
-                filename: att.filename,
-              });
-            }
-          }
-        }
 
         // Send the email via Resend
         const { data: result, error } = await resend.emails.send({
           from: `${emailData.companyName} Purchasing <${fromAddress}>`,
           to: [toEmail],
-          cc: ccList.length ? ccList : undefined,
+          cc: supplierCcList.length ? supplierCcList : undefined,
           subject: `Purchase Order: ${emailData.qNumber}`,
           html,
           attachments: emailAttachments.length > 0 ? emailAttachments : undefined,
@@ -273,6 +346,30 @@ export async function POST(request: Request) {
             messageId: result?.id,
             recipientEmail: toEmail,
           });
+
+          // Send a separate internal copy that includes "For Order" references.
+          if (internalCcList.length > 0) {
+            try {
+              const internalEmailData: PurchaseOrderInternalEmailProps = {
+                ...emailData,
+                supplierOrders: internalSupplierOrdersForEmail,
+              };
+              const internalHtml = await renderAsync(PurchaseOrderInternalEmail(internalEmailData));
+
+              await resend.emails.send({
+                from: `${emailData.companyName} Purchasing <${fromAddress}>`,
+                to: internalCcList,
+                subject: `Internal Copy - Purchase Order: ${emailData.qNumber} (${supplier.name})`,
+                html: internalHtml,
+                attachments: emailAttachments.length > 0 ? emailAttachments : undefined,
+              });
+            } catch (internalError) {
+              console.error(
+                `Error sending internal PO copy for supplier ${supplier.name}:`,
+                internalError
+              );
+            }
+          }
         }
       } catch (renderError: any) {
         emailResults.push({
@@ -291,8 +388,10 @@ export async function POST(request: Request) {
         await supabase.from('purchase_order_emails').insert({
           purchase_order_id: purchaseOrderId,
           supplier_id: result.supplierId,
+          supplier_order_id: null,
           recipient_email: result.recipientEmail,
-          cc_emails: ccList.length > 0 ? ccList : [],
+          cc_emails: supplierCcList.length > 0 ? supplierCcList : [],
+          email_type: 'po_send',
           status: result.success ? 'sent' : 'failed',
           message_id: result.messageId || null,
           error_message: result.error || null,

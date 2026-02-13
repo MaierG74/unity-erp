@@ -178,6 +178,26 @@ The `/cutlist` page uses `packPartsSmartOptimized()` in `components/features/cut
 - **Split selection**: Evaluates both horizontal and vertical splits at each placement, choosing the one that best consolidates remaining free space.
 - **Result metrics**: Tracks `offcutConcentration` (1.0 = all waste in one piece) and `fragmentCount`.
 
+**Deep algorithm:** `simulated annealing` (iterative optimization)
+- Implemented in `lib/cutlist/saOptimizer.ts`, runs in a Web Worker (`lib/cutlist/saWorker.ts`).
+- Seeds with the best result from the guillotine multi-pass heuristic, then iteratively improves.
+- **Solution representation**: Permutation of expanded parts (order fed to the greedy guillotine packer).
+- **5 neighborhood moves** (weighted): swap (35%), insert (25%), reverse segment (15%), block swap (15%), promote grain-constrained (10%).
+- **Temperature schedule**: Geometric cooling from T=500 to T=0.1, dynamically calibrated after 100 iterations based on actual throughput.
+- **Acceptance**: Always accepts improvements; accepts worse solutions with probability `exp(delta/temperature)`.
+- **Reheating**: If stuck for 10% of estimated iterations, reheats to `T_START × 0.3`.
+- **Scoring (V2)**: Heavily weighted toward offcut quality:
+  - `-sheets × 100,000` (fewer sheets)
+  - `+offcutQuality × 500` (largest offcut as % of sheet — user's #1 priority)
+  - `+concentration × 300` (consolidated waste)
+  - `+utilization × 1` (efficiency, weak signal)
+  - `-fragments × 20` (fewer fragments better)
+- **Progressive UI**: Shows live progress (elapsed time, iterations, improvements, % vs baseline) with a progress bar.
+- **Time budget**: User-selectable (10s / 30s / 60s), default 30s.
+- **Cancel**: "Stop & Keep Best" button aborts early and keeps the best result found so far.
+- **Web Worker**: All computation runs off the main thread so UI stays fully responsive.
+- Typical throughput: ~20,000 iterations/second.
+
 **Legacy algorithm:** `packPartsIntoSheets()` (greedy best-fit) remains for older consumers but is not used by the `/cutlist` page.
 
 ### Optimization Priority Selector
@@ -188,14 +208,17 @@ Located next to the **Calculate Layout** button. Controls which packing algorith
 |--------|-----------|----------|
 | **Fast / fewer cuts** | `strip` | Production speed, simpler cutting patterns |
 | **Best offcut** | `guillotine` | Material savings, large reusable offcuts |
+| **Deep (SA)** | `simulated annealing` | Maximum material savings, best offcut quality (10-60s) |
 
 - **Tooltip**: Hover the `?` icon for a description of each option
 - **Persistence**: Selection is saved to localStorage and restored on page reload
-- **Indicator**: After calculation, the Preview tab shows which priority was used (e.g., "Optimized for: Fast / fewer cuts")
+- **Indicator**: After calculation, the Preview tab shows which priority was used
+- **Time budget selector**: Appears when Deep (SA) is selected (10s / 30s / 60s)
 
 **When to use each:**
 - **Fast / fewer cuts**: When labor cost outweighs material cost, or when cutting by hand
 - **Best offcut**: When material is expensive, or when you want a large reusable remnant piece
+- **Deep (SA)**: When maximum material optimization is needed and you can wait 10-60 seconds
 
 ---
 
@@ -253,7 +276,9 @@ CREATE TABLE cutlist_material_defaults (
 | `cutlistDimensions.ts` | Dimension parsing utilities |
 | `types.ts` | TypeScript type definitions |
 | `stripPacker.ts` | Strip-based packer (default for `/cutlist`) |
-| `guillotinePacker.ts` | Waste-optimized guillotine packer (optional) |
+| `guillotinePacker.ts` | Waste-optimized guillotine packer |
+| `saOptimizer.ts` | Simulated annealing optimization engine |
+| `saWorker.ts` | Web Worker entry point for SA (off-main-thread) |
 
 ### Packing Entry Point
 
@@ -311,3 +336,4 @@ Currently assumes 16mm boards (32mm when laminated). See `plans/cutlist-improvem
 
 *Created: 2026-01-25*
 *Updated: 2026-01-26 - Added Lamination Groups and Optimization Priority features*
+*Updated: 2026-02-13 - Added Deep (SA) simulated annealing optimizer with Web Worker, progressive UI, and time budget control*

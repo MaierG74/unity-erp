@@ -41,6 +41,7 @@ export interface CancellationEmailProps {
   supplierEmail?: string;
   contactName?: string;
   contactEmail?: string;
+  cancellationScope?: 'order' | 'line';
 }
 
 const formatCurrency = (amount: number) => `R ${amount.toFixed(2)}`;
@@ -59,6 +60,7 @@ export default function PurchaseOrderCancellationEmail({
   supplierEmail,
   contactName = 'Mignon',
   contactEmail = 'orders@qbutton.co.za',
+  cancellationScope = 'order',
 }: CancellationEmailProps) {
   const formattedDate = new Date(createdAt).toLocaleDateString('en-GB', {
     day: '2-digit',
@@ -79,10 +81,17 @@ export default function PurchaseOrderCancellationEmail({
   const vatAmount = subtotal * 0.15;
   const totalInclVAT = subtotal + vatAmount;
 
+  const isLineCancellation = cancellationScope === 'line';
+  const scopeLabel = isLineCancellation ? 'Line Item Cancelled' : 'Order Cancelled';
+  const subjectPrefix = isLineCancellation ? 'LINE ITEM CANCELLED' : 'CANCELLED';
+  const processMessage = isLineCancellation
+    ? `Cancelled line item(s) on Purchase Order ${qNumber}. Please do not process these cancelled item(s).`
+    : `Purchase Order ${qNumber} has been cancelled. Please do not process this order.`;
+
   return (
     <Html>
       <Head />
-      <Preview>CANCELLED - Purchase Order {qNumber} from {companyName}</Preview>
+      <Preview>{subjectPrefix} - Purchase Order {qNumber} from {companyName}</Preview>
       <Tailwind>
         <Body style={{ backgroundColor: '#f3f4f6', fontFamily: 'Arial, sans-serif', fontSize: '14px', color: '#1f2937' }}>
           <Container style={{ maxWidth: '768px', margin: '0 auto', padding: '24px' }}>
@@ -92,10 +101,10 @@ export default function PurchaseOrderCancellationEmail({
               <Section>
                 <div style={{ backgroundColor: '#fef2f2', border: '2px solid #ef4444', borderRadius: '12px', padding: '16px', textAlign: 'center', marginBottom: '24px' }}>
                   <Text style={{ fontSize: '20px', fontWeight: 700, color: '#dc2626', margin: '0 0 4px 0', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    Order Cancelled
+                    {scopeLabel}
                   </Text>
                   <Text style={{ fontSize: '14px', color: '#991b1b', margin: 0 }}>
-                    Purchase Order {qNumber} has been cancelled. Please do not process this order.
+                    {processMessage}
                   </Text>
                 </div>
               </Section>
@@ -116,7 +125,7 @@ export default function PurchaseOrderCancellationEmail({
                     </Text>
                   </Column>
                   <Column style={{ width: '50%', textAlign: 'right', verticalAlign: 'top' }}>
-                    <Text style={{ fontSize: '12px', fontWeight: 500, color: '#dc2626', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 4px 0' }}>Cancelled Purchase Order</Text>
+                    <Text style={{ fontSize: '12px', fontWeight: 500, color: '#dc2626', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 4px 0' }}>{scopeLabel}</Text>
                     <Text style={{ fontSize: '20px', fontWeight: 600, color: '#111827', margin: '0 0 4px 0', textDecoration: 'line-through' }}>PO {qNumber}</Text>
                     <Text style={{ fontSize: '14px', color: '#4b5563', margin: 0 }}>Original Date: {formattedDate}</Text>
                   </Column>
@@ -168,7 +177,9 @@ export default function PurchaseOrderCancellationEmail({
 
               {/* Cancelled Items Table */}
               <Section>
-                <Text style={{ fontSize: '13px', fontWeight: 600, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 12px 0' }}>Cancelled Items</Text>
+                <Text style={{ fontSize: '13px', fontWeight: 600, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 12px 0' }}>
+                  {isLineCancellation ? 'Cancelled Line Items' : 'Cancelled Items'}
+                </Text>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', color: '#374151', border: '1px solid #e5e7eb', borderRadius: '8px' }}>
                   <thead>
                     <tr style={{ backgroundColor: '#fef2f2' }}>
@@ -226,7 +237,7 @@ export default function PurchaseOrderCancellationEmail({
               <Section>
                 <div style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px 16px' }}>
                   <Text style={{ fontSize: '12px', color: '#374151', lineHeight: '1.5', margin: 0 }}>
-                    Please acknowledge receipt of this cancellation notice. If you have any questions or concerns regarding this cancellation, please contact {contactName} at{' '}
+                    Please acknowledge receipt of this cancellation notice. If you have any questions or concerns regarding {isLineCancellation ? 'these cancelled line items' : 'this cancellation'}, please contact {contactName} at{' '}
                     <Link href={`mailto:${contactEmail}`} style={{ color: '#2563eb', fontWeight: 600, textDecoration: 'none' }}>{contactEmail}</Link>.
                   </Text>
                 </div>

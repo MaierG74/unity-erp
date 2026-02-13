@@ -579,7 +579,7 @@ test('guillotine packer achieves better waste consolidation', async () => {
 
   // Compare legacy vs guillotine
   const legacyResult = packPartsOptimized(parts, [SHEET_2700x1800]) as LayoutResult;
-  const guillotineResult = packPartsSmartOptimized(parts, [SHEET_2700x1800], { algorithm: 'guillotine' }) as LayoutResult & { algorithm: string };
+  const guillotineResult = await packPartsSmartOptimized(parts, [SHEET_2700x1800], { algorithm: 'guillotine' }) as LayoutResult & { algorithm: string };
 
   const legacyYield = calculateYield(legacyResult, SHEET_2700x1800);
   const guillotineYield = calculateYield(guillotineResult, SHEET_2700x1800);
@@ -606,7 +606,7 @@ test('guillotine packer respects grain constraints', async () => {
     { id: 'grain-any', length_mm: 600, width_mm: 300, qty: 2, grain: 'any' },
   ];
 
-  const result = packPartsSmartOptimized(parts, [STANDARD_SHEET], { algorithm: 'guillotine' }) as LayoutResult;
+  const result = await packPartsSmartOptimized(parts, [STANDARD_SHEET], { algorithm: 'guillotine' }) as LayoutResult;
 
   assert.equal(result.sheets.length, 1, 'Should fit on 1 sheet');
 
@@ -633,7 +633,7 @@ test('guillotine packer places constrained parts first', async () => {
     { id: 'free2', length_mm: 600, width_mm: 500, qty: 3, grain: 'any' },
   ];
 
-  const result = packPartsSmartOptimized(parts, [STANDARD_SHEET], { algorithm: 'guillotine' }) as LayoutResult;
+  const result = await packPartsSmartOptimized(parts, [STANDARD_SHEET], { algorithm: 'guillotine' }) as LayoutResult;
   const totalPlacements = result.sheets.reduce((s, sh) => s + sh.placements.length, 0);
 
   console.log(`  Constrained-first test:`);
@@ -653,7 +653,7 @@ test('guillotine packer handles challenging tall+medium mix', async () => {
   ];
 
   const legacyResult = packPartsOptimized(parts, [STANDARD_SHEET]) as LayoutResult;
-  const guillotineResult = packPartsSmartOptimized(parts, [STANDARD_SHEET], { algorithm: 'guillotine' }) as LayoutResult;
+  const guillotineResult = await packPartsSmartOptimized(parts, [STANDARD_SHEET], { algorithm: 'guillotine' }) as LayoutResult;
 
   console.log(`  Challenging mix test:`);
   console.log(`    Legacy: ${legacyResult.sheets.length} sheets`);
@@ -676,7 +676,7 @@ test('guillotine packer performance with 200 parts', async () => {
   ];
 
   const start = performance.now();
-  const result = packPartsSmartOptimized(parts, [STANDARD_SHEET], { algorithm: 'guillotine' }) as LayoutResult;
+  const result = await packPartsSmartOptimized(parts, [STANDARD_SHEET], { algorithm: 'guillotine' }) as LayoutResult;
   const elapsed = performance.now() - start;
 
   const totalPlacements = result.sheets.reduce((s, sh) => s + sh.placements.length, 0);
@@ -698,8 +698,8 @@ test('guillotine packer can switch between algorithms', async () => {
     { id: 'part1', length_mm: 800, width_mm: 600, qty: 3, grain: 'any' },
   ];
 
-  const legacyResult = packPartsSmartOptimized(parts, [STANDARD_SHEET], { algorithm: 'legacy' }) as LayoutResult & { algorithm: string };
-  const guillotineResult = packPartsSmartOptimized(parts, [STANDARD_SHEET], { algorithm: 'guillotine' }) as LayoutResult & { algorithm: string };
+  const legacyResult = await packPartsSmartOptimized(parts, [STANDARD_SHEET], { algorithm: 'legacy' }) as LayoutResult & { algorithm: string };
+  const guillotineResult = await packPartsSmartOptimized(parts, [STANDARD_SHEET], { algorithm: 'guillotine' }) as LayoutResult & { algorithm: string };
 
   console.log(`  Algorithm switching test:`);
   console.log(`    Legacy algorithm: ${legacyResult.algorithm}`);
@@ -707,6 +707,186 @@ test('guillotine packer can switch between algorithms', async () => {
 
   assert.equal(legacyResult.algorithm, 'legacy', 'Should report legacy algorithm');
   assert.equal(guillotineResult.algorithm, 'guillotine', 'Should report guillotine algorithm');
+});
+
+// ============================================================================
+// Simulated Annealing (SA) Optimizer Tests
+// ============================================================================
+
+const importSAOptimizer = async () => {
+  const mod = await import('../lib/cutlist/saOptimizer.js');
+  return mod;
+};
+
+const importGuillotinePacker = async () => {
+  const mod = await import('../lib/cutlist/guillotinePacker.js');
+  return mod;
+};
+
+test('SA optimizer produces equal or better results than heuristic baseline', async () => {
+  const { runSimulatedAnnealing, calculateResultScoreV2 } = await importSAOptimizer();
+  const { packPartsGuillotine, calculateResultScore } = await importGuillotinePacker();
+
+  const parts: PartSpec[] = [
+    { id: 'p1', length_mm: 1200, width_mm: 750, qty: 1, grain: 'any' },
+    { id: 'p2', length_mm: 1080, width_mm: 400, qty: 1, grain: 'any' },
+    { id: 'p3', length_mm: 710, width_mm: 700, qty: 4, grain: 'any' },
+  ];
+
+  const stock: StockSheetSpec = {
+    id: 'S1',
+    length_mm: 2750,
+    width_mm: 1830,
+    qty: 10,
+    kerf_mm: 3,
+  };
+  const sheetArea = stock.length_mm * stock.width_mm;
+
+  // Baseline
+  const baseline = packPartsGuillotine(parts, [stock]);
+  const baselineScore = calculateResultScoreV2(baseline, sheetArea);
+
+  // SA with short time budget (5 seconds)
+  const start = performance.now();
+  const saResult = runSimulatedAnnealing(parts, stock, 5000);
+  const elapsed = performance.now() - start;
+  const saScore = calculateResultScoreV2(saResult, sheetArea);
+
+  console.log(`  SA vs Heuristic:`);
+  console.log(`    Baseline score: ${baselineScore.toFixed(0)}, sheets: ${baseline.sheets.length}`);
+  console.log(`    SA score: ${saScore.toFixed(0)}, sheets: ${saResult.sheets.length}`);
+  console.log(`    Time: ${elapsed.toFixed(0)}ms`);
+  console.log(`    Strategy: ${saResult.strategyUsed}`);
+
+  // SA should be at least as good as baseline
+  assert.ok(saScore >= baselineScore - 1, 'SA score should be >= baseline score');
+
+  // All parts should be placed
+  const totalPlacements = saResult.sheets.reduce((s: number, sh: SheetLayout) => s + sh.placements.length, 0);
+  assert.equal(totalPlacements, 6, 'All 6 parts should be placed');
+});
+
+test('SA optimizer respects grain constraints', async () => {
+  const { runSimulatedAnnealing } = await importSAOptimizer();
+
+  const parts: PartSpec[] = [
+    { id: 'grain-len', length_mm: 2000, width_mm: 500, qty: 1, grain: 'length' },
+    { id: 'grain-wid', length_mm: 800, width_mm: 400, qty: 1, grain: 'width' },
+    { id: 'any1', length_mm: 600, width_mm: 300, qty: 3, grain: 'any' },
+  ];
+
+  const result = runSimulatedAnnealing(parts, STANDARD_SHEET, 3000);
+
+  assert.equal(result.sheets.length, 1, 'Should fit on 1 sheet');
+
+  const placements = result.sheets[0].placements;
+
+  // Check grain-length part is not rotated
+  const grainLenPart = placements.find((p: Placement) => p.part_id === 'grain-len');
+  assert.ok(grainLenPart, 'Grain-length part should be placed');
+  assert.equal(grainLenPart!.rot, 0, 'Grain-length part should not be rotated');
+
+  // Check grain-width part is rotated
+  const grainWidPart = placements.find((p: Placement) => p.part_id === 'grain-wid');
+  assert.ok(grainWidPart, 'Grain-width part should be placed');
+  assert.equal(grainWidPart!.rot, 90, 'Grain-width part should be rotated 90°');
+});
+
+test('SA scoring V2 prioritizes offcut quality heavily', async () => {
+  const { calculateResultScoreV2 } = await importSAOptimizer();
+  const { packPartsGuillotine } = await importGuillotinePacker();
+
+  const parts: PartSpec[] = [
+    { id: 'p1', length_mm: 1000, width_mm: 800, qty: 2, grain: 'any' },
+  ];
+
+  const result = packPartsGuillotine(parts, [STANDARD_SHEET]);
+  const sheetArea = STANDARD_SHEET.length_mm * STANDARD_SHEET.width_mm;
+  const score = calculateResultScoreV2(result, sheetArea);
+
+  console.log(`  Scoring V2 test:`);
+  console.log(`    Score: ${score.toFixed(0)}`);
+  console.log(`    Largest offcut area: ${result.largestOffcutArea.toLocaleString()} mm²`);
+  console.log(`    Concentration: ${(result.offcutConcentration * 100).toFixed(1)}%`);
+
+  // Score should be negative (1 sheet = -100,000 base) but offset by bonuses
+  assert.ok(score < 0, 'Score for 1 sheet should be negative base');
+  assert.ok(score > -100_000, 'Bonuses should offset some of the sheet penalty');
+});
+
+test('SA optimizer completes within time budget', async () => {
+  const { runSimulatedAnnealing } = await importSAOptimizer();
+
+  const parts: PartSpec[] = [
+    { id: 'comp', length_mm: 500, width_mm: 300, qty: 20, grain: 'any' },
+  ];
+
+  const timeBudget = 3000; // 3 seconds
+  const start = performance.now();
+  const result = runSimulatedAnnealing(parts, STANDARD_SHEET, timeBudget);
+  const elapsed = performance.now() - start;
+
+  console.log(`  Time budget test: ${elapsed.toFixed(0)}ms for ${timeBudget}ms budget`);
+
+  // Should complete within budget + small overhead
+  assert.ok(elapsed < timeBudget + 1000, `Should complete near budget (got ${elapsed.toFixed(0)}ms)`);
+
+  // All parts should be placed
+  const totalPlacements = result.sheets.reduce((s: number, sh: SheetLayout) => s + sh.placements.length, 0);
+  assert.equal(totalPlacements, 20, 'All 20 parts should be placed');
+});
+
+test('SA optimizer progress callback fires', async () => {
+  const { runSimulatedAnnealing } = await importSAOptimizer();
+
+  const parts: PartSpec[] = [
+    { id: 'p1', length_mm: 800, width_mm: 600, qty: 4, grain: 'any' },
+  ];
+
+  let progressCount = 0;
+  let lastIteration = 0;
+
+  runSimulatedAnnealing(
+    parts,
+    STANDARD_SHEET,
+    2000,
+    { progressIntervalMs: 200 },
+    {},
+    (progress) => {
+      progressCount++;
+      lastIteration = progress.iteration;
+    }
+  );
+
+  console.log(`  Progress callback test: ${progressCount} callbacks, ${lastIteration} iterations`);
+
+  assert.ok(progressCount > 0, 'Should have received progress callbacks');
+  assert.ok(lastIteration > 100, 'Should have completed many iterations');
+});
+
+test('SA optimizer can be cancelled via shouldCancel', async () => {
+  const { runSimulatedAnnealing } = await importSAOptimizer();
+
+  const parts: PartSpec[] = [
+    { id: 'p1', length_mm: 500, width_mm: 300, qty: 20, grain: 'any' },
+  ];
+
+  // Cancel immediately — the SA loop checks shouldCancel on every iteration
+  const result = runSimulatedAnnealing(
+    parts,
+    STANDARD_SHEET,
+    30000, // 30s budget
+    {},
+    {},
+    undefined,
+    () => true // always cancel
+  );
+
+  console.log(`  Cancel test: SA returned after immediate cancel`);
+  console.log(`    Strategy: ${result.strategyUsed}`);
+
+  // Should still return the baseline result (heuristic)
+  assert.ok(result.sheets.length > 0, 'Should still have a result from baseline');
 });
 
 console.log('\n=== Cutlist Packing Algorithm Tests ===\n');

@@ -29,6 +29,8 @@ interface StaffLaneListProps {
   onUnassign?: (assignment: StaffAssignment) => void;
   compact?: boolean;
   timelineWidth?: number;
+  /** Default snap increment (minutes) for drag preview indicator. Falls back to 15. */
+  dragSnapIncrement?: number;
 }
 
 export function StaffLaneList({
@@ -40,6 +42,7 @@ export function StaffLaneList({
   onUnassign,
   compact = false,
   timelineWidth,
+  dragSnapIncrement = 15,
 }: StaffLaneListProps) {
   const router = useRouter();
   const totalMinutes = endMinutes - startMinutes;
@@ -100,7 +103,7 @@ export function StaffLaneList({
   // Track selected lane for getting staff info
   const [selectedLane, setSelectedLane] = useState<StaffLane | null>(null);
   // Track drag position for time indicator
-  const [dragIndicator, setDragIndicator] = useState<{ laneId: string; x: number; minutes: number } | null>(null);
+  const [dragIndicator, setDragIndicator] = useState<{ laneId: string; x: number; minutes: number; snappedMinutes: number } | null>(null);
   // Track assignment being completed
   const [completeAssignment, setCompleteAssignment] = useState<{
     assignment_id: number;
@@ -225,6 +228,13 @@ export function StaffLaneList({
         const laneAvailable = isAvailable(lane);
         const isDragOver = dragOverLaneId === lane.id;
 
+        // Capacity utilization calculation
+        const totalAssignedMinutes = lane.assignments.reduce(
+          (sum, a) => sum + Math.max(0, a.endMinutes - a.startMinutes), 0
+        );
+        const shiftMinutes = endMinutes - startMinutes;
+        const utilization = shiftMinutes > 0 ? Math.round((totalAssignedMinutes / shiftMinutes) * 100) : 0;
+
         return (
           <div key={lane.id} className={cn(
             "flex rounded-lg border bg-card shadow-sm transition-all",
@@ -244,6 +254,20 @@ export function StaffLaneList({
               <p className="truncate text-[10px] text-muted-foreground">
                 {lane.role} • {lane.capacityHours}h
               </p>
+              {/* Utilization bar */}
+              <div className="mt-1 h-1 w-full rounded-full bg-muted overflow-hidden">
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-all",
+                    utilization > 90 ? "bg-red-500" :
+                    utilization > 70 ? "bg-amber-500" : "bg-emerald-500"
+                  )}
+                  style={{ width: `${Math.min(utilization, 100)}%` }}
+                />
+              </div>
+              {totalAssignedMinutes > 0 && (
+                <span className="text-[9px] text-muted-foreground">{utilization}% loaded</span>
+              )}
             </div>
 
             {/* Timeline grid - scrollable with fixed width */}
@@ -259,11 +283,17 @@ export function StaffLaneList({
                 event.preventDefault();
                 if (laneAvailable) {
                   setDragOverLaneId(lane.id);
-                  // Calculate position for time indicator
+                  // Calculate position for time indicator with snap preview
                   const rect = event.currentTarget.getBoundingClientRect();
                   const x = event.clientX - rect.left;
                   const minutes = computeMinutesFromEvent(event);
-                  setDragIndicator({ laneId: lane.id, x, minutes });
+                  // Compute snapped position for preview
+                  const snappedMinutes = Math.round(minutes / dragSnapIncrement) * dragSnapIncrement;
+                  const clampedSnapped = Math.min(Math.max(snappedMinutes, startMinutes), endMinutes);
+                  // Compute pixel position for snapped indicator
+                  const snappedRatio = (clampedSnapped - startMinutes) / totalMinutes;
+                  const snappedX = snappedRatio * rect.width;
+                  setDragIndicator({ laneId: lane.id, x: snappedX, minutes, snappedMinutes: clampedSnapped });
                 }
               }}
               onDragEnter={(event) => {
@@ -304,7 +334,7 @@ export function StaffLaneList({
                 })}
               </div>
 
-              {/* Time indicator during drag */}
+              {/* Time indicator during drag - shows snapped position */}
               {dragIndicator && dragIndicator.laneId === lane.id && (
                 <div
                   className="pointer-events-none absolute inset-y-0 z-50"
@@ -312,9 +342,9 @@ export function StaffLaneList({
                 >
                   {/* Vertical line */}
                   <div className="absolute inset-y-0 w-0.5 bg-primary" />
-                  {/* Time badge */}
+                  {/* Time badge showing snapped time */}
                   <div className="absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-primary px-2 py-1 text-xs font-semibold text-primary-foreground shadow-lg">
-                    {minutesToClock(dragIndicator.minutes)}
+                    {formatTimeDisplay(dragIndicator.snappedMinutes)}
                   </div>
                   {/* Arrow pointing down */}
                   <div className="absolute -top-1 left-1/2 -translate-x-1/2 border-4 border-transparent border-t-primary" />
@@ -544,6 +574,15 @@ export function StaffLaneList({
       />
     </div>
   );
+}
+
+/** Format minutes to friendly time like "8:00 AM" */
+function formatTimeDisplay(minutes: number): string {
+  const hours24 = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  const period = hours24 >= 12 ? 'PM' : 'AM';
+  const hours12 = hours24 === 0 ? 12 : hours24 > 12 ? hours24 - 12 : hours24;
+  return `${hours12}:${mins.toString().padStart(2, '0')} ${period}`;
 }
 
 const defaultSlots = () => [

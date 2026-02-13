@@ -17,7 +17,7 @@ export interface SavedCutlistData {
   backerBoards: BoardMaterial[];
   edging: EdgingMaterial[];
   kerf: number;
-  optimizationPriority: 'fast' | 'offcut';
+  optimizationPriority: 'fast' | 'offcut' | 'deep';
 }
 
 export interface CutlistFolder {

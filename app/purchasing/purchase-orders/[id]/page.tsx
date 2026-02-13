@@ -29,6 +29,7 @@ import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import styles from './page.module.css';
 import { fetchPOAttachments, POAttachment } from '@/lib/db/purchase-order-attachments';
 import POAttachmentManager from '@/components/features/purchasing/POAttachmentManager';
@@ -623,7 +624,8 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const [rejectReason, setRejectReason] = useState('');
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
-  const [cancelLineItemId, setCancelLineItemId] = useState<number | null>(null);
+  const [cancelLineItemIds, setCancelLineItemIds] = useState<number[]>([]);
+  const [selectedLineItemIds, setSelectedLineItemIds] = useState<number[]>([]);
   const [cancelLineReason, setCancelLineReason] = useState('');
   
   const handleReceiveModalChange = (open: boolean) => {
@@ -701,8 +703,10 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
         .select(`
           email_id,
           supplier_id,
+          supplier_order_id,
           recipient_email,
           cc_emails,
+          email_type,
           status,
           message_id,
           error_message,
@@ -719,8 +723,10 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
       return data as Array<{
         email_id: number;
         supplier_id: number;
+        supplier_order_id: number | null;
         recipient_email: string;
         cc_emails: string[];
+        email_type: 'po_send' | 'po_cancel' | 'po_line_cancel' | 'po_follow_up' | null;
         status: 'sent' | 'failed';
         message_id: string | null;
         error_message: string | null;
@@ -820,6 +826,26 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
       setQNumber(`Q${year}-${id.padStart(3, '0')}`);
     }
   }, [purchaseOrder, id]);
+
+  useEffect(() => {
+    if (!purchaseOrder?.supplier_orders) return;
+    const validLineIds = new Set(
+      purchaseOrder.supplier_orders
+        .filter((order) => order.status_id !== 4 && (order.order_quantity - (order.total_received || 0)) > 0)
+        .map((order) => order.order_id)
+    );
+    setSelectedLineItemIds((prev) => prev.filter((orderId) => validLineIds.has(orderId)));
+  }, [purchaseOrder]);
+
+  const toggleLineSelection = (orderId: number, checked: boolean) => {
+    setSelectedLineItemIds((prev) => {
+      if (checked) {
+        if (prev.includes(orderId)) return prev;
+        return [...prev, orderId];
+      }
+      return prev.filter((id) => id !== orderId);
+    });
+  };
 
   const baseEmailRows = useMemo<EmailRecipientRow[]>(() => {
     if (!purchaseOrder?.supplier_orders?.length) return [];
@@ -1244,27 +1270,57 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
 
   // Cancel individual line item mutation
   const cancelLineItemMutation = useMutation({
-    mutationFn: async ({ orderId, reason }: { orderId: number; reason?: string }) => {
+    mutationFn: async ({ orderIds, reason }: { orderIds: number[]; reason?: string }) => {
+      const uniqueOrderIds = Array.from(new Set(orderIds.map((value) => Number(value)).filter((value) => Number.isFinite(value))));
+      if (uniqueOrderIds.length === 0) {
+        throw new Error('No line items selected for cancellation');
+      }
+
       const { data: statusData, error: statusError } = await supabase
         .from('supplier_order_statuses')
         .select('status_id')
         .eq('status_name', 'Cancelled')
-        .single();
+      .single();
       if (statusError || !statusData) throw new Error('Could not find Cancelled status');
 
-      const updateData: Record<string, any> = { status_id: statusData.status_id };
-      if (reason?.trim()) {
-        const existingNotes = purchaseOrder?.supplier_orders?.find(o => o.order_id === orderId)?.notes || '';
-        updateData.notes = existingNotes
-          ? `${existingNotes}\n[CANCELLED] ${reason.trim()}`
-          : `[CANCELLED] ${reason.trim()}`;
+      for (const orderId of uniqueOrderIds) {
+        const updateData: Record<string, any> = { status_id: statusData.status_id };
+        if (reason?.trim()) {
+          const existingNotes = purchaseOrder?.supplier_orders?.find(o => o.order_id === orderId)?.notes || '';
+          updateData.notes = existingNotes
+            ? `${existingNotes}\n[CANCELLED] ${reason.trim()}`
+            : `[CANCELLED] ${reason.trim()}`;
+        }
+
+        const { error: updateError } = await supabase
+          .from('supplier_orders')
+          .update(updateData)
+          .eq('order_id', orderId);
+        if (updateError) throw new Error(`Failed to cancel line item ${orderId}: ${updateError.message}`);
       }
 
-      const { error: updateError } = await supabase
-        .from('supplier_orders')
-        .update(updateData)
-        .eq('order_id', orderId);
-      if (updateError) throw new Error(`Failed to cancel line item: ${updateError.message}`);
+      // Send line-level cancellation email for the affected line.
+      // Do not fail the cancellation if email sending fails.
+      let emailResult: any = null;
+      let emailError: string | null = null;
+      try {
+        const emailResponse = await fetch('/api/send-po-cancellation-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            purchaseOrderId: id,
+            cancellationReason: reason?.trim() || undefined,
+            supplierOrderIds: uniqueOrderIds,
+            emailType: 'po_line_cancel',
+          }),
+        });
+        emailResult = await emailResponse.json().catch(() => ({}));
+        if (!emailResponse.ok) {
+          emailError = emailResult?.error || 'Failed to send line cancellation email';
+        }
+      } catch (err: any) {
+        emailError = err?.message || 'Failed to send line cancellation email';
+      }
 
       // Check if all line items are now cancelled - if so, cancel the whole PO
       const { data: remainingActive } = await supabase
@@ -1279,17 +1335,36 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           .update({ status_id: statusData.status_id })
           .eq('purchase_order_id', id);
       }
+
+      return { emailResult, emailError, cancelledOrderIds: uniqueOrderIds };
     },
-    onSuccess: () => {
+    onSuccess: (result: { emailResult?: any; emailError?: string | null; cancelledOrderIds?: number[] }) => {
       queryClient.invalidateQueries({ queryKey: ['purchaseOrder', id] });
       queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] });
-      setCancelLineItemId(null);
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrderEmails', id] });
+      setCancelLineItemIds([]);
       setCancelLineReason('');
+      if (Array.isArray(result?.cancelledOrderIds) && result.cancelledOrderIds.length > 0) {
+        setSelectedLineItemIds((prev) => prev.filter((id) => !result.cancelledOrderIds!.includes(id)));
+      }
+
+      const emailResult = result?.emailResult;
+      const emailError = result?.emailError || null;
+      const successes = emailResult?.results?.filter((r: any) => r.success).length || 0;
+      const failures = (emailResult?.results?.filter((r: any) => !r.success).length || 0) + (emailError ? 1 : 0);
+      const cancelledCount = result?.cancelledOrderIds?.length || 0;
+
       toast({
-        title: 'Line Item Cancelled',
-        description: 'The line item has been cancelled.',
+        title: cancelledCount > 1 ? 'Line Items Cancelled' : 'Line Item Cancelled',
+        description:
+          failures > 0
+            ? `${cancelledCount > 1 ? `${cancelledCount} lines cancelled.` : 'Line cancelled.'} Notification emails: ${successes} sent, ${failures} failed.${emailError ? ` ${emailError}` : ''}`
+            : successes > 0
+              ? `${cancelledCount > 1 ? `${cancelledCount} lines cancelled` : 'The line item has been cancelled'} and supplier notified.`
+              : cancelledCount > 1 ? `${cancelledCount} line items have been cancelled.` : 'The line item has been cancelled.',
+        variant: failures > 0 ? 'destructive' : 'default',
       });
     },
     onError: (error: Error) => {
@@ -2061,6 +2136,12 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                               const isDelivered = email.delivery_status === 'delivered';
                               const isComplained = email.delivery_status === 'complained';
                               const hasIssue = isBounced || isComplained;
+                              const emailTypeLabel = (() => {
+                                if (email.email_type === 'po_cancel') return 'PO Cancel';
+                                if (email.email_type === 'po_line_cancel') return 'Line Cancel';
+                                if (email.email_type === 'po_follow_up') return 'Follow-up';
+                                return 'PO Send';
+                              })();
 
                               return (
                                 <div
@@ -2078,6 +2159,9 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                                       {email.supplier?.name || 'Unknown'}
                                     </span>
                                     <div className="flex items-center gap-1">
+                                      <Badge variant="outline" className="text-[10px]">
+                                        {emailTypeLabel}
+                                      </Badge>
                                       {isBounced && (
                                         <Badge variant="destructive" className="text-[10px]">
                                           Bounced
@@ -2210,6 +2294,15 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                   <Mail className="h-4 w-4 mr-2" />
                   Send Supplier Emails
                 </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setCancelLineItemIds(selectedLineItemIds)}
+                  disabled={selectedLineItemIds.length === 0 || cancelLineItemMutation.isPending}
+                >
+                  Cancel Selected
+                  {selectedLineItemIds.length > 0 ? ` (${selectedLineItemIds.length})` : ''}
+                </Button>
               </div>
             )}
           </CardHeader>
@@ -2278,7 +2371,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                                     target="_blank"
                                     className="text-blue-600 hover:underline text-sm"
                                   >
-                                    #{link.customer_order!.order_number || link.customer_order!.order_id}
+                                    {link.customer_order!.order_number || link.customer_order!.order_id}
                                   </Link>
                                 );
                               }
@@ -2293,7 +2386,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                                       target="_blank"
                                       className="text-blue-600 hover:underline text-sm"
                                     >
-                                      #{link.customer_order!.order_number || link.customer_order!.order_id}
+                                      {link.customer_order!.order_number || link.customer_order!.order_id}
                                     </Link>
                                     <span className="text-xs text-muted-foreground">
                                       ({link.quantity_for_order})
@@ -2342,7 +2435,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                                             target="_blank"
                                             className="text-blue-600 hover:underline"
                                           >
-                                            #{link.customer_order!.order_number || link.customer_order!.order_id}
+                                            {link.customer_order!.order_number || link.customer_order!.order_id}
                                           </Link>
                                           <span className="text-muted-foreground">
                                             {link.quantity_for_order} units
@@ -2420,15 +2513,23 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                           {isApproved && !isEditMode && (
                             <TableCell className="text-right">
                               {!isLineCancelled && remainingToReceive > 0 && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => setCancelLineItemId(order.order_id)}
-                                  disabled={cancelLineItemMutation.isPending}
-                                  title="Cancel this line item"
-                                >
-                                  <XCircle className="h-4 w-4 text-destructive" />
-                                </Button>
+                                <div className="flex items-center justify-end gap-2">
+                                  <Checkbox
+                                    checked={selectedLineItemIds.includes(order.order_id)}
+                                    onCheckedChange={(checked) => toggleLineSelection(order.order_id, checked === true)}
+                                    disabled={cancelLineItemMutation.isPending}
+                                    aria-label={`Select line ${order.order_id} for cancellation`}
+                                  />
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setCancelLineItemIds([order.order_id])}
+                                    disabled={cancelLineItemMutation.isPending}
+                                    title="Cancel this line item"
+                                  >
+                                    <XCircle className="h-4 w-4 text-destructive" />
+                                  </Button>
+                                </div>
                               )}
                             </TableCell>
                           )}
@@ -3018,7 +3119,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
               className="min-h-[80px]"
             />
           </div>
-          <DialogFooter>
+          <DialogFooter className="pt-4">
             <Button
               variant="outline"
               onClick={() => { setShowCancelDialog(false); setCancelReason(''); }}
@@ -3039,12 +3140,13 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
       </Dialog>
 
       {/* Cancel individual line item dialog */}
-      <Dialog open={cancelLineItemId !== null} onOpenChange={(open) => { if (!open) { setCancelLineItemId(null); setCancelLineReason(''); } }}>
+      <Dialog open={cancelLineItemIds.length > 0} onOpenChange={(open) => { if (!open) { setCancelLineItemIds([]); setCancelLineReason(''); } }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Cancel Line Item</DialogTitle>
+            <DialogTitle>{cancelLineItemIds.length > 1 ? 'Cancel Line Items' : 'Cancel Line Item'}</DialogTitle>
             <DialogDescription>
-              This will cancel the selected line item. The item will remain visible but marked as cancelled.
+              This will cancel {cancelLineItemIds.length > 1 ? `${cancelLineItemIds.length} selected line items` : 'the selected line item'}.
+              For each affected supplier, one cancellation email will be sent with all cancelled lines from this action.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
@@ -3059,18 +3161,18 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => { setCancelLineItemId(null); setCancelLineReason(''); }}
+              onClick={() => { setCancelLineItemIds([]); setCancelLineReason(''); }}
               disabled={cancelLineItemMutation.isPending}
             >
-              Keep Item
+              Keep {cancelLineItemIds.length > 1 ? 'Items' : 'Item'}
             </Button>
             <Button
               variant="destructive"
-              onClick={() => cancelLineItemId && cancelLineItemMutation.mutate({ orderId: cancelLineItemId, reason: cancelLineReason || undefined })}
+              onClick={() => cancelLineItemIds.length > 0 && cancelLineItemMutation.mutate({ orderIds: cancelLineItemIds, reason: cancelLineReason || undefined })}
               disabled={cancelLineItemMutation.isPending}
             >
               {cancelLineItemMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Cancel Line Item
+              Cancel {cancelLineItemIds.length > 1 ? 'Line Items' : 'Line Item'}
             </Button>
           </DialogFooter>
         </DialogContent>

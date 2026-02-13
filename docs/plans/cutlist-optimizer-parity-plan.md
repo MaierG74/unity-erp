@@ -1,6 +1,6 @@
 # Cutlist Optimizer Parity Plan
 
-> **Status**: Draft
+> **Status**: Mostly Complete (SA optimizer implemented 2026-02-13)
 > **Owner**: Unassigned
 > **Last Updated**: 2026-01-26
 > **Related UI**: `/cutlist`
@@ -71,13 +71,18 @@ Each dataset should record:
 - Validate guillotine cut correctness and grain constraints.
 - Update documentation and changelog.
 
-## Implementation Tasks (Draft)
-- [ ] Build a small benchmarking harness for the evaluation dataset.
-- [ ] Add offcut quality scoring and fragmentation metrics to results.
-- [ ] Add “Optimization Priority” selector to `/cutlist`.
-- [ ] Wire UI to pass `algorithm` and optional time budget.
-- [ ] Add tests for strip default + guillotine mode.
-- [ ] Document algorithms and usage in a new technical doc.
+## Implementation Tasks
+- [x] Build a small benchmarking harness for the evaluation dataset.
+- [x] Add offcut quality scoring and fragmentation metrics to results.
+- [x] Add "Optimization Priority" selector to `/cutlist`.
+- [x] Wire UI to pass `algorithm` and optional time budget.
+- [x] Add tests for strip default + guillotine mode.
+- [x] Document algorithms and usage in feature docs.
+- [x] **Simulated Annealing optimizer** (`lib/cutlist/saOptimizer.ts`) — 5 neighborhood moves, geometric cooling, stagnation reheating, V2 scoring heavily weighted toward offcut quality (2026-02-13).
+- [x] **Web Worker** (`lib/cutlist/saWorker.ts`) — off-main-thread execution with progress/cancel protocol (2026-02-13).
+- [x] **Progressive UI** — live progress bar, elapsed/iterations/improvements display, time budget selector (10s/30s/60s), "Stop & Keep Best" cancel (2026-02-13).
+- [x] **Per-sheet offcut tracking** — `SheetOffcutInfo` type added to `GuillotinePackResult` (2026-02-13).
+- [x] **SA tests** — 6 tests covering score comparison, grain constraints, scoring function, time budget, progress callbacks, cancellation (2026-02-13).
 
 ## Risks & Mitigations
 - **Longer runtime**: time‑box optimization passes; fall back to best result.

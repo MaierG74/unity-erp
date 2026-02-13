@@ -28,7 +28,10 @@ import {
 import { logSchedulingEvent } from '@/src/lib/analytics/scheduling';
 import { useLaborPlanningMutations } from '@/src/lib/mutations/laborPlanning';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Minus, Plus, ZoomIn } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Minus, Plus, ZoomIn } from 'lucide-react';
+import { format, addDays, subDays } from 'date-fns';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 const START_MINUTES = 7 * 60;
 const END_MINUTES = 19 * 60;
@@ -56,10 +59,13 @@ function storeZoom(index: number): void {
 }
 
 export function LaborPlanningBoard() {
-  const [selectedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
+  const [selectedDate, setSelectedDate] = useState(
+    () => searchParams?.get('date') || format(new Date(), 'yyyy-MM-dd')
+  );
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
   const compactFromParams = searchParams?.get('compact') !== '0';
   const [compact, setCompact] = useState(compactFromParams);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
@@ -80,6 +86,19 @@ export function LaborPlanningBoard() {
       return next;
     });
   }, []);
+
+  const handleDateChange = useCallback((newDate: string) => {
+    setSelectedDate(newDate);
+    const params = new URLSearchParams(searchParams?.toString() ?? '');
+    const today = format(new Date(), 'yyyy-MM-dd');
+    if (newDate === today) {
+      params.delete('date');
+    } else {
+      params.set('date', newDate);
+    }
+    const qs = params.toString();
+    window.history.replaceState(null, '', pathname + (qs ? `?${qs}` : ''));
+  }, [searchParams, pathname]);
 
   // Calculate timeline width based on zoom
   const totalHours = (END_MINUTES - START_MINUTES) / 60;
@@ -351,6 +370,54 @@ export function LaborPlanningBoard() {
   return (
     <div className="w-full space-y-0 px-2 py-1">
       <div className="flex flex-wrap items-center gap-1.5 rounded-md border bg-card px-2 py-1 text-sm shadow-sm mb-2">
+        <div className="flex items-center gap-1 mr-2 border-r pr-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 w-7 p-0"
+            onClick={() => handleDateChange(format(subDays(new Date(selectedDate + 'T00:00:00'), 1), 'yyyy-MM-dd'))}
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-7 px-2 text-xs font-medium">
+                {format(new Date(selectedDate + 'T00:00:00'), 'MMM d, yyyy')}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={new Date(selectedDate + 'T00:00:00')}
+                onSelect={(date) => {
+                  if (date) {
+                    handleDateChange(format(date, 'yyyy-MM-dd'));
+                    setDatePickerOpen(false);
+                  }
+                }}
+                initialFocus
+              />
+            </PopoverContent>
+          </Popover>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 w-7 p-0"
+            onClick={() => handleDateChange(format(addDays(new Date(selectedDate + 'T00:00:00'), 1), 'yyyy-MM-dd'))}
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+          {selectedDate !== format(new Date(), 'yyyy-MM-dd') && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              onClick={() => handleDateChange(format(new Date(), 'yyyy-MM-dd'))}
+            >
+              Today
+            </Button>
+          )}
+        </div>
         <span className="text-muted-foreground">Filter by role:</span>
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
           {roleGroups.map((group) => {

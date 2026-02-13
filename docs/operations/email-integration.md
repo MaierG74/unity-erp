@@ -72,7 +72,11 @@ function getResendClient(): Resend {
 Branding details (company name, address, phone, website, supplier footer copy, logo path) live in the `quote_company_settings` table and are editable from `/settings`. Environment variables act strictly as fallbacks for local development or in the unlikely event the settings row is missing.
 
 ## Email Templates
-All purchase order emails render through `emails/purchase-order-email.tsx`, a React component composed with Tailwind-compatible styling helpers. The supplier template now focuses on a clean header, a spacious zebra-striped line item table, and a branded footer (no customer-style summary card or terms block). Key traits:
+Purchase order notifications now use two React email templates:
+- `emails/purchase-order-email.tsx` for supplier-facing sends.
+- `emails/purchase-order-internal-email.tsx` for the internal default-CC copy, including a compact `For Order` column per line item.
+
+The supplier template focuses on a clean header, a spacious zebra-striped line item table, and a branded footer (no customer-style summary card or terms block). Key traits:
 - Accepts supplier-specific line items and company metadata via `PurchaseOrderEmailProps`.
 - Pulls company name/logo/contact/website from `quote_company_settings` so the supplier view stays in lockstep with Settings branding.【F:app/api/send-purchase-order-email/route.ts†L58-L112】
 - Calculates totals and formats the created date within the component.
@@ -87,7 +91,7 @@ A plain-text fallback is produced in `lib/email.ts` when using the helper functi
 1. **Supabase hydration** – Loads the purchase order, related supplier orders, and supplier metadata using the service-role key.
 2. **Supplier resolution** – Groups supplier order lines, fetches the primary email from `supplier_emails` (falling back to any available contact or operator overrides from the dialog), and normalizes the payload for the template.
 3. **Rendering** – Calls `renderAsync` to convert the template to HTML.
-4. **Delivery** – Sends via `resend.emails.send`, populating the sender identity from environment variables.
+4. **Delivery** – Sends supplier mail via `resend.emails.send`, then sends a separate internal copy to `po_default_cc_email` recipients with `For Order` references (without leading `#`).
 5. **Result aggregation** – Returns a JSON payload summarizing success or per-supplier failures so the UI can surface status.
 
 Any rendering or delivery errors are captured per supplier to prevent a single failure from blocking the rest of the batch.【F:app/api/send-purchase-order-email/route.ts†L43-L183】
@@ -106,6 +110,8 @@ The Purchasing detail page invokes the route after a PO is approved and a Q numb
 - **Supabase tables:** `purchase_orders`, `supplier_orders`, `suppliercomponents`, `suppliers`, and `supplier_emails` must be populated with accurate supplier contact data for delivery to succeed.【F:app/api/send-purchase-order-email/route.ts†L23-L120】
 - **Supplier emails:** When `is_primary = true` is present we preselect that address; otherwise we fall back to any email on file or an operator override. Missing rows are still logged in the API response so ops can add the contact later.【F:app/api/send-purchase-order-email/route.ts†L44-L120】【F:app/purchasing/purchase-orders/[id]/EmailOverrideDialog.tsx†L1-L169】
 - **Company branding:** `quote_company_settings` (Settings → Company) stores the logo path, address, phone, website, and default reply-to. The API reads this row on every send and only falls back to env values if it is missing.【F:app/api/send-purchase-order-email/route.ts†L58-L112】【F:app/settings/page.tsx†L1-L196】
+- **Cancellation workflows:** `POST /api/send-po-cancellation-email` supports both full-PO cancellation and scoped line-item cancellation (via `supplierOrderIds`). It merges default internal CC recipients from settings with any explicit CC addresses.
+- **Typed email logs:** `purchase_order_emails.email_type` classifies PO mail as `po_send`, `po_cancel`, `po_line_cancel`, or `po_follow_up`; `supplier_order_id` stores line-level linkage where applicable.
 
 ## Observability & Logging
 Errors encountered while rendering or sending emails are logged to the server console from the route. Consider piping these logs into the central logging workflow described in `docs/operations/user-logging.md` to capture audit trails and reduce silent failures.【F:app/api/send-purchase-order-email/route.ts†L160-L183】【F:docs/operations/user-logging.md†L66-L132】

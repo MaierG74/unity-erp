@@ -67,7 +67,8 @@ import type {
 } from '@/lib/cutlist/types';
 
 // Import packing
-import { packPartsSmartOptimized } from '@/components/features/cutlist/packing';
+import { packPartsSmartOptimized, type SAProgressInfo } from '@/components/features/cutlist/packing';
+import { Loader2, X } from 'lucide-react';
 
 // =============================================================================
 // Formatters
@@ -111,7 +112,7 @@ function SummaryStat({ label, value }: { label: string; value: string }) {
 // Types
 // =============================================================================
 
-export type OptimizationPriority = 'fast' | 'offcut';
+export type OptimizationPriority = 'fast' | 'offcut' | 'deep';
 
 export interface CutlistCalculatorData {
   parts: CompactPart[];
@@ -258,6 +259,10 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     () => initialData?.optimizationPriority ?? 'fast'
   );
   const optimizationLoadedRef = React.useRef(false);
+  const [isCalculating, setIsCalculating] = React.useState(false);
+  const [deepTimeBudget, setDeepTimeBudget] = React.useState(30); // seconds
+  const [saProgress, setSaProgress] = React.useState<SAProgressInfo | null>(null);
+  const abortControllerRef = React.useRef<AbortController | null>(null);
 
   // ============== Results ==============
   const [result, setResult] = React.useState<LayoutResult | null>(null);
@@ -428,7 +433,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     };
 
     loadPinnedMaterials();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Load parts from localStorage
@@ -455,7 +460,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     } finally {
       partsLoadedRef.current = true;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ============== Persist pinned materials to database ==============
@@ -507,7 +512,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     if (initialData?.optimizationPriority) return;
     try {
       const stored = window.localStorage.getItem(optimizationStorageKey);
-      if (stored === 'fast' || stored === 'offcut') {
+      if (stored === 'fast' || stored === 'offcut' || stored === 'deep') {
         setOptimizationPriority(stored);
       }
     } catch (err) {
@@ -515,7 +520,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     } finally {
       optimizationLoadedRef.current = true;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ============== Persist optimization priority ==============
@@ -837,231 +842,260 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
 
   const pendingCalculateRef = React.useRef(false);
 
-  const runCalculation = React.useCallback((partsToUse: CompactPart[]) => {
-    const partSpecs: PartSpec[] = partsToUse
-      .filter((p) => p.length_mm > 0 && p.width_mm > 0 && p.quantity > 0)
-      .map((p) => ({
-        id: p.id,
-        length_mm: p.length_mm,
-        width_mm: p.width_mm,
-        qty: p.quantity,
-        grain: p.grain,
-        band_edges: p.band_edges,
-        laminate: p.lamination_type !== 'none' && p.lamination_type !== undefined,
-        lamination_type: p.lamination_type,
-        material_id: p.material_id,
-        label: p.name,
-      }));
+  const handleCancelOptimization = React.useCallback(() => {
+    abortControllerRef.current?.abort();
+  }, []);
 
-    if (partSpecs.length === 0) {
-      setResult(null);
-      setBackerResult(null);
-      return;
-    }
+  const runCalculation = React.useCallback(async (partsToUse: CompactPart[]) => {
+    // Abort any in-progress optimization
+    abortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
-    const algorithm = optimizationPriority === 'fast' ? 'strip' : 'guillotine';
+    setIsCalculating(true);
+    setSaProgress(null);
+    // Yield to let UI update state immediately
+    await new Promise(resolve => setTimeout(resolve, 0));
 
-    // Group parts by material_id so each material gets packed on its own board
-    const defaultMaterialId = primaryBoards.find((b) => b.isDefault)?.id || primaryBoards[0]?.id;
-    const partsByMaterial = new Map<string, PartSpec[]>();
-    for (const p of partSpecs) {
-      const matId = p.material_id || defaultMaterialId || '__default__';
-      if (!partsByMaterial.has(matId)) partsByMaterial.set(matId, []);
-      partsByMaterial.get(matId)!.push(p);
-    }
+    try {
+      const partSpecs: PartSpec[] = partsToUse
+        .filter((p) => p.length_mm > 0 && p.width_mm > 0 && p.quantity > 0)
+        .map((p) => ({
+          id: p.id,
+          length_mm: p.length_mm,
+          width_mm: p.width_mm,
+          qty: p.quantity,
+          grain: p.grain,
+          band_edges: p.band_edges,
+          laminate: p.lamination_type !== 'none' && p.lamination_type !== undefined,
+          lamination_type: p.lamination_type,
+          material_id: p.material_id,
+          label: p.name,
+        }));
 
-    // Build a lookup from board ID to board info
-    const boardLookup = new Map<string, typeof primaryBoards[0]>();
-    for (const b of primaryBoards) boardLookup.set(b.id, b);
+      if (partSpecs.length === 0) {
+        setResult(null);
+        setBackerResult(null);
+        return;
+      }
 
-    // Pack each material group with its own stock sheet dimensions, then merge
-    const allSheets: SheetLayout[] = [];
-    let totalUsedArea = 0;
-    let totalWasteArea = 0;
-    let totalCuts = 0;
-    let totalCutLength = 0;
-    const allUnplaced: UnplacedPart[] = [];
+      const algorithm = optimizationPriority === 'fast' ? 'strip' : optimizationPriority === 'deep' ? 'deep' : 'guillotine';
 
-    for (const [matId, matParts] of partsByMaterial) {
-      const board = boardLookup.get(matId);
-      const stockForMat: StockSheetSpec[] = [{
-        id: 'S1',
-        length_mm: board?.length_mm || stock[0].length_mm,
-        width_mm: board?.width_mm || stock[0].width_mm,
-        qty: 10,
-        kerf_mm: Math.max(0, kerf),
-      }];
+      // Group parts by material_id so each material gets packed on its own board
+      const defaultMaterialId = primaryBoards.find((b) => b.isDefault)?.id || primaryBoards[0]?.id;
+      const partsByMaterial = new Map<string, PartSpec[]>();
+      for (const p of partSpecs) {
+        const matId = p.material_id || defaultMaterialId || '__default__';
+        if (!partsByMaterial.has(matId)) partsByMaterial.set(matId, []);
+        partsByMaterial.get(matId)!.push(p);
+      }
 
-      const matRes = packPartsSmartOptimized(matParts, stockForMat, { allowRotation, singleSheetOnly, algorithm });
+      // Build a lookup from board ID to board info
+      const boardLookup = new Map<string, typeof primaryBoards[0]>();
+      for (const b of primaryBoards) boardLookup.set(b.id, b);
 
-      // Annotate sheets with material info and stock dimensions
-      for (const s of matRes.sheets) {
-        allSheets.push({
-          ...s,
-          sheet_id: `${matId}_${s.sheet_id}`,
-          stock_length_mm: stockForMat[0].length_mm,
-          stock_width_mm: stockForMat[0].width_mm,
-          material_label: board?.name,
+      // Pack each material group with its own stock sheet dimensions, then merge
+      const allSheets: SheetLayout[] = [];
+      let totalUsedArea = 0;
+      let totalWasteArea = 0;
+      let totalCuts = 0;
+      let totalCutLength = 0;
+      const allUnplaced: UnplacedPart[] = [];
+
+      for (const [matId, matParts] of partsByMaterial) {
+        const board = boardLookup.get(matId);
+        const stockForMat: StockSheetSpec[] = [{
+          id: 'S1',
+          length_mm: board?.length_mm || stock[0].length_mm,
+          width_mm: board?.width_mm || stock[0].width_mm,
+          qty: 10,
+          kerf_mm: Math.max(0, kerf),
+        }];
+
+        const isDeep = algorithm === 'deep';
+        const matRes = await packPartsSmartOptimized(matParts, stockForMat, {
+          allowRotation,
+          singleSheetOnly,
+          algorithm,
+          timeBudgetMs: isDeep ? deepTimeBudget * 1000 : 2000,
+          onProgress: isDeep ? (progress) => setSaProgress(progress) : undefined,
+          abortSignal: isDeep ? abortController.signal : undefined,
         });
+
+        // Annotate sheets with material info and stock dimensions
+        for (const s of matRes.sheets) {
+          allSheets.push({
+            ...s,
+            sheet_id: `${matId}_${s.sheet_id}`,
+            stock_length_mm: stockForMat[0].length_mm,
+            stock_width_mm: stockForMat[0].width_mm,
+            material_label: board?.name,
+          });
+        }
+
+        totalUsedArea += matRes.stats.used_area_mm2;
+        totalWasteArea += matRes.stats.waste_area_mm2;
+        totalCuts += matRes.stats.cuts;
+        totalCutLength += matRes.stats.cut_length_mm;
+        if (matRes.unplaced) allUnplaced.push(...matRes.unplaced);
       }
 
-      totalUsedArea += matRes.stats.used_area_mm2;
-      totalWasteArea += matRes.stats.waste_area_mm2;
-      totalCuts += matRes.stats.cuts;
-      totalCutLength += matRes.stats.cut_length_mm;
-      if (matRes.unplaced) allUnplaced.push(...matRes.unplaced);
-    }
+      const res: LayoutResult = {
+        sheets: allSheets,
+        stats: {
+          used_area_mm2: totalUsedArea,
+          waste_area_mm2: totalWasteArea,
+          cuts: totalCuts,
+          cut_length_mm: totalCutLength,
+        },
+        unplaced: allUnplaced.length > 0 ? allUnplaced : undefined,
+      };
 
-    const res: LayoutResult = {
-      sheets: allSheets,
-      stats: {
-        used_area_mm2: totalUsedArea,
-        waste_area_mm2: totalWasteArea,
-        cuts: totalCuts,
-        cut_length_mm: totalCutLength,
-      },
-      unplaced: allUnplaced.length > 0 ? allUnplaced : undefined,
-    };
+      // Calculate edging correctly based on lamination type AND lamination groups
+      let edging16mm = 0;
+      let edging32mm = 0;
+      const customEdging = new Map<number, number>();
+      // Per-edging-material accumulation for export
+      const edgingPerMaterial = new Map<string, number>();
+      const defaultEdging16 = edging.find((e) => e.thickness_mm === 16 && e.isDefaultForThickness);
+      const defaultEdging32 = edging.find((e) => e.thickness_mm === 32 && e.isDefaultForThickness);
 
-    // Calculate edging correctly based on lamination type AND lamination groups
-    let edging16mm = 0;
-    let edging32mm = 0;
-    const customEdging = new Map<number, number>();
-    // Per-edging-material accumulation for export
-    const edgingPerMaterial = new Map<string, number>();
-    const defaultEdging16 = edging.find((e) => e.thickness_mm === 16 && e.isDefaultForThickness);
-    const defaultEdging32 = edging.find((e) => e.thickness_mm === 32 && e.isDefaultForThickness);
+      const laminationGroups = new Map<string, typeof partsToUse>();
+      const ungroupedParts: typeof partsToUse = [];
 
-    const laminationGroups = new Map<string, typeof partsToUse>();
-    const ungroupedParts: typeof partsToUse = [];
-
-    for (const part of partsToUse) {
-      if (part.lamination_group) {
-        if (!laminationGroups.has(part.lamination_group)) {
-          laminationGroups.set(part.lamination_group, []);
+      for (const part of partsToUse) {
+        if (part.lamination_group) {
+          if (!laminationGroups.has(part.lamination_group)) {
+            laminationGroups.set(part.lamination_group, []);
+          }
+          laminationGroups.get(part.lamination_group)!.push(part);
+        } else {
+          ungroupedParts.push(part);
         }
-        laminationGroups.get(part.lamination_group)!.push(part);
+      }
+
+      for (const part of ungroupedParts) {
+        if (part.length_mm <= 0 || part.width_mm <= 0 || part.quantity <= 0) continue;
+
+        const laminationType = part.lamination_type || 'none';
+        const be = part.band_edges;
+        const singlePartEdge =
+          (be.top ? part.width_mm : 0) +
+          (be.bottom ? part.width_mm : 0) +
+          (be.left ? part.length_mm : 0) +
+          (be.right ? part.length_mm : 0);
+
+        let finishedPartCount: number;
+        switch (laminationType) {
+          case 'same-board':
+            finishedPartCount = Math.floor(part.quantity / 2);
+            break;
+          case 'with-backer':
+          case 'none':
+          case 'custom':
+          default:
+            finishedPartCount = part.quantity;
+            break;
+        }
+
+        const totalEdge = singlePartEdge * finishedPartCount;
+
+        if (laminationType === 'none') {
+          edging16mm += totalEdge;
+          // Accumulate per edging material
+          const edgingMatId = part.edging_material_id || defaultEdging16?.id;
+          if (edgingMatId && totalEdge > 0) {
+            edgingPerMaterial.set(edgingMatId, (edgingPerMaterial.get(edgingMatId) || 0) + totalEdge);
+          }
+        } else {
+          edging32mm += totalEdge;
+          const edgingMatId = part.edging_material_id || defaultEdging32?.id;
+          if (edgingMatId && totalEdge > 0) {
+            edgingPerMaterial.set(edgingMatId, (edgingPerMaterial.get(edgingMatId) || 0) + totalEdge);
+          }
+        }
+      }
+
+      for (const [, groupParts] of laminationGroups) {
+        if (groupParts.length === 0) continue;
+
+        const memberCount = groupParts.length;
+        const edgeThickness = 16 * memberCount;
+        const refPart = groupParts[0];
+        if (refPart.length_mm <= 0 || refPart.width_mm <= 0) continue;
+
+        const mergedEdges = { top: false, right: false, bottom: false, left: false };
+        for (const p of groupParts) {
+          if (p.band_edges.top) mergedEdges.top = true;
+          if (p.band_edges.right) mergedEdges.right = true;
+          if (p.band_edges.bottom) mergedEdges.bottom = true;
+          if (p.band_edges.left) mergedEdges.left = true;
+        }
+
+        const singleAssemblyEdge =
+          (mergedEdges.top ? refPart.width_mm : 0) +
+          (mergedEdges.bottom ? refPart.width_mm : 0) +
+          (mergedEdges.left ? refPart.length_mm : 0) +
+          (mergedEdges.right ? refPart.length_mm : 0);
+
+        const assemblies = Math.min(...groupParts.map((p) => p.quantity));
+        const totalEdge = singleAssemblyEdge * assemblies;
+
+        if (memberCount === 1) {
+          edging16mm += totalEdge;
+          const edgingMatId = refPart.edging_material_id || defaultEdging16?.id;
+          if (edgingMatId && totalEdge > 0) {
+            edgingPerMaterial.set(edgingMatId, (edgingPerMaterial.get(edgingMatId) || 0) + totalEdge);
+          }
+        } else if (edgeThickness === 32) {
+          edging32mm += totalEdge;
+          const edgingMatId = refPart.edging_material_id || defaultEdging32?.id;
+          if (edgingMatId && totalEdge > 0) {
+            edgingPerMaterial.set(edgingMatId, (edgingPerMaterial.get(edgingMatId) || 0) + totalEdge);
+          }
+        } else {
+          customEdging.set(edgeThickness, (customEdging.get(edgeThickness) || 0) + totalEdge);
+          // For custom thickness, still track by material
+          const edgingMatId = refPart.edging_material_id;
+          if (edgingMatId && totalEdge > 0) {
+            edgingPerMaterial.set(edgingMatId, (edgingPerMaterial.get(edgingMatId) || 0) + totalEdge);
+          }
+        }
+      }
+
+      if (res.stats) {
+        res.stats.edgebanding_16mm_mm = edging16mm;
+        res.stats.edgebanding_32mm_mm = edging32mm;
+      }
+
+      setResult(res);
+      setEdgingByMaterialMap(edgingPerMaterial);
+      // NOTE: Do NOT reset sheetOverrides/globalFullBoard here.
+
+      const backerParts: PartSpec[] = partSpecs
+        .filter((p) => p.lamination_type === 'with-backer')
+        .map((p) => ({ ...p, grain: 'any', require_grain: undefined, band_edges: undefined } as PartSpec));
+
+      if (backerParts.length > 0) {
+        const backerStockWithKerf: StockSheetSpec[] = [{ ...backerStock[0], kerf_mm: Math.max(0, kerf) }];
+        const resBacker = await packPartsSmartOptimized(backerParts, backerStockWithKerf, {
+          allowRotation: true,
+          singleSheetOnly,
+          algorithm,
+          timeBudgetMs: algorithm === 'deep' ? deepTimeBudget * 1000 : 2000,
+        });
+        setBackerResult(resBacker);
       } else {
-        ungroupedParts.push(part);
-      }
-    }
-
-    for (const part of ungroupedParts) {
-      if (part.length_mm <= 0 || part.width_mm <= 0 || part.quantity <= 0) continue;
-
-      const laminationType = part.lamination_type || 'none';
-      const be = part.band_edges;
-      const singlePartEdge =
-        (be.top ? part.width_mm : 0) +
-        (be.bottom ? part.width_mm : 0) +
-        (be.left ? part.length_mm : 0) +
-        (be.right ? part.length_mm : 0);
-
-      let finishedPartCount: number;
-      switch (laminationType) {
-        case 'same-board':
-          finishedPartCount = Math.floor(part.quantity / 2);
-          break;
-        case 'with-backer':
-        case 'none':
-        case 'custom':
-        default:
-          finishedPartCount = part.quantity;
-          break;
+        setBackerResult(null);
       }
 
-      const totalEdge = singlePartEdge * finishedPartCount;
-
-      if (laminationType === 'none') {
-        edging16mm += totalEdge;
-        // Accumulate per edging material
-        const edgingMatId = part.edging_material_id || defaultEdging16?.id;
-        if (edgingMatId && totalEdge > 0) {
-          edgingPerMaterial.set(edgingMatId, (edgingPerMaterial.get(edgingMatId) || 0) + totalEdge);
-        }
-      } else {
-        edging32mm += totalEdge;
-        const edgingMatId = part.edging_material_id || defaultEdging32?.id;
-        if (edgingMatId && totalEdge > 0) {
-          edgingPerMaterial.set(edgingMatId, (edgingPerMaterial.get(edgingMatId) || 0) + totalEdge);
-        }
-      }
+      setActiveTab('preview');
+    } finally {
+      setIsCalculating(false);
+      setSaProgress(null);
+      abortControllerRef.current = null;
     }
-
-    for (const [, groupParts] of laminationGroups) {
-      if (groupParts.length === 0) continue;
-
-      const memberCount = groupParts.length;
-      const edgeThickness = 16 * memberCount;
-      const refPart = groupParts[0];
-      if (refPart.length_mm <= 0 || refPart.width_mm <= 0) continue;
-
-      const mergedEdges = { top: false, right: false, bottom: false, left: false };
-      for (const p of groupParts) {
-        if (p.band_edges.top) mergedEdges.top = true;
-        if (p.band_edges.right) mergedEdges.right = true;
-        if (p.band_edges.bottom) mergedEdges.bottom = true;
-        if (p.band_edges.left) mergedEdges.left = true;
-      }
-
-      const singleAssemblyEdge =
-        (mergedEdges.top ? refPart.width_mm : 0) +
-        (mergedEdges.bottom ? refPart.width_mm : 0) +
-        (mergedEdges.left ? refPart.length_mm : 0) +
-        (mergedEdges.right ? refPart.length_mm : 0);
-
-      const assemblies = Math.min(...groupParts.map((p) => p.quantity));
-      const totalEdge = singleAssemblyEdge * assemblies;
-
-      if (memberCount === 1) {
-        edging16mm += totalEdge;
-        const edgingMatId = refPart.edging_material_id || defaultEdging16?.id;
-        if (edgingMatId && totalEdge > 0) {
-          edgingPerMaterial.set(edgingMatId, (edgingPerMaterial.get(edgingMatId) || 0) + totalEdge);
-        }
-      } else if (edgeThickness === 32) {
-        edging32mm += totalEdge;
-        const edgingMatId = refPart.edging_material_id || defaultEdging32?.id;
-        if (edgingMatId && totalEdge > 0) {
-          edgingPerMaterial.set(edgingMatId, (edgingPerMaterial.get(edgingMatId) || 0) + totalEdge);
-        }
-      } else {
-        customEdging.set(edgeThickness, (customEdging.get(edgeThickness) || 0) + totalEdge);
-        // For custom thickness, still track by material
-        const edgingMatId = refPart.edging_material_id;
-        if (edgingMatId && totalEdge > 0) {
-          edgingPerMaterial.set(edgingMatId, (edgingPerMaterial.get(edgingMatId) || 0) + totalEdge);
-        }
-      }
-    }
-
-    if (res.stats) {
-      res.stats.edgebanding_16mm_mm = edging16mm;
-      res.stats.edgebanding_32mm_mm = edging32mm;
-    }
-
-    setResult(res);
-    setEdgingByMaterialMap(edgingPerMaterial);
-    // NOTE: Do NOT reset sheetOverrides/globalFullBoard here.
-    // Billing overrides are keyed by sheet_id — stale keys for sheets
-    // that no longer exist are harmlessly ignored by computeSheetCharge.
-    // Resetting them here would destroy manual % adjustments when the
-    // user recalculates (e.g. during "Recalculate & Replace" export).
-
-    const backerParts: PartSpec[] = partSpecs
-      .filter((p) => p.lamination_type === 'with-backer')
-      .map((p) => ({ ...p, grain: 'any', require_grain: undefined, band_edges: undefined } as PartSpec));
-
-    if (backerParts.length > 0) {
-      const backerStockWithKerf: StockSheetSpec[] = [{ ...backerStock[0], kerf_mm: Math.max(0, kerf) }];
-      const resBacker = packPartsSmartOptimized(backerParts, backerStockWithKerf, { allowRotation: true, singleSheetOnly, algorithm });
-      setBackerResult(resBacker);
-    } else {
-      setBackerResult(null);
-    }
-
-    setActiveTab('preview');
-  }, [stock, backerStock, kerf, allowRotation, singleSheetOnly, optimizationPriority, primaryBoards, edging]);
+  }, [stock, backerStock, kerf, allowRotation, singleSheetOnly, optimizationPriority, deepTimeBudget, primaryBoards, edging]);
 
   React.useEffect(() => {
     if (pendingCalculateRef.current && parts.length > 0) {
@@ -1207,15 +1241,33 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                     <Select
                       value={optimizationPriority}
                       onValueChange={(v) => setOptimizationPriority(v as OptimizationPriority)}
+                      disabled={isCalculating}
                     >
-                      <SelectTrigger className="h-8 w-[140px] text-xs">
+                      <SelectTrigger className="h-8 w-[160px] text-xs">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="fast">Fast / fewer cuts</SelectItem>
                         <SelectItem value="offcut">Best offcut</SelectItem>
+                        <SelectItem value="deep">Deep (High Quality)</SelectItem>
                       </SelectContent>
                     </Select>
+                    {optimizationPriority === 'deep' && (
+                      <Select
+                        value={String(deepTimeBudget)}
+                        onValueChange={(v) => setDeepTimeBudget(Number(v))}
+                        disabled={isCalculating}
+                      >
+                        <SelectTrigger className="h-8 w-[80px] text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="10">10s</SelectItem>
+                          <SelectItem value="30">30s</SelectItem>
+                          <SelectItem value="60">60s</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
                     <TooltipProvider delayDuration={200}>
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -1225,20 +1277,43 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                           <p className="font-medium">Fast / fewer cuts:</p>
                           <p className="text-muted-foreground mb-2">Runs quickly and minimizes the number of saw cuts (strip-based).</p>
                           <p className="font-medium">Best offcut:</p>
-                          <p className="text-muted-foreground">Trades extra computation for a larger contiguous offcut (guillotine packer).</p>
+                          <p className="text-muted-foreground mb-2">Trades extra computation for a larger contiguous offcut (guillotine packer).</p>
+                          <p className="font-medium">Deep (SA):</p>
+                          <p className="text-muted-foreground">Simulated annealing optimizer. Progressively improves layout over 10-60s. Maximizes offcut quality.</p>
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
                   </div>
-                  <Button
-                    type="button"
-                    onClick={handleCalculate}
-                    disabled={parts.length === 0 && !hasQuickAddPending}
-                    className="gap-1.5"
-                  >
-                    <Calculator className="h-4 w-4" />
-                    Calculate Layout
-                  </Button>
+                  {isCalculating && optimizationPriority === 'deep' ? (
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      onClick={handleCancelOptimization}
+                      className="gap-1.5"
+                    >
+                      <X className="h-4 w-4" />
+                      Stop & Keep Best
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      onClick={handleCalculate}
+                      disabled={(parts.length === 0 && !hasQuickAddPending) || isCalculating}
+                      className="gap-1.5"
+                    >
+                      {isCalculating ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Calculating...
+                        </>
+                      ) : (
+                        <>
+                          <Calculator className="h-4 w-4" />
+                          Calculate Layout
+                        </>
+                      )}
+                    </Button>
+                  )}
                 </div>
               </div>
 
@@ -1274,11 +1349,68 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
 
             {/* Preview Tab */}
             <TabsContent value="preview" className="space-y-4">
-              {!result ? (
-                <div className="text-muted-foreground py-8 text-center">
-                  No results yet. Add parts and click Calculate Layout.
+              {/* SA Progress Bar */}
+              {isCalculating && optimizationPriority === 'deep' && saProgress && (
+                <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                      <span className="font-medium">Simulated Annealing Optimization</span>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={handleCancelOptimization}
+                      className="h-7 text-xs"
+                    >
+                      <X className="h-3 w-3 mr-1" />
+                      Stop
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-4 gap-3 text-xs">
+                    <div>
+                      <div className="text-muted-foreground">Elapsed</div>
+                      <div className="font-mono font-medium">{(saProgress.elapsed / 1000).toFixed(1)}s / {deepTimeBudget}s</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Iterations</div>
+                      <div className="font-mono font-medium">{saProgress.iteration.toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Improvements</div>
+                      <div className="font-mono font-medium">{saProgress.improvementCount}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">vs Baseline</div>
+                      <div className="font-mono font-medium">
+                        {saProgress.baselineScore !== 0
+                          ? `${(((saProgress.bestScore - saProgress.baselineScore) / Math.abs(saProgress.baselineScore)) * 100).toFixed(1)}%`
+                          : '—'}
+                      </div>
+                    </div>
+                  </div>
+                  {/* Progress bar */}
+                  <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-primary rounded-full transition-all duration-500"
+                      style={{ width: `${Math.min(100, (saProgress.elapsed / (deepTimeBudget * 1000)) * 100)}%` }}
+                    />
+                  </div>
                 </div>
-              ) : (
+              )}
+
+              {!result && !saProgress ? (
+                <div className="text-muted-foreground py-8 text-center">
+                  {isCalculating ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                      <p>Optimizing layout...</p>
+                    </div>
+                  ) : (
+                    'No results yet. Add parts and click Calculate Layout.'
+                  )}
+                </div>
+              ) : result ? (
                 <div className="space-y-4">
                   {/* Results Summary */}
                   <ResultsSummary
@@ -1301,6 +1433,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                     <Select
                       value={optimizationPriority}
                       onValueChange={(v) => setOptimizationPriority(v as OptimizationPriority)}
+                      disabled={isCalculating}
                     >
                       <SelectTrigger className="w-[180px] h-8">
                         <SelectValue />
@@ -1308,17 +1441,53 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                       <SelectContent>
                         <SelectItem value="fast">Fast / fewer cuts</SelectItem>
                         <SelectItem value="offcut">Best offcut</SelectItem>
+                        <SelectItem value="deep">Deep (SA)</SelectItem>
                       </SelectContent>
                     </Select>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={handleCalculate}
-                      className="h-8"
-                    >
-                      <Calculator className="h-4 w-4 mr-1" />
-                      Recalculate
-                    </Button>
+                    {optimizationPriority === 'deep' && (
+                      <Select
+                        value={String(deepTimeBudget)}
+                        onValueChange={(v) => setDeepTimeBudget(Number(v))}
+                        disabled={isCalculating}
+                      >
+                        <SelectTrigger className="w-[80px] h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="10">10s</SelectItem>
+                          <SelectItem value="30">30s</SelectItem>
+                          <SelectItem value="60">60s</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                    {isCalculating && optimizationPriority === 'deep' ? (
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={handleCancelOptimization}
+                        className="h-8"
+                      >
+                        <X className="h-4 w-4 mr-1" />
+                        Stop & Keep Best
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleCalculate}
+                        className="h-8"
+                        disabled={isCalculating}
+                      >
+                        {isCalculating ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            <Calculator className="h-4 w-4 mr-1" />
+                            Recalculate
+                          </>
+                        )}
+                      </Button>
+                    )}
                   </div>
 
                   {/* Unplaced parts alert */}
@@ -1371,7 +1540,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                     </div>
                   )}
                 </div>
-              )}
+              ) : null}
             </TabsContent>
           </Tabs>
         </CardContent>

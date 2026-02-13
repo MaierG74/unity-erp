@@ -112,7 +112,7 @@ interface PlacementCandidate {
 /**
  * Extended part with unique instance ID for quantity expansion.
  */
-interface ExpandedPartInstance extends PartSpec {
+export interface ExpandedPartInstance extends PartSpec {
   uid: string;
 }
 
@@ -131,6 +131,18 @@ export type SortStrategy =
 /**
  * Result from packing with strategy info.
  */
+/**
+ * Per-sheet offcut information for detailed analysis.
+ */
+export interface SheetOffcutInfo {
+  sheetIndex: number;
+  freeRects: FreeRect[];
+  largestOffcutArea: number;
+  totalOffcutArea: number;
+  concentration: number;
+  fragmentCount: number;
+}
+
 export interface GuillotinePackResult extends LayoutResult {
   /** The sort strategy that produced this result */
   strategyUsed: SortStrategy | string;
@@ -144,6 +156,8 @@ export interface GuillotinePackResult extends LayoutResult {
   offcutConcentration: number;
   /** Number of free rectangle fragments */
   fragmentCount: number;
+  /** Per-sheet offcut details */
+  perSheetOffcuts?: SheetOffcutInfo[];
 }
 
 // =============================================================================
@@ -445,7 +459,7 @@ function pruneContainedRects(freeRects: FreeRect[]): void {
  * Sort parts by strategy.
  * All strategies place constrained (grain-locked) parts first for flexibility.
  */
-function sortByStrategy(
+export function sortByStrategy(
   parts: ExpandedPartInstance[],
   strategy: SortStrategy
 ): ExpandedPartInstance[] {
@@ -684,7 +698,7 @@ export class GuillotinePacker {
 /**
  * Expand parts by quantity into individual instances.
  */
-function expandParts(parts: PartSpec[]): ExpandedPartInstance[] {
+export function expandParts(parts: PartSpec[]): ExpandedPartInstance[] {
   const expanded: ExpandedPartInstance[] = [];
   for (const p of parts) {
     const count = Math.max(1, Math.floor(p.qty));
@@ -857,7 +871,7 @@ export function packWithStrategy(
  * Overloaded version that accepts pre-expanded and sorted parts with a custom strategy name.
  * Used internally for multi-pass optimization.
  */
-function packWithExpandedParts(
+export function packWithExpandedParts(
   sortedParts: ExpandedPartInstance[],
   stock: StockSheetSpec,
   strategyName: string,
@@ -873,6 +887,8 @@ function packWithExpandedParts(
   let sheetIndex = 0;
   const maxSheets = stock.qty || 100;
 
+  const perSheetOffcuts: SheetOffcutInfo[] = [];
+
   while (remaining.length > 0 && sheetIndex < maxSheets) {
     const packer = new GuillotinePacker(stock.width_mm, stock.length_mm, kerf, fullConfig);
 
@@ -887,6 +903,20 @@ function packWithExpandedParts(
     if (placements.length === 0) {
       break;
     }
+
+    // Capture per-sheet offcut info directly from packer state
+    const sheetFreeRects = packer.getFreeRects();
+    const sheetOffcutAreas = sheetFreeRects.map((r) => r.w * r.h);
+    const sheetLargestOffcut = sheetOffcutAreas.length > 0 ? Math.max(...sheetOffcutAreas) : 0;
+    const sheetTotalOffcut = sheetOffcutAreas.reduce((sum, a) => sum + a, 0);
+    perSheetOffcuts.push({
+      sheetIndex,
+      freeRects: sheetFreeRects,
+      largestOffcutArea: sheetLargestOffcut,
+      totalOffcutArea: sheetTotalOffcut,
+      concentration: sheetTotalOffcut > 0 ? sheetLargestOffcut / sheetTotalOffcut : 1,
+      fragmentCount: sheetFreeRects.length,
+    });
 
     sheets.push({
       sheet_id: `${stock.id}:${sheetIndex + 1}`,
@@ -904,33 +934,18 @@ function packWithExpandedParts(
   const usedArea = sheets.reduce((sum, s) => sum + (s.used_area_mm2 ?? 0), 0);
   const wasteArea = Math.max(0, totalSheetArea - usedArea);
 
-  // Get final free rects from last sheet
-  const lastPacker = new GuillotinePacker(stock.width_mm, stock.length_mm, kerf, fullConfig);
-  if (sheets.length > 0) {
-    const lastSheet = sheets[sheets.length - 1];
-    for (const placement of lastSheet.placements) {
-      const part: PartSpec = {
-        id: placement.part_id,
-        length_mm: placement.rot === 90 ? placement.w : placement.h,
-        width_mm: placement.rot === 90 ? placement.h : placement.w,
-        qty: 1,
-        grain: 'any',
-      };
-      lastPacker.tryPlace(part);
-    }
-  }
-
-  const freeRects = sheets.length > 0 ? lastPacker.getFreeRects() : [];
+  // Aggregate offcut data from per-sheet tracking (last sheet for backwards compat)
+  const lastSheetOffcuts = perSheetOffcuts.length > 0 ? perSheetOffcuts[perSheetOffcuts.length - 1] : null;
+  const freeRects = lastSheetOffcuts?.freeRects ?? [];
   const usableOffcuts = freeRects.filter(
     (r) =>
       Math.min(r.w, r.h) >= fullConfig.minUsableDimension &&
       r.w * r.h >= fullConfig.minUsableArea
   );
-  const allOffcutAreas = freeRects.map((r) => r.w * r.h);
-  const largestOffcutArea = allOffcutAreas.length > 0 ? Math.max(...allOffcutAreas) : 0;
-  const totalOffcutArea = allOffcutAreas.reduce((sum, a) => sum + a, 0);
-  const offcutConcentration = totalOffcutArea > 0 ? largestOffcutArea / totalOffcutArea : 1;
-  const fragmentCount = freeRects.length;
+  const largestOffcutArea = lastSheetOffcuts?.largestOffcutArea ?? 0;
+  const totalOffcutArea = lastSheetOffcuts?.totalOffcutArea ?? 0;
+  const offcutConcentration = lastSheetOffcuts?.concentration ?? 1;
+  const fragmentCount = lastSheetOffcuts?.fragmentCount ?? 0;
 
   // Calculate edge banding
   let edgebandingLength = 0;
@@ -1001,6 +1016,7 @@ function packWithExpandedParts(
     largestOffcutArea,
     offcutConcentration,
     fragmentCount,
+    perSheetOffcuts,
   };
 }
 
@@ -1014,7 +1030,7 @@ function packWithExpandedParts(
  * 3. Quality of offcuts (tertiary - larger, fewer offcuts are better)
  * 4. Offcut concentration (prefer waste in one contiguous piece)
  */
-function calculateResultScore(result: GuillotinePackResult, sheetArea: number): number {
+export function calculateResultScore(result: GuillotinePackResult, sheetArea: number): number {
   const totalSheetArea = result.sheets.length * sheetArea;
   const usedArea = result.stats.used_area_mm2;
 
@@ -1174,6 +1190,97 @@ export function packPartsGuillotine(
 
   return bestResult;
 }
+
+
+/**
+ * Deep optimization: Pack parts using a time budget to explore many variations.
+ *
+ * @param parts - Parts to pack
+ * @param stock - Stock sheets
+ * @param timeBudgetMs - Max time to run in milliseconds (default: 1000)
+ * @param config - Packing configuration
+ * @returns Best result found
+ */
+export async function packPartsGuillotineDeep(
+  parts: PartSpec[],
+  stock: StockSheetSpec[],
+  timeBudgetMs: number = 1000,
+  config: Partial<PackingConfig> = {}
+): Promise<GuillotinePackResult> {
+  const startTime = performance.now();
+  const sheet = stock[0]; // MVP: single sheet size
+  const sheetArea = sheet.width_mm * sheet.length_mm;
+  const fullConfig = { ...DEFAULT_PACKING_CONFIG, ...config };
+
+  // Initial result using standard heuristics (baseline)
+  let bestResult = packPartsGuillotine(parts, stock, config);
+  let bestScore = calculateResultScore(bestResult, sheetArea);
+
+  // Expand parts once for reuse
+  const expanded = expandParts(parts);
+
+  // Optimization loop
+  let iterations = 0;
+  const strategies: SortStrategy[] = [
+    'area',
+    'constrained-longest',
+    'width',
+    'perimeter',
+    'height',
+  ];
+
+  // Helper to yield to event loop to keep UI responsive
+  const yieldToEventLoop = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  while (performance.now() - startTime < timeBudgetMs) {
+    iterations++;
+
+    // Yield every 20 iterations to prevent UI freeze
+    if (iterations % 20 === 0) {
+      await yieldToEventLoop();
+    }
+
+    // Generate a random variation of parts
+    // 1. Pick a random base strategy
+    const baseStrategy = strategies[Math.floor(Math.random() * strategies.length)];
+    const sorted = sortByStrategy(expanded, baseStrategy);
+
+    // 2. Shuffle a random subset or swizzle pairs
+    // For deep optimization, we want significant variations.
+    // Let's use a randomized shuffle with a random seed.
+    const seed = Math.floor(Math.random() * 1000000);
+    const shuffled = deterministicShuffle(sorted, seed);
+
+    // 3. Occasionally reverse the list
+    if (Math.random() > 0.5) {
+      shuffled.reverse();
+    }
+
+    // Pack this variation
+    const strategyName = `deep-${baseStrategy}-${seed}`;
+    const result = packWithExpandedParts(shuffled, sheet, strategyName, parts, config);
+    const score = calculateResultScore(result, sheetArea);
+
+    // Keep if better
+    if (score > bestScore) {
+      bestScore = score;
+      bestResult = result;
+    }
+  }
+
+  // Debug: uncomment to see iteration count
+  // console.log(`Deep optimization: ${iterations} iterations in ${Math.round(performance.now() - startTime)}ms`);
+
+  // Ensure we identify this as a deep optimization result
+  return {
+    ...bestResult,
+    strategyUsed: `deep-optimized (${iterations} passes)`,
+  };
+}
+
+// =============================================================================
+// Helper: Convert to LayoutResult
+// =============================================================================
 
 /**
  * Convert GuillotinePackResult to standard LayoutResult for compatibility.

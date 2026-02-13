@@ -21,7 +21,7 @@ export interface QuoteCutlistLayoutV2 {
   backerBoards: BoardMaterial[];
   edging: EdgingMaterial[];
   kerf: number;
-  optimizationPriority: 'fast' | 'offcut';
+  optimizationPriority: 'fast' | 'offcut' | 'deep';
   sheetOverrides?: Record<string, SheetBillingOverride>;
   globalFullBoard?: boolean;
   backerSheetOverrides?: Record<string, SheetBillingOverride>;

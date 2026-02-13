@@ -48,7 +48,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - Timekeeping: [`domains/timekeeping/labor-section.md`](domains/timekeeping/labor-section.md), [`domains/timekeeping/labor-planning-user-guide.md`](domains/timekeeping/labor-planning-user-guide.md)
   - Suppliers: [`domains/suppliers/suppliers-master.md`](domains/suppliers/suppliers-master.md)
 - Features:
-  - [`features/cutlist-calculator.md`](features/cutlist-calculator.md) – **Cutlist Calculator** documentation: materials panel, parts table, edge banding popover, lamination types
+  - [`features/cutlist-calculator.md`](features/cutlist-calculator.md) – **Cutlist Calculator** documentation: materials panel, parts table, edge banding popover, lamination types, Deep (SA) simulated annealing optimizer
   - [`features/quotes.md`](features/quotes.md) – **Quotes** feature planning and implementation notes
   - [`features/customers-ui-redesign.md`](features/customers-ui-redesign.md) – ✅ **Customers UI redesign** with inline editing, metrics, charts, and streamlined navigation
   - [`features/suppliers-ui-redesign-prompt.md`](features/suppliers-ui-redesign-prompt.md) – **Suppliers UI redesign prompt** (ready to apply in new conversation)
@@ -80,6 +80,9 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - New: [`plans/inventory-traceability-po-consolidation-plan.md`](plans/inventory-traceability-po-consolidation-plan.md) – Inventory traceability through purchase cycle, PO consolidation, and reserved inventory system
 - Changelogs: [`changelogs/`](changelogs/)
   - [`changelogs/auth-and-landing-ui-improvements-20250117.md`](changelogs/auth-and-landing-ui-improvements-20250117.md) – ✅ **Auth flow & landing page UI improvements** (background color uniformity, login/logout flow fixes)
+  - [`changelogs/purchase-order-internal-cc-for-order-20260212.md`](changelogs/purchase-order-internal-cc-for-order-20260212.md) – Internal PO CC emails now include a compact `For Order` column (without `#`) while supplier email content remains unchanged
+  - [`changelogs/purchase-order-cancellation-default-cc-20260212.md`](changelogs/purchase-order-cancellation-default-cc-20260212.md) – Cancellation emails now always include default internal PO CC recipients from Settings
+  - [`changelogs/purchase-order-line-cancellation-email-20260212.md`](changelogs/purchase-order-line-cancellation-email-20260212.md) – Single-line PO cancellations now notify suppliers and log typed PO email intent (`po_send`, `po_cancel`, `po_line_cancel`, `po_follow_up`)
   - [`changelogs/supplier-metrics-cards-enhancement-20260206.md`](changelogs/supplier-metrics-cards-enhancement-20260206.md) – ✅ Supplier detail metric cards now support period toggles, outstanding drill-down, and spend trend chart
   - [`changelogs/purchasing-pending-orders-status-filter-fix-20260206.md`](changelogs/purchasing-pending-orders-status-filter-fix-20260206.md) – Fixed dashboard pending/approved card drilldown showing `Unknown` statuses due to embedded relation filtering
   - [`changelogs/purchasing-partially-delivered-card-20260206.md`](changelogs/purchasing-partially-delivered-card-20260206.md) – Replaced the purchasing “This Month” card with a clickable partially delivered orders drilldown

@@ -67,6 +67,7 @@ export type SortStrategy = 'area' | 'length' | 'width' | 'perimeter';
 export {
   GuillotinePacker,
   packPartsGuillotine,
+  packPartsGuillotineDeep,
   packWithStrategy,
   toLayoutResult,
   DEFAULT_PACKING_CONFIG,
@@ -255,7 +256,7 @@ export function packPartsIntoSheets(
     const hSegments: HorizontalSegment[] = [];
 
     // Try pack as many as possible onto this sheet
-    for (let i = 0; i < expanded.length; ) {
+    for (let i = 0; i < expanded.length;) {
       const part = expanded[i];
       const placed = tryPlace(
         part,
@@ -447,6 +448,7 @@ export function packPartsOptimized(
 
 import {
   packPartsGuillotine as packGuillotine,
+  packPartsGuillotineDeep,
   toLayoutResult as guillotineToLayout,
   type GuillotinePackResult,
   type PackingConfig,
@@ -457,8 +459,20 @@ import {
  * - 'strip': Cut-minimizing algorithm using vertical sections (best for guillotine cutting)
  * - 'guillotine': Waste-optimized guillotine packer
  * - 'legacy': Original greedy best-fit algorithm
+ * - 'deep': Time-budgeted deep optimization
  */
-export type PackingAlgorithm = 'strip' | 'guillotine' | 'legacy';
+export type PackingAlgorithm = 'strip' | 'guillotine' | 'legacy' | 'deep';
+
+/** Progress info from SA optimization */
+export interface SAProgressInfo {
+  iteration: number;
+  bestScore: number;
+  bestResult: LayoutResult;
+  elapsed: number;
+  temperature: number;
+  improvementCount: number;
+  baselineScore: number;
+}
 
 /**
  * Extended pack options with algorithm choice.
@@ -468,6 +482,12 @@ export interface ExtendedPackOptions extends PackOptions {
   algorithm?: PackingAlgorithm;
   /** Configuration for guillotine packer (only used if algorithm='guillotine') */
   packingConfig?: Partial<PackingConfig>;
+  /** Time budget for deep optimization in ms. Default: 1000 */
+  timeBudgetMs?: number;
+  /** Progress callback for SA optimization (fires every ~500ms) */
+  onProgress?: (progress: SAProgressInfo) => void;
+  /** AbortSignal to cancel SA optimization early */
+  abortSignal?: AbortSignal;
 }
 
 /**
@@ -482,11 +502,11 @@ export interface ExtendedPackOptions extends PackOptions {
  * @param opts - Packing options including algorithm choice
  * @returns LayoutResult with best packing found
  */
-export function packPartsSmartOptimized(
+export async function packPartsSmartOptimized(
   parts: PartSpec[],
   stock: StockSheetSpec[],
   opts: ExtendedPackOptions = {}
-): LayoutResult & { strategyUsed: string; algorithm: PackingAlgorithm } {
+): Promise<LayoutResult & { strategyUsed: string; algorithm: PackingAlgorithm }> {
   const algorithm = opts.algorithm ?? 'strip';
 
   if (algorithm === 'strip') {
@@ -514,6 +534,64 @@ export function packPartsSmartOptimized(
     };
   }
 
+  if (algorithm === 'deep') {
+    const timeBudget = opts.timeBudgetMs ?? 30_000;
+    const sheet = stock[0];
+
+    // Try to use Web Worker for off-main-thread SA optimization
+    if (typeof window !== 'undefined' && typeof Worker !== 'undefined') {
+      try {
+        const result = await runSAInWorker(
+          parts,
+          sheet,
+          timeBudget,
+          opts.packingConfig,
+          opts.onProgress,
+          opts.abortSignal
+        );
+        return {
+          ...guillotineToLayout(result),
+          strategyUsed: result.strategyUsed,
+          algorithm: 'deep',
+        };
+      } catch (err) {
+        // Worker failed (e.g. CSP restrictions) — fall back to main thread
+        console.warn('SA Worker failed, falling back to main thread:', err);
+      }
+    }
+
+    // Fallback: run SA on main thread (blocks UI but still works)
+    const { runSimulatedAnnealing } = await import('@/lib/cutlist/saOptimizer');
+    let cancelled = false;
+    const onAbort = () => { cancelled = true; };
+    opts.abortSignal?.addEventListener('abort', onAbort);
+    const result = runSimulatedAnnealing(
+      parts,
+      sheet,
+      timeBudget,
+      {},
+      opts.packingConfig,
+      opts.onProgress
+        ? (p) => opts.onProgress!({
+            iteration: p.iteration,
+            bestScore: p.bestScore,
+            bestResult: guillotineToLayout(p.bestResult),
+            elapsed: p.elapsed,
+            temperature: p.temperature,
+            improvementCount: p.improvementCount,
+            baselineScore: p.baselineScore,
+          })
+        : undefined,
+      () => cancelled
+    );
+    opts.abortSignal?.removeEventListener('abort', onAbort);
+    return {
+      ...guillotineToLayout(result),
+      strategyUsed: result.strategyUsed,
+      algorithm: 'deep',
+    };
+  }
+
   if (algorithm === 'guillotine') {
     const result = packGuillotine(parts, stock, opts.packingConfig);
     return {
@@ -529,6 +607,78 @@ export function packPartsSmartOptimized(
     ...legacyResult,
     algorithm: 'legacy',
   };
+}
+
+// ============================================================================
+// SA Web Worker Helper
+// ============================================================================
+
+import type { GuillotinePackResult as _GPR } from '@/lib/cutlist/guillotinePacker';
+
+/**
+ * Run simulated annealing in a Web Worker for off-main-thread execution.
+ */
+async function runSAInWorker(
+  parts: PartSpec[],
+  stock: StockSheetSpec,
+  timeBudgetMs: number,
+  packingConfig?: Partial<PackingConfig>,
+  onProgress?: (progress: SAProgressInfo) => void,
+  abortSignal?: AbortSignal
+): Promise<_GPR> {
+  return new Promise((resolve, reject) => {
+    let worker: Worker;
+    try {
+      worker = new Worker(
+        new URL('@/lib/cutlist/saWorker.ts', import.meta.url)
+      );
+    } catch (err) {
+      reject(err);
+      return;
+    }
+
+    const onAbort = () => {
+      worker.postMessage({ type: 'cancel' });
+    };
+    abortSignal?.addEventListener('abort', onAbort);
+
+    worker.onmessage = (event) => {
+      const msg = event.data;
+
+      if (msg.type === 'progress' && onProgress) {
+        onProgress({
+          iteration: msg.iteration,
+          bestScore: msg.bestScore,
+          bestResult: guillotineToLayout(msg.bestResult),
+          elapsed: msg.elapsed,
+          temperature: msg.temperature,
+          improvementCount: msg.improvementCount,
+          baselineScore: msg.baselineScore,
+        });
+      }
+
+      if (msg.type === 'complete') {
+        abortSignal?.removeEventListener('abort', onAbort);
+        worker.terminate();
+        resolve(msg.result);
+      }
+    };
+
+    worker.onerror = (err) => {
+      abortSignal?.removeEventListener('abort', onAbort);
+      worker.terminate();
+      reject(err);
+    };
+
+    // Start the optimization
+    worker.postMessage({
+      type: 'start',
+      parts,
+      stock,
+      timeBudgetMs,
+      packingConfig,
+    });
+  });
 }
 
 // ============================================================================
@@ -550,14 +700,14 @@ export function packPartsSmartOptimized(
  * @param defaultBackerMaterialId - Default backer material ID
  * @param opts - Packing options
  */
-export function packPartsWithLamination(
+export async function packPartsWithLamination(
   parts: CutlistPart[],
   primaryStock: StockSheetSpec[],
   backerStock?: StockSheetSpec[],
   defaultMaterialId?: string,
   defaultBackerMaterialId?: string,
-  opts: PackOptions = {}
-): CombinedPackingResult {
+  opts: ExtendedPackOptions = {}
+): Promise<CombinedPackingResult> {
   // Expand parts based on lamination types
   const expansion = expandPartsWithLamination(parts, defaultMaterialId, defaultBackerMaterialId);
 
@@ -567,7 +717,7 @@ export function packPartsWithLamination(
 
   for (const [materialId, expandedParts] of expansion.primaryPartsByMaterial) {
     const partSpecs = expandedPartsToPartSpecs(expandedParts);
-    const result = packPartsIntoSheets(partSpecs, primaryStock, opts);
+    const result = await packPartsSmartOptimized(partSpecs, primaryStock, opts);
     primaryResults.set(materialId, result);
     totalPrimarySheets += result.sheets.length;
   }
@@ -579,7 +729,7 @@ export function packPartsWithLamination(
 
   for (const [materialId, expandedParts] of expansion.backerPartsByMaterial) {
     const partSpecs = expandedPartsToPartSpecs(expandedParts);
-    const result = packPartsIntoSheets(partSpecs, effectiveBackerStock, opts);
+    const result = await packPartsSmartOptimized(partSpecs, effectiveBackerStock, opts);
     backerResults.set(materialId, result);
     totalBackerSheets += result.sheets.length;
   }

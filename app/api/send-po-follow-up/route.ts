@@ -292,8 +292,10 @@ export async function POST(request: Request) {
         await supabase.from('purchase_order_emails').insert({
           purchase_order_id: purchaseOrderId,
           supplier_id: result.supplierId,
+          supplier_order_id: null,
           recipient_email: result.recipientEmail,
           cc_emails: ccList.length > 0 ? ccList : [],
+          email_type: 'po_follow_up',
           status: result.success ? 'sent' : 'failed',
           message_id: result.messageId || null,
           error_message: result.error || null,

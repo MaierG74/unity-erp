@@ -19,6 +19,7 @@ import {
   X,
   Box,
   Hammer,
+  CalendarClock,
   FileText,
   CheckSquare,
   Ruler,
@@ -60,12 +61,17 @@ const navigation = [
     href: '/inventory',
     icon: Package 
   },
-  { 
-    name: 'Labor', 
+  {
+    name: 'Labor',
     href: '/labor',
-    icon: Hammer 
+    icon: Hammer
   },
-  { 
+  {
+    name: 'Scheduling',
+    href: '/labor-planning',
+    icon: CalendarClock
+  },
+  {
     name: 'Purchasing', 
     href: '/purchasing',
     icon: ShoppingBag 

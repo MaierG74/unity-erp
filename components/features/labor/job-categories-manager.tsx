@@ -9,18 +9,7 @@ import { z } from 'zod';
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from '@/components/ui/card';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import {
   Form,
   FormControl,
@@ -37,10 +26,28 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
-import { Plus, Trash2, Edit, Calendar, Loader2, ChevronDown, ChevronRight, Search, TrendingUp, DollarSign, Briefcase } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Plus, Trash2, Edit, Calendar, Loader2, ChevronDown, ChevronRight, Search, DollarSign, Briefcase } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { format } from 'date-fns';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -88,10 +95,11 @@ export function JobCategoriesManager() {
   const [isAddCategoryOpen, setIsAddCategoryOpen] = useState(false);
   const [isEditCategoryOpen, setIsEditCategoryOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortBy, setSortBy] = useState<'name' | 'rate'>('name');
+  const [sortBy, setSortBy] = useState<string>('name-asc');
+  const [deletingCategory, setDeletingCategory] = useState<JobCategory | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  
+
   // Initialize category form
   const categoryForm = useForm<CategoryFormValues>({
     resolver: zodResolver(categorySchema),
@@ -101,7 +109,7 @@ export function JobCategoriesManager() {
       current_hourly_rate: 0,
     },
   });
-  
+
   // Initialize rate form
   const rateForm = useForm<RateFormValues>({
     resolver: zodResolver(rateSchema),
@@ -110,21 +118,41 @@ export function JobCategoriesManager() {
       effective_date: new Date(),
     },
   });
-  
-  // Fetch job categories
+
+  // Fetch job categories with job counts
   const { data: categories = [], isLoading: categoriesLoading } = useQuery({
     queryKey: ['jobCategories'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('job_categories')
         .select('*');
-        
+
       if (error) throw error;
       return data as JobCategory[];
     },
   });
-  
-  // Fetch rates for all categories (we'll filter by expanded ones)
+
+  // Fetch job counts per category
+  const { data: jobCounts = {} } = useQuery({
+    queryKey: ['jobCountsByCategory'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('jobs')
+        .select('category_id');
+
+      if (error) throw error;
+
+      const counts: Record<number, number> = {};
+      data.forEach((job: { category_id: number | null }) => {
+        if (job.category_id != null) {
+          counts[job.category_id] = (counts[job.category_id] || 0) + 1;
+        }
+      });
+      return counts;
+    },
+  });
+
+  // Fetch rates for all categories
   const { data: allCategoryRates = [], isLoading: ratesLoading } = useQuery({
     queryKey: ['jobCategoryRates'],
     queryFn: async () => {
@@ -132,57 +160,63 @@ export function JobCategoriesManager() {
         .from('job_category_rates')
         .select('*')
         .order('effective_date', { ascending: false });
-        
+
       if (error) throw error;
       return data as JobCategoryRate[];
     },
   });
-  
+
   // Filter and sort categories
   const filteredAndSortedCategories = useMemo(() => {
     let filtered = categories;
-    
-    // Apply search filter
+
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(cat => 
+      filtered = filtered.filter(cat =>
         cat.name.toLowerCase().includes(query) ||
         cat.description?.toLowerCase().includes(query)
       );
     }
-    
-    // Apply sorting
+
     const sorted = [...filtered].sort((a, b) => {
-      if (sortBy === 'name') {
-        return a.name.localeCompare(b.name);
-      } else {
-        return b.current_hourly_rate - a.current_hourly_rate;
+      switch (sortBy) {
+        case 'name-asc':
+          return a.name.localeCompare(b.name);
+        case 'name-desc':
+          return b.name.localeCompare(a.name);
+        case 'rate-asc':
+          return a.current_hourly_rate - b.current_hourly_rate;
+        case 'rate-desc':
+          return b.current_hourly_rate - a.current_hourly_rate;
+        case 'jobs-desc':
+          return (jobCounts[b.category_id] || 0) - (jobCounts[a.category_id] || 0);
+        default:
+          return a.name.localeCompare(b.name);
       }
     });
-    
+
     return sorted;
-  }, [categories, searchQuery, sortBy]);
-  
+  }, [categories, searchQuery, sortBy, jobCounts]);
+
   // Calculate stats
   const stats = useMemo(() => {
     if (categories.length === 0) {
-      return { total: 0, avgRate: 0, maxRate: 0, minRate: 0 };
+      return { total: 0, avgRate: 0, totalJobs: 0 };
     }
-    
+
     const rates = categories.map(c => c.current_hourly_rate);
     const total = categories.length;
     const avgRate = rates.reduce((sum, r) => sum + r, 0) / total;
-    const maxRate = Math.max(...rates);
-    const minRate = Math.min(...rates);
-    
-    return { total, avgRate, maxRate, minRate };
-  }, [categories]);
-  
+    const totalJobs = Object.values(jobCounts).reduce((sum: number, c: number) => sum + c, 0);
+
+    return { total, avgRate, totalJobs };
+  }, [categories, jobCounts]);
+
   // Get rates for a specific category
   const getRatesForCategory = (categoryId: number) => {
     return allCategoryRates.filter(rate => rate.category_id === categoryId);
   };
-  
+
   // Toggle category expansion
   const toggleCategory = (categoryId: number) => {
     const newExpanded = new Set(expandedCategories);
@@ -193,7 +227,7 @@ export function JobCategoriesManager() {
     }
     setExpandedCategories(newExpanded);
   };
-  
+
   // Add job category mutation
   const addCategory = useMutation({
     mutationFn: async (values: CategoryFormValues) => {
@@ -205,10 +239,9 @@ export function JobCategoriesManager() {
           current_hourly_rate: values.current_hourly_rate,
         })
         .select();
-        
+
       if (error) throw error;
-      
-      // Also create an initial rate entry
+
       const categoryId = data[0].category_id;
       const { error: rateError } = await supabase
         .from('job_category_rates')
@@ -217,9 +250,9 @@ export function JobCategoriesManager() {
           hourly_rate: values.current_hourly_rate,
           effective_date: new Date().toISOString().split('T')[0],
         });
-        
+
       if (rateError) throw rateError;
-      
+
       return data;
     },
     onSuccess: () => {
@@ -241,7 +274,7 @@ export function JobCategoriesManager() {
       console.error('Error adding job category:', error);
     },
   });
-  
+
   // Update job category mutation
   const updateCategory = useMutation({
     mutationFn: async (values: CategoryFormValues & { category_id: number }) => {
@@ -254,7 +287,7 @@ export function JobCategoriesManager() {
         })
         .eq('category_id', values.category_id)
         .select();
-        
+
       if (error) throw error;
       return data;
     },
@@ -277,67 +310,65 @@ export function JobCategoriesManager() {
       console.error('Error updating job category:', error);
     },
   });
-  
+
   // Delete job category mutation
   const deleteCategory = useMutation({
     mutationFn: async (categoryId: number) => {
-      // First delete all rates for this category
       const { error: ratesError } = await supabase
         .from('job_category_rates')
         .delete()
         .eq('category_id', categoryId);
-        
+
       if (ratesError) throw ratesError;
-      
-      // Then delete the category
+
       const { error } = await supabase
         .from('job_categories')
         .delete()
         .eq('category_id', categoryId);
-        
+
       if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobCategories'] });
       queryClient.invalidateQueries({ queryKey: ['jobCategoryRates'] });
+      queryClient.invalidateQueries({ queryKey: ['jobCountsByCategory'] });
+      setDeletingCategory(null);
       toast({
         title: 'Success',
         description: 'Job category deleted',
       });
     },
     onError: (error) => {
+      setDeletingCategory(null);
       toast({
         title: 'Error',
-        description: 'Failed to delete job category. It may be in use.',
+        description: 'Failed to delete job category. It may have jobs assigned to it.',
         variant: 'destructive',
       });
       console.error('Error deleting job category:', error);
     },
   });
-  
+
   // Add rate version mutation
   const addRateVersion = useMutation({
     mutationFn: async (values: RateFormValues & { categoryId: number }) => {
       const { categoryId, ...rateValues } = values;
-      
-      // Check if there are any existing rates with effective dates after the new one
+
       const { data: laterRates, error: checkError } = await supabase
         .from('job_category_rates')
         .select('*')
         .eq('category_id', categoryId)
         .gte('effective_date', rateValues.effective_date.toISOString().split('T')[0])
         .order('effective_date', { ascending: true });
-        
+
       if (checkError) throw checkError;
-      
-      // If there are later rates, we need to set the end_date of our new rate
+
       let endDate = null;
       if (laterRates && laterRates.length > 0) {
         endDate = new Date(laterRates[0].effective_date);
         endDate.setDate(endDate.getDate() - 1);
       }
-      
-      // Find the most recent rate before our new one to update its end_date
+
       const { data: earlierRates, error: earlierError } = await supabase
         .from('job_category_rates')
         .select('*')
@@ -345,10 +376,9 @@ export function JobCategoriesManager() {
         .lt('effective_date', rateValues.effective_date.toISOString().split('T')[0])
         .order('effective_date', { ascending: false })
         .limit(1);
-        
+
       if (earlierError) throw earlierError;
-      
-      // Insert the new rate
+
       const { data, error } = await supabase
         .from('job_category_rates')
         .insert({
@@ -358,28 +388,26 @@ export function JobCategoriesManager() {
           end_date: endDate ? endDate.toISOString().split('T')[0] : null,
         })
         .select();
-        
+
       if (error) throw error;
-      
-      // Update the end_date of the previous rate
+
       if (earlierRates && earlierRates.length > 0) {
         const prevDate = new Date(rateValues.effective_date);
         prevDate.setDate(prevDate.getDate() - 1);
-        
+
         const { error: updateError } = await supabase
           .from('job_category_rates')
           .update({
             end_date: prevDate.toISOString().split('T')[0],
           })
           .eq('rate_id', earlierRates[0].rate_id);
-          
+
         if (updateError) throw updateError;
       }
-      
-      // Update the current_hourly_rate if this is the most recent rate
+
       const today = new Date().toISOString().split('T')[0];
       const effectiveDate = rateValues.effective_date.toISOString().split('T')[0];
-      
+
       if (effectiveDate <= today && (!endDate || endDate.toISOString().split('T')[0] >= today)) {
         const { error: updateCategoryError } = await supabase
           .from('job_categories')
@@ -387,10 +415,10 @@ export function JobCategoriesManager() {
             current_hourly_rate: rateValues.hourly_rate,
           })
           .eq('category_id', categoryId);
-          
+
         if (updateCategoryError) throw updateCategoryError;
       }
-      
+
       return data;
     },
     onSuccess: () => {
@@ -412,7 +440,7 @@ export function JobCategoriesManager() {
       console.error('Error adding rate version:', error);
     },
   });
-  
+
   // Handle category form submission
   const onCategorySubmit = (values: CategoryFormValues) => {
     if (editingId) {
@@ -424,12 +452,12 @@ export function JobCategoriesManager() {
       addCategory.mutate(values);
     }
   };
-  
+
   // Handle rate form submission
   const onRateSubmit = (categoryId: number) => (values: RateFormValues) => {
     addRateVersion.mutate({ ...values, categoryId });
   };
-  
+
   // Start editing a category
   const startEditing = (category: JobCategory) => {
     setEditingId(category.category_id);
@@ -440,77 +468,38 @@ export function JobCategoriesManager() {
     });
     setIsEditCategoryOpen(true);
   };
-  
+
   // Cancel editing
   const cancelEditing = () => {
     setEditingId(null);
     categoryForm.reset();
     setIsEditCategoryOpen(false);
   };
-  
+
   return (
-    <div className="space-y-6">
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Briefcase className="h-4 w-4" />
-              Total Categories
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.total}</div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <DollarSign className="h-4 w-4" />
-              Average Rate
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">R{stats.avgRate.toFixed(2)}</div>
-            <p className="text-xs text-muted-foreground mt-1">per hour</p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <TrendingUp className="h-4 w-4" />
-              Highest Rate
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">R{stats.maxRate.toFixed(2)}</div>
-            <p className="text-xs text-muted-foreground mt-1">per hour</p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <DollarSign className="h-4 w-4" />
-              Lowest Rate
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">R{stats.minRate.toFixed(2)}</div>
-            <p className="text-xs text-muted-foreground mt-1">per hour</p>
-          </CardContent>
-        </Card>
+    <div className="space-y-4">
+      {/* Compact Stats Row */}
+      <div className="flex items-center gap-6 text-sm text-muted-foreground">
+        <div className="flex items-center gap-1.5">
+          <Briefcase className="h-4 w-4" />
+          <span className="font-medium text-foreground">{stats.total}</span> categories
+        </div>
+        <div className="flex items-center gap-1.5">
+          <DollarSign className="h-4 w-4" />
+          Avg <span className="font-medium text-foreground">R{stats.avgRate.toFixed(2)}</span>/hr
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="font-medium text-foreground">{stats.totalJobs}</span> total jobs
+        </div>
       </div>
 
       {/* Toolbar */}
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <Button onClick={() => setIsAddCategoryOpen(true)} className="h-9">
+        <Button onClick={() => setIsAddCategoryOpen(true)} size="sm">
           <Plus className="h-4 w-4 mr-2" />
           Add Category
         </Button>
-        
+
         <div className="flex flex-col gap-3 md:flex-row md:items-center">
           {/* Search */}
           <div className="relative w-full md:w-80">
@@ -523,27 +512,20 @@ export function JobCategoriesManager() {
               className="h-9 pl-9"
             />
           </div>
-          
-          {/* Sort */}
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Sort:</span>
-            <Button
-              variant={sortBy === 'name' ? 'default' : 'outline'}
-              size="sm"
-              className="h-9"
-              onClick={() => setSortBy('name')}
-            >
-              Name
-            </Button>
-            <Button
-              variant={sortBy === 'rate' ? 'default' : 'outline'}
-              size="sm"
-              className="h-9"
-              onClick={() => setSortBy('rate')}
-            >
-              Rate
-            </Button>
-          </div>
+
+          {/* Sort dropdown */}
+          <Select value={sortBy} onValueChange={setSortBy}>
+            <SelectTrigger className="w-[180px] h-9">
+              <SelectValue placeholder="Sort by..." />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name-asc">Name (A-Z)</SelectItem>
+              <SelectItem value="name-desc">Name (Z-A)</SelectItem>
+              <SelectItem value="rate-desc">Rate (High-Low)</SelectItem>
+              <SelectItem value="rate-asc">Rate (Low-High)</SelectItem>
+              <SelectItem value="jobs-desc">Most Jobs</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -551,10 +533,31 @@ export function JobCategoriesManager() {
       <Card>
         <CardContent className="p-0">
           {categoriesLoading ? (
-            <div className="text-center py-8">Loading categories...</div>
+            <div className="flex items-center justify-center py-8 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              Loading categories...
+            </div>
           ) : filteredAndSortedCategories.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              {searchQuery ? 'No categories match your search' : 'No job categories defined yet'}
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <Briefcase className="h-10 w-10 text-muted-foreground/50 mb-3" />
+              <p className="font-medium">
+                {searchQuery ? 'No categories match your search' : 'No job categories yet'}
+              </p>
+              <p className="text-sm text-muted-foreground mt-1">
+                {searchQuery
+                  ? 'Try a different search term'
+                  : 'Create your first category to organize jobs and set hourly rates'}
+              </p>
+              {!searchQuery && (
+                <Button
+                  size="sm"
+                  className="mt-4"
+                  onClick={() => setIsAddCategoryOpen(true)}
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Category
+                </Button>
+              )}
             </div>
           ) : (
             <div className="divide-y">
@@ -562,7 +565,8 @@ export function JobCategoriesManager() {
                 const isExpanded = expandedCategories.has(category.category_id);
                 const categoryRates = getRatesForCategory(category.category_id);
                 const isAddingRateForThis = isAddingRate === category.category_id;
-                
+                const jobCount = jobCounts[category.category_id] || 0;
+
                 return (
                   <div key={category.category_id} className="p-4">
                     {/* Category Header */}
@@ -582,6 +586,9 @@ export function JobCategoriesManager() {
                             <span className="text-sm font-semibold text-primary">
                               R{category.current_hourly_rate.toFixed(2)}/hr
                             </span>
+                            <Badge variant="secondary" className="text-xs">
+                              {jobCount} {jobCount === 1 ? 'job' : 'jobs'}
+                            </Badge>
                           </div>
                           {category.description && (
                             <p className="text-sm text-muted-foreground mt-1">
@@ -590,7 +597,7 @@ export function JobCategoriesManager() {
                           )}
                         </div>
                       </button>
-                      
+
                       <div className="flex items-center gap-2">
                         <Button
                           variant="ghost"
@@ -604,17 +611,13 @@ export function JobCategoriesManager() {
                           variant="destructiveSoft"
                           size="icon"
                           className="h-8 w-8"
-                          onClick={() => {
-                            if (confirm(`Are you sure you want to delete ${category.name}?`)) {
-                              deleteCategory.mutate(category.category_id);
-                            }
-                          }}
+                          onClick={() => setDeletingCategory(category)}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
                     </div>
-                    
+
                     {/* Expanded Rate History */}
                     {isExpanded && (
                       <div className="mt-4 ml-8 space-y-3">
@@ -630,7 +633,7 @@ export function JobCategoriesManager() {
                             Add Rate
                           </Button>
                         </div>
-                        
+
                         {ratesLoading ? (
                           <div className="text-sm text-muted-foreground">Loading rates...</div>
                         ) : categoryRates.length === 0 ? (
@@ -659,7 +662,7 @@ export function JobCategoriesManager() {
                             ))}
                           </div>
                         )}
-                        
+
                         {/* Add Rate Form */}
                         {isAddingRateForThis && (
                           <Card className="mt-3">
@@ -688,7 +691,7 @@ export function JobCategoriesManager() {
                                       </FormItem>
                                     )}
                                   />
-                                  
+
                                   <FormField
                                     control={rateForm.control}
                                     name="effective_date"
@@ -728,7 +731,7 @@ export function JobCategoriesManager() {
                                       </FormItem>
                                     )}
                                   />
-                                  
+
                                   <div className="flex justify-end gap-2 pt-2">
                                     <Button
                                       type="button"
@@ -772,7 +775,45 @@ export function JobCategoriesManager() {
           )}
         </CardContent>
       </Card>
-      
+
+      {/* Delete Confirmation AlertDialog */}
+      <AlertDialog open={!!deletingCategory} onOpenChange={(open) => !open && setDeletingCategory(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Category</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <span className="font-medium text-foreground">{deletingCategory?.name}</span>?
+              This will also remove all rate history for this category. This action cannot be undone.
+              {(jobCounts[deletingCategory?.category_id ?? 0] || 0) > 0 && (
+                <span className="block mt-2 text-destructive">
+                  Warning: This category has {jobCounts[deletingCategory?.category_id ?? 0]} job(s) assigned to it.
+                </span>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (deletingCategory) {
+                  deleteCategory.mutate(deletingCategory.category_id);
+                }
+              }}
+            >
+              {deleteCategory.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Add Category Dialog */}
       <Dialog open={isAddCategoryOpen} onOpenChange={setIsAddCategoryOpen}>
         <DialogContent className="sm:max-w-md">
@@ -797,7 +838,7 @@ export function JobCategoriesManager() {
                   </FormItem>
                 )}
               />
-              
+
               <FormField
                 control={categoryForm.control}
                 name="description"
@@ -811,7 +852,7 @@ export function JobCategoriesManager() {
                   </FormItem>
                 )}
               />
-              
+
               <FormField
                 control={categoryForm.control}
                 name="current_hourly_rate"
@@ -831,7 +872,7 @@ export function JobCategoriesManager() {
                   </FormItem>
                 )}
               />
-              
+
               <DialogFooter>
                 <Button
                   type="button"
@@ -868,7 +909,7 @@ export function JobCategoriesManager() {
           </Form>
         </DialogContent>
       </Dialog>
-      
+
       {/* Edit Category Dialog */}
       <Dialog open={isEditCategoryOpen} onOpenChange={setIsEditCategoryOpen}>
         <DialogContent className="sm:max-w-md">
@@ -893,7 +934,7 @@ export function JobCategoriesManager() {
                   </FormItem>
                 )}
               />
-              
+
               <FormField
                 control={categoryForm.control}
                 name="description"
@@ -907,7 +948,7 @@ export function JobCategoriesManager() {
                   </FormItem>
                 )}
               />
-              
+
               <FormField
                 control={categoryForm.control}
                 name="current_hourly_rate"
@@ -927,7 +968,7 @@ export function JobCategoriesManager() {
                   </FormItem>
                 )}
               />
-              
+
               <DialogFooter>
                 <Button
                   type="button"
@@ -960,4 +1001,4 @@ export function JobCategoriesManager() {
       </Dialog>
     </div>
   );
-} 
+}

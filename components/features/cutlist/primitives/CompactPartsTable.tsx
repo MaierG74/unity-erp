@@ -655,7 +655,7 @@ const PartRow = memo(function PartRow({
           onChange={handleLengthChange}
           placeholder="L"
           min={0}
-          className="w-20"
+          className="w-[5.5rem]"
         />
       </TableCell>
 
@@ -667,7 +667,7 @@ const PartRow = memo(function PartRow({
           onChange={handleWidthChange}
           placeholder="W"
           min={0}
-          className="w-20"
+          className="w-[5.5rem]"
         />
       </TableCell>
 
@@ -678,7 +678,7 @@ const PartRow = memo(function PartRow({
           value={part.quantity}
           onChange={handleQuantityChange}
           min={1}
-          className="w-12"
+          className="w-16"
         />
       </TableCell>
 
@@ -980,9 +980,9 @@ export const CompactPartsTable = memo(forwardRef<CompactPartsTableRef, CompactPa
           <TableRow className="h-10">
             <TableHead className="px-2 py-1 font-medium text-xs">ID</TableHead>
             <TableHead className="px-2 py-1 font-medium text-xs">Material</TableHead>
-            <TableHead className="px-2 py-1 font-medium text-xs w-20">L</TableHead>
-            <TableHead className="px-2 py-1 font-medium text-xs w-20">W</TableHead>
-            <TableHead className="px-2 py-1 font-medium text-xs w-12">Qty</TableHead>
+            <TableHead className="px-2 py-1 font-medium text-xs w-[5.5rem]">L</TableHead>
+            <TableHead className="px-2 py-1 font-medium text-xs w-[5.5rem]">W</TableHead>
+            <TableHead className="px-2 py-1 font-medium text-xs w-16">Qty</TableHead>
             <TableHead className="px-2 py-1 font-medium text-xs w-10" title="Grain Direction">Grain</TableHead>
             <TableHead className="px-2 py-1 font-medium text-xs">Lam</TableHead>
             <TableHead className="px-2 py-1 font-medium text-xs w-16" title="Lamination Group">Grp</TableHead>
