@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Pencil, Copy, Trash2, MoreVertical } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { ProductRow } from './ProductsPage';
 
 interface ProductsRowActionsProps {
@@ -23,7 +24,7 @@ export function ProductsRowActions({ product, onError }: ProductsRowActionsProps
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
-      const response = await fetch(`/api/products/${product.product_id}`, {
+      const response = await authorizedFetch(`/api/products/${product.product_id}`, {
         method: 'DELETE',
       });
 
@@ -47,7 +48,7 @@ export function ProductsRowActions({ product, onError }: ProductsRowActionsProps
 
   const duplicateMutation = useMutation({
     mutationFn: async () => {
-      const response = await fetch(`/api/products/${product.product_id}/duplicate`, {
+      const response = await authorizedFetch(`/api/products/${product.product_id}/duplicate`, {
         method: 'POST',
       });
 
@@ -108,4 +109,3 @@ export function ProductsRowActions({ product, onError }: ProductsRowActionsProps
     </DropdownMenu>
   );
 }
-

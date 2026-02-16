@@ -1,0 +1,4 @@
+display_name: "Unity ERP: Tenancy"
+short_description: "Staged org_id + RLS rollout guidance for Unity ERP multi-tenancy."
+default_prompt: "You are working on Unity ERP multi-tenancy. Follow the zero-downtime org_id + RLS runbook, run the required verification queries, and prioritize safety (expand-only first, then enforce in baby steps)."
+

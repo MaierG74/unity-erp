@@ -22,7 +22,10 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
 - `plans/` – Implementation plans and project briefs (`*-plan.md` / `*-plan.txt`).
 - `changelogs/` – Historical release notes and change summaries.
 - `technical/` – Technical guides and troubleshooting documentation for developers.
-- `../migrations/` – Database migration files (see [`../migrations/README.md`](../migrations/README.md) for details)
+- `../migrations/` – Database migration files (legacy/manual runbook entries; see [`../migrations/README.md`](../migrations/README.md))
+- `../supabase/migrations/` – Supabase CLI migration history for auth/org/cutlist and newer platform migrations
+  - latest tenant data isolation expand migration: `../supabase/migrations/20260214_tenant_org_scoping_expand_phase_a.sql`
+  - follow-on expand migration (purchasing/quotes/staff org_id columns): `../supabase/migrations/20260215_tenant_org_scoping_expand_phase_b_purchasing_quotes_staff.sql`
 - `scopes/` – Client-friendly scope summaries for Unity ERP modules and the overall platform.
 
 ## Quick links
@@ -48,7 +51,8 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - Timekeeping: [`domains/timekeeping/labor-section.md`](domains/timekeeping/labor-section.md), [`domains/timekeeping/labor-planning-user-guide.md`](domains/timekeeping/labor-planning-user-guide.md)
   - Suppliers: [`domains/suppliers/suppliers-master.md`](domains/suppliers/suppliers-master.md)
 - Features:
-  - [`features/cutlist-calculator.md`](features/cutlist-calculator.md) – **Cutlist Calculator** documentation: materials panel, parts table, edge banding popover, lamination types, Deep (SA) simulated annealing optimizer
+  - [`features/cutlist-calculator.md`](features/cutlist-calculator.md) – **Cutlist Calculator** documentation: materials panel, parts table, edge banding, lamination, Deep (SA) optimizer with strip fallback, color-coded presentation, interactive zoom, operator PDF
+  - [`features/furniture-configurator.md`](features/furniture-configurator.md) – **Furniture Configurator**: parametric cupboard designer with live SVG preview, auto-generated cutlist parts, and cutlist builder integration
   - [`features/quotes.md`](features/quotes.md) – **Quotes** feature planning and implementation notes
   - [`features/customers-ui-redesign.md`](features/customers-ui-redesign.md) – ✅ **Customers UI redesign** with inline editing, metrics, charts, and streamlined navigation
   - [`features/suppliers-ui-redesign-prompt.md`](features/suppliers-ui-redesign-prompt.md) – **Suppliers UI redesign prompt** (ready to apply in new conversation)
@@ -58,6 +62,9 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - [`operations/cutlist-standalone.md`](operations/cutlist-standalone.md)
   - [`operations/email-integration.md`](operations/email-integration.md) – Core Resend email setup and configuration
   - [`operations/email-tracking.md`](operations/email-tracking.md) – ✅ **Email delivery tracking with Resend webhooks** (requires webhook setup)
+  - [`operations/tenant-module-entitlements-runbook.md`](operations/tenant-module-entitlements-runbook.md) – Runbook for tenant-level module toggles, verification, and rollback
+  - [`operations/tenant-data-isolation-zero-downtime-runbook.md`](operations/tenant-data-isolation-zero-downtime-runbook.md) – Zero-downtime staged runbook for adding `org_id` isolation to live `orders/products/stock` data
+  - [`operations/tenant-rollout-status.md`](operations/tenant-rollout-status.md) – Current production status checkpoint for the multi-tenant rollout
   - [`operations/supabase-mcp.md`](operations/supabase-mcp.md) – Unified Supabase MCP config (server-postgres, port 6543, tool-specific paths)
   - [`operations/chrome-devtools-mcp.md`](operations/chrome-devtools-mcp.md)
   - [`operations/quote-email-implementation.md`](operations/quote-email-implementation.md) – ✅ Quote email implementation summary (completed)
@@ -66,9 +73,10 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - Completed: [`plans/product-cutlist-calculator-plan.md`](plans/product-cutlist-calculator-plan.md) – Product cutlist calculator and **Cutlist Builder** with drag-and-drop grouping, CSV import, and 16mm/32mm board type support
   - Active: [`plans/cutlist-improvements.md`](plans/cutlist-improvements.md) – Cutlist improvements: ✅ grain direction toggle, ✅ qty=pieces model, pending: dynamic board thickness
   - Completed: [`plans/cutlist-qty-as-pieces-plan.md`](plans/cutlist-qty-as-pieces-plan.md) – Unified quantity model (Qty = pieces to cut, not finished assemblies)
-  - New: [`plans/cutlist-optimizer-parity-plan.md`](plans/cutlist-optimizer-parity-plan.md) – Cutlist optimizer parity (strip vs guillotine, offcut quality, optimization modes)
+  - Completed: [`plans/cutlist-optimizer-parity-plan.md`](plans/cutlist-optimizer-parity-plan.md) – Cutlist optimizer parity: SA optimizer, strip fallback, presentation upgrade, operator PDF
   - New: [`plans/labor-planning-validation-plan.md`](plans/labor-planning-validation-plan.md) – guardrails + telemetry plan for the Labor Planning board
   - New: [`plans/permissions-and-logging-plan.md`](plans/permissions-and-logging-plan.md) – unified roadmap for role-based access control, permissions UI, and audit logging rollout
+  - New: [`plans/tenant-module-entitlements-rollout-plan.md`](plans/tenant-module-entitlements-rollout-plan.md) – multi-tenant module licensing architecture and phased rollout (starts with Furniture Configurator toggle)
   - New: [`plans/sunday-doubletime-payroll-rollout-plan.md`](plans/sunday-doubletime-payroll-rollout-plan.md) – live-safe rollout plan to align Sunday/double-time calculations across attendance summaries, weekly views, and payroll
   - New: [`plans/todo-module-plan.md`](plans/todo-module-plan.md) – To-Do module planning doc covering cross-module task assignments
   - New: [`plans/products-section-upgrade.md`](plans/products-section-upgrade.md) – Modernize the Products area with inventory-parity tabs, transactions, and finished-good reports

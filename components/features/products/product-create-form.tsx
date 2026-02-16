@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { supabase } from '@/lib/supabase';
 import { Plus, Loader2 } from 'lucide-react';
 import { CategoryDialog } from './category-dialog';
@@ -65,11 +66,8 @@ export function ProductCreateForm({ trigger, onProductCreated }: ProductCreateFo
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/products', {
+      const response = await authorizedFetch('/api/products', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           ...formData,
           categories: selectedCategories,

@@ -2,6 +2,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -385,9 +386,14 @@ export default function AdminUsersPage() {
           <h1 className="text-2xl font-semibold">Admin Users</h1>
           <p className="text-sm text-muted-foreground">Create, edit, reset passwords, and manage activation.</p>
         </div>
-        <Button variant="outline" onClick={loadProfiles} disabled={loading}>
-          Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Link href="/admin/modules">
+            <Button variant="secondary">Modules</Button>
+          </Link>
+          <Button variant="outline" onClick={loadProfiles} disabled={loading}>
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {authError ? <p className="text-sm text-red-500">{authError}</p> : null}

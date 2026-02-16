@@ -635,6 +635,20 @@ export class GuillotinePacker {
       w: orientation.w - this.kerf,
       h: orientation.h - this.kerf,
       rot: orientation.rotated ? 90 : 0,
+      grain: part.grain,
+      band_edges: part.band_edges
+        ? {
+            top: !!part.band_edges.top,
+            right: !!part.band_edges.right,
+            bottom: !!part.band_edges.bottom,
+            left: !!part.band_edges.left,
+          }
+        : undefined,
+      lamination_type: part.lamination_type,
+      material_id: part.material_id ?? undefined,
+      material_label: 'material_label' in part ? (part as PartSpec & { material_label?: string }).material_label : undefined,
+      original_length_mm: part.length_mm,
+      original_width_mm: part.width_mm,
     });
 
     // Split the free rectangle

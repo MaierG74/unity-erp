@@ -190,8 +190,10 @@ The `/cutlist` page uses `packPartsSmartOptimized()` in `components/features/cut
   - `-sheets × 100,000` (fewer sheets)
   - `+offcutQuality × 500` (largest offcut as % of sheet — user's #1 priority)
   - `+concentration × 300` (consolidated waste)
+  - `-compactness × 50` (bounding box penalty — prefer parts packed in corner)
   - `+utilization × 1` (efficiency, weak signal)
   - `-fragments × 20` (fewer fragments better)
+- **Strip fallback safety net**: After SA completes, the orchestrator also runs the strip packer and compares both results using a `LayoutResult`-level scoring function (sheet count, utilization, compactness). If the strip packer produces a better layout (common on small single-sheet jobs), it is returned instead. This guarantees SA never regresses below the Fast algorithm.
 - **Progressive UI**: Shows live progress (elapsed time, iterations, improvements, % vs baseline) with a progress bar.
 - **Time budget**: User-selectable (10s / 30s / 60s), default 30s.
 - **Cancel**: "Stop & Keep Best" button aborts early and keeps the best result found so far.
@@ -260,12 +262,16 @@ CREATE TABLE cutlist_material_defaults (
 | `EdgeBandingPopover.tsx` | Visual edge selector popover |
 | `EdgeIndicator.tsx` | Compact edge display for table cells |
 | `CustomLaminationModal.tsx` | Multi-layer lamination configuration |
+| `InteractiveSheetViewer.tsx` | Pan/zoom dialog with tooltip, legend, highlight |
+| `SheetLayoutGrid.tsx` | Paginated sheet card grid with zoom + PDF download |
+| `CuttingDiagramButton.tsx` | Lazy-loaded PDF download button |
 
 ### Supporting Components
 
 | Component | Purpose |
 |-----------|---------|
 | `ComponentPickerDialog.tsx` | Inventory material selector |
+| `CuttingDiagramPDF.tsx` | React-PDF operator cutting diagram (one page per sheet) |
 
 ### Libraries (`lib/cutlist/`)
 
@@ -274,17 +280,54 @@ CREATE TABLE cutlist_material_defaults (
 | `materialsDefaults.ts` | Load/save pinned materials |
 | `boardCalculator.ts` | Lamination expansion helpers |
 | `cutlistDimensions.ts` | Dimension parsing utilities |
-| `types.ts` | TypeScript type definitions |
+| `types.ts` | TypeScript type definitions (incl. extended Placement metadata) |
 | `stripPacker.ts` | Strip-based packer (default for `/cutlist`) |
 | `guillotinePacker.ts` | Waste-optimized guillotine packer |
-| `saOptimizer.ts` | Simulated annealing optimization engine |
+| `saOptimizer.ts` | Simulated annealing optimization engine (V2 scoring with compactness) |
 | `saWorker.ts` | Web Worker entry point for SA (off-main-thread) |
+| `colorAssignment.ts` | 12-color palette, deterministic assignment by part name |
 
 ### Packing Entry Point
 
 | File | Purpose |
 |------|---------|
-| `components/features/cutlist/packing.ts` | Packing orchestration + algorithm selection |
+| `components/features/cutlist/packing.ts` | Packing orchestration, algorithm selection, strip fallback safety net |
+
+---
+
+## Visual Presentation (2026-02-13)
+
+### Color System
+Parts are color-coded by type using a 12-color accessible palette. Assignment is deterministic (sorted alphabetically, round-robin). Waste areas use a distinct slate gray with diagonal crosshatch. See `lib/cutlist/colorAssignment.ts`.
+
+### Sheet Preview (`preview.tsx`)
+SVG-based rendering with:
+- Per-part coloring from color map (falls back to blue when no map provided)
+- Grain direction overlay (fine parallel lines — horizontal for length, vertical for width)
+- Edge banding ticks (orange indicators on banded edges)
+- Hover/click: highlighted parts pulse, non-matching parts dim to 0.35 opacity
+- Thumbnail mode: hides part labels, only shows dimensions when parts are large enough
+- Interactive mode: cursor pointer, mouse events for hover/click
+
+### Interactive Zoom Dialog (`InteractiveSheetViewer.tsx`)
+Near-fullscreen dialog (max-w-6xl, h-[85vh]) with:
+- `@panzoom/panzoom` integration with `contain: 'inside'` for bounded zoom
+- Floating tooltip on hover (part name, L×W, grain, edges)
+- Click-to-highlight all instances of same part type
+- Two-column layout: 70% diagram / 30% parts legend
+- Legend table: color swatch, letter (A/B/C), display name, qty, L×W, grain/edge info
+- Legend hover highlights matching parts in the diagram
+- Header shows material, dimensions, and usage percentage
+- Zoom controls (+/-/reset) in top-right corner
+
+### Operator Cutting Diagram PDF (`CuttingDiagramPDF.tsx`)
+Production-ready PDF via `@react-pdf/renderer` (lazy-loaded):
+- One landscape A4 page per sheet
+- Lettered part labels (A-Z, AA-AZ) with color-coded backgrounds
+- Legend table per sheet with letter, name, qty, L, W
+- Header: material name, sheet N of M, date
+- Footer: sheet efficiency %, used area
+- Download button with date-stamped filename
 
 ---
 
@@ -337,3 +380,4 @@ Currently assumes 16mm boards (32mm when laminated). See `plans/cutlist-improvem
 *Created: 2026-01-25*
 *Updated: 2026-01-26 - Added Lamination Groups and Optimization Priority features*
 *Updated: 2026-02-13 - Added Deep (SA) simulated annealing optimizer with Web Worker, progressive UI, and time budget control*
+*Updated: 2026-02-13 - World-class presentation: color system, interactive zoom, operator PDF, SA compactness fix, strip fallback, UX polish*

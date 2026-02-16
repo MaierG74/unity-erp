@@ -191,6 +191,20 @@ export interface Placement {
   h: number;
   /** Rotation applied (0° or 90°) */
   rot: 0 | 90;
+  /** Grain orientation of the source part */
+  grain?: GrainOrientation;
+  /** Edge banding flags per side */
+  band_edges?: { top: boolean; right: boolean; bottom: boolean; left: boolean };
+  /** Lamination type of the source part */
+  lamination_type?: string;
+  /** Material ID for coloring / grouping */
+  material_id?: string;
+  /** Human-readable material label */
+  material_label?: string;
+  /** Original part length before placement (mm) */
+  original_length_mm?: number;
+  /** Original part width before placement (mm) */
+  original_width_mm?: number;
 }
 
 /**

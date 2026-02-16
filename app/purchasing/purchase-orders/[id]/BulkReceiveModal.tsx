@@ -124,6 +124,9 @@ export function BulkReceiveModal({
     const openOrders = supplierOrders.filter(
         (order) => (order.order_quantity - (order.total_received || 0)) > 0
     );
+    const openOrdersMissingComponent = openOrders.filter(
+        (order) => !order?.supplier_component?.component
+    );
 
     // Fetch company settings
     const { data: companySettings } = useQuery({
@@ -154,16 +157,25 @@ export function BulkReceiveModal({
         resolver: zodResolver(bulkReceiveSchema),
         defaultValues: {
             receipt_date: format(new Date(), 'yyyy-MM-dd'),
-            items: openOrders.map((order) => ({
-                order_id: order.order_id,
-                component_code: order.supplier_component.component.internal_code,
-                component_description: order.supplier_component.component.description,
-                remaining_quantity: order.order_quantity - (order.total_received || 0),
-                quantity_received: 0,
-                quantity_rejected: 0,
-                rejection_reason: '',
-                notes: '',
-            })),
+            items: openOrders.map((order) => {
+                const component = order?.supplier_component?.component;
+                const component_code =
+                    component?.internal_code ??
+                    order?.supplier_component?.supplier_code ??
+                    'Unknown';
+                const component_description = component?.description ?? '';
+
+                return {
+                    order_id: order.order_id,
+                    component_code,
+                    component_description,
+                    remaining_quantity: order.order_quantity - (order.total_received || 0),
+                    quantity_received: 0,
+                    quantity_rejected: 0,
+                    rejection_reason: '',
+                    notes: '',
+                };
+            }),
         },
     });
 
@@ -282,6 +294,15 @@ export function BulkReceiveModal({
                         {errors.items?.root && (
                             <Alert variant="destructive">
                                 <AlertDescription>{errors.items.root.message}</AlertDescription>
+                            </Alert>
+                        )}
+
+                        {openOrdersMissingComponent.length > 0 && (
+                            <Alert>
+                                <AlertTriangle className="h-4 w-4" />
+                                <AlertDescription>
+                                    {openOrdersMissingComponent.length} line item{openOrdersMissingComponent.length === 1 ? '' : 's'} {openOrdersMissingComponent.length === 1 ? 'is' : 'are'} missing component details (deleted or restricted by permissions). You can still process receipts, but some codes/descriptions may show as &quot;Unknown&quot;.
+                                </AlertDescription>
                             </Alert>
                         )}
 

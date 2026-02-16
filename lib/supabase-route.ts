@@ -1,20 +1,16 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
 import type { NextRequest } from 'next/server';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-type RouteClientResult = {
+export type RouteClientResult = {
   supabase: SupabaseClient;
-  user: {
-    id: string;
-    email?: string;
-    [key: string]: unknown;
-  };
+  user: User;
   accessToken: string;
 };
 
-type RouteClientError = {
+export type RouteClientError = {
   error: string;
   status?: number;
 };

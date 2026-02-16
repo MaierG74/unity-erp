@@ -1,8 +1,8 @@
 # Cutlist Optimizer Parity Plan
 
-> **Status**: Mostly Complete (SA optimizer implemented 2026-02-13)
+> **Status**: Complete (SA optimizer + presentation upgrade + SA fix 2026-02-13)
 > **Owner**: Unassigned
-> **Last Updated**: 2026-01-26
+> **Last Updated**: 2026-02-13
 > **Related UI**: `/cutlist`
 
 ## Goal
@@ -83,14 +83,20 @@ Each dataset should record:
 - [x] **Progressive UI** — live progress bar, elapsed/iterations/improvements display, time budget selector (10s/30s/60s), "Stop & Keep Best" cancel (2026-02-13).
 - [x] **Per-sheet offcut tracking** — `SheetOffcutInfo` type added to `GuillotinePackResult` (2026-02-13).
 - [x] **SA tests** — 6 tests covering score comparison, grain constraints, scoring function, time budget, progress callbacks, cancellation (2026-02-13).
+- [x] **V2 scoring compactness term** — Added bounding box penalty (×50) to prevent SA from spreading parts on single-sheet jobs (2026-02-13).
+- [x] **Strip fallback safety net** — `packing.ts` compares SA result vs strip packer after completion; returns whichever scores better. Guarantees SA never regresses below Fast mode (2026-02-13).
+- [x] **World-class presentation upgrade** — Color-coded parts (12-color palette), grain direction overlays, edge banding indicators, interactive pan/zoom dialog with legend/tooltip, operator cutting diagram PDF, framer-motion animations (2026-02-13).
+- [x] **Placement metadata propagation** — Extended `Placement` type with grain, band_edges, lamination_type, material_id/label, original dimensions. Propagated through both guillotine and strip packers (2026-02-13).
+- [x] **UX polish** — Fixed legend showing CSV IDs instead of part names, fixed zoom containment overflow, cleaned up thumbnail labels, clickable thumbnail cards, header with dimensions/usage, legend grain/edge info column (2026-02-13).
 
 ## Risks & Mitigations
 - **Longer runtime**: time‑box optimization passes; fall back to best result.
 - **Higher cut count**: keep Strip as default and expose cut‑minimizing mode.
 - **User confusion**: add short tooltips describing trade‑offs.
+- **SA regression on small jobs**: Strip fallback safety net guarantees SA >= strip quality.
 
 ## Open Questions
-- What is the acceptable upper bound for “Optimize longer” (1s, 2s, 3s)?
-- Should “Best offcut” become default for specific roles (production vs estimator)?
+- ~~What is the acceptable upper bound for "Optimize longer" (1s, 2s, 3s)?~~ Resolved: 10s/30s/60s options.
+- Should "Best offcut" become default for specific roles (production vs estimator)?
 - Do we need to enforce a minimum offcut dimension (e.g., 300mm)?
 

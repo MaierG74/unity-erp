@@ -47,19 +47,33 @@ export function Navbar() {
 
       // Fallback: read the user's org membership (RLS allows selecting your own row).
       try {
-        const { data, error } = await supabase
-          .from('organization_members')
-          .select('role')
-          .eq('user_id', user.id)
-          .limit(1)
-          .maybeSingle();
+        const [
+          { data: membershipData, error: membershipError },
+          { data: platformData, error: platformError },
+        ] = await Promise.all([
+          supabase
+            .from('organization_members')
+            .select('role')
+            .eq('user_id', user.id)
+            .limit(1)
+            .maybeSingle(),
+          supabase
+            .from('platform_admins')
+            .select('user_id')
+            .eq('user_id', user.id)
+            .eq('is_active', true)
+            .limit(1)
+            .maybeSingle(),
+        ]);
 
         if (cancelled) return;
-        if (error) {
+        if (membershipError && platformError) {
           setIsAdmin(false);
           return;
         }
-        setIsAdmin(data?.role === 'owner' || data?.role === 'admin');
+        const orgAdmin = membershipData?.role === 'owner' || membershipData?.role === 'admin';
+        const platformAdmin = Boolean(platformData?.user_id);
+        setIsAdmin(orgAdmin || platformAdmin);
       } catch (_err) {
         if (!cancelled) setIsAdmin(false);
       }
@@ -155,15 +169,26 @@ export function Navbar() {
             </>
           )}
           {isAdmin && (
-            <Link
-              href="/admin/users"
-              className={cn(
-                'text-sm font-medium text-muted-foreground hover:text-foreground',
-                pathname === '/admin/users' && 'text-foreground'
-              )}
-            >
-              Admin
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/admin/users"
+                className={cn(
+                  'text-sm font-medium text-muted-foreground hover:text-foreground',
+                  pathname === '/admin/users' && 'text-foreground'
+                )}
+              >
+                Admin
+              </Link>
+              <Link
+                href="/admin/modules"
+                className={cn(
+                  'text-sm font-medium text-muted-foreground hover:text-foreground',
+                  pathname === '/admin/modules' && 'text-foreground'
+                )}
+              >
+                Modules
+              </Link>
+            </div>
           )}
           <EmailIssuesIndicator />
           <ThemeToggle />

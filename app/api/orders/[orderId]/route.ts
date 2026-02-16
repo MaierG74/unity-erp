@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+
+import { requireModuleAccess } from '@/lib/api/module-access';
+import { MODULE_KEYS } from '@/lib/modules/keys';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
 function extractStoragePathFromPublicUrl(url: string): { bucket: string; path: string } | null {
   try {
@@ -14,18 +17,47 @@ function extractStoragePathFromPublicUrl(url: string): { bucket: string; path: s
   }
 }
 
+function parseOrderId(orderId: string): number | null {
+  const parsed = Number.parseInt(orderId, 10);
+  if (!Number.isFinite(parsed) || Number.isNaN(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+async function requireOrdersAccess(request: NextRequest) {
+  const access = await requireModuleAccess(request, MODULE_KEYS.ORDERS_FULFILLMENT, {
+    forbiddenMessage: 'Orders module access is disabled for your organization',
+  });
+
+  if ('error' in access) {
+    return { error: access.error };
+  }
+
+  if (!access.orgId) {
+    return {
+      error: NextResponse.json(
+        {
+          error: 'Organization context is required for orders access',
+          reason: 'missing_org_context',
+          module_key: access.moduleKey,
+        },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return { orgId: access.orgId };
+}
+
 export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ orderId: string }> }
 ) {
-  const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
+  const auth = await requireOrdersAccess(request);
+  if ('error' in auth) return auth.error;
 
   const { orderId: orderIdParam } = await context.params;
-  const orderId = parseInt(orderIdParam, 10);
-  if (!orderId || Number.isNaN(orderId)) {
+  const orderId = parseOrderId(orderIdParam);
+  if (!orderId) {
     return NextResponse.json({ error: 'Invalid order id' }, { status: 400 });
   }
 
@@ -36,7 +68,7 @@ export async function PATCH(
     console.log(`[PATCH /orders/${orderId}] Updating order with:`, { customer_id, order_number, delivery_date });
 
     // Build the update object with only provided fields
-    const updateData: Record<string, any> = {};
+    const updateData: Record<string, unknown> = {};
     if (customer_id !== undefined) updateData.customer_id = customer_id;
     if (order_number !== undefined) updateData.order_number = order_number;
     if (delivery_date !== undefined) updateData.delivery_date = delivery_date;
@@ -51,10 +83,15 @@ export async function PATCH(
       .from('orders')
       .select('order_id')
       .eq('order_id', orderId)
-      .single();
+      .eq('org_id', auth.orgId)
+      .maybeSingle();
 
-    if (checkErr || !orderExists) {
+    if (checkErr) {
       console.error(`[PATCH /orders/${orderId}] Order not found`, checkErr);
+      return NextResponse.json({ error: 'Failed to validate order' }, { status: 500 });
+    }
+
+    if (!orderExists) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
@@ -64,10 +101,15 @@ export async function PATCH(
         .from('customers')
         .select('id')
         .eq('id', customer_id)
-        .single();
+        .eq('org_id', auth.orgId)
+        .maybeSingle();
 
-      if (customerErr || !customerExists) {
+      if (customerErr) {
         console.error(`[PATCH /orders/${orderId}] Customer not found`, customerErr);
+        return NextResponse.json({ error: 'Failed to validate customer' }, { status: 500 });
+      }
+
+      if (!customerExists) {
         return NextResponse.json({ error: 'Customer not found' }, { status: 400 });
       }
     }
@@ -77,34 +119,38 @@ export async function PATCH(
       .from('orders')
       .update(updateData)
       .eq('order_id', orderId)
+      .eq('org_id', auth.orgId)
       .select()
-      .single();
+      .maybeSingle();
 
     if (updateErr) {
       console.error(`[PATCH /orders/${orderId}] Failed to update order`, updateErr);
       return NextResponse.json({ error: `Failed to update order: ${updateErr.message}` }, { status: 500 });
     }
 
+    if (!updatedOrder) {
+      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+    }
+
     console.log(`[PATCH /orders/${orderId}] Successfully updated order`);
     return NextResponse.json({ success: true, order: updatedOrder });
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('[PATCH /orders] unexpected error', e);
-    return NextResponse.json({ error: `Unexpected error: ${e.message || String(e)}` }, { status: 500 });
+    const message = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ error: `Unexpected error: ${message}` }, { status: 500 });
   }
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   context: { params: Promise<{ orderId: string }> }
 ) {
-  const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
+  const auth = await requireOrdersAccess(request);
+  if ('error' in auth) return auth.error;
 
   const { orderId: orderIdParam } = await context.params;
-  const orderId = parseInt(orderIdParam, 10);
-  if (!orderId || Number.isNaN(orderId)) {
+  const orderId = parseOrderId(orderIdParam);
+  if (!orderId) {
     return NextResponse.json({ error: 'Invalid order id' }, { status: 400 });
   }
 
@@ -116,10 +162,15 @@ export async function DELETE(
       .from('orders')
       .select('order_id, order_number')
       .eq('order_id', orderId)
-      .single();
+      .eq('org_id', auth.orgId)
+      .maybeSingle();
 
-    if (checkErr || !orderExists) {
+    if (checkErr) {
       console.error(`[DELETE /orders/${orderId}] Order not found`, checkErr);
+      return NextResponse.json({ error: 'Failed to validate order' }, { status: 500 });
+    }
+
+    if (!orderExists) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
@@ -165,7 +216,11 @@ export async function DELETE(
     }
 
     // Delete order details
-    const { error: detailsErr } = await supabaseAdmin.from('order_details').delete().eq('order_id', orderId);
+    const { error: detailsErr } = await supabaseAdmin
+      .from('order_details')
+      .delete()
+      .eq('order_id', orderId)
+      .eq('org_id', auth.orgId);
     if (detailsErr) {
       console.error('[DELETE /orders] failed to delete order details', detailsErr);
       return NextResponse.json({ error: `Failed to delete order details: ${detailsErr.message}` }, { status: 500 });
@@ -175,7 +230,8 @@ export async function DELETE(
     const { error: invTxErr } = await supabaseAdmin
       .from('inventory_transactions')
       .delete()
-      .eq('order_id', orderId);
+      .eq('order_id', orderId)
+      .eq('org_id', auth.orgId);
     if (invTxErr) {
       console.warn('[DELETE /orders] failed to delete inventory transactions', invTxErr);
       // Don't fail the deletion if inventory transactions can't be deleted
@@ -186,7 +242,8 @@ export async function DELETE(
     const { error: delErr } = await supabaseAdmin
       .from('orders')
       .delete()
-      .eq('order_id', orderId);
+      .eq('order_id', orderId)
+      .eq('org_id', auth.orgId);
     if (delErr) {
       console.error('[DELETE /orders] failed to delete order', delErr);
       return NextResponse.json({ error: `Failed to delete order: ${delErr.message}` }, { status: 500 });
@@ -194,9 +251,9 @@ export async function DELETE(
 
     console.log(`[DELETE /orders/${orderId}] Successfully deleted order`);
     return NextResponse.json({ success: true });
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('[DELETE /orders] unexpected error', e);
-    return NextResponse.json({ error: `Unexpected error: ${e.message || String(e)}` }, { status: 500 });
+    const message = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ error: `Unexpected error: ${message}` }, { status: 500 });
   }
 }
-

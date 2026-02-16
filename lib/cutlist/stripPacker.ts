@@ -399,6 +399,20 @@ function stripsToPlacement(strips: Strip[]): Placement[] {
         w: placed.width,
         h: placed.height,
         rot: placed.part.rotated ? 90 : 0,
+        grain: placed.part.grain,
+        band_edges: placed.part.band_edges
+          ? {
+              top: !!placed.part.band_edges.top,
+              right: !!placed.part.band_edges.right,
+              bottom: !!placed.part.band_edges.bottom,
+              left: !!placed.part.band_edges.left,
+            }
+          : undefined,
+        lamination_type: placed.part.lamination_type,
+        material_id: placed.part.material_id ?? undefined,
+        material_label: 'material_label' in placed.part ? (placed.part as PartSpec & { material_label?: string }).material_label : undefined,
+        original_length_mm: placed.part.length_mm,
+        original_width_mm: placed.part.width_mm,
       });
     }
   }

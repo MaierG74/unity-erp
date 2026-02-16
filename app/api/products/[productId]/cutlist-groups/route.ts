@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 
-// Create Supabase client with service role for API routes
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { requireModuleAccess } from '@/lib/api/module-access';
+import { MODULE_KEYS, type ModuleKey } from '@/lib/modules/keys';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
 interface CutlistPart {
   id: string;
@@ -13,7 +10,7 @@ interface CutlistPart {
   length_mm: number;
   width_mm: number;
   quantity: number;
-  grain: 'length' | 'width' | 'none';
+  grain: 'length' | 'width' | 'any';
   band_edges: {
     top: boolean;
     right: boolean;
@@ -21,18 +18,71 @@ interface CutlistPart {
     left: boolean;
   };
   material_label?: string;
+  lamination_type?: 'same-board' | 'counter-balance' | 'veneer';
 }
 
 interface CutlistGroup {
-  id?: number; // Database ID (optional for new groups)
+  id?: number;
   name: string;
   board_type: '16mm' | '32mm-both' | '32mm-backer';
-  primary_material_id?: string;
-  primary_material_name?: string;
-  backer_material_id?: string;
-  backer_material_name?: string;
+  primary_material_id?: string | null;
+  primary_material_name?: string | null;
+  backer_material_id?: string | null;
+  backer_material_name?: string | null;
   parts: CutlistPart[];
   sort_order?: number;
+}
+
+function resolveRequiredModule(req: NextRequest): ModuleKey {
+  const requested = (req.nextUrl.searchParams.get('module') ?? '').trim().toLowerCase();
+  return requested === MODULE_KEYS.FURNITURE_CONFIGURATOR
+    ? MODULE_KEYS.FURNITURE_CONFIGURATOR
+    : MODULE_KEYS.CUTLIST_OPTIMIZER;
+}
+
+function parseProductId(raw: string): number | null {
+  const id = Number.parseInt(raw, 10);
+  return Number.isFinite(id) && id > 0 ? id : null;
+}
+
+async function ensureProductExists(productId: number, orgId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
+    .from('products')
+    .select('product_id')
+    .eq('product_id', productId)
+    .eq('org_id', orgId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return Boolean(data);
+}
+
+async function requireAccess(req: NextRequest, moduleKey: ModuleKey) {
+  const access = await requireModuleAccess(req, moduleKey, {
+    forbiddenMessage: `Access denied: module "${moduleKey}" is disabled for your organization`,
+  });
+
+  if ('error' in access) {
+    return { error: access.error };
+  }
+
+  if (!access.orgId) {
+    return {
+      error: NextResponse.json(
+        {
+          error: 'Organization context is required for cutlist access',
+          reason: 'missing_org_context',
+          module_key: access.moduleKey,
+        },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return { orgId: access.orgId };
 }
 
 /**
@@ -43,18 +93,24 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ productId: string }> }
 ) {
+  const moduleKey = resolveRequiredModule(request);
+  const auth = await requireAccess(request, moduleKey);
+  if ('error' in auth) return auth.error;
+
   try {
     const { productId } = await params;
-    const productIdNum = parseInt(productId, 10);
+    const productIdNum = parseProductId(productId);
 
-    if (isNaN(productIdNum)) {
-      return NextResponse.json(
-        { error: 'Invalid product ID' },
-        { status: 400 }
-      );
+    if (!productIdNum) {
+      return NextResponse.json({ error: 'Invalid product ID' }, { status: 400 });
     }
 
-    const { data, error } = await supabase
+    const exists = await ensureProductExists(productIdNum, auth.orgId);
+    if (!exists) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
+
+    const { data, error } = await supabaseAdmin
       .from('product_cutlist_groups')
       .select('*')
       .eq('product_id', productIdNum)
@@ -62,19 +118,13 @@ export async function GET(
 
     if (error) {
       console.error('Error fetching cutlist groups:', error);
-      return NextResponse.json(
-        { error: 'Failed to fetch cutlist groups' },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: 'Failed to fetch cutlist groups' }, { status: 500 });
     }
 
-    return NextResponse.json({ groups: data || [] });
+    return NextResponse.json({ groups: data ?? [] });
   } catch (error) {
     console.error('Error in GET cutlist-groups:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -86,80 +136,66 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ productId: string }> }
 ) {
+  const moduleKey = resolveRequiredModule(request);
+  const auth = await requireAccess(request, moduleKey);
+  if ('error' in auth) return auth.error;
+
   try {
     const { productId } = await params;
-    const productIdNum = parseInt(productId, 10);
+    const productIdNum = parseProductId(productId);
 
-    if (isNaN(productIdNum)) {
-      return NextResponse.json(
-        { error: 'Invalid product ID' },
-        { status: 400 }
-      );
+    if (!productIdNum) {
+      return NextResponse.json({ error: 'Invalid product ID' }, { status: 400 });
     }
 
-    const body = await request.json();
-    const { groups } = body as { groups: CutlistGroup[] };
+    let body: { groups?: CutlistGroup[] };
+    try {
+      body = (await request.json()) as { groups?: CutlistGroup[] };
+    } catch (_err) {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
+    const { groups } = body;
 
     if (!Array.isArray(groups)) {
-      return NextResponse.json(
-        { error: 'Groups must be an array' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Groups must be an array' }, { status: 400 });
     }
 
-    // Verify product exists
-    const { data: product, error: productError } = await supabase
-      .from('products')
-      .select('product_id')
-      .eq('product_id', productIdNum)
-      .single();
-
-    if (productError || !product) {
-      return NextResponse.json(
-        { error: 'Product not found' },
-        { status: 404 }
-      );
+    const exists = await ensureProductExists(productIdNum, auth.orgId);
+    if (!exists) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
     }
 
-    // Delete existing groups for this product
-    const { error: deleteError } = await supabase
+    const { error: deleteError } = await supabaseAdmin
       .from('product_cutlist_groups')
       .delete()
       .eq('product_id', productIdNum);
 
     if (deleteError) {
       console.error('Error deleting existing groups:', deleteError);
-      return NextResponse.json(
-        { error: 'Failed to update cutlist groups' },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: 'Failed to update cutlist groups' }, { status: 500 });
     }
 
-    // Insert new groups if any
     if (groups.length > 0) {
       const groupsToInsert = groups.map((group, index) => ({
         product_id: productIdNum,
         name: group.name || 'Unnamed Group',
         board_type: group.board_type || '16mm',
-        primary_material_id: group.primary_material_id ? parseInt(group.primary_material_id, 10) : null,
+        primary_material_id: group.primary_material_id ? Number.parseInt(group.primary_material_id, 10) : null,
         primary_material_name: group.primary_material_name || null,
-        backer_material_id: group.backer_material_id ? parseInt(group.backer_material_id, 10) : null,
+        backer_material_id: group.backer_material_id ? Number.parseInt(group.backer_material_id, 10) : null,
         backer_material_name: group.backer_material_name || null,
         parts: group.parts || [],
-        sort_order: index,
+        sort_order: typeof group.sort_order === 'number' ? group.sort_order : index,
       }));
 
-      const { data: insertedGroups, error: insertError } = await supabase
+      const { data: insertedGroups, error: insertError } = await supabaseAdmin
         .from('product_cutlist_groups')
         .insert(groupsToInsert)
         .select();
 
       if (insertError) {
         console.error('Error inserting groups:', insertError);
-        return NextResponse.json(
-          { error: 'Failed to save cutlist groups' },
-          { status: 500 }
-        );
+        return NextResponse.json({ error: 'Failed to save cutlist groups' }, { status: 500 });
       }
 
       return NextResponse.json({
@@ -176,10 +212,7 @@ export async function POST(
     });
   } catch (error) {
     console.error('Error in POST cutlist-groups:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -191,28 +224,31 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ productId: string }> }
 ) {
+  const moduleKey = resolveRequiredModule(request);
+  const auth = await requireAccess(request, moduleKey);
+  if ('error' in auth) return auth.error;
+
   try {
     const { productId } = await params;
-    const productIdNum = parseInt(productId, 10);
+    const productIdNum = parseProductId(productId);
 
-    if (isNaN(productIdNum)) {
-      return NextResponse.json(
-        { error: 'Invalid product ID' },
-        { status: 400 }
-      );
+    if (!productIdNum) {
+      return NextResponse.json({ error: 'Invalid product ID' }, { status: 400 });
     }
 
-    const { error } = await supabase
+    const exists = await ensureProductExists(productIdNum, auth.orgId);
+    if (!exists) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
+
+    const { error } = await supabaseAdmin
       .from('product_cutlist_groups')
       .delete()
       .eq('product_id', productIdNum);
 
     if (error) {
       console.error('Error deleting cutlist groups:', error);
-      return NextResponse.json(
-        { error: 'Failed to delete cutlist groups' },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: 'Failed to delete cutlist groups' }, { status: 500 });
     }
 
     return NextResponse.json({
@@ -221,9 +257,6 @@ export async function DELETE(
     });
   } catch (error) {
     console.error('Error in DELETE cutlist-groups:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

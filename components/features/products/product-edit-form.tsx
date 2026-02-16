@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { supabase } from '@/lib/supabase';
 import { Loader2, Pencil } from 'lucide-react';
 
@@ -76,9 +77,8 @@ export function ProductEditForm({ product, trigger, onProductUpdated }: ProductE
 
     setIsLoading(true);
     try {
-      const response = await fetch(`/api/products/${product.product_id}`, {
+      const response = await authorizedFetch(`/api/products/${product.product_id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           internal_code: formData.internal_code,
           name: formData.name,
@@ -186,4 +186,3 @@ export function ProductEditForm({ product, trigger, onProductUpdated }: ProductE
     </Dialog>
   );
 }
-

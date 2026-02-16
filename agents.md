@@ -1,12 +1,22 @@
-# Agents Playbook
+# Unity ERP Agent Notes
 
-This file is a quick reference for anyone building or updating Unity ERP agents or workflows.
+This repository is being actively migrated to **multi-tenant** (organization/tenant) data isolation in Supabase using `org_id` + RLS.
 
-- `docs/README.md` is the canonical index for all project documentation. Start there when kicking off a new chat, feature area, or research spike that lacks current context.
-- Review the consolidated TODO tracker in `docs/overview/todo-index.md` to confirm outstanding work items and locate their authoritative source docs before you start implementation.
-- If you already validated the relevant docs for the current thread or task, rely on that knowledge—don't re-read the same pages unless something changes or you uncover gaps.
-- Every update or change to the application must be reflected somewhere in the documentation set. Use `docs/README.md` to decide where the update belongs and add or update the appropriate doc.
-- When working on a new area of the app, consult the existing documentation first. If coverage is missing, create the necessary docs and ensure `docs/README.md` points to them so the index remains complete.
-- The Supabase MCP connection used by `gpt-5-codex` lives in `.codex/config.toml` under `[mcp_servers.supabase]`; update that file if credentials or features change.
+## Canonical Docs (start here)
+- Documentation index: `docs/README.md`
+- Tenant module entitlements (feature toggles per org): `docs/operations/tenant-module-entitlements-runbook.md`
+- Tenant data isolation (zero-downtime staged plan): `docs/operations/tenant-data-isolation-zero-downtime-runbook.md`
+- Consolidated TODO tracker: `docs/overview/todo-index.md`
 
-Keep the knowledge base current—treat documentation updates as part of the definition of done for any agent-related change.
+## Tenancy Vocabulary
+- Use **organization** (aka **tenant**) consistently.
+
+## Tenancy Rules Of Thumb (for new code)
+1. If a feature stores **customer/org-specific data**, it must be scoped by `org_id` (eventually `NOT NULL` + FK + RLS).
+2. A user must have a row in `public.organization_members` to see tenant-scoped tables under RLS.
+3. Supabase nested selects can return `null` for related rows that are blocked by RLS. UI code should treat nested relations as nullable.
+4. Prefer enforcing access in server routes via the shared module/org utilities (see `lib/api/module-access.ts` + `lib/api/org-context.ts`) rather than ad-hoc checks.
+
+## Production State Notes
+This evolves. Do not assume everything is fully tenant-enforced yet. Always check the runbook and verify RLS/policies on the tables you touch.
+

@@ -8,6 +8,8 @@ import type {
   BoardType,
   GrainOrientation,
 } from '@/lib/cutlist/types';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
+import { MODULE_KEYS } from '@/lib/modules/keys';
 
 /**
  * Options for the product cutlist persistence adapter.
@@ -122,9 +124,12 @@ export function useProductCutlistAdapter(
     }
 
     try {
-      const res = await fetch(`/api/products/${productIdStr}/cutlist-groups`, {
-        cache: 'no-store',
-      });
+      const res = await authorizedFetch(
+        `/api/products/${productIdStr}/cutlist-groups?module=${MODULE_KEYS.CUTLIST_OPTIMIZER}`,
+        {
+          cache: 'no-store',
+        }
+      );
 
       if (!res.ok) {
         const message = await res.text();
@@ -211,11 +216,14 @@ export function useProductCutlistAdapter(
         });
       }
 
-      const res = await fetch(`/api/products/${productIdStr}/cutlist-groups`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ groups: allGroups }),
-      });
+      const res = await authorizedFetch(
+        `/api/products/${productIdStr}/cutlist-groups?module=${MODULE_KEYS.CUTLIST_OPTIMIZER}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ groups: allGroups }),
+        }
+      );
 
       if (!res.ok) {
         const message = await res.text();

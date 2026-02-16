@@ -30,6 +30,9 @@ import { ProductOptionsTab } from '@/components/features/products/ProductOptions
 import { ProductCutlistTab } from '@/components/features/products/ProductCutlistTab';
 import { useToast } from '@/components/ui/use-toast';
 import { ProductTransactionsTab } from '@/components/features/products/ProductTransactionsTab';
+import { useModuleAccess } from '@/lib/hooks/use-module-access';
+import { MODULE_KEYS } from '@/lib/modules/keys';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 
 interface ProductDetailPageProps {
   params: Promise<{
@@ -153,6 +156,10 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
     },
   });
 
+  const { data: configuratorAccess } = useModuleAccess(MODULE_KEYS.FURNITURE_CONFIGURATOR);
+
+  const canUseConfigurator = Boolean(configuratorAccess?.allowed);
+
   // FG: fetch inventory rows for this product
   const { data: inventoryRows, refetch: refetchInventory } = useQuery({
     queryKey: ['productInventory', productId],
@@ -270,9 +277,8 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
     }
     setAddingFg(true);
     try {
-      const res = await fetch(`/api/products/${productId}/add-fg`, {
+      const res = await authorizedFetch(`/api/products/${productId}/add-fg`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ quantity: qty, location: addFgLocation || null }),
       });
       const json = await res.json().catch(() => ({} as any));
@@ -624,6 +630,32 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
         </TabsContent>
 
         <TabsContent value="cutlist" className="space-y-4">
+          <div className="flex gap-2">
+            {canUseConfigurator ? (
+              <Link href={`/products/${product.product_id}/configurator`}>
+                <Button variant="outline" size="sm" className="gap-1.5">
+                  <Package className="h-4 w-4" />
+                  Design with Configurator
+                </Button>
+              </Link>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled
+                title="Furniture Configurator module is disabled for your organization"
+              >
+                <Package className="h-4 w-4" />
+                Configurator Locked
+              </Button>
+            )}
+            <Link href={`/products/${product.product_id}/cutlist-builder`}>
+              <Button variant="outline" size="sm" className="gap-1.5">
+                Cutlist Builder
+              </Button>
+            </Link>
+          </div>
           <ProductCutlistTab productId={product.product_id} />
         </TabsContent>
         

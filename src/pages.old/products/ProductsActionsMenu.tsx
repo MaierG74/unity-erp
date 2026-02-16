@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { ProductRow } from './ProductsPage';
 import { ReactNode } from 'react';
 
@@ -23,7 +24,7 @@ export function ProductsActionsMenu({ product, children, onError }: ProductsActi
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
-      const response = await fetch(`/api/products/${product.product_id}`, {
+      const response = await authorizedFetch(`/api/products/${product.product_id}`, {
         method: 'DELETE',
       });
 
@@ -47,7 +48,7 @@ export function ProductsActionsMenu({ product, children, onError }: ProductsActi
 
   const duplicateMutation = useMutation({
     mutationFn: async () => {
-      const response = await fetch(`/api/products/${product.product_id}/duplicate`, {
+      const response = await authorizedFetch(`/api/products/${product.product_id}/duplicate`, {
         method: 'POST',
       });
 
@@ -101,4 +102,3 @@ export function ProductsActionsMenu({ product, children, onError }: ProductsActi
     </DropdownMenu>
   );
 }
-

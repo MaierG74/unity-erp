@@ -2,6 +2,24 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Multi-Tenancy (Organizations / Tenants)
+
+Unity ERP is being migrated to **multi-tenant** data isolation using `org_id` columns and Supabase Row Level Security (RLS).
+
+Claude Code project skill:
+- `.claude/skills/unity-erp-tenancy/SKILL.md`
+
+Canonical references:
+- `docs/operations/tenant-module-entitlements-runbook.md` (module toggles per org)
+- `docs/operations/tenant-data-isolation-zero-downtime-runbook.md` (staged org_id + RLS rollout)
+- `docs/overview/todo-index.md` (current rollout status)
+
+Practical rules:
+1. Treat **organization** and **tenant** as the same thing; use the word **organization** in code/UI/docs.
+2. Any new table holding org-specific data should include an `org_id` column and be designed to support org-scoped RLS.
+3. Users must have a row in `public.organization_members` or they may see partial data when some tables are tenant-locked and others are not.
+4. Nested relations in Supabase queries can become `null` due to RLS. UI code should not assume embedded objects always exist.
+
 ## MCP Configuration
 
 **IMPORTANT**: This project uses MCP servers for browser automation.

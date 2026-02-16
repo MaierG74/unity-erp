@@ -537,6 +537,21 @@ export async function packPartsSmartOptimized(
   if (algorithm === 'deep') {
     const timeBudget = opts.timeBudgetMs ?? 30_000;
     const sheet = stock[0];
+    if (!sheet) {
+      return {
+        sheets: [],
+        stats: { used_area_mm2: 0, waste_area_mm2: 0, cuts: 0, cut_length_mm: 0, edgebanding_length_mm: 0 },
+        strategyUsed: 'deep',
+        algorithm: 'deep',
+      };
+    }
+
+    // Run strip packer as a baseline for post-run comparison.
+    // Strip packer produces compact corner-packing layouts that are
+    // ideal for small jobs. SA should never produce worse results.
+    const stripBaseline = packWithStrips(parts, sheet);
+
+    let saLayout: LayoutResult & { strategyUsed: string };
 
     // Try to use Web Worker for off-main-thread SA optimization
     if (typeof window !== 'undefined' && typeof Worker !== 'undefined') {
@@ -549,50 +564,102 @@ export async function packPartsSmartOptimized(
           opts.onProgress,
           opts.abortSignal
         );
-        return {
+        saLayout = {
           ...guillotineToLayout(result),
           strategyUsed: result.strategyUsed,
-          algorithm: 'deep',
         };
       } catch (err) {
         // Worker failed (e.g. CSP restrictions) — fall back to main thread
         console.warn('SA Worker failed, falling back to main thread:', err);
+        const { runSimulatedAnnealing } = await import('@/lib/cutlist/saOptimizer');
+        let cancelled = false;
+        const onAbort = () => { cancelled = true; };
+        opts.abortSignal?.addEventListener('abort', onAbort);
+        const result = runSimulatedAnnealing(
+          parts,
+          sheet,
+          timeBudget,
+          {},
+          opts.packingConfig,
+          opts.onProgress
+            ? (p) => opts.onProgress!({
+                iteration: p.iteration,
+                bestScore: p.bestScore,
+                bestResult: guillotineToLayout(p.bestResult),
+                elapsed: p.elapsed,
+                temperature: p.temperature,
+                improvementCount: p.improvementCount,
+                baselineScore: p.baselineScore,
+              })
+            : undefined,
+          () => cancelled
+        );
+        opts.abortSignal?.removeEventListener('abort', onAbort);
+        saLayout = {
+          ...guillotineToLayout(result),
+          strategyUsed: result.strategyUsed,
+        };
       }
+    } else {
+      // Fallback: run SA on main thread (blocks UI but still works)
+      const { runSimulatedAnnealing } = await import('@/lib/cutlist/saOptimizer');
+      let cancelled = false;
+      const onAbort = () => { cancelled = true; };
+      opts.abortSignal?.addEventListener('abort', onAbort);
+      const result = runSimulatedAnnealing(
+        parts,
+        sheet,
+        timeBudget,
+        {},
+        opts.packingConfig,
+        opts.onProgress
+          ? (p) => opts.onProgress!({
+              iteration: p.iteration,
+              bestScore: p.bestScore,
+              bestResult: guillotineToLayout(p.bestResult),
+              elapsed: p.elapsed,
+              temperature: p.temperature,
+              improvementCount: p.improvementCount,
+              baselineScore: p.baselineScore,
+            })
+          : undefined,
+        () => cancelled
+      );
+      opts.abortSignal?.removeEventListener('abort', onAbort);
+      saLayout = {
+        ...guillotineToLayout(result),
+        strategyUsed: result.strategyUsed,
+      };
     }
 
-    // Fallback: run SA on main thread (blocks UI but still works)
-    const { runSimulatedAnnealing } = await import('@/lib/cutlist/saOptimizer');
-    let cancelled = false;
-    const onAbort = () => { cancelled = true; };
-    opts.abortSignal?.addEventListener('abort', onAbort);
-    const result = runSimulatedAnnealing(
-      parts,
-      sheet,
-      timeBudget,
-      {},
-      opts.packingConfig,
-      opts.onProgress
-        ? (p) => opts.onProgress!({
-            iteration: p.iteration,
-            bestScore: p.bestScore,
-            bestResult: guillotineToLayout(p.bestResult),
-            elapsed: p.elapsed,
-            temperature: p.temperature,
-            improvementCount: p.improvementCount,
-            baselineScore: p.baselineScore,
-          })
-        : undefined,
-      () => cancelled
-    );
-    opts.abortSignal?.removeEventListener('abort', onAbort);
+    // Post-run safety net: only fall back to strip when it uses strictly
+    // fewer sheets. When sheet counts are equal SA's offcut-optimized
+    // layout should be preserved — scoreLayoutResult has no offcut terms
+    // so it would otherwise discard SA's better offcut consolidation.
+    if (stripBaseline.sheets.length < saLayout.sheets.length) {
+      return {
+        ...stripBaseline,
+        strategyUsed: `strip-fallback (SA tried ${saLayout.strategyUsed})`,
+        algorithm: 'deep',
+      };
+    }
+
     return {
-      ...guillotineToLayout(result),
-      strategyUsed: result.strategyUsed,
+      ...saLayout,
+      strategyUsed: saLayout.strategyUsed,
       algorithm: 'deep',
     };
   }
 
   if (algorithm === 'guillotine') {
+    if (!stock[0]) {
+      return {
+        sheets: [],
+        stats: { used_area_mm2: 0, waste_area_mm2: 0, cuts: 0, cut_length_mm: 0, edgebanding_length_mm: 0 },
+        strategyUsed: 'guillotine',
+        algorithm: 'guillotine',
+      };
+    }
     const result = packGuillotine(parts, stock, opts.packingConfig);
     return {
       ...guillotineToLayout(result),
@@ -607,6 +674,51 @@ export async function packPartsSmartOptimized(
     ...legacyResult,
     algorithm: 'legacy',
   };
+}
+
+// ============================================================================
+// Layout Comparison (for post-run SA vs Strip safety net)
+// ============================================================================
+
+/**
+ * Score a LayoutResult for comparison between algorithms.
+ * Works without offcut-specific metrics (unlike V2 scoring in saOptimizer).
+ *
+ * Higher score = better result.
+ *
+ * Scoring:
+ *   -100,000 per sheet (fewer sheets dominates)
+ *   +utilization × 10 (break ties when sheet count is equal)
+ *   -compactness penalty × 50 (prefer parts packed in corner)
+ */
+function scoreLayoutResult(result: LayoutResult, sheetArea: number): number {
+  const totalSheetArea = result.sheets.length * sheetArea;
+  const utilizationPct = totalSheetArea > 0
+    ? (result.stats.used_area_mm2 / totalSheetArea) * 100
+    : 0;
+
+  // Compactness: average bounding box area as % of sheet area across all sheets.
+  // Compact (parts in corner) = low %, spread out = high %.
+  let compactnessPenalty = 0;
+  for (const sheet of result.sheets) {
+    let maxX = 0;
+    let maxY = 0;
+    for (const p of sheet.placements) {
+      maxX = Math.max(maxX, p.x + p.w);
+      maxY = Math.max(maxY, p.y + p.h);
+    }
+    const bbAreaPct = sheetArea > 0 ? ((maxX * maxY) / sheetArea) * 100 : 0;
+    compactnessPenalty += bbAreaPct;
+  }
+  if (result.sheets.length > 0) {
+    compactnessPenalty /= result.sheets.length;
+  }
+
+  return (
+    -result.sheets.length * 100_000 +
+    utilizationPct * 10 -
+    compactnessPenalty * 50
+  );
 }
 
 // ============================================================================

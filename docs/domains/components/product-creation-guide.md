@@ -250,6 +250,12 @@ API endpoint backing this action:
    - `GET /api/products/[productId]` - Get single product with relations
    - `PUT /api/products/[productId]` - Update existing products
    - `DELETE /api/products/[productId]` - Delete products (with safety checks)
+   - `POST /api/products/[productId]/add-fg` - Add finished-goods stock for a product
+
+   Auth/entitlement requirements:
+   - These endpoints now require an authenticated Supabase bearer token.
+   - Access is gated by module entitlement `products_bom` via `requireModuleAccess(...)`.
+   - Client callers should use `authorizedFetch(...)` to ensure the bearer token is attached.
 
 3. **Product Validation** ✅
    - Server-side validation for required fields (internal_code, name)

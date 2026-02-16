@@ -75,8 +75,9 @@ export interface SAProgress {
  *   Tier 1: Sheet count (-100,000 per sheet) — unambiguous, dominates
  *   Tier 2: Offcut quality (×500) — user's #1 priority
  *   Tier 3: Waste concentration (×300) — consolidated waste
- *   Tier 4: Utilization (×1) — implied by sheet count
- *   Tier 5: Fragmentation penalty (×20) — fewer fragments better
+ *   Tier 4: Compactness (×50) — prefer parts packed in corner, not spread out
+ *   Tier 5: Utilization (×1) — implied by sheet count
+ *   Tier 6: Fragmentation penalty (×20) — fewer fragments better
  *
  * Higher score = better result.
  */
@@ -99,12 +100,34 @@ export function calculateResultScoreV2(
   // Fragment count
   const fragments = result.fragmentCount;
 
+  // Compactness: bounding box of all placements as fraction of sheet area.
+  // Lower = parts packed into a corner, higher = spread across sheet.
+  // On single-sheet jobs where sheet count is equal, this becomes the
+  // key differentiator between compact (operator-friendly) and spread layouts.
+  let compactnessPenalty = 0;
+  for (const sheet of result.sheets) {
+    let maxX = 0;
+    let maxY = 0;
+    for (const p of sheet.placements) {
+      maxX = Math.max(maxX, p.x + p.w);
+      maxY = Math.max(maxY, p.y + p.h);
+    }
+    // Bounding box area as % of sheet area (0-100)
+    const bbAreaPct = sheetArea > 0 ? ((maxX * maxY) / sheetArea) * 100 : 0;
+    compactnessPenalty += bbAreaPct;
+  }
+  // Average across sheets
+  if (result.sheets.length > 0) {
+    compactnessPenalty /= result.sheets.length;
+  }
+
   return (
     -result.sheets.length * 100_000 +   // Tier 1: fewer sheets
     offcutQualityPct * 500 +             // Tier 2: largest offcut (heavy weight)
     concentration * 300 +                 // Tier 3: consolidated waste
-    utilizationPct * 1 -                  // Tier 4: efficiency (weak)
-    fragments * 20                        // Tier 5: fragmentation penalty
+    -compactnessPenalty * 50 +            // Tier 4: compactness (prefer corner packing)
+    utilizationPct * 1 -                  // Tier 5: efficiency (weak)
+    fragments * 20                        // Tier 6: fragmentation penalty
   );
 }
 

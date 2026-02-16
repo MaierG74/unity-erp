@@ -86,14 +86,14 @@ interface ReceiveItemsModalProps {
   supplierOrder: {
     order_id: number;
     order_quantity: number;
-    total_received: number;
+    total_received: number | null;
     supplier_component: {
       supplier_code: string;
       component: {
         component_id: number;
         internal_code: string;
         description: string;
-      };
+      } | null;
       supplier: {
         supplier_id: number;
         name: string;
@@ -126,6 +126,14 @@ export function ReceiveItemsModal({
   const [deliveryNoteFile, setDeliveryNoteFile] = useState<File | null>(null);
   const [isUploadingNote, setIsUploadingNote] = useState(false);
   const [noteUploaded, setNoteUploaded] = useState(false);
+
+  const component = supplierOrder?.supplier_component?.component;
+  const componentCode =
+    component?.internal_code ??
+    supplierOrder?.supplier_component?.supplier_code ??
+    'Unknown';
+  const componentDescription = component?.description ?? '';
+  const supplierName = supplierOrder?.supplier_component?.supplier?.name ?? 'Supplier';
 
   const remainingToReceive = Math.max(0, supplierOrder.order_quantity - (supplierOrder.total_received || 0));
 
@@ -347,8 +355,7 @@ export function ReceiveItemsModal({
         <DialogHeader>
           <DialogTitle>Receive Items</DialogTitle>
           <DialogDescription>
-            Record delivery for {supplierOrder.supplier_component.component.internal_code} -{' '}
-            {supplierOrder.supplier_component.component.description}
+            Record delivery for {componentCode} - {componentDescription}
           </DialogDescription>
         </DialogHeader>
 
@@ -524,15 +531,15 @@ export function ReceiveItemsModal({
                     returnDate={new Date().toISOString()}
                     items={[
                       {
-                        component_code: supplierOrder.supplier_component.component.internal_code,
-                        component_name: supplierOrder.supplier_component.component.description,
+                        component_code: componentCode,
+                        component_name: componentDescription,
                         quantity_returned: successData.rejectedQty,
                         reason: 'Gate rejection',
                         return_type: 'rejection',
                       },
                     ]}
                     supplierInfo={{
-                      supplier_name: supplierOrder.supplier_component.supplier.name,
+                      supplier_name: supplierName,
                     }}
                     companyInfo={getCompanyInfo(companySettings)}
                     returnType="rejection"

@@ -1,12 +1,15 @@
 'use client';
 
 import React from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { SheetPreview } from '../preview';
+import { CuttingDiagramButton } from './CuttingDiagramButton';
+import { InteractiveSheetViewer } from './InteractiveSheetViewer';
+import { getPartColorMap } from '@/lib/cutlist/colorAssignment';
 import type {
   LayoutResult,
   StockSheetSpec,
@@ -38,6 +41,12 @@ export function SheetLayoutGrid({
 }: SheetLayoutGridProps) {
   const [activePage, setActivePage] = React.useState(0);
   const [zoomSheetId, setZoomSheetId] = React.useState<string | null>(null);
+
+  // Build a single color map from all placements across all sheets for consistent coloring
+  const allColorMap = React.useMemo(() => {
+    const allPlacements = result.sheets.flatMap((s) => s.placements);
+    return getPartColorMap(allPlacements);
+  }, [result.sheets]);
 
   const totalPages = Math.ceil(result.sheets.length / sheetsPerPage);
 
@@ -75,15 +84,24 @@ export function SheetLayoutGrid({
             {idx + 1}
           </Button>
         ))}
-        <div className="ml-auto text-xs text-muted-foreground">
-          Showing {activePage * sheetsPerPage + 1}-
-          {Math.min((activePage + 1) * sheetsPerPage, result.sheets.length)} of{' '}
-          {result.sheets.length}
+        <div className="ml-auto flex items-center gap-3">
+          <CuttingDiagramButton
+            sheets={result.sheets}
+            stockWidth={stockSheet.width_mm}
+            stockLength={stockSheet.length_mm}
+            materialLabel={result.sheets[0]?.material_label}
+          />
+          <span className="text-xs text-muted-foreground">
+            Showing {activePage * sheetsPerPage + 1}-
+            {Math.min((activePage + 1) * sheetsPerPage, result.sheets.length)} of{' '}
+            {result.sheets.length}
+          </span>
         </div>
       </div>
 
       {/* Sheet grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <AnimatePresence mode="wait">
         {result.sheets
           .slice(activePage * sheetsPerPage, activePage * sheetsPerPage + sheetsPerPage)
           .map((sheetLayout, idx) => {
@@ -99,7 +117,14 @@ export function SheetLayoutGrid({
             const chargePct = mode === 'full' ? 100 : mode === 'manual' ? manualPct : autoPct;
 
             return (
-              <div key={sheetLayout.sheet_id} className="border rounded p-2 space-y-2">
+              <motion.div
+                key={sheetLayout.sheet_id}
+                className="border rounded p-2 space-y-2 hover:border-primary/50 transition-colors"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.25, delay: idx * 0.08 }}
+              >
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <span>
                     Sheet {activePage * sheetsPerPage + idx + 1}
@@ -117,13 +142,20 @@ export function SheetLayoutGrid({
                   </Button>
                 </div>
 
-                <SheetPreview
-                  sheetWidth={sheetW}
-                  sheetLength={sheetL}
-                  layout={sheetLayout}
-                  maxWidth={260}
-                  maxHeight={200}
-                />
+                <div
+                  className="cursor-pointer"
+                  onClick={() => setZoomSheetId(sheetLayout.sheet_id)}
+                >
+                  <SheetPreview
+                    sheetWidth={sheetW}
+                    sheetLength={sheetL}
+                    layout={sheetLayout}
+                    maxWidth={260}
+                    maxHeight={200}
+                    colorMap={allColorMap}
+                    showEdgeBanding
+                  />
+                </div>
 
                 <div className="text-xs text-muted-foreground">
                   Used {autoPct.toFixed(1)}% (
@@ -212,39 +244,28 @@ export function SheetLayoutGrid({
                     </Button>
                   </div>
                 </div>
-              </div>
+              </motion.div>
             );
           })}
+        </AnimatePresence>
       </div>
 
-      {/* Zoom dialog */}
-      <Dialog
-        open={zoomSheetId != null}
-        onOpenChange={(open) => {
-          if (!open) setZoomSheetId(null);
-        }}
-      >
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>Sheet preview</DialogTitle>
-          </DialogHeader>
-          {zoomSheetId && (() => {
-            const zoomSheet = result.sheets.find((s) => s.sheet_id === zoomSheetId);
-            if (!zoomSheet) return null;
-            return (
-              <div className="flex justify-center">
-                <SheetPreview
-                  sheetWidth={zoomSheet.stock_width_mm || stockSheet.width_mm}
-                  sheetLength={zoomSheet.stock_length_mm || stockSheet.length_mm}
-                  layout={zoomSheet}
-                  maxWidth={800}
-                  maxHeight={600}
-                />
-              </div>
-            );
-          })()}
-        </DialogContent>
-      </Dialog>
+      {/* Interactive zoom dialog */}
+      {zoomSheetId && (() => {
+        const zoomSheet = result.sheets.find((s) => s.sheet_id === zoomSheetId);
+        if (!zoomSheet) return null;
+        const zoomIdx = result.sheets.indexOf(zoomSheet);
+        return (
+          <InteractiveSheetViewer
+            open
+            onOpenChange={(open) => { if (!open) setZoomSheetId(null); }}
+            sheetLayout={zoomSheet}
+            sheetWidth={zoomSheet.stock_width_mm || stockSheet.width_mm}
+            sheetLength={zoomSheet.stock_length_mm || stockSheet.length_mm}
+            sheetIndex={zoomIdx >= 0 ? zoomIdx : undefined}
+          />
+        );
+      })()}
     </div>
   );
 }
