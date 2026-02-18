@@ -68,7 +68,10 @@ export function SupplierList() {
   });
 
   // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPage, setCurrentPage] = useState(() => {
+    const page = Number(searchParams?.get('page'));
+    return page > 0 ? page : 1;
+  });
   const [pageSize, setPageSize] = useState(25);
   const pageSizeOptions = [10, 25, 50, 100];
 
@@ -84,9 +87,12 @@ export function SupplierList() {
     const urlShowInactive = searchParams?.get('showInactive');
     const urlShowInactiveBool = urlShowInactive === '1' || urlShowInactive === 'true';
 
+    const urlPage = Number(searchParams?.get('page')) || 1;
+
     if (urlQuery !== searchTerm) setSearchTerm(urlQuery);
     if (urlHasPricelistBool !== hasPricelistOnly) setHasPricelistOnly(urlHasPricelistBool);
     if (urlShowInactiveBool !== showInactive) setShowInactive(urlShowInactiveBool);
+    if (urlPage !== currentPage) setCurrentPage(urlPage);
   }, [searchParamsString]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync filter state to URL
@@ -96,12 +102,14 @@ export function SupplierList() {
     const currentUrlHasPricelistBool = currentUrlHasPricelist === '1' || currentUrlHasPricelist === 'true';
     const currentUrlShowInactive = searchParams?.get('showInactive');
     const currentUrlShowInactiveBool = currentUrlShowInactive === '1' || currentUrlShowInactive === 'true';
+    const currentUrlPage = Number(searchParams?.get('page')) || 1;
 
     // Only update URL if values differ from current URL
     if (
       debouncedSearchTerm === currentUrlQuery &&
       hasPricelistOnly === currentUrlHasPricelistBool &&
-      showInactive === currentUrlShowInactiveBool
+      showInactive === currentUrlShowInactiveBool &&
+      currentPage === currentUrlPage
     ) {
       return;
     }
@@ -126,10 +134,16 @@ export function SupplierList() {
       params.delete('showInactive');
     }
 
+    if (currentPage > 1) {
+      params.set('page', String(currentPage));
+    } else {
+      params.delete('page');
+    }
+
     const query = params.toString();
     const url = query ? `/suppliers?${query}` : '/suppliers';
     router.replace(url, { scroll: false });
-  }, [debouncedSearchTerm, hasPricelistOnly, showInactive, router, searchParams]);
+  }, [debouncedSearchTerm, hasPricelistOnly, showInactive, currentPage, router, searchParams]);
 
   // Reset to page 1 when filters change
   useEffect(() => {
