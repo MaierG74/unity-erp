@@ -470,11 +470,27 @@ export default function POAttachmentManager({
 
                   const relX = ((event.clientX - imgRect.left) / imgRect.width) * 100;
                   const relY = ((event.clientY - imgRect.top) / imgRect.height) * 100;
+                  // Map visual position back to original (unrotated) image coordinates
+                  const normalizedRotation = ((rotation % 360) + 360) % 360;
+                  let bgX: number, bgY: number;
+                  if (normalizedRotation === 90) {
+                    bgX = relY;
+                    bgY = 100 - relX;
+                  } else if (normalizedRotation === 180) {
+                    bgX = 100 - relX;
+                    bgY = 100 - relY;
+                  } else if (normalizedRotation === 270) {
+                    bgX = 100 - relY;
+                    bgY = relX;
+                  } else {
+                    bgX = relX;
+                    bgY = relY;
+                  }
                   setMagnifierPos({
                     x: event.clientX - containerRect.left,
                     y: event.clientY - containerRect.top,
-                    bgX: relX,
-                    bgY: relY,
+                    bgX,
+                    bgY,
                   });
                 }}
                 onMouseLeave={() => setMagnifierPos(null)}
@@ -499,6 +515,7 @@ export default function POAttachmentManager({
                       backgroundRepeat: 'no-repeat',
                       backgroundSize: `${375 * Math.max(1, viewerScale)}% ${375 * Math.max(1, viewerScale)}%`,
                       backgroundPosition: `${magnifierPos.bgX}% ${magnifierPos.bgY}%`,
+                      transform: `rotate(${rotation}deg)`,
                     }}
                   />
                 )}
