@@ -45,7 +45,7 @@ async function requireOrdersAccess(request: NextRequest) {
     };
   }
 
-  return { orgId: access.orgId };
+  return { orgId: access.orgId, userId: access.ctx.user.id };
 }
 
 export async function PATCH(
@@ -78,10 +78,10 @@ export async function PATCH(
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
     }
 
-    // Verify the order exists
-    const { data: orderExists, error: checkErr } = await supabaseAdmin
+    // Fetch current order values (for activity logging)
+    const { data: currentOrder, error: checkErr } = await supabaseAdmin
       .from('orders')
-      .select('order_id')
+      .select('order_id, order_number, customer_id, delivery_date')
       .eq('order_id', orderId)
       .eq('org_id', auth.orgId)
       .maybeSingle();
@@ -91,7 +91,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'Failed to validate order' }, { status: 500 });
     }
 
-    if (!orderExists) {
+    if (!currentOrder) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
@@ -130,6 +130,55 @@ export async function PATCH(
 
     if (!updatedOrder) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+    }
+
+    // Log activity for each changed field
+    const activityEntries: { action_type: string; description: string; metadata: Record<string, unknown> }[] = [];
+
+    if (order_number !== undefined && order_number !== currentOrder.order_number) {
+      activityEntries.push({
+        action_type: 'order_number_changed',
+        description: `Changed order number from "${currentOrder.order_number || '(empty)'}" to "${order_number || '(empty)'}"`,
+        metadata: { old_value: currentOrder.order_number, new_value: order_number },
+      });
+    }
+
+    if (customer_id !== undefined && customer_id !== currentOrder.customer_id) {
+      // Look up customer names for readable description
+      const customerIds = [currentOrder.customer_id, customer_id].filter(Boolean);
+      const { data: customerNames } = customerIds.length > 0
+        ? await supabaseAdmin.from('customers').select('id, name').in('id', customerIds)
+        : { data: [] };
+      const nameMap = Object.fromEntries((customerNames || []).map((c: any) => [c.id, c.name]));
+      const oldName = currentOrder.customer_id ? (nameMap[currentOrder.customer_id] || `#${currentOrder.customer_id}`) : '(none)';
+      const newName = customer_id ? (nameMap[customer_id] || `#${customer_id}`) : '(none)';
+      activityEntries.push({
+        action_type: 'customer_changed',
+        description: `Changed customer from ${oldName} to ${newName}`,
+        metadata: { old_customer_id: currentOrder.customer_id, new_customer_id: customer_id, old_name: oldName, new_name: newName },
+      });
+    }
+
+    if (delivery_date !== undefined && delivery_date !== currentOrder.delivery_date) {
+      activityEntries.push({
+        action_type: 'delivery_date_changed',
+        description: `Changed delivery date from ${currentOrder.delivery_date || '(not set)'} to ${delivery_date || '(not set)'}`,
+        metadata: { old_value: currentOrder.delivery_date, new_value: delivery_date },
+      });
+    }
+
+    if (activityEntries.length > 0) {
+      const rows = activityEntries.map((entry) => ({
+        order_id: orderId,
+        org_id: auth.orgId,
+        performed_by: auth.userId,
+        ...entry,
+      }));
+      const { error: activityErr } = await supabaseAdmin.from('order_activity').insert(rows);
+      if (activityErr) {
+        // Non-blocking — don't fail the update if activity logging fails
+        console.warn(`[PATCH /orders/${orderId}] Failed to log activity`, activityErr);
+      }
     }
 
     console.log(`[PATCH /orders/${orderId}] Successfully updated order`);

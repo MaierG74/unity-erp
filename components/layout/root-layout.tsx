@@ -8,7 +8,7 @@ import { supabase } from '@/lib/supabase';
 import { usePathname } from 'next/navigation';
 
 // Standalone public routes - no navbar, no sidebar, no app chrome at all
-const standaloneRoutes = ['/supplier-response'];
+const standaloneRoutes = ['/supplier-response', '/scan'];
 
 // Full-bleed routes - have navbar but no container wrapper (they handle their own full-screen layout)
 const fullBleedRoutes = ['/', '/login'];

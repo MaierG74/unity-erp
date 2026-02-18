@@ -12,6 +12,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useDebounce } from '@/hooks/use-debounce';
+import { useToast } from '@/components/ui/use-toast';
 import { format, parseISO, isValid, isBefore, isAfter, differenceInDays, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { Order, OrderStatus } from '@/types/orders';
@@ -40,7 +41,7 @@ import {
   PlusCircle, Search, Package, Layers, Wrench, PaintBucket, Paperclip,
   Upload, FileText, ImageIcon, Eye, Download, FileUp, Check, RefreshCw,
   Trash2, ChevronRight, ChevronLeft, ChevronDown, MoreHorizontal, ArrowUp, ArrowDown,
-  ArrowUpDown, Calendar as CalendarIcon, FilterX, Loader2, ClipboardList, Undo2, ExternalLink, X,
+  ArrowUpDown, Calendar as CalendarIcon, FilterX, Loader2, ClipboardList, Undo2, ExternalLink, X, AlertTriangle,
 } from 'lucide-react';
 import { AttachmentPreviewModal } from '@/components/ui/attachment-preview-modal';
 import { FileIcon } from '@/components/ui/file-icon';
@@ -95,7 +96,7 @@ async function fetchOrders(statusFilter?: string, searchQuery?: string): Promise
       const customerIds = customers?.map(c => c.id) || [];
 
       // Build the filter conditions
-      const conditions = [];
+      const conditions: string[] = [];
 
       // Add customer filter if we found matching customers
       if (customerIds.length > 0) {
@@ -298,6 +299,34 @@ function getStatusDotColor(status: string): string {
   }
 }
 
+function parseDeliveryDateValue(deliveryDate: string | null): Date | undefined {
+  if (!deliveryDate) return undefined;
+  const parsed = parseISO(deliveryDate);
+  return isValid(parsed) ? parsed : undefined;
+}
+
+function getSelectedDeliveryDateClass(selectedDate?: Date): string {
+  if (!selectedDate) {
+    return 'bg-primary text-primary-foreground hover:bg-primary focus:bg-primary';
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const selected = new Date(selectedDate);
+  selected.setHours(0, 0, 0, 0);
+
+  if (selected.getTime() < today.getTime()) {
+    return 'bg-red-600 text-white hover:bg-red-600 focus:bg-red-600';
+  }
+
+  if (selected.getTime() === today.getTime()) {
+    return 'bg-amber-500 text-white hover:bg-amber-500 focus:bg-amber-500';
+  }
+
+  return 'bg-emerald-600 text-white hover:bg-emerald-600 focus:bg-emerald-600';
+}
+
 // Status Badge component with dark-mode-aware colors for all 7 statuses
 function StatusBadge({ status }: { status: string }) {
   return (
@@ -346,28 +375,123 @@ function getDeliveryDateInfo(deliveryDate: string | null, statusName: string) {
 }
 
 // Delivery date cell with colour coding + relative time
-function DeliveryDateCell({ order }: { order: Order }) {
-  if (!order.delivery_date) {
-    return <span className="text-muted-foreground">Not set</span>;
-  }
+function DeliveryDateCell({
+  order,
+  isUpdating,
+  onDeliveryDateChange,
+}: {
+  order: Order;
+  isUpdating: boolean;
+  onDeliveryDateChange: (orderId: number, deliveryDate: string | null) => Promise<boolean>;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const selectedDate = parseDeliveryDateValue(order.delivery_date);
 
   const statusName = order.status?.status_name || 'Unknown';
   const { colorClass, relativeText, isOverdue } = getDeliveryDateInfo(order.delivery_date, statusName);
+  const dateLabel = selectedDate ? format(selectedDate, 'MMM d, yyyy') : 'Set date';
+
+  const handleSelect = async (date: Date | undefined) => {
+    if (!date) return;
+
+    const nextDeliveryDate = format(date, 'yyyy-MM-dd');
+    const currentDeliveryDate = order.delivery_date ? order.delivery_date.slice(0, 10) : null;
+
+    if (nextDeliveryDate === currentDeliveryDate) {
+      setIsOpen(false);
+      return;
+    }
+
+    setIsOpen(false);
+    const didUpdate = await onDeliveryDateChange(order.order_id, nextDeliveryDate);
+    if (!didUpdate) {
+      setIsOpen(true);
+    }
+  };
+
+  const handleClear = async () => {
+    if (!order.delivery_date) return;
+    setIsOpen(false);
+    const didUpdate = await onDeliveryDateChange(order.order_id, null);
+    if (!didUpdate) {
+      setIsOpen(true);
+    }
+  };
 
   return (
-    <div className={colorClass}>
-      <div className="flex items-center gap-1.5">
-        <span>{format(new Date(order.delivery_date), 'MMM d, yyyy')}</span>
-        {isOverdue && (
-          <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-4 leading-none">
-            OVERDUE
-          </Badge>
-        )}
-      </div>
-      {relativeText && (
-        <div className="text-xs opacity-75 mt-0.5">{relativeText}</div>
-      )}
-    </div>
+    <Popover open={isOpen} onOpenChange={(open) => !isUpdating && setIsOpen(open)}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+          disabled={isUpdating}
+          className="rounded-md p-1 -m-1 hover:bg-muted/60 transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 disabled:opacity-70"
+        >
+          <div className={`text-left ${order.delivery_date ? colorClass : 'text-muted-foreground'}`}>
+            <div className="flex items-center gap-1.5">
+              {isUpdating ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+              ) : (
+                <CalendarIcon className="h-3.5 w-3.5 opacity-70" />
+              )}
+              <span>{dateLabel}</span>
+              {isOverdue && !isUpdating && (
+                <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-4 leading-none">
+                  OVERDUE
+                </Badge>
+              )}
+            </div>
+            {relativeText && order.delivery_date && (
+              <div className="text-xs opacity-75 mt-0.5">{relativeText}</div>
+            )}
+          </div>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-auto p-0"
+        align="start"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <Calendar
+          mode="single"
+          selected={selectedDate}
+          onSelect={(date) => {
+            void handleSelect(date);
+          }}
+          classNames={{
+            day_today: 'ring-1 ring-amber-500/70 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20',
+            day_selected: getSelectedDeliveryDateClass(selectedDate),
+          }}
+          initialFocus
+        />
+        <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={(event) => {
+              event.stopPropagation();
+              setIsOpen(false);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={(event) => {
+              event.stopPropagation();
+              void handleClear();
+            }}
+            disabled={!order.delivery_date || isUpdating}
+          >
+            Clear
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -1262,6 +1386,7 @@ export default function OrdersPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   // Initialize ALL state from URL parameters for full navigation persistence
   const [statusFilter, setStatusFilter] = useState<string>(() => searchParams?.get('status') || 'all');
@@ -1287,6 +1412,7 @@ export default function OrdersPage() {
 
   // Status being updated (for loading indicator)
   const [updatingOrderId, setUpdatingOrderId] = useState<number | null>(null);
+  const [updatingDeliveryDateOrderId, setUpdatingDeliveryDateOrderId] = useState<number | null>(null);
 
   // Pagination state - restored from URL
   const [currentPage, setCurrentPage] = useState(() => {
@@ -1453,6 +1579,35 @@ export default function OrdersPage() {
     refetchOnWindowFocus: true,
   });
 
+  // Detect duplicate order_number + customer_id combinations
+  const duplicateOrderKeys = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const o of orders) {
+      if (!o.order_number?.trim()) continue;
+      const key = `${o.order_number.trim().toLowerCase()}|${o.customer_id ?? ''}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    const dupes = new Set<string>();
+    for (const [key, count] of counts) {
+      if (count > 1) dupes.add(key);
+    }
+    return dupes;
+  }, [orders]);
+
+  // Fetch linked record counts when delete dialog is open
+  const deleteTargetOrder = deleteTargetId !== null ? orders.find((o) => o.order_id === deleteTargetId) : null;
+  const { data: deleteTargetLinks } = useQuery({
+    queryKey: ['delete-order-links', deleteTargetId],
+    queryFn: async () => {
+      const [{ count: attachmentCount }, { count: supplierLinkCount }] = await Promise.all([
+        supabase.from('order_attachments').select('*', { count: 'exact', head: true }).eq('order_id', deleteTargetId!),
+        supabase.from('supplier_order_customer_orders').select('*', { count: 'exact', head: true }).eq('order_id', deleteTargetId!),
+      ]);
+      return { attachments: attachmentCount ?? 0, supplierLinks: supplierLinkCount ?? 0 };
+    },
+    enabled: deleteTargetId !== null,
+  });
+
   // Fetch procurement summaries (one query for all orders)
   const { data: procurementSummaries = {} } = useQuery({
     queryKey: ['procurementSummaries'],
@@ -1495,6 +1650,86 @@ export default function OrdersPage() {
       setUpdatingOrderId(null);
     }
   }, [orders, queryClient]);
+
+  const handleDeliveryDateChange = useCallback(async (orderId: number, deliveryDate: string | null): Promise<boolean> => {
+    setUpdatingDeliveryDateOrderId(orderId);
+    const previousOrderQueries = queryClient.getQueriesData({ queryKey: ['orders'] });
+
+    queryClient.setQueriesData({ queryKey: ['orders'] }, (current: unknown) => {
+      if (!Array.isArray(current)) return current;
+      return current.map((row: any) => {
+        if (row?.order_id !== orderId) return row;
+        return {
+          ...row,
+          delivery_date: deliveryDate,
+        };
+      });
+    });
+
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (sessionError || !accessToken) {
+        previousOrderQueries.forEach(([queryKey, queryData]) => {
+          queryClient.setQueryData(queryKey, queryData);
+        });
+        toast({
+          title: 'Session expired',
+          description: 'Please sign in again to update delivery dates.',
+          variant: 'destructive',
+        });
+        router.push('/login');
+        return false;
+      }
+
+      const response = await fetch(`/api/orders/${orderId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ delivery_date: deliveryDate }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        previousOrderQueries.forEach(([queryKey, queryData]) => {
+          queryClient.setQueryData(queryKey, queryData);
+        });
+        if (response.status === 401) {
+          toast({
+            title: 'Session expired',
+            description: 'Please sign in again to update delivery dates.',
+            variant: 'destructive',
+          });
+          router.push('/login');
+          return false;
+        }
+        toast({
+          title: 'Could not update delivery date',
+          description: payload.error || 'Please try again.',
+          variant: 'destructive',
+        });
+        return false;
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['orders'], refetchType: 'inactive' });
+      return true;
+    } catch (err) {
+      previousOrderQueries.forEach(([queryKey, queryData]) => {
+        queryClient.setQueryData(queryKey, queryData);
+      });
+      const message = err instanceof Error ? err.message : 'Please try again.';
+      toast({
+        title: 'Could not update delivery date',
+        description: message,
+        variant: 'destructive',
+      });
+      return false;
+    } finally {
+      setUpdatingDeliveryDateOrderId(null);
+    }
+  }, [queryClient, router, toast]);
 
   // Undo status change
   const handleUndoStatusChange = useCallback(async () => {
@@ -1928,7 +2163,16 @@ export default function OrdersPage() {
                             </button>
                           </TableCell>
                           <TableCell className="align-middle font-semibold tracking-tight text-foreground py-2">
-                            {order.order_number || `#${order.order_id}`}
+                            <span className="flex items-center gap-1.5">
+                              {order.order_number || `#${order.order_id}`}
+                              {order.order_number?.trim() &&
+                                duplicateOrderKeys.has(`${order.order_number.trim().toLowerCase()}|${order.customer_id ?? ''}`) && (
+                                <span className="inline-flex items-center gap-0.5 text-amber-500 text-[11px] font-medium" title="Duplicate order number for this customer">
+                                  <AlertTriangle className="h-3 w-3" />
+                                  Duplicate
+                                </span>
+                              )}
+                            </span>
                           </TableCell>
                           <TableCell className="align-middle py-2">
                             {order.customer?.name || 'N/A'}
@@ -1938,7 +2182,11 @@ export default function OrdersPage() {
                           </TableCell>
                           {/* Delivery Date with colour coding */}
                           <TableCell className="align-middle text-sm py-2">
-                            <DeliveryDateCell order={order} />
+                            <DeliveryDateCell
+                              order={order}
+                              isUpdating={updatingDeliveryDateOrderId === order.order_id}
+                              onDeliveryDateChange={handleDeliveryDateChange}
+                            />
                           </TableCell>
                           <TableCell className="align-middle text-sm font-medium text-foreground py-2">
                             {order.total_amount !== null && order.total_amount !== undefined
@@ -2099,11 +2347,25 @@ export default function OrdersPage() {
       <Dialog open={deleteTargetId !== null} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>Delete order</DialogTitle>
+            <DialogTitle>Delete order {deleteTargetOrder?.order_number || `#${deleteTargetId}`}</DialogTitle>
             <DialogDescription>
-              This action cannot be undone. This will permanently delete the order and related records (attachments, details, links).
+              This action cannot be undone. This will permanently delete the order and all related records.
             </DialogDescription>
           </DialogHeader>
+          {deleteTargetOrder && (
+            <div className="rounded-md border bg-muted/50 px-4 py-3 text-sm space-y-1">
+              <p className="font-medium text-foreground">This order has:</p>
+              <ul className="list-disc list-inside text-muted-foreground space-y-0.5">
+                <li>{deleteTargetOrder.details?.length ?? 0} line item{(deleteTargetOrder.details?.length ?? 0) !== 1 ? 's' : ''}</li>
+                <li>{deleteTargetLinks?.attachments ?? 0} attachment{(deleteTargetLinks?.attachments ?? 0) !== 1 ? 's' : ''}</li>
+                {(deleteTargetLinks?.supplierLinks ?? 0) > 0 && (
+                  <li className="text-amber-500 font-medium">
+                    {deleteTargetLinks!.supplierLinks} linked purchase order{deleteTargetLinks!.supplierLinks !== 1 ? 's' : ''}
+                  </li>
+                )}
+              </ul>
+            </div>
+          )}
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setDeleteTargetId(null)} disabled={isDeleting}>Cancel</Button>
             <Button
@@ -2112,7 +2374,15 @@ export default function OrdersPage() {
                 if (!deleteTargetId) return;
                 setIsDeleting(true);
                 try {
-                  const res = await fetch(`/api/orders/${deleteTargetId}`, { method: 'DELETE' });
+                  const { data: sessionData } = await supabase.auth.getSession();
+                  const accessToken = sessionData.session?.access_token;
+                  if (!accessToken) {
+                    throw new Error('Session expired. Please sign in again.');
+                  }
+                  const res = await fetch(`/api/orders/${deleteTargetId}`, {
+                    method: 'DELETE',
+                    headers: { Authorization: `Bearer ${accessToken}` },
+                  });
                   const responseText = await res.text();
                   if (!res.ok) {
                     let errorMessage = 'Failed to delete order';

@@ -3,14 +3,14 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { ArrowLeft, ChevronsUpDown, Check } from 'lucide-react';
+import { ArrowLeft, ChevronsUpDown, Check, AlertTriangle } from 'lucide-react';
 import { useState, useMemo, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { fetchQuotes } from '@/lib/db/quotes';
 import { fetchCustomers } from '@/lib/db/customers';
 import type { Customer } from '@/lib/db/customers';
 import { createOrder } from '@/lib/db/orders';
-import { useMutation } from '@tanstack/react-query';
+import { supabase } from '@/lib/supabase';
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { useRouter } from 'next/navigation';
@@ -95,6 +95,24 @@ export default function NewOrderPage() {
     ),
     [customersSorted, searchTerm]
   );
+
+  // Check for duplicate order_number + customer_id
+  const trimmedOrderNumber = orderNumber.trim();
+  const { data: duplicateOrders } = useQuery({
+    queryKey: ['duplicate-order-check', trimmedOrderNumber, customerId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('order_id, order_number')
+        .eq('order_number', trimmedOrderNumber)
+        .eq('customer_id', Number(customerId))
+        .limit(1);
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: Boolean(trimmedOrderNumber && customerId),
+  });
+  const hasDuplicate = (duplicateOrders?.length ?? 0) > 0;
 
   return (
     <div className="space-y-6">
@@ -209,6 +227,12 @@ export default function NewOrderPage() {
                     <div>
                       <Label htmlFor="order-number">Order Number (optional)</Label>
                       <Input id="order-number" value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} />
+                      {hasDuplicate && (
+                        <p className="flex items-center gap-1 mt-1 text-xs text-amber-500">
+                          <AlertTriangle className="h-3 w-3 flex-shrink-0" />
+                          An order with number &ldquo;{trimmedOrderNumber}&rdquo; already exists for this customer. You may be creating a duplicate.
+                        </p>
+                      )}
                     </div>
                     <div>
                       <Label htmlFor="delivery-date">Delivery Date (optional)</Label>

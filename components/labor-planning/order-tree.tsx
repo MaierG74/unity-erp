@@ -13,6 +13,7 @@ interface OrderTreeProps {
   orders: PlanningOrder[];
   windowSize?: number;
   onJobDragStart?: (event: React.DragEvent<HTMLDivElement>, job: PlanningJob, order: PlanningOrder) => void;
+  onJobClick?: (job: PlanningJob, order: PlanningOrder) => void;
 }
 
 const priorityStyles: Record<PlanningOrder['priority'], string> = {
@@ -40,7 +41,7 @@ const formatDate = (input?: string | null) => {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(parsed);
 };
 
-export function OrderTree({ orders, windowSize = 12, onJobDragStart }: OrderTreeProps) {
+export function OrderTree({ orders, windowSize = 12, onJobDragStart, onJobClick }: OrderTreeProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [openOrders, setOpenOrders] = useState<Set<string>>(() => new Set());
@@ -114,8 +115,9 @@ export function OrderTree({ orders, windowSize = 12, onJobDragStart }: OrderTree
                     {order.jobs.map((job) => (
                       <div
                         key={job.id}
-                        className="group flex items-center gap-1.5 rounded border border-dashed border-muted-foreground/30 bg-muted/50 px-1.5 py-1 cursor-grab active:cursor-grabbing"
+                        className="group flex items-center gap-1.5 rounded border border-dashed border-muted-foreground/30 bg-muted/50 px-1.5 py-1 cursor-grab active:cursor-grabbing hover:border-primary/50 hover:bg-muted"
                         draggable
+                        onClick={() => onJobClick?.(job, order)}
                         onDragStart={(event) => {
                           const payload = {
                             type: 'job',

@@ -46,7 +46,7 @@ interface JobCard {
   orders: {
     order_number: string;
     customers: {
-      company_name: string;
+      name: string;
     } | null;
   } | null;
   job_card_items: { count: number }[];
@@ -74,7 +74,7 @@ export default function JobCardsPage() {
         .select(`
           *,
           staff:staff_id(first_name, last_name),
-          orders:order_id(order_number, customers(company_name)),
+          orders:order_id(order_number, customers(name)),
           job_card_items(count)
         `)
         .order('issue_date', { ascending: false });
@@ -97,7 +97,7 @@ export default function JobCardsPage() {
         results = results.filter((jc: JobCard) => {
           const staffName = jc.staff ? `${jc.staff.first_name} ${jc.staff.last_name}`.toLowerCase() : '';
           const orderNum = jc.orders?.order_number?.toLowerCase() || '';
-          const customerName = jc.orders?.customers?.company_name?.toLowerCase() || '';
+          const customerName = jc.orders?.customers?.name?.toLowerCase() || '';
           return staffName.includes(searchLower) ||
                  orderNum.includes(searchLower) ||
                  customerName.includes(searchLower) ||
@@ -239,7 +239,7 @@ export default function JobCardsPage() {
                           <div className="font-medium">{jobCard.orders.order_number}</div>
                           {jobCard.orders.customers && (
                             <div className="text-sm text-muted-foreground">
-                              {jobCard.orders.customers.company_name}
+                              {jobCard.orders.customers.name}
                             </div>
                           )}
                         </div>

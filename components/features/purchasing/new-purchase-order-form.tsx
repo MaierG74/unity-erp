@@ -13,40 +13,62 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Loader2, Plus, Trash2, AlertCircle, StickyNote } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import {
+  Loader2,
+  Plus,
+  Trash2,
+  AlertCircle,
+  StickyNote,
+  Search,
+  Package,
+  X,
+} from 'lucide-react';
 import { PurchaseOrderFormData } from '@/types/purchasing';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import ReactSelect from 'react-select';
 import { toast } from 'sonner';
-import { ConsolidatePODialog, SupplierWithDrafts, ExistingDraftPO } from '@/components/features/purchasing/ConsolidatePODialog';
+import {
+  ConsolidatePODialog,
+  SupplierWithDrafts,
+} from '@/components/features/purchasing/ConsolidatePODialog';
+import {
+  ComponentSearchModal,
+  ComponentSelection,
+  ModalSupplierComponent,
+} from '@/components/features/purchasing/ComponentSearchModal';
 
 // Form validation schema
 const formSchema = z.object({
   order_date: z.string().optional(),
   notes: z.string().optional(),
-  items: z.array(
-    z.object({
-      component_id: z.number({
-        required_error: 'Please select a component',
-      }),
-      supplier_component_id: z.number({
-        required_error: 'Please select a supplier',
-      }),
-      quantity: z.number({
-        required_error: 'Please enter a quantity',
-        invalid_type_error: 'Please enter a number',
-      }).min(0.01, 'Quantity must be greater than 0'),
-      customer_order_id: z.number().nullable().optional(),
-      notes: z.string().optional(),
-    })
-  ).min(1, 'Please add at least one item to the order'),
+  items: z
+    .array(
+      z.object({
+        component_id: z.number({
+          required_error: 'Please select a component',
+        }),
+        supplier_component_id: z.number({
+          required_error: 'Please select a supplier',
+        }),
+        quantity: z
+          .number({
+            required_error: 'Please enter a quantity',
+            invalid_type_error: 'Please enter a number',
+          })
+          .min(0.01, 'Quantity must be greater than 0'),
+        customer_order_id: z.number().nullable().optional(),
+        notes: z.string().optional(),
+      })
+    )
+    .min(1, 'Please add at least one item to the order'),
 });
-
-type ComponentFromAPI = {
-  component_id: number;
-  internal_code: string;
-  description: string | null;
-};
 
 type SupplierComponentFromAPI = {
   supplier_component_id: number;
@@ -73,44 +95,35 @@ type PurchaseOrderCreationResult = {
   supplier_order_ids: number[] | null;
 };
 
-type ComponentOption = {
-  value: number;
-  label: string;
+// Selected component info (stored alongside form data for display)
+type SelectedComponentInfo = {
+  internal_code: string;
+  description: string | null;
+  category_name: string | null;
+  stock_on_hand: number | null;
+  suppliers: ModalSupplierComponent[];
 };
 
-// Fetch components
-async function fetchComponents() {
-  const { data, error } = await supabase
-    .from('components')
-    .select('component_id, internal_code, description')
-    .order('internal_code');
-
-  if (error) {
-    console.error('Error fetching components:', error);
-    throw new Error('Failed to fetch components');
-  }
-
-  return data as ComponentFromAPI[];
-}
-
 // Fetch supplier components for a specific component
-async function fetchSupplierComponentsForComponent(componentId: number): Promise<SupplierComponentFromAPI[]> {
-  // Validate component ID
+async function fetchSupplierComponentsForComponent(
+  componentId: number
+): Promise<SupplierComponentFromAPI[]> {
   if (!componentId || isNaN(componentId) || componentId <= 0) {
-    console.warn('Invalid component ID:', componentId);
     return [];
   }
 
   try {
     const { data, error } = await supabase
       .from('suppliercomponents')
-      .select(`
+      .select(
+        `
         supplier_component_id,
         component_id,
         supplier_id,
         price,
         supplier:suppliers (name)
-      `)
+      `
+      )
       .eq('component_id', componentId);
 
     if (error) {
@@ -119,12 +132,10 @@ async function fetchSupplierComponentsForComponent(componentId: number): Promise
     }
 
     if (!data || !Array.isArray(data)) {
-      console.warn(`No supplier components found for component ${componentId}`);
       return [];
     }
 
-    // Transform the data to match expected format, handling potential null values
-    return data.map(item => {
+    return data.map((item) => {
       const rawItem = item as unknown as {
         supplier_component_id: number;
         component_id: number;
@@ -139,8 +150,8 @@ async function fetchSupplierComponentsForComponent(componentId: number): Promise
         supplier_id: rawItem.supplier_id,
         price: rawItem.price,
         supplier: {
-          name: rawItem.supplier?.name || 'Unknown Supplier'
-        }
+          name: rawItem.supplier?.name || 'Unknown Supplier',
+        },
       };
     });
   } catch (error) {
@@ -171,19 +182,23 @@ async function createPurchaseOrder(
   statusId: number,
   supplierComponentsCache: Map<number, SupplierComponentFromAPI[]> = new Map()
 ): Promise<PurchaseOrderCreationResult[]> {
-  // Group items by supplier
-  const itemsBySupplier = new Map<number, Array<{
-    supplier_component_id: number;
-    quantity: number;
-    component_id: number;
-    customer_order_id?: number | null;
-    notes?: string;
-  }>>();
+  const itemsBySupplier = new Map<
+    number,
+    Array<{
+      supplier_component_id: number;
+      quantity: number;
+      component_id: number;
+      customer_order_id?: number | null;
+      notes?: string;
+    }>
+  >();
 
   formData.items.forEach((item) => {
-    const supplierOptions = supplierComponentsCache.get(item.component_id) || [];
+    const supplierOptions =
+      supplierComponentsCache.get(item.component_id) || [];
     const supplierComponent = supplierOptions.find(
-      (candidate) => candidate.supplier_component_id === item.supplier_component_id
+      (candidate) =>
+        candidate.supplier_component_id === item.supplier_component_id
     );
 
     if (!supplierComponent) {
@@ -215,7 +230,6 @@ async function createPurchaseOrder(
     ? new Date(formData.order_date).toISOString()
     : new Date().toISOString();
 
-  // Create a purchase order for each supplier via RPC so the header and lines are inserted atomically
   const purchaseOrders = await Promise.all(
     Array.from(itemsBySupplier.entries()).map(async ([supplierId, items]) => {
       const lineItems: SupplierOrderLinePayload[] = items.map((item) => ({
@@ -228,13 +242,16 @@ async function createPurchaseOrder(
         line_notes: item.notes || null,
       }));
 
-      const { data, error: rpcError } = await supabase.rpc('create_purchase_order_with_lines', {
-        supplier_id: supplierId,
-        line_items: lineItems,
-        status_id: statusId,
-        order_date: orderDateISO,
-        notes: formData.notes ?? '',
-      });
+      const { data, error: rpcError } = await supabase.rpc(
+        'create_purchase_order_with_lines',
+        {
+          supplier_id: supplierId,
+          line_items: lineItems,
+          status_id: statusId,
+          order_date: orderDateISO,
+          notes: formData.notes ?? '',
+        }
+      );
 
       if (rpcError) {
         console.error('Error creating purchase order via RPC:', rpcError);
@@ -244,7 +261,10 @@ async function createPurchaseOrder(
       const rpcResult = Array.isArray(data) ? data?.[0] : data;
 
       if (!rpcResult || typeof rpcResult.purchase_order_id !== 'number') {
-        console.error('Unexpected RPC response when creating purchase order:', data);
+        console.error(
+          'Unexpected RPC response when creating purchase order:',
+          data
+        );
         throw new Error('Failed to create purchase order');
       }
 
@@ -265,10 +285,24 @@ export function NewPurchaseOrderForm() {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [consolidateDialogOpen, setConsolidateDialogOpen] = useState(false);
-  const [suppliersWithDrafts, setSuppliersWithDrafts] = useState<SupplierWithDrafts[]>([]);
-  const [pendingFormData, setPendingFormData] = useState<PurchaseOrderFormData | null>(null);
+  const [suppliersWithDrafts, setSuppliersWithDrafts] = useState<
+    SupplierWithDrafts[]
+  >([]);
+  const [pendingFormData, setPendingFormData] =
+    useState<PurchaseOrderFormData | null>(null);
   const [isCheckingDrafts, setIsCheckingDrafts] = useState(false);
   const [expandedNotes, setExpandedNotes] = useState<Set<number>>(new Set());
+
+  // Component search modal state
+  const [componentModalOpen, setComponentModalOpen] = useState(false);
+  const [componentModalTargetIndex, setComponentModalTargetIndex] = useState<
+    number | null
+  >(null);
+
+  // Rich component info for display (keyed by item index position doesn't work with reordering — key by component_id)
+  const [selectedComponentInfoMap, setSelectedComponentInfoMap] = useState<
+    Map<number, SelectedComponentInfo>
+  >(new Map());
 
   // Form setup
   const {
@@ -284,7 +318,15 @@ export function NewPurchaseOrderForm() {
     defaultValues: {
       order_date: new Date().toISOString().split('T')[0],
       notes: '',
-      items: [{ component_id: 0, supplier_component_id: 0, quantity: undefined as unknown as number, customer_order_id: null, notes: '' }],
+      items: [
+        {
+          component_id: 0,
+          supplier_component_id: 0,
+          quantity: undefined as unknown as number,
+          customer_order_id: null,
+          notes: '',
+        },
+      ],
     },
   });
 
@@ -308,6 +350,41 @@ export function NewPurchaseOrderForm() {
         if (hasContent) {
           reset(parsed);
           toast.info('Draft purchase order restored');
+
+          // Re-hydrate component info for restored items
+          const componentIds = parsed.items
+            .map((item) => item.component_id)
+            .filter((id) => id > 0);
+          if (componentIds.length > 0) {
+            supabase
+              .from('components')
+              .select(
+                `component_id, internal_code, description,
+                 category:component_categories(categoryname),
+                 inventory(quantity_on_hand),
+                 suppliercomponents(
+                   supplier_component_id, supplier_id, price, lead_time, min_order_quantity,
+                   supplier:suppliers(name, supplier_id)
+                 )`
+              )
+              .in('component_id', componentIds)
+              .then(({ data }) => {
+                if (!data?.length) return;
+                setSelectedComponentInfoMap((prev) => {
+                  const next = new Map(prev);
+                  data.forEach((comp: any) => {
+                    next.set(comp.component_id, {
+                      internal_code: comp.internal_code,
+                      description: comp.description,
+                      category_name: comp.category?.categoryname ?? null,
+                      stock_on_hand: comp.inventory?.[0]?.quantity_on_hand ?? null,
+                      suppliers: comp.suppliercomponents ?? [],
+                    });
+                  });
+                  return next;
+                });
+              });
+          }
         }
       }
     } catch {
@@ -327,10 +404,15 @@ export function NewPurchaseOrderForm() {
             formData.items?.some((item) => item.component_id > 0) ||
             (formData.notes && formData.notes.trim().length > 0);
           if (hasContent) {
-            sessionStorage.setItem(PO_DRAFT_STORAGE_KEY, JSON.stringify(formData));
+            sessionStorage.setItem(
+              PO_DRAFT_STORAGE_KEY,
+              JSON.stringify(formData)
+            );
+          } else {
+            sessionStorage.removeItem(PO_DRAFT_STORAGE_KEY);
           }
         } catch {
-          // Ignore storage errors (e.g. quota exceeded)
+          // Ignore storage errors
         }
       }, 500);
     });
@@ -344,21 +426,6 @@ export function NewPurchaseOrderForm() {
   const clearDraft = useCallback(() => {
     sessionStorage.removeItem(PO_DRAFT_STORAGE_KEY);
   }, []);
-
-  // Get all components for dropdown
-  const { data: components, isLoading: componentsLoading } = useQuery({
-    queryKey: ['components'],
-    queryFn: fetchComponents,
-  });
-
-  const componentOptions = useMemo<ComponentOption[]>(
-    () =>
-      (components ?? []).map((component) => ({
-        value: component.component_id,
-        label: `${component.internal_code}${component.description ? ` - ${component.description}` : ''}`,
-      })),
-    [components]
-  );
 
   // Get draft status ID
   const { data: draftStatusId, isLoading: statusLoading } = useQuery({
@@ -377,55 +444,73 @@ export function NewPurchaseOrderForm() {
         .limit(50);
 
       if (error) throw error;
-      return data?.map(o => ({
-        value: o.order_id,
-        label: `${o.order_number} - ${o.customer?.name || 'Unknown Customer'}`
-      })) || [];
-    }
+      return (
+        data?.map((o: any) => ({
+          value: o.order_id,
+          label: `${o.order_number} - ${o.customer?.name || 'Unknown Customer'}`,
+        })) || []
+      );
+    },
   });
 
   // Watch for component changes to load suppliers
   const watchedItems = watch('items');
 
   // Create a single query for all supplier components
-  const { data: supplierComponentsMap, isLoading: suppliersLoading } = useQuery<Map<number, SupplierComponentFromAPI[]>>({
-    queryKey: ['supplierComponents', watchedItems.map((item) => item.component_id).join(',')],
-    queryFn: async () => {
-      const results = new Map<number, SupplierComponentFromAPI[]>();
-      const componentIds = Array.from(
-        new Set(watchedItems.filter((item) => item.component_id > 0).map((item) => item.component_id))
-      );
+  const { data: supplierComponentsMap, isLoading: suppliersLoading } =
+    useQuery<Map<number, SupplierComponentFromAPI[]>>({
+      queryKey: [
+        'supplierComponents',
+        watchedItems.map((item) => item.component_id).join(','),
+      ],
+      queryFn: async () => {
+        const results = new Map<number, SupplierComponentFromAPI[]>();
+        const componentIds = Array.from(
+          new Set(
+            watchedItems
+              .filter((item) => item.component_id > 0)
+              .map((item) => item.component_id)
+          )
+        );
 
-      await Promise.all(
-        componentIds.map(async (componentId) => {
-          const suppliers = await fetchSupplierComponentsForComponent(componentId);
-          results.set(componentId, suppliers);
-        })
-      );
+        await Promise.all(
+          componentIds.map(async (componentId) => {
+            const suppliers =
+              await fetchSupplierComponentsForComponent(componentId);
+            results.set(componentId, suppliers);
+          })
+        );
 
-      return results;
-    },
-    enabled: watchedItems.some((item) => item.component_id > 0),
-  });
+        return results;
+      },
+      enabled: watchedItems.some((item) => item.component_id > 0),
+    });
 
   // Create purchase order mutation
   const createOrderMutation = useMutation({
     mutationFn: async (data: PurchaseOrderFormData) => {
       if (!draftStatusId) throw new Error('Failed to get draft status');
-      return createPurchaseOrder(data, draftStatusId, supplierComponentsMap ?? new Map());
+      return createPurchaseOrder(
+        data,
+        draftStatusId,
+        supplierComponentsMap ?? new Map()
+      );
     },
     onSuccess: (results) => {
       clearDraft();
       queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
-      const firstPurchaseOrderId = Array.isArray(results) && results.length > 0
-        ? results[0]?.purchase_order_id
-        : undefined;
+      queryClient.invalidateQueries({ queryKey: ['purchasing-dashboard'] });
 
-      // Redirect to the first purchase order created
-      if (typeof firstPurchaseOrderId === 'number') {
-        router.push(`/purchasing/purchase-orders/${firstPurchaseOrderId}`);
+      const createdCount = Array.isArray(results) ? results.length : 0;
+      if (createdCount > 1) {
+        // Multiple POs created (multi-supplier) — go to dashboard with pending filter
+        router.push('/purchasing?filter=pending');
+      } else if (createdCount === 1) {
+        router.push(
+          `/purchasing/purchase-orders/${results[0].purchase_order_id}`
+        );
       } else {
-        router.push('/purchasing/purchase-orders');
+        router.push('/purchasing?filter=pending');
       }
     },
     onError: (error: Error) => {
@@ -434,12 +519,14 @@ export function NewPurchaseOrderForm() {
   });
 
   // Check for existing Draft POs for the selected suppliers
-  const checkForExistingDrafts = async (formData: PurchaseOrderFormData): Promise<SupplierWithDrafts[]> => {
-    // Get unique supplier IDs from the form items
+  const checkForExistingDrafts = async (
+    formData: PurchaseOrderFormData
+  ): Promise<SupplierWithDrafts[]> => {
     const supplierIds = new Set<number>();
-    
+
     formData.items.forEach((item) => {
-      const supplierOptions = supplierComponentsMap?.get(item.component_id) || [];
+      const supplierOptions =
+        supplierComponentsMap?.get(item.component_id) || [];
       const supplierComponent = supplierOptions.find(
         (sc) => sc.supplier_component_id === item.supplier_component_id
       );
@@ -451,15 +538,17 @@ export function NewPurchaseOrderForm() {
     const draftsPerSupplier: SupplierWithDrafts[] = [];
 
     for (const supplierId of Array.from(supplierIds)) {
-      const { data: drafts, error } = await supabase.rpc('get_draft_purchase_orders_for_supplier', {
-        p_supplier_id: supplierId
-      });
+      const { data: drafts, error } = await supabase.rpc(
+        'get_draft_purchase_orders_for_supplier',
+        {
+          p_supplier_id: supplierId,
+        }
+      );
 
       if (!error && drafts && drafts.length > 0) {
-        // Find supplier name from our cache
         let supplierName = 'Unknown';
         for (const [, suppliers] of supplierComponentsMap?.entries() || []) {
-          const match = suppliers.find(s => s.supplier_id === supplierId);
+          const match = suppliers.find((s) => s.supplier_id === supplierId);
           if (match) {
             supplierName = match.supplier.name;
             break;
@@ -475,8 +564,8 @@ export function NewPurchaseOrderForm() {
             created_at: d.created_at,
             notes: d.notes,
             line_count: Number(d.line_count),
-            total_amount: Number(d.total_amount)
-          }))
+            total_amount: Number(d.total_amount),
+          })),
         });
       }
     }
@@ -485,26 +574,31 @@ export function NewPurchaseOrderForm() {
   };
 
   // Handle consolidation decision
-  const handleConsolidationConfirm = async (decisions: Record<number, number | 'new'>) => {
+  const handleConsolidationConfirm = async (
+    decisions: Record<number, number | 'new'>
+  ) => {
     setConsolidateDialogOpen(false);
-    
+
     if (!pendingFormData || !draftStatusId) return;
 
-    const toastId = toast.loading('Creating purchase orders…');
-    
+    const toastId = toast.loading('Creating purchase orders...');
+
     try {
-      // Group items by supplier
-      const itemsBySupplier = new Map<number, Array<{
-        supplier_component_id: number;
-        quantity: number;
-        component_id: number;
-        customer_order_id?: number | null;
-        notes?: string;
-        supplierId: number;
-      }>>();
+      const itemsBySupplier = new Map<
+        number,
+        Array<{
+          supplier_component_id: number;
+          quantity: number;
+          component_id: number;
+          customer_order_id?: number | null;
+          notes?: string;
+          supplierId: number;
+        }>
+      >();
 
       pendingFormData.items.forEach((item) => {
-        const supplierOptions = supplierComponentsMap?.get(item.component_id) || [];
+        const supplierOptions =
+          supplierComponentsMap?.get(item.component_id) || [];
         const supplierComponent = supplierOptions.find(
           (sc) => sc.supplier_component_id === item.supplier_component_id
         );
@@ -540,9 +634,11 @@ export function NewPurchaseOrderForm() {
 
       const results: PurchaseOrderCreationResult[] = [];
 
-      for (const [supplierId, items] of Array.from(itemsBySupplier.entries())) {
+      for (const [supplierId, items] of Array.from(
+        itemsBySupplier.entries()
+      )) {
         const decision = decisions[supplierId] || 'new';
-        
+
         const lineItems: SupplierOrderLinePayload[] = items.map((item) => ({
           supplier_component_id: item.supplier_component_id,
           order_quantity: item.quantity,
@@ -554,27 +650,31 @@ export function NewPurchaseOrderForm() {
         }));
 
         if (decision !== 'new' && typeof decision === 'number') {
-          // Add to existing PO
-          const { data, error: rpcError } = await supabase.rpc('add_lines_to_purchase_order', {
-            target_purchase_order_id: decision,
-            line_items: lineItems
-          });
+          const { data, error: rpcError } = await supabase.rpc(
+            'add_lines_to_purchase_order',
+            {
+              target_purchase_order_id: decision,
+              line_items: lineItems,
+            }
+          );
 
           if (rpcError) throw rpcError;
 
           results.push({
             purchase_order_id: decision,
-            supplier_order_ids: data?.[0]?.supplier_order_ids ?? []
+            supplier_order_ids: data?.[0]?.supplier_order_ids ?? [],
           });
         } else {
-          // Create new PO
-          const { data, error: rpcError } = await supabase.rpc('create_purchase_order_with_lines', {
-            supplier_id: supplierId,
-            line_items: lineItems,
-            status_id: draftStatusId,
-            order_date: orderDateISO,
-            notes: pendingFormData.notes ?? '',
-          });
+          const { data, error: rpcError } = await supabase.rpc(
+            'create_purchase_order_with_lines',
+            {
+              supplier_id: supplierId,
+              line_items: lineItems,
+              status_id: draftStatusId,
+              order_date: orderDateISO,
+              notes: pendingFormData.notes ?? '',
+            }
+          );
 
           if (rpcError) throw rpcError;
 
@@ -582,39 +682,49 @@ export function NewPurchaseOrderForm() {
           if (rpcResult && typeof rpcResult.purchase_order_id === 'number') {
             results.push({
               purchase_order_id: rpcResult.purchase_order_id,
-              supplier_order_ids: rpcResult.supplier_order_ids ?? []
+              supplier_order_ids: rpcResult.supplier_order_ids ?? [],
             });
           }
         }
       }
 
-      // Success message
-      const addedCount = results.filter(r => 
-        suppliersWithDrafts.some(s => s.existingDrafts.some(d => d.purchase_order_id === r.purchase_order_id))
+      const addedCount = results.filter((r) =>
+        suppliersWithDrafts.some((s) =>
+          s.existingDrafts.some(
+            (d) => d.purchase_order_id === r.purchase_order_id
+          )
+        )
       ).length;
 
       let toastMessage = '';
       if (addedCount > 0 && addedCount === results.length) {
-        toastMessage = addedCount === 1 
-          ? 'Items added to existing purchase order!' 
-          : `Items added to ${addedCount} existing purchase orders!`;
+        toastMessage =
+          addedCount === 1
+            ? 'Items added to existing purchase order!'
+            : `Items added to ${addedCount} existing purchase orders!`;
       } else if (addedCount > 0) {
         toastMessage = `${results.length - addedCount} new PO(s) created, ${addedCount} existing PO(s) updated!`;
       } else {
-        toastMessage = results.length === 1
-          ? 'Purchase order created successfully!'
-          : `${results.length} purchase orders created successfully!`;
+        toastMessage =
+          results.length === 1
+            ? 'Purchase order created successfully!'
+            : `${results.length} purchase orders created successfully!`;
       }
 
       toast.success(toastMessage, { id: toastId });
       clearDraft();
       queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
+      queryClient.invalidateQueries({ queryKey: ['purchasing-dashboard'] });
 
-      // Redirect to first PO
-      if (results.length > 0) {
-        router.push(`/purchasing/purchase-orders/${results[0].purchase_order_id}`);
+      if (results.length > 1) {
+        // Multiple POs — go to dashboard with pending filter
+        router.push('/purchasing?filter=pending');
+      } else if (results.length === 1) {
+        router.push(
+          `/purchasing/purchase-orders/${results[0].purchase_order_id}`
+        );
       } else {
-        router.push('/purchasing/purchase-orders');
+        router.push('/purchasing?filter=pending');
       }
     } catch (err) {
       console.error('Error in consolidation:', err);
@@ -629,20 +739,17 @@ export function NewPurchaseOrderForm() {
     setIsCheckingDrafts(true);
 
     try {
-      // Check for existing drafts
       const drafts = await checkForExistingDrafts(data);
-      
+
       if (drafts.length > 0) {
         setPendingFormData(data);
         setSuppliersWithDrafts(drafts);
         setConsolidateDialogOpen(true);
       } else {
-        // No existing drafts, create new POs directly
         createOrderMutation.mutate(data);
       }
     } catch (err) {
       console.error('Error checking for drafts:', err);
-      // Fall back to creating new POs
       createOrderMutation.mutate(data);
     } finally {
       setIsCheckingDrafts(false);
@@ -650,7 +757,146 @@ export function NewPurchaseOrderForm() {
   };
 
   const addItem = () => {
-    append({ component_id: 0, supplier_component_id: 0, quantity: undefined as unknown as number, customer_order_id: null, notes: '' });
+    append({
+      component_id: 0,
+      supplier_component_id: 0,
+      quantity: undefined as unknown as number,
+      customer_order_id: null,
+      notes: '',
+    });
+  };
+
+  // Open modal for a specific item index
+  const openComponentModal = (index: number) => {
+    setComponentModalTargetIndex(index);
+    setComponentModalOpen(true);
+  };
+
+  // Handle component selection from modal
+  const handleComponentSelection = (selection: ComponentSelection) => {
+    if (componentModalTargetIndex === null) return;
+
+    const idx = componentModalTargetIndex;
+
+    // Set component_id
+    setValue(`items.${idx}.component_id`, selection.component_id, {
+      shouldValidate: true,
+      shouldDirty: true,
+    });
+
+    // Store rich info for display
+    setSelectedComponentInfoMap((prev) => {
+      const next = new Map(prev);
+      next.set(selection.component_id, {
+        internal_code: selection.internal_code,
+        description: selection.description,
+        category_name: selection.category_name,
+        stock_on_hand: selection.stock_on_hand,
+        suppliers: selection.suppliers,
+      });
+      return next;
+    });
+
+    // Reset supplier selection
+    setValue(`items.${idx}.supplier_component_id`, 0, {
+      shouldValidate: false,
+      shouldDirty: true,
+    });
+
+    // Auto-select supplier if only one option
+    if (selection.suppliers.length === 1) {
+      setValue(
+        `items.${idx}.supplier_component_id`,
+        selection.suppliers[0].supplier_component_id,
+        { shouldValidate: true, shouldDirty: true }
+      );
+    }
+  };
+
+  // Clear a component selection on a line item
+  const clearComponentSelection = (index: number) => {
+    setValue(`items.${index}.component_id`, 0, {
+      shouldValidate: true,
+      shouldDirty: true,
+    });
+    setValue(`items.${index}.supplier_component_id`, 0, {
+      shouldValidate: false,
+      shouldDirty: true,
+    });
+  };
+
+  // Get existing component IDs for the modal indicator
+  const existingComponentIds = useMemo(
+    () =>
+      watchedItems
+        .filter((item) => item.component_id > 0)
+        .map((item) => item.component_id),
+    [watchedItems]
+  );
+
+  // react-select shared dark-mode styles
+  const reactSelectStyles = {
+    control: (base: any, state: any) => ({
+      ...base,
+      minHeight: '2.5rem',
+      borderRadius: '0.375rem',
+      borderColor: state.isFocused
+        ? 'hsl(var(--ring))'
+        : 'hsl(var(--input))',
+      boxShadow: state.isFocused ? '0 0 0 1px hsl(var(--ring))' : 'none',
+      '&:hover': {
+        borderColor: state.isFocused
+          ? 'hsl(var(--ring))'
+          : 'hsl(var(--input))',
+      },
+      backgroundColor: 'hsl(var(--background))',
+    }),
+    menu: (base: any) => ({
+      ...base,
+      zIndex: 50,
+      marginTop: 4,
+      backgroundColor: 'hsl(var(--popover))',
+      border: '1px solid hsl(var(--border))',
+      borderRadius: '0.375rem',
+      boxShadow:
+        '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
+    }),
+    menuList: (base: any) => ({
+      ...base,
+      backgroundColor: 'hsl(var(--popover))',
+      padding: '0.25rem',
+    }),
+    menuPortal: (base: any) => ({
+      ...base,
+      zIndex: 60,
+    }),
+    option: (base: any, state: any) => ({
+      ...base,
+      backgroundColor: state.isFocused
+        ? 'hsl(var(--accent))'
+        : 'transparent',
+      color: state.isFocused
+        ? 'hsl(var(--accent-foreground))'
+        : 'hsl(var(--popover-foreground))',
+      cursor: 'pointer',
+      borderRadius: '0.25rem',
+    }),
+    singleValue: (base: any) => ({
+      ...base,
+      color: 'hsl(var(--foreground))',
+    }),
+    input: (base: any) => ({
+      ...base,
+      color: 'hsl(var(--foreground))',
+    }),
+    placeholder: (base: any) => ({
+      ...base,
+      color: 'hsl(var(--muted-foreground))',
+    }),
+    noOptionsMessage: (base: any) => ({
+      ...base,
+      color: 'hsl(var(--muted-foreground))',
+    }),
   };
 
   return (
@@ -665,7 +911,10 @@ export function NewPurchaseOrderForm() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
-          <label htmlFor="order_date" className="block text-sm font-medium mb-1">
+          <label
+            htmlFor="order_date"
+            className="block text-sm font-medium mb-1"
+          >
             Order Date
           </label>
           <Input
@@ -676,7 +925,9 @@ export function NewPurchaseOrderForm() {
             {...register('order_date')}
           />
           {errors.order_date && (
-            <p className="mt-1 text-sm text-destructive">{errors.order_date.message}</p>
+            <p className="mt-1 text-sm text-destructive">
+              {errors.order_date.message}
+            </p>
           )}
         </div>
 
@@ -691,7 +942,9 @@ export function NewPurchaseOrderForm() {
             {...register('notes')}
           />
           {errors.notes && (
-            <p className="mt-1 text-sm text-destructive">{errors.notes.message}</p>
+            <p className="mt-1 text-sm text-destructive">
+              {errors.notes.message}
+            </p>
           )}
         </div>
       </div>
@@ -714,357 +967,366 @@ export function NewPurchaseOrderForm() {
           <p className="text-sm text-destructive">{errors.items.message}</p>
         )}
 
-        {fields.map((field, index) => (
-          <Card key={field.id} className="overflow-hidden">
-            <CardContent className="p-4">
-              <h4 className="text-sm font-medium mb-4">Item {index + 1}</h4>
+        {fields.map((field, index) => {
+          const componentId = watchedItems[index]?.component_id;
+          const hasComponent = componentId > 0;
+          const componentInfo = hasComponent
+            ? selectedComponentInfoMap.get(componentId)
+            : null;
+          const suppliers =
+            supplierComponentsMap?.get(componentId) || [];
+          const selectedSupplierComponentId =
+            watchedItems[index]?.supplier_component_id;
+          const selectedSupplier = suppliers.find(
+            (sc) =>
+              sc.supplier_component_id === selectedSupplierComponentId
+          );
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[1fr_1fr_7rem_1fr_auto] gap-4 items-end">
-                <div>
-                  <label htmlFor={`items.${index}.component_id`} className="block text-sm font-medium mb-1">
-                    Component
-                  </label>
-                  <Controller
-                    control={control}
-                    name={`items.${index}.component_id`}
-                    render={({ field }) => (
-                      <ReactSelect<ComponentOption, false>
-                        inputId={`component-select-${index}`}
-                        isClearable
-                        isDisabled={componentsLoading || createOrderMutation.isPending}
-                        isLoading={componentsLoading}
-                        options={componentOptions}
-                        value={componentOptions.find((option) => option.value === field.value) ?? null}
-                        onChange={(option: ComponentOption | null) => {
-                          const selectedId = option?.value ?? 0;
-                          field.onChange(selectedId);
-                          setValue(`items.${index}.supplier_component_id`, 0, {
-                            shouldValidate: true,
-                            shouldDirty: true,
-                          });
-                        }}
-                        onBlur={field.onBlur}
-                        placeholder="Search for a component"
-                        menuPlacement="auto"
-                        classNamePrefix="component-select"
-                        styles={{
-                          control: (base, state) => ({
-                            ...base,
-                            minHeight: '2.5rem',
-                            borderRadius: '0.375rem',
-                            borderColor: state.isFocused
-                              ? 'hsl(var(--ring))'
-                              : errors.items?.[index]?.component_id
-                                ? 'hsl(var(--destructive))'
-                                : 'hsl(var(--input))',
-                            boxShadow: state.isFocused
-                              ? '0 0 0 1px hsl(var(--ring))'
-                              : 'none',
-                            '&:hover': {
-                              borderColor: state.isFocused
-                                ? 'hsl(var(--ring))'
-                                : 'hsl(var(--input))',
-                            },
-                            backgroundColor: 'hsl(var(--background))',
-                          }),
-                          menu: (base) => ({
-                            ...base,
-                            zIndex: 50,
-                            marginTop: 4,
-                            backgroundColor: 'hsl(var(--popover))',
-                            border: '1px solid hsl(var(--border))',
-                            borderRadius: '0.375rem',
-                            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
-                          }),
-                          menuList: (base) => ({
-                            ...base,
-                            backgroundColor: 'hsl(var(--popover))',
-                            padding: '0.25rem',
-                          }),
-                          menuPortal: (base) => ({
-                            ...base,
-                            zIndex: 60,
-                          }),
-                          option: (base, state) => ({
-                            ...base,
-                            backgroundColor: state.isFocused
-                              ? 'hsl(var(--accent))'
-                              : 'transparent',
-                            color: state.isFocused
-                              ? 'hsl(var(--accent-foreground))'
-                              : 'hsl(var(--popover-foreground))',
-                            cursor: 'pointer',
-                            borderRadius: '0.25rem',
-                          }),
-                          singleValue: (base) => ({
-                            ...base,
-                            color: 'hsl(var(--foreground))',
-                          }),
-                          input: (base) => ({
-                            ...base,
-                            color: 'hsl(var(--foreground))',
-                          }),
-                          placeholder: (base) => ({
-                            ...base,
-                            color: 'hsl(var(--muted-foreground))',
-                          }),
-                          noOptionsMessage: (base) => ({
-                            ...base,
-                            color: 'hsl(var(--muted-foreground))',
-                          }),
-                        }}
-                        menuPortalTarget={typeof document !== 'undefined' ? document.body : undefined}
-                        noOptionsMessage={() =>
-                          componentsLoading ? 'Loading components...' : 'No component found.'
-                        }
-                      />
-                    )}
-                  />
-                  {errors.items?.[index]?.component_id && (
-                    <p className="mt-1 text-sm text-destructive">
-                      {errors.items[index]?.component_id?.message}
-                    </p>
-                  )}
-                </div>
-
-                <div>
-                  <label htmlFor={`items.${index}.supplier_component_id`} className="block text-sm font-medium mb-1">
-                    Supplier
-                  </label>
-                  <Controller
-                    control={control}
-                    name={`items.${index}.supplier_component_id`}
-                    render={({ field }) => {
-                      const componentId = watchedItems[index]?.component_id;
-                      const suppliers = supplierComponentsMap?.get(componentId) || [];
-
-                      return (
-                        <Select
-                          value={field.value?.toString() || ''}
-                          onValueChange={(value) => field.onChange(parseInt(value) || 0)}
-                          disabled={!componentId || suppliersLoading || createOrderMutation.isPending}
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Select a supplier" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {suppliers.map((sc: SupplierComponentFromAPI) => (
-                              <SelectItem key={sc.supplier_component_id} value={sc.supplier_component_id.toString()}>
-                                {sc.supplier?.name || 'Unknown Supplier'} - R{sc.price.toFixed(2)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      );
-                    }}
-                  />
-                  {errors.items?.[index]?.supplier_component_id && (
-                    <p className="mt-1 text-sm text-destructive">
-                      {errors.items[index]?.supplier_component_id?.message}
-                    </p>
-                  )}
-                </div>
-
-                <div>
-                  <label htmlFor={`items.${index}.quantity`} className="block text-sm font-medium mb-1">
-                    Quantity
-                  </label>
-                  <Controller
-                    control={control}
-                    name={`items.${index}.quantity`}
-                    render={({ field }) => (
-                      <input
-                        type="number"
-                        id={`items.${index}.quantity`}
-                        className={`h-10 w-full rounded-md border ${errors.items?.[index]?.quantity ? 'border-destructive' : 'border-input'
-                          } bg-background px-3 py-2 text-sm placeholder:text-muted-foreground`}
-                        min="0.01"
-                        step="any"
-                        placeholder="Qty"
-                        value={field.value ?? ''}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          field.onChange(val === '' ? undefined : parseFloat(val) || 0);
-                        }}
-                        disabled={createOrderMutation.isPending}
-                      />
-                    )}
-                  />
-                  {errors.items?.[index]?.quantity && (
-                    <p className="mt-1 text-sm text-destructive">
-                      {errors.items[index]?.quantity?.message}
-                    </p>
-                  )}
-                </div>
-
-                <div>
-                  <label htmlFor={`items.${index}.customer_order_id`} className="block text-sm font-medium mb-1">
-                    Customer Order
-                  </label>
-                  <Controller
-                    control={control}
-                    name={`items.${index}.customer_order_id`}
-                    render={({ field }) => (
-                      <ReactSelect
-                        inputId={`customer-order-select-${index}`}
-                        isClearable
-                        isDisabled={ordersLoading || createOrderMutation.isPending}
-                        isLoading={ordersLoading}
-                        options={customerOrders}
-                        value={customerOrders?.find(o => o.value === field.value) || null}
-                        onChange={(option) => field.onChange(option?.value || null)}
-                        placeholder="Stock Order"
-                        menuPlacement="auto"
-                        classNamePrefix="customer-order-select"
-                        styles={{
-                          control: (base, state) => ({
-                            ...base,
-                            minHeight: '2.5rem',
-                            borderRadius: '0.375rem',
-                            borderColor: state.isFocused
-                              ? 'hsl(var(--ring))'
-                              : 'hsl(var(--input))',
-                            boxShadow: state.isFocused
-                              ? '0 0 0 1px hsl(var(--ring))'
-                              : 'none',
-                            '&:hover': {
-                              borderColor: state.isFocused
-                                ? 'hsl(var(--ring))'
-                                : 'hsl(var(--input))',
-                            },
-                            backgroundColor: 'hsl(var(--background))',
-                          }),
-                          menu: (base) => ({
-                            ...base,
-                            zIndex: 50,
-                            marginTop: 4,
-                            backgroundColor: 'hsl(var(--popover))',
-                            border: '1px solid hsl(var(--border))',
-                            borderRadius: '0.375rem',
-                            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
-                          }),
-                          menuList: (base) => ({
-                            ...base,
-                            backgroundColor: 'hsl(var(--popover))',
-                            padding: '0.25rem',
-                          }),
-                          menuPortal: (base) => ({
-                            ...base,
-                            zIndex: 60,
-                          }),
-                          option: (base, state) => ({
-                            ...base,
-                            backgroundColor: state.isFocused
-                              ? 'hsl(var(--accent))'
-                              : 'transparent',
-                            color: state.isFocused
-                              ? 'hsl(var(--accent-foreground))'
-                              : 'hsl(var(--popover-foreground))',
-                            cursor: 'pointer',
-                            borderRadius: '0.25rem',
-                          }),
-                          singleValue: (base) => ({
-                            ...base,
-                            color: 'hsl(var(--foreground))',
-                          }),
-                          input: (base) => ({
-                            ...base,
-                            color: 'hsl(var(--foreground))',
-                          }),
-                          placeholder: (base) => ({
-                            ...base,
-                            color: 'hsl(var(--muted-foreground))',
-                          }),
-                          noOptionsMessage: (base) => ({
-                            ...base,
-                            color: 'hsl(var(--muted-foreground))',
-                          }),
-                        }}
-                        menuPortalTarget={typeof document !== 'undefined' ? document.body : undefined}
-                      />
-                    )}
-                  />
-                </div>
-
-                {/* Delete item button */}
-                <div className="flex items-end">
+          return (
+            <Card key={field.id} className="overflow-hidden">
+              <CardContent className="p-4 space-y-4">
+                {/* Row 1: Item header + delete */}
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-medium text-muted-foreground">
+                    Item {index + 1}
+                  </h4>
                   <Button
                     type="button"
                     onClick={() => {
                       if (fields.length > 1) {
                         remove(index);
                       } else {
-                        // Last item — reset to blank rather than leaving form empty
-                        setValue(`items.0.component_id`, 0);
-                        setValue(`items.0.supplier_component_id`, 0);
-                        setValue(`items.0.quantity`, undefined as unknown as number);
+                        clearComponentSelection(0);
+                        setValue(
+                          `items.0.quantity`,
+                          undefined as unknown as number
+                        );
                         setValue(`items.0.customer_order_id`, null);
                         setValue(`items.0.notes`, '');
                       }
                     }}
                     variant="ghost"
                     size="icon"
-                    className="h-10 w-10 text-muted-foreground hover:text-destructive"
+                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
                     disabled={createOrderMutation.isPending}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
-              </div>
 
-              {/* Per-line-item note (expand/collapse) */}
-              {expandedNotes.has(index) || watchedItems[index]?.notes ? (
-                <div className="mt-3">
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-medium text-muted-foreground">Item Note</label>
-                    {!watchedItems[index]?.notes && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 px-2 text-xs text-muted-foreground"
-                        onClick={() => {
-                          setExpandedNotes(prev => {
-                            const next = new Set(prev);
-                            next.delete(index);
-                            return next;
-                          });
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    )}
-                  </div>
-                  <Textarea
-                    {...register(`items.${index}.notes`)}
-                    placeholder="e.g. Size must be 1m x 2m"
-                    className="min-h-[60px] text-sm"
-                    disabled={createOrderMutation.isPending}
-                  />
+                {/* Row 2: Component selector — full width */}
+                <div>
+                  {!hasComponent ? (
+                    // Empty state: show search button
+                    <button
+                      type="button"
+                      onClick={() => openComponentModal(index)}
+                      className={`w-full flex items-center gap-3 px-4 py-3 rounded-md border text-sm transition-colors hover:bg-accent/50 ${
+                        errors.items?.[index]?.component_id
+                          ? 'border-destructive'
+                          : 'border-input border-dashed'
+                      }`}
+                    >
+                      <Search className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      <span className="text-muted-foreground">
+                        Search for a component...
+                      </span>
+                    </button>
+                  ) : (
+                    // Selected: show rich component info card
+                    <div className="rounded-md border bg-accent/30 px-4 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-3 min-w-0 flex-1">
+                          <Package className="h-5 w-5 text-muted-foreground mt-0.5 flex-shrink-0" />
+                          <div className="min-w-0 space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-mono text-sm font-semibold">
+                                {componentInfo?.internal_code ?? `#${componentId}`}
+                              </span>
+                              {componentInfo?.category_name && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] font-normal"
+                                >
+                                  {componentInfo.category_name}
+                                </Badge>
+                              )}
+                            </div>
+                            {componentInfo?.description && (
+                              <p className="text-sm text-muted-foreground truncate">
+                                {componentInfo.description}
+                              </p>
+                            )}
+                            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                              {componentInfo?.stock_on_hand !== null &&
+                                componentInfo?.stock_on_hand !== undefined && (
+                                  <span
+                                    className={
+                                      componentInfo.stock_on_hand === 0
+                                        ? 'text-destructive'
+                                        : componentInfo.stock_on_hand < 10
+                                          ? 'text-amber-500'
+                                          : ''
+                                    }
+                                  >
+                                    Stock: {componentInfo.stock_on_hand}
+                                  </span>
+                                )}
+                              <span>
+                                {suppliers.length} supplier
+                                {suppliers.length !== 1 ? 's' : ''}
+                              </span>
+                              {selectedSupplier && (
+                                <span className="font-medium">
+                                  R{selectedSupplier.price.toFixed(2)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => openComponentModal(index)}
+                          >
+                            Change
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                            onClick={() => clearComponentSelection(index)}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {errors.items?.[index]?.component_id && !hasComponent && (
+                    <p className="mt-1 text-sm text-destructive">
+                      {errors.items[index]?.component_id?.message}
+                    </p>
+                  )}
                 </div>
-              ) : (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="mt-2 h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-                  onClick={() => {
-                    setExpandedNotes(prev => new Set(prev).add(index));
-                  }}
-                >
-                  <StickyNote className="h-3 w-3 mr-1" />
-                  Add note
-                </Button>
-              )}
-            </CardContent>
-          </Card>
-        ))}
+
+                {/* Row 3: Supplier, Quantity, Customer Order — side by side */}
+                {hasComponent && (
+                  <div className="grid grid-cols-1 sm:grid-cols-[1fr_8rem_1fr] gap-4 items-end">
+                    {/* Supplier */}
+                    <div>
+                      <label
+                        htmlFor={`items.${index}.supplier_component_id`}
+                        className="block text-xs font-medium text-muted-foreground mb-1"
+                      >
+                        Supplier
+                      </label>
+                      <Controller
+                        control={control}
+                        name={`items.${index}.supplier_component_id`}
+                        render={({ field }) => {
+                          return (
+                            <Select
+                              value={field.value?.toString() || ''}
+                              onValueChange={(value) =>
+                                field.onChange(parseInt(value) || 0)
+                              }
+                              disabled={
+                                !componentId ||
+                                suppliersLoading ||
+                                createOrderMutation.isPending
+                              }
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Select a supplier" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {suppliers.map(
+                                  (sc: SupplierComponentFromAPI) => (
+                                    <SelectItem
+                                      key={sc.supplier_component_id}
+                                      value={sc.supplier_component_id.toString()}
+                                    >
+                                      {sc.supplier?.name ||
+                                        'Unknown Supplier'}{' '}
+                                      - R{sc.price.toFixed(2)}
+                                    </SelectItem>
+                                  )
+                                )}
+                              </SelectContent>
+                            </Select>
+                          );
+                        }}
+                      />
+                      {errors.items?.[index]?.supplier_component_id && (
+                        <p className="mt-1 text-sm text-destructive">
+                          {errors.items[index]?.supplier_component_id?.message}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Quantity */}
+                    <div>
+                      <label
+                        htmlFor={`items.${index}.quantity`}
+                        className="block text-xs font-medium text-muted-foreground mb-1"
+                      >
+                        Quantity
+                      </label>
+                      <Controller
+                        control={control}
+                        name={`items.${index}.quantity`}
+                        render={({ field }) => (
+                          <input
+                            type="number"
+                            id={`items.${index}.quantity`}
+                            className={`h-10 w-full rounded-md border ${
+                              errors.items?.[index]?.quantity
+                                ? 'border-destructive'
+                                : 'border-input'
+                            } bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
+                            min="0.01"
+                            step="any"
+                            placeholder="Qty"
+                            value={field.value ?? ''}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              field.onChange(
+                                val === '' ? undefined : parseFloat(val) || 0
+                              );
+                            }}
+                            disabled={createOrderMutation.isPending}
+                          />
+                        )}
+                      />
+                      {errors.items?.[index]?.quantity && (
+                        <p className="mt-1 text-sm text-destructive">
+                          {errors.items[index]?.quantity?.message}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Customer Order */}
+                    <div>
+                      <label
+                        htmlFor={`items.${index}.customer_order_id`}
+                        className="block text-xs font-medium text-muted-foreground mb-1"
+                      >
+                        Customer Order
+                      </label>
+                      <Controller
+                        control={control}
+                        name={`items.${index}.customer_order_id`}
+                        render={({ field }) => (
+                          <ReactSelect
+                            inputId={`customer-order-select-${index}`}
+                            isClearable
+                            isDisabled={
+                              ordersLoading || createOrderMutation.isPending
+                            }
+                            isLoading={ordersLoading}
+                            options={customerOrders}
+                            value={
+                              customerOrders?.find(
+                                (o: any) => o.value === field.value
+                              ) || null
+                            }
+                            onChange={(option: any) =>
+                              field.onChange(option?.value || null)
+                            }
+                            placeholder="Stock Order"
+                            menuPlacement="auto"
+                            classNamePrefix="customer-order-select"
+                            styles={reactSelectStyles}
+                            menuPortalTarget={
+                              typeof document !== 'undefined'
+                                ? document.body
+                                : undefined
+                            }
+                          />
+                        )}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Per-line-item note (expand/collapse) */}
+                {hasComponent &&
+                  (expandedNotes.has(index) || watchedItems[index]?.notes ? (
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-medium text-muted-foreground">
+                          Item Note
+                        </label>
+                        {!watchedItems[index]?.notes && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2 text-xs text-muted-foreground"
+                            onClick={() => {
+                              setExpandedNotes((prev) => {
+                                const next = new Set(prev);
+                                next.delete(index);
+                                return next;
+                              });
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        )}
+                      </div>
+                      <Textarea
+                        {...register(`items.${index}.notes`)}
+                        placeholder="e.g. Size must be 1m x 2m"
+                        className="min-h-[60px] text-sm"
+                        disabled={createOrderMutation.isPending}
+                      />
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        setExpandedNotes((prev) => new Set(prev).add(index));
+                      }}
+                    >
+                      <StickyNote className="h-3 w-3 mr-1" />
+                      Add note
+                    </Button>
+                  ))}
+              </CardContent>
+            </Card>
+          );
+        })}
+
+        {/* Bottom Add Item — always within reach after the last card */}
+        {fields.length >= 2 && (
+          <Button
+            type="button"
+            onClick={addItem}
+            variant="outline"
+            size="sm"
+            className="w-full border-dashed"
+            disabled={createOrderMutation.isPending}
+          >
+            <Plus className="h-4 w-4 mr-1" /> Add Item
+          </Button>
+        )}
       </div>
 
       <div className="pt-4 border-t flex justify-end">
         <Button
           type="submit"
-          disabled={createOrderMutation.isPending || statusLoading || isCheckingDrafts}
+          disabled={
+            createOrderMutation.isPending || statusLoading || isCheckingDrafts
+          }
           className="w-full md:w-auto"
         >
           {(createOrderMutation.isPending || isCheckingDrafts) && (
@@ -1078,6 +1340,14 @@ export function NewPurchaseOrderForm() {
         </Button>
       </div>
 
+      {/* Component Search Modal */}
+      <ComponentSearchModal
+        open={componentModalOpen}
+        onOpenChange={setComponentModalOpen}
+        onSelect={handleComponentSelection}
+        existingComponentIds={existingComponentIds}
+      />
+
       {/* Consolidation Dialog */}
       <ConsolidatePODialog
         open={consolidateDialogOpen}
@@ -1088,4 +1358,4 @@ export function NewPurchaseOrderForm() {
       />
     </form>
   );
-} 
+}

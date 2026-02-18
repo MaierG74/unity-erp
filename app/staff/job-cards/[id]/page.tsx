@@ -43,7 +43,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { JobCardPDFDownload } from '@/components/features/job-cards/JobCardPDF';
+import { JobCardPDFDownload } from '@/components/features/job-cards/JobCardPDFDownload';
 
 type JobCardStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
 type ItemStatus = 'pending' | 'in_progress' | 'completed';
@@ -87,7 +87,7 @@ interface JobCard {
     order_id: number;
     order_number: string;
     customers: {
-      company_name: string;
+      name: string;
     } | null;
   } | null;
 }
@@ -115,7 +115,7 @@ export default function JobCardDetailPage() {
   const [editingQuantity, setEditingQuantity] = useState<number>(0);
 
   // Fetch job card details
-  const { data: jobCard, isLoading: loadingJobCard } = useQuery({
+  const { data: jobCard, isLoading: loadingJobCard, error: jobCardError, refetch: refetchJobCard } = useQuery({
     queryKey: ['jobCard', jobCardId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -123,13 +123,15 @@ export default function JobCardDetailPage() {
         .select(`
           *,
           staff:staff_id(first_name, last_name),
-          orders:order_id(order_id, order_number, customers(company_name))
+          orders:order_id(order_id, order_number, customers(name))
         `)
         .eq('job_card_id', jobCardId)
         .single();
       if (error) throw error;
       return data as JobCard;
     },
+    enabled: Number.isFinite(jobCardId) && jobCardId > 0,
+    retry: 1,
   });
 
   // Fetch job card items
@@ -304,10 +306,17 @@ export default function JobCardDetailPage() {
   if (!jobCard) {
     return (
       <div className="text-center py-8">
-        <p className="text-muted-foreground">Job card not found</p>
-        <Button variant="link" asChild className="mt-2">
-          <Link href="/staff/job-cards">Back to Job Cards</Link>
-        </Button>
+        <p className="text-muted-foreground">
+          {jobCardError ? `Error loading job card: ${jobCardError.message}` : 'Job card not found'}
+        </p>
+        <div className="flex justify-center gap-2 mt-4">
+          <Button variant="outline" size="sm" onClick={() => refetchJobCard()}>
+            Retry
+          </Button>
+          <Button variant="link" size="sm" asChild>
+            <Link href="/staff/job-cards">Back to Job Cards</Link>
+          </Button>
+        </div>
       </div>
     );
   }
@@ -388,10 +397,11 @@ export default function JobCardDetailPage() {
               ? `${jobCard.staff.first_name} ${jobCard.staff.last_name}`
               : 'Unassigned',
             order_number: jobCard.orders?.order_number || null,
-            customer_name: jobCard.orders?.customers?.company_name || null,
+            customer_name: jobCard.orders?.customers?.name || null,
             issue_date: jobCard.issue_date,
             due_date: jobCard.due_date,
             notes: jobCard.notes,
+            status: jobCard.status,
           }}
           items={items.map((item) => ({
             item_id: item.item_id,
@@ -399,6 +409,7 @@ export default function JobCardDetailPage() {
             product_code: item.products?.internal_code || '',
             job_name: item.jobs?.name || 'Unknown Job',
             quantity: item.quantity,
+            completed_quantity: item.completed_quantity,
             piece_rate: item.piece_rate,
           }))}
           companyInfo={companyInfo}
@@ -438,7 +449,7 @@ export default function JobCardDetailPage() {
             )}
             {jobCard.orders?.customers && (
               <p className="text-sm text-muted-foreground">
-                {jobCard.orders.customers.company_name}
+                {jobCard.orders.customers.name}
               </p>
             )}
           </CardContent>
@@ -466,7 +477,7 @@ export default function JobCardDetailPage() {
               {completedItems} / {totalItems} items
             </p>
             <p className="text-sm text-muted-foreground">
-              ${completedValue.toFixed(2)} / ${totalValue.toFixed(2)}
+              R {completedValue.toFixed(2)} / R {totalValue.toFixed(2)}
             </p>
           </CardContent>
         </Card>
@@ -545,10 +556,10 @@ export default function JobCardDetailPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      ${item.piece_rate.toFixed(2)}
+                      R {item.piece_rate.toFixed(2)}
                     </TableCell>
                     <TableCell className="text-right font-medium">
-                      ${itemTotal.toFixed(2)}
+                      R {itemTotal.toFixed(2)}
                     </TableCell>
                     <TableCell>
                       <Badge variant={itemStatus.variant}>{itemStatus.label}</Badge>
@@ -593,9 +604,9 @@ export default function JobCardDetailPage() {
           <div className="mt-4 pt-4 border-t flex justify-end">
             <div className="text-right">
               <div className="text-sm text-muted-foreground">Total Value</div>
-              <div className="text-2xl font-bold">${totalValue.toFixed(2)}</div>
+              <div className="text-2xl font-bold">R {totalValue.toFixed(2)}</div>
               <div className="text-sm text-muted-foreground">
-                Earned: <span className="text-green-500 font-medium">${completedValue.toFixed(2)}</span>
+                Earned: <span className="text-green-500 font-medium">R {completedValue.toFixed(2)}</span>
               </div>
             </div>
           </div>

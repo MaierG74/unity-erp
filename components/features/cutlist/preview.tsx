@@ -44,6 +44,12 @@ const DEFAULT_COLOR: ColorEntry = {
 const EDGE_BAND_COLOR = '#f97316'; // orange-500
 const EDGE_BAND_THICKNESS = 3;
 
+/** Approximate width of a character at a given font size (SVG units). */
+const CHAR_WIDTH_RATIO = 0.6;
+
+/** Minimum font size below which we hide the label entirely. */
+const MIN_LABEL_FONT = 5;
+
 export function SheetPreview({
   sheetWidth,
   sheetLength,
@@ -71,8 +77,10 @@ export function SheetPreview({
   const widthPx = Math.max(50, sheetWidth * scale + padding * 2);
   const heightPx = Math.max(50, sheetLength * scale + padding * 2);
 
-  // Font sizes based on scale
-  const dimFont = Math.max(7, Math.min(9, 8 * scale));
+  // Font sizes — larger range for interactive mode (zoom dialog)
+  const dimFont = interactive
+    ? Math.max(9, Math.min(12, 10 * scale))
+    : Math.max(7, Math.min(9, 8 * scale));
 
   // Sheet origin in SVG coordinates
   const sheetX = padding;
@@ -175,6 +183,19 @@ export function SheetPreview({
             strokeWidth="0.5"
           />
         </pattern>
+
+        {/* Per-part clipPaths for text overflow safety */}
+        {layout.placements.map((pl, i) => {
+          const cx = sheetX + pl.x * scale;
+          const cy = sheetY + pl.y * scale;
+          const cw = pl.w * scale;
+          const ch = pl.h * scale;
+          return (
+            <clipPath key={i} id={`${pid}-clip-${i}`}>
+              <rect x={cx} y={cy} width={cw} height={ch} />
+            </clipPath>
+          );
+        })}
       </defs>
 
       {/* Sheet background with waste pattern */}
@@ -238,6 +259,22 @@ export function SheetPreview({
 
         const displayLabel = pl.label || pl.part_id;
 
+        // Per-part adaptive font sizing for the center label.
+        // Scale down if the label text would overflow the part rect.
+        let labelFont = dimFont;
+        if (showLabel) {
+          const textWidthEst = dimFont * CHAR_WIDTH_RATIO * displayLabel.length;
+          const textHeightEst = dimFont * 1.2;
+          const availW = w - 8; // 4px padding each side
+          const availH = h - 8;
+          if (textWidthEst > availW || textHeightEst > availH) {
+            const scaleW = availW > 0 ? availW / (CHAR_WIDTH_RATIO * displayLabel.length) : dimFont;
+            const scaleH = availH > 0 ? availH / 1.2 : dimFont;
+            labelFont = Math.min(dimFont, scaleW, scaleH);
+          }
+        }
+        const showLabelFinal = showLabel && labelFont >= MIN_LABEL_FONT;
+
         // Color: use colorMap if provided, else default blue
         const color = colorMap
           ? getPartColor(colorMap, pl.part_id)
@@ -262,6 +299,7 @@ export function SheetPreview({
         return (
           <g
             key={i}
+            clipPath={`url(#${pid}-clip-${i})`}
             style={{
               cursor: interactive ? 'pointer' : undefined,
               transition: 'opacity 150ms ease',
@@ -385,12 +423,12 @@ export function SheetPreview({
               </text>
             )}
 
-            {/* Part label (centered) — hidden in thumbnail mode */}
-            {showLabel && (
+            {/* Part label (centered) — hidden in thumbnail mode, adaptively scaled */}
+            {showLabelFinal && (
               <text
                 x={centerX}
                 y={centerY}
-                fontSize={dimFont}
+                fontSize={labelFont}
                 textAnchor="middle"
                 dominantBaseline="middle"
                 fill={color.text}

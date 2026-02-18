@@ -46,6 +46,7 @@
   - Orders layout: `app/orders/layout.tsx`
   - A bypass page also exists: `app/bypass/orders/page.tsx`
   - Each table row is hover/focus interactive and navigates directly to the detail view (chevron indicator replaces the previous "View Details" text link).
+  - Delivery Date is inline-editable from the list table: click the date (or "Set date"), choose a calendar day, and the UI updates `orders.delivery_date` via `PATCH /api/orders/[orderId]` (organization-scoped access enforced server-side). The popover closes immediately on selection while the list applies an optimistic date update for snappier feedback, then rolls back with a destructive toast if the server rejects the change.
   - Attachment counts render as pill buttons with improved hover/focus treatment; Upload and Delete controls stop event propagation so row clicks do not trigger unintentionally.
   - The delete action is now an icon-only circular control (`aria-label` supplied) to declutter the actions column while keeping the tooltip/title.
 

@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { ArrowLeft, File, Download, Paperclip, Package, Layers, Wrench, Cog, Search, PaintBucket, PlusCircle, Check, Plus, Loader2, AlertCircle, ShoppingCart, ChevronDown, CheckCircle, Trash, FilePlus, Terminal, ChevronRight, Info, ShoppingBag, Users, RotateCcw, ChevronUp, Warehouse, Printer, Edit, Save, X, ChevronsUpDown } from 'lucide-react';
+import { ArrowLeft, File, Download, Paperclip, Package, Layers, Wrench, Cog, Search, PaintBucket, PlusCircle, Check, Plus, Loader2, AlertCircle, ShoppingCart, ChevronDown, CheckCircle, Trash, FilePlus, Terminal, ChevronRight, Info, ShoppingBag, Users, RotateCcw, ChevronUp, Warehouse, Printer, Edit, Save, X, ChevronsUpDown, ClipboardList } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
@@ -31,6 +31,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { IssueStockTab } from '@/components/features/orders/IssueStockTab';
 import { OrderDocumentsTab } from '@/components/features/orders/OrderDocumentsTab';
 import { ProcurementTab } from '@/components/features/orders/ProcurementTab';
+import { JobCardsTab } from '@/components/features/orders/JobCardsTab';
 import { ConsolidatePODialog, SupplierWithDrafts, ExistingDraftPO } from '@/components/features/purchasing/ConsolidatePODialog';
 
 type OrderDetailPageProps = {
@@ -2452,9 +2453,14 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   // Mutation for updating order
   const updateOrderMutation = useMutation({
     mutationFn: async (data: { customer_id?: number; order_number?: string | null; delivery_date?: string | null }) => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) {
+        throw new Error('Session expired. Please sign in again.');
+      }
       const response = await fetch(`/api/orders/${orderId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify(data),
       });
       if (!response.ok) {
@@ -2465,11 +2471,46 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderActivity', orderId] });
       toast.success('Order updated successfully');
     },
     onError: (error: Error) => {
       toast.error(`Failed to update order: ${error.message}`);
     },
+  });
+
+  // Activity log
+  const [activityExpanded, setActivityExpanded] = useState(false);
+  const { data: activityLog } = useQuery({
+    queryKey: ['orderActivity', orderId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('order_activity')
+        .select('id, action_type, description, metadata, performed_by, created_at')
+        .eq('order_id', orderId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+
+      const userIds = [...new Set((data || []).map(a => a.performed_by).filter(Boolean))] as string[];
+      let profileMap: Record<string, string> = {};
+      if (userIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, display_name, first_name, last_name')
+          .in('id', userIds);
+        if (profiles) {
+          profileMap = Object.fromEntries(
+            profiles.map((p: any) => [p.id, p.display_name || [p.first_name, p.last_name].filter(Boolean).join(' ') || 'Unknown'])
+          );
+        }
+      }
+
+      return (data || []).map(a => ({
+        ...a,
+        performer_name: a.performed_by ? (profileMap[a.performed_by] || 'Unknown') : 'System',
+      }));
+    },
+    enabled: !!orderId,
   });
 
   // Initialize edit form values when order loads
@@ -3009,6 +3050,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
           <TabsTrigger value="issue-stock">Issue Stock</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
           <TabsTrigger value="procurement">Procurement</TabsTrigger>
+            <TabsTrigger value="job-cards">Job Cards</TabsTrigger>
         </TabsList>
         
         <TabsContent value="details" className="space-y-6">
@@ -3167,6 +3209,48 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                   </div>
                 </div>
               </div>
+
+              {/* Activity Log - Collapsible */}
+              {activityLog && activityLog.length > 0 && (
+                <div className="pt-2 border-t">
+                  <button
+                    onClick={() => setActivityExpanded(!activityExpanded)}
+                    className="w-full flex items-center justify-between text-sm font-medium hover:bg-muted/50 rounded-md py-1 px-1 -mx-1"
+                  >
+                    <span className="flex items-center gap-2">
+                      <ClipboardList className="h-4 w-4" />
+                      Activity Log
+                      <Badge variant="secondary" className="text-[10px] h-5">
+                        {activityLog.length}
+                      </Badge>
+                    </span>
+                    {activityExpanded ? (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </button>
+
+                  {activityExpanded && (
+                    <div className="mt-2 space-y-2 max-h-48 overflow-y-auto">
+                      {activityLog.map((entry) => (
+                        <div
+                          key={entry.id}
+                          className="text-xs p-2 rounded-md border bg-muted/30"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-medium">{entry.performer_name}</span>
+                            <span className="text-muted-foreground">
+                              {format(new Date(entry.created_at), 'PP · p')}
+                            </span>
+                          </div>
+                          <p className="text-muted-foreground mt-1">{entry.description}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
           </CardContent>
         </Card>
 
@@ -4052,6 +4136,10 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
 
         <TabsContent value="procurement" className="space-y-4">
           <ProcurementTab orderId={orderId} />
+        </TabsContent>
+
+        <TabsContent value="job-cards" className="space-y-4">
+          <JobCardsTab orderId={orderId} />
         </TabsContent>
       </Tabs>
 

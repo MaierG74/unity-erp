@@ -305,6 +305,8 @@ interface PartRowProps {
   onUpdate: (index: number, updates: Partial<CompactPart>) => void;
   onDelete: (index: number) => void;
   onDuplicate: (index: number) => void;
+  onApplyMaterialToAll: (index: number) => void;
+  onApplyEdgingToAll: (index: number) => void;
   onOpenCustomLamination: (partId: string, initialConfig?: LaminationConfig) => void;
   onQuickAddActivate?: () => void;
 }
@@ -319,6 +321,8 @@ const PartRow = memo(function PartRow({
   onUpdate,
   onDelete,
   onDuplicate,
+  onApplyMaterialToAll,
+  onApplyEdgingToAll,
   onOpenCustomLamination,
   onQuickAddActivate,
 }: PartRowProps) {
@@ -834,6 +838,19 @@ const PartRow = memo(function PartRow({
                 Duplicate
               </DropdownMenuItem>
               <DropdownMenuSeparator />
+              {part.material_id && (
+                <DropdownMenuItem onClick={() => onApplyMaterialToAll(index)}>
+                  <Copy className="mr-2 h-4 w-4" />
+                  Apply material to all rows
+                </DropdownMenuItem>
+              )}
+              {part.edging_material_id && (
+                <DropdownMenuItem onClick={() => onApplyEdgingToAll(index)}>
+                  <Copy className="mr-2 h-4 w-4" />
+                  Apply edging to all rows
+                </DropdownMenuItem>
+              )}
+              {(part.material_id || part.edging_material_id) && <DropdownMenuSeparator />}
               <DropdownMenuItem
                 onClick={() => onDelete(index)}
                 className="text-destructive focus:text-destructive"
@@ -950,6 +967,34 @@ export const CompactPartsTable = memo(forwardRef<CompactPartsTableRef, CompactPa
     [parts, onPartsChange]
   );
 
+  // Apply material from one row to all other rows
+  const handleApplyMaterialToAll = useCallback(
+    (index: number) => {
+      const sourcePart = parts[index];
+      if (!sourcePart?.material_id) return;
+      const newParts = parts.map((p) => ({
+        ...p,
+        material_id: sourcePart.material_id,
+      }));
+      onPartsChange(newParts);
+    },
+    [parts, onPartsChange]
+  );
+
+  // Apply edging material from one row to all other rows
+  const handleApplyEdgingToAll = useCallback(
+    (index: number) => {
+      const sourcePart = parts[index];
+      if (!sourcePart?.edging_material_id) return;
+      const newParts = parts.map((p) => ({
+        ...p,
+        edging_material_id: sourcePart.edging_material_id,
+      }));
+      onPartsChange(newParts);
+    },
+    [parts, onPartsChange]
+  );
+
   // Quick-add update handler
   const handleQuickAddUpdate = useCallback(
     (_index: number, updates: Partial<CompactPart>) => {
@@ -1003,6 +1048,8 @@ export const CompactPartsTable = memo(forwardRef<CompactPartsTableRef, CompactPa
               onUpdate={handleUpdate}
               onDelete={handleDelete}
               onDuplicate={handleDuplicate}
+              onApplyMaterialToAll={handleApplyMaterialToAll}
+              onApplyEdgingToAll={handleApplyEdgingToAll}
               onOpenCustomLamination={onOpenCustomLamination}
             />
           ))}
@@ -1018,6 +1065,8 @@ export const CompactPartsTable = memo(forwardRef<CompactPartsTableRef, CompactPa
             onUpdate={handleQuickAddUpdate}
             onDelete={() => {}}
             onDuplicate={() => {}}
+            onApplyMaterialToAll={() => {}}
+            onApplyEdgingToAll={() => {}}
             onOpenCustomLamination={onOpenCustomLamination}
             onQuickAddActivate={handleQuickAddActivate}
           />

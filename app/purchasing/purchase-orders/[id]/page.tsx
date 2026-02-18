@@ -23,7 +23,7 @@ import { EmailActivityCard } from '@/components/features/emails/EmailActivityCar
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertCircle, ArrowLeft, Loader2, CheckCircle2, Mail, Pencil, Save, X, Trash2, ChevronDown, ChevronRight, Paperclip, Ban, XCircle } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Loader2, CheckCircle2, Mail, Pencil, Save, X, Trash2, ChevronDown, ChevronRight, Paperclip, Ban, XCircle, ClipboardList } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -33,6 +33,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import styles from './page.module.css';
 import { fetchPOAttachments, POAttachment } from '@/lib/db/purchase-order-attachments';
 import POAttachmentManager from '@/components/features/purchasing/POAttachmentManager';
+import { ForOrderEditPopover } from '@/components/features/purchasing/ForOrderEditPopover';
 // import { sendPurchaseOrderEmail } from '@/lib/email'; // not used here; email is sent via API route
 
 // Status badge component
@@ -784,6 +785,41 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     enabled: !!id,
   });
 
+  // Fetch PO activity log
+  const [activityExpanded, setActivityExpanded] = useState(false);
+  const { data: activityLog } = useQuery({
+    queryKey: ['purchaseOrderActivity', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('purchase_order_activity')
+        .select('id, action_type, description, metadata, performed_by, created_at')
+        .eq('purchase_order_id', id)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+
+      // Look up profile display names for unique performed_by user IDs
+      const userIds = [...new Set((data || []).map(a => a.performed_by).filter(Boolean))] as string[];
+      let profileMap: Record<string, string> = {};
+      if (userIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, display_name, first_name, last_name')
+          .in('id', userIds);
+        if (profiles) {
+          profileMap = Object.fromEntries(
+            profiles.map(p => [p.id, p.display_name || [p.first_name, p.last_name].filter(Boolean).join(' ') || 'Unknown'])
+          );
+        }
+      }
+
+      return (data || []).map(a => ({
+        ...a,
+        performer_name: a.performed_by ? (profileMap[a.performed_by] || 'Unknown') : 'System',
+      }));
+    },
+    enabled: !!id,
+  });
+
   // Fetch default CC email from company settings
   const { data: companySettings } = useQuery({
     queryKey: ['companySettings'],
@@ -1336,6 +1372,21 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           .eq('purchase_order_id', id);
       }
 
+      // Log activity for cancelled lines
+      const { data: { user } } = await supabase.auth.getUser();
+      const cancelledDescriptions = uniqueOrderIds.map(oid => {
+        const so = purchaseOrder?.supplier_orders?.find(o => o.order_id === oid);
+        const code = so?.supplier_component?.component?.internal_code || `#${oid}`;
+        return code;
+      });
+      await supabase.from('purchase_order_activity').insert({
+        purchase_order_id: Number(id),
+        action_type: 'line_cancelled',
+        description: `Cancelled line${uniqueOrderIds.length > 1 ? 's' : ''}: ${cancelledDescriptions.join(', ')}${reason?.trim() ? ` — "${reason.trim()}"` : ''}`,
+        metadata: { supplier_order_ids: uniqueOrderIds, reason: reason?.trim() || null },
+        performed_by: user?.id || null,
+      });
+
       return { emailResult, emailError, cancelledOrderIds: uniqueOrderIds };
     },
     onSuccess: (result: { emailResult?: any; emailError?: string | null; cancelledOrderIds?: number[] }) => {
@@ -1344,6 +1395,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] });
       queryClient.invalidateQueries({ queryKey: ['purchaseOrderEmails', id] });
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrderActivity', id] });
       setCancelLineItemIds([]);
       setCancelLineReason('');
       if (Array.isArray(result?.cancelledOrderIds) && result.cancelledOrderIds.length > 0) {
@@ -1575,11 +1627,34 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
         }
       }
 
+      // Log activity
+      const { data: { user } } = await supabase.auth.getUser();
+      const descriptions: string[] = [];
+      if (data.notes !== undefined) descriptions.push('Updated notes');
+      if (data.lineUpdates && data.lineUpdates.length > 0) {
+        const qtyChanges = data.lineUpdates.map(u => {
+          const so = purchaseOrder?.supplier_orders?.find(o => o.order_id === u.orderId);
+          const code = so?.supplier_component?.component?.internal_code || `#${u.orderId}`;
+          return `${code}: ${so?.order_quantity} → ${u.quantity}`;
+        });
+        descriptions.push(`Changed quantities: ${qtyChanges.join(', ')}`);
+      }
+      if (descriptions.length > 0) {
+        await supabase.from('purchase_order_activity').insert({
+          purchase_order_id: Number(id),
+          action_type: data.lineUpdates?.length ? 'quantity_changed' : 'notes_updated',
+          description: descriptions.join('. '),
+          metadata: { notes_changed: data.notes !== undefined, line_updates: data.lineUpdates || [] },
+          performed_by: user?.id || null,
+        });
+      }
+
       return true;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['purchaseOrder', id] });
       queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrderActivity', id] });
       setIsEditMode(false);
       setEditedQuantities({});
       toast({
@@ -1831,6 +1906,11 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const isApproved = purchaseOrder.status?.status_name === 'Approved';
   const isCancelled = purchaseOrder.status?.status_name === 'Cancelled';
 
+  // Email status helpers
+  const hasSentPO = emailHistory?.some(e => e.email_type === 'po_send' && e.status === 'sent');
+  const hasEmailIssues = emailHistory?.some(e => e.delivery_status === 'bounced' || e.delivery_status === 'complained' || e.status === 'failed');
+  const hasOutstandingItems = purchaseOrder.supplier_orders?.some(o => (o.order_quantity - (o.total_received || 0)) > 0);
+
   // Calculate totals (exclude cancelled line items)
   const activeOrders = purchaseOrder.supplier_orders?.filter(o => o.status_id !== 4) || [];
   const totalItems = activeOrders.reduce((sum, order) => sum + order.order_quantity, 0);
@@ -1859,6 +1939,18 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                 {purchaseOrder.q_number || `PO #${purchaseOrder.purchase_order_id}`}
               </h1>
               <StatusBadge status={getOrderStatus(purchaseOrder)} />
+              {isApproved && hasEmailIssues && (
+                <Badge variant="destructive" className="text-[10px] h-5 gap-1">
+                  <AlertCircle className="h-3 w-3" />
+                  Email Issue
+                </Badge>
+              )}
+              {isApproved && hasSentPO && !hasEmailIssues && (
+                <Badge variant="secondary" className="text-[10px] h-5 gap-1 bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300">
+                  <Mail className="h-3 w-3" />
+                  Emailed
+                </Badge>
+              )}
               <span className="text-muted-foreground">•</span>
               <span className="text-sm font-medium text-muted-foreground">
                 {Array.from(new Set(
@@ -2207,25 +2299,48 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                         </div>
                       )}
 
-                      {/* Follow-up button */}
-                      {purchaseOrder.supplier_orders?.some(o => 
-                        (o.order_quantity - (o.total_received || 0)) > 0
-                      ) && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-full text-blue-600 border-blue-300 hover:bg-blue-50"
-                          onClick={sendFollowUpEmail}
-                          disabled={sendingFollowUp}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Activity Log - Collapsible */}
+              {activityLog && activityLog.length > 0 && (
+                <div className="pt-2 border-t">
+                  <button
+                    onClick={() => setActivityExpanded(!activityExpanded)}
+                    className="w-full flex items-center justify-between text-sm font-medium hover:bg-muted/50 rounded-md py-1 px-1 -mx-1"
+                  >
+                    <span className="flex items-center gap-2">
+                      <ClipboardList className="h-4 w-4" />
+                      Activity Log
+                      <Badge variant="secondary" className="text-[10px] h-5">
+                        {activityLog.length}
+                      </Badge>
+                    </span>
+                    {activityExpanded ? (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </button>
+
+                  {activityExpanded && (
+                    <div className="mt-2 space-y-2 max-h-48 overflow-y-auto">
+                      {activityLog.map((entry) => (
+                        <div
+                          key={entry.id}
+                          className="text-xs p-2 rounded-md border bg-muted/30"
                         >
-                          {sendingFollowUp ? (
-                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          ) : (
-                            <Mail className="h-4 w-4 mr-2" />
-                          )}
-                          Send Follow-up
-                        </Button>
-                      )}
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-medium">{entry.performer_name}</span>
+                            <span className="text-muted-foreground">
+                              {format(new Date(entry.created_at), 'PP · p')}
+                            </span>
+                          </div>
+                          <p className="text-muted-foreground mt-1">{entry.description}</p>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -2287,14 +2402,6 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                   Bulk Receive
                 </Button>
                 <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleOpenEmailDialog}
-                >
-                  <Mail className="h-4 w-4 mr-2" />
-                  Send Supplier Emails
-                </Button>
-                <Button
                   variant="destructive"
                   size="sm"
                   onClick={() => setCancelLineItemIds(selectedLineItemIds)}
@@ -2353,106 +2460,13 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                           <TableCell className={cn(isLineCancelled && "line-through")}>{component?.description || 'No description'}</TableCell>
                           <TableCell className={cn(isLineCancelled && "line-through")}>{supplier?.name || 'Unknown'}</TableCell>
                           <TableCell>
-                            {(() => {
-                              const orderLinks = customerOrderLinks.filter(link => link.customer_order);
-                              const stockOnly = customerOrderLinks.filter(link => !link.customer_order && Number(link.quantity_for_stock) > 0);
-                              const totalStock = customerOrderLinks.reduce((sum, link) => sum + Number(link.quantity_for_stock || 0), 0);
-                              
-                              if (orderLinks.length === 0 && stockOnly.length === 0) {
-                                return <span className="text-muted-foreground text-sm">—</span>;
-                              }
-                              
-                              // Single order - simple display
-                              if (orderLinks.length === 1 && totalStock === 0) {
-                                const link = orderLinks[0];
-                                return (
-                                  <Link
-                                    href={`/orders/${link.customer_order!.order_id}`}
-                                    target="_blank"
-                                    className="text-blue-600 hover:underline text-sm"
-                                  >
-                                    {link.customer_order!.order_number || link.customer_order!.order_id}
-                                  </Link>
-                                );
-                              }
-                              
-                              // Single order with stock allocation
-                              if (orderLinks.length === 1 && totalStock > 0) {
-                                const link = orderLinks[0];
-                                return (
-                                  <div className="flex items-center gap-1">
-                                    <Link
-                                      href={`/orders/${link.customer_order!.order_id}`}
-                                      target="_blank"
-                                      className="text-blue-600 hover:underline text-sm"
-                                    >
-                                      {link.customer_order!.order_number || link.customer_order!.order_id}
-                                    </Link>
-                                    <span className="text-xs text-muted-foreground">
-                                      ({link.quantity_for_order})
-                                    </span>
-                                    <Badge variant="outline" className="text-xs">
-                                      +{totalStock} stock
-                                    </Badge>
-                                  </div>
-                                );
-                              }
-                              
-                              // Stock only
-                              if (orderLinks.length === 0 && totalStock > 0) {
-                                return (
-                                  <Badge variant="outline" className="text-xs">
-                                    Stock: {totalStock}
-                                  </Badge>
-                                );
-                              }
-                              
-                              // Multiple orders - use popover
-                              return (
-                                <Popover>
-                                  <PopoverTrigger asChild>
-                                    <Button variant="ghost" size="sm" className="h-auto py-1 px-2 text-sm">
-                                      <span className="text-blue-600">
-                                        {orderLinks.length} orders
-                                      </span>
-                                      {totalStock > 0 && (
-                                        <Badge variant="outline" className="ml-1 text-xs">
-                                          +{totalStock}
-                                        </Badge>
-                                      )}
-                                      <ChevronDown className="ml-1 h-3 w-3" />
-                                    </Button>
-                                  </PopoverTrigger>
-                                  <PopoverContent className="w-auto p-2" align="start">
-                                    <div className="space-y-1">
-                                      <p className="text-xs font-medium text-muted-foreground mb-2">
-                                        Allocated to:
-                                      </p>
-                                      {orderLinks.map((link) => (
-                                        <div key={link.id} className="flex items-center justify-between gap-4 text-sm">
-                                          <Link
-                                            href={`/orders/${link.customer_order!.order_id}`}
-                                            target="_blank"
-                                            className="text-blue-600 hover:underline"
-                                          >
-                                            {link.customer_order!.order_number || link.customer_order!.order_id}
-                                          </Link>
-                                          <span className="text-muted-foreground">
-                                            {link.quantity_for_order} units
-                                          </span>
-                                        </div>
-                                      ))}
-                                      {totalStock > 0 && (
-                                        <div className="flex items-center justify-between gap-4 text-sm border-t pt-1 mt-1">
-                                          <span className="text-muted-foreground">Stock</span>
-                                          <span className="text-muted-foreground">{totalStock} units</span>
-                                        </div>
-                                      )}
-                                    </div>
-                                  </PopoverContent>
-                                </Popover>
-                              );
-                            })()}
+                            <ForOrderEditPopover
+                              supplierOrderId={order.order_id}
+                              purchaseOrderId={id}
+                              orderQuantity={order.order_quantity}
+                              customerOrderLinks={customerOrderLinks}
+                              disabled={isLineCancelled || (order.total_received >= order.order_quantity) || isCancelled}
+                            />
                           </TableCell>
                           <TableCell className="text-right">R{price.toFixed(2)}</TableCell>
                           <TableCell className="text-right">
@@ -2977,9 +2991,27 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                 onClick={handleOpenEmailDialog}
                 disabled={sendEmailMutation.isPending || emailDialogLoading}
               >
-                {sendEmailMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                Send Supplier Emails
+                {sendEmailMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Mail className="h-4 w-4 mr-2" />
+                )}
+                {hasSentPO ? 'Resend PO to Supplier' : 'Email PO to Supplier'}
               </Button>
+              {hasOutstandingItems && (
+                <Button
+                  variant="outline"
+                  onClick={sendFollowUpEmail}
+                  disabled={sendingFollowUp}
+                >
+                  {sendingFollowUp ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Mail className="h-4 w-4 mr-2" />
+                  )}
+                  Send Follow-up
+                </Button>
+              )}
               <Button
                 onClick={handleSubmitReceipts}
                 disabled={receiptMutation.isPending || Object.keys(receiptQuantities).length === 0}

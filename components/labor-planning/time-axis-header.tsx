@@ -9,6 +9,8 @@ interface TimeAxisHeaderProps {
   endMinutes: number;
   showMinorTicks?: boolean;
   timelineWidth?: number;
+  /** Left offset (px) so header grid lines align with lane timelines. */
+  staffColumnOffset?: number;
 }
 
 export function TimeAxisHeader({
@@ -17,6 +19,7 @@ export function TimeAxisHeader({
   endMinutes,
   showMinorTicks = true,
   timelineWidth,
+  staffColumnOffset = 120,
 }: TimeAxisHeaderProps) {
   const totalMinutes = endMinutes - startMinutes;
   const visibleMarkers = showMinorTicks ? markers : markers.filter((marker) => marker.isMajor);
@@ -37,8 +40,11 @@ export function TimeAxisHeader({
         </span>
       </div>
       <div
-        className="relative h-8 pointer-events-none select-none ml-[120px]"
-        style={useFixedWidth ? { width: timelineWidth } : undefined}
+        className="relative h-8 pointer-events-none select-none"
+        style={{
+          marginLeft: staffColumnOffset,
+          ...(useFixedWidth ? { width: timelineWidth } : {}),
+        }}
       >
         {visibleMarkers.map((marker) => {
           const pos = toPosition(marker.minutes);

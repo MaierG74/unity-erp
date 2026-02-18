@@ -25,7 +25,7 @@ export const useAuth = () => {
 const publicRoutes = ['/login', '/forgot-password', '/reset-password', '/bypass', '/bypass/orders', '/'];
 
 // Public routes with dynamic segments (patterns) - accessible without auth
-const publicPatternRoutes = ['/supplier-response/[token]'];
+const publicPatternRoutes = ['/supplier-response/[token]', '/scan/jc/[id]'];
 
 // Development bypass routes - these routes will be accessible without authentication in development mode
 const devBypassRoutes = ['/orders', '/orders/new', '/orders/[orderId]', '/quotes', '/quotes/[id]'];

@@ -160,11 +160,39 @@ export function StaffLaneList({
         }
       }
 
-      // Create the job card
+      const orderId = typeof selectedAssignment.orderId === 'number' ? selectedAssignment.orderId : null;
+
+      // Check for existing unassigned job card item for this order + job.
+      // If found, we move it to the new staff card instead of creating a duplicate.
+      let existingItem: { item_id: number; job_card_id: number; quantity: number; piece_rate: number | null; product_id: number | null } | null = null;
+      if (orderId && jobId) {
+        const { data: unassignedCards } = await supabase
+          .from('job_cards')
+          .select('job_card_id')
+          .eq('order_id', orderId)
+          .is('staff_id', null)
+          .eq('status', 'pending');
+
+        if (unassignedCards && unassignedCards.length > 0) {
+          const cardIds = unassignedCards.map(c => c.job_card_id);
+          const { data: matchingItems } = await supabase
+            .from('job_card_items')
+            .select('item_id, job_card_id, quantity, piece_rate, product_id')
+            .in('job_card_id', cardIds)
+            .eq('job_id', jobId)
+            .limit(1);
+
+          if (matchingItems && matchingItems.length > 0) {
+            existingItem = matchingItems[0];
+          }
+        }
+      }
+
+      // Create the staff-assigned job card
       const { data: jobCardData, error: jobCardError } = await supabase
         .from('job_cards')
         .insert({
-          order_id: typeof selectedAssignment.orderId === 'number' ? selectedAssignment.orderId : null,
+          order_id: orderId,
           staff_id: parseInt(selectedLane.id, 10),
           issue_date: selectedAssignment.assignmentDate || new Date().toISOString().split('T')[0],
           status: 'pending',
@@ -176,8 +204,28 @@ export function StaffLaneList({
       if (jobCardError) throw jobCardError;
       if (!jobCardData) throw new Error('Failed to create job card');
 
-      // Create job card item (only if we have valid job data)
-      if (jobId || productId) {
+      if (existingItem) {
+        // Move the existing unassigned item to the new staff card
+        await supabase
+          .from('job_card_items')
+          .update({ job_card_id: jobCardData.job_card_id })
+          .eq('item_id', existingItem.item_id);
+
+        // Clean up the empty unassigned card if no items remain
+        const { data: remaining } = await supabase
+          .from('job_card_items')
+          .select('item_id')
+          .eq('job_card_id', existingItem.job_card_id)
+          .limit(1);
+
+        if (!remaining || remaining.length === 0) {
+          await supabase
+            .from('job_cards')
+            .delete()
+            .eq('job_card_id', existingItem.job_card_id);
+        }
+      } else if (jobId || productId) {
+        // No existing item to move — create a new one
         const { error: itemError } = await supabase
           .from('job_card_items')
           .insert({
@@ -203,7 +251,7 @@ export function StaffLaneList({
           .eq('assignment_id', parseInt(selectedAssignment.id, 10));
       }
 
-      toast.success('Job card created successfully');
+      toast.success('Job card issued successfully');
       setSelectedAssignment(null);
       setSelectedLane(null);
 
@@ -366,6 +414,7 @@ export function StaffLaneList({
                 return (
                   <div
                     key={assignment.id}
+                    data-job-key={assignment.jobKey}
                     title={`${assignment.label}\n${minutesToClock(assignment.startMinutes)} – ${minutesToClock(assignment.endMinutes)}\nOrder: ${assignment.orderNumber || 'N/A'}\nClick for details`}
                     className={cn(
                       'absolute top-1 flex items-center rounded-md border px-2 text-xs font-medium text-white shadow-sm cursor-pointer hover:brightness-110 transition-all',
@@ -510,7 +559,7 @@ export function StaffLaneList({
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-4">
+              <div className="flex justify-end gap-2 pt-4 pb-1">
                 <Button
                   variant="outline"
                   size="sm"

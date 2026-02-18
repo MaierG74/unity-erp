@@ -799,8 +799,8 @@ function JobRow({
 }) {
   return (
     <>
-      <TableRow className="hover:bg-muted/20">
-        <TableCell className="py-2">
+      <TableRow className="hover:bg-muted/20 cursor-pointer" onClick={onEdit}>
+        <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
           <button
             onClick={onToggleExpanded}
             className="p-0.5 hover:bg-muted rounded transition-colors"
@@ -815,26 +815,22 @@ function JobRow({
         </TableCell>
         <TableCell className="py-2">
           <div className="flex items-center gap-2">
-            <button
-              onClick={onEdit}
-              className="font-medium text-sm hover:underline text-left"
-              title="Open job details"
-            >
+            <span className="font-medium text-sm">
               {job.name}
-            </button>
+            </span>
           </div>
           {job.description && (
             <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{job.description}</p>
           )}
         </TableCell>
-        <TableCell className="py-2">
+        <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
           <EditableRateCell
             value={job.currentHourlyRate}
             suffix="/hr"
             onSave={(v) => onSaveHourlyRate(job.job_id, v)}
           />
         </TableCell>
-        <TableCell className="py-2">
+        <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
           <EditableRateCell
             value={job.currentPieceRate}
             suffix="/pc"
@@ -856,21 +852,16 @@ function JobRow({
         <TableCell className="py-2 text-sm text-muted-foreground">
           {formatEstTime(job.estimated_minutes, job.time_unit)}
         </TableCell>
-        <TableCell className="py-2 text-right">
-          <div className="flex items-center justify-end gap-1">
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit} title="Edit job">
-              <ExternalLink className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-destructive hover:text-destructive"
-              onClick={onDelete}
-              title="Delete job"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
-          </div>
+        <TableCell className="py-2 text-right" onClick={(e) => e.stopPropagation()}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-destructive hover:text-destructive"
+            onClick={onDelete}
+            title="Delete job"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
         </TableCell>
       </TableRow>
 

@@ -18,6 +18,8 @@ export interface DurationOptions {
 export interface SnapOptions {
   increments?: number[];
   defaultIncrement?: number;
+  /** Hard ceiling — snap will never exceed this value (default 15). */
+  maxIncrement?: number;
 }
 
 export interface UnscheduledStateOptions extends DurationOptions {
@@ -100,12 +102,13 @@ export function chooseSnapIncrement(durationMinutes: number, options: SnapOption
   const fallback = options.defaultIncrement ?? 15;
   if (!Number.isFinite(durationMinutes) || increments.length === 0) return fallback;
 
+  const maxSnap = options.maxIncrement ?? 15;
   const target = durationMinutes / 3;
   for (const increment of increments) {
-    if (increment >= target) return increment;
+    if (increment >= target) return Math.min(increment, maxSnap);
   }
 
-  return increments[increments.length - 1] ?? fallback;
+  return Math.min(increments[increments.length - 1] ?? fallback, maxSnap);
 }
 
 export function buildUnscheduledBarState(effort: JobEffortInput, options: UnscheduledStateOptions = {}): UnscheduledBarState {

@@ -28,7 +28,9 @@ import {
 import { logSchedulingEvent } from '@/src/lib/analytics/scheduling';
 import { useLaborPlanningMutations } from '@/src/lib/mutations/laborPlanning';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { ChevronLeft, ChevronRight, Minus, Plus, ZoomIn } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { ChevronLeft, ChevronRight, Filter, Minus, Plus, Search, ZoomIn } from 'lucide-react';
 import { format, addDays, subDays } from 'date-fns';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -40,6 +42,11 @@ const TIME_MARKERS = buildTimeMarkers(START_MINUTES, END_MINUTES);
 
 // Zoom levels: pixels per hour
 const ZOOM_LEVELS = [80, 120, 180, 240] as const;
+
+// Left offset (px) so the time-axis header grid lines align with lane timelines.
+// Accounts for: px-3 wrapper (12) + role-group border (1) + StaffLaneList p-2 (8)
+// + lane-row border (1) + staff column w-[120px] (120) + border-r (1)
+const LANE_TIMELINE_OFFSET = 143;
 const ZOOM_STORAGE_KEY = 'labor-planning-zoom';
 
 function getStoredZoom(): number {
@@ -71,6 +78,8 @@ export function LaborPlanningBoard() {
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [collapsedRoles, setCollapsedRoles] = useState<Set<string>>(new Set());
   const [zoomIndex, setZoomIndex] = useState(1);
+  const [orderSearch, setOrderSearch] = useState('');
+  const [showOnlyWithJobs, setShowOnlyWithJobs] = useState(true);
   const swimlaneScrollRef = useRef<HTMLDivElement>(null);
   const queryKey = ['labor-planning', selectedDate] as const;
 
@@ -117,6 +126,26 @@ export function LaborPlanningBoard() {
     [data?.orders]
   );
 
+  // Filter orders for the order tree panel
+  const filteredOrders = useMemo(() => {
+    let orders = data?.orders ?? [];
+
+    if (showOnlyWithJobs) {
+      orders = orders.filter((o) => o.jobs.length > 0);
+    }
+
+    if (orderSearch.trim()) {
+      const q = orderSearch.toLowerCase().trim();
+      orders = orders.filter(
+        (o) =>
+          (o.orderNumber ?? o.id).toLowerCase().includes(q) ||
+          o.customer.toLowerCase().includes(q),
+      );
+    }
+
+    return orders;
+  }, [data?.orders, showOnlyWithJobs, orderSearch]);
+
   const staffLanes = useMemo(
     () => buildStaffLanes(data, jobLookup),
     [data, jobLookup]
@@ -159,6 +188,20 @@ export function LaborPlanningBoard() {
     });
   }, [data]);
 
+  // Click a job in the order tree → scroll to its assignment bar and flash it
+  const handleJobClick = useCallback((job: PlanningJob) => {
+    const el = swimlaneScrollRef.current?.querySelector<HTMLElement>(
+      `[data-job-key="${CSS.escape(job.id)}"]`,
+    );
+    if (!el) {
+      toast.info('Job not yet scheduled — drag it onto a staff lane first');
+      return;
+    }
+    el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+    el.classList.add('ring-2', 'ring-primary', 'ring-offset-2');
+    setTimeout(() => el.classList.remove('ring-2', 'ring-primary', 'ring-offset-2'), 1500);
+  }, []);
+
   useEffect(() => {
     if (!data) return;
     if (noStaffAvailable) {
@@ -187,10 +230,13 @@ export function LaborPlanningBoard() {
 
       if (payload.type === 'job') {
         const jobMeta = jobLookup.get(payload.job.id) ?? { job: payload.job, order: undefined };
-        const duration = Math.max(
+        const rawDuration = Math.max(
           calculateDurationMinutes(jobMeta.job, { minimumMinutes: MIN_DURATION }),
           MIN_DURATION
         );
+        // Cap to shift window so large jobs (e.g. 300 pieces) can still be placed
+        const shiftWindow = END_MINUTES - START_MINUTES;
+        const duration = Math.min(rawDuration, shiftWindow);
         const snap = chooseSnapIncrement(duration);
         const snappedStart = snapToGrid(clampedStart, snap, START_MINUTES, END_MINUTES - duration);
         const end = Math.min(snappedStart + duration, END_MINUTES);
@@ -474,10 +520,43 @@ export function LaborPlanningBoard() {
         <Card className="flex flex-col overflow-hidden" style={{ height: columnHeight, maxHeight: columnHeight }}>
           <div className="flex items-center justify-between border-b px-3 py-2">
             <span className="text-sm font-semibold">Orders</span>
-            <span className="text-[11px] text-muted-foreground">{data.orders.length} open</span>
+            <span className="text-[11px] text-muted-foreground">
+              {filteredOrders.length}{filteredOrders.length !== data.orders.length ? ` / ${data.orders.length}` : ''} open
+            </span>
+          </div>
+          {/* Compact filter strip */}
+          <div className="flex items-center gap-1 border-b px-2 py-1.5">
+            <div className="relative flex-1">
+              <Search className="absolute left-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={orderSearch}
+                onChange={(e) => setOrderSearch(e.target.value)}
+                placeholder="Filter orders..."
+                className="h-6 pl-6 text-[11px] rounded-sm"
+              />
+            </div>
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={showOnlyWithJobs ? 'default' : 'ghost'}
+                    size="icon"
+                    className="h-6 w-6 shrink-0"
+                    onClick={() => setShowOnlyWithJobs((v) => !v)}
+                  >
+                    <Filter className="h-3 w-3" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right" className="text-xs">
+                  {showOnlyWithJobs
+                    ? 'Show all orders'
+                    : 'Only orders with outstanding jobs'}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </div>
           <div className="flex-1 overflow-auto px-1 py-1">
-            <OrderTree orders={data.orders as PlanningOrder[]} />
+            <OrderTree orders={filteredOrders as PlanningOrder[]} onJobClick={handleJobClick} />
           </div>
         </Card>
 
@@ -524,6 +603,7 @@ export function LaborPlanningBoard() {
                   endMinutes={END_MINUTES}
                   showMinorTicks={!compact}
                   timelineWidth={timelineWidth}
+                  staffColumnOffset={LANE_TIMELINE_OFFSET}
                 />
                 <div className="space-y-3 px-3 pb-3 pt-1">
                   {roleGroups

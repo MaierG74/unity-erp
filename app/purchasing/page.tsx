@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
   ClipboardList,
@@ -55,7 +55,13 @@ const ITEMS_PER_PAGE = 10;
 
 export default function PurchasingPage() {
   const router = useRouter();
-  const [activeFilter, setActiveFilter] = useState<FilterType>('all');
+  const searchParams = useSearchParams();
+  const filterParam = searchParams.get('filter');
+  const validFilters: FilterType[] = ['pending', 'approved', 'partialReceived'];
+  const initialFilter: FilterType = validFilters.includes(filterParam as FilterType)
+    ? (filterParam as FilterType)
+    : 'all';
+  const [activeFilter, setActiveFilter] = useState<FilterType>(initialFilter);
   const [supplierFilter, setSupplierFilter] = useState<string | null>(null);
   const [supplierPopoverOpen, setSupplierPopoverOpen] = useState(false);
   const [visibleItems, setVisibleItems] = useState(ITEMS_PER_PAGE);

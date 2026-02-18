@@ -105,7 +105,10 @@ export async function fetchOpenOrdersWithLabor(): Promise<PlanningOrderWithMeta[
     .order('delivery_date', { ascending: true });
 
   if (closedStatusIds.length > 0) {
-    ordersQuery = ordersQuery.not('status_id', 'in', `(${closedStatusIds.join(',')})`);
+    // Use .or() so orders with NULL status_id are also included (NOT IN excludes NULLs in SQL)
+    ordersQuery = ordersQuery.or(
+      `status_id.not.in.(${closedStatusIds.join(',')}),status_id.is.null`
+    );
   }
 
   const { data, error } = await ordersQuery;
@@ -113,7 +116,12 @@ export async function fetchOpenOrdersWithLabor(): Promise<PlanningOrderWithMeta[
 
   const rows = Array.isArray(data) ? data : [];
 
-  return rows.map((row: any) => normalizeOrderRow(row)).filter(Boolean) as PlanningOrderWithMeta[];
+  // Also fetch job_card_items linked to orders (manually added jobs)
+  const jobCardItemsByOrder = await loadJobCardItemsByOrder();
+
+  return rows
+    .map((row: any) => normalizeOrderRow(row, jobCardItemsByOrder))
+    .filter(Boolean) as PlanningOrderWithMeta[];
 }
 
 export async function fetchStaffRoster(options: StaffRosterOptions = {}): Promise<StaffRosterEntry[]> {
@@ -261,18 +269,35 @@ async function loadSummariesForDate(date?: string): Promise<Set<number>> {
   );
 }
 
-function normalizeOrderRow(row: any): PlanningOrderWithMeta | null {
+function normalizeOrderRow(
+  row: any,
+  jobCardItemsByOrder?: Map<number, JobCardItemRow[]>,
+): PlanningOrderWithMeta | null {
   if (!row) return null;
 
+  const orderId = Number(row.order_id);
   const statusRow = extractSingle(row.order_statuses);
   const customer = extractSingle(row.customers);
   const details = Array.isArray(row.order_details) ? row.order_details : [];
-  const jobs = details.flatMap((detail: any) => normalizeDetailJobs(row, detail));
+  const bolJobs = details.flatMap((detail: any) => normalizeDetailJobs(row, detail));
+
+  // Merge in job_card_items that were manually added (not from BOL)
+  const cardItems = jobCardItemsByOrder?.get(orderId) ?? [];
+  const manualJobs = cardItems
+    .filter((item) => {
+      // Skip items that duplicate a BOL job (same job_id + product_id)
+      return !bolJobs.some(
+        (bj) => bj.jobId === item.job_id && bj.productId === item.product_id,
+      );
+    })
+    .map((item) => normalizeJobCardItem(orderId, item));
+
+  const jobs = [...bolJobs, ...manualJobs];
 
   return {
-    id: row.order_number ? String(row.order_number) : `SO-${row.order_id}`,
-    orderId: Number(row.order_id),
-    orderNumber: row.order_number ?? `SO-${row.order_id}`,
+    id: row.order_number ? String(row.order_number) : `SO-${orderId}`,
+    orderId,
+    orderNumber: row.order_number ?? `SO-${orderId}`,
     customer: customer?.name ?? 'Unknown customer',
     priority: derivePriority(row.delivery_date ?? row.order_date),
     dueDate: row.delivery_date ?? row.order_date ?? null,
@@ -295,6 +320,8 @@ function normalizeDetailJobs(order: any, detail: any): PlanningJobWithMeta[] {
     const timeUnit = String(bol.time_unit ?? 'hours').toLowerCase() as TimeUnit;
     const baseMinutes = convertToMinutes(bol.time_required, timeUnit);
     const totalMinutes = baseMinutes != null ? baseMinutes * jobQuantity : null;
+    // durationMinutes stores per-unit value for calculateDurationMinutes (which multiplies by quantity)
+    const perUnitMinutes = baseMinutes;
 
     const categoryName = category?.name ?? null;
     const categoryColor = getCategoryColor(category?.category_id ?? categoryName);
@@ -305,7 +332,7 @@ function normalizeDetailJobs(order: any, detail: any): PlanningJobWithMeta[] {
       name: job?.name ?? `Job ${bol.job_id ?? ''}`.trim(),
       status: 'ready',
       durationHours: totalMinutes != null ? Number((totalMinutes / 60).toFixed(2)) : 0,
-      durationMinutes: totalMinutes,
+      durationMinutes: perUnitMinutes,
       owner: categoryName ?? productName ?? 'Unassigned',
       start: undefined,
       end: undefined,
@@ -364,6 +391,136 @@ function normalizeAssignmentRow(row: any): LaborPlanAssignment {
     issuedAt: row?.issued_at ?? null,
     startedAt: row?.started_at ?? null,
     completedAt: row?.completed_at ?? null,
+  };
+}
+
+interface JobCardItemRow {
+  item_id: number;
+  job_card_id: number;
+  product_id: number | null;
+  job_id: number | null;
+  quantity: number;
+  piece_rate: number | null;
+  status: string;
+  order_id: number;
+  job_name: string | null;
+  job_category_id: number | null;
+  job_category_name: string | null;
+  product_name: string | null;
+  estimated_minutes: number | null;
+  job_time_unit: string | null;
+}
+
+async function loadJobCardItemsByOrder(): Promise<Map<number, JobCardItemRow[]>> {
+  // Step 1: Get all non-cancelled job cards linked to orders
+  const { data: cards, error: cardsErr } = await supabase
+    .from('job_cards')
+    .select('job_card_id, order_id, status')
+    .not('order_id', 'is', null)
+    .neq('status', 'cancelled');
+
+  if (cardsErr) {
+    console.warn('[laborPlanning] Failed to load job cards for planning', cardsErr);
+    return new Map();
+  }
+
+  if (!cards || cards.length === 0) return new Map();
+
+  const cardIds = cards.map((c) => c.job_card_id);
+  const cardOrderMap = new Map(cards.map((c) => [c.job_card_id, Number(c.order_id)]));
+
+  // Step 2: Fetch non-completed items for those cards
+  const { data, error } = await supabase
+    .from('job_card_items')
+    .select(`
+      item_id,
+      job_card_id,
+      product_id,
+      job_id,
+      quantity,
+      piece_rate,
+      status,
+      jobs:job_id(job_id, name, estimated_minutes, time_unit, job_categories:category_id(category_id, name)),
+      products:product_id(product_id, name)
+    `)
+    .in('job_card_id', cardIds)
+    .neq('status', 'completed');
+
+  if (error) {
+    console.warn('[laborPlanning] Failed to load job card items', error);
+    return new Map();
+  }
+
+  const result = new Map<number, JobCardItemRow[]>();
+
+  for (const row of data || []) {
+    const orderId = cardOrderMap.get(row.job_card_id);
+    if (!orderId) continue;
+
+    const job = extractSingle(row.jobs as any);
+    const product = extractSingle(row.products as any);
+    const category = extractSingle(job?.job_categories);
+
+    const item: JobCardItemRow = {
+      item_id: row.item_id,
+      job_card_id: row.job_card_id,
+      product_id: row.product_id,
+      job_id: row.job_id,
+      quantity: row.quantity,
+      piece_rate: row.piece_rate ? Number(row.piece_rate) : null,
+      status: row.status,
+      order_id: orderId,
+      job_name: job?.name ?? null,
+      job_category_id: category?.category_id ?? null,
+      job_category_name: category?.name ?? null,
+      product_name: product?.name ?? null,
+      estimated_minutes: job?.estimated_minutes ? Number(job.estimated_minutes) : null,
+      job_time_unit: job?.time_unit ?? null,
+    };
+
+    if (!result.has(orderId)) result.set(orderId, []);
+    result.get(orderId)!.push(item);
+  }
+
+  return result;
+}
+
+function normalizeJobCardItem(orderId: number, item: JobCardItemRow): PlanningJobWithMeta {
+  const categoryName = item.job_category_name ?? null;
+  const categoryColor = getCategoryColor(item.job_category_id ?? categoryName);
+
+  // Estimate duration from job's estimated_minutes if available
+  const estimatedMinutesPerUnit = item.estimated_minutes ?? null;
+  const totalMinutes = estimatedMinutesPerUnit != null ? estimatedMinutesPerUnit * item.quantity : null;
+  // durationMinutes stores per-unit value for calculateDurationMinutes (which multiplies by quantity)
+  const perUnitMinutes = estimatedMinutesPerUnit;
+
+  const payType: PayType = item.piece_rate != null ? 'piece' : 'hourly';
+
+  return {
+    id: `order-${orderId}:jci-${item.item_id}`,
+    name: item.job_name ?? `Job Card Item ${item.item_id}`,
+    status: 'ready',
+    durationHours: totalMinutes != null ? Number((totalMinutes / 60).toFixed(2)) : 0,
+    durationMinutes: perUnitMinutes,
+    owner: categoryName ?? item.product_name ?? 'Unassigned',
+    start: undefined,
+    end: undefined,
+    orderId,
+    orderDetailId: null,
+    productId: item.product_id ? Number(item.product_id) : null,
+    productName: item.product_name,
+    bolId: null,
+    jobId: item.job_id,
+    categoryName,
+    categoryColor,
+    payType,
+    quantity: item.quantity,
+    timeUnit: (item.job_time_unit as TimeUnit) ?? 'hours',
+    rateId: null,
+    hourlyRateId: null,
+    pieceRateId: null,
+    scheduleStatus: 'unscheduled',
   };
 }
 

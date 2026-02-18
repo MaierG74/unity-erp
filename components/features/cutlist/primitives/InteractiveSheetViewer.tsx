@@ -384,10 +384,10 @@ export function InteractiveSheetViewer({
 
           {/* Right: legend table (30%) */}
           <div className="flex-[3] min-w-[240px] max-w-[340px] overflow-y-auto p-3 border-l">
-            <div className="text-xs font-medium text-muted-foreground mb-2">
+            <div className="text-sm font-medium text-muted-foreground mb-2">
               Parts Legend ({sheetLayout.placements.length} placements)
             </div>
-            <table className="w-full text-xs">
+            <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-muted-foreground">
                   <th className="text-left py-1 pr-1 w-5"></th>
@@ -440,7 +440,7 @@ export function InteractiveSheetViewer({
             </table>
 
             {/* Sheet stats */}
-            <div className="mt-3 pt-2 border-t text-xs text-muted-foreground space-y-1">
+            <div className="mt-3 pt-2 border-t text-sm text-foreground/70 space-y-1">
               <div>
                 Sheet: {Math.round(sheetWidth)} x {Math.round(sheetLength)} mm
               </div>
