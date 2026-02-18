@@ -11,7 +11,7 @@
  * - Pricelist thumbnail strip
  * - Delete with confirmation dialog
  */
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getSuppliers, deleteSupplier, getOpenOrderCounts } from '@/lib/api/suppliers';
 import { Plus, Trash2, Package, ChevronLeft, ChevronRight, Loader2, Users } from 'lucide-react';
@@ -67,13 +67,25 @@ export function SupplierList() {
     return param === '1' || param === 'true';
   });
 
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(() => {
+  // Pagination — currentPage is derived directly from URL (single source of truth)
+  const currentPage = useMemo(() => {
     const page = Number(searchParams?.get('page'));
     return page > 0 ? page : 1;
-  });
+  }, [searchParams]);
   const [pageSize, setPageSize] = useState(25);
   const pageSizeOptions = [10, 25, 50, 100];
+
+  const setCurrentPage = useCallback((page: number | ((prev: number) => number)) => {
+    const nextPage = typeof page === 'function' ? page(currentPage) : page;
+    const params = new URLSearchParams(searchParams?.toString() || '');
+    if (nextPage > 1) {
+      params.set('page', String(nextPage));
+    } else {
+      params.delete('page');
+    }
+    const query = params.toString();
+    router.replace(query ? `/suppliers?${query}` : '/suppliers', { scroll: false });
+  }, [currentPage, searchParams, router]);
 
   // Debounce search input to avoid excessive URL updates
   const debouncedSearchTerm = useDebounce(searchTerm, 300);
@@ -87,29 +99,24 @@ export function SupplierList() {
     const urlShowInactive = searchParams?.get('showInactive');
     const urlShowInactiveBool = urlShowInactive === '1' || urlShowInactive === 'true';
 
-    const urlPage = Number(searchParams?.get('page')) || 1;
-
     if (urlQuery !== searchTerm) setSearchTerm(urlQuery);
     if (urlHasPricelistBool !== hasPricelistOnly) setHasPricelistOnly(urlHasPricelistBool);
     if (urlShowInactiveBool !== showInactive) setShowInactive(urlShowInactiveBool);
-    if (urlPage !== currentPage) setCurrentPage(urlPage);
   }, [searchParamsString]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Sync filter state to URL
+  // Sync filter state to URL (page is handled separately via setCurrentPage)
   useEffect(() => {
     const currentUrlQuery = searchParams?.get('q') || '';
     const currentUrlHasPricelist = searchParams?.get('hasPricelist');
     const currentUrlHasPricelistBool = currentUrlHasPricelist === '1' || currentUrlHasPricelist === 'true';
     const currentUrlShowInactive = searchParams?.get('showInactive');
     const currentUrlShowInactiveBool = currentUrlShowInactive === '1' || currentUrlShowInactive === 'true';
-    const currentUrlPage = Number(searchParams?.get('page')) || 1;
 
     // Only update URL if values differ from current URL
     if (
       debouncedSearchTerm === currentUrlQuery &&
       hasPricelistOnly === currentUrlHasPricelistBool &&
-      showInactive === currentUrlShowInactiveBool &&
-      currentPage === currentUrlPage
+      showInactive === currentUrlShowInactiveBool
     ) {
       return;
     }
@@ -134,21 +141,13 @@ export function SupplierList() {
       params.delete('showInactive');
     }
 
-    if (currentPage > 1) {
-      params.set('page', String(currentPage));
-    } else {
-      params.delete('page');
-    }
+    // Reset to page 1 when filters change
+    params.delete('page');
 
     const query = params.toString();
     const url = query ? `/suppliers?${query}` : '/suppliers';
     router.replace(url, { scroll: false });
-  }, [debouncedSearchTerm, hasPricelistOnly, showInactive, currentPage, router, searchParams]);
-
-  // Reset to page 1 when filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [debouncedSearchTerm, hasPricelistOnly, showInactive]);
+  }, [debouncedSearchTerm, hasPricelistOnly, showInactive, router, searchParams]);
 
   const { data: suppliers, isLoading, error } = useQuery({
     queryKey: ['suppliers'],
