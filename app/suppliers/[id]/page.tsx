@@ -724,10 +724,8 @@ export default function SupplierDetailPage() {
   return (
     <div className="space-y-6">
       <div>
-        <Button asChild variant="outline" size="sm">
-          <Link href="/suppliers" aria-label="Back to Suppliers">
-            <ArrowLeft className="mr-2 h-4 w-4" /> Back to Suppliers
-          </Link>
+        <Button variant="outline" size="sm" onClick={() => router.back()}>
+          <ArrowLeft className="mr-2 h-4 w-4" /> Back to Suppliers
         </Button>
       </div>
       <div className="flex items-center justify-between">
