@@ -31,9 +31,24 @@ const QuoteClusterLineRow: React.FC<QuoteClusterLineRowProps> = ({ line, onUpdat
 
   const missingCost = (line.unit_cost ?? 0) === 0;
 
+  const typeBadgeClass: Record<string, string> = {
+    manual: 'bg-gray-100 text-gray-600',
+    component: 'bg-teal-100 text-teal-700',
+    product: 'bg-blue-100 text-blue-700',
+    cluster: 'bg-purple-100 text-purple-700',
+  };
+  const typeLabel = line.line_type
+    ? line.line_type.charAt(0).toUpperCase() + line.line_type.slice(1)
+    : '';
+  const badgeClass = typeBadgeClass[line.line_type ?? ''] ?? 'bg-gray-100 text-gray-600';
+
   return (
     <TableRow>
-      <TableCell className="text-sm">{line.line_type}</TableCell>
+      <TableCell>
+        <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${badgeClass}`}>
+          {typeLabel}
+        </span>
+      </TableCell>
       <TableCell>
         <Input
           value={description}
@@ -60,7 +75,7 @@ const QuoteClusterLineRow: React.FC<QuoteClusterLineRowProps> = ({ line, onUpdat
           onChange={e => setUnitCost(e.target.value)}
           onBlur={() => { const numCost = Math.round((Number(unitCost) || 0) * 100) / 100; handleBlur('unit_cost', numCost as QuoteClusterLine['unit_cost']); setUnitCost(String(numCost)); }}
           onFocus={e => e.target.select()}
-          className={`text-sm h-8 w-24 bg-background text-foreground border ${missingCost ? 'border-red-300 bg-red-50' : 'border-border'}`}
+          className={`text-sm h-8 w-24 bg-background text-foreground border ${missingCost ? 'border-amber-400 bg-amber-50' : 'border-border'}`}
         />
       </TableCell>
       <TableCell className="text-sm text-right font-medium">{formatCurrency((Number(qty) || 0) * (Number(unitCost) || 0))}</TableCell>

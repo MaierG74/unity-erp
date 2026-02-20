@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus } from "lucide-react";
 import { CreateJobModal } from "@/components/features/labor/create-job-modal";
 
-type JobCategory = { category_id: number; name: string; description: string | null; current_hourly_rate: number };
+type JobCategory = { category_id: number; name: string; description: string | null; current_hourly_rate: number; parent_category_id: number | null };
 type Job = { job_id: number; name: string; description: string | null; category_id: number };
 
 export default function AddJobDialog({
@@ -29,6 +29,7 @@ export default function AddJobDialog({
   const [categories, setCategories] = useState<JobCategory[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
+  const [selectedSubcategoryId, setSelectedSubcategoryId] = useState<number | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
   const [payType, setPayType] = useState<"hourly" | "piece">("hourly");
   const [timeRequired, setTimeRequired] = useState<number>(1);
@@ -36,14 +37,54 @@ export default function AddJobDialog({
   const [quantity, setQuantity] = useState<number>(1);
   const [createOpen, setCreateOpen] = useState(false);
 
+  // Derived: top-level categories and subcategories of selected parent
+  const parentCategories = useMemo(
+    () => categories.filter(c => c.parent_category_id === null),
+    [categories]
+  );
+
+  const subcategories = useMemo(
+    () => selectedCategoryId
+      ? categories.filter(c => c.parent_category_id === selectedCategoryId)
+      : [],
+    [categories, selectedCategoryId]
+  );
+
+  const hasSubcategories = subcategories.length > 0;
+
   useEffect(() => {
     if (!actualOpen) return;
     void loadCategories();
   }, [actualOpen]);
 
+  // Load jobs when category/subcategory selection changes
   useEffect(() => {
     if (!selectedCategoryId) { setJobs([]); return; }
-    void loadJobs(selectedCategoryId);
+
+    // If there are subcategories and one is selected, load jobs for that subcategory
+    if (selectedSubcategoryId) {
+      void loadJobs(selectedSubcategoryId);
+      return;
+    }
+
+    // If no subcategories exist for this parent, load jobs for the parent directly
+    // If subcategories exist but none selected, load ALL jobs for parent + subcategories
+    const subcatIds = categories
+      .filter(c => c.parent_category_id === selectedCategoryId)
+      .map(c => c.category_id);
+
+    if (subcatIds.length === 0) {
+      void loadJobs(selectedCategoryId);
+    } else {
+      const allCatIds = [selectedCategoryId, ...subcatIds];
+      void loadJobsForCategories(allCatIds);
+    }
+  }, [selectedCategoryId, selectedSubcategoryId, categories]);
+
+  // Reset subcategory when parent changes
+  useEffect(() => {
+    setSelectedSubcategoryId(null);
+    setSelectedJobId(null);
   }, [selectedCategoryId]);
 
   async function loadCategories() {
@@ -60,8 +101,18 @@ export default function AddJobDialog({
     setJobs((data as Job[]) || []);
   }
 
+  async function loadJobsForCategories(categoryIds: number[]) {
+    const { data } = await supabase
+      .from("jobs")
+      .select("job_id, name, description, category_id")
+      .in("category_id", categoryIds)
+      .order("name");
+    setJobs((data as Job[]) || []);
+  }
+
   function resetForm() {
     setSelectedCategoryId(null);
+    setSelectedSubcategoryId(null);
     setSelectedJobId(null);
     setPayType("hourly");
     setTimeRequired(1);
@@ -147,7 +198,7 @@ export default function AddJobDialog({
                     <SelectValue placeholder="Select category" />
                   </SelectTrigger>
                   <SelectContent>
-                    {categories.map(c => (
+                    {parentCategories.map(c => (
                       <SelectItem key={c.category_id} value={String(c.category_id)}>
                         {c.name} - R{c.current_hourly_rate.toFixed(2)}/hr
                       </SelectItem>
@@ -155,6 +206,31 @@ export default function AddJobDialog({
                   </SelectContent>
                 </Select>
               </div>
+
+              {hasSubcategories && (
+                <div>
+                  <div className="text-sm font-medium mb-2">Subcategory</div>
+                  <Select
+                    value={selectedSubcategoryId?.toString() || "all"}
+                    onValueChange={(v) => {
+                      setSelectedSubcategoryId(v === "all" ? null : Number(v));
+                      setSelectedJobId(null);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="All subcategories" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All subcategories</SelectItem>
+                      {subcategories.map(c => (
+                        <SelectItem key={c.category_id} value={String(c.category_id)}>
+                          {c.name} - R{c.current_hourly_rate.toFixed(2)}/hr
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
               <div>
                 <div className="text-sm font-medium mb-2">Job</div>

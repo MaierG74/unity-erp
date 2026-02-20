@@ -20,13 +20,13 @@ import QuoteItemsTable from '@/components/features/quotes/QuoteItemsTable';
 import EmailQuoteDialog from '@/components/features/quotes/EmailQuoteDialog';
 import { EmailActivityCard } from '@/components/features/emails/EmailActivityCard';
 import { useToast } from '@/components/ui/use-toast';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
-  FileText,
   Save,
-  Eye,
   Image as ImageIcon,
   Calculator,
-  Mail
+  Mail,
+  Paperclip,
 } from 'lucide-react';
 
 interface EnhancedQuoteEditorProps {
@@ -344,6 +344,7 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
               quote={pdfQuote}
               companyInfo={settingsCompanyInfo || defaultCompanyInfo}
               defaultTermsTemplate={defaultTermsTemplate}
+              variant="buttons"
             />
             <Button
               variant="outline"
@@ -366,11 +367,10 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
 
       {/* Main Content */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="details">Quote Details</TabsTrigger>
           <TabsTrigger value="items">Line Items</TabsTrigger>
           <TabsTrigger value="attachments">Attachments</TabsTrigger>
-          <TabsTrigger value="preview">PDF Preview</TabsTrigger>
         </TabsList>
 
         {/* Quote Details Tab */}
@@ -523,8 +523,24 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
         {/* Line Items Tab */}
         <TabsContent value="items" className="space-y-4">
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
               <CardTitle>Line Items</CardTitle>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={`h-8 w-8 ${showItemAttachmentSections ? 'text-teal-600' : 'text-muted-foreground'}`}
+                      onClick={() => setShowItemAttachmentSections(v => !v)}
+                      aria-label="Toggle inline attachment sections"
+                    >
+                      <Paperclip size={16} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Toggle inline attachment sections</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </CardHeader>
             <CardContent>
                 <QuoteItemsTable
@@ -543,14 +559,6 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
                 />
             </CardContent>
           </Card>
-
-          {/* Optional per-item attachment sections (collapsed by default to save space) */}
-          <div className="flex items-center justify-between">
-            <div className="text-sm text-muted-foreground">Need to edit attachments inline under each item?</div>
-            <Button variant="outline" size="sm" onClick={() => setShowItemAttachmentSections(v => !v)}>
-              {showItemAttachmentSections ? 'Hide item attachment sections' : 'Show item attachment sections'}
-            </Button>
-          </div>
 
           {showItemAttachmentSections && items.map((item, index) => (
             <Card key={item.id}>
@@ -622,42 +630,6 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
           </div>
         </TabsContent>
 
-        {/* PDF Preview Tab */}
-        <TabsContent value="preview" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Eye size={20} />
-                PDF Preview
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-center py-8">
-                <FileText size={64} className="mx-auto mb-4 text-muted-foreground" />
-                <h3 className="text-lg font-medium mb-2">PDF Preview</h3>
-                <p className="text-muted-foreground mb-6">
-                  Click the button below to generate and download the PDF quote
-                </p>
-                <QuotePDFDownload
-                  quote={pdfQuote}
-                  companyInfo={settingsCompanyInfo || defaultCompanyInfo}
-                  defaultTermsTemplate={defaultTermsTemplate}
-                />
-                <div className="mt-6 p-4 bg-gray-50 rounded-lg text-left">
-                  <h4 className="font-medium mb-2">PDF will include:</h4>
-                  <ul className="text-sm text-muted-foreground space-y-1">
-                    <li>• Company branding and contact information</li>
-                    <li>• Quote details and line items with images</li>
-                    <li>• {items.length} line item{items.length !== 1 ? 's' : ''} with product images</li>
-                    <li>• {referenceImages.length} reference image{referenceImages.length !== 1 ? 's' : ''}</li>
-                    <li>• Pricing breakdown with VAT calculation</li>
-                    <li>• Terms and conditions</li>
-                  </ul>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
       </Tabs>
 
       {/* Email Quote Dialog */}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -12,13 +12,8 @@ interface PdfThumbnailClientProps {
 }
 
 /**
- * Lightweight PDF thumbnail renderer.
- *
- * Strategy:
- * - Fetch the PDF once, create an object URL, and render via <object> so we avoid
- *   iframe/GDocs hacks and reduce flicker.
- * - Show a subtle loading state while the blob is fetched.
- * - Fail fast to a neutral icon when rendering fails (e.g., CORS or corrupt file).
+ * Canvas-based PDF thumbnail — renders only page 1 via pdf.js.
+ * No browser PDF viewer chrome (no sidebar, no toolbar).
  */
 export function PdfThumbnailClient({
   url,
@@ -26,50 +21,68 @@ export function PdfThumbnailClient({
   height,
   className,
 }: PdfThumbnailClientProps) {
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
 
-  // Stable key so caches don't explode on re-renders but still update when URL changes.
-  const cacheKey = useMemo(() => `${url}`, [url]);
-
   useEffect(() => {
-    let revokedUrl: string | null = null;
     let cancelled = false;
 
-    async function hydrate() {
+    async function render() {
       setStatus('loading');
       try {
-        const resp = await fetch(cacheKey, { cache: 'force-cache' });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const blob = await resp.blob();
+        const pdfjsLib = await import('pdfjs-dist');
+
+        // Use local worker file copied to public/
+        pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+
+        const loadingTask = pdfjsLib.getDocument(url);
+        const pdf = await loadingTask.promise;
         if (cancelled) return;
-        const nextUrl = URL.createObjectURL(blob);
-        revokedUrl = nextUrl;
-        setObjectUrl(nextUrl);
-        setStatus('ready');
+
+        const page = await pdf.getPage(1);
+        if (cancelled) return;
+
+        const canvas = canvasRef.current;
+        const container = containerRef.current;
+        if (!canvas || !container) return;
+
+        // Scale to fit within the container (both width and height)
+        const containerWidth = container.clientWidth;
+        const containerHeight = container.clientHeight;
+        const unscaledViewport = page.getViewport({ scale: 1 });
+        const scale = Math.min(
+          containerWidth / unscaledViewport.width,
+          containerHeight / unscaledViewport.height
+        );
+        const viewport = page.getViewport({ scale });
+
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('No 2d context');
+
+        await page.render({ canvasContext: ctx, viewport } as any).promise;
+        if (!cancelled) setStatus('ready');
       } catch (err) {
-        console.warn('PDF thumbnail fetch failed', err);
-        if (!cancelled) {
-          setObjectUrl(null);
-          setStatus('error');
-        }
+        console.warn('PDF thumbnail render failed', err);
+        if (!cancelled) setStatus('error');
       }
     }
 
-    hydrate();
+    render();
 
     return () => {
       cancelled = true;
-      if (revokedUrl) {
-        URL.revokeObjectURL(revokedUrl);
-      }
     };
-  }, [cacheKey]);
+  }, [url]);
 
   return (
     <div
+      ref={containerRef}
       className={cn(
-        'relative flex items-center justify-center overflow-hidden rounded border bg-muted/30',
+        'relative flex items-center justify-center overflow-hidden rounded border bg-white',
         className,
       )}
       style={{
@@ -83,15 +96,13 @@ export function PdfThumbnailClient({
         </div>
       )}
 
-      {status === 'ready' && objectUrl ? (
-        <object
-          data={objectUrl}
-          type="application/pdf"
-          className="h-full w-full"
-          aria-label="PDF preview"
-          onError={() => setStatus('error')}
-        />
-      ) : null}
+      <canvas
+        ref={canvasRef}
+        className={cn(
+          'max-w-full max-h-full object-contain',
+          status !== 'ready' && 'hidden'
+        )}
+      />
 
       {status === 'error' && (
         <div className="flex flex-col items-center justify-center text-muted-foreground gap-1">

@@ -9,8 +9,10 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useSidebar } from './sidebar';
 import { EmailIssuesIndicator } from '@/components/features/emails/EmailIssuesIndicator';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { usePathname, useSearchParams, useRouter } from 'next/navigation';
+import { useWorkSchedule } from '@/hooks/use-work-schedule';
+import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 
 export function Navbar() {
@@ -23,6 +25,9 @@ export function Navbar() {
   const router = useRouter();
   const compactOn = searchParams?.get('compact') !== '0';
   const isLaborPlanning = pathname?.startsWith('/labor-planning');
+  const scheduleDateParam = searchParams?.get('date') ?? format(new Date(), 'yyyy-MM-dd');
+  // Only fetch the schedule when on the labor planning page to avoid unnecessary queries site-wide
+  const schedule = useWorkSchedule(isLaborPlanning ? scheduleDateParam : '');
   const isQuoteDetail = pathname?.startsWith('/quotes/') && pathname !== '/quotes/new';
   // On cutlist sub-pages (/quotes/[id]/cutlist/...), link back to the specific quote
   const quoteCutlistMatch = pathname?.match(/^\/quotes\/([^/]+)\/cutlist\//);
@@ -164,7 +169,7 @@ export function Navbar() {
                 Prototype surface
               </Badge>
               <Badge variant="secondary" className="hidden sm:inline">
-                7:00 AM – 7:00 PM
+                {formatMinutesAmPm(schedule.startMinutes)} – {formatMinutesAmPm(schedule.endMinutes)}
               </Badge>
             </>
           )}
@@ -234,4 +239,12 @@ export function Navbar() {
       </div>
     </div>
   );
-} 
+}
+
+function formatMinutesAmPm(value: number): string {
+  const hours = Math.floor(value / 60);
+  const mins = value % 60;
+  const suffix = hours >= 12 ? 'PM' : 'AM';
+  const normalized = hours % 12 || 12;
+  return `${normalized}:${mins.toString().padStart(2, '0')} ${suffix}`;
+}

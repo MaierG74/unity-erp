@@ -25,6 +25,7 @@ export interface PlanningJob {
   hourlyRateId?: number | null;
   pieceRateId?: number | null;
   scheduleStatus?: PlanningJobScheduleStatus;
+  jobStatus?: 'scheduled' | 'issued' | 'in_progress' | 'completed' | 'on_hold' | null;
 }
 
 export interface PlanningOrder {
@@ -56,6 +57,7 @@ export interface StaffAssignment {
   pieceRateId?: number | null;
   rateId?: number | null;
   bolId?: number | null;
+  quantity?: number | null;
   showHandles?: boolean;
   // Time tracking fields
   jobStatus?: 'scheduled' | 'issued' | 'in_progress' | 'completed' | 'on_hold';

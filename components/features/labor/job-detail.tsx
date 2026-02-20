@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
@@ -94,6 +94,7 @@ interface JobCategory {
   name: string;
   description: string | null;
   current_hourly_rate: number;
+  parent_category_id: number | null;
 }
 
 interface Job {
@@ -172,6 +173,8 @@ export function JobDetail({ jobId }: JobDetailProps) {
   const [isAddHourlyOpen, setIsAddHourlyOpen] = useState(false);
   const [isAddPieceworkOpen, setIsAddPieceworkOpen] = useState(false);
   const [deleteRateId, setDeleteRateId] = useState<{ id: number; type: 'hourly' | 'piecework' } | null>(null);
+  const [editParentId, setEditParentId] = useState('');
+  const [editSubId, setEditSubId] = useState('');
 
   // Forms
   const editForm = useForm<z.infer<typeof jobEditSchema>>({
@@ -222,6 +225,20 @@ export function JobDetail({ jobId }: JobDetailProps) {
       return data as JobCategory[];
     },
   });
+
+  // Build parent/children maps for cascading category selects
+  const { editParentCategories, editChildrenByParent } = useMemo(() => {
+    const parents = categories.filter((c) => c.parent_category_id === null);
+    const childMap = new Map<number, JobCategory[]>();
+    for (const cat of categories) {
+      if (cat.parent_category_id !== null) {
+        const list = childMap.get(cat.parent_category_id) || [];
+        list.push(cat);
+        childMap.set(cat.parent_category_id, list);
+      }
+    }
+    return { editParentCategories: parents, editChildrenByParent: childMap };
+  }, [categories]);
 
   // Fetch hourly rates
   const { data: hourlyRates = [] } = useQuery({
@@ -321,6 +338,8 @@ export function JobDetail({ jobId }: JobDetailProps) {
       queryClient.invalidateQueries({ queryKey: ['job', jobId] });
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
       setIsEditing(false);
+      setEditParentId('');
+      setEditSubId('');
       toast({ title: 'Success', description: 'Job updated successfully' });
     },
     onError: () => {
@@ -507,6 +526,19 @@ export function JobDetail({ jobId }: JobDetailProps) {
   // Start editing
   const startEditing = () => {
     if (job) {
+      const cat = categories.find((c) => c.category_id === job.category_id);
+      let parentId = '';
+      let subId = '';
+      if (cat) {
+        if (cat.parent_category_id === null) {
+          parentId = cat.category_id.toString();
+        } else {
+          parentId = cat.parent_category_id.toString();
+          subId = cat.category_id.toString();
+        }
+      }
+      setEditParentId(parentId);
+      setEditSubId(subId);
       editForm.reset({
         name: job.name,
         description: job.description || '',
@@ -561,34 +593,30 @@ export function JobDetail({ jobId }: JobDetailProps) {
   return (
     <div className="container mx-auto py-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={() => router.push('/labor')}>
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back
-          </Button>
-          <div>
-            <h1 className="text-2xl font-bold">{job.name}</h1>
-            <div className="flex items-center gap-2 mt-1">
-              <Badge variant="outline">{job.category?.name || 'Uncategorized'}</Badge>
-              {job.labor_roles && (
-                <Badge
-                  style={{ backgroundColor: job.labor_roles.color || undefined }}
-                  className="text-white"
-                >
-                  <Users className="h-3 w-3 mr-1" />
-                  {job.labor_roles.name}
-                </Badge>
-              )}
-            </div>
+      <div className="flex items-center gap-4">
+        <Button variant="ghost" size="sm" onClick={() => router.push('/labor')}>
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Back
+        </Button>
+        <div>
+          <h1 className="text-2xl font-bold">{job.name}</h1>
+          <div className="flex items-center gap-2 mt-1">
+            <Badge variant="outline">
+              {job.category?.parent_category_id
+                ? `${categories.find((c) => c.category_id === job.category?.parent_category_id)?.name ?? 'Unknown'} > ${job.category.name}`
+                : job.category?.name || 'Uncategorized'}
+            </Badge>
+            {job.labor_roles && (
+              <Badge
+                style={{ backgroundColor: job.labor_roles.color || undefined }}
+                className="text-white"
+              >
+                <Users className="h-3 w-3 mr-1" />
+                {job.labor_roles.name}
+              </Badge>
+            )}
           </div>
         </div>
-        {!isEditing && (
-          <Button onClick={startEditing}>
-            <Edit className="h-4 w-4 mr-2" />
-            Edit Job
-          </Button>
-        )}
       </div>
 
       {/* Role Suggestion Banner */}
@@ -628,203 +656,258 @@ export function JobDetail({ jobId }: JobDetailProps) {
         </Card>
       )}
 
-      {/* Edit Form */}
-      {isEditing && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Edit Job Details</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Form {...editForm}>
-              <form onSubmit={editForm.handleSubmit((v) => updateJob.mutate(v))} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <FormField
-                    control={editForm.control}
-                    name="name"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Name</FormLabel>
-                        <FormControl>
-                          <Input {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={editForm.control}
-                    name="category_id"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Category</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value}>
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select category" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {categories.map((cat) => (
-                              <SelectItem key={cat.category_id} value={cat.category_id.toString()}>
-                                {cat.name} - R{cat.current_hourly_rate.toFixed(2)}/hr
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={editForm.control}
-                    name="role_id"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Role</FormLabel>
-                        <FormControl>
-                          <RoleSelector
-                            value={field.value}
-                            onChange={field.onChange}
-                            placeholder="Select role for planning"
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-
-                <FormField
-                  control={editForm.control}
-                  name="description"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Description</FormLabel>
-                      <FormControl>
-                        <Textarea {...field} rows={3} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <FormField
-                    control={editForm.control}
-                    name="estimated_minutes"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Estimated Time (optional)</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="number"
-                            step="0.1"
-                            min="0"
-                            placeholder="e.g., 2.5"
-                            {...field}
-                            value={field.value ?? ''}
-                            onChange={(e) => {
-                              const val = e.target.value === '' ? null : parseFloat(e.target.value);
-                              field.onChange(val);
-                            }}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={editForm.control}
-                    name="time_unit"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Time Unit</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value}>
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select unit" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="hours">Hours</SelectItem>
-                            <SelectItem value="minutes">Minutes</SelectItem>
-                            <SelectItem value="seconds">Seconds</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-
-                <div className="flex gap-2">
-                  <Button type="submit" disabled={updateJob.isPending}>
-                    {updateJob.isPending ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <Save className="h-4 w-4 mr-2" />
-                    )}
-                    Save Changes
-                  </Button>
-                  <Button type="button" variant="outline" onClick={() => setIsEditing(false)}>
-                    <X className="h-4 w-4 mr-2" />
-                    Cancel
-                  </Button>
-                </div>
-              </form>
-            </Form>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left Column - Details & Time Analysis */}
         <div className="space-y-6">
-          {/* Job Details Card */}
-          {!isEditing && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Briefcase className="h-5 w-5" />
-                  Job Details
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">Category</p>
-                    <p className="font-medium">{job.category?.name || 'None'}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">Category Rate</p>
-                    <p className="font-medium">R{job.category?.current_hourly_rate?.toFixed(2) || '0.00'}/hr</p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">Role</p>
-                    <p className="font-medium">{job.labor_roles?.name || 'Not assigned'}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">Estimated Time</p>
-                    <p className="font-medium">
-                      {job.estimated_minutes
-                        ? `${job.estimated_minutes} ${job.time_unit || 'hours'} per piece`
-                        : 'Not set'}
-                    </p>
-                  </div>
+          {/* Job Details Card — inline edit */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
+              <CardTitle className="flex items-center gap-2">
+                <Briefcase className="h-5 w-5" />
+                {isEditing ? 'Edit Job Details' : 'Job Details'}
+              </CardTitle>
+              {isEditing ? (
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    onClick={editForm.handleSubmit((v) => updateJob.mutate(v))}
+                    disabled={updateJob.isPending}
+                  >
+                    {updateJob.isPending ? (
+                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4 mr-1" />
+                    )}
+                    Save
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => { setIsEditing(false); setEditParentId(''); setEditSubId(''); }}
+                  >
+                    <X className="h-4 w-4 mr-1" />
+                    Cancel
+                  </Button>
                 </div>
-                {job.description && (
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground mb-1">Description</p>
-                    <p className="text-sm">{job.description}</p>
+              ) : (
+                <Button size="sm" variant="ghost" onClick={startEditing}>
+                  <Edit className="h-4 w-4" />
+                </Button>
+              )}
+            </CardHeader>
+            <CardContent>
+              {isEditing ? (
+                <Form {...editForm}>
+                  <form
+                    id="job-edit-form"
+                    onSubmit={editForm.handleSubmit((v) => updateJob.mutate(v))}
+                    className="space-y-4"
+                  >
+                    {/* Row 1: Name + Role */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <FormField
+                        control={editForm.control}
+                        name="name"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Name</FormLabel>
+                            <FormControl>
+                              <Input {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={editForm.control}
+                        name="role_id"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Role</FormLabel>
+                            <FormControl>
+                              <RoleSelector
+                                value={field.value}
+                                onChange={field.onChange}
+                                placeholder="Select role for planning"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
+                    {/* Row 2: Category group + Estimated Time group */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Category + Subcategory stacked */}
+                      <div className="space-y-3">
+                        <FormItem>
+                          <FormLabel>Category</FormLabel>
+                          <Select
+                            value={editParentId}
+                            onValueChange={(v) => {
+                              setEditParentId(v);
+                              setEditSubId('');
+                              editForm.setValue('category_id', v, { shouldValidate: true });
+                            }}
+                          >
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select category" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {editParentCategories.map((cat) => (
+                                <SelectItem key={cat.category_id} value={cat.category_id.toString()}>
+                                  {cat.name} - R{cat.current_hourly_rate.toFixed(2)}/hr
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {editForm.formState.errors.category_id && (
+                            <p className="text-sm font-medium text-destructive">
+                              {editForm.formState.errors.category_id.message}
+                            </p>
+                          )}
+                        </FormItem>
+
+                        {editParentId && (editChildrenByParent.get(parseInt(editParentId)) || []).length > 0 && (
+                          <FormItem>
+                            <FormLabel>Subcategory (optional)</FormLabel>
+                            <Select
+                              value={editSubId || '_none'}
+                              onValueChange={(v) => {
+                                const val = v === '_none' ? '' : v;
+                                setEditSubId(val);
+                                editForm.setValue('category_id', val || editParentId, { shouldValidate: true });
+                              }}
+                            >
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="None (use parent category)" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="_none">None (use parent category)</SelectItem>
+                                {(editChildrenByParent.get(parseInt(editParentId)) || []).map((sub) => (
+                                  <SelectItem key={sub.category_id} value={sub.category_id.toString()}>
+                                    {sub.name} - R{sub.current_hourly_rate.toFixed(2)}/hr
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </FormItem>
+                        )}
+                      </div>
+
+                      {/* Estimated Time + Time Unit stacked */}
+                      <div className="space-y-3">
+                        <FormField
+                          control={editForm.control}
+                          name="estimated_minutes"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Estimated Time (optional)</FormLabel>
+                              <FormControl>
+                                <Input
+                                  type="number"
+                                  step="0.1"
+                                  min="0"
+                                  placeholder="e.g., 2.5"
+                                  {...field}
+                                  value={field.value ?? ''}
+                                  onChange={(e) => {
+                                    const val = e.target.value === '' ? null : parseFloat(e.target.value);
+                                    field.onChange(val);
+                                  }}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
+                        <FormField
+                          control={editForm.control}
+                          name="time_unit"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Time Unit</FormLabel>
+                              <Select onValueChange={field.onChange} value={field.value}>
+                                <FormControl>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Select unit" />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                  <SelectItem value="hours">Hours</SelectItem>
+                                  <SelectItem value="minutes">Minutes</SelectItem>
+                                  <SelectItem value="seconds">Seconds</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Row 3: Description full-width */}
+                    <FormField
+                      control={editForm.control}
+                      name="description"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Description</FormLabel>
+                          <FormControl>
+                            <Textarea {...field} rows={3} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </form>
+                </Form>
+              ) : (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Category</p>
+                      <p className="font-medium">
+                        {job.category?.parent_category_id
+                          ? `${categories.find((c) => c.category_id === job.category?.parent_category_id)?.name ?? 'Unknown'} > ${job.category.name}`
+                          : job.category?.name || 'None'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Category Rate</p>
+                      <p className="font-medium">R{job.category?.current_hourly_rate?.toFixed(2) || '0.00'}/hr</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Role</p>
+                      <p className="font-medium">{job.labor_roles?.name || 'Not assigned'}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Estimated Time</p>
+                      <p className="font-medium">
+                        {job.estimated_minutes
+                          ? `${job.estimated_minutes} ${job.time_unit || 'hours'} per piece`
+                          : 'Not set'}
+                      </p>
+                    </div>
                   </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
+                  {job.description && (
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground mb-1">Description</p>
+                      <p className="text-sm">{job.description}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Time Analysis - shows average times from completed jobs */}
           <JobTimeAnalysis jobId={jobId} />

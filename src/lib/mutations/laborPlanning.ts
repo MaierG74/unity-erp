@@ -54,7 +54,7 @@ export function useLaborPlanningMutations(queryKey: QueryKey) {
           assignments: current.assignments.filter((assignment) => assignment.jobKey !== input.jobKey),
           orders: markJobSchedule(current.orders, input.jobKey, 'unscheduled'),
           unscheduledJobs: addJobIfMissing(current.unscheduledJobs, job),
-        };
+        } as LaborPlanningCache;
       });
 
       return { previous };
@@ -85,6 +85,7 @@ export function useLaborPlanningMutations(queryKey: QueryKey) {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey });
+      queryClient.invalidateQueries({ queryKey: ['labor-planning-week-summary'] });
     },
   });
 
@@ -161,6 +162,7 @@ export function useLaborPlanningMutations(queryKey: QueryKey) {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey });
+      queryClient.invalidateQueries({ queryKey: ['labor-planning-week-summary'] });
     },
   });
 
@@ -190,6 +192,10 @@ export function useLaborPlanningMutations(queryKey: QueryKey) {
             hourlyRateId: input.hourlyRateId ?? null,
             pieceRateId: input.pieceRateId ?? null,
             assignmentDate: input.assignmentDate,
+            jobStatus: null,
+            issuedAt: null,
+            startedAt: null,
+            completedAt: null,
           }),
           staffId: input.staffId ?? existing?.staffId ?? null,
           startMinutes: input.startMinutes ?? existing?.startMinutes ?? null,
@@ -247,6 +253,7 @@ export function useLaborPlanningMutations(queryKey: QueryKey) {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey });
+      queryClient.invalidateQueries({ queryKey: ['labor-planning-week-summary'] });
     },
   });
 
@@ -331,6 +338,10 @@ export async function unassignJob(input: UnassignJobInput): Promise<LaborPlanAss
     hourlyRateId: null,
     pieceRateId: null,
     assignmentDate: input.assignmentDate,
+    jobStatus: null,
+    issuedAt: null,
+    startedAt: null,
+    completedAt: null,
   };
 }
 
@@ -407,6 +418,10 @@ function normalizeAssignmentRow(row: any): LaborPlanAssignment {
     hourlyRateId: toNumber(row?.hourly_rate_id),
     pieceRateId: toNumber(row?.piece_rate_id),
     assignmentDate: row?.assignment_date ?? null,
+    jobStatus: row?.job_status ?? null,
+    issuedAt: row?.issued_at ?? null,
+    startedAt: row?.started_at ?? null,
+    completedAt: row?.completed_at ?? null,
   };
 }
 
@@ -459,5 +474,9 @@ function buildOptimisticAssignment(input: AssignJobInput): LaborPlanAssignment {
     hourlyRateId: input.job.hourlyRateId ?? input.job.rateId ?? null,
     pieceRateId: input.job.pieceRateId ?? null,
     assignmentDate: input.assignmentDate,
+    jobStatus: null,
+    issuedAt: null,
+    startedAt: null,
+    completedAt: null,
   };
 }

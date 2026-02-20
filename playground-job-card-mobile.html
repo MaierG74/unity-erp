@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Job Card Mobile View — Playground</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --surface: #141414;
+    --surface2: #1e1e1e;
+    --border: #2a2a2a;
+    --text: #e5e5e5;
+    --text-muted: #888;
+    --accent: #10b981;
+    --accent-blue: #3b82f6;
+    --accent-amber: #f59e0b;
+    --accent-red: #ef4444;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* ── Layout ─────────────────────────────── */
+  .app {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    grid-template-rows: auto 1fr auto;
+    min-height: 100vh;
+  }
+
+  .header {
+    grid-column: 1 / -1;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .header h1 {
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .header .tag {
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--surface2);
+    padding: 3px 8px;
+    border-radius: 4px;
+  }
+
+  /* ── Controls Panel ──────────────────────── */
+  .controls {
+    padding: 16px;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    background: var(--surface);
+  }
+
+  .control-group {
+    margin-bottom: 20px;
+  }
+
+  .control-group label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+
+  .control-group input[type="text"],
+  .control-group input[type="number"],
+  .control-group select {
+    width: 100%;
+    padding: 8px 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+  }
+
+  .control-group input:focus,
+  .control-group select:focus {
+    border-color: var(--accent);
+  }
+
+  .radio-group {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+
+  .radio-group button {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface2);
+    color: var(--text-muted);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+  }
+
+  .radio-group button.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+
+  .radio-group button:hover:not(.active) {
+    border-color: #444;
+  }
+
+  .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .slider-row input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent);
+  }
+
+  .slider-row .val {
+    font-size: 13px;
+    font-weight: 600;
+    min-width: 36px;
+    text-align: right;
+    font-family: 'SF Mono', 'Menlo', monospace;
+  }
+
+  .preset-bar {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+  }
+
+  .preset-bar button {
+    flex: 1;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface2);
+    color: var(--text-muted);
+    font-size: 11px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
+  }
+
+  .preset-bar button:hover {
+    background: var(--border);
+    color: var(--text);
+  }
+
+  .check-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+
+  .check-row input[type="checkbox"] {
+    accent-color: var(--accent);
+  }
+
+  .check-row span {
+    font-size: 13px;
+  }
+
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 16px 0;
+  }
+
+  /* ── Preview Area ────────────────────────── */
+  .preview-area {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    overflow: auto;
+    background: #111;
+  }
+
+  .phone-frame {
+    width: 375px;
+    height: 812px;
+    border: 3px solid #333;
+    border-radius: 40px;
+    overflow: hidden;
+    background: #fff;
+    box-shadow: 0 0 60px rgba(0,0,0,0.5);
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .phone-notch {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 150px;
+    height: 28px;
+    background: #000;
+    border-radius: 0 0 18px 18px;
+    z-index: 10;
+  }
+
+  .phone-screen {
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* ── Dark mode phone screen ──────────────── */
+  .phone-screen.dark {
+    background: #09090b;
+    color: #fafafa;
+  }
+
+  .phone-screen.dark .m-header {
+    background: rgba(9,9,11,0.95);
+    border-color: #27272a;
+  }
+
+  .phone-screen.dark .m-info-card {
+    background: #18181b;
+    border-color: #27272a;
+  }
+
+  .phone-screen.dark .m-progress-card {
+    background: #18181b;
+    border-color: #27272a;
+  }
+
+  .phone-screen.dark .m-stat-box { background: #27272a; }
+  .phone-screen.dark .m-progress-track { background: #27272a; }
+
+  .phone-screen.dark .m-item {
+    background: #18181b;
+    border-color: #27272a;
+  }
+
+  .phone-screen.dark .m-item.done {
+    background: rgba(16,185,129,0.08);
+    border-color: #065f46;
+  }
+
+  .phone-screen.dark .m-icon-box {
+    background: #27272a;
+    color: #a1a1aa;
+  }
+
+  .phone-screen.dark .m-item-sub { color: #a1a1aa; }
+  .phone-screen.dark .m-info-label { color: #a1a1aa; }
+  .phone-screen.dark .m-progress-label { color: #a1a1aa; }
+  .phone-screen.dark .m-stat-label { color: #a1a1aa; }
+
+  .phone-screen.dark .m-notes {
+    background: rgba(245,158,11,0.08);
+    border-color: #92400e;
+  }
+  .phone-screen.dark .m-notes-title { color: #fbbf24; }
+
+  .phone-screen.dark .m-completed-banner {
+    background: rgba(16,185,129,0.08);
+    border-color: #065f46;
+  }
+  .phone-screen.dark .m-completed-text { color: #34d399; }
+
+  .phone-screen.dark .m-qty-btn {
+    background: #18181b;
+    border-color: #27272a;
+  }
+
+  /* ── Light mode phone screen ─────────────── */
+  .phone-screen.light {
+    background: #fff;
+    color: #09090b;
+  }
+
+  .phone-screen.light .m-header {
+    background: rgba(255,255,255,0.95);
+    border-color: #e4e4e7;
+  }
+
+  .phone-screen.light .m-info-card {
+    background: #fff;
+    border-color: #e4e4e7;
+  }
+
+  .phone-screen.light .m-progress-card {
+    background: #fff;
+    border-color: #e4e4e7;
+  }
+
+  .phone-screen.light .m-stat-box { background: #f4f4f5; }
+  .phone-screen.light .m-progress-track { background: #e4e4e7; }
+
+  .phone-screen.light .m-item {
+    background: #fff;
+    border-color: #e4e4e7;
+  }
+
+  .phone-screen.light .m-item.done {
+    background: rgba(16,185,129,0.05);
+    border-color: #a7f3d0;
+  }
+
+  .phone-screen.light .m-icon-box {
+    background: #f4f4f5;
+    color: #71717a;
+  }
+
+  .phone-screen.light .m-item-sub { color: #71717a; }
+  .phone-screen.light .m-info-label { color: #71717a; }
+  .phone-screen.light .m-progress-label { color: #71717a; }
+  .phone-screen.light .m-stat-label { color: #71717a; }
+
+  .phone-screen.light .m-notes {
+    background: rgba(245,158,11,0.05);
+    border-color: #fde68a;
+  }
+  .phone-screen.light .m-notes-title { color: #b45309; }
+
+  .phone-screen.light .m-completed-banner {
+    background: rgba(16,185,129,0.05);
+    border-color: #a7f3d0;
+  }
+  .phone-screen.light .m-completed-text { color: #047857; }
+
+  .phone-screen.light .m-qty-btn {
+    background: #f4f4f5;
+    border-color: #e4e4e7;
+  }
+
+  /* ── Mobile component styles ─────────────── */
+  .m-header {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    padding: 40px 16px 12px;
+    border-bottom: 1px solid;
+    backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .m-header h1 { font-size: 18px; font-weight: 700; }
+  .m-header .sub { font-size: 13px; margin-top: 2px; }
+
+  .m-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+  }
+
+  .m-badge svg { width: 14px; height: 14px; }
+
+  .m-body { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+
+  .m-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  .m-info-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid;
+    border-radius: 12px;
+    padding: 12px;
+  }
+
+  .m-info-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .m-info-label { font-size: 11px; }
+  .m-info-value { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .m-progress-card {
+    border: 1px solid;
+    border-radius: 12px;
+    padding: 16px;
+  }
+
+  .m-progress-top { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 8px; }
+  .m-progress-label { font-weight: 500; }
+  .m-progress-pct { font-weight: 700; }
+
+  .m-progress-track {
+    height: 12px;
+    border-radius: 999px;
+    overflow: hidden;
+  }
+
+  .m-progress-bar {
+    height: 100%;
+    border-radius: 999px;
+    background: #10b981;
+    transition: width 0.4s ease;
+  }
+
+  .m-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+
+  .m-stat-box {
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+  }
+
+  .m-stat-value { font-size: 24px; font-weight: 700; }
+  .m-stat-label { font-size: 12px; margin-top: 2px; }
+
+  .m-items-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+
+  .m-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid;
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 8px;
+    transition: all 0.2s;
+  }
+
+  .m-icon-box {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .m-item-text { flex: 1; min-width: 0; }
+  .m-item-name { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .m-item-sub { font-size: 12px; }
+
+  .m-qty-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    border: 1px solid;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 16px;
+  }
+
+  .m-qty-btn.primary {
+    background: #18181b;
+    color: #fafafa;
+    border-color: transparent;
+  }
+
+  .phone-screen.light .m-qty-btn.primary {
+    background: #18181b;
+    color: #fafafa;
+  }
+
+  .m-notes {
+    border: 1px solid;
+    border-radius: 12px;
+    padding: 12px;
+  }
+
+  .m-notes-title { font-size: 12px; font-weight: 600; }
+  .m-notes-body { font-size: 14px; margin-top: 4px; }
+
+  .m-action-btn {
+    width: 100%;
+    height: 56px;
+    border-radius: 12px;
+    border: none;
+    font-size: 18px;
+    font-weight: 600;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    cursor: pointer;
+  }
+
+  .m-action-btn svg { width: 20px; height: 20px; }
+
+  .m-completed-banner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid;
+    border-radius: 12px;
+    padding: 24px;
+  }
+
+  .m-completed-banner svg { width: 40px; height: 40px; color: #10b981; }
+  .m-completed-text { font-size: 18px; font-weight: 600; }
+
+  /* ── Prompt Output ───────────────────────── */
+  .prompt-area {
+    grid-column: 1 / -1;
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .prompt-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+
+  .prompt-box {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+
+  .prompt-text {
+    flex: 1;
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    min-height: 48px;
+    white-space: pre-wrap;
+  }
+
+  .copy-btn {
+    padding: 8px 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 13px;
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+    transition: all 0.15s;
+  }
+
+  .copy-btn:hover { background: var(--border); }
+  .copy-btn.copied { background: var(--accent); border-color: var(--accent); color: #fff; }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- Header -->
+  <div class="header">
+    <h1>Job Card Mobile View</h1>
+    <span class="tag">Playground</span>
+    <span class="tag">375 &times; 812</span>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <div class="preset-bar">
+      <button onclick="applyPreset('pending')">Pending</button>
+      <button onclick="applyPreset('inProgress')">In Progress</button>
+      <button onclick="applyPreset('completed')">Completed</button>
+      <button onclick="applyPreset('multiItem')">Multi-Item</button>
+    </div>
+
+    <div class="control-group">
+      <label>Theme</label>
+      <div class="radio-group" id="themeGroup">
+        <button class="active" onclick="setState('theme','dark')">Dark</button>
+        <button onclick="setState('theme','light')">Light</button>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="control-group">
+      <label>Status</label>
+      <div class="radio-group" id="statusGroup">
+        <button onclick="setState('status','pending')">Pending</button>
+        <button class="active" onclick="setState('status','in_progress')">In Progress</button>
+        <button onclick="setState('status','completed')">Completed</button>
+        <button onclick="setState('status','cancelled')">Cancelled</button>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="control-group">
+      <label>Job Card ID</label>
+      <input type="number" value="7" onchange="setState('jobCardId', +this.value)">
+    </div>
+
+    <div class="row-2">
+      <div class="control-group">
+        <label>Staff Name</label>
+        <input type="text" value="Thulani L." onchange="setState('staffName', this.value)">
+      </div>
+      <div class="control-group">
+        <label>Due Date</label>
+        <input type="text" value="No due date" onchange="setState('dueDate', this.value)">
+      </div>
+    </div>
+
+    <div class="row-2">
+      <div class="control-group">
+        <label>Order #</label>
+        <input type="text" value="Test1133" onchange="setState('orderNumber', this.value)">
+      </div>
+      <div class="control-group">
+        <label>Customer</label>
+        <input type="text" value="Qbutton" onchange="setState('customer', this.value)">
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="control-group">
+      <label>Item 1 — Product</label>
+      <input type="text" value="Unknown Product" onchange="setState('item1Product', this.value)">
+    </div>
+
+    <div class="control-group">
+      <label>Item 1 — Job</label>
+      <input type="text" value="Manufacture L Arm Bracket" onchange="setState('item1Job', this.value)">
+    </div>
+
+    <div class="row-2">
+      <div class="control-group">
+        <label>Quantity</label>
+        <input type="number" value="60" onchange="setState('item1Qty', +this.value)">
+      </div>
+      <div class="control-group">
+        <label>Piece Rate (R)</label>
+        <input type="number" step="0.01" value="0.64" onchange="setState('item1Rate', +this.value)">
+      </div>
+    </div>
+
+    <div class="control-group">
+      <label>Item 1 — Completed</label>
+      <div class="slider-row">
+        <input type="range" id="item1CompletedSlider" min="0" max="60" value="15" oninput="setState('item1Completed', +this.value)">
+        <span class="val" id="item1CompletedVal">15</span>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="check-row">
+      <input type="checkbox" id="showItem2" onchange="setState('showItem2', this.checked)">
+      <span>Show 2nd item</span>
+    </div>
+
+    <div id="item2Controls" style="display:none;">
+      <div class="control-group">
+        <label>Item 2 — Product</label>
+        <input type="text" value="Steel Plate" onchange="setState('item2Product', this.value)">
+      </div>
+      <div class="control-group">
+        <label>Item 2 — Job</label>
+        <input type="text" value="Cut & Bend" onchange="setState('item2Job', this.value)">
+      </div>
+      <div class="row-2">
+        <div class="control-group">
+          <label>Quantity</label>
+          <input type="number" value="30" onchange="setState('item2Qty', +this.value)">
+        </div>
+        <div class="control-group">
+          <label>Rate (R)</label>
+          <input type="number" step="0.01" value="1.20" onchange="setState('item2Rate', +this.value)">
+        </div>
+      </div>
+      <div class="control-group">
+        <label>Item 2 — Completed</label>
+        <div class="slider-row">
+          <input type="range" id="item2CompletedSlider" min="0" max="30" value="0" oninput="setState('item2Completed', +this.value)">
+          <span class="val" id="item2CompletedVal">0</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="check-row">
+      <input type="checkbox" id="showNotes" checked onchange="setState('showNotes', this.checked)">
+      <span>Show instructions/notes</span>
+    </div>
+
+    <div class="control-group">
+      <label>Notes Text</label>
+      <input type="text" value="Scheduled: 08:15 - 09:15" onchange="setState('notes', this.value)">
+    </div>
+  </div>
+
+  <!-- Preview -->
+  <div class="preview-area">
+    <div class="phone-frame">
+      <div class="phone-notch"></div>
+      <div class="phone-screen dark" id="phoneScreen">
+        <!-- rendered by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Prompt -->
+  <div class="prompt-area">
+    <div class="prompt-label">Prompt — paste into Claude to apply changes</div>
+    <div class="prompt-box">
+      <div class="prompt-text" id="promptText"></div>
+      <button class="copy-btn" id="copyBtn" onclick="copyPrompt()">Copy</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── SVG Icons (inline) ───────────────────────────────
+const ICONS = {
+  clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+  user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+  calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+  package: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>',
+  hash: '#',
+  play: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>',
+};
+
+// ── State ─────────────────────────────────
+const DEFAULTS = {
+  theme: 'dark',
+  status: 'in_progress',
+  jobCardId: 7,
+  staffName: 'Thulani L.',
+  dueDate: 'No due date',
+  orderNumber: 'Test1133',
+  customer: 'Qbutton',
+  item1Product: 'Unknown Product',
+  item1Job: 'Manufacture L Arm Bracket',
+  item1Qty: 60,
+  item1Rate: 0.64,
+  item1Completed: 15,
+  showItem2: false,
+  item2Product: 'Steel Plate',
+  item2Job: 'Cut & Bend',
+  item2Qty: 30,
+  item2Rate: 1.20,
+  item2Completed: 0,
+  showNotes: true,
+  notes: 'Scheduled: 08:15 - 09:15',
+};
+
+const state = { ...DEFAULTS };
+
+function setState(key, value) {
+  state[key] = value;
+  if (key === 'item1Qty') {
+    document.getElementById('item1CompletedSlider').max = value;
+    if (state.item1Completed > value) state.item1Completed = value;
+  }
+  if (key === 'item2Qty') {
+    document.getElementById('item2CompletedSlider').max = value;
+    if (state.item2Completed > value) state.item2Completed = value;
+  }
+  if (key === 'showItem2') {
+    document.getElementById('item2Controls').style.display = value ? 'block' : 'none';
+  }
+  syncRadioGroups();
+  updateAll();
+}
+
+function syncRadioGroups() {
+  document.querySelectorAll('#themeGroup button').forEach(b => {
+    b.classList.toggle('active', b.textContent.toLowerCase() === state.theme);
+  });
+  document.querySelectorAll('#statusGroup button').forEach(b => {
+    const val = b.textContent.toLowerCase().replace(' ', '_');
+    b.classList.toggle('active', val === state.status);
+  });
+}
+
+function updateAll() {
+  renderPreview();
+  updatePrompt();
+  document.getElementById('item1CompletedVal').textContent = state.item1Completed;
+  document.getElementById('item2CompletedVal').textContent = state.item2Completed;
+}
+
+// ── Presets ────────────────────────────────
+function applyPreset(name) {
+  const presets = {
+    pending: { status: 'pending', item1Completed: 0, item2Completed: 0, showItem2: false },
+    inProgress: { status: 'in_progress', item1Completed: 15, showItem2: false },
+    completed: { status: 'completed', item1Completed: 60, showItem2: false },
+    multiItem: { status: 'in_progress', showItem2: true, item1Completed: 40, item2Completed: 10 },
+  };
+  Object.assign(state, presets[name]);
+  // Sync inputs
+  document.getElementById('item1CompletedSlider').value = state.item1Completed;
+  document.getElementById('item2CompletedSlider').value = state.item2Completed;
+  document.getElementById('showItem2').checked = state.showItem2;
+  document.getElementById('item2Controls').style.display = state.showItem2 ? 'block' : 'none';
+  syncRadioGroups();
+  updateAll();
+}
+
+// ── Render Preview ────────────────────────
+function renderPreview() {
+  const screen = document.getElementById('phoneScreen');
+  screen.className = 'phone-screen ' + state.theme;
+
+  const statusColor = {
+    pending: '#f59e0b',
+    in_progress: '#3b82f6',
+    completed: '#10b981',
+    cancelled: '#ef4444',
+  }[state.status] || '#f59e0b';
+
+  const statusLabel = state.status.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+  const statusIcon = state.status === 'completed' ? ICONS.check : ICONS.clock;
+  const isActive = state.status === 'pending' || state.status === 'in_progress';
+
+  // Build items
+  const items = [{
+    product: state.item1Product,
+    job: state.item1Job,
+    qty: state.item1Qty,
+    rate: state.item1Rate,
+    completed: Math.min(state.item1Completed, state.item1Qty),
+  }];
+  if (state.showItem2) {
+    items.push({
+      product: state.item2Product,
+      job: state.item2Job,
+      qty: state.item2Qty,
+      rate: state.item2Rate,
+      completed: Math.min(state.item2Completed, state.item2Qty),
+    });
+  }
+
+  const totalQty = items.reduce((s, i) => s + i.qty, 0);
+  const completedQty = items.reduce((s, i) => s + i.completed, 0);
+  const totalValue = items.reduce((s, i) => s + i.qty * i.rate, 0);
+  const earnedValue = items.reduce((s, i) => s + i.completed * i.rate, 0);
+  const progressPct = totalQty > 0 ? Math.round((completedQty / totalQty) * 100) : 0;
+
+  let html = '';
+
+  // Header
+  html += `
+    <div class="m-header">
+      <div>
+        <h1>Job Card #${state.jobCardId}</h1>
+        <div class="m-header sub" style="color:${state.theme === 'dark' ? '#a1a1aa' : '#71717a'}">
+          Order #${state.orderNumber} &middot; ${state.customer}
+        </div>
+      </div>
+      <span class="m-badge" style="background:${statusColor}">
+        ${statusIcon}
+        ${statusLabel}
+      </span>
+    </div>
+  `;
+
+  // Body
+  html += '<div class="m-body">';
+
+  // Info cards
+  html += `
+    <div class="m-info-grid">
+      <div class="m-info-card">
+        <div class="m-info-icon m-icon-box">${ICONS.user}</div>
+        <div>
+          <div class="m-info-label">Staff</div>
+          <div class="m-info-value">${state.staffName}</div>
+        </div>
+      </div>
+      <div class="m-info-card">
+        <div class="m-info-icon m-icon-box">${ICONS.calendar}</div>
+        <div>
+          <div class="m-info-label">Due</div>
+          <div class="m-info-value">${state.dueDate}</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Progress
+  html += `
+    <div class="m-progress-card">
+      <div class="m-progress-top">
+        <span class="m-progress-label">Progress</span>
+        <span class="m-progress-pct">${progressPct}%</span>
+      </div>
+      <div class="m-progress-track">
+        <div class="m-progress-bar" style="width:${progressPct}%"></div>
+      </div>
+      <div class="m-stats">
+        <div class="m-stat-box">
+          <div class="m-stat-value">${completedQty}</div>
+          <div class="m-stat-label">of ${totalQty} done</div>
+        </div>
+        <div class="m-stat-box">
+          <div class="m-stat-value">R ${earnedValue.toFixed(0)}</div>
+          <div class="m-stat-label">of R ${totalValue.toFixed(0)}</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Items
+  html += '<div class="m-items-title">Items</div>';
+  items.forEach(item => {
+    const done = item.completed >= item.qty;
+    html += `
+      <div class="m-item ${done ? 'done' : ''}">
+        <div class="m-icon-box">${ICONS.package}</div>
+        <div class="m-item-text">
+          <div class="m-item-name">${item.product}</div>
+          <div class="m-item-sub">${item.job} &middot; ${item.completed}/${item.qty}${item.rate ? ' &middot; R ' + item.rate.toFixed(2) : ''}</div>
+        </div>
+        ${isActive && !done ? '<div class="m-qty-btn primary">#</div>' : ''}
+        ${done ? '<span style="color:#10b981;">' + ICONS.check + '</span>' : ''}
+      </div>
+    `;
+  });
+
+  // Notes
+  if (state.showNotes && state.notes) {
+    html += `
+      <div class="m-notes">
+        <div class="m-notes-title">Instructions</div>
+        <div class="m-notes-body">${state.notes}</div>
+      </div>
+    `;
+  }
+
+  // Action buttons
+  if (isActive) {
+    if (state.status === 'pending') {
+      html += `<button class="m-action-btn" style="background:#2563eb">${ICONS.play} Start Job</button>`;
+    }
+    if (state.status === 'in_progress') {
+      html += `<button class="m-action-btn" style="background:#059669">${ICONS.check} Complete Job</button>`;
+    }
+  }
+
+  // Completed banner
+  if (state.status === 'completed') {
+    html += `
+      <div class="m-completed-banner">
+        ${ICONS.check}
+        <div class="m-completed-text">Job Completed</div>
+      </div>
+    `;
+  }
+
+  html += '</div>'; // end m-body
+  screen.innerHTML = html;
+}
+
+// ── Prompt Builder ────────────────────────
+function updatePrompt() {
+  const parts = [];
+
+  if (state.theme !== DEFAULTS.theme) {
+    parts.push(`use ${state.theme} mode for the mobile scan page`);
+  }
+  if (state.status !== DEFAULTS.status) {
+    parts.push(`show the "${state.status}" state`);
+  }
+
+  // Collect design observations
+  const designNotes = [];
+
+  const items = [{ qty: state.item1Qty, completed: state.item1Completed }];
+  if (state.showItem2) items.push({ qty: state.item2Qty, completed: state.item2Completed });
+  const totalQty = items.reduce((s, i) => s + i.qty, 0);
+  const completedQty = items.reduce((s, i) => s + i.completed, 0);
+  const pct = totalQty > 0 ? Math.round((completedQty / totalQty) * 100) : 0;
+
+  if (pct > 0 && pct < 100) {
+    designNotes.push(`at ${pct}% progress`);
+  }
+  if (state.showItem2) {
+    designNotes.push('with multiple work items');
+  }
+  if (!state.showNotes) {
+    designNotes.push('without the instructions/notes section');
+  }
+
+  if (designNotes.length > 0) {
+    parts.push(designNotes.join(', '));
+  }
+
+  const promptEl = document.getElementById('promptText');
+  if (parts.length === 0) {
+    promptEl.textContent = 'The mobile job card scan view at /scan/jc/[id] looks good with current defaults. No changes needed.';
+  } else {
+    promptEl.textContent = `Update the mobile job card scan view at /scan/jc/[id]/page.tsx: ${parts.join('; ')}.`;
+  }
+}
+
+// ── Copy ──────────────────────────────────
+function copyPrompt() {
+  const text = document.getElementById('promptText').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copyBtn');
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.textContent = 'Copy';
+      btn.classList.remove('copied');
+    }, 1500);
+  });
+}
+
+// ── Init ──────────────────────────────────
+updateAll();
+</script>
+</body>
+</html>

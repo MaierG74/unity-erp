@@ -1,7 +1,7 @@
 'use client';
 
 import type { DragEvent } from 'react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -11,9 +11,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { minutesToClock } from '@/src/lib/laborScheduling';
-import { Circle, GripHorizontal, X, Calendar, Clock, User, Briefcase, CheckCircle2, ClipboardList, Loader2 } from 'lucide-react';
+import { Circle, GripHorizontal, X, Calendar, Clock, User, Briefcase, CheckCircle2, ClipboardList, Loader2, Undo2, Play, PackageCheck, Pause } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
@@ -21,6 +22,22 @@ import { toast } from 'sonner';
 import type { LaborDragPayload, StaffAssignment, StaffLane, TimeMarker } from './types';
 import { CompleteJobDialog } from './complete-job-dialog';
 import type { ScheduleBreak } from '@/types/work-schedule';
+
+/** Visual metadata for job status indicators on assignment bars */
+function getJobStatusInfo(status?: StaffAssignment['jobStatus']) {
+  switch (status) {
+    case 'issued':
+      return { label: 'Issued', icon: ClipboardList, color: 'text-blue-300', dotColor: 'bg-blue-400', stripe: 'rgba(96,165,250,0.5)' };
+    case 'in_progress':
+      return { label: 'In Progress', icon: Play, color: 'text-amber-300', dotColor: 'bg-amber-400', stripe: 'rgba(251,191,36,0.5)' };
+    case 'completed':
+      return { label: 'Completed', icon: CheckCircle2, color: 'text-emerald-300', dotColor: 'bg-emerald-400', stripe: 'rgba(52,211,153,0.5)' };
+    case 'on_hold':
+      return { label: 'On Hold', icon: Pause, color: 'text-orange-300', dotColor: 'bg-orange-400', stripe: 'rgba(251,146,60,0.5)' };
+    default:
+      return null;
+  }
+}
 
 interface StaffLaneListProps {
   staff: StaffLane[];
@@ -131,7 +148,43 @@ export function StaffLaneList({
     job_status?: string;
   } | null>(null);
 
-  // Issue job card from assignment
+  // Issue quantity state — fetched when the assignment dialog opens
+  const [availableQty, setAvailableQty] = useState<number | null>(null);
+  const [issueQty, setIssueQty] = useState(1);
+
+  useEffect(() => {
+    if (!selectedAssignment) {
+      setAvailableQty(null);
+      setIssueQty(1);
+      return;
+    }
+    const orderId = typeof selectedAssignment.orderId === 'number' ? selectedAssignment.orderId : null;
+    const jobId = selectedAssignment.jobId ?? null;
+    if (!orderId || !jobId) { setAvailableQty(null); return; }
+
+    (async () => {
+      // Only count items on unassigned cards (staff_id IS NULL) that haven't been completed
+      const { data: cards } = await supabase
+        .from('job_cards')
+        .select('job_card_id')
+        .eq('order_id', orderId)
+        .is('staff_id', null);
+      if (!cards || cards.length === 0) { setAvailableQty(null); return; }
+
+      const { data: items } = await supabase
+        .from('job_card_items')
+        .select('quantity')
+        .in('job_card_id', cards.map(c => c.job_card_id))
+        .eq('job_id', jobId)
+        .neq('status', 'completed');
+
+      const total = (items ?? []).reduce((sum, i) => sum + (i.quantity ?? 0), 0);
+      setAvailableQty(total > 0 ? total : null);
+      setIssueQty(total > 0 ? total : 1);
+    })();
+  }, [selectedAssignment]);
+
+  // Issue job card from assignment — splits quantity from existing item if present
   const handleIssueJobCard = async () => {
     if (!selectedAssignment || !selectedLane) return;
 
@@ -139,7 +192,7 @@ export function StaffLaneList({
     try {
       // Look up BOL data if we have a bolId to get product_id and quantity
       let productId: number | null = null;
-      let quantity = 1;
+      let bolQuantity = 1;
       let jobId = selectedAssignment.jobId || null;
 
       if (selectedAssignment.bolId) {
@@ -151,7 +204,7 @@ export function StaffLaneList({
         if (bolData) {
           productId = bolData.product_id;
           jobId = bolData.job_id || jobId;
-          quantity = bolData.quantity || 1;
+          bolQuantity = bolData.quantity || 1;
         }
       }
 
@@ -170,30 +223,53 @@ export function StaffLaneList({
 
       const orderId = typeof selectedAssignment.orderId === 'number' ? selectedAssignment.orderId : null;
 
-      // Check for existing unassigned job card item for this order + job.
-      // If found, we move it to the new staff card instead of creating a duplicate.
-      let existingItem: { item_id: number; job_card_id: number; quantity: number; piece_rate: number | null; product_id: number | null } | null = null;
-      if (orderId && jobId) {
-        const { data: unassignedCards } = await supabase
-          .from('job_cards')
-          .select('job_card_id')
-          .eq('order_id', orderId)
-          .is('staff_id', null)
-          .eq('status', 'pending');
+      // Find ANY existing job_card_item for this (order, job) across all cards
+      type SourceItem = {
+        item_id: number;
+        job_card_id: number;
+        quantity: number;
+        piece_rate: number | null;
+        product_id: number | null;
+        card_staff_id: number | null;
+      };
+      let sourceItem: SourceItem | null = null;
 
-        if (unassignedCards && unassignedCards.length > 0) {
-          const cardIds = unassignedCards.map(c => c.job_card_id);
+      if (orderId && jobId) {
+        const { data: allCards } = await supabase
+          .from('job_cards')
+          .select('job_card_id, staff_id')
+          .eq('order_id', orderId);
+
+        if (allCards && allCards.length > 0) {
+          const cardMap = new Map(allCards.map(c => [c.job_card_id, c.staff_id]));
+          const cardIds = allCards.map(c => c.job_card_id);
+
           const { data: matchingItems } = await supabase
             .from('job_card_items')
             .select('item_id, job_card_id, quantity, piece_rate, product_id')
             .in('job_card_id', cardIds)
             .eq('job_id', jobId)
+            .order('quantity', { ascending: false })
             .limit(1);
 
           if (matchingItems && matchingItems.length > 0) {
-            existingItem = matchingItems[0];
+            const item = matchingItems[0];
+            sourceItem = {
+              ...item,
+              card_staff_id: cardMap.get(item.job_card_id) ?? null,
+            };
           }
         }
+      }
+
+      const qtyToIssue = issueQty;
+
+      // If the source item has no remaining balance and is already on a staff-assigned card, block
+      if (sourceItem && sourceItem.quantity <= 0 && sourceItem.card_staff_id != null) {
+        toast.error('Already fully issued', {
+          description: 'This job has already been issued with no remaining balance.',
+        });
+        return;
       }
 
       // Create the staff-assigned job card
@@ -212,35 +288,54 @@ export function StaffLaneList({
       if (jobCardError) throw jobCardError;
       if (!jobCardData) throw new Error('Failed to create job card');
 
-      if (existingItem) {
-        // Move the existing unassigned item to the new staff card
+      const remaining = sourceItem ? sourceItem.quantity - qtyToIssue : 0;
+
+      if (sourceItem && remaining > 0) {
+        // Split: decrement source item, create new item with issued qty
+        await supabase
+          .from('job_card_items')
+          .update({ quantity: remaining })
+          .eq('item_id', sourceItem.item_id);
+
+        await supabase
+          .from('job_card_items')
+          .insert({
+            job_card_id: jobCardData.job_card_id,
+            product_id: sourceItem.product_id ?? productId,
+            job_id: jobId,
+            quantity: qtyToIssue,
+            piece_rate: sourceItem.piece_rate ?? pieceRate,
+            status: 'pending',
+          });
+      } else if (sourceItem && remaining <= 0) {
+        // Issuing full balance — move the item to the new staff card
         await supabase
           .from('job_card_items')
           .update({ job_card_id: jobCardData.job_card_id })
-          .eq('item_id', existingItem.item_id);
+          .eq('item_id', sourceItem.item_id);
 
-        // Clean up the empty unassigned card if no items remain
-        const { data: remaining } = await supabase
+        // Clean up empty source card if no items remain
+        const { data: leftover } = await supabase
           .from('job_card_items')
           .select('item_id')
-          .eq('job_card_id', existingItem.job_card_id)
+          .eq('job_card_id', sourceItem.job_card_id)
           .limit(1);
 
-        if (!remaining || remaining.length === 0) {
+        if (!leftover || leftover.length === 0) {
           await supabase
             .from('job_cards')
             .delete()
-            .eq('job_card_id', existingItem.job_card_id);
+            .eq('job_card_id', sourceItem.job_card_id);
         }
       } else if (jobId || productId) {
-        // No existing item to move — create a new one
+        // No existing item found at all — create fresh
         const { error: itemError } = await supabase
           .from('job_card_items')
           .insert({
             job_card_id: jobCardData.job_card_id,
             product_id: productId,
             job_id: jobId,
-            quantity: quantity,
+            quantity: qtyToIssue || bolQuantity,
             piece_rate: pieceRate,
             status: 'pending',
           });
@@ -259,17 +354,142 @@ export function StaffLaneList({
           .eq('assignment_id', parseInt(selectedAssignment.id, 10));
       }
 
-      toast.success('Job card issued successfully');
+      const jobCardId = jobCardData.job_card_id;
+      const issuedRemaining = remaining > 0 ? ` (${qtyToIssue} issued, ${remaining} remaining)` : '';
+
+      toast.success(`Job card #${jobCardId} issued${issuedRemaining}`);
+
+      // Open job card in new tab so the user can print immediately
+      window.open(`/staff/job-cards/${jobCardId}`, '_blank');
+
       setSelectedAssignment(null);
       setSelectedLane(null);
-
-      // Navigate to the new job card
-      router.push(`/staff/job-cards/${jobCardData.job_card_id}`);
     } catch (err: any) {
       console.error('Failed to create job card:', err);
       toast.error(err.message || 'Failed to create job card');
     } finally {
       setIssuingJobCard(false);
+    }
+  };
+
+  const [unissuing, setUnissuing] = useState(false);
+
+  const handleUnissueJobCard = async () => {
+    if (!selectedAssignment || !selectedLane) return;
+
+    setUnissuing(true);
+    try {
+      const orderId = typeof selectedAssignment.orderId === 'number' ? selectedAssignment.orderId : null;
+      const jobId = selectedAssignment.jobId ?? null;
+      const staffId = parseInt(selectedLane.id, 10);
+
+      // Find the staff-assigned job card for this order + staff
+      if (orderId && jobId) {
+        const { data: staffCards } = await supabase
+          .from('job_cards')
+          .select('job_card_id')
+          .eq('order_id', orderId)
+          .eq('staff_id', staffId);
+
+        if (staffCards && staffCards.length > 0) {
+          const cardIds = staffCards.map(c => c.job_card_id);
+
+          // Find the issued item on this staff's card
+          const { data: issuedItems } = await supabase
+            .from('job_card_items')
+            .select('item_id, job_card_id, quantity, product_id, piece_rate')
+            .in('job_card_id', cardIds)
+            .eq('job_id', jobId);
+
+          for (const item of issuedItems ?? []) {
+            // Find the source item (on any other card for this order+job) to merge qty back
+            const { data: sourceItems } = await supabase
+              .from('job_card_items')
+              .select('item_id, quantity, job_card_id')
+              .eq('job_id', jobId)
+              .not('job_card_id', 'in', `(${cardIds.join(',')})`)
+              .limit(1);
+
+            if (sourceItems && sourceItems.length > 0) {
+              // Merge quantity back into source
+              await supabase
+                .from('job_card_items')
+                .update({ quantity: sourceItems[0].quantity + item.quantity })
+                .eq('item_id', sourceItems[0].item_id);
+            } else {
+              // No source item to merge into — find or create an unassigned card
+              const { data: unassignedCard } = await supabase
+                .from('job_cards')
+                .select('job_card_id')
+                .eq('order_id', orderId)
+                .is('staff_id', null)
+                .limit(1)
+                .maybeSingle();
+
+              let targetCardId: number;
+              if (unassignedCard) {
+                targetCardId = unassignedCard.job_card_id;
+              } else {
+                const { data: newCard } = await supabase
+                  .from('job_cards')
+                  .insert({ order_id: orderId, staff_id: null, status: 'pending', issue_date: new Date().toISOString().split('T')[0] })
+                  .select()
+                  .single();
+                targetCardId = newCard!.job_card_id;
+              }
+
+              // Move the item back to the unassigned card
+              await supabase
+                .from('job_card_items')
+                .update({ job_card_id: targetCardId })
+                .eq('item_id', item.item_id);
+            }
+
+            // Delete the issued item (if it was merged back) or clean up card
+            if (sourceItems && sourceItems.length > 0) {
+              await supabase.from('job_card_items').delete().eq('item_id', item.item_id);
+            }
+          }
+
+          // Clean up empty staff cards
+          for (const cardId of cardIds) {
+            const { data: remaining } = await supabase
+              .from('job_card_items')
+              .select('item_id')
+              .eq('job_card_id', cardId)
+              .limit(1);
+            if (!remaining || remaining.length === 0) {
+              await supabase.from('job_cards').delete().eq('job_card_id', cardId);
+            }
+          }
+        }
+      }
+
+      // Reset the assignment status back to scheduled
+      if (selectedAssignment.id) {
+        await supabase
+          .from('labor_plan_assignments')
+          .update({
+            job_status: 'scheduled',
+            issued_at: null,
+          })
+          .eq('assignment_id', parseInt(selectedAssignment.id, 10));
+      }
+
+      toast.success('Job card un-issued', {
+        description: 'Quantity returned. You can re-issue to a different staff member.',
+      });
+
+      setSelectedAssignment(null);
+      setSelectedLane(null);
+
+      // Force window refocus to trigger React Query refetch
+      window.dispatchEvent(new Event('focus'));
+    } catch (err: any) {
+      console.error('Failed to un-issue job card:', err);
+      toast.error(err.message || 'Failed to un-issue job card');
+    } finally {
+      setUnissuing(false);
     }
   };
 
@@ -455,6 +675,8 @@ export function StaffLaneList({
 
                 const durationMins = assignment.endMinutes - assignment.startMinutes;
                 const durationHours = Math.round(durationMins / 6) / 10;
+                const statusInfo = getJobStatusInfo(assignment.jobStatus);
+                const isCompleted = assignment.jobStatus === 'completed';
 
                 return (
                   <Tooltip key={assignment.id} delayDuration={300}>
@@ -464,6 +686,7 @@ export function StaffLaneList({
                     className={cn(
                       'absolute top-1 flex items-center rounded-xl cursor-pointer transition-all duration-150 hover:scale-[1.02] hover:shadow-lg active:scale-[0.99]',
                       compact ? 'h-12' : 'h-14',
+                      isCompleted && 'opacity-60',
                     )}
                     draggable
                     onClick={(event) => {
@@ -484,10 +707,10 @@ export function StaffLaneList({
                       boxShadow: `0 2px 8px ${baseColor}55, inset 0 1px 0 rgba(255,255,255,0.15)`,
                     }}
                   >
-                    {/* Left accent stripe */}
+                    {/* Left accent stripe — coloured by job status when present */}
                     <div
                       className="absolute left-0 top-0 h-full w-1 rounded-l-xl"
-                      style={{ background: 'rgba(255,255,255,0.35)' }}
+                      style={{ background: statusInfo?.stripe ?? 'rgba(255,255,255,0.35)' }}
                     />
 
                     {/* Resize handles */}
@@ -534,6 +757,13 @@ export function StaffLaneList({
                       </div>
                     </div>
 
+                    {/* Job status indicator */}
+                    {statusInfo && (
+                      <div className={cn('mr-1 flex shrink-0 items-center justify-center rounded-full p-0.5', statusInfo.color)}>
+                        <statusInfo.icon className="h-3.5 w-3.5 drop-shadow-sm" />
+                      </div>
+                    )}
+
                     {onUnassign && (
                       <button
                         type="button"
@@ -570,7 +800,31 @@ export function StaffLaneList({
                       {assignment.orderNumber && (
                         <div className="flex items-center gap-1.5 text-[10px] text-neutral-300">
                           <ClipboardList className="h-3 w-3 shrink-0 text-neutral-500" />
-                          <span>Order #{assignment.orderNumber}</span>
+                          {assignment.orderId ? (
+                            <a
+                              href={`/orders/${assignment.orderId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline decoration-neutral-500 underline-offset-2 hover:text-white"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              Order #{assignment.orderNumber}
+                            </a>
+                          ) : (
+                            <span>Order #{assignment.orderNumber}</span>
+                          )}
+                        </div>
+                      )}
+                      {assignment.quantity != null && assignment.quantity > 0 && (
+                        <div className="flex items-center gap-1.5 text-[10px] text-neutral-300">
+                          <Circle className="h-3 w-3 shrink-0 text-neutral-500" />
+                          <span>Qty: {assignment.quantity}</span>
+                        </div>
+                      )}
+                      {statusInfo && (
+                        <div className={cn('flex items-center gap-1.5 text-[10px]', statusInfo.color)}>
+                          <statusInfo.icon className="h-3 w-3 shrink-0" />
+                          <span>{statusInfo.label}</span>
                         </div>
                       )}
                     </div>
@@ -640,20 +894,60 @@ export function StaffLaneList({
                 </div>
               </div>
 
+              {/* Issue quantity — only show when not yet issued */}
+              {availableQty != null && selectedAssignment.jobStatus !== 'issued' && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm">
+                    <ClipboardList className="h-4 w-4 text-muted-foreground" />
+                    <span className="font-medium">Issue Quantity</span>
+                  </div>
+                  <div className="ml-6 flex items-center gap-3">
+                    <Input
+                      type="number"
+                      min={1}
+                      max={availableQty}
+                      value={issueQty}
+                      onChange={(e) => setIssueQty(Math.max(1, Math.min(availableQty, parseInt(e.target.value) || 1)))}
+                      className="h-8 w-24 text-sm"
+                    />
+                    <span className="text-sm text-muted-foreground">
+                      of {availableQty} available
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <div className="flex justify-end gap-2 pt-4 pb-1">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleIssueJobCard}
-                  disabled={issuingJobCard}
-                >
-                  {issuingJobCard ? (
-                    <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                  ) : (
-                    <ClipboardList className="h-4 w-4 mr-1.5" />
-                  )}
-                  {issuingJobCard ? 'Creating...' : 'Issue Job Card'}
-                </Button>
+                {selectedAssignment.jobStatus === 'issued' ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleUnissueJobCard}
+                    disabled={unissuing}
+                    className="text-amber-600 border-amber-300 hover:bg-amber-50"
+                  >
+                    {unissuing ? (
+                      <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                    ) : (
+                      <Undo2 className="h-4 w-4 mr-1.5" />
+                    )}
+                    {unissuing ? 'Un-issuing...' : 'Un-issue'}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleIssueJobCard}
+                    disabled={issuingJobCard}
+                  >
+                    {issuingJobCard ? (
+                      <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                    ) : (
+                      <ClipboardList className="h-4 w-4 mr-1.5" />
+                    )}
+                    {issuingJobCard ? 'Creating...' : `Issue${availableQty != null ? ` (${issueQty})` : ''}`}
+                  </Button>
+                )}
                 <Button
                   variant="default"
                   size="sm"

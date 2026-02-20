@@ -25,6 +25,7 @@ import {
   Ruler,
   Layers,
   LayoutGrid,
+  Clock,
 } from 'lucide-react';
 import { useState, useEffect, createContext, useContext } from 'react';
 import { Button } from '@/components/ui/button';
@@ -111,15 +112,20 @@ const navigation = [
     href: '/reports',
     icon: BarChart 
   },
-  { 
+  {
     name: 'Option Sets',
     href: '/settings/option-sets',
     icon: Layers
   },
-  { 
-    name: 'Settings', 
+  {
+    name: 'Work Schedules',
+    href: '/settings/work-schedules',
+    icon: Clock
+  },
+  {
+    name: 'Settings',
     href: '/settings',
-    icon: Settings 
+    icon: Settings
   },
 ];
 

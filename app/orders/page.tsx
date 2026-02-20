@@ -1054,17 +1054,17 @@ function AttachmentModalWithRefresh({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[900px]">
-        <DialogHeader className="relative">
-          <div className="flex items-center justify-between">
+      <DialogContent className="sm:max-w-[900px]" onClick={(e) => e.stopPropagation()}>
+        <DialogHeader className="pr-8">
+          <div className="flex items-center gap-3">
             <DialogTitle>Order {orderNumber} - Attachments</DialogTitle>
             <button
               onClick={handleRefresh}
-              className="bg-primary text-white px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors hover:bg-primary/90 shadow-sm"
+              className="ml-auto text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-sm transition-colors"
               title="Refresh thumbnails"
             >
-              <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-              <span className="text-sm">Refresh</span>
+              <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+              Refresh
             </button>
           </div>
 
@@ -1098,7 +1098,13 @@ function AttachmentModalWithRefresh({
                     >
                       <div>
                         {isPdf ? (
-                          <div className="mb-3 aspect-[3/4] border rounded overflow-hidden bg-muted/30 flex items-center justify-center relative">
+                          <a
+                            href={attachment.file_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="block mb-3 aspect-[3/4] border rounded overflow-hidden bg-muted/30 flex items-center justify-center relative cursor-pointer hover:ring-2 hover:ring-primary/40 transition-all"
+                          >
                             <PdfThumbnailClient
                               key={`pdf-${key}`}
                               url={attachment.file_url}
@@ -1109,9 +1115,15 @@ function AttachmentModalWithRefresh({
                             <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/50 to-transparent p-2">
                               <p className="text-xs text-white truncate">{attachment.file_name}</p>
                             </div>
-                          </div>
+                          </a>
                         ) : isImage ? (
-                          <div className="mb-3 aspect-[3/4] border rounded overflow-hidden bg-muted flex items-center justify-center relative">
+                          <a
+                            href={attachment.file_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="block mb-3 aspect-[3/4] border rounded overflow-hidden bg-muted flex items-center justify-center relative cursor-pointer hover:ring-2 hover:ring-primary/40 transition-all"
+                          >
                             <div className="w-full h-full flex items-center justify-center p-3">
                               <div className="relative w-full h-full flex items-center justify-center">
                                 <div className="absolute inset-0 flex items-center justify-center">
@@ -1152,9 +1164,15 @@ function AttachmentModalWithRefresh({
                             <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/60 to-transparent p-2 z-20">
                               <p className="text-xs text-white truncate">{attachment.file_name}</p>
                             </div>
-                          </div>
+                          </a>
                         ) : (
-                          <div className="mb-3 aspect-[3/4] border rounded overflow-hidden bg-muted/30 flex items-center justify-center relative">
+                          <a
+                            href={attachment.file_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="block mb-3 aspect-[3/4] border rounded overflow-hidden bg-muted/30 flex items-center justify-center relative cursor-pointer hover:ring-2 hover:ring-primary/40 transition-all"
+                          >
                             <FileIcon
                               fileName={attachment.file_name}
                               size={48}
@@ -1162,7 +1180,7 @@ function AttachmentModalWithRefresh({
                             <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/50 to-transparent p-2">
                               <p className="text-xs text-white truncate">{attachment.file_name}</p>
                             </div>
-                          </div>
+                          </a>
                         )}
                         <div className="flex-1 min-w-0">
                           <h4 className="font-medium truncate">{attachment.file_name}</h4>
@@ -1210,7 +1228,7 @@ function AttachmentModalWithRefresh({
   );
 }
 
-// Compact Order Attachments Component for the table cell with hover preview
+// Customer Order documents column — shows customer_order type attachments with popover preview
 function OrderAttachments({ order }: { order: Order }): JSX.Element {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
@@ -1222,6 +1240,12 @@ function OrderAttachments({ order }: { order: Order }): JSX.Element {
     enabled: !!order.order_id,
   });
 
+  // Filter to only customer_order documents for this column
+  const customerOrderDocs = attachments.filter(
+    (att: any) => att.document_type === 'customer_order'
+  );
+  const otherDocsCount = attachments.length - customerOrderDocs.length;
+
   const handleUploadSuccess = () => {
     setIsUploadDialogOpen(false);
     queryClient.invalidateQueries({ queryKey: ['orderAttachments', order.order_id] });
@@ -1231,7 +1255,7 @@ function OrderAttachments({ order }: { order: Order }): JSX.Element {
     <>
       <TableCell className="text-center align-middle">
         <div className="inline-flex items-center gap-1">
-          {attachments.length > 0 ? (
+          {customerOrderDocs.length > 0 ? (
             <Popover>
               <PopoverTrigger asChild>
                 <button
@@ -1239,8 +1263,11 @@ function OrderAttachments({ order }: { order: Order }): JSX.Element {
                   onClick={(event) => event.stopPropagation()}
                   className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
-                  <Paperclip className="h-3.5 w-3.5" />
-                  <span className="font-medium">{attachments.length}</span>
+                  <ClipboardList className="h-3.5 w-3.5" />
+                  <span className="font-medium">{customerOrderDocs.length}</span>
+                  {otherDocsCount > 0 && (
+                    <span className="text-xs text-muted-foreground/60">+{otherDocsCount}</span>
+                  )}
                 </button>
               </PopoverTrigger>
               <PopoverContent
@@ -1252,18 +1279,18 @@ function OrderAttachments({ order }: { order: Order }): JSX.Element {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-medium">
-                      {attachments.length} file{attachments.length === 1 ? '' : 's'}
+                      {customerOrderDocs.length} customer order{customerOrderDocs.length === 1 ? '' : 's'}
                     </p>
                     <button
                       type="button"
                       onClick={() => setSelectedOrder(order)}
                       className="text-xs text-primary hover:underline"
                     >
-                      View all
+                      View all ({attachments.length})
                     </button>
                   </div>
                   <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                    {attachments.map((att, idx) => {
+                    {customerOrderDocs.map((att: any, idx: number) => {
                       const ext = att.file_name?.split('.').pop()?.toLowerCase() || '';
                       const isPdf = ext === 'pdf';
                       const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
@@ -1299,6 +1326,20 @@ function OrderAttachments({ order }: { order: Order }): JSX.Element {
                 </div>
               </PopoverContent>
             </Popover>
+          ) : attachments.length > 0 ? (
+            // Has attachments but none are customer_order type
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setSelectedOrder(order);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
+              title={`${attachments.length} other document${attachments.length === 1 ? '' : 's'}`}
+            >
+              <Paperclip className="h-3.5 w-3.5" />
+              <span className="font-medium">{attachments.length}</span>
+            </button>
           ) : (
             <span className="text-muted-foreground/50">—</span>
           )}
@@ -2122,7 +2163,7 @@ export default function OrdersPage() {
                     <TableHead className="font-semibold">Items</TableHead>
                     <TableHead className="font-semibold">Supplier</TableHead>
                     <SortableHeader label="Status" field="status" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
-                    <TableHead className="font-semibold text-center">Files</TableHead>
+                    <TableHead className="font-semibold text-center">Customer Order</TableHead>
                     <TableHead className="font-semibold text-right w-10"></TableHead>
                   </TableRow>
                 </TableHeader>

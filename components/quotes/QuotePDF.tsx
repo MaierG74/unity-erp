@@ -5,6 +5,7 @@ import { Document, Page, Text, View, StyleSheet, Image, pdf } from '@react-pdf/r
 import { Eye, Download } from 'lucide-react';
 import { Quote, QuoteItem, QuoteAttachment, QuoteItemType, QuoteItemTextAlign } from '@/lib/db/quotes';
 import { Button } from '@/components/ui/button';
+import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { preprocessQuoteImages } from '@/lib/quotes/compositeImage';
 import { IMAGE_SIZE_MAP } from '@/types/image-editor';
 
@@ -643,13 +644,19 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
 // Download Button Component
 interface QuotePDFDownloadProps extends QuotePDFProps {
   fileName?: string;
+  /** Rendering variant:
+   *  - 'buttons'    — default, two standalone outline buttons side-by-side
+   *  - 'menu-items' — two DropdownMenuItems (must be inside a DropdownMenuContent)
+   */
+  variant?: 'buttons' | 'menu-items';
 }
 
 export const QuotePDFDownload: React.FC<QuotePDFDownloadProps> = ({
   quote,
   companyInfo,
   fileName,
-  defaultTermsTemplate
+  defaultTermsTemplate,
+  variant = 'buttons',
 }) => {
   const date = new Date(quote.created_at);
   const y = date.getFullYear();
@@ -763,6 +770,21 @@ export const QuotePDFDownload: React.FC<QuotePDFDownloadProps> = ({
       setDownloading(false);
     }
   };
+
+  if (variant === 'menu-items') {
+    return (
+      <>
+        <DropdownMenuItem onClick={handleOpen} disabled={downloading} className="flex items-center gap-2 cursor-pointer">
+          <Eye size={15} />
+          Preview PDF
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={handleDownload} disabled={downloading} className="flex items-center gap-2 cursor-pointer">
+          <Download size={15} />
+          {downloading ? 'Generating...' : 'Download PDF'}
+        </DropdownMenuItem>
+      </>
+    );
+  }
 
   return (
     <div className="flex items-center gap-2">

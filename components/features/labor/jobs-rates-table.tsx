@@ -61,6 +61,7 @@ interface JobCategory {
   name: string;
   description: string | null;
   current_hourly_rate: number;
+  parent_category_id: number | null;
 }
 
 interface LaborRole {
@@ -98,6 +99,12 @@ interface JobWithRates {
   labor_roles?: LaborRole | null;
   currentHourlyRate: number | null;
   currentPieceRate: number | null;
+}
+
+interface CategoryGroup {
+  category: JobCategory;
+  directJobs: JobWithRates[];
+  subcategories: { category: JobCategory; jobs: JobWithRates[] }[];
 }
 
 // Editable rate cell component
@@ -301,6 +308,26 @@ export function JobsRatesTable() {
     },
   });
 
+  // Build parent/child maps from categories
+  const { parentCategories, childrenByParent, childToParentMap } = useMemo(() => {
+    const parents: JobCategory[] = [];
+    const children = new Map<number, JobCategory[]>();
+    const childParent = new Map<number, number>();
+
+    for (const cat of categories) {
+      if (cat.parent_category_id === null) {
+        parents.push(cat);
+      } else {
+        const list = children.get(cat.parent_category_id) || [];
+        list.push(cat);
+        children.set(cat.parent_category_id, list);
+        childParent.set(cat.category_id, cat.parent_category_id);
+      }
+    }
+
+    return { parentCategories: parents, childrenByParent: children, childToParentMap: childParent };
+  }, [categories]);
+
   // Fetch all jobs with relations
   const { data: allJobs = [], isLoading: jobsLoading } = useQuery({
     queryKey: ['jobs'],
@@ -310,7 +337,7 @@ export function JobsRatesTable() {
         .select(`
           job_id, name, description, category_id, role_id,
           estimated_minutes, time_unit,
-          job_categories (category_id, name, description, current_hourly_rate),
+          job_categories (category_id, name, description, current_hourly_rate, parent_category_id),
           labor_roles (role_id, name, color)
         `)
         .order('name');
@@ -372,11 +399,24 @@ export function JobsRatesTable() {
     }));
   }, [allJobs, hourlyRateMap, pieceRateMap]);
 
+  // Compute the set of category IDs that match the current filter
+  const filterCategoryIds = useMemo(() => {
+    if (!categoryFilter) return null;
+    const filterId = parseInt(categoryFilter);
+    const ids = new Set<number>([filterId]);
+    // If this is a parent category, include all its subcategories
+    const subs = childrenByParent.get(filterId);
+    if (subs) {
+      subs.forEach((s) => ids.add(s.category_id));
+    }
+    return ids;
+  }, [categoryFilter, childrenByParent]);
+
   // Filter jobs
   const filteredJobs = useMemo(() => {
     let filtered = jobsWithRates;
-    if (categoryFilter) {
-      filtered = filtered.filter((j) => j.category_id.toString() === categoryFilter);
+    if (filterCategoryIds) {
+      filtered = filtered.filter((j) => filterCategoryIds.has(j.category_id));
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -389,33 +429,80 @@ export function JobsRatesTable() {
       );
     }
     return filtered;
-  }, [jobsWithRates, categoryFilter, searchQuery]);
+  }, [jobsWithRates, filterCategoryIds, searchQuery]);
 
-  // Group jobs by category
-  const groupedJobs = useMemo(() => {
-    const groups = new Map<number, { category: JobCategory; jobs: JobWithRates[] }>();
-    filteredJobs.forEach((job) => {
+  // Group jobs into Category > Subcategory > Jobs hierarchy
+  const groupedJobs: CategoryGroup[] = useMemo(() => {
+    // Build a map of parent_id -> { directJobs, subcategories }
+    const groupMap = new Map<number, CategoryGroup>();
+
+    for (const job of filteredJobs) {
       const catId = job.category_id;
-      if (!groups.has(catId)) {
-        groups.set(catId, {
-          category: job.category || { category_id: catId, name: 'Uncategorized', description: null, current_hourly_rate: 0 },
-          jobs: [],
-        });
+      const parentId = childToParentMap.get(catId);
+
+      if (parentId !== undefined) {
+        // Job belongs to a subcategory
+        if (!groupMap.has(parentId)) {
+          const parentCat = categories.find((c) => c.category_id === parentId);
+          groupMap.set(parentId, {
+            category: parentCat || { category_id: parentId, name: 'Unknown', description: null, current_hourly_rate: 0, parent_category_id: null },
+            directJobs: [],
+            subcategories: [],
+          });
+        }
+        const group = groupMap.get(parentId)!;
+        let subGroup = group.subcategories.find((s) => s.category.category_id === catId);
+        if (!subGroup) {
+          const subCat = categories.find((c) => c.category_id === catId);
+          subGroup = {
+            category: subCat || { category_id: catId, name: 'Unknown', description: null, current_hourly_rate: 0, parent_category_id: parentId },
+            jobs: [],
+          };
+          group.subcategories.push(subGroup);
+        }
+        subGroup.jobs.push(job);
+      } else {
+        // Job belongs directly to a top-level category
+        if (!groupMap.has(catId)) {
+          groupMap.set(catId, {
+            category: job.category || { category_id: catId, name: 'Uncategorized', description: null, current_hourly_rate: 0, parent_category_id: null },
+            directJobs: [],
+            subcategories: [],
+          });
+        }
+        groupMap.get(catId)!.directJobs.push(job);
       }
-      groups.get(catId)!.jobs.push(job);
-    });
-    return Array.from(groups.values()).sort((a, b) =>
+    }
+
+    // Sort groups alphabetically, and subcategories within each group
+    const result = Array.from(groupMap.values()).sort((a, b) =>
       a.category.name.localeCompare(b.category.name)
     );
-  }, [filteredJobs]);
+    for (const group of result) {
+      group.subcategories.sort((a, b) => a.category.name.localeCompare(b.category.name));
+    }
+    return result;
+  }, [filteredJobs, childToParentMap, categories]);
+
+  // Collect all category IDs (parents + subcategories) that appear in groupedJobs
+  const allGroupCategoryIds = useMemo(() => {
+    const ids: number[] = [];
+    for (const group of groupedJobs) {
+      ids.push(group.category.category_id);
+      for (const sub of group.subcategories) {
+        ids.push(sub.category.category_id);
+      }
+    }
+    return ids;
+  }, [groupedJobs]);
 
   // Initialize collapsedCategories to all categories on first render only
   useEffect(() => {
-    if (!hasInitializedCollapsed && groupedJobs.length > 0) {
-      setCollapsedCategories(new Set(groupedJobs.map((g) => g.category.category_id)));
+    if (!hasInitializedCollapsed && allGroupCategoryIds.length > 0) {
+      setCollapsedCategories(new Set(allGroupCategoryIds));
       setHasInitializedCollapsed(true);
     }
-  }, [groupedJobs, hasInitializedCollapsed]);
+  }, [allGroupCategoryIds, hasInitializedCollapsed]);
 
   // Toggle category collapse
   const toggleCategory = (categoryId: number) => {
@@ -429,10 +516,10 @@ export function JobsRatesTable() {
 
   // Toggle all categories
   const toggleAllCategories = () => {
-    if (collapsedCategories.size === groupedJobs.length) {
+    if (collapsedCategories.size === allGroupCategoryIds.length) {
       setCollapsedCategories(new Set());
     } else {
-      setCollapsedCategories(new Set(groupedJobs.map((g) => g.category.category_id)));
+      setCollapsedCategories(new Set(allGroupCategoryIds));
     }
   };
 
@@ -543,8 +630,36 @@ export function JobsRatesTable() {
     const total = jobsWithRates.length;
     const withHourly = jobsWithRates.filter((j) => j.currentHourlyRate !== null).length;
     const withPiece = jobsWithRates.filter((j) => j.currentPieceRate !== null).length;
-    return { total, withHourly, withPiece, categoryCount: categories.length };
-  }, [jobsWithRates, categories]);
+    const parentCount = parentCategories.length;
+    const subcategoryCount = categories.length - parentCount;
+    return { total, withHourly, withPiece, categoryCount: parentCount, subcategoryCount };
+  }, [jobsWithRates, categories, parentCategories]);
+
+  // Build hierarchical dropdown options for the category filter
+  const categoryFilterOptions = useMemo(() => {
+    const options: { value: string; label: string }[] = [];
+    for (const parent of parentCategories) {
+      options.push({ value: parent.category_id.toString(), label: parent.name });
+      const subs = childrenByParent.get(parent.category_id) || [];
+      for (const sub of subs) {
+        options.push({ value: sub.category_id.toString(), label: `  \u2514 ${sub.name}` });
+      }
+    }
+    return options;
+  }, [parentCategories, childrenByParent]);
+
+  // Shared props for job rendering
+  const jobRowProps = {
+    expandedJobs,
+    onToggleJobExpanded: toggleJobExpanded,
+    onSaveHourlyRate: (jobId: number, rate: number) =>
+      saveHourlyRate.mutateAsync({ jobId, newRate: rate }),
+    onSavePieceRate: (jobId: number, rate: number) =>
+      savePieceRate.mutateAsync({ jobId, newRate: rate }),
+    onEditJob: (job: JobWithRates) => router.push(`/labor/jobs/${job.job_id}`),
+    onDeleteJob: (job: JobWithRates) => setDeleteJob(job),
+    formatEstTime,
+  };
 
   return (
     <div className="space-y-3">
@@ -552,6 +667,9 @@ export function JobsRatesTable() {
       <div className="flex items-center gap-6 text-sm text-muted-foreground">
         <span><strong className="text-foreground">{stats.total}</strong> jobs</span>
         <span><strong className="text-foreground">{stats.categoryCount}</strong> categories</span>
+        {stats.subcategoryCount > 0 && (
+          <span><strong className="text-foreground">{stats.subcategoryCount}</strong> subcategories</span>
+        )}
         <span><strong className="text-foreground">{stats.withHourly}</strong> with hourly rates</span>
         <span><strong className="text-foreground">{stats.withPiece}</strong> with piece rates</span>
       </div>
@@ -568,7 +686,7 @@ export function JobsRatesTable() {
             size="sm"
             className="h-9"
             onClick={toggleAllCategories}
-            title={collapsedCategories.size === groupedJobs.length ? 'Expand all' : 'Collapse all'}
+            title={collapsedCategories.size === allGroupCategoryIds.length ? 'Expand all' : 'Collapse all'}
           >
             <ChevronsUpDown className="h-4 w-4" />
           </Button>
@@ -594,9 +712,9 @@ export function JobsRatesTable() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="_all">All Categories</SelectItem>
-              {categories.map((c) => (
-                <SelectItem key={c.category_id} value={c.category_id.toString()}>
-                  {c.name}
+              {categoryFilterOptions.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -646,24 +764,20 @@ export function JobsRatesTable() {
                 </TableHeader>
                 <TableBody>
                   {groupedJobs.map((group) => {
-                    const isCollapsed = collapsedCategories.has(group.category.category_id);
+                    const isParentCollapsed = collapsedCategories.has(group.category.category_id);
+                    const totalJobs = group.directJobs.length +
+                      group.subcategories.reduce((sum, s) => sum + s.jobs.length, 0);
+
                     return (
                       <GroupSection
                         key={group.category.category_id}
                         group={group}
-                        isCollapsed={isCollapsed}
+                        totalJobs={totalJobs}
+                        isCollapsed={isParentCollapsed}
                         onToggleCollapse={() => toggleCategory(group.category.category_id)}
-                        expandedJobs={expandedJobs}
-                        onToggleJobExpanded={toggleJobExpanded}
-                        onSaveHourlyRate={(jobId, rate) =>
-                          saveHourlyRate.mutateAsync({ jobId, newRate: rate })
-                        }
-                        onSavePieceRate={(jobId, rate) =>
-                          savePieceRate.mutateAsync({ jobId, newRate: rate })
-                        }
-                        onEditJob={(job) => router.push(`/labor/jobs/${job.job_id}`)}
-                        onDeleteJob={(job) => setDeleteJob(job)}
-                        formatEstTime={formatEstTime}
+                        collapsedCategories={collapsedCategories}
+                        onToggleSubcategory={toggleCategory}
+                        {...jobRowProps}
                       />
                     );
                   })}
@@ -709,11 +823,14 @@ export function JobsRatesTable() {
   );
 }
 
-// Group section component
+// Group section component - renders a parent category with its direct jobs and subcategories
 function GroupSection({
   group,
+  totalJobs,
   isCollapsed,
   onToggleCollapse,
+  collapsedCategories,
+  onToggleSubcategory,
   expandedJobs,
   onToggleJobExpanded,
   onSaveHourlyRate,
@@ -722,9 +839,12 @@ function GroupSection({
   onDeleteJob,
   formatEstTime,
 }: {
-  group: { category: JobCategory; jobs: JobWithRates[] };
+  group: CategoryGroup;
+  totalJobs: number;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
+  collapsedCategories: Set<number>;
+  onToggleSubcategory: (categoryId: number) => void;
   expandedJobs: Set<number>;
   onToggleJobExpanded: (jobId: number) => void;
   onSaveHourlyRate: (jobId: number, rate: number) => Promise<void>;
@@ -735,7 +855,7 @@ function GroupSection({
 }) {
   return (
     <>
-      {/* Category group header row */}
+      {/* Parent category header row */}
       <TableRow
         className="bg-muted/40 hover:bg-muted/60 cursor-pointer border-t-2 border-border"
         onClick={onToggleCollapse}
@@ -750,7 +870,7 @@ function GroupSection({
         <TableCell className="py-2 font-semibold" colSpan={2}>
           {group.category.name}
           <span className="text-muted-foreground font-normal ml-2 text-sm">
-            ({group.jobs.length} {group.jobs.length === 1 ? 'job' : 'jobs'})
+            ({totalJobs} {totalJobs === 1 ? 'job' : 'jobs'})
           </span>
         </TableCell>
         <TableCell className="py-2 text-sm text-muted-foreground" colSpan={4}>
@@ -758,12 +878,102 @@ function GroupSection({
         </TableCell>
       </TableRow>
 
-      {/* Job rows */}
+      {/* Direct jobs under this parent (not in any subcategory) */}
       {!isCollapsed &&
-        group.jobs.map((job) => (
+        group.directJobs.map((job) => (
           <JobRow
             key={job.job_id}
             job={job}
+            isExpanded={expandedJobs.has(job.job_id)}
+            onToggleExpanded={() => onToggleJobExpanded(job.job_id)}
+            onSaveHourlyRate={onSaveHourlyRate}
+            onSavePieceRate={onSavePieceRate}
+            onEdit={() => onEditJob(job)}
+            onDelete={() => onDeleteJob(job)}
+            formatEstTime={formatEstTime}
+          />
+        ))}
+
+      {/* Subcategories */}
+      {!isCollapsed &&
+        group.subcategories.map((sub) => {
+          const isSubCollapsed = collapsedCategories.has(sub.category.category_id);
+          return (
+            <SubcategorySection
+              key={sub.category.category_id}
+              subcategory={sub}
+              isCollapsed={isSubCollapsed}
+              onToggleCollapse={() => onToggleSubcategory(sub.category.category_id)}
+              expandedJobs={expandedJobs}
+              onToggleJobExpanded={onToggleJobExpanded}
+              onSaveHourlyRate={onSaveHourlyRate}
+              onSavePieceRate={onSavePieceRate}
+              onEditJob={onEditJob}
+              onDeleteJob={onDeleteJob}
+              formatEstTime={formatEstTime}
+            />
+          );
+        })}
+    </>
+  );
+}
+
+// Subcategory section - indented header with its own collapse
+function SubcategorySection({
+  subcategory,
+  isCollapsed,
+  onToggleCollapse,
+  expandedJobs,
+  onToggleJobExpanded,
+  onSaveHourlyRate,
+  onSavePieceRate,
+  onEditJob,
+  onDeleteJob,
+  formatEstTime,
+}: {
+  subcategory: { category: JobCategory; jobs: JobWithRates[] };
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
+  expandedJobs: Set<number>;
+  onToggleJobExpanded: (jobId: number) => void;
+  onSaveHourlyRate: (jobId: number, rate: number) => Promise<void>;
+  onSavePieceRate: (jobId: number, rate: number) => Promise<void>;
+  onEditJob: (job: JobWithRates) => void;
+  onDeleteJob: (job: JobWithRates) => void;
+  formatEstTime: (m: number | null | undefined, u: string | null | undefined) => string;
+}) {
+  return (
+    <>
+      {/* Subcategory header row */}
+      <TableRow
+        className="bg-muted/20 hover:bg-muted/30 cursor-pointer"
+        onClick={onToggleCollapse}
+      >
+        <TableCell className="py-1.5 pl-6">
+          {isCollapsed ? (
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+          )}
+        </TableCell>
+        <TableCell className="py-1.5 pl-6 font-medium text-sm" colSpan={2}>
+          {subcategory.category.name}
+          <span className="text-muted-foreground font-normal ml-2 text-xs">
+            ({subcategory.jobs.length} {subcategory.jobs.length === 1 ? 'job' : 'jobs'})
+          </span>
+        </TableCell>
+        <TableCell className="py-1.5 text-xs text-muted-foreground" colSpan={4}>
+          R{subcategory.category.current_hourly_rate.toFixed(2)}/hr
+        </TableCell>
+      </TableRow>
+
+      {/* Subcategory jobs */}
+      {!isCollapsed &&
+        subcategory.jobs.map((job) => (
+          <JobRow
+            key={job.job_id}
+            job={job}
+            indent
             isExpanded={expandedJobs.has(job.job_id)}
             onToggleExpanded={() => onToggleJobExpanded(job.job_id)}
             onSaveHourlyRate={onSaveHourlyRate}
@@ -780,6 +990,7 @@ function GroupSection({
 // Individual job row
 function JobRow({
   job,
+  indent,
   isExpanded,
   onToggleExpanded,
   onSaveHourlyRate,
@@ -789,6 +1000,7 @@ function JobRow({
   formatEstTime,
 }: {
   job: JobWithRates;
+  indent?: boolean;
   isExpanded: boolean;
   onToggleExpanded: () => void;
   onSaveHourlyRate: (jobId: number, rate: number) => Promise<void>;
@@ -800,7 +1012,7 @@ function JobRow({
   return (
     <>
       <TableRow className="hover:bg-muted/20 cursor-pointer" onClick={onEdit}>
-        <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
+        <TableCell className={indent ? 'py-2 pl-6' : 'py-2'} onClick={(e) => e.stopPropagation()}>
           <button
             onClick={onToggleExpanded}
             className="p-0.5 hover:bg-muted rounded transition-colors"

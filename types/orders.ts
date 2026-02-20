@@ -42,6 +42,18 @@ export interface OrderDetail {
   product?: Product;
 }
 
+export type OrderDocumentType = string;
+
+export interface OrderDocumentCategory {
+  id: number;
+  key: string;
+  label: string;
+  icon: string;
+  description: string;
+  sort_order: number;
+  is_system: boolean;
+}
+
 export interface OrderAttachment {
   id: number;
   order_id: number;
@@ -49,6 +61,7 @@ export interface OrderAttachment {
   file_name: string;
   mime_type: string;
   uploaded_at: string;
+  document_type: OrderDocumentType;
 }
 
 export interface FinishedGoodReservation {

@@ -1,9 +1,14 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
+import { useAuth } from '@/components/common/auth-provider';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
+
+const MobileScanLogin = lazy(() =>
+  import('@/components/features/scan/mobile-scan-login').then((m) => ({ default: m.MobileScanLogin })),
+);
 import {
   CheckCircle2,
   Clock,
@@ -47,6 +52,7 @@ interface JobCardItem {
 
 // ── Page ───────────────────────────────────────────────────────────
 export default function JobCardScanPage() {
+  const { user, loading: authLoading } = useAuth();
   const params = useParams();
   const jobCardId = Number(params.id);
 
@@ -94,13 +100,14 @@ export default function JobCardScanPage() {
   };
 
   useEffect(() => {
+    if (!user) return;
     if (!Number.isFinite(jobCardId) || jobCardId <= 0) {
       setError('Invalid job card ID');
       setLoading(false);
       return;
     }
     fetchData();
-  }, [jobCardId]);
+  }, [jobCardId, user]);
 
   const summary = useMemo(() => {
     const totalQty = items.reduce((s, i) => s + i.quantity, 0);
@@ -109,6 +116,21 @@ export default function JobCardScanPage() {
     const earnedValue = items.reduce((s, i) => s + i.completed_quantity * (i.piece_rate || 0), 0);
     return { totalQty, completedQty, totalValue, earnedValue };
   }, [items]);
+
+  /** Sync job_status back to labor_plan_assignments when a job card changes state */
+  const syncAssignmentStatus = async (newStatus: 'in_progress' | 'completed') => {
+    if (!jobCard) return;
+    const jobIds = items.map((i) => i.job_id).filter(Boolean);
+    if (jobIds.length === 0 || !jobCard.staff_id) return;
+    const updates: Record<string, any> = { job_status: newStatus };
+    if (newStatus === 'in_progress') updates.started_at = new Date().toISOString();
+    if (newStatus === 'completed') updates.completed_at = new Date().toISOString();
+    await supabase
+      .from('labor_plan_assignments')
+      .update(updates)
+      .in('job_id', jobIds)
+      .eq('staff_id', jobCard.staff_id);
+  };
 
   // ── Actions ────────────────────────────────────────────────────
   const handleStartJob = async () => {
@@ -120,6 +142,7 @@ export default function JobCardScanPage() {
         .update({ status: 'in_progress' })
         .eq('job_card_id', jobCardId);
       if (err) throw err;
+      await syncAssignmentStatus('in_progress');
       setJobCard((prev) => prev ? { ...prev, status: 'in_progress' } : prev);
       toast.success('Job started');
     } catch (err: any) {
@@ -138,7 +161,30 @@ export default function JobCardScanPage() {
         .update({ status: 'completed', completion_date: new Date().toISOString().split('T')[0] })
         .eq('job_card_id', jobCardId);
       if (err) throw err;
+      // Finalize items: only auto-fill quantity on untouched items (completed_quantity === 0).
+      // Items where a partial qty was already entered keep their value.
+      const untouchedItems = items.filter((i) => i.completed_quantity === 0);
+      for (const item of untouchedItems) {
+        await supabase
+          .from('job_card_items')
+          .update({ completed_quantity: item.quantity, status: 'completed', completion_time: new Date().toISOString() })
+          .eq('item_id', item.item_id);
+      }
+      // Mark any remaining partial items as completed too (status only, keep their entered qty)
+      const partialItems = items.filter((i) => i.completed_quantity > 0 && i.status !== 'completed');
+      for (const item of partialItems) {
+        await supabase
+          .from('job_card_items')
+          .update({ status: 'completed', completion_time: new Date().toISOString() })
+          .eq('item_id', item.item_id);
+      }
+      await syncAssignmentStatus('completed');
       setJobCard((prev) => prev ? { ...prev, status: 'completed' } : prev);
+      setItems((prev) => prev.map((i) => ({
+        ...i,
+        completed_quantity: i.completed_quantity === 0 ? i.quantity : i.completed_quantity,
+        status: 'completed',
+      })));
       toast.success('Job completed');
     } catch (err: any) {
       toast.error(err.message || 'Failed to complete job');
@@ -184,6 +230,22 @@ export default function JobCardScanPage() {
   };
 
   // ── Render ─────────────────────────────────────────────────────
+  if (authLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-background"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>}>
+        <MobileScanLogin />
+      </Suspense>
+    );
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
@@ -217,7 +279,7 @@ export default function JobCardScanPage() {
   return (
     <div className="mx-auto min-h-screen max-w-lg bg-background pb-8">
       {/* ── Header ───────────────────────────────── */}
-      <div className="sticky top-0 z-10 border-b bg-background/95 px-4 py-3 backdrop-blur">
+      <div className="sticky top-0 z-10 border-b bg-background/95 px-8 py-3 backdrop-blur">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-lg font-bold">Job Card #{jobCard.job_card_id}</h1>
@@ -239,7 +301,7 @@ export default function JobCardScanPage() {
         </div>
       </div>
 
-      <div className="space-y-4 px-4 pt-4">
+      <div className="space-y-4 px-8 pt-4">
         {/* ── Info Cards ─────────────────────────── */}
         <div className="grid grid-cols-2 gap-3">
           <InfoCard

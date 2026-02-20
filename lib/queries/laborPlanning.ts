@@ -211,26 +211,133 @@ export async function fetchLaborPlanningPayload(options: { date?: string } = {})
   ]);
 
   const assignmentsByJob = new Map(assignments.map((assignment) => [assignment.jobKey, assignment]));
-  const annotatedOrders = orders.map((order) => ({
+  const annotatedOrders: PlanningOrderWithMeta[] = orders.map((order) => ({
     ...order,
     jobs: order.jobs.map((job) => {
       const scheduled = assignmentsByJob.get(job.id);
       return {
         ...job,
         scheduleStatus: scheduled && scheduled.status !== 'unscheduled' ? 'scheduled' : 'unscheduled',
+        jobStatus: scheduled?.jobStatus ?? null,
         status: job.status ?? 'ready',
       };
     }),
   }));
 
-  const unscheduledJobs = annotatedOrders
+  // Enrich assignments whose jobs aren't in the open-orders list (e.g. completed/closed orders)
+  const orderJobKeys = new Set(annotatedOrders.flatMap((o) => o.jobs.map((j) => j.id)));
+  const orphanedAssignments = assignments.filter((a) => !orderJobKeys.has(a.jobKey));
+  if (orphanedAssignments.length > 0) {
+    const orphanOrderIds = [...new Set(orphanedAssignments.map((a) => a.orderId).filter(Boolean))] as number[];
+    const orphanJobIds = [...new Set(orphanedAssignments.map((a) => a.jobId).filter(Boolean))] as number[];
+    const orphanDetailIds = [...new Set(orphanedAssignments.map((a) => a.orderDetailId).filter(Boolean))] as number[];
+
+    const [orderRows, jobRows, detailRows] = await Promise.all([
+      orphanOrderIds.length > 0
+        ? supabase.from('orders').select('order_id, order_number, customers(name)').in('order_id', orphanOrderIds).then((r) => r.data ?? [])
+        : Promise.resolve([] as any[]),
+      orphanJobIds.length > 0
+        ? supabase.from('jobs').select('job_id, name, job_categories(name)').in('job_id', orphanJobIds).then((r) => r.data ?? [])
+        : Promise.resolve([] as any[]),
+      orphanDetailIds.length > 0
+        ? supabase.from('order_details').select('order_detail_id, quantity, product_id, products(name)').in('order_detail_id', orphanDetailIds).then((r) => r.data ?? [])
+        : Promise.resolve([] as any[]),
+    ]);
+
+    const orderMap = new Map<number, any>(orderRows.map((o: any) => [o.order_id, o]));
+    const jobMap = new Map<number, any>(jobRows.map((j: any) => [j.job_id, j]));
+    const detailMap = new Map<number, any>(detailRows.map((d: any) => [d.order_detail_id, d]));
+
+    // Synthesize PlanningOrder entries for orphaned assignments so buildStaffLanes can find them
+    const orphanOrderGroups = new Map<number, typeof orphanedAssignments>();
+    for (const a of orphanedAssignments) {
+      if (!a.orderId) continue;
+      const group = orphanOrderGroups.get(a.orderId) ?? [];
+      group.push(a);
+      orphanOrderGroups.set(a.orderId, group);
+    }
+
+    for (const [orderId, groupAssignments] of orphanOrderGroups) {
+      const orderRow = orderMap.get(orderId);
+      const syntheticJobs: PlanningJobWithMeta[] = groupAssignments.map((a) => {
+        const jobRow = a.jobId ? jobMap.get(a.jobId) : null;
+        const detailRow = a.orderDetailId ? detailMap.get(a.orderDetailId) : null;
+        const categoryName = jobRow?.job_categories?.name ?? null;
+        return {
+          id: a.jobKey,
+          name: jobRow?.name ?? 'Job',
+          status: 'ready' as const,
+          durationHours: 0,
+          orderId,
+          orderDetailId: a.orderDetailId,
+          productId: detailRow?.product_id ?? null,
+          productName: detailRow?.products?.name ?? null,
+          bolId: a.bolId,
+          jobId: a.jobId,
+          categoryName,
+          categoryColor: getCategoryColor(categoryName),
+          payType: a.payType,
+          quantity: detailRow?.quantity ?? 0,
+          durationMinutes: null,
+          timeUnit: 'hours' as const,
+          rateId: a.rateId,
+          hourlyRateId: a.hourlyRateId,
+          pieceRateId: a.pieceRateId,
+          scheduleStatus: 'scheduled' as const,
+          jobStatus: a.jobStatus ?? null,
+        };
+      });
+
+      annotatedOrders.push({
+        id: `order-${orderId}`,
+        customer: (orderRow?.customers as any)?.name ?? 'Unknown',
+        priority: 'medium',
+        dueDate: null,
+        orderId,
+        orderNumber: orderRow?.order_number ?? String(orderId),
+        statusName: null,
+        jobs: syntheticJobs,
+      });
+    }
+  }
+
+  const unscheduledJobs: PlanningJobWithMeta[] = annotatedOrders
     .flatMap((order) => order.jobs.filter((job) => job.scheduleStatus !== 'scheduled'))
     .map((job) => ({
       ...job,
-      scheduleStatus: 'unscheduled',
+      scheduleStatus: 'unscheduled' as const,
     }));
 
   return { orders: annotatedOrders, staff, unscheduledJobs, assignments };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Cross-date duplicate check                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Find the date a job is currently scheduled on.
+ * Optionally exclude a specific date (for the duplicate-drop guard).
+ * Returns the date string if found, or null if unscheduled.
+ */
+export async function findScheduledDate(
+  jobInstanceId: string,
+  excludeDate?: string,
+): Promise<string | null> {
+  let query = supabase
+    .from('labor_plan_assignments')
+    .select('assignment_date')
+    .eq('job_instance_id', jobInstanceId)
+    .eq('status', 'scheduled')
+    .limit(1);
+
+  if (excludeDate) {
+    query = query.neq('assignment_date', excludeDate);
+  }
+
+  const { data, error } = await query.maybeSingle();
+  if (error || !data) return null;
+  return data.assignment_date;
 }
 
 /* ------------------------------------------------------------------ */

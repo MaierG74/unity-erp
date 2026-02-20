@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
-import { CalendarClock, CheckCircle2, ChevronRight, Clock3, Flame, GripVertical, Loader2, Sparkles } from 'lucide-react';
+import { CalendarClock, CheckCircle2, ChevronRight, ClipboardList, Clock3, Flame, GripVertical, Loader2, Pause, Play, Sparkles } from 'lucide-react';
 import type { PlanningOrder, PlanningJob } from './types';
 
 const ESTIMATED_ROW_HEIGHT = 48;
@@ -140,10 +140,33 @@ export function OrderTree({ orders, windowSize = 12, onJobDragStart, onJobClick 
                         />
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-[11px] font-medium">{job.name}</p>
-                          <p className="truncate text-[10px] text-muted-foreground">
-                            {job.durationHours}h • {job.status === 'ready' ? 'Ready' : job.status}
-                            {job.scheduleStatus === 'scheduled' && ' • Scheduled'}
-                          </p>
+                          <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                            <span>{job.durationHours}h</span>
+                            <span>•</span>
+                            {job.jobStatus === 'completed' ? (
+                              <span className="inline-flex items-center gap-0.5 font-medium text-emerald-600 dark:text-emerald-400">
+                                <CheckCircle2 className="h-3 w-3" /> Completed
+                              </span>
+                            ) : job.jobStatus === 'in_progress' ? (
+                              <span className="inline-flex items-center gap-0.5 font-medium text-amber-600 dark:text-amber-400">
+                                <Play className="h-3 w-3" /> In Progress
+                              </span>
+                            ) : job.jobStatus === 'issued' ? (
+                              <span className="inline-flex items-center gap-0.5 font-medium text-blue-600 dark:text-blue-400">
+                                <ClipboardList className="h-3 w-3" /> Issued
+                              </span>
+                            ) : job.jobStatus === 'on_hold' ? (
+                              <span className="inline-flex items-center gap-0.5 font-medium text-orange-600 dark:text-orange-400">
+                                <Pause className="h-3 w-3" /> On Hold
+                              </span>
+                            ) : job.scheduleStatus === 'scheduled' ? (
+                              <span className="inline-flex items-center gap-0.5 font-medium text-violet-600 dark:text-violet-400">
+                                <CalendarClock className="h-3 w-3" /> Scheduled
+                              </span>
+                            ) : (
+                              <span>{job.status === 'ready' ? 'Ready' : job.status}</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))}

@@ -433,6 +433,7 @@ Implemented product-domain hardening (2026-02-15):
 2. `app/api/products/[productId]/route.ts` now scopes product ownership checks and mutations by `org_id`.
 3. `app/api/products/[productId]/add-fg/route.ts` now scopes product inventory reads/writes by `org_id`.
 4. `app/api/products/[productId]/cutlist-groups/route.ts` now verifies product ownership using (`product_id`, `org_id`) before reading/writing groups.
+5. Next expand-only migration prepared: `supabase/migrations/20260220_tenant_org_scoping_expand_product_cutlist_groups.sql` to add `org_id` scoping support on `product_cutlist_groups` (no RLS or NOT NULL enforcement in this step).
 
 Implemented orders-domain hardening (2026-02-15):
 1. `app/api/orders/[orderId]/route.ts` now scopes order update/delete flows by (`order_id`, `org_id`).

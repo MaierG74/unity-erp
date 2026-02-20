@@ -31,8 +31,8 @@ Expand-only `org_id` columns have been added and backfilled (but RLS has NOT bee
 - Staff (staff, hours, payroll tables)
 
 ## What’s Next (recommended order)
-1. Tighten Purchasing + Suppliers RLS, one table at a time, with smoke tests after each change.
-2. Tighten Quotes RLS (similar baby-step rollout).
-3. Tighten Staff RLS.
-4. Validate and enforce FK constraints (VALIDATE CONSTRAINT) and later `NOT NULL` on the Phase B tables.
-
+1. Apply expand-only migration for `product_cutlist_groups` (`org_id` + backfill + FK NOT VALID + index) before onboarding a second organization.
+2. Tighten Purchasing + Suppliers RLS, one table at a time, with smoke tests after each change.
+3. Tighten Quotes RLS (similar baby-step rollout).
+4. Tighten Staff RLS.
+5. Validate and enforce FK constraints (`VALIDATE CONSTRAINT`) and later `NOT NULL` on the Phase B tables.

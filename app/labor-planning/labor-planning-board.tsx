@@ -10,6 +10,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { OrderTree } from '@/components/labor-planning/order-tree';
 import { StaffLaneList } from '@/components/labor-planning/staff-lane-list';
 import { TimeAxisHeader } from '@/components/labor-planning/time-axis-header';
+import { WeekStrip } from '@/components/labor-planning/week-strip';
 import type {
   LaborDragPayload,
   PlanningJob,
@@ -18,7 +19,7 @@ import type {
   StaffLane,
   TimeMarker,
 } from '@/components/labor-planning/types';
-import { fetchLaborPlanningPayload } from '@/lib/queries/laborPlanning';
+import { fetchLaborPlanningPayload, findScheduledDate } from '@/lib/queries/laborPlanning';
 import {
   breakOverlapMinutes,
   buildAssignmentLabel,
@@ -31,6 +32,7 @@ import { useWorkSchedule } from '@/hooks/use-work-schedule';
 import type { ScheduleBreak } from '@/types/work-schedule';
 import { logSchedulingEvent } from '@/src/lib/analytics/scheduling';
 import { useLaborPlanningMutations } from '@/src/lib/mutations/laborPlanning';
+import { useLaborRealtime } from '@/hooks/use-labor-realtime';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -167,6 +169,9 @@ export function LaborPlanningBoard() {
 
   const { assignMutation, updateMutation, unassignMutation } = useLaborPlanningMutations(queryKey);
 
+  // Live-sync: invalidate queries when other clients change labor tables
+  useLaborRealtime();
+
   const jobLookup = useMemo(
     () => buildJobLookup(data?.orders ?? []),
     [data?.orders]
@@ -234,19 +239,47 @@ export function LaborPlanningBoard() {
     });
   }, [data]);
 
-  // Click a job in the order tree → scroll to its assignment bar and flash it
-  const handleJobClick = useCallback((job: PlanningJob) => {
+  // Capacity for the week strip: (shift - breaks) * active staff
+  const staffCapacityMinutes = useMemo(() => {
+    const shiftMinutes = END_MINUTES - START_MINUTES;
+    const totalBreakMinutes = scheduleBreaks.reduce(
+      (sum, brk) => sum + (brk.endMinutes - brk.startMinutes),
+      0,
+    );
+    const activeCount = (data?.staff ?? []).filter(
+      (s) => s.availability?.isActive && s.availability?.isAvailableOnDate,
+    ).length;
+    return (shiftMinutes - totalBreakMinutes) * activeCount;
+  }, [END_MINUTES, START_MINUTES, scheduleBreaks, data?.staff]);
+
+  // Click a job in the order tree → scroll to its assignment bar (or jump to the scheduled date)
+  const handleJobClick = useCallback(async (job: PlanningJob) => {
     const el = swimlaneScrollRef.current?.querySelector<HTMLElement>(
       `[data-job-key="${CSS.escape(job.id)}"]`,
     );
-    if (!el) {
-      toast.info('Job not yet scheduled — drag it onto a staff lane first');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+      // Use outline instead of ring — ring uses box-shadow which is overridden by the bar's inline styles
+      el.style.outline = '3px solid hsl(142, 71%, 45%)';
+      el.style.outlineOffset = '2px';
+      setTimeout(() => {
+        el.style.outline = '';
+        el.style.outlineOffset = '';
+      }, 1500);
       return;
     }
-    el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
-    el.classList.add('ring-2', 'ring-primary', 'ring-offset-2');
-    setTimeout(() => el.classList.remove('ring-2', 'ring-primary', 'ring-offset-2'), 1500);
-  }, []);
+
+    // Not on this day — check if it's scheduled on another date
+    const scheduledDate = await findScheduledDate(job.id);
+    if (scheduledDate && scheduledDate !== selectedDate) {
+      const formatted = format(new Date(scheduledDate + 'T00:00:00'), 'EEE, MMM d');
+      toast.info(`Jumping to ${formatted}`, { description: `${job.name} is scheduled there.` });
+      handleDateChange(scheduledDate);
+      return;
+    }
+
+    toast.info('Job not yet scheduled — drag it onto a staff lane first');
+  }, [selectedDate, handleDateChange]);
 
   useEffect(() => {
     if (!data) return;
@@ -261,7 +294,7 @@ export function LaborPlanningBoard() {
   }, [data, noStaffAvailable, selectedDate]);
 
   const handleDrop = useCallback(
-    ({
+    async ({
       staff,
       startMinutes,
       payload,
@@ -316,6 +349,16 @@ export function LaborPlanningBoard() {
             endMinutes: end,
             reason: constraints.status,
             detail: message.description,
+          });
+          return;
+        }
+
+        // Guard: prevent scheduling the same job on multiple dates
+        const existingDate = await findScheduledDate(payload.job.id, selectedDate);
+        if (existingDate) {
+          const formatted = format(new Date(existingDate + 'T00:00:00'), 'EEE, MMM d');
+          toast.error('Job already scheduled', {
+            description: `This job is already on ${formatted}. Unassign it there first.`,
           });
           return;
         }
@@ -562,6 +605,12 @@ export function LaborPlanningBoard() {
         </p>
       </div>
 
+      <WeekStrip
+        selectedDate={selectedDate}
+        onDateSelect={handleDateChange}
+        staffCapacityMinutes={staffCapacityMinutes}
+      />
+
       {noStaffAvailable && (
         <Alert className="border-amber-300 bg-amber-50">
           <AlertTitle>No staff available to schedule</AlertTitle>
@@ -788,6 +837,7 @@ function buildStaffLanes(
         pieceRateId: assignment.pieceRateId,
         rateId: assignment.rateId,
         bolId: assignment.bolId,
+        quantity: job?.quantity ?? null,
         // Time tracking fields
         jobStatus: assignment.jobStatus ?? undefined,
         issuedAt: assignment.issuedAt,
