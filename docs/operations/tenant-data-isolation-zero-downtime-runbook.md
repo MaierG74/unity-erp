@@ -832,6 +832,38 @@ with check (auth.role() = 'authenticated'::text);
 commit;
 ```
 
+### Step 5.13 (completed on 2026-02-20): `public.suppliers`
+
+What changed:
+1. Removed broad policy `authenticated_users_all_access`.
+2. Added org-scoped policies:
+   - `suppliers_select_org_member`
+   - `suppliers_insert_org_member`
+   - `suppliers_update_org_member`
+   - `suppliers_delete_org_member`
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step13_suppliers_replace_broad_with_org`.
+2. Confirmed only `suppliers_*_org_member` policies exist on `public.suppliers`.
+3. Confirmed `suppliers.org_id` null count is zero.
+4. Smoke-tested as a normal user (`testai@qbutton.co.za`) on `/suppliers` and `/purchasing` with no access errors.
+
+Immediate rollback SQL (if needed):
+```sql
+begin;
+drop policy if exists suppliers_select_org_member on public.suppliers;
+drop policy if exists suppliers_insert_org_member on public.suppliers;
+drop policy if exists suppliers_update_org_member on public.suppliers;
+drop policy if exists suppliers_delete_org_member on public.suppliers;
+create policy authenticated_users_all_access
+on public.suppliers
+for all
+to public
+using (auth.role() = 'authenticated'::text)
+with check (auth.role() = 'authenticated'::text);
+commit;
+```
+
 ## Unique constraint strategy (important)
 
 Current constraints like `products_internal_code_key` are globally unique.  
