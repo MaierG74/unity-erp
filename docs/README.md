@@ -58,6 +58,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - [`features/suppliers-ui-redesign-prompt.md`](features/suppliers-ui-redesign-prompt.md) – **Suppliers UI redesign prompt** (ready to apply in new conversation)
 - Operations:
   - [`operations/deployment-guide.md`](operations/deployment-guide.md) – **Production deployment guide** (Netlify, env vars, rollback)
+  - [`operations/migration-status.md`](operations/migration-status.md) – Environment-by-environment migration tracking ledger (local/staging/production)
   - [`operations/BOL_SYSTEM.md`](operations/BOL_SYSTEM.md)
   - [`operations/cutlist-standalone.md`](operations/cutlist-standalone.md)
   - [`operations/email-integration.md`](operations/email-integration.md) – Core Resend email setup and configuration
