@@ -2,6 +2,7 @@
 
 import { cn } from '@/lib/utils';
 import type { TimeMarker } from './types';
+import type { ScheduleBreak } from '@/types/work-schedule';
 
 interface TimeAxisHeaderProps {
   markers: TimeMarker[];
@@ -11,6 +12,10 @@ interface TimeAxisHeaderProps {
   timelineWidth?: number;
   /** Left offset (px) so header grid lines align with lane timelines. */
   staffColumnOffset?: number;
+  /** Scheduled break windows to render as shaded zones. */
+  breaks?: ScheduleBreak[];
+  /** Current time in minutes from midnight. Only shown when viewing today. */
+  nowMinutes?: number | null;
 }
 
 export function TimeAxisHeader({
@@ -20,6 +25,8 @@ export function TimeAxisHeader({
   showMinorTicks = true,
   timelineWidth,
   staffColumnOffset = 120,
+  breaks = [],
+  nowMinutes,
 }: TimeAxisHeaderProps) {
   const totalMinutes = endMinutes - startMinutes;
   const visibleMarkers = showMinorTicks ? markers : markers.filter((marker) => marker.isMajor);
@@ -66,10 +73,49 @@ export function TimeAxisHeader({
             </div>
           );
         })}
+        {/* Break zone overlays */}
+        {breaks.map((brk) => {
+          const left = toPosition(brk.startMinutes);
+          const right = toPosition(brk.endMinutes);
+          const width = right - left;
+          return (
+            <div
+              key={`break-${brk.startMinutes}`}
+              className="absolute inset-y-0 bg-muted-foreground/10 border-x border-dashed border-muted-foreground/25"
+              style={{
+                left: useFixedWidth ? left : `${left}%`,
+                width: useFixedWidth ? width : `${width}%`,
+              }}
+            >
+              <span className="absolute bottom-0 left-1 truncate text-[8px] leading-tight text-muted-foreground/70">
+                {brk.label}
+              </span>
+            </div>
+          );
+        })}
+
         <div
           className="absolute inset-y-0 border-l border-border"
           style={{ left: useFixedWidth ? timelineWidth : '100%' }}
         />
+
+        {/* Now indicator */}
+        {nowMinutes != null && nowMinutes >= startMinutes && nowMinutes <= endMinutes && (() => {
+          const pos = toPosition(nowMinutes);
+          const posStyle = useFixedWidth ? pos : `${pos}%`;
+          return (
+            <div
+              className="pointer-events-none absolute inset-y-0 z-20"
+              style={{ left: posStyle }}
+            >
+              <div className="absolute -top-3 -translate-x-1/2 h-2 w-2 rounded-full bg-rose-500 shadow-[0_0_4px_1px_rgba(244,63,94,0.5)]" />
+              <div className="absolute -top-7 -translate-x-1/2 whitespace-nowrap rounded bg-rose-500 px-1 py-px text-[8px] font-bold leading-tight text-white">
+                {formatMinutes(nowMinutes)}
+              </div>
+              <div className="absolute inset-y-0 border-l-2 border-rose-500" />
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

@@ -20,11 +20,15 @@ import type {
 } from '@/components/labor-planning/types';
 import { fetchLaborPlanningPayload } from '@/lib/queries/laborPlanning';
 import {
+  breakOverlapMinutes,
   buildAssignmentLabel,
   calculateDurationMinutes,
   checkLaneConstraints,
   chooseSnapIncrement,
+  stretchForBreaks,
 } from '@/src/lib/laborScheduling';
+import { useWorkSchedule } from '@/hooks/use-work-schedule';
+import type { ScheduleBreak } from '@/types/work-schedule';
 import { logSchedulingEvent } from '@/src/lib/analytics/scheduling';
 import { useLaborPlanningMutations } from '@/src/lib/mutations/laborPlanning';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
@@ -35,10 +39,7 @@ import { format, addDays, subDays } from 'date-fns';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
-const START_MINUTES = 7 * 60;
-const END_MINUTES = 19 * 60;
 const MIN_DURATION = 30;
-const TIME_MARKERS = buildTimeMarkers(START_MINUTES, END_MINUTES);
 
 // Zoom levels: pixels per hour
 const ZOOM_LEVELS = [80, 120, 180, 240] as const;
@@ -73,6 +74,37 @@ export function LaborPlanningBoard() {
     () => searchParams?.get('date') || format(new Date(), 'yyyy-MM-dd')
   );
   const [datePickerOpen, setDatePickerOpen] = useState(false);
+
+  // "Now" indicator — only shown when the selected date is today
+  const [nowMinutes, setNowMinutes] = useState<number | null>(() => {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    if (selectedDate !== today) return null;
+    const now = new Date();
+    return now.getHours() * 60 + now.getMinutes();
+  });
+  useEffect(() => {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    if (selectedDate !== today) {
+      setNowMinutes(null);
+      return;
+    }
+    const update = () => {
+      const now = new Date();
+      setNowMinutes(now.getHours() * 60 + now.getMinutes());
+    };
+    update();
+    const id = setInterval(update, 60_000);
+    return () => clearInterval(id);
+  }, [selectedDate]);
+
+  const schedule = useWorkSchedule(selectedDate);
+  const START_MINUTES = schedule.startMinutes;
+  const END_MINUTES = schedule.endMinutes;
+  const scheduleBreaks = schedule.breaks;
+  const TIME_MARKERS = useMemo(
+    () => buildTimeMarkers(START_MINUTES, END_MINUTES),
+    [START_MINUTES, END_MINUTES],
+  );
   const compactFromParams = searchParams?.get('compact') !== '0';
   const [compact, setCompact] = useState(compactFromParams);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
@@ -108,6 +140,20 @@ export function LaborPlanningBoard() {
     const qs = params.toString();
     window.history.replaceState(null, '', pathname + (qs ? `?${qs}` : ''));
   }, [searchParams, pathname]);
+
+  // Keyboard date navigation — left/right arrow keys (ignore when focus is in an input)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === 'ArrowLeft') {
+        handleDateChange(format(subDays(new Date(selectedDate + 'T00:00:00'), 1), 'yyyy-MM-dd'));
+      } else if (e.key === 'ArrowRight') {
+        handleDateChange(format(addDays(new Date(selectedDate + 'T00:00:00'), 1), 'yyyy-MM-dd'));
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [selectedDate, handleDateChange]);
 
   // Calculate timeline width based on zoom
   const totalHours = (END_MINUTES - START_MINUTES) / 60;
@@ -147,8 +193,8 @@ export function LaborPlanningBoard() {
   }, [data?.orders, showOnlyWithJobs, orderSearch]);
 
   const staffLanes = useMemo(
-    () => buildStaffLanes(data, jobLookup),
-    [data, jobLookup]
+    () => buildStaffLanes(data, jobLookup, START_MINUTES, END_MINUTES),
+    [data, jobLookup, START_MINUTES, END_MINUTES]
   );
 
   const roleGroups = useMemo(() => {
@@ -230,16 +276,17 @@ export function LaborPlanningBoard() {
 
       if (payload.type === 'job') {
         const jobMeta = jobLookup.get(payload.job.id) ?? { job: payload.job, order: undefined };
-        const rawDuration = Math.max(
+        const workMinutes = Math.max(
           calculateDurationMinutes(jobMeta.job, { minimumMinutes: MIN_DURATION }),
           MIN_DURATION
         );
-        // Cap to shift window so large jobs (e.g. 300 pieces) can still be placed
+        // Stretch work duration to account for breaks in the shift
         const shiftWindow = END_MINUTES - START_MINUTES;
-        const duration = Math.min(rawDuration, shiftWindow);
-        const snap = chooseSnapIncrement(duration);
-        const snappedStart = snapToGrid(clampedStart, snap, START_MINUTES, END_MINUTES - duration);
-        const end = Math.min(snappedStart + duration, END_MINUTES);
+        const snap = chooseSnapIncrement(Math.min(workMinutes, shiftWindow));
+        const prelimStart = snapToGrid(clampedStart, snap, START_MINUTES, END_MINUTES - MIN_DURATION);
+        const stretched = stretchForBreaks(prelimStart, workMinutes, scheduleBreaks);
+        const snappedStart = prelimStart;
+        const end = Math.min(stretched.wallEnd, END_MINUTES);
 
         const constraints = checkLaneConstraints(
           laneAssignments.map((assignment) => ({
@@ -256,7 +303,7 @@ export function LaborPlanningBoard() {
         );
 
         if (constraints.hasConflict) {
-          const message = buildConstraintMessage(constraints, staff, laneAssignments);
+          const message = buildConstraintMessage(constraints, staff, laneAssignments, START_MINUTES, END_MINUTES);
           toast.error(message.title, { description: message.description });
           logSchedulingEvent({
             type: 'drop_blocked',
@@ -303,8 +350,16 @@ export function LaborPlanningBoard() {
       let nextEnd = assignment.endMinutes;
 
       if (payload.type === 'assignment') {
-        nextStart = snapToGrid(clampedStart, snap, START_MINUTES, END_MINUTES - duration);
-        nextEnd = Math.min(nextStart + duration, END_MINUTES);
+        // Compute net work time by stripping any break overlap from the current position
+        const currentBreakOverlap = breakOverlapMinutes(
+          assignment.startMinutes ?? 0,
+          assignment.endMinutes ?? 0,
+          scheduleBreaks,
+        );
+        const netWork = Math.max(duration - currentBreakOverlap, MIN_DURATION);
+        nextStart = snapToGrid(clampedStart, snap, START_MINUTES, END_MINUTES - netWork);
+        const stretched = stretchForBreaks(nextStart, netWork, scheduleBreaks);
+        nextEnd = Math.min(stretched.wallEnd, END_MINUTES);
       } else if (payload.type === 'resize-start') {
         const maxStart = Math.min(assignment.endMinutes - 15, END_MINUTES - MIN_DURATION);
         nextStart = snapToGrid(clampedStart, snap, START_MINUTES, maxStart);
@@ -332,7 +387,7 @@ export function LaborPlanningBoard() {
       );
 
       if (constraints.hasConflict) {
-        const message = buildConstraintMessage(constraints, staff, laneAssignments);
+        const message = buildConstraintMessage(constraints, staff, laneAssignments, START_MINUTES, END_MINUTES);
         toast.error(message.title, { description: message.description });
         logSchedulingEvent({
           type: 'drop_blocked',
@@ -374,7 +429,7 @@ export function LaborPlanningBoard() {
         status: 'scheduled',
       });
     },
-    [assignMutation, data, jobLookup, selectedDate, updateMutation]
+    [assignMutation, data, jobLookup, selectedDate, updateMutation, START_MINUTES, END_MINUTES, scheduleBreaks]
   );
 
   const handleUnassign = useCallback(
@@ -566,6 +621,12 @@ export function LaborPlanningBoard() {
             <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
               <ZoomIn className="h-3.5 w-3.5" />
               <span>Timeline zoom</span>
+              {data && data.unscheduledJobs.length > 0 && (
+                <span className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-px text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                  {data.unscheduledJobs.length} unscheduled
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-1">
               <Button
@@ -604,6 +665,8 @@ export function LaborPlanningBoard() {
                   showMinorTicks={!compact}
                   timelineWidth={timelineWidth}
                   staffColumnOffset={LANE_TIMELINE_OFFSET}
+                  breaks={scheduleBreaks}
+                  nowMinutes={nowMinutes}
                 />
                 <div className="space-y-3 px-3 pb-3 pt-1">
                   {roleGroups
@@ -645,6 +708,8 @@ export function LaborPlanningBoard() {
                               onUnassign={handleUnassign}
                               compact={compact}
                               timelineWidth={timelineWidth}
+                              breaks={scheduleBreaks}
+                              nowMinutes={nowMinutes}
                             />
                           )}
                         </div>
@@ -675,7 +740,9 @@ function buildJobLookup(orders: PlanningOrder[]) {
 
 function buildStaffLanes(
   payload: Awaited<ReturnType<typeof fetchLaborPlanningPayload>> | undefined,
-  lookup: Map<string, { job: PlanningJob; order: PlanningOrder | null }>
+  lookup: Map<string, { job: PlanningJob; order: PlanningOrder | null }>,
+  startMinutes: number,
+  endMinutes: number,
 ): StaffLane[] {
   if (!payload) return [];
 
@@ -692,7 +759,7 @@ function buildStaffLanes(
         assignment.startMinutes != null && assignment.endMinutes != null
           ? assignment.endMinutes - assignment.startMinutes
           : Math.max(calculateDurationMinutes(job ?? {}, { minimumMinutes: MIN_DURATION }), MIN_DURATION);
-      const start = assignment.startMinutes ?? START_MINUTES;
+      const start = assignment.startMinutes ?? startMinutes;
       const end = assignment.endMinutes ?? start + duration;
       const label = buildAssignmentLabel({
         orderNumber: order?.orderNumber ?? order?.id,
@@ -736,8 +803,8 @@ function buildStaffLanes(
       capacityHours: staff.capacityHours ?? 0,
       availability: staff.availability,
       assignments,
-      availableFrom: formatRange(START_MINUTES),
-      availableTo: formatRange(END_MINUTES),
+      availableFrom: formatRange(startMinutes),
+      availableTo: formatRange(endMinutes),
     };
   });
 }
@@ -787,7 +854,9 @@ function normalizeRoleKey(role?: string | null) {
 function buildConstraintMessage(
   constraints: ReturnType<typeof checkLaneConstraints>,
   staff: StaffLane,
-  assignments: StaffAssignment[]
+  assignments: StaffAssignment[],
+  shiftStart?: number,
+  shiftEnd?: number,
 ) {
   if (constraints.status === 'availability') {
     return {
@@ -799,7 +868,7 @@ function buildConstraintMessage(
   if (constraints.status === 'window') {
     return {
       title: 'Outside shift window',
-      description: `Place this job within ${formatRange(START_MINUTES)} – ${formatRange(END_MINUTES)} for ${staff.name}.`,
+      description: `Place this job within ${formatRange(shiftStart ?? 420)} – ${formatRange(shiftEnd ?? 1140)} for ${staff.name}.`,
     };
   }
 

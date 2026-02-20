@@ -233,6 +233,47 @@ export async function fetchLaborPlanningPayload(options: { date?: string } = {})
   return { orders: annotatedOrders, staff, unscheduledJobs, assignments };
 }
 
+/* ------------------------------------------------------------------ */
+/*  Week summary (lightweight, for the condensed week strip)           */
+/* ------------------------------------------------------------------ */
+
+export interface DaySummary {
+  date: string;
+  totalAssignedMinutes: number;
+  assignmentCount: number;
+  staffCount: number;
+}
+
+export async function fetchWeekSummary(dates: string[]): Promise<DaySummary[]> {
+  const { data, error } = await supabase
+    .from('labor_plan_assignments')
+    .select('assignment_date, start_minutes, end_minutes, staff_id, status')
+    .in('assignment_date', dates)
+    .neq('status', 'unscheduled');
+
+  if (error) {
+    console.warn('[laborPlanning] Failed to fetch week summary', error);
+    return dates.map((d) => ({ date: d, totalAssignedMinutes: 0, assignmentCount: 0, staffCount: 0 }));
+  }
+
+  const byDate = new Map<string, { minutes: number; count: number; staffIds: Set<number> }>();
+  for (const d of dates) {
+    byDate.set(d, { minutes: 0, count: 0, staffIds: new Set() });
+  }
+  for (const row of data ?? []) {
+    const bucket = byDate.get(row.assignment_date);
+    if (!bucket) continue;
+    bucket.minutes += Math.max((row.end_minutes ?? 0) - (row.start_minutes ?? 0), 0);
+    bucket.count += 1;
+    if (row.staff_id) bucket.staffIds.add(row.staff_id);
+  }
+
+  return dates.map((d) => {
+    const b = byDate.get(d)!;
+    return { date: d, totalAssignedMinutes: b.minutes, assignmentCount: b.count, staffCount: b.staffIds.size };
+  });
+}
+
 async function loadClosedStatusIds(): Promise<number[]> {
   const { data, error } = await supabase.from('order_statuses').select('status_id, status_name');
   if (error) {
@@ -317,8 +358,11 @@ function normalizeDetailJobs(order: any, detail: any): PlanningJobWithMeta[] {
     const job = extractSingle(bol.jobs);
     const category = extractSingle(job?.job_categories);
     const jobQuantity = (toNumber(bol.quantity) ?? 1) * orderQty;
-    const timeUnit = String(bol.time_unit ?? 'hours').toLowerCase() as TimeUnit;
-    const baseMinutes = convertToMinutes(bol.time_required, timeUnit);
+    // Fall back to job's estimated_minutes/time_unit when the BOL doesn't have time_required set
+    const effectiveTimeRequired = bol.time_required ?? job?.estimated_minutes ?? null;
+    const effectiveTimeUnit = (bol.time_required != null ? bol.time_unit : job?.time_unit) ?? 'hours';
+    const timeUnit = String(effectiveTimeUnit).toLowerCase() as TimeUnit;
+    const baseMinutes = convertToMinutes(effectiveTimeRequired, timeUnit);
     const totalMinutes = baseMinutes != null ? baseMinutes * jobQuantity : null;
     // durationMinutes stores per-unit value for calculateDurationMinutes (which multiplies by quantity)
     const perUnitMinutes = baseMinutes;
@@ -489,8 +533,11 @@ function normalizeJobCardItem(orderId: number, item: JobCardItemRow): PlanningJo
   const categoryName = item.job_category_name ?? null;
   const categoryColor = getCategoryColor(item.job_category_id ?? categoryName);
 
-  // Estimate duration from job's estimated_minutes if available
-  const estimatedMinutesPerUnit = item.estimated_minutes ?? null;
+  // Estimate duration from job's estimated_minutes, converting from job_time_unit to minutes
+  const rawEstimatedTime = item.estimated_minutes ?? null;
+  const estimatedMinutesPerUnit = rawEstimatedTime != null
+    ? convertToMinutes(rawEstimatedTime, item.job_time_unit)
+    : null;
   const totalMinutes = estimatedMinutesPerUnit != null ? estimatedMinutesPerUnit * item.quantity : null;
   // durationMinutes stores per-unit value for calculateDurationMinutes (which multiplies by quantity)
   const perUnitMinutes = estimatedMinutesPerUnit;

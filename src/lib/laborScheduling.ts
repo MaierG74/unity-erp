@@ -266,6 +266,26 @@ function deriveStatus(issues: ConstraintIssue[]): ConstraintResult['status'] {
   return sorted[0]?.type ?? 'ok';
 }
 
+/**
+ * Compute total break minutes that overlap a given wall-clock range.
+ * Used to "unstretch" an existing assignment back to net work minutes.
+ */
+export function breakOverlapMinutes(
+  rangeStart: number,
+  rangeEnd: number,
+  breaks: BreakWindow[],
+): number {
+  let total = 0;
+  for (const brk of breaks) {
+    const overlapStart = Math.max(rangeStart, brk.startMinutes);
+    const overlapEnd = Math.min(rangeEnd, brk.endMinutes);
+    if (overlapEnd > overlapStart) {
+      total += overlapEnd - overlapStart;
+    }
+  }
+  return total;
+}
+
 function hashString(value: string): number {
   let hash = 0;
   for (let i = 0; i < value.length; i++) {
@@ -273,4 +293,74 @@ function hashString(value: string): number {
     hash |= 0;
   }
   return hash;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Break-aware scheduling utilities                                   */
+/* ------------------------------------------------------------------ */
+
+export interface BreakWindow {
+  label?: string;
+  startMinutes: number;
+  endMinutes: number;
+}
+
+export interface StretchResult {
+  wallStart: number;
+  wallEnd: number;
+  wallDuration: number;
+}
+
+/**
+ * Given a work start time and net work duration, walks the timeline
+ * skipping over any overlapping breaks to compute the wall-clock end.
+ *
+ * Example: 60 min job at 9:30 with a break 10:00–10:15
+ *   → wallEnd = 10:45 (75 min wall clock for 60 min of work)
+ */
+export function stretchForBreaks(
+  workStart: number,
+  workDuration: number,
+  breaks: BreakWindow[],
+): StretchResult {
+  if (workDuration <= 0 || breaks.length === 0) {
+    return { wallStart: workStart, wallEnd: workStart + workDuration, wallDuration: workDuration };
+  }
+
+  // Sort breaks by start time
+  const sorted = [...breaks]
+    .filter((b) => b.endMinutes > workStart)
+    .sort((a, b) => a.startMinutes - b.startMinutes);
+
+  let cursor = workStart;
+  let remaining = workDuration;
+
+  for (const brk of sorted) {
+    if (remaining <= 0) break;
+
+    // If cursor is inside a break (job starts mid-break), push cursor past it
+    if (cursor >= brk.startMinutes && cursor < brk.endMinutes) {
+      cursor = brk.endMinutes;
+      continue;
+    }
+
+    // If the break starts after the remaining work would finish, we're done
+    if (brk.startMinutes >= cursor + remaining) break;
+
+    // Work before this break
+    const workBeforeBreak = brk.startMinutes - cursor;
+    remaining -= workBeforeBreak;
+    cursor = brk.endMinutes; // skip past the break
+  }
+
+  // Consume any remaining work time after the last break
+  if (remaining > 0) {
+    cursor += remaining;
+  }
+
+  return {
+    wallStart: workStart,
+    wallEnd: cursor,
+    wallDuration: cursor - workStart,
+  };
 }

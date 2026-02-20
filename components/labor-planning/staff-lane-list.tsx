@@ -14,11 +14,13 @@ import {
 import { cn } from '@/lib/utils';
 import { minutesToClock } from '@/src/lib/laborScheduling';
 import { Circle, GripHorizontal, X, Calendar, Clock, User, Briefcase, CheckCircle2, ClipboardList, Loader2 } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import type { LaborDragPayload, StaffAssignment, StaffLane, TimeMarker } from './types';
 import { CompleteJobDialog } from './complete-job-dialog';
+import type { ScheduleBreak } from '@/types/work-schedule';
 
 interface StaffLaneListProps {
   staff: StaffLane[];
@@ -31,6 +33,10 @@ interface StaffLaneListProps {
   timelineWidth?: number;
   /** Default snap increment (minutes) for drag preview indicator. Falls back to 15. */
   dragSnapIncrement?: number;
+  /** Scheduled break windows to render as overlays on each lane. */
+  breaks?: ScheduleBreak[];
+  /** Current time in minutes from midnight. Only shown when viewing today. */
+  nowMinutes?: number | null;
 }
 
 export function StaffLaneList({
@@ -43,6 +49,8 @@ export function StaffLaneList({
   compact = false,
   timelineWidth,
   dragSnapIncrement = 15,
+  breaks = [],
+  nowMinutes,
 }: StaffLaneListProps) {
   const router = useRouter();
   const totalMinutes = endMinutes - startMinutes;
@@ -382,6 +390,39 @@ export function StaffLaneList({
                 })}
               </div>
 
+              {/* Break zone overlays */}
+              {breaks.length > 0 && (
+                <div className="pointer-events-none absolute inset-0 z-[1]">
+                  {breaks.map((brk) => {
+                    const left = toPosition(brk.startMinutes);
+                    const width = toWidth(brk.startMinutes, brk.endMinutes);
+                    return (
+                      <div
+                        key={`${lane.id}-break-${brk.startMinutes}`}
+                        className="absolute inset-y-0"
+                        style={{
+                          left: useFixedWidth ? left : `${left}%`,
+                          width: useFixedWidth ? width : `${width}%`,
+                          background: 'repeating-linear-gradient(135deg, transparent, transparent 3px, hsl(var(--muted-foreground) / 0.08) 3px, hsl(var(--muted-foreground) / 0.08) 6px)',
+                          backgroundColor: 'hsl(var(--muted-foreground) / 0.06)',
+                        }}
+                        title={brk.label}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Now indicator */}
+              {nowMinutes != null && nowMinutes >= startMinutes && nowMinutes <= endMinutes && (
+                <div
+                  className="pointer-events-none absolute inset-y-0 z-[2]"
+                  style={{ left: useFixedWidth ? toPosition(nowMinutes) : `${toPosition(nowMinutes)}%` }}
+                >
+                  <div className="absolute inset-y-0 border-l-2 border-rose-500/60" />
+                </div>
+              )}
+
               {/* Time indicator during drag - shows snapped position */}
               {dragIndicator && dragIndicator.laneId === lane.id && (
                 <div
@@ -400,6 +441,7 @@ export function StaffLaneList({
               )}
 
               {/* Assignment bars */}
+              <TooltipProvider delayDuration={300}>
               {lane.assignments.map((assignment) => {
                 const left = toPosition(assignment.startMinutes);
                 const width = toWidth(assignment.startMinutes, assignment.endMinutes);
@@ -411,13 +453,16 @@ export function StaffLaneList({
                       ? '#60a5fa'
                       : '#34d399');
 
+                const durationMins = assignment.endMinutes - assignment.startMinutes;
+                const durationHours = Math.round(durationMins / 6) / 10;
+
                 return (
+                  <Tooltip key={assignment.id} delayDuration={300}>
+                  <TooltipTrigger asChild>
                   <div
-                    key={assignment.id}
                     data-job-key={assignment.jobKey}
-                    title={`${assignment.label}\n${minutesToClock(assignment.startMinutes)} – ${minutesToClock(assignment.endMinutes)}\nOrder: ${assignment.orderNumber || 'N/A'}\nClick for details`}
                     className={cn(
-                      'absolute top-1 flex items-center rounded-md border px-2 text-xs font-medium text-white shadow-sm cursor-pointer hover:brightness-110 transition-all',
+                      'absolute top-1 flex items-center rounded-xl cursor-pointer transition-all duration-150 hover:scale-[1.02] hover:shadow-lg active:scale-[0.99]',
                       compact ? 'h-12' : 'h-14',
                     )}
                     draggable
@@ -435,15 +480,21 @@ export function StaffLaneList({
                       left: useFixedWidth ? left : `${left}%`,
                       width: useFixedWidth ? Math.max(width, 80) : `${Math.max(width, 8)}%`,
                       minWidth: '80px',
-                      background: `linear-gradient(135deg, ${baseColor} 0%, ${baseColor}dd 100%)`,
-                      borderColor: baseColor,
+                      background: `linear-gradient(145deg, ${baseColor}ee 0%, ${baseColor}bb 100%)`,
+                      boxShadow: `0 2px 8px ${baseColor}55, inset 0 1px 0 rgba(255,255,255,0.15)`,
                     }}
                   >
+                    {/* Left accent stripe */}
+                    <div
+                      className="absolute left-0 top-0 h-full w-1 rounded-l-xl"
+                      style={{ background: 'rgba(255,255,255,0.35)' }}
+                    />
+
                     {/* Resize handles */}
                     {assignment.showHandles !== false && (
                       <>
                         <div
-                          className="absolute left-0 top-0 flex h-full w-3 cursor-ew-resize items-center justify-center rounded-l bg-black/20 opacity-0 transition hover:opacity-100"
+                          className="absolute left-0 top-0 flex h-full w-3 cursor-ew-resize items-center justify-center rounded-l-xl bg-black/15 opacity-0 transition hover:opacity-100"
                           draggable
                           onDragStart={(event) => {
                             event.stopPropagation();
@@ -455,7 +506,7 @@ export function StaffLaneList({
                           <GripHorizontal className="h-3 w-3 rotate-90 text-white/80" />
                         </div>
                         <div
-                          className="absolute right-0 top-0 flex h-full w-3 cursor-ew-resize items-center justify-center rounded-r bg-black/20 opacity-0 transition hover:opacity-100"
+                          className="absolute right-0 top-0 flex h-full w-3 cursor-ew-resize items-center justify-center rounded-r-xl bg-black/15 opacity-0 transition hover:opacity-100"
                           draggable
                           onDragStart={(event) => {
                             event.stopPropagation();
@@ -468,20 +519,21 @@ export function StaffLaneList({
                         </div>
                       </>
                     )}
-                    <div className="flex min-w-0 flex-1 flex-col justify-center px-1.5">
-                      <span className="truncate text-[10px] font-medium text-white/95">
+
+                    <div className="flex min-w-0 flex-1 flex-col justify-center pl-3.5 pr-1.5">
+                      <span className="truncate text-[10px] font-semibold leading-tight text-white drop-shadow-sm">
                         {assignment.productName || assignment.jobName || assignment.label}
                       </span>
-                      <div className="flex items-center gap-1">
-                        <span className="text-[9px] font-semibold text-white/80">
+                      <div className="mt-0.5 flex items-center gap-1">
+                        <span className="rounded bg-black/20 px-1 py-px text-[8px] font-bold tracking-wide text-white/90">
                           #{assignment.orderNumber || 'N/A'}
                         </span>
-                        <span className="text-[8px] text-white/60">•</span>
-                        <span className="text-[9px] text-white/70">
+                        <span className="text-[9px] font-medium text-white/75">
                           {Math.round((assignment.endMinutes - assignment.startMinutes) / 60 * 10) / 10}h
                         </span>
                       </div>
                     </div>
+
                     {onUnassign && (
                       <button
                         type="button"
@@ -489,15 +541,44 @@ export function StaffLaneList({
                           event.stopPropagation();
                           onUnassign(assignment);
                         }}
-                        className="ml-1 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-black/20 text-white/80 transition hover:bg-black/30"
+                        className="mr-1.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-white/20 text-white/90 transition hover:bg-white/35"
                         aria-label="Unassign job"
                       >
-                        <X className="h-3 w-3" />
+                        <X className="h-2.5 w-2.5" />
                       </button>
                     )}
                   </div>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    side="top"
+                    sideOffset={6}
+                    className="z-50 max-w-[220px] rounded-lg border-0 bg-neutral-900 px-3 py-2.5 shadow-xl"
+                  >
+                    <div className="space-y-1.5">
+                      <p className="text-[11px] font-semibold leading-tight text-white">
+                        {assignment.productName || assignment.jobName || assignment.label}
+                      </p>
+                      {assignment.jobName && assignment.productName && assignment.jobName !== assignment.productName && (
+                        <p className="text-[10px] text-neutral-400">{assignment.jobName}</p>
+                      )}
+                      <div className="h-px bg-neutral-700" />
+                      <div className="flex items-center gap-1.5 text-[10px] text-neutral-300">
+                        <Clock className="h-3 w-3 shrink-0 text-neutral-500" />
+                        <span>{minutesToClock(assignment.startMinutes)} – {minutesToClock(assignment.endMinutes)}</span>
+                        <span className="ml-auto text-neutral-500">{durationHours}h</span>
+                      </div>
+                      {assignment.orderNumber && (
+                        <div className="flex items-center gap-1.5 text-[10px] text-neutral-300">
+                          <ClipboardList className="h-3 w-3 shrink-0 text-neutral-500" />
+                          <span>Order #{assignment.orderNumber}</span>
+                        </div>
+                      )}
+                    </div>
+                  </TooltipContent>
+                  </Tooltip>
                 );
               })}
+              </TooltipProvider>
             </div>
           </div>
         );
