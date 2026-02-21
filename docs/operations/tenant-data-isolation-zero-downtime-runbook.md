@@ -1175,6 +1175,39 @@ with check (true);
 commit;
 ```
 
+### Step 5.23 (completed on 2026-02-21): `public.quote_attachments`
+
+What changed:
+1. Removed broad permissive policy:
+   - `allow_all_on_quote_attachments`
+2. Added org-scoped policies:
+   - `quote_attachments_select_org_member`
+   - `quote_attachments_insert_org_member`
+   - `quote_attachments_update_org_member`
+   - `quote_attachments_delete_org_member`
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step23_quote_attachments_replace_broad_with_org`.
+2. Confirmed only `quote_attachments_*_org_member` policies exist on `public.quote_attachments`.
+3. Confirmed `quote_attachments.org_id` null count is zero.
+4. Smoke-tested as a normal user (`testai@qbutton.co.za`) on quote detail page with no access/runtime errors.
+
+Immediate rollback SQL (if needed):
+```sql
+begin;
+drop policy if exists quote_attachments_select_org_member on public.quote_attachments;
+drop policy if exists quote_attachments_insert_org_member on public.quote_attachments;
+drop policy if exists quote_attachments_update_org_member on public.quote_attachments;
+drop policy if exists quote_attachments_delete_org_member on public.quote_attachments;
+create policy allow_all_on_quote_attachments
+on public.quote_attachments
+for all
+to authenticated
+using (true)
+with check (true);
+commit;
+```
+
 ## Unique constraint strategy (important)
 
 Current constraints like `products_internal_code_key` are globally unique.  
