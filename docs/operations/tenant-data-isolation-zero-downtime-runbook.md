@@ -1077,6 +1077,34 @@ with check (true);
 commit;
 ```
 
+### Step 5.20 (completed on 2026-02-21): `public.purchase_order_emails`
+
+What changed:
+1. Removed broad permissive policies:
+   - `Allow authenticated users to view purchase order emails`
+   - `Allow authenticated users to insert purchase order emails`
+2. Added org-scoped policies (preserving existing command coverage):
+   - `purchase_order_emails_select_org_member` (SELECT)
+   - `purchase_order_emails_insert_org_member` (INSERT)
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step20_purchase_order_emails_replace_broad_with_org`.
+2. Confirmed only `purchase_order_emails_*_org_member` policies exist on `public.purchase_order_emails`.
+3. Confirmed `purchase_order_emails.org_id` null count is zero.
+4. Smoke-tested as a normal user (`testai@qbutton.co.za`) on PO detail page by opening Email Activity; no access/runtime errors.
+
+Immediate rollback SQL (if needed):
+```sql
+begin;
+drop policy if exists purchase_order_emails_select_org_member on public.purchase_order_emails;
+drop policy if exists purchase_order_emails_insert_org_member on public.purchase_order_emails;
+create policy "Allow authenticated users to view purchase order emails"
+on public.purchase_order_emails for select to authenticated using (true);
+create policy "Allow authenticated users to insert purchase order emails"
+on public.purchase_order_emails for insert to authenticated with check (true);
+commit;
+```
+
 ## Unique constraint strategy (important)
 
 Current constraints like `products_internal_code_key` are globally unique.  
