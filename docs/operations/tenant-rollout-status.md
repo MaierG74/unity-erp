@@ -43,11 +43,12 @@ Expand-only `org_id` columns have been added and backfilled (but RLS has NOT bee
 - `quote_items` is now tenant-scoped with org membership policies (migration: `tenant_rls_step22_quote_items_replace_broad_with_org`, applied + smoke-verified on 2026-02-21).
 - `quote_attachments` is now tenant-scoped with org membership policies (migration: `tenant_rls_step23_quote_attachments_replace_broad_with_org`, applied + smoke-verified on 2026-02-21).
 - `quote_email_log` is now tenant-scoped with org membership policies (migration: `tenant_rls_step24_quote_email_log_replace_broad_with_org`, applied + smoke-verified on 2026-02-21).
+- `staff` is now tenant-scoped with org membership policies (migration: `tenant_rls_step25_staff_replace_broad_with_org`, applied + smoke-verified on 2026-02-21 as normal user `testai@qbutton.co.za` on `/staff`, `/staff/hours`, and `/staff/payroll`).
 - Remaining purchasing/supplier tables are still in expand-only state and should be tightened one-by-one.
 
 ## What’s Next (recommended order)
 1. Apply expand-only migration for `product_cutlist_groups` (`org_id` + backfill + FK NOT VALID + index) before onboarding a second organization.
-2. Continue tightening Staff/Timekeeping RLS in baby steps (next recommended table: `staff`).
+2. Continue tightening Staff/Timekeeping RLS in baby steps (next recommended table: `staff_hours`).
 3. Continue tightening any remaining edge tables identified without org-scoped policies.
-4. Tighten Staff RLS.
-5. Validate and enforce FK constraints (`VALIDATE CONSTRAINT`) and later `NOT NULL` on the Phase B tables.
+4. Validate and enforce FK constraints (`VALIDATE CONSTRAINT`) and later `NOT NULL` on the Phase B tables.
+5. Standardize timekeeping read patterns that currently produce expected `406` responses when per-staff daily summary rows are absent.

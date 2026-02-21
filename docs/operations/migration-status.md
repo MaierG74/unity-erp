@@ -28,11 +28,11 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260221083233
-- Latest applied migration name: tenant_rls_step24_quote_email_log_replace_broad_with_org
+- Latest applied migration version: 20260221084441
+- Latest applied migration name: tenant_rls_step25_staff_replace_broad_with_org
 - Applied at (UTC): 2026-02-21
 - Applied by: Codex via Supabase MCP
-- Verification notes: Confirmed via Supabase MCP `list_migrations`, policy checks on `public.quote_email_log`, `org_id` null checks, and manual normal-user smoke test (`testai@qbutton.co.za`) on quote detail page.
+- Verification notes: Confirmed via Supabase MCP `list_migrations`, policy checks on `public.staff`, `org_id` null checks, and manual normal-user smoke test (`testai@qbutton.co.za`) on `/staff`, `/staff/hours`, and `/staff/payroll`.
 
 ## Pre-Deploy Migration Checklist
 - [ ] Repo checked: latest file in `supabase/migrations`

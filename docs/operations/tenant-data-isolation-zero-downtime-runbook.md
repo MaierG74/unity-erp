@@ -1236,6 +1236,65 @@ on public.quote_email_log for insert to authenticated with check (auth.role() = 
 commit;
 ```
 
+### Step 5.25 (completed on 2026-02-21): `public.staff`
+
+What changed:
+1. Removed broad and duplicate policies:
+   - `Allow anon read access to staff`
+   - `Allow anyone to read staff`
+   - `Allow authenticated users to read staff`
+   - `Allow authenticated users to insert staff`
+   - `Allow authenticated users to update staff`
+   - `Allow authenticated users to delete staff`
+   - `Only allow admins to update staff`
+2. Added org-scoped policies:
+   - `staff_select_org_member`
+   - `staff_insert_org_member`
+   - `staff_update_org_member`
+   - `staff_delete_org_member`
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step25_staff_replace_broad_with_org`.
+2. Confirmed only `staff_*_org_member` policies exist on `public.staff`.
+3. Confirmed `staff.org_id` null count is zero.
+4. Smoke-tested as a normal user (`testai@qbutton.co.za`) on `/staff`, `/staff/hours`, and `/staff/payroll` with no runtime/access denial failures.
+5. Noted existing timekeeping fetch pattern on `/staff/hours` issues expected `406` responses for missing per-staff `time_daily_summary` rows; this is not an RLS denial and did not block page usage.
+
+Immediate rollback SQL (if needed):
+```sql
+begin;
+drop policy if exists staff_select_org_member on public.staff;
+drop policy if exists staff_insert_org_member on public.staff;
+drop policy if exists staff_update_org_member on public.staff;
+drop policy if exists staff_delete_org_member on public.staff;
+
+create policy "Allow authenticated users to read staff"
+on public.staff
+for select
+to authenticated
+using (auth.role() = 'authenticated'::text);
+
+create policy "Allow authenticated users to insert staff"
+on public.staff
+for insert
+to authenticated
+with check (auth.role() = 'authenticated'::text);
+
+create policy "Allow authenticated users to update staff"
+on public.staff
+for update
+to authenticated
+using (auth.role() = 'authenticated'::text)
+with check (auth.role() = 'authenticated'::text);
+
+create policy "Allow authenticated users to delete staff"
+on public.staff
+for delete
+to authenticated
+using (auth.role() = 'authenticated'::text);
+commit;
+```
+
 ## Unique constraint strategy (important)
 
 Current constraints like `products_internal_code_key` are globally unique.  
