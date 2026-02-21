@@ -1105,6 +1105,39 @@ on public.purchase_order_emails for insert to authenticated with check (true);
 commit;
 ```
 
+### Step 5.21 (completed on 2026-02-21): `public.quotes`
+
+What changed:
+1. Removed broad permissive policy:
+   - `allow_all_on_quotes`
+2. Added org-scoped policies:
+   - `quotes_select_org_member`
+   - `quotes_insert_org_member`
+   - `quotes_update_org_member`
+   - `quotes_delete_org_member`
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step21_quotes_replace_broad_with_org`.
+2. Confirmed only `quotes_*_org_member` policies exist on `public.quotes`.
+3. Confirmed `quotes.org_id` null count is zero.
+4. Smoke-tested as a normal user (`testai@qbutton.co.za`) on `/quotes`; no access/runtime errors.
+
+Immediate rollback SQL (if needed):
+```sql
+begin;
+drop policy if exists quotes_select_org_member on public.quotes;
+drop policy if exists quotes_insert_org_member on public.quotes;
+drop policy if exists quotes_update_org_member on public.quotes;
+drop policy if exists quotes_delete_org_member on public.quotes;
+create policy allow_all_on_quotes
+on public.quotes
+for all
+to authenticated
+using (true)
+with check (true);
+commit;
+```
+
 ## Unique constraint strategy (important)
 
 Current constraints like `products_internal_code_key` are globally unique.  
