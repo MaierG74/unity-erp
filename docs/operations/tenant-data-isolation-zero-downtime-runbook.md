@@ -1208,6 +1208,34 @@ with check (true);
 commit;
 ```
 
+### Step 5.24 (completed on 2026-02-21): `public.quote_email_log`
+
+What changed:
+1. Removed broad permissive policies:
+   - `Users can view quote email logs`
+   - `Users can insert quote email logs`
+2. Added org-scoped policies (preserving existing command coverage):
+   - `quote_email_log_select_org_member` (SELECT)
+   - `quote_email_log_insert_org_member` (INSERT)
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step24_quote_email_log_replace_broad_with_org`.
+2. Confirmed only `quote_email_log_*_org_member` policies exist on `public.quote_email_log`.
+3. Confirmed `quote_email_log.org_id` null count is zero.
+4. Smoke-tested as a normal user (`testai@qbutton.co.za`) on quote detail page with no access/runtime errors.
+
+Immediate rollback SQL (if needed):
+```sql
+begin;
+drop policy if exists quote_email_log_select_org_member on public.quote_email_log;
+drop policy if exists quote_email_log_insert_org_member on public.quote_email_log;
+create policy "Users can view quote email logs"
+on public.quote_email_log for select to authenticated using (auth.role() = 'authenticated'::text);
+create policy "Users can insert quote email logs"
+on public.quote_email_log for insert to authenticated with check (auth.role() = 'authenticated'::text);
+commit;
+```
+
 ## Unique constraint strategy (important)
 
 Current constraints like `products_internal_code_key` are globally unique.  
