@@ -1044,6 +1044,39 @@ on public.supplier_order_receipts for delete to authenticated using (true);
 commit;
 ```
 
+### Step 5.19 (completed on 2026-02-21): `public.purchase_order_attachments`
+
+What changed:
+1. Removed broad permissive policy:
+   - `Allow all for authenticated`
+2. Added org-scoped policies:
+   - `purchase_order_attachments_select_org_member`
+   - `purchase_order_attachments_insert_org_member`
+   - `purchase_order_attachments_update_org_member`
+   - `purchase_order_attachments_delete_org_member`
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step19_purchase_order_attachments_replace_broad_with_org`.
+2. Confirmed only `purchase_order_attachments_*_org_member` policies exist on `public.purchase_order_attachments`.
+3. Confirmed `purchase_order_attachments.org_id` null count is zero.
+4. Smoke-tested as a normal user (`testai@qbutton.co.za`) on PO detail page; Attachments section loaded with no access/runtime errors.
+
+Immediate rollback SQL (if needed):
+```sql
+begin;
+drop policy if exists purchase_order_attachments_select_org_member on public.purchase_order_attachments;
+drop policy if exists purchase_order_attachments_insert_org_member on public.purchase_order_attachments;
+drop policy if exists purchase_order_attachments_update_org_member on public.purchase_order_attachments;
+drop policy if exists purchase_order_attachments_delete_org_member on public.purchase_order_attachments;
+create policy "Allow all for authenticated"
+on public.purchase_order_attachments
+for all
+to authenticated
+using (true)
+with check (true);
+commit;
+```
+
 ## Unique constraint strategy (important)
 
 Current constraints like `products_internal_code_key` are globally unique.  
