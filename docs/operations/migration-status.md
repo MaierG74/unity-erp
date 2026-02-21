@@ -28,11 +28,11 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260221052733
-- Latest applied migration name: tenant_rls_step15_supplier_orders_replace_broad_with_org
+- Latest applied migration version: 20260221071725
+- Latest applied migration name: tenant_rls_step16_suppliercomponents_replace_broad_with_org
 - Applied at (UTC): 2026-02-21
 - Applied by: Codex via Supabase MCP
-- Verification notes: Confirmed via Supabase MCP `list_migrations`, policy checks on `public.supplier_orders`, and `org_id` null checks. Manual normal-user UI smoke test is pending due local Playwright transport outage.
+- Verification notes: Confirmed via Supabase MCP `list_migrations`, policy checks on `public.supplier_orders` + `public.suppliercomponents`, `org_id` null checks, and manual normal-user smoke test (`testai@qbutton.co.za`) across `/purchasing`, `/purchasing/purchase-orders`, PO detail, and Bulk Receive modal.
 
 ## Pre-Deploy Migration Checklist
 - [ ] Repo checked: latest file in `supabase/migrations`

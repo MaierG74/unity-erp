@@ -902,7 +902,7 @@ on public.purchase_orders for delete to authenticated using (true);
 commit;
 ```
 
-### Step 5.15 (applied on 2026-02-21): `public.supplier_orders`
+### Step 5.15 (completed on 2026-02-21): `public.supplier_orders`
 
 What changed:
 1. Removed broad permissive policy:
@@ -917,7 +917,7 @@ Verification performed:
 1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step15_supplier_orders_replace_broad_with_org`.
 2. Confirmed only `supplier_orders_*_org_member` policies exist on `public.supplier_orders`.
 3. Confirmed `supplier_orders.org_id` null count is zero.
-4. Manual normal-user UI smoke test is still required (automation outage during this run).
+4. Smoke-tested as a normal user (`testai@qbutton.co.za`) on `/purchasing`, `/purchasing/purchase-orders`, and PO details with no access errors.
 
 Immediate rollback SQL (if needed):
 ```sql
@@ -932,6 +932,39 @@ for all
 to authenticated
 using (true)
 with check (true);
+commit;
+```
+
+### Step 5.16 (completed on 2026-02-21): `public.suppliercomponents`
+
+What changed:
+1. Removed broad permissive policy:
+   - `authenticated_users_all_access`
+2. Added org-scoped policies:
+   - `suppliercomponents_select_org_member`
+   - `suppliercomponents_insert_org_member`
+   - `suppliercomponents_update_org_member`
+   - `suppliercomponents_delete_org_member`
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step16_suppliercomponents_replace_broad_with_org`.
+2. Confirmed only `suppliercomponents_*_org_member` policies exist on `public.suppliercomponents`.
+3. Confirmed `suppliercomponents.org_id` null count is zero.
+4. Smoke-tested as a normal user (`testai@qbutton.co.za`) on `/purchasing`, `/purchasing/purchase-orders`, and Bulk Receive modal with no access errors.
+
+Immediate rollback SQL (if needed):
+```sql
+begin;
+drop policy if exists suppliercomponents_select_org_member on public.suppliercomponents;
+drop policy if exists suppliercomponents_insert_org_member on public.suppliercomponents;
+drop policy if exists suppliercomponents_update_org_member on public.suppliercomponents;
+drop policy if exists suppliercomponents_delete_org_member on public.suppliercomponents;
+create policy authenticated_users_all_access
+on public.suppliercomponents
+for all
+to public
+using (auth.role() = 'authenticated'::text)
+with check (auth.role() = 'authenticated'::text);
 commit;
 ```
 
