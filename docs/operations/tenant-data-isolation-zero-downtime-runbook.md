@@ -1138,6 +1138,43 @@ with check (true);
 commit;
 ```
 
+### Step 5.22 (completed on 2026-02-21): `public.quote_items`
+
+What changed:
+1. Removed broad permissive policies (including duplicate legacy policies):
+   - `allow_all_on_quote_items`
+   - `Open select quote_items`
+   - `Open insert quote_items`
+   - `Open update quote_items`
+   - `Open delete quote_items`
+2. Added org-scoped policies:
+   - `quote_items_select_org_member`
+   - `quote_items_insert_org_member`
+   - `quote_items_update_org_member`
+   - `quote_items_delete_org_member`
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step22_quote_items_replace_broad_with_org`.
+2. Confirmed only `quote_items_*_org_member` policies exist on `public.quote_items`.
+3. Confirmed `quote_items.org_id` null count is zero.
+4. Smoke-tested as a normal user (`testai@qbutton.co.za`) on `/quotes` list and quote detail page with no access/runtime errors.
+
+Immediate rollback SQL (if needed):
+```sql
+begin;
+drop policy if exists quote_items_select_org_member on public.quote_items;
+drop policy if exists quote_items_insert_org_member on public.quote_items;
+drop policy if exists quote_items_update_org_member on public.quote_items;
+drop policy if exists quote_items_delete_org_member on public.quote_items;
+create policy allow_all_on_quote_items
+on public.quote_items
+for all
+to authenticated
+using (true)
+with check (true);
+commit;
+```
+
 ## Unique constraint strategy (important)
 
 Current constraints like `products_internal_code_key` are globally unique.  
