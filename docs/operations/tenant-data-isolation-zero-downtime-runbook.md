@@ -864,6 +864,44 @@ with check (auth.role() = 'authenticated'::text);
 commit;
 ```
 
+### Step 5.14 (completed on 2026-02-21): `public.purchase_orders`
+
+What changed:
+1. Removed broad permissive purchase-order policies:
+   - `Authenticated users can select from purchase_orders`
+   - `Authenticated users can insert into purchase_orders`
+   - `Authenticated users can update purchase_orders`
+   - `Authenticated users can delete from purchase_orders`
+2. Added org-scoped policies:
+   - `purchase_orders_select_org_member`
+   - `purchase_orders_insert_org_member`
+   - `purchase_orders_update_org_member`
+   - `purchase_orders_delete_org_member`
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step14_purchase_orders_replace_broad_with_org`.
+2. Confirmed only `purchase_orders_*_org_member` policies exist on `public.purchase_orders`.
+3. Confirmed `purchase_orders.org_id` null count is zero.
+4. Smoke-tested as a normal user (`testai@qbutton.co.za`) on `/purchasing` and `/purchasing/purchase-orders` with no access errors.
+
+Immediate rollback SQL (if needed):
+```sql
+begin;
+drop policy if exists purchase_orders_select_org_member on public.purchase_orders;
+drop policy if exists purchase_orders_insert_org_member on public.purchase_orders;
+drop policy if exists purchase_orders_update_org_member on public.purchase_orders;
+drop policy if exists purchase_orders_delete_org_member on public.purchase_orders;
+create policy "Authenticated users can select from purchase_orders"
+on public.purchase_orders for select to authenticated using (true);
+create policy "Authenticated users can insert into purchase_orders"
+on public.purchase_orders for insert to authenticated with check (true);
+create policy "Authenticated users can update purchase_orders"
+on public.purchase_orders for update to authenticated using (true) with check (true);
+create policy "Authenticated users can delete from purchase_orders"
+on public.purchase_orders for delete to authenticated using (true);
+commit;
+```
+
 ## Unique constraint strategy (important)
 
 Current constraints like `products_internal_code_key` are globally unique.  

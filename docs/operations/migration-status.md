@@ -28,11 +28,11 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260220203230
-- Latest applied migration name: tenant_rls_step13_suppliers_replace_broad_with_org
-- Applied at (UTC): 2026-02-20
+- Latest applied migration version: 20260221050114
+- Latest applied migration name: tenant_rls_step14_purchase_orders_replace_broad_with_org
+- Applied at (UTC): 2026-02-21
 - Applied by: Codex via Supabase MCP
-- Verification notes: Confirmed via Supabase MCP `list_migrations` and policy checks on `public.suppliers`.
+- Verification notes: Confirmed via Supabase MCP `list_migrations`, policy checks on `public.purchase_orders`, and normal-user smoke checks on purchasing pages.
 
 ## Pre-Deploy Migration Checklist
 - [ ] Repo checked: latest file in `supabase/migrations`

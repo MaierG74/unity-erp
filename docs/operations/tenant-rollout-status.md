@@ -32,11 +32,12 @@ Expand-only `org_id` columns have been added and backfilled (but RLS has NOT bee
 
 ### Purchasing/Suppliers RLS baby-step progress
 - `suppliers` is now tenant-scoped with org membership policies (migration: `tenant_rls_step13_suppliers_replace_broad_with_org`, applied 2026-02-20).
+- `purchase_orders` is now tenant-scoped with org membership policies (migration: `tenant_rls_step14_purchase_orders_replace_broad_with_org`, applied 2026-02-21).
 - Remaining purchasing/supplier tables are still in expand-only state and should be tightened one-by-one.
 
 ## What’s Next (recommended order)
 1. Apply expand-only migration for `product_cutlist_groups` (`org_id` + backfill + FK NOT VALID + index) before onboarding a second organization.
-2. Continue tightening Purchasing + Suppliers RLS, one table at a time, with smoke tests after each change (next recommended table: `purchase_orders`).
+2. Continue tightening Purchasing + Suppliers RLS, one table at a time, with smoke tests after each change (next recommended table: `supplier_orders`).
 3. Tighten Quotes RLS (similar baby-step rollout).
 4. Tighten Staff RLS.
 5. Validate and enforce FK constraints (`VALIDATE CONSTRAINT`) and later `NOT NULL` on the Phase B tables.
