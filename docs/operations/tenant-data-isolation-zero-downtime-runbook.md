@@ -902,6 +902,39 @@ on public.purchase_orders for delete to authenticated using (true);
 commit;
 ```
 
+### Step 5.15 (applied on 2026-02-21): `public.supplier_orders`
+
+What changed:
+1. Removed broad permissive policy:
+   - `Allow authenticated users full access`
+2. Added org-scoped policies:
+   - `supplier_orders_select_org_member`
+   - `supplier_orders_insert_org_member`
+   - `supplier_orders_update_org_member`
+   - `supplier_orders_delete_org_member`
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step15_supplier_orders_replace_broad_with_org`.
+2. Confirmed only `supplier_orders_*_org_member` policies exist on `public.supplier_orders`.
+3. Confirmed `supplier_orders.org_id` null count is zero.
+4. Manual normal-user UI smoke test is still required (automation outage during this run).
+
+Immediate rollback SQL (if needed):
+```sql
+begin;
+drop policy if exists supplier_orders_select_org_member on public.supplier_orders;
+drop policy if exists supplier_orders_insert_org_member on public.supplier_orders;
+drop policy if exists supplier_orders_update_org_member on public.supplier_orders;
+drop policy if exists supplier_orders_delete_org_member on public.supplier_orders;
+create policy "Allow authenticated users full access"
+on public.supplier_orders
+for all
+to authenticated
+using (true)
+with check (true);
+commit;
+```
+
 ## Unique constraint strategy (important)
 
 Current constraints like `products_internal_code_key` are globally unique.  
