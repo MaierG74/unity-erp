@@ -317,7 +317,7 @@ export function ForOrderEditPopover({
               <Pencil className="h-3 w-3" />
             </Button>
           </PopoverTrigger>
-          <PopoverContent className={editMode === 'split' ? 'w-80 p-3' : 'w-72 p-0'} align="start" side="bottom">
+          <PopoverContent className={editMode === 'split' ? 'w-80 p-3' : 'w-72 p-0'} align="start" side={editMode === 'split' ? 'top' : 'bottom'} sideOffset={4}>
             {editMode === 'split' ? (
               <SplitEditor
                 allocations={allocations}
@@ -572,7 +572,7 @@ function MultiOrderEditableDisplay({
           {!disabled && <Pencil className="ml-1 h-3 w-3 text-muted-foreground" />}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-80 p-3" align="start">
+      <PopoverContent className="w-80 p-3" align="start" side="top" sideOffset={4}>
         <SplitEditor
           allocations={allocations}
           setAllocations={setAllocations}

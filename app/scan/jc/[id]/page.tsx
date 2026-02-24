@@ -580,30 +580,41 @@ function QrScannerOverlay({ onClose }: { onClose: () => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [decoding, setDecoding] = useState(false);
-  const [useLiveCamera, setUseLiveCamera] = useState(false);
+  // null = still trying, true = live camera, false = fallback
+  const [useLiveCamera, setUseLiveCamera] = useState<boolean | null>(null);
 
-  // Try live camera first — falls back to file input if getUserMedia fails (e.g. HTTP)
+  // Step 1: Try to get camera stream
   useEffect(() => {
     let cancelled = false;
-    let animFrame: number;
 
-    const startCamera = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' },
-        });
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      .then((stream) => {
         if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
         streamRef.current = stream;
         setUseLiveCamera(true);
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-          scanLoop();
-        }
-      } catch {
-        // getUserMedia failed (HTTP, denied, etc.) — use file input fallback
-        setUseLiveCamera(false);
-      }
+      })
+      .catch(() => {
+        if (!cancelled) setUseLiveCamera(false);
+      });
+
+    return () => {
+      cancelled = true;
+      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  // Step 2: Once live camera is active AND video element is mounted, connect them
+  useEffect(() => {
+    if (!useLiveCamera || !streamRef.current) return;
+    let cancelled = false;
+    let animFrame: number;
+
+    const connectVideo = async () => {
+      const video = videoRef.current;
+      if (!video) return;
+      video.srcObject = streamRef.current;
+      await video.play();
+      scanLoop();
     };
 
     const scanLoop = () => {
@@ -631,14 +642,13 @@ function QrScannerOverlay({ onClose }: { onClose: () => void }) {
       }
     };
 
-    startCamera();
+    connectVideo();
 
     return () => {
       cancelled = true;
       cancelAnimationFrame(animFrame);
-      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
     };
-  }, []);
+  }, [useLiveCamera]);
 
   const handleResult = (rawValue: string) => {
     const match = rawValue.match(/\/scan\/jc\/(\d+)/);
@@ -681,6 +691,24 @@ function QrScannerOverlay({ onClose }: { onClose: () => void }) {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
+
+  // ── Loading (waiting for camera permission) ──
+  if (useLiveCamera === null) {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col bg-black">
+        <div className="flex items-center justify-between px-4 py-3">
+          <h2 className="text-lg font-bold text-white">Scan Job Card</h2>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-white active:scale-95">
+            <X className="h-6 w-6" />
+          </button>
+        </div>
+        <div className="flex flex-1 flex-col items-center justify-center gap-4">
+          <Loader2 className="h-8 w-8 animate-spin text-white/60" />
+          <p className="text-sm text-white/60">Starting camera...</p>
+        </div>
+      </div>
+    );
+  }
 
   // ── Live camera view ──
   if (useLiveCamera) {
