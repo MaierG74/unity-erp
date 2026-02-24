@@ -1,6 +1,6 @@
 'use client';
 
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useAuth } from '@/components/common/auth-provider';
 import { supabase } from '@/lib/supabase';
@@ -20,6 +20,10 @@ import {
   Package,
   User,
   CalendarDays,
+  ExternalLink,
+  ScanLine,
+  FileText,
+  X,
 } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -63,6 +67,9 @@ export default function JobCardScanPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [qtyDialogItem, setQtyDialogItem] = useState<JobCardItem | null>(null);
   const [qtyInput, setQtyInput] = useState('');
+  const [orderDocs, setOrderDocs] = useState<{ id: number; file_url: string; file_name: string }[]>([]);
+  const [showDocPicker, setShowDocPicker] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -96,6 +103,25 @@ export default function JobCardScanPage() {
       setError(err.message || 'Job card not found');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleViewOrder = async () => {
+    if (!jobCard?.order_id) return;
+    // Fetch customer order attachments
+    const { data } = await supabase
+      .from('order_attachments')
+      .select('id, file_url, file_name')
+      .eq('order_id', jobCard.order_id)
+      .eq('document_type', 'customer_order');
+    const docs = data || [];
+    if (docs.length === 0) {
+      toast.error('No customer order document uploaded for this order');
+    } else if (docs.length === 1) {
+      window.open(docs[0].file_url, '_blank');
+    } else {
+      setOrderDocs(docs);
+      setShowDocPicker(true);
     }
   };
 
@@ -284,10 +310,17 @@ export default function JobCardScanPage() {
           <div>
             <h1 className="text-lg font-bold">Job Card #{jobCard.job_card_id}</h1>
             {jobCard.orders && (
-              <p className="text-sm text-muted-foreground">
-                Order #{jobCard.orders.order_number}
-                {jobCard.orders.customers ? ` · ${jobCard.orders.customers.name}` : ''}
-              </p>
+              <button
+                type="button"
+                onClick={handleViewOrder}
+                className="flex items-center gap-1 text-sm text-muted-foreground active:opacity-70"
+              >
+                <span className="underline decoration-muted-foreground/50 underline-offset-2">
+                  Order #{jobCard.orders.order_number}
+                </span>
+                {jobCard.orders.customers ? <span> · {jobCard.orders.customers.name}</span> : null}
+                <ExternalLink className="ml-0.5 h-3 w-3 shrink-0" />
+              </button>
             )}
           </div>
           <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold text-white ${statusColor}`}>
@@ -429,6 +462,16 @@ export default function JobCardScanPage() {
             <p className="text-lg font-semibold text-emerald-700 dark:text-emerald-400">Job Completed</p>
           </div>
         )}
+
+        {/* ── Scan Another ─────────────────────── */}
+        <button
+          type="button"
+          onClick={() => setShowScanner(true)}
+          className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-muted-foreground/25 text-sm font-medium text-muted-foreground active:scale-[0.98]"
+        >
+          <ScanLine className="h-4 w-4" />
+          Scan another job card
+        </button>
       </div>
 
       {/* ── Quantity Entry Dialog ─────────────────── */}
@@ -490,6 +533,223 @@ export default function JobCardScanPage() {
           </div>
         </div>
       )}
+
+      {/* ── Document Picker (multiple attachments) ── */}
+      {showDocPicker && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 sm:items-center">
+          <div className="w-full max-w-lg rounded-t-2xl bg-background p-6 sm:rounded-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-bold">Customer Order Documents</h3>
+              <button type="button" onClick={() => setShowDocPicker(false)} className="rounded-lg p-1 active:scale-95">
+                <X className="h-5 w-5 text-muted-foreground" />
+              </button>
+            </div>
+            <div className="space-y-2">
+              {orderDocs.map((doc) => (
+                <button
+                  key={doc.id}
+                  type="button"
+                  onClick={() => {
+                    window.open(doc.file_url, '_blank');
+                    setShowDocPicker(false);
+                  }}
+                  className="flex w-full items-center gap-3 rounded-xl border bg-card p-3 text-left active:scale-[0.98]"
+                >
+                  <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
+                  <span className="truncate text-sm font-medium">{doc.file_name}</span>
+                  <ExternalLink className="ml-auto h-4 w-4 shrink-0 text-muted-foreground" />
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── QR Scanner ─────────────────────────────── */}
+      {showScanner && (
+        <QrScannerOverlay onClose={() => setShowScanner(false)} />
+      )}
+    </div>
+  );
+}
+
+// ── QR Scanner Component ──────────────────────────────────────────
+function QrScannerOverlay({ onClose }: { onClose: () => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [decoding, setDecoding] = useState(false);
+  const [useLiveCamera, setUseLiveCamera] = useState(false);
+
+  // Try live camera first — falls back to file input if getUserMedia fails (e.g. HTTP)
+  useEffect(() => {
+    let cancelled = false;
+    let animFrame: number;
+
+    const startCamera = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' },
+        });
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        streamRef.current = stream;
+        setUseLiveCamera(true);
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+          scanLoop();
+        }
+      } catch {
+        // getUserMedia failed (HTTP, denied, etc.) — use file input fallback
+        setUseLiveCamera(false);
+      }
+    };
+
+    const scanLoop = () => {
+      if (cancelled || !videoRef.current) return;
+      const video = videoRef.current;
+      if (video.readyState < video.HAVE_ENOUGH_DATA) {
+        animFrame = requestAnimationFrame(scanLoop);
+        return;
+      }
+
+      if ('BarcodeDetector' in window) {
+        const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
+        detector.detect(video).then((barcodes: any[]) => {
+          if (cancelled) return;
+          if (barcodes.length > 0) {
+            handleResult(barcodes[0].rawValue);
+            return;
+          }
+          animFrame = requestAnimationFrame(scanLoop);
+        }).catch(() => {
+          if (!cancelled) animFrame = requestAnimationFrame(scanLoop);
+        });
+      } else {
+        setScanError('QR scanning not supported on this browser.');
+      }
+    };
+
+    startCamera();
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(animFrame);
+      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  const handleResult = (rawValue: string) => {
+    const match = rawValue.match(/\/scan\/jc\/(\d+)/);
+    if (match) {
+      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+      window.location.href = `/scan/jc/${match[1]}`;
+    } else if (rawValue.startsWith('http')) {
+      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+      window.location.href = rawValue;
+    } else {
+      setScanError('Not a valid job card QR code. Try again.');
+    }
+  };
+
+  // File input fallback — user takes photo with native camera, we decode QR from it
+  const handleFileCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setScanError(null);
+    setDecoding(true);
+
+    try {
+      const bitmap = await createImageBitmap(file);
+
+      if ('BarcodeDetector' in window) {
+        const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
+        const barcodes = await detector.detect(bitmap);
+        if (barcodes.length > 0) {
+          handleResult(barcodes[0].rawValue);
+          return;
+        }
+      }
+
+      setScanError('No QR code found in photo. Try again — make sure the QR code is clear and well-lit.');
+    } catch {
+      setScanError('Could not read the photo. Please try again.');
+    } finally {
+      setDecoding(false);
+      // Reset input so the same file can be re-selected
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  // ── Live camera view ──
+  if (useLiveCamera) {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col bg-black">
+        <div className="flex items-center justify-between px-4 py-3">
+          <h2 className="text-lg font-bold text-white">Scan Job Card</h2>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-white active:scale-95">
+            <X className="h-6 w-6" />
+          </button>
+        </div>
+        <div className="relative flex flex-1 items-center justify-center">
+          <video ref={videoRef} className="h-full w-full object-cover" playsInline muted />
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="h-56 w-56 rounded-2xl border-2 border-white/60" />
+          </div>
+        </div>
+        {scanError && (
+          <div className="px-6 py-4 text-center text-sm text-red-400">{scanError}</div>
+        )}
+        <div className="px-6 pb-8 pt-4 text-center text-sm text-white/60">
+          Point camera at a job card QR code
+        </div>
+      </div>
+    );
+  }
+
+  // ── File input fallback (HTTP / camera denied) ──
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-black">
+      <div className="flex items-center justify-between px-4 py-3">
+        <h2 className="text-lg font-bold text-white">Scan Job Card</h2>
+        <button type="button" onClick={onClose} className="rounded-lg p-2 text-white active:scale-95">
+          <X className="h-6 w-6" />
+        </button>
+      </div>
+      <div className="flex flex-1 flex-col items-center justify-center gap-6 px-8">
+        <ScanLine className="h-16 w-16 text-white/40" />
+        <p className="text-center text-white/70">
+          Take a photo of the job card QR code
+        </p>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleFileCapture}
+          className="hidden"
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={decoding}
+          className="flex h-14 w-full max-w-xs items-center justify-center gap-2 rounded-xl bg-white text-lg font-semibold text-black active:scale-[0.98] disabled:opacity-50"
+        >
+          {decoding ? (
+            <Loader2 className="h-5 w-5 animate-spin" />
+          ) : (
+            <FileImage className="h-5 w-5" />
+          )}
+          {decoding ? 'Reading QR...' : 'Open Camera'}
+        </button>
+        {scanError && (
+          <p className="text-center text-sm text-red-400">{scanError}</p>
+        )}
+      </div>
+      <div className="px-6 pb-8 pt-4 text-center text-xs text-white/40">
+        Camera opens your phone&apos;s camera app to take a photo
+      </div>
     </div>
   );
 }

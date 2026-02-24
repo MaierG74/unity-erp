@@ -28,11 +28,11 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260221084441
-- Latest applied migration name: tenant_rls_step25_staff_replace_broad_with_org
-- Applied at (UTC): 2026-02-21
+- Latest applied migration version: 20260222145908
+- Latest applied migration name: tenant_rls_step66_quote_item_cutlists_enable_org
+- Applied at (UTC): 2026-02-22
 - Applied by: Codex via Supabase MCP
-- Verification notes: Confirmed via Supabase MCP `list_migrations`, policy checks on `public.staff`, `org_id` null checks, and manual normal-user smoke test (`testai@qbutton.co.za`) on `/staff`, `/staff/hours`, and `/staff/payroll`.
+- Verification notes: Confirmed via `supabase_migrations.schema_migrations` and Supabase MCP checks; Steps 61-66 completed for quote helper tables (`quote_cluster_lines`, `quote_item_clusters`, `quote_item_cutlists`) with `org_id` FK validation + `NOT NULL` enforcement and org-scoped RLS policies enabled. Normal-user smoke tests (`testai@qbutton.co.za`) on `/quotes` and quote detail succeeded with no new access/runtime regressions.
 
 ## Pre-Deploy Migration Checklist
 - [ ] Repo checked: latest file in `supabase/migrations`

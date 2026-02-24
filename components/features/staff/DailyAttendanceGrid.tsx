@@ -97,12 +97,12 @@ const OptimizedAttendanceTimeline = memo(function OptimizedAttendanceTimeline({
         .select('*')
         .eq('date_worked', dateStr)
         .eq('staff_id', staffId)
-        .single();
+        .limit(1);
 
-      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+      if (error) {
         throw error;
       }
-      return data || null;
+      return data?.[0] ?? null;
     },
   });
 

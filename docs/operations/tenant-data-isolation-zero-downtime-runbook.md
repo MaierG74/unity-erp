@@ -46,6 +46,21 @@ Use this migration to extend `org_id` columns + defaults + backfill to purchasin
 
 1. `supabase/migrations/20260215_tenant_org_scoping_expand_phase_b_purchasing_quotes_staff.sql`
 
+## Migration file for Phase C expand-only (timekeeping)
+Use this migration to extend `org_id` columns + defaults + backfill to timekeeping tables before RLS tightening:
+
+1. `supabase/migrations/20260221_tenant_org_scoping_expand_phase_c_timekeeping.sql`
+
+## Migration file for Phase C FK validation
+Use this migration after Phase C backfill to validate org foreign keys:
+
+1. `supabase/migrations/20260221_tenant_org_scoping_phase_c_validate_org_fks.sql`
+
+## Migration file for Phase C NOT NULL enforcement
+Use this migration after null checks and FK validation are complete:
+
+1. `supabase/migrations/20260221_tenant_org_scoping_phase_c_enforce_org_not_null.sql`
+
 ## Non-goals (for this run)
 1. Full RLS rollout across every table in one deployment.
 2. Reworking all unique constraints for multi-org duplicates in one step.
@@ -433,7 +448,10 @@ Implemented product-domain hardening (2026-02-15):
 2. `app/api/products/[productId]/route.ts` now scopes product ownership checks and mutations by `org_id`.
 3. `app/api/products/[productId]/add-fg/route.ts` now scopes product inventory reads/writes by `org_id`.
 4. `app/api/products/[productId]/cutlist-groups/route.ts` now verifies product ownership using (`product_id`, `org_id`) before reading/writing groups.
-5. Next expand-only migration prepared: `supabase/migrations/20260220_tenant_org_scoping_expand_product_cutlist_groups.sql` to add `org_id` scoping support on `product_cutlist_groups` (no RLS or NOT NULL enforcement in this step).
+5. `product_cutlist_groups` org scoping was completed in follow-up steps:
+   - Expand-only migration: `supabase/migrations/20260220_tenant_org_scoping_expand_product_cutlist_groups.sql`
+   - Constraint enforcement: Step 5.46
+   - RLS tightening: Step 5.47
 
 Implemented orders-domain hardening (2026-02-15):
 1. `app/api/orders/[orderId]/route.ts` now scopes order update/delete flows by (`order_id`, `org_id`).
@@ -1294,6 +1312,837 @@ to authenticated
 using (auth.role() = 'authenticated'::text);
 commit;
 ```
+
+### Step 5.26 (completed on 2026-02-21): `public.staff_hours`
+
+What changed:
+1. Removed broad permissive policies:
+   - `Allow authenticated users to read staff_hours`
+   - `Allow authenticated users to insert staff_hours`
+   - `Allow authenticated users to update staff_hours`
+   - `Allow authenticated users to delete staff_hours`
+2. Added org-scoped policies:
+   - `staff_hours_select_org_member`
+   - `staff_hours_insert_org_member`
+   - `staff_hours_update_org_member`
+   - `staff_hours_delete_org_member`
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step26_staff_hours_replace_broad_with_org`.
+2. Confirmed only `staff_hours_*_org_member` policies exist on `public.staff_hours`.
+3. Confirmed `staff_hours.org_id` null count is zero.
+4. Smoke-tested as a normal user (`testai@qbutton.co.za`) on `/staff/hours` and `/staff/payroll` with no access denial/runtime crash.
+5. Noted existing timekeeping fetch pattern still issues expected `406` responses for missing per-staff `time_daily_summary` rows.
+
+Immediate rollback SQL (if needed):
+```sql
+begin;
+drop policy if exists staff_hours_select_org_member on public.staff_hours;
+drop policy if exists staff_hours_insert_org_member on public.staff_hours;
+drop policy if exists staff_hours_update_org_member on public.staff_hours;
+drop policy if exists staff_hours_delete_org_member on public.staff_hours;
+
+create policy "Allow authenticated users to read staff_hours"
+on public.staff_hours
+for select
+to authenticated
+using (auth.role() = 'authenticated'::text);
+
+create policy "Allow authenticated users to insert staff_hours"
+on public.staff_hours
+for insert
+to authenticated
+with check (auth.role() = 'authenticated'::text);
+
+create policy "Allow authenticated users to update staff_hours"
+on public.staff_hours
+for update
+to authenticated
+using (auth.role() = 'authenticated'::text)
+with check (auth.role() = 'authenticated'::text);
+
+create policy "Allow authenticated users to delete staff_hours"
+on public.staff_hours
+for delete
+to authenticated
+using (auth.role() = 'authenticated'::text);
+commit;
+```
+
+### Step 5.27 (completed on 2026-02-21): `public.time_clock_events`
+
+What changed:
+1. Removed legacy broad/public/anon-read policies:
+   - `Allow anon insert to time_clock_events`
+   - `Allow anon read access to time clock events`
+   - `Allow anonymous inserts to time_clock_events`
+   - `Allow anonymous reads from time_clock_events`
+   - `Allow reading time events`
+   - `Allow time clock events recording`
+   - plus prior broad authenticated update/delete policies
+2. Added org-scoped authenticated policies:
+   - `time_clock_events_select_org_member`
+   - `time_clock_events_insert_org_member`
+   - `time_clock_events_update_org_member`
+   - `time_clock_events_delete_org_member`
+3. Preserved public clock-in path with restricted anon insert policy:
+   - `time_clock_events_insert_anon_staff_org` (INSERT to `anon` only, requires matching `staff.staff_id` + `staff.org_id`)
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step27_time_clock_events_split_anon_and_org`.
+2. Confirmed `public.time_clock_events` policy set is now:
+   - 4 org-scoped authenticated policies
+   - 1 anon insert-only policy
+3. Smoke-tested as a normal user (`testai@qbutton.co.za`) on `/staff/hours` with no access/runtime denial.
+4. Confirmed expected `406` responses for missing per-staff daily summary rows still occur and are unrelated to this policy change.
+
+Immediate rollback SQL (if needed):
+```sql
+begin;
+drop policy if exists time_clock_events_select_org_member on public.time_clock_events;
+drop policy if exists time_clock_events_insert_org_member on public.time_clock_events;
+drop policy if exists time_clock_events_update_org_member on public.time_clock_events;
+drop policy if exists time_clock_events_delete_org_member on public.time_clock_events;
+drop policy if exists time_clock_events_insert_anon_staff_org on public.time_clock_events;
+
+create policy "Allow reading time events"
+on public.time_clock_events
+for select
+to public
+using (true);
+
+create policy "Allow time clock events recording"
+on public.time_clock_events
+for insert
+to public
+with check (true);
+
+create policy "Allow authenticated users to update time clock events"
+on public.time_clock_events
+for update
+to authenticated
+using (true)
+with check (true);
+
+create policy "Allow authenticated users to delete time clock events"
+on public.time_clock_events
+for delete
+to authenticated
+using (true);
+commit;
+```
+
+### Step 5.28 (completed on 2026-02-21): `public.time_segments`
+
+What changed:
+1. Removed legacy broad/anon policies:
+   - `Allow anonymous inserts to time_segments`
+   - `Allow anonymous reads from time_segments`
+   - `Allow authenticated users to select from time_segments`
+   - `Allow authenticated users to insert into time_segments`
+   - `Allow authenticated users to update time_segments`
+   - `Allow authenticated users to delete from time_segments`
+2. Added org-scoped authenticated policies:
+   - `time_segments_select_org_member`
+   - `time_segments_insert_org_member`
+   - `time_segments_update_org_member`
+   - `time_segments_delete_org_member`
+3. Insert/update safeguards now require `staff.org_id = time_segments.org_id` (prevents cross-org staff linkage through direct writes).
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step28_time_segments_replace_broad_with_org`.
+2. Confirmed only `time_segments_*_org_member` policies exist on `public.time_segments`.
+3. Confirmed `time_segments.org_id` null count is zero.
+4. Smoke-tested as a normal user (`testai@qbutton.co.za`) on `/staff/hours` with no access/runtime denial.
+5. Confirmed expected `406` responses for missing per-staff daily summary rows still occur and are unrelated to this policy change.
+
+Immediate rollback SQL (if needed):
+```sql
+begin;
+drop policy if exists time_segments_select_org_member on public.time_segments;
+drop policy if exists time_segments_insert_org_member on public.time_segments;
+drop policy if exists time_segments_update_org_member on public.time_segments;
+drop policy if exists time_segments_delete_org_member on public.time_segments;
+
+create policy "Allow authenticated users to select from time_segments"
+on public.time_segments
+for select
+to authenticated
+using (true);
+
+create policy "Allow authenticated users to insert into time_segments"
+on public.time_segments
+for insert
+to authenticated
+with check (true);
+
+create policy "Allow authenticated users to update time_segments"
+on public.time_segments
+for update
+to authenticated
+using (true)
+with check (true);
+
+create policy "Allow authenticated users to delete from time_segments"
+on public.time_segments
+for delete
+to authenticated
+using (true);
+commit;
+```
+
+### Step 5.29 (completed on 2026-02-21): `public.time_daily_summary`
+
+What changed:
+1. Removed legacy broad/anon policies:
+   - `Allow anonymous inserts to time_daily_summary`
+   - `Allow anonymous reads from time_daily_summary`
+   - `Allow anonymous updates to time_daily_summary`
+   - `Allow authenticated users to delete from time_daily_summary`
+   - `Allow authenticated users to insert into time_daily_summary`
+   - `Allow authenticated users to insert time_daily_summary`
+   - `Allow authenticated users to select from time_daily_summary`
+   - `Allow authenticated users to select their own time_daily_summar`
+   - `Allow authenticated users to update their own time_daily_summar`
+   - `Allow authenticated users to update time_daily_summary`
+2. Added org-scoped authenticated policies:
+   - `time_daily_summary_select_org_member`
+   - `time_daily_summary_insert_org_member`
+   - `time_daily_summary_update_org_member`
+   - `time_daily_summary_delete_org_member`
+3. Insert/update safeguards now require `staff.org_id = time_daily_summary.org_id` (prevents cross-org staff linkage through direct writes).
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step29_time_daily_summary_replace_broad_with_org`.
+2. Confirmed only `time_daily_summary_*_org_member` policies exist on `public.time_daily_summary`.
+3. Confirmed `time_daily_summary.org_id` null count is zero.
+4. Smoke-tested as a normal user (`testai@qbutton.co.za`) on `/staff/hours` with no access/runtime denial.
+5. Confirmed expected `406` responses for missing per-staff daily summary rows still occur and are unrelated to this policy change.
+
+Immediate rollback SQL (if needed):
+```sql
+begin;
+drop policy if exists time_daily_summary_select_org_member on public.time_daily_summary;
+drop policy if exists time_daily_summary_insert_org_member on public.time_daily_summary;
+drop policy if exists time_daily_summary_update_org_member on public.time_daily_summary;
+drop policy if exists time_daily_summary_delete_org_member on public.time_daily_summary;
+
+create policy "Allow authenticated users to select from time_daily_summary"
+on public.time_daily_summary
+for select
+to authenticated
+using (true);
+
+create policy "Allow authenticated users to insert into time_daily_summary"
+on public.time_daily_summary
+for insert
+to authenticated
+with check (true);
+
+create policy "Allow authenticated users to update time_daily_summary"
+on public.time_daily_summary
+for update
+to authenticated
+using (true)
+with check (true);
+
+create policy "Allow authenticated users to delete from time_daily_summary"
+on public.time_daily_summary
+for delete
+to authenticated
+using (true);
+
+create policy "Allow anonymous inserts to time_daily_summary"
+on public.time_daily_summary
+for insert
+to anon
+with check (true);
+
+create policy "Allow anonymous reads from time_daily_summary"
+on public.time_daily_summary
+for select
+to anon
+using (true);
+
+create policy "Allow anonymous updates to time_daily_summary"
+on public.time_daily_summary
+for update
+to anon
+using (true)
+with check (true);
+commit;
+```
+
+### Step 5.30 (completed on 2026-02-21): Phase C FK validation
+
+What changed:
+1. Validated org foreign keys for the three timekeeping tables:
+   - `time_clock_events_org_id_fkey`
+   - `time_segments_org_id_fkey`
+   - `time_daily_summary_org_id_fkey`
+2. This is integrity hardening only; no policy behavior change.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_c_validate_org_fks`.
+2. Confirmed all three constraints now show `convalidated = true`.
+3. Re-smoke-tested as normal user (`testai@qbutton.co.za`) on `/staff/hours` with no access/runtime denial.
+4. Confirmed expected `406` missing-row pattern for per-staff daily summary reads remains unchanged.
+
+Immediate rollback note:
+- Constraint validation itself is metadata hardening and does not alter data. If a rollback is required, focus on policy rollback steps from 5.27-5.29.
+
+### Step 5.31 (completed on 2026-02-21): Phase C `org_id` NOT NULL enforcement
+
+What changed:
+1. Enforced `org_id NOT NULL` on:
+   - `public.time_clock_events`
+   - `public.time_segments`
+   - `public.time_daily_summary`
+2. Applied using safe sequence per table:
+   - add `CHECK (org_id is not null) NOT VALID`
+   - `VALIDATE CONSTRAINT`
+   - `ALTER COLUMN org_id SET NOT NULL`
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_c_enforce_org_not_null`.
+2. Confirmed all three `org_id` columns now report `is_nullable = NO`.
+3. Confirmed new check constraints are validated:
+   - `time_clock_events_org_id_not_null`
+   - `time_segments_org_id_not_null`
+   - `time_daily_summary_org_id_not_null`
+4. Re-smoke-tested as normal user (`testai@qbutton.co.za`) on `/staff/hours` with no access/runtime denial.
+5. Confirmed expected `406` missing-row pattern for per-staff daily summary reads remains unchanged.
+
+Immediate rollback note:
+- Reverting `NOT NULL` would require a dedicated rollback migration (`ALTER COLUMN org_id DROP NOT NULL`) and should only be done during incident handling with explicit go/no-go approval.
+
+### Step 5.32 (completed on 2026-02-21): `public.suppliers` constraint enforcement
+
+What changed:
+1. Validated `suppliers_org_id_fkey`.
+2. Added and validated `CHECK (org_id is not null)` constraint:
+   - `suppliers_org_id_not_null`
+3. Enforced `suppliers.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step32_suppliers_enforce_org`.
+2. Confirmed `suppliers.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated:
+   - `suppliers_org_id_fkey`
+   - `suppliers_org_id_not_null`
+4. Smoke-tested as normal user (`testai@qbutton.co.za`) on:
+   - `/suppliers`
+   - `/purchasing`
+   with no access/runtime denial.
+
+Immediate rollback note:
+- If required, rollback must be done via dedicated migration (`ALTER TABLE public.suppliers ALTER COLUMN org_id DROP NOT NULL;` and drop `suppliers_org_id_not_null`) with explicit incident go/no-go approval.
+
+### Step 5.33 (completed on 2026-02-21): `public.purchase_orders` constraint enforcement
+
+What changed:
+1. Validated `purchase_orders_org_id_fkey`.
+2. Added and validated `CHECK (org_id is not null)` constraint:
+   - `purchase_orders_org_id_not_null`
+3. Enforced `purchase_orders.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step33_purchase_orders_enforce_org`.
+2. Confirmed `purchase_orders.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated:
+   - `purchase_orders_org_id_fkey`
+   - `purchase_orders_org_id_not_null`
+4. Smoke-tested as normal user (`testai@qbutton.co.za`) on:
+   - `/purchasing`
+   - `/purchasing/purchase-orders/203`
+   with no access/runtime denial.
+
+Immediate rollback note:
+- If required, rollback must be done via dedicated migration (`ALTER TABLE public.purchase_orders ALTER COLUMN org_id DROP NOT NULL;` and drop `purchase_orders_org_id_not_null`) with explicit incident go/no-go approval.
+
+### Step 5.34 (completed on 2026-02-22): `public.supplier_orders` constraint enforcement
+
+What changed:
+1. Validated `supplier_orders_org_id_fkey`.
+2. Added and validated `CHECK (org_id is not null)` constraint:
+   - `supplier_orders_org_id_not_null`
+3. Enforced `supplier_orders.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step34_supplier_orders_enforce_org`.
+2. Confirmed `supplier_orders.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated:
+   - `supplier_orders_org_id_fkey`
+   - `supplier_orders_org_id_not_null`
+4. Smoke-tested as normal user (`testai@qbutton.co.za`) on:
+   - `/purchasing`
+   - `/purchasing/purchase-orders/203`
+   with no access/runtime denial and no failing API requests in the tested flow.
+
+Immediate rollback note:
+- If required, rollback must be done via dedicated migration (`ALTER TABLE public.supplier_orders ALTER COLUMN org_id DROP NOT NULL;` and drop `supplier_orders_org_id_not_null`) with explicit incident go/no-go approval.
+
+### Step 5.35 (completed on 2026-02-22): `public.suppliercomponents` constraint enforcement
+
+What changed:
+1. Validated `suppliercomponents_org_id_fkey`.
+2. Added and validated `CHECK (org_id is not null)` constraint:
+   - `suppliercomponents_org_id_not_null`
+3. Enforced `suppliercomponents.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step35_suppliercomponents_enforce_org`.
+2. Confirmed `suppliercomponents.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated:
+   - `suppliercomponents_org_id_fkey`
+   - `suppliercomponents_org_id_not_null`
+4. Smoke-tested as normal user (`testai@qbutton.co.za`) on:
+   - `/purchasing`
+   - `/purchasing/purchase-orders/203`
+   with no access/runtime denial.
+
+Immediate rollback note:
+- If required, rollback must be done via dedicated migration (`ALTER TABLE public.suppliercomponents ALTER COLUMN org_id DROP NOT NULL;` and drop `suppliercomponents_org_id_not_null`) with explicit incident go/no-go approval.
+
+### Step 5.36 (completed on 2026-02-22): `public.supplier_order_returns` constraint enforcement
+
+What changed:
+1. Validated `supplier_order_returns_org_id_fkey`.
+2. Added and validated `CHECK (org_id is not null)` constraint:
+   - `supplier_order_returns_org_id_not_null`
+3. Enforced `supplier_order_returns.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step36_supplier_order_returns_enforce_org`.
+2. Confirmed `supplier_order_returns.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated:
+   - `supplier_order_returns_org_id_fkey`
+   - `supplier_order_returns_org_id_not_null`
+4. Smoke-tested as normal user (`testai@qbutton.co.za`) on:
+   - `/purchasing`
+   - `/purchasing/purchase-orders/203`
+   with no access/runtime denial and no console errors in the tested flow.
+
+Immediate rollback note:
+- If required, rollback must be done via dedicated migration (`ALTER TABLE public.supplier_order_returns ALTER COLUMN org_id DROP NOT NULL;` and drop `supplier_order_returns_org_id_not_null`) with explicit incident go/no-go approval.
+
+### Step 5.37 (completed on 2026-02-22): `public.supplier_order_receipts` constraint enforcement
+
+What changed:
+1. Validated `supplier_order_receipts_org_id_fkey`.
+2. Added and validated `CHECK (org_id is not null)` constraint:
+   - `supplier_order_receipts_org_id_not_null`
+3. Enforced `supplier_order_receipts.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step37_supplier_order_receipts_enforce_org`.
+2. Confirmed `supplier_order_receipts.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated:
+   - `supplier_order_receipts_org_id_fkey`
+   - `supplier_order_receipts_org_id_not_null`
+4. Smoke-tested as normal user (`testai@qbutton.co.za`) on:
+   - `/purchasing`
+   - `/purchasing/purchase-orders/203`
+   with no access/runtime denial and no console errors in the tested flow.
+
+Immediate rollback note:
+- If required, rollback must be done via dedicated migration (`ALTER TABLE public.supplier_order_receipts ALTER COLUMN org_id DROP NOT NULL;` and drop `supplier_order_receipts_org_id_not_null`) with explicit incident go/no-go approval.
+
+### Step 5.38 (completed on 2026-02-22): `public.purchase_order_attachments` constraint enforcement
+
+What changed:
+1. Validated `purchase_order_attachments_org_id_fkey`.
+2. Added and validated `purchase_order_attachments_org_id_not_null`.
+3. Enforced `purchase_order_attachments.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step38_purchase_order_attachments_enforce_org`.
+2. Confirmed `purchase_order_attachments.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated.
+4. Smoke-tested as normal user (`testai@qbutton.co.za`) on `/purchasing/purchase-orders/203` with no access/runtime denial.
+
+### Step 5.39 (completed on 2026-02-22): `public.purchase_order_emails` constraint enforcement
+
+What changed:
+1. Validated `purchase_order_emails_org_id_fkey`.
+2. Added and validated `purchase_order_emails_org_id_not_null`.
+3. Enforced `purchase_order_emails.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step39_purchase_order_emails_enforce_org`.
+2. Confirmed `purchase_order_emails.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated.
+4. Smoke-tested as normal user (`testai@qbutton.co.za`) on `/purchasing/purchase-orders/203` with no access/runtime denial.
+
+### Step 5.40 (completed on 2026-02-22): `public.quotes` constraint enforcement
+
+What changed:
+1. Validated `quotes_org_id_fkey`.
+2. Added and validated `quotes_org_id_not_null`.
+3. Enforced `quotes.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step40_quotes_enforce_org`.
+2. Confirmed `quotes.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated.
+4. Smoke-tested quote list and detail APIs (`/quotes`, `/quotes/<id>`) with no failing API responses.
+
+### Step 5.41 (completed on 2026-02-22): `public.quote_items` constraint enforcement
+
+What changed:
+1. Validated `quote_items_org_id_fkey`.
+2. Added and validated `quote_items_org_id_not_null`.
+3. Enforced `quote_items.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step41_quote_items_enforce_org`.
+2. Confirmed `quote_items.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated.
+4. Re-smoke-tested quote detail API (`/api/quotes/<id>`) successfully.
+
+### Step 5.42 (completed on 2026-02-22): `public.quote_attachments` constraint enforcement
+
+What changed:
+1. Validated `quote_attachments_org_id_fkey`.
+2. Added and validated `quote_attachments_org_id_not_null`.
+3. Enforced `quote_attachments.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step42_quote_attachments_enforce_org`.
+2. Confirmed `quote_attachments.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated.
+4. Re-smoke-tested quote detail + attachments read path successfully.
+
+### Step 5.43 (completed on 2026-02-22): `public.quote_email_log` constraint enforcement
+
+What changed:
+1. Validated `quote_email_log_org_id_fkey`.
+2. Added and validated `quote_email_log_org_id_not_null`.
+3. Enforced `quote_email_log.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step43_quote_email_log_enforce_org`.
+2. Confirmed `quote_email_log.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated.
+4. Re-smoke-tested quote detail + email-status path successfully.
+
+### Step 5.44 (completed on 2026-02-22): `public.staff` constraint enforcement
+
+What changed:
+1. Validated `staff_org_id_fkey`.
+2. Added and validated `staff_org_id_not_null`.
+3. Enforced `staff.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step44_staff_enforce_org`.
+2. Confirmed `staff.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated.
+4. Smoke-tested `/staff/hours` as normal user (`testai@qbutton.co.za`): page loads and behavior unchanged; expected `406` per-staff missing `time_daily_summary` rows still appear as known pre-existing pattern.
+
+### Step 5.45 (completed on 2026-02-22): `public.staff_hours` constraint enforcement
+
+What changed:
+1. Validated `staff_hours_org_id_fkey`.
+2. Added and validated `staff_hours_org_id_not_null`.
+3. Enforced `staff_hours.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step45_staff_hours_enforce_org`.
+2. Confirmed `staff_hours.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated.
+4. Re-smoke-tested `/staff/hours` as normal user (`testai@qbutton.co.za`): no new access/runtime denial introduced; same known `406` missing-summary pattern remains.
+
+### Step 5.46 (completed on 2026-02-22): `public.product_cutlist_groups` constraint enforcement
+
+What changed:
+1. Validated `product_cutlist_groups_org_id_fkey`.
+2. Added and validated `product_cutlist_groups_org_id_not_null`.
+3. Enforced `product_cutlist_groups.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step46_product_cutlist_groups_enforce_org`.
+2. Confirmed `product_cutlist_groups.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated.
+4. Precheck verified zero `org_id` null rows and zero `org_id` mismatch rows against `products.org_id`.
+
+### Step 5.47 (completed on 2026-02-22): `public.product_cutlist_groups` org-scoped RLS
+
+What changed:
+1. Removed broad authenticated policies:
+   - `Allow authenticated users to view cutlist groups`
+   - `Allow authenticated users to insert cutlist groups`
+   - `Allow authenticated users to update cutlist groups`
+   - `Allow authenticated users to delete cutlist groups`
+2. Added org-scoped authenticated policies:
+   - `product_cutlist_groups_select_org_member`
+   - `product_cutlist_groups_insert_org_member`
+   - `product_cutlist_groups_update_org_member`
+   - `product_cutlist_groups_delete_org_member`
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step47_product_cutlist_groups_replace_broad_with_org`.
+2. Confirmed only org-scoped policies remain for `public.product_cutlist_groups`.
+3. Smoke-tested as normal user (`testai@qbutton.co.za`) on `/products/812/cutlist-builder`:
+   - `/api/products/812/cutlist-groups?module=cutlist_optimizer` returned `200`.
+   - Cutlist builder loaded existing groups successfully.
+   - No new cutlist access/runtime regression introduced.
+4. Observed unchanged pre-existing `406` reads on `cutlist_material_defaults` for absent per-user rows (known pattern, unrelated to `product_cutlist_groups` RLS).
+
+### Step 5.48 (completed on 2026-02-22): `public.supplier_pricelists` constraint enforcement
+
+What changed:
+1. Validated `supplier_pricelists_org_id_fkey`.
+2. Added and validated `supplier_pricelists_org_id_not_null`.
+3. Enforced `supplier_pricelists.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step48_supplier_pricelists_enforce_org`.
+2. Confirmed `supplier_pricelists.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated.
+4. Precheck verified zero `org_id` null rows in `supplier_pricelists`.
+
+### Step 5.49 (completed on 2026-02-22): `public.supplier_pricelists` org-scoped RLS
+
+What changed:
+1. Removed broad authenticated policy:
+   - `Authenticated users read and write.`
+2. Added org-scoped authenticated policies:
+   - `supplier_pricelists_select_org_member`
+   - `supplier_pricelists_insert_org_member`
+   - `supplier_pricelists_update_org_member`
+   - `supplier_pricelists_delete_org_member`
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step49_supplier_pricelists_replace_broad_with_org`.
+2. Confirmed only org-scoped policies remain for `public.supplier_pricelists`.
+3. Re-ran broad-policy audit across all `public` tables with `org_id`; result is now empty.
+4. Smoke-tested as normal user (`testai@qbutton.co.za`) on `/suppliers`:
+   - Suppliers list loaded successfully.
+   - Nested `pricelists:supplier_pricelists(*)` read returned `200`.
+   - No new access/runtime regression introduced.
+
+### Step 5.50 (completed on 2026-02-22): `public.quote_company_settings` constraint enforcement
+
+What changed:
+1. Validated `quote_company_settings_org_id_fkey`.
+2. Added and validated `quote_company_settings_org_id_not_null`.
+3. Enforced `quote_company_settings.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step50_quote_company_settings_enforce_org`.
+2. Confirmed `quote_company_settings.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated.
+4. Precheck verified zero `org_id` null rows in `quote_company_settings`.
+
+### Step 5.51 (completed on 2026-02-22): `public.quote_company_settings` org-scoped RLS
+
+What changed:
+1. Enabled RLS on `public.quote_company_settings`.
+2. Added org-scoped authenticated policies:
+   - `quote_company_settings_select_org_member`
+   - `quote_company_settings_insert_org_member`
+   - `quote_company_settings_update_org_member`
+   - `quote_company_settings_delete_org_member`
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step51_quote_company_settings_enable_org`.
+2. Confirmed `relrowsecurity = true` for `public.quote_company_settings`.
+3. Confirmed org-scoped policies are present for select/insert/update/delete.
+4. Smoke-tested as normal user (`testai@qbutton.co.za`) on `/settings`, `/quotes`, and `/purchasing`; no new access/runtime regression introduced.
+
+### Step 5.52 (completed on 2026-02-22): `public.purchase_order_activity` constraint enforcement
+
+What changed:
+1. Verified no `org_id` null rows remain.
+2. Enforced `purchase_order_activity.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step52_purchase_order_activity_enforce_org`.
+2. Confirmed `purchase_order_activity.org_id` now reports `is_nullable = NO`.
+3. Smoke-tested as normal user (`testai@qbutton.co.za`) on `/purchasing`, `/purchasing/purchase-orders`, and `/purchasing/purchase-orders/142`; no new access/runtime regression introduced.
+
+### Step 5.53 (completed on 2026-02-22): `public.supplier_emails` constraint enforcement
+
+What changed:
+1. Validated `supplier_emails_org_id_fkey`.
+2. Added and validated `supplier_emails_org_id_not_null`.
+3. Enforced `supplier_emails.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step53_supplier_emails_enforce_org`.
+2. Confirmed `supplier_emails.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated.
+4. Precheck verified zero `org_id` null rows in `supplier_emails`.
+
+### Step 5.54 (completed on 2026-02-22): `public.supplier_emails` org-scoped RLS
+
+What changed:
+1. Removed broad authenticated policy:
+   - `authenticated_users_all_access`
+2. Added org-scoped authenticated policies:
+   - `supplier_emails_select_org_member`
+   - `supplier_emails_insert_org_member`
+   - `supplier_emails_update_org_member`
+   - `supplier_emails_delete_org_member`
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step54_supplier_emails_replace_broad_with_org`.
+2. Confirmed only org-scoped policies remain for `public.supplier_emails`.
+3. Smoke-tested as normal user (`testai@qbutton.co.za`) on:
+   - `/suppliers` (`suppliers?select=...,emails:supplier_emails(*)` returned `200`)
+   - `/purchasing/purchase-orders/142` (nested `supplier_emails` read returned `200`)
+4. No new access/runtime regression introduced.
+
+### Step 5.55 (completed on 2026-02-22): `public.staff_weekly_hours` constraint enforcement
+
+What changed:
+1. Validated `staff_weekly_hours_org_id_fkey`.
+2. Added and validated `staff_weekly_hours_org_id_not_null`.
+3. Enforced `staff_weekly_hours.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step55_staff_weekly_hours_enforce_org`.
+2. Confirmed `staff_weekly_hours.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated.
+4. Smoke-tested as normal user (`testai@qbutton.co.za`) on `/staff/hours` and `/staff/payroll`; no new access/runtime regression introduced.
+
+### Step 5.56 (completed on 2026-02-22): `public.staff_weekly_payroll` constraint enforcement
+
+What changed:
+1. Validated `staff_weekly_payroll_org_id_fkey`.
+2. Added and validated `staff_weekly_payroll_org_id_not_null`.
+3. Enforced `staff_weekly_payroll.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step56_staff_weekly_payroll_enforce_org`.
+2. Confirmed `staff_weekly_payroll.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated.
+4. Smoke-tested as normal user (`testai@qbutton.co.za`) on `/staff/payroll` and `/staff/hours`; no new access/runtime regression introduced.
+
+### Step 5.57 (completed on 2026-02-22): `public.supplier_follow_up_responses` constraint enforcement
+
+What changed:
+1. Validated `supplier_follow_up_responses_org_id_fkey`.
+2. Added and validated `supplier_follow_up_responses_org_id_not_null`.
+3. Enforced `supplier_follow_up_responses.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step57_supplier_follow_up_responses_enforce_org`.
+2. Confirmed `supplier_follow_up_responses.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated.
+4. Precheck verified zero `org_id` null rows before enforcement.
+
+### Step 5.58 (completed on 2026-02-22): `public.supplier_follow_up_responses` org-scoped RLS
+
+What changed:
+1. Removed broad policy:
+   - `Allow all access to supplier_responses`
+2. Added org-scoped authenticated policies:
+   - `supplier_follow_up_responses_select_org_member`
+   - `supplier_follow_up_responses_insert_org_member`
+   - `supplier_follow_up_responses_update_org_member`
+   - `supplier_follow_up_responses_delete_org_member`
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step58_supplier_follow_up_responses_replace_broad_with_org`.
+2. Confirmed only org-scoped policies remain for `public.supplier_follow_up_responses`.
+3. Smoke-tested as normal user (`testai@qbutton.co.za`) on `/purchasing`, `/purchasing/purchase-orders/142`, and `/suppliers`; no new access/runtime regression introduced.
+
+### Step 5.59 (completed on 2026-02-22): `public.supplier_order_customer_orders` constraint enforcement
+
+What changed:
+1. Validated `supplier_order_customer_orders_org_id_fkey`.
+2. Added and validated `supplier_order_customer_orders_org_id_not_null`.
+3. Enforced `supplier_order_customer_orders.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step59_supplier_order_customer_orders_enforce_org`.
+2. Confirmed `supplier_order_customer_orders.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated.
+4. Precheck verified zero `org_id` null rows before enforcement.
+
+### Step 5.60 (completed on 2026-02-22): `public.supplier_order_customer_orders` org-scoped RLS
+
+What changed:
+1. Enabled RLS on `public.supplier_order_customer_orders`.
+2. Added org-scoped authenticated policies:
+   - `supplier_order_customer_orders_select_org_member`
+   - `supplier_order_customer_orders_insert_org_member`
+   - `supplier_order_customer_orders_update_org_member`
+   - `supplier_order_customer_orders_delete_org_member`
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step60_supplier_order_customer_orders_enable_org`.
+2. Confirmed `relrowsecurity = true` for `public.supplier_order_customer_orders`.
+3. Confirmed org-scoped policies are present for select/insert/update/delete.
+4. Smoke-tested as normal user (`testai@qbutton.co.za`) on `/purchasing/purchase-orders/142` and `/purchasing`; nested `customer_order_links:supplier_order_customer_orders(...)` read returned `200`.
+
+### Step 5.61 (completed on 2026-02-22): `public.quote_cluster_lines` constraint enforcement
+
+What changed:
+1. Validated `quote_cluster_lines_org_id_fkey`.
+2. Added and validated `quote_cluster_lines_org_id_not_null`.
+3. Enforced `quote_cluster_lines.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step61_quote_cluster_lines_enforce_org`.
+2. Confirmed `quote_cluster_lines.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated.
+
+### Step 5.62 (completed on 2026-02-22): `public.quote_cluster_lines` org-scoped RLS
+
+What changed:
+1. Enabled RLS on `public.quote_cluster_lines`.
+2. Added org-scoped authenticated policies for select/insert/update/delete.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step62_quote_cluster_lines_enable_org`.
+2. Confirmed `relrowsecurity = true` and org-scoped policies are present.
+
+### Step 5.63 (completed on 2026-02-22): `public.quote_item_clusters` constraint enforcement
+
+What changed:
+1. Validated `quote_item_clusters_org_id_fkey`.
+2. Added and validated `quote_item_clusters_org_id_not_null`.
+3. Enforced `quote_item_clusters.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step63_quote_item_clusters_enforce_org`.
+2. Confirmed `quote_item_clusters.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated.
+
+### Step 5.64 (completed on 2026-02-22): `public.quote_item_clusters` org-scoped RLS
+
+What changed:
+1. Enabled RLS on `public.quote_item_clusters`.
+2. Added org-scoped authenticated policies for select/insert/update/delete.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step64_quote_item_clusters_enable_org`.
+2. Confirmed `relrowsecurity = true` and org-scoped policies are present.
+
+### Step 5.65 (completed on 2026-02-22): `public.quote_item_cutlists` constraint enforcement
+
+What changed:
+1. Validated `quote_item_cutlists_org_id_fkey`.
+2. Added and validated `quote_item_cutlists_org_id_not_null`.
+3. Enforced `quote_item_cutlists.org_id` as `NOT NULL`.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_org_scoping_phase_b_step65_quote_item_cutlists_enforce_org`.
+2. Confirmed `quote_item_cutlists.org_id` now reports `is_nullable = NO`.
+3. Confirmed both constraints are validated.
+
+### Step 5.66 (completed on 2026-02-22): `public.quote_item_cutlists` org-scoped RLS
+
+What changed:
+1. Enabled RLS on `public.quote_item_cutlists`.
+2. Added org-scoped authenticated policies for select/insert/update/delete.
+
+Verification performed:
+1. Confirmed migration is recorded in `schema_migrations` as `tenant_rls_step66_quote_item_cutlists_enable_org`.
+2. Confirmed `relrowsecurity = true` and org-scoped policies are present.
+3. Smoke-tested as normal user (`testai@qbutton.co.za`) on `/quotes` and quote detail (`/quotes/ee0f39e9-e1e3-48a2-927f-7390fc3dda46`); no new access/runtime regression introduced.
 
 ## Unique constraint strategy (important)
 

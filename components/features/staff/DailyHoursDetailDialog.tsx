@@ -200,10 +200,10 @@ export function DailyHoursDetailDialog({
         .select('*')
         .eq('staff_id', staffId)
         .eq('date_worked', date)
-        .single();
+        .limit(1);
 
-      if (error && error.code !== 'PGRST116') throw error; // PGRST116 = no rows found
-      return data;
+      if (error) throw error;
+      return data?.[0];
     },
     enabled: isOpen && !!staffId && !!date,
   });

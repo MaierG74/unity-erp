@@ -70,6 +70,11 @@ export type PurchaseOrder = {
   supplier_orders?: SupplierOrder[];
 };
 
+export type PurchaseOrderAllocation = {
+  customer_order_id: number;
+  quantity: number;
+};
+
 export type PurchaseOrderFormData = {
   order_date: string;
   notes: string;
@@ -78,6 +83,7 @@ export type PurchaseOrderFormData = {
     supplier_component_id: number;
     quantity: number;
     customer_order_id?: number | null;
+    allocations?: PurchaseOrderAllocation[];
     notes?: string;
   }[];
 };

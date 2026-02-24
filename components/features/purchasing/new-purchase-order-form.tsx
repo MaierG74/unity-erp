@@ -23,6 +23,7 @@ import {
   Search,
   Package,
   X,
+  Split,
 } from 'lucide-react';
 import { PurchaseOrderFormData } from '@/types/purchasing';
 import {
@@ -45,6 +46,11 @@ import {
 } from '@/components/features/purchasing/ComponentSearchModal';
 
 // Form validation schema
+const allocationSchema = z.object({
+  customer_order_id: z.number(),
+  quantity: z.number().min(0.01, 'Allocation must be > 0'),
+});
+
 const formSchema = z.object({
   order_date: z.string().optional(),
   notes: z.string().optional(),
@@ -64,10 +70,33 @@ const formSchema = z.object({
           })
           .min(0.01, 'Quantity must be greater than 0'),
         customer_order_id: z.number().nullable().optional(),
+        allocations: z.array(allocationSchema).optional(),
         notes: z.string().optional(),
       })
     )
     .min(1, 'Please add at least one item to the order'),
+}).superRefine((data, ctx) => {
+  data.items.forEach((item, idx) => {
+    if (item.allocations && item.allocations.length > 0 && item.quantity > 0) {
+      const allocSum = item.allocations.reduce((sum, a) => sum + (a.quantity || 0), 0);
+      if (allocSum > item.quantity) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Allocated quantity (${allocSum}) exceeds total (${item.quantity})`,
+          path: ['items', idx, 'allocations'],
+        });
+      }
+      item.allocations.forEach((a, aIdx) => {
+        if (!a.customer_order_id || a.customer_order_id <= 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Please select a customer order',
+            path: ['items', idx, 'allocations', aIdx, 'customer_order_id'],
+          });
+        }
+      });
+    }
+  });
 });
 
 type SupplierComponentFromAPI = {
@@ -87,6 +116,7 @@ type SupplierOrderLinePayload = {
   quantity_for_order: number;
   quantity_for_stock: number;
   customer_order_id?: number | null;
+  allocations?: { customer_order_id: number; quantity_for_order: number }[];
   line_notes?: string | null;
 };
 
@@ -176,6 +206,41 @@ async function fetchDraftStatusId() {
   return data.status_id;
 }
 
+// Build a single line payload, handling split allocations or single-order
+function buildLinePayload(item: {
+  supplier_component_id: number;
+  quantity: number;
+  component_id: number;
+  customer_order_id?: number | null;
+  allocations?: { customer_order_id: number; quantity: number }[];
+  notes?: string;
+}): SupplierOrderLinePayload {
+  if (item.allocations && item.allocations.length > 0) {
+    return {
+      supplier_component_id: item.supplier_component_id,
+      order_quantity: item.quantity,
+      component_id: item.component_id,
+      quantity_for_order: 0,
+      quantity_for_stock: 0,
+      allocations: item.allocations.map((a) => ({
+        customer_order_id: a.customer_order_id,
+        quantity_for_order: a.quantity,
+      })),
+      line_notes: item.notes || null,
+    };
+  }
+
+  return {
+    supplier_component_id: item.supplier_component_id,
+    order_quantity: item.quantity,
+    component_id: item.component_id,
+    quantity_for_order: item.customer_order_id ? item.quantity : 0,
+    quantity_for_stock: item.customer_order_id ? 0 : item.quantity,
+    customer_order_id: item.customer_order_id || null,
+    line_notes: item.notes || null,
+  };
+}
+
 // Create purchase order
 async function createPurchaseOrder(
   formData: PurchaseOrderFormData,
@@ -189,6 +254,7 @@ async function createPurchaseOrder(
       quantity: number;
       component_id: number;
       customer_order_id?: number | null;
+      allocations?: { customer_order_id: number; quantity: number }[];
       notes?: string;
     }>
   >();
@@ -222,6 +288,7 @@ async function createPurchaseOrder(
       quantity: item.quantity,
       component_id: item.component_id,
       customer_order_id: item.customer_order_id,
+      allocations: item.allocations,
       notes: item.notes,
     });
   });
@@ -232,15 +299,9 @@ async function createPurchaseOrder(
 
   const purchaseOrders = await Promise.all(
     Array.from(itemsBySupplier.entries()).map(async ([supplierId, items]) => {
-      const lineItems: SupplierOrderLinePayload[] = items.map((item) => ({
-        supplier_component_id: item.supplier_component_id,
-        order_quantity: item.quantity,
-        component_id: item.component_id,
-        quantity_for_order: item.customer_order_id ? item.quantity : 0,
-        quantity_for_stock: item.customer_order_id ? 0 : item.quantity,
-        customer_order_id: item.customer_order_id || null,
-        line_notes: item.notes || null,
-      }));
+      const lineItems: SupplierOrderLinePayload[] = items.map((item) =>
+        buildLinePayload(item)
+      );
 
       const { data, error: rpcError } = await supabase.rpc(
         'create_purchase_order_with_lines',
@@ -276,6 +337,148 @@ async function createPurchaseOrder(
   );
 
   return purchaseOrders;
+}
+
+// Inline split allocation editor for distributing quantity across customer orders
+function SplitAllocationEditor({
+  index,
+  totalQuantity,
+  allocations,
+  customerOrders,
+  ordersLoading,
+  disabled,
+  reactSelectStyles,
+  onAllocationsChange,
+  onExitSplit,
+}: {
+  index: number;
+  totalQuantity: number;
+  allocations: { customer_order_id: number; quantity: number }[];
+  customerOrders: { value: number; label: string }[];
+  ordersLoading: boolean;
+  disabled: boolean;
+  reactSelectStyles: any;
+  onAllocationsChange: (allocs: { customer_order_id: number; quantity: number }[]) => void;
+  onExitSplit: () => void;
+}) {
+  const allocatedSum = allocations.reduce((sum, a) => sum + (a.quantity || 0), 0);
+  const remaining = Math.max(0, totalQuantity - allocatedSum);
+  const overAllocated = allocatedSum > totalQuantity && totalQuantity > 0;
+
+  // Filter out already-used orders from options for each row
+  const usedOrderIds = new Set(allocations.map((a) => a.customer_order_id));
+
+  const addRow = () => {
+    onAllocationsChange([...allocations, { customer_order_id: 0, quantity: 0 }]);
+  };
+
+  const removeRow = (rowIdx: number) => {
+    const next = allocations.filter((_, i) => i !== rowIdx);
+    onAllocationsChange(next);
+    if (next.length === 0) {
+      onExitSplit();
+    }
+  };
+
+  const updateRow = (rowIdx: number, field: 'customer_order_id' | 'quantity', value: number) => {
+    const next = allocations.map((a, i) =>
+      i === rowIdx ? { ...a, [field]: value } : a
+    );
+    onAllocationsChange(next);
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <label className="block text-xs font-medium text-muted-foreground">
+          Split Allocation
+        </label>
+        <button
+          type="button"
+          className="text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+          onClick={onExitSplit}
+        >
+          Cancel split
+        </button>
+      </div>
+      <div className="space-y-2">
+        {allocations.map((alloc, rowIdx) => {
+          const availableOptions = customerOrders.filter(
+            (o) => o.value === alloc.customer_order_id || !usedOrderIds.has(o.value)
+          );
+          return (
+            <div key={rowIdx} className="flex items-center gap-2">
+              <div className="flex-1 min-w-0">
+                <ReactSelect
+                  inputId={`split-order-${index}-${rowIdx}`}
+                  isClearable={false}
+                  isDisabled={ordersLoading || disabled}
+                  isLoading={ordersLoading}
+                  options={availableOptions}
+                  value={customerOrders.find((o) => o.value === alloc.customer_order_id) || null}
+                  onChange={(option: any) =>
+                    updateRow(rowIdx, 'customer_order_id', option?.value || 0)
+                  }
+                  placeholder="Select order..."
+                  menuPlacement="auto"
+                  classNamePrefix="customer-order-select"
+                  styles={reactSelectStyles}
+                  menuPortalTarget={typeof document !== 'undefined' ? document.body : undefined}
+                />
+              </div>
+              <div className="w-20 flex-shrink-0">
+                <input
+                  type="number"
+                  className={`h-10 w-full rounded-md border ${
+                    overAllocated ? 'border-destructive' : 'border-input'
+                  } bg-background px-2 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
+                  min="0.01"
+                  step="any"
+                  placeholder="Qty"
+                  value={alloc.quantity || ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    updateRow(rowIdx, 'quantity', val === '' ? 0 : parseFloat(val) || 0);
+                  }}
+                  disabled={disabled}
+                />
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 flex-shrink-0 text-muted-foreground hover:text-destructive"
+                onClick={() => removeRow(rowIdx)}
+                disabled={disabled}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex items-center justify-between mt-2">
+        <span className={`text-xs ${overAllocated ? 'text-destructive font-medium' : 'text-muted-foreground'}`}>
+          {overAllocated
+            ? `Over-allocated by ${(allocatedSum - totalQuantity).toFixed(1)}`
+            : remaining > 0
+              ? `Stock: ${remaining % 1 === 0 ? remaining : remaining.toFixed(1)} remaining`
+              : 'Fully allocated'}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-xs"
+          onClick={addRow}
+          disabled={disabled}
+        >
+          <Plus className="h-3 w-3 mr-1" />
+          Add order
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 const PO_DRAFT_STORAGE_KEY = 'unity-erp:po-draft';
@@ -324,6 +527,7 @@ export function NewPurchaseOrderForm() {
           supplier_component_id: 0,
           quantity: undefined as unknown as number,
           customer_order_id: null,
+          allocations: [],
           notes: '',
         },
       ],
@@ -334,6 +538,9 @@ export function NewPurchaseOrderForm() {
     control,
     name: 'items',
   });
+
+  // Track which items are in split mode
+  const [splitModeItems, setSplitModeItems] = useState<Set<number>>(new Set());
 
   // Restore saved draft from sessionStorage on mount
   const draftRestored = useRef(false);
@@ -591,6 +798,7 @@ export function NewPurchaseOrderForm() {
           quantity: number;
           component_id: number;
           customer_order_id?: number | null;
+          allocations?: { customer_order_id: number; quantity: number }[];
           notes?: string;
           supplierId: number;
         }>
@@ -623,6 +831,7 @@ export function NewPurchaseOrderForm() {
           quantity: item.quantity,
           component_id: item.component_id,
           customer_order_id: item.customer_order_id,
+          allocations: item.allocations,
           notes: item.notes,
           supplierId: supplierComponent.supplier_id,
         });
@@ -639,15 +848,9 @@ export function NewPurchaseOrderForm() {
       )) {
         const decision = decisions[supplierId] || 'new';
 
-        const lineItems: SupplierOrderLinePayload[] = items.map((item) => ({
-          supplier_component_id: item.supplier_component_id,
-          order_quantity: item.quantity,
-          component_id: item.component_id,
-          quantity_for_order: item.customer_order_id ? item.quantity : 0,
-          quantity_for_stock: item.customer_order_id ? 0 : item.quantity,
-          customer_order_id: item.customer_order_id || null,
-          line_notes: item.notes || null,
-        }));
+        const lineItems: SupplierOrderLinePayload[] = items.map((item) =>
+          buildLinePayload(item)
+        );
 
         if (decision !== 'new' && typeof decision === 'number') {
           const { data, error: rpcError } = await supabase.rpc(
@@ -762,6 +965,7 @@ export function NewPurchaseOrderForm() {
       supplier_component_id: 0,
       quantity: undefined as unknown as number,
       customer_order_id: null,
+      allocations: [],
       notes: '',
     });
   };
@@ -822,6 +1026,12 @@ export function NewPurchaseOrderForm() {
     setValue(`items.${index}.supplier_component_id`, 0, {
       shouldValidate: false,
       shouldDirty: true,
+    });
+    setValue(`items.${index}.allocations`, []);
+    setSplitModeItems((prev) => {
+      const next = new Set(prev);
+      next.delete(index);
+      return next;
     });
   };
 
@@ -995,6 +1205,14 @@ export function NewPurchaseOrderForm() {
                     onClick={() => {
                       if (fields.length > 1) {
                         remove(index);
+                        setSplitModeItems((prev) => {
+                          const next = new Set<number>();
+                          prev.forEach((i) => {
+                            if (i < index) next.add(i);
+                            else if (i > index) next.add(i - 1);
+                          });
+                          return next;
+                        });
                       } else {
                         clearComponentSelection(0);
                         setValue(
@@ -1116,7 +1334,7 @@ export function NewPurchaseOrderForm() {
 
                 {/* Row 3: Supplier, Quantity, Customer Order — side by side */}
                 {hasComponent && (
-                  <div className="grid grid-cols-1 sm:grid-cols-[1fr_8rem_1fr] gap-4 items-end">
+                  <div className={`grid grid-cols-1 ${splitModeItems.has(index) ? 'sm:grid-cols-[1fr_8rem]' : 'sm:grid-cols-[1fr_8rem_1fr]'} gap-4 items-end`}>
                     {/* Supplier */}
                     <div>
                       <label
@@ -1210,48 +1428,104 @@ export function NewPurchaseOrderForm() {
                       )}
                     </div>
 
-                    {/* Customer Order */}
-                    <div>
-                      <label
-                        htmlFor={`items.${index}.customer_order_id`}
-                        className="block text-xs font-medium text-muted-foreground mb-1"
-                      >
-                        Customer Order
-                      </label>
-                      <Controller
-                        control={control}
-                        name={`items.${index}.customer_order_id`}
-                        render={({ field }) => (
-                          <ReactSelect
-                            inputId={`customer-order-select-${index}`}
-                            isClearable
-                            isDisabled={
-                              ordersLoading || createOrderMutation.isPending
-                            }
-                            isLoading={ordersLoading}
-                            options={customerOrders}
-                            value={
-                              customerOrders?.find(
-                                (o: any) => o.value === field.value
-                              ) || null
-                            }
-                            onChange={(option: any) =>
-                              field.onChange(option?.value || null)
-                            }
-                            placeholder="Stock Order"
-                            menuPlacement="auto"
-                            classNamePrefix="customer-order-select"
-                            styles={reactSelectStyles}
-                            menuPortalTarget={
-                              typeof document !== 'undefined'
-                                ? document.body
-                                : undefined
-                            }
-                          />
-                        )}
-                      />
-                    </div>
+                    {/* Customer Order — only shown in single mode */}
+                    {!splitModeItems.has(index) && (
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label
+                            htmlFor={`items.${index}.customer_order_id`}
+                            className="block text-xs font-medium text-muted-foreground"
+                          >
+                            Customer Order
+                          </label>
+                          <button
+                            type="button"
+                            className="text-[11px] text-blue-600 hover:text-blue-700 hover:underline flex items-center gap-1"
+                            onClick={() => {
+                              const currentOrderId = watchedItems[index]?.customer_order_id;
+                              const currentQty = watchedItems[index]?.quantity || 0;
+                              if (currentOrderId) {
+                                setValue(`items.${index}.allocations`, [
+                                  { customer_order_id: currentOrderId, quantity: currentQty },
+                                ]);
+                                setValue(`items.${index}.customer_order_id`, null);
+                              } else {
+                                setValue(`items.${index}.allocations`, []);
+                              }
+                              setSplitModeItems((prev) => new Set(prev).add(index));
+                            }}
+                          >
+                            <Split className="h-3 w-3" />
+                            Split
+                          </button>
+                        </div>
+                        <Controller
+                          control={control}
+                          name={`items.${index}.customer_order_id`}
+                          render={({ field }) => (
+                            <ReactSelect
+                              inputId={`customer-order-select-${index}`}
+                              isClearable
+                              isDisabled={
+                                ordersLoading || createOrderMutation.isPending
+                              }
+                              isLoading={ordersLoading}
+                              options={customerOrders}
+                              value={
+                                customerOrders?.find(
+                                  (o: any) => o.value === field.value
+                                ) || null
+                              }
+                              onChange={(option: any) =>
+                                field.onChange(option?.value || null)
+                              }
+                              placeholder="Stock Order"
+                              menuPlacement="auto"
+                              classNamePrefix="customer-order-select"
+                              styles={reactSelectStyles}
+                              menuPortalTarget={
+                                typeof document !== 'undefined'
+                                  ? document.body
+                                  : undefined
+                              }
+                            />
+                          )}
+                        />
+                      </div>
+                    )}
                   </div>
+                )}
+
+                {/* Split allocation editor — shown below the grid when in split mode */}
+                {hasComponent && splitModeItems.has(index) && (
+                  <SplitAllocationEditor
+                    index={index}
+                    totalQuantity={watchedItems[index]?.quantity || 0}
+                    allocations={watchedItems[index]?.allocations || []}
+                    customerOrders={customerOrders || []}
+                    ordersLoading={ordersLoading}
+                    disabled={createOrderMutation.isPending}
+                    reactSelectStyles={reactSelectStyles}
+                    onAllocationsChange={(allocs) => {
+                      setValue(`items.${index}.allocations`, allocs, {
+                        shouldDirty: true,
+                      });
+                    }}
+                    onExitSplit={() => {
+                      const allocs = watchedItems[index]?.allocations || [];
+                      if (allocs.length === 1) {
+                        setValue(`items.${index}.customer_order_id`, allocs[0].customer_order_id);
+                      } else {
+                        setValue(`items.${index}.customer_order_id`, null);
+                      }
+                      setValue(`items.${index}.allocations`, []);
+                      setSplitModeItems((prev) => {
+                        const next = new Set(prev);
+                        next.delete(index);
+                        return next;
+                      });
+                    }}
+                  />
                 )}
 
                 {/* Per-line-item note (expand/collapse) */}
