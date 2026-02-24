@@ -577,6 +577,7 @@ export default function JobCardScanPage() {
 function QrScannerOverlay({ onClose }: { onClose: () => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [decoding, setDecoding] = useState(false);
@@ -603,11 +604,21 @@ function QrScannerOverlay({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
-  // Step 2: Once live camera is active AND video element is mounted, connect them
+  // Step 2: Once live camera is active AND video element is mounted, connect & scan
   useEffect(() => {
     if (!useLiveCamera || !streamRef.current) return;
     let cancelled = false;
     let animFrame: number;
+
+    // Lazy-load jsQR only when needed (BarcodeDetector unavailable)
+    let jsQRModule: typeof import('jsqr') extends Promise<infer T> ? T : never;
+    const getJsQR = async () => {
+      if (!jsQRModule) jsQRModule = (await import('jsqr')).default as any;
+      return jsQRModule;
+    };
+
+    // Create offscreen canvas once
+    if (!canvasRef.current) canvasRef.current = document.createElement('canvas');
 
     const connectVideo = async () => {
       const video = videoRef.current;
@@ -626,6 +637,7 @@ function QrScannerOverlay({ onClose }: { onClose: () => void }) {
       }
 
       if ('BarcodeDetector' in window) {
+        // Native BarcodeDetector (Chrome 83+, Safari 17.2+)
         const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
         detector.detect(video).then((barcodes: any[]) => {
           if (cancelled) return;
@@ -638,7 +650,25 @@ function QrScannerOverlay({ onClose }: { onClose: () => void }) {
           if (!cancelled) animFrame = requestAnimationFrame(scanLoop);
         });
       } else {
-        setScanError('QR scanning not supported on this browser.');
+        // Fallback: jsQR via canvas
+        const canvas = canvasRef.current!;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+        ctx.drawImage(video, 0, 0);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+        getJsQR().then((jsQR: any) => {
+          if (cancelled) return;
+          const result = jsQR(imageData.data, canvas.width, canvas.height);
+          if (result?.data) {
+            handleResult(result.data);
+            return;
+          }
+          animFrame = requestAnimationFrame(scanLoop);
+        }).catch(() => {
+          if (!cancelled) animFrame = requestAnimationFrame(scanLoop);
+        });
       }
     };
 
@@ -673,11 +703,26 @@ function QrScannerOverlay({ onClose }: { onClose: () => void }) {
     try {
       const bitmap = await createImageBitmap(file);
 
+      // Try native BarcodeDetector first
       if ('BarcodeDetector' in window) {
         const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
         const barcodes = await detector.detect(bitmap);
         if (barcodes.length > 0) {
           handleResult(barcodes[0].rawValue);
+          return;
+        }
+      } else {
+        // Fallback: jsQR
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(bitmap, 0, 0);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const jsQR = (await import('jsqr')).default;
+        const result = (jsQR as any)(imageData.data, canvas.width, canvas.height);
+        if (result?.data) {
+          handleResult(result.data);
           return;
         }
       }

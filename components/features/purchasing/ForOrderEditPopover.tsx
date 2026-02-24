@@ -446,9 +446,9 @@ function SplitEditor({
         {allocations.map((alloc, idx) => {
           const orderInfo = customerOrders.find(o => o.orderId === alloc.customer_order_id);
           return (
-            <div key={idx} className="flex items-center gap-2">
+            <div key={idx} className="flex items-center gap-2 overflow-hidden">
               <select
-                className="flex-1 h-8 rounded-md border border-input bg-background px-2 text-xs"
+                className="min-w-0 flex-1 h-8 rounded-md border border-input bg-background px-2 text-xs truncate"
                 value={alloc.customer_order_id || ''}
                 onChange={(e) => {
                   const next = [...allocations];
@@ -468,7 +468,7 @@ function SplitEditor({
               </select>
               <input
                 type="number"
-                className={`w-16 h-8 rounded-md border ${overAllocated ? 'border-destructive' : 'border-input'} bg-background px-2 text-xs text-right`}
+                className={`w-16 flex-shrink-0 h-8 rounded-md border ${overAllocated ? 'border-destructive' : 'border-input'} bg-background px-2 text-xs text-right`}
                 min="0.01"
                 step="any"
                 value={alloc.quantity || ''}
