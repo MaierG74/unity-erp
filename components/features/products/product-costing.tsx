@@ -4,13 +4,6 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from '@/components/ui/card'
-import {
   Table,
   TableBody,
   TableCell,
@@ -19,12 +12,6 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from '@/components/ui/accordion'
 import { Plus, Trash2 } from 'lucide-react'
 import { AddOverheadDialog } from './AddOverheadDialog'
 import { ProductBOM } from './product-bom'
@@ -104,8 +91,11 @@ function fmtMoney(v: number | null | undefined) {
   return `R${v.toFixed(2)}`
 }
 
+type CostingSection = 'materials' | 'labor' | 'overhead'
+
 export function ProductCosting({ productId }: { productId: number }) {
   const [addOverheadOpen, setAddOverheadOpen] = useState(false)
+  const [activeSection, setActiveSection] = useState<CostingSection>('materials')
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
@@ -331,135 +321,113 @@ export function ProductCosting({ productId }: { productId: number }) {
     setAddOverheadOpen(false)
   }
 
+  const sections: { key: CostingSection; label: string; count: number; cost: number }[] = [
+    { key: 'materials', label: 'Materials', count: materials.length, cost: materialsCost },
+    { key: 'labor', label: 'Labor', count: labour.length, cost: labourCost },
+    { key: 'overhead', label: 'Overhead', count: overhead.length, cost: overheadCost },
+  ]
+
   return (
-    <div className="space-y-6">
-      {/* Cost Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Materials</CardTitle></CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{fmtMoney(materialsCost)}</div>
-            {missingPrices > 0 && (
-              <p className="text-xs text-amber-500 mt-1">{missingPrices} item(s) missing prices</p>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Labor</CardTitle></CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{fmtMoney(labourCost)}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Overhead</CardTitle></CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{fmtMoney(overheadCost)}</div>
-          </CardContent>
-        </Card>
-        <Card className="bg-primary/5 border-primary/20">
-          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Unit Cost</CardTitle></CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{fmtMoney(unitCost)}</div>
-          </CardContent>
-        </Card>
+    <div className="space-y-0">
+      {/* Compact cost summary + section tabs in one bar */}
+      <div className="flex items-center justify-between border-b pb-0 mb-0">
+        {/* Section tabs */}
+        <div className="flex">
+          {sections.map((s) => (
+            <button
+              key={s.key}
+              onClick={() => setActiveSection(s.key)}
+              className={`
+                relative px-4 py-3 text-sm font-medium transition-colors
+                ${activeSection === s.key
+                  ? 'text-foreground after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-primary'
+                  : 'text-muted-foreground hover:text-foreground'
+                }
+              `}
+            >
+              <span>{s.label}</span>
+              <span className="ml-2 text-xs text-muted-foreground">({s.count})</span>
+              <span className="ml-2 text-xs font-semibold">{fmtMoney(s.cost)}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Unit cost badge */}
+        <div className="flex items-center gap-2 pr-2">
+          {missingPrices > 0 && (
+            <span className="text-xs text-amber-500">{missingPrices} missing price{missingPrices !== 1 ? 's' : ''}</span>
+          )}
+          <div className="text-sm text-muted-foreground">Unit Cost</div>
+          <div className="text-lg font-bold">{fmtMoney(unitCost)}</div>
+        </div>
       </div>
 
-      {/* Accordion Sections */}
-      <Accordion type="multiple" defaultValue={['materials']} className="space-y-3">
-        {/* Materials (BOM) */}
-        <AccordionItem value="materials" className="border rounded-lg px-4">
-          <AccordionTrigger className="hover:no-underline">
-            <div className="flex items-center gap-3">
-              <span className="font-semibold">Bill of Materials</span>
-              <span className="text-sm text-muted-foreground">{materials.length} component{materials.length !== 1 ? 's' : ''}</span>
-              <span className="text-sm font-medium ml-auto mr-4">{fmtMoney(materialsCost)}</span>
-            </div>
-          </AccordionTrigger>
-          <AccordionContent>
-            <ProductBOM productId={productId} />
-          </AccordionContent>
-        </AccordionItem>
+      {/* Section content */}
+      <div className="pt-4">
+        {activeSection === 'materials' && (
+          <ProductBOM productId={productId} />
+        )}
 
-        {/* Labor (BOL) */}
-        <AccordionItem value="labor" className="border rounded-lg px-4">
-          <AccordionTrigger className="hover:no-underline">
-            <div className="flex items-center gap-3">
-              <span className="font-semibold">Bill of Labor</span>
-              <span className="text-sm text-muted-foreground">{labour.length} operation{labour.length !== 1 ? 's' : ''}</span>
-              <span className="text-sm font-medium ml-auto mr-4">{fmtMoney(labourCost)}</span>
-            </div>
-          </AccordionTrigger>
-          <AccordionContent>
-            <ProductBOL productId={productId} />
-          </AccordionContent>
-        </AccordionItem>
+        {activeSection === 'labor' && (
+          <ProductBOL productId={productId} />
+        )}
 
-        {/* Overhead */}
-        <AccordionItem value="overhead" className="border rounded-lg px-4">
-          <AccordionTrigger className="hover:no-underline">
-            <div className="flex items-center gap-3">
-              <span className="font-semibold">Overhead</span>
-              <span className="text-sm text-muted-foreground">{overhead.length} element{overhead.length !== 1 ? 's' : ''}</span>
-              <span className="text-sm font-medium ml-auto mr-4">{fmtMoney(overheadCost)}</span>
+        {activeSection === 'overhead' && (
+          <div className="space-y-4">
+            <div className="flex justify-end">
+              <Button size="sm" onClick={() => setAddOverheadOpen(true)}>
+                <Plus className="h-4 w-4 mr-1" />
+                Add Overhead
+              </Button>
             </div>
-          </AccordionTrigger>
-          <AccordionContent>
-            <div className="space-y-4">
-              <div className="flex justify-end">
-                <Button size="sm" onClick={() => setAddOverheadOpen(true)}>
-                  <Plus className="h-4 w-4 mr-1" />
-                  Add Overhead
-                </Button>
-              </div>
-              {overheadLoading ? (
-                <div className="py-4 text-muted-foreground">Loading overhead...</div>
-              ) : overhead.length === 0 ? (
-                <div className="py-4 text-muted-foreground">No overhead costs assigned. Click &quot;Add Overhead&quot; to assign overhead elements to this product.</div>
-              ) : (
-                <div className="rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Code</TableHead>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead className="text-right">Value</TableHead>
-                        <TableHead className="text-right">Qty</TableHead>
-                        <TableHead className="text-right">Line Total</TableHead>
-                        <TableHead className="w-10"></TableHead>
+            {overheadLoading ? (
+              <div className="py-4 text-muted-foreground">Loading overhead...</div>
+            ) : overhead.length === 0 ? (
+              <div className="py-4 text-muted-foreground">No overhead costs assigned. Click &quot;Add Overhead&quot; to assign overhead elements to this product.</div>
+            ) : (
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Code</TableHead>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead className="text-right">Value</TableHead>
+                      <TableHead className="text-right">Qty</TableHead>
+                      <TableHead className="text-right">Line Total</TableHead>
+                      <TableHead className="w-10"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {overhead.map((o, idx) => (
+                      <TableRow key={idx}>
+                        <TableCell className="font-mono text-sm">{o.code}</TableCell>
+                        <TableCell>{o.name}</TableCell>
+                        <TableCell className="capitalize">{o.type === 'fixed' ? 'Fixed' : 'Percentage'}</TableCell>
+                        <TableCell className="text-right">
+                          {o.type === 'fixed' ? fmtMoney(o.value) : `${o.value}%`}
+                        </TableCell>
+                        <TableCell className="text-right">{o.quantity}</TableCell>
+                        <TableCell className="text-right font-medium">{fmtMoney(o.lineTotal)}</TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => handleRemoveOverhead(o.element_id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
                       </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {overhead.map((o, idx) => (
-                        <TableRow key={idx}>
-                          <TableCell className="font-mono text-sm">{o.code}</TableCell>
-                          <TableCell>{o.name}</TableCell>
-                          <TableCell className="capitalize">{o.type === 'fixed' ? 'Fixed' : 'Percentage'}</TableCell>
-                          <TableCell className="text-right">
-                            {o.type === 'fixed' ? fmtMoney(o.value) : `${o.value}%`}
-                          </TableCell>
-                          <TableCell className="text-right">{o.quantity}</TableCell>
-                          <TableCell className="text-right font-medium">{fmtMoney(o.lineTotal)}</TableCell>
-                          <TableCell>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-destructive hover:text-destructive"
-                              onClick={() => handleRemoveOverhead(o.element_id)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </div>
-          </AccordionContent>
-        </AccordionItem>
-      </Accordion>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Add Overhead Dialog */}
       <AddOverheadDialog

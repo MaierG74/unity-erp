@@ -106,21 +106,24 @@ export default function JobCardScanPage() {
     }
   };
 
-  const handleViewOrder = async () => {
+  // Pre-fetch order docs so the click handler is synchronous (Safari blocks async popups)
+  useEffect(() => {
     if (!jobCard?.order_id) return;
-    // Fetch customer order attachments
-    const { data } = await supabase
+    supabase
       .from('order_attachments')
       .select('id, file_url, file_name')
       .eq('order_id', jobCard.order_id)
-      .eq('document_type', 'customer_order');
-    const docs = data || [];
-    if (docs.length === 0) {
+      .eq('document_type', 'customer_order')
+      .then(({ data }) => setOrderDocs(data || []));
+  }, [jobCard?.order_id]);
+
+  const handleViewOrder = () => {
+    if (!jobCard?.order_id) return;
+    if (orderDocs.length === 0) {
       toast.error('No customer order document uploaded for this order');
-    } else if (docs.length === 1) {
-      window.open(docs[0].file_url, '_blank');
+    } else if (orderDocs.length === 1) {
+      window.open(orderDocs[0].file_url, '_blank');
     } else {
-      setOrderDocs(docs);
       setShowDocPicker(true);
     }
   };

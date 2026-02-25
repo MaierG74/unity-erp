@@ -265,18 +265,16 @@ export function ProductsPage() {
   return (
     // CHANGED: Reduced space-y from 6 to 2
     <div className="space-y-2">
-      {/* CHANGED: Compact inline toolbar - title, count, search, category, and button in one row */}
+      {/* CHANGED: Compact inline toolbar - search/filter grouped on the left, action on the right */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 p-2 bg-card rounded-xl border shadow-sm">
-        {/* Left: Small title + count */}
-        <div className="flex items-center gap-3 shrink-0">
-          <span className="text-sm font-medium text-foreground">Products</span>
-          <span className="text-xs text-muted-foreground">
-            {totalCount > 0 ? `${totalCount.toLocaleString()} products` : ''}
-          </span>
-        </div>
-
-        {/* Right: Search, category filter, and Add button */}
-        <div className="flex flex-col md:flex-row md:items-center gap-3 w-full md:w-auto">
+        {/* Left: Title/count plus search and filter for faster primary flow */}
+        <div className="flex w-full flex-col md:flex-row md:items-center gap-3">
+          <div className="flex items-center gap-3 shrink-0">
+            <span className="text-sm font-medium text-foreground">Products</span>
+            <span className="text-xs text-muted-foreground">
+              {totalCount > 0 ? `${totalCount.toLocaleString()} products` : ''}
+            </span>
+          </div>
           <ProductSearchBar
             value={search}
             onSearchChange={(value) => {
@@ -290,12 +288,16 @@ export function ProductsPage() {
               setPage(1);
             }}
           />
+        </div>
+
+        {/* Right: Primary create action */}
+        <div className="flex w-full md:w-auto md:justify-end">
           <ProductCreateForm
             onProductCreated={() => {
               setPage(1);
             }}
             trigger={
-              <Button variant="default" size="sm" className="h-9 md:shrink-0">
+              <Button variant="default" size="sm" className="h-9 w-full md:w-auto md:shrink-0">
                 Add Product
               </Button>
             }
@@ -398,4 +400,3 @@ export function ProductsPage() {
     </div>
   );
 }
-
