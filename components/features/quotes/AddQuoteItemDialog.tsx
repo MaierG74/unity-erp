@@ -28,6 +28,7 @@ interface AddQuoteItemDialogProps {
     qty: number;
     explode: boolean;
     include_labour?: boolean;
+    include_overhead?: boolean;
     attach_image?: boolean;
     selected_options?: ProductOptionSelection;
   }) => void | Promise<void>;
@@ -56,6 +57,7 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
   // Quantity input removed — items import as 1 by default; user sets final line qty later
   const [explode, setExplode] = React.useState(true);
   const [includeLabor, setIncludeLabor] = React.useState(true);
+  const [includeOverhead, setIncludeOverhead] = React.useState(true);
   const [attachImage, setAttachImage] = React.useState(true);
   const [productsLoading, setProductsLoading] = React.useState(false);
   const [optionsLoading, setOptionsLoading] = React.useState(false);
@@ -195,6 +197,7 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
             qty: 1,
             explode,
             include_labour: includeLabor as boolean,
+            include_overhead: includeOverhead as boolean,
             attach_image: attachImage as boolean,
             selected_options: Object.keys(normalizedOptions).length ? normalizedOptions : undefined,
           })
@@ -348,6 +351,10 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
               <div className="flex items-center gap-2">
                 <Checkbox id="include-labor" checked={includeLabor} onCheckedChange={(v) => setIncludeLabor(Boolean(v))} />
                 <Label htmlFor="include-labor" className="text-sm text-muted-foreground">Include Labour</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox id="include-overhead" checked={includeOverhead} onCheckedChange={(v) => setIncludeOverhead(Boolean(v))} />
+                <Label htmlFor="include-overhead" className="text-sm text-muted-foreground">Include Overhead</Label>
               </div>
               <div className="flex items-center gap-2">
                 <Checkbox id="attach-image" checked={attachImage} onCheckedChange={(v) => setAttachImage(Boolean(v))} />

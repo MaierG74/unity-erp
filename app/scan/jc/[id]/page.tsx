@@ -182,28 +182,12 @@ export default function JobCardScanPage() {
     if (!jobCard) return;
     setActionLoading('complete');
     try {
-      const { error: err } = await supabase
-        .from('job_cards')
-        .update({ status: 'completed', completion_date: new Date().toISOString().split('T')[0] })
-        .eq('job_card_id', jobCardId);
-      if (err) throw err;
-      // Finalize items: only auto-fill quantity on untouched items (completed_quantity === 0).
-      // Items where a partial qty was already entered keep their value.
-      const untouchedItems = items.filter((i) => i.completed_quantity === 0);
-      for (const item of untouchedItems) {
-        await supabase
-          .from('job_card_items')
-          .update({ completed_quantity: item.quantity, status: 'completed', completion_time: new Date().toISOString() })
-          .eq('item_id', item.item_id);
-      }
-      // Mark any remaining partial items as completed too (status only, keep their entered qty)
-      const partialItems = items.filter((i) => i.completed_quantity > 0 && i.status !== 'completed');
-      for (const item of partialItems) {
-        await supabase
-          .from('job_card_items')
-          .update({ status: 'completed', completion_time: new Date().toISOString() })
-          .eq('item_id', item.item_id);
-      }
+      // Single RPC call wraps everything in a transaction — all-or-nothing
+      const { error: rpcErr } = await supabase.rpc('complete_job_card', {
+        p_job_card_id: jobCardId,
+      });
+      if (rpcErr) throw rpcErr;
+
       await syncAssignmentStatus('completed');
       setJobCard((prev) => prev ? { ...prev, status: 'completed' } : prev);
       setItems((prev) => prev.map((i) => ({
@@ -610,12 +594,19 @@ function QrScannerOverlay({ onClose }: { onClose: () => void }) {
     let cancelled = false;
     let animFrame: number;
 
-    // Lazy-load jsQR only when needed (BarcodeDetector unavailable)
-    let jsQRModule: typeof import('jsqr') extends Promise<infer T> ? T : never;
+    // Lazy-load jsQR — used as fallback or when BarcodeDetector is absent
+    let jsQRFn: ((data: Uint8ClampedArray, width: number, height: number) => { data: string } | null) | null = null;
     const getJsQR = async () => {
-      if (!jsQRModule) jsQRModule = (await import('jsqr')).default as any;
-      return jsQRModule;
+      if (!jsQRFn) jsQRFn = (await import('jsqr')).default as any;
+      return jsQRFn!;
     };
+
+    // Create BarcodeDetector once (not per frame) if available
+    const nativeDetector = 'BarcodeDetector' in window
+      ? new (window as any).BarcodeDetector({ formats: ['qr_code'] })
+      : null;
+    let nativeFailCount = 0;
+    const NATIVE_FAIL_THRESHOLD = 60; // ~2 seconds of failures → fall back to jsQR
 
     // Create offscreen canvas once
     if (!canvasRef.current) canvasRef.current = document.createElement('canvas');
@@ -628,6 +619,15 @@ function QrScannerOverlay({ onClose }: { onClose: () => void }) {
       scanLoop();
     };
 
+    const decodeViaCanvas = (video: HTMLVideoElement) => {
+      const canvas = canvasRef.current!;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+      ctx.drawImage(video, 0, 0);
+      return ctx.getImageData(0, 0, canvas.width, canvas.height);
+    };
+
     const scanLoop = () => {
       if (cancelled || !videoRef.current) return;
       const video = videoRef.current;
@@ -636,31 +636,29 @@ function QrScannerOverlay({ onClose }: { onClose: () => void }) {
         return;
       }
 
-      if ('BarcodeDetector' in window) {
-        // Native BarcodeDetector (Chrome 83+, Safari 17.2+)
-        const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
-        detector.detect(video).then((barcodes: any[]) => {
+      const useNative = nativeDetector && nativeFailCount < NATIVE_FAIL_THRESHOLD;
+
+      if (useNative) {
+        nativeDetector.detect(video).then((barcodes: any[]) => {
           if (cancelled) return;
           if (barcodes.length > 0) {
+            nativeFailCount = 0; // reset on success
             handleResult(barcodes[0].rawValue);
             return;
           }
+          nativeFailCount++; // empty result counts as failure too
           animFrame = requestAnimationFrame(scanLoop);
         }).catch(() => {
-          if (!cancelled) animFrame = requestAnimationFrame(scanLoop);
+          if (cancelled) return;
+          nativeFailCount++;
+          animFrame = requestAnimationFrame(scanLoop);
         });
       } else {
-        // Fallback: jsQR via canvas
-        const canvas = canvasRef.current!;
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-        ctx.drawImage(video, 0, 0);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-        getJsQR().then((jsQR: any) => {
+        // jsQR fallback (BarcodeDetector absent or repeatedly failing)
+        const imageData = decodeViaCanvas(video);
+        getJsQR().then((jsQR) => {
           if (cancelled) return;
-          const result = jsQR(imageData.data, canvas.width, canvas.height);
+          const result = jsQR(imageData.data, imageData.width, imageData.height);
           if (result?.data) {
             handleResult(result.data);
             return;
@@ -681,14 +679,21 @@ function QrScannerOverlay({ onClose }: { onClose: () => void }) {
   }, [useLiveCamera]);
 
   const handleResult = (rawValue: string) => {
+    // Extract /scan/jc/<id> from raw value or full URL
     const match = rawValue.match(/\/scan\/jc\/(\d+)/);
     if (match) {
       if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
       window.location.href = `/scan/jc/${match[1]}`;
-    } else if (rawValue.startsWith('http')) {
-      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
-      window.location.href = rawValue;
     } else {
+      // Only allow same-origin URLs — block external redirects (phishing risk)
+      try {
+        const url = new URL(rawValue, window.location.origin);
+        if (url.origin === window.location.origin && url.pathname.startsWith('/scan/')) {
+          if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+          window.location.href = url.pathname;
+          return;
+        }
+      } catch { /* not a valid URL */ }
       setScanError('Not a valid job card QR code. Try again.');
     }
   };
@@ -703,28 +708,32 @@ function QrScannerOverlay({ onClose }: { onClose: () => void }) {
     try {
       const bitmap = await createImageBitmap(file);
 
-      // Try native BarcodeDetector first
+      // Try native BarcodeDetector first, then fall through to jsQR if no result or error
       if ('BarcodeDetector' in window) {
-        const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
-        const barcodes = await detector.detect(bitmap);
-        if (barcodes.length > 0) {
-          handleResult(barcodes[0].rawValue);
-          return;
+        try {
+          const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
+          const barcodes = await detector.detect(bitmap);
+          if (barcodes.length > 0) {
+            handleResult(barcodes[0].rawValue);
+            return;
+          }
+        } catch {
+          // BarcodeDetector threw — fall through to jsQR
         }
-      } else {
-        // Fallback: jsQR
-        const canvas = document.createElement('canvas');
-        canvas.width = bitmap.width;
-        canvas.height = bitmap.height;
-        const ctx = canvas.getContext('2d')!;
-        ctx.drawImage(bitmap, 0, 0);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const jsQR = (await import('jsqr')).default;
-        const result = (jsQR as any)(imageData.data, canvas.width, canvas.height);
-        if (result?.data) {
-          handleResult(result.data);
-          return;
-        }
+      }
+
+      // jsQR fallback — always tried if BarcodeDetector found nothing, threw, or is absent
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(bitmap, 0, 0);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const jsQR = (await import('jsqr')).default;
+      const result = (jsQR as any)(imageData.data, canvas.width, canvas.height);
+      if (result?.data) {
+        handleResult(result.data);
+        return;
       }
 
       setScanError('No QR code found in photo. Try again — make sure the QR code is clear and well-lit.');

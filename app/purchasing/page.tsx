@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { SO_STATUS } from '@/types/purchasing';
 import { Button } from '@/components/ui/button';
 import {
   ClipboardList,
@@ -146,7 +147,7 @@ export default function PurchasingPage() {
             )
           )
         `)
-        .in('purchase_orders.status_id', [7, 8])
+        .in('purchase_orders.status_id', [SO_STATUS.APPROVED, SO_STATUS.PARTIALLY_RECEIVED])
         .order('purchase_order_id', { ascending: false })
         .limit(50);
 
@@ -196,7 +197,7 @@ export default function PurchasingPage() {
             )
           )
         `)
-        .in('status_id', [5, 6])
+        .in('status_id', [SO_STATUS.DRAFT, SO_STATUS.PENDING_APPROVAL])
         .order('created_at', { ascending: false });
 
       if (error) throw error;

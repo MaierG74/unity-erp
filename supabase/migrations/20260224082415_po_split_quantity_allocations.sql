@@ -76,6 +76,18 @@ BEGIN
             alloc_sum := 0;
             FOR alloc IN SELECT * FROM jsonb_array_elements(line->'allocations')
             LOOP
+                alloc_sum := alloc_sum + (alloc->>'quantity_for_order')::numeric;
+            END LOOP;
+
+            -- Guard: reject over-allocation
+            IF alloc_sum > line_qty THEN
+                RAISE EXCEPTION 'Allocation total (%) exceeds line quantity (%) for supplier_component_id %',
+                    alloc_sum, line_qty, (line->>'supplier_component_id');
+            END IF;
+
+            -- Now insert the allocation rows
+            FOR alloc IN SELECT * FROM jsonb_array_elements(line->'allocations')
+            LOOP
                 INSERT INTO supplier_order_customer_orders (
                     supplier_order_id, order_id, component_id,
                     quantity_for_order, quantity_for_stock
@@ -86,7 +98,6 @@ BEGIN
                     (alloc->>'quantity_for_order')::numeric,
                     0
                 );
-                alloc_sum := alloc_sum + (alloc->>'quantity_for_order')::numeric;
             END LOOP;
 
             -- Remaining quantity goes to stock
@@ -195,6 +206,17 @@ BEGIN
             alloc_sum := 0;
             FOR alloc IN SELECT * FROM jsonb_array_elements(line->'allocations')
             LOOP
+                alloc_sum := alloc_sum + (alloc->>'quantity_for_order')::numeric;
+            END LOOP;
+
+            -- Guard: reject over-allocation
+            IF alloc_sum > line_qty THEN
+                RAISE EXCEPTION 'Allocation total (%) exceeds line quantity (%) for supplier_component_id %',
+                    alloc_sum, line_qty, (line->>'supplier_component_id');
+            END IF;
+
+            FOR alloc IN SELECT * FROM jsonb_array_elements(line->'allocations')
+            LOOP
                 INSERT INTO supplier_order_customer_orders (
                     supplier_order_id, order_id, component_id,
                     quantity_for_order, quantity_for_stock
@@ -205,7 +227,6 @@ BEGIN
                     (alloc->>'quantity_for_order')::numeric,
                     0
                 );
-                alloc_sum := alloc_sum + (alloc->>'quantity_for_order')::numeric;
             END LOOP;
 
             IF alloc_sum < line_qty THEN

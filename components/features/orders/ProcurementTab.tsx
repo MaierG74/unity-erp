@@ -207,13 +207,30 @@ async function fetchPOEmailData(purchaseOrderIds: number[]): Promise<Record<numb
   return result;
 }
 
+// Effective quantity for this order's allocation.
+// When a PO line is split across multiple orders, quantity_for_order holds
+// the portion allocated to *this* customer order, which may be less than the
+// full PO line order_quantity.
+function effectiveQty(line: ProcurementLineDetail) {
+  return line.quantity_for_order > 0 ? line.quantity_for_order : line.order_quantity;
+}
+
+// Effective received: cap total_received at the allocated quantity so a line
+// that received more than its share (possible when receiving against the full
+// PO line) doesn't show >100% on the customer order side.
+function effectiveReceived(line: ProcurementLineDetail) {
+  const qty = effectiveQty(line);
+  return Math.min(line.total_received, qty);
+}
+
 // Helper: line status colour + progress bar colour
 function getLineStatusInfo(line: ProcurementLineDetail) {
-  const { order_quantity, total_received } = line;
-  if (total_received >= order_quantity && order_quantity > 0) {
+  const qty = effectiveQty(line);
+  const received = effectiveReceived(line);
+  if (received >= qty && qty > 0) {
     return { dot: 'bg-emerald-500', label: 'Received', variant: 'default' as const, progressClass: '[&>div]:bg-emerald-500' };
   }
-  if (total_received > 0) {
+  if (received > 0) {
     return { dot: 'bg-amber-500', label: 'Partial', variant: 'default' as const, progressClass: '[&>div]:bg-amber-500' };
   }
   return { dot: 'bg-gray-400', label: 'Awaiting', variant: 'secondary' as const, progressClass: '[&>div]:bg-gray-400' };
@@ -273,9 +290,9 @@ export function ProcurementTab({ orderId }: { orderId: number }) {
   // Compute stats
   const stats = useMemo(() => {
     const total = lines.length;
-    const fullyReceived = lines.filter(l => l.total_received >= l.order_quantity && l.order_quantity > 0).length;
-    const partial = lines.filter(l => l.total_received > 0 && l.total_received < l.order_quantity).length;
-    const awaiting = lines.filter(l => l.total_received === 0).length;
+    const fullyReceived = lines.filter(l => effectiveReceived(l) >= effectiveQty(l) && effectiveQty(l) > 0).length;
+    const partial = lines.filter(l => effectiveReceived(l) > 0 && effectiveReceived(l) < effectiveQty(l)).length;
+    const awaiting = lines.filter(l => effectiveReceived(l) === 0).length;
     return { total, fullyReceived, partial, awaiting };
   }, [lines]);
 
@@ -337,7 +354,7 @@ export function ProcurementTab({ orderId }: { orderId: number }) {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">
-                    {groupLines.filter(l => l.total_received >= l.order_quantity && l.order_quantity > 0).length}/{groupLines.length} received
+                    {groupLines.filter(l => effectiveReceived(l) >= effectiveQty(l) && effectiveQty(l) > 0).length}/{groupLines.length} received
                   </span>
                 </div>
               </div>
@@ -351,7 +368,9 @@ export function ProcurementTab({ orderId }: { orderId: number }) {
               <div className="divide-y divide-border/50">
                 {groupLines.map((line) => {
                   const statusInfo = getLineStatusInfo(line);
-                  const pct = line.order_quantity > 0 ? Math.min(100, Math.round((line.total_received / line.order_quantity) * 100)) : 0;
+                  const qty = effectiveQty(line);
+                  const received = effectiveReceived(line);
+                  const pct = qty > 0 ? Math.min(100, Math.round((received / qty) * 100)) : 0;
 
                   return (
                     <div key={line.supplier_order_id} className="flex items-center gap-4 px-4 py-3">
@@ -371,7 +390,7 @@ export function ProcurementTab({ orderId }: { orderId: number }) {
                       {/* Qty + Progress (colour-coded) */}
                       <div className="flex items-center gap-3 shrink-0 w-40">
                         <span className="text-xs tabular-nums font-medium w-16 text-right">
-                          {line.total_received}/{line.order_quantity}
+                          {received}/{qty}
                         </span>
                         <div className="flex-1">
                           <Progress

@@ -109,7 +109,7 @@ Comprehensive UI/UX redesign of the quote detail page and Add Component modal. F
 
 ## Next Session Checklist
 
-- [ ] Delete `SupplierBrowseModal.tsx` (if confirmed)
+- [x] Delete `SupplierBrowseModal.tsx` — deleted, zero imports found
 - [ ] Manual testing of all modal tabs
 - [ ] Verify PDF actions work from new header layout
 - [ ] Check responsive behaviour on mobile (button labels shrink/hide)

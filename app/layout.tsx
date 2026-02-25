@@ -5,6 +5,7 @@ import { Providers } from "@/components/common/providers";
 import { RootLayout as AppRootLayout } from "@/components/layout/root-layout";
 import { ThemeProvider } from '@/components/common/theme-provider';
 import { Toaster } from "@/components/ui/toaster";
+import { Toaster as SonnerToaster } from "sonner";
 import { cn } from "@/lib/utils";
 
 const inter = Inter({
@@ -61,6 +62,7 @@ export default function RootLayout({
             <AppRootLayout>{children}</AppRootLayout>
           </Providers>
           <Toaster />
+          <SonnerToaster position="top-center" richColors />
         </ThemeProvider>
       </body>
     </html>

@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { SO_STATUS } from '@/types/purchasing';
 import type { Supplier, SupplierEmail, SupplierComponent, SupplierWithDetails, SupplierPricelist, SupplierPurchaseOrder } from '@/types/suppliers';
 
 // Extended SupplierComponent type that includes component details
@@ -272,7 +273,7 @@ export async function getOpenOrderCounts(): Promise<Record<number, number>> {
   const { data, error } = await supabase
     .from('purchase_orders')
     .select('purchase_order_id, supplier_id, status_id')
-    .in('status_id', [1, 2, 7, 8]); // Open, In Progress, Approved, Partially Received
+    .in('status_id', [SO_STATUS.OPEN, SO_STATUS.IN_PROGRESS, SO_STATUS.APPROVED, SO_STATUS.PARTIALLY_RECEIVED]);
 
   if (error) throw error;
 
@@ -320,7 +321,7 @@ export async function getSupplierOpenOrders(supplierId: number) {
       )
     `)
     .eq('supplier_id', supplierId)
-    .in('status_id', [1, 2, 7, 8])
+    .in('status_id', [SO_STATUS.OPEN, SO_STATUS.IN_PROGRESS, SO_STATUS.APPROVED, SO_STATUS.PARTIALLY_RECEIVED])
     .order('order_date', { ascending: false });
 
   if (error) throw error;

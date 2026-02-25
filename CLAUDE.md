@@ -26,6 +26,7 @@ Two MCP servers are available. For setup/troubleshooting, see `docs/technical/mc
 ### Database & Scripts
 - `npm run schema` - Get database schema via `tsx scripts/get-schema.ts`
 - `npm run seed` - Seed test data via `tsx scripts/seed-test-data.ts`
+- For database migrations, use the `migration-hygiene` skill.
 
 ## Documentation
 

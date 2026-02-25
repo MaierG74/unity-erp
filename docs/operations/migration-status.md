@@ -28,11 +28,20 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260222145908
-- Latest applied migration name: tenant_rls_step66_quote_item_cutlists_enable_org
-- Applied at (UTC): 2026-02-22
+- Latest applied migration version: 20260225074503
+- Latest applied migration name: timekeeper_trigger_security_definer_fix
+- Applied at (UTC): 2026-02-25
 - Applied by: Codex via Supabase MCP
-- Verification notes: Confirmed via `supabase_migrations.schema_migrations` and Supabase MCP checks; Steps 61-66 completed for quote helper tables (`quote_cluster_lines`, `quote_item_clusters`, `quote_item_cutlists`) with `org_id` FK validation + `NOT NULL` enforcement and org-scoped RLS policies enabled. Normal-user smoke tests (`testai@qbutton.co.za`) on `/quotes` and quote detail succeeded with no new access/runtime regressions.
+- Verification notes:
+  1. `timekeeper_anon_read_hotfix_qbutton` (20260225073626): restored limited `anon` read on `public.staff` + `public.time_clock_events` for active Qbutton staff.
+  2. `timekeeper_anon_insert_policy_fix` (20260225074120): relaxed `anon` insert policy predicate to work with scanner payload shape.
+  3. `timekeeper_anon_policy_uuid_lock_fix` (20260225074246): removed `organizations` table dependency from anon policy checks and locked predicates to Qbutton org UUID.
+  4. `timekeeper_trigger_security_definer_fix` (20260225074503): made `update_daily_work_summary` trigger function `SECURITY DEFINER` and propagated `org_id` in summary upserts.
+  5. External scanner behavior verified via real anon REST calls:
+     - `GET /rest/v1/staff?...` returns `200`.
+     - `GET /rest/v1/time_clock_events?...` returns `200`.
+     - `POST /rest/v1/time_clock_events` returns `201`.
+  6. This is a tactical compatibility path for a non-authenticated scanner integration; long-term target remains authenticated organization-context scanner access.
 
 ## Pre-Deploy Migration Checklist
 - [ ] Repo checked: latest file in `supabase/migrations`

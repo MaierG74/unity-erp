@@ -23,9 +23,11 @@ import {
   fetchComponents,
   fetchProductComponents,
   fetchProductLabor,
+  fetchProductOverhead,
   fetchEffectiveBOM,
   fetchComponentsByIds,
   reorderQuoteItems,
+  type ProductOverheadItem,
 } from '@/lib/db/quotes';
 import QuoteItemClusterGrid from './QuoteItemClusterGrid';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
@@ -463,6 +465,7 @@ export default function QuoteItemsTable({
     qty,
     explode,
     include_labour,
+    include_overhead,
     attach_image,
     selected_options,
   }: {
@@ -471,6 +474,7 @@ export default function QuoteItemsTable({
     qty: number;
     explode: boolean;
     include_labour?: boolean;
+    include_overhead?: boolean;
     attach_image?: boolean;
     selected_options?: ProductOptionSelection;
   }) => {
@@ -514,7 +518,8 @@ export default function QuoteItemsTable({
           return await fetchProductComponents(product_id, optionSelections);
         })();
         const laborPromise = include_labour === false ? Promise.resolve([]) : fetchProductLabor(product_id);
-        const [bom, labor] = await Promise.all([bomPromise, laborPromise]);
+        const overheadPromise = include_overhead === false ? Promise.resolve([]) : fetchProductOverhead(product_id);
+        const [bom, labor, overheadItems] = await Promise.all([bomPromise, laborPromise, overheadPromise]);
 
         const createdLines: QuoteClusterLine[] = [];
 
@@ -563,8 +568,51 @@ export default function QuoteItemsTable({
           }
         }
 
+        // Overhead lines (snapshot values at explosion time)
+        if (overheadItems && overheadItems.length > 0) {
+          // Compute material/labor subtotals for percentage-based overheads
+          const materialsCost = createdLines
+            .filter(l => l.line_type === 'component')
+            .reduce((sum, l) => sum + (l.qty || 0) * (l.unit_cost || 0), 0);
+          const laborCost = createdLines
+            .filter(l => l.line_type === 'labor')
+            .reduce((sum, l) => sum + (l.qty || 0) * (l.unit_cost || 0), 0);
+
+          for (const oh of overheadItems) {
+            const value = oh.override_value ?? oh.element.default_value;
+            const ohQty = oh.quantity;
+            let unitCost: number;
+
+            if (oh.element.cost_type === 'fixed') {
+              unitCost = value;
+            } else {
+              // Percentage type
+              const basis =
+                oh.element.percentage_basis === 'materials' ? materialsCost
+                : oh.element.percentage_basis === 'labor' ? laborCost
+                : materialsCost + laborCost; // 'total'
+              unitCost = (basis * value / 100);
+            }
+
+            const description = `Overhead – ${oh.element.name} (${oh.element.code})`;
+            const line = await createQuoteClusterLine({
+              cluster_id: targetCluster.id,
+              line_type: 'overhead',
+              description,
+              qty: ohQty * (qty || 1),
+              unit_cost: Math.round(unitCost * 100) / 100,
+              include_in_markup: true,
+              sort_order: 0,
+              overhead_element_id: oh.element.element_id,
+              overhead_cost_type: oh.element.cost_type,
+              overhead_percentage_basis: oh.element.percentage_basis,
+            } as any);
+            createdLines.push(line);
+          }
+        }
+
         if (createdLines.length === 0) {
-          toast({ title: 'No BOM/BOL found', description: 'This product has no components or labour. Item added without costing lines.' });
+          toast({ title: 'No BOM/BOL found', description: 'This product has no components, labour, or overhead. Item added without costing lines.' });
         } else {
           newItemWithCluster = {
             ...newItem,
@@ -712,6 +760,9 @@ export default function QuoteItemsTable({
                 hours: originalLine.hours,
                 rate: originalLine.rate,
                 cutlist_slot: originalLine.cutlist_slot,
+                overhead_element_id: (originalLine as any).overhead_element_id,
+                overhead_cost_type: (originalLine as any).overhead_cost_type,
+                overhead_percentage_basis: (originalLine as any).overhead_percentage_basis,
               });
               newLines.push(newLine);
             } catch (error) {
@@ -802,7 +853,8 @@ export default function QuoteItemsTable({
         if (component.explode !== false) {
           const bomPromise = fetchProductComponents(component.product_id);
           const laborPromise = component.include_labour === false ? Promise.resolve([]) : fetchProductLabor(component.product_id);
-          const [bom, labor] = await Promise.all([bomPromise, laborPromise]);
+          const overheadPromise = fetchProductOverhead(component.product_id);
+          const [bom, labor, clOverhead] = await Promise.all([bomPromise, laborPromise, overheadPromise]);
           const createdLines: QuoteClusterLine[] = [];
 
           // BOM component lines
@@ -844,6 +896,47 @@ export default function QuoteItemsTable({
               sort_order: 0,
             } as any);
             createdLines.push(line);
+          }
+
+          // Overhead lines (snapshot values at explosion time)
+          if (clOverhead && clOverhead.length > 0) {
+            const materialsCost = createdLines
+              .filter(l => l.line_type === 'component')
+              .reduce((sum, l) => sum + (l.qty || 0) * (l.unit_cost || 0), 0);
+            const laborCost = createdLines
+              .filter(l => l.line_type === 'labor')
+              .reduce((sum, l) => sum + (l.qty || 0) * (l.unit_cost || 0), 0);
+
+            for (const oh of clOverhead) {
+              const value = oh.override_value ?? oh.element.default_value;
+              const ohQty = oh.quantity;
+              let unitCost: number;
+
+              if (oh.element.cost_type === 'fixed') {
+                unitCost = value;
+              } else {
+                const basis =
+                  oh.element.percentage_basis === 'materials' ? materialsCost
+                  : oh.element.percentage_basis === 'labor' ? laborCost
+                  : materialsCost + laborCost;
+                unitCost = (basis * value / 100);
+              }
+
+              const ohDesc = `Overhead – ${oh.element.name} (${oh.element.code})`;
+              const line = await createQuoteClusterLine({
+                cluster_id: clusterId,
+                line_type: 'overhead',
+                description: ohDesc,
+                qty: ohQty * (component.qty || 1),
+                unit_cost: Math.round(unitCost * 100) / 100,
+                include_in_markup: true,
+                sort_order: 0,
+                overhead_element_id: oh.element.element_id,
+                overhead_cost_type: oh.element.cost_type,
+                overhead_percentage_basis: oh.element.percentage_basis,
+              } as any);
+              createdLines.push(line);
+            }
           }
 
           const updatedItems = items.map(item => {

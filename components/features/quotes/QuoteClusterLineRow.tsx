@@ -36,6 +36,7 @@ const QuoteClusterLineRow: React.FC<QuoteClusterLineRowProps> = ({ line, onUpdat
     component: 'bg-teal-100 text-teal-700',
     product: 'bg-blue-100 text-blue-700',
     cluster: 'bg-purple-100 text-purple-700',
+    overhead: 'bg-orange-100 text-orange-700',
   };
   const typeLabel = line.line_type
     ? line.line_type.charAt(0).toUpperCase() + line.line_type.slice(1)

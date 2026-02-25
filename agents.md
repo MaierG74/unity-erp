@@ -21,14 +21,8 @@ This repository is being actively migrated to **multi-tenant** (organization/ten
 - Non-obvious guardrails: staff attendance payroll rules rely on `time_clock_events`; keep `@react-pdf/renderer` lazily/dynamically imported to avoid build timeouts.
 
 ## Migration Tracking (All Features)
-1. Migration files are append-only: never delete old files from `supabase/migrations`.
-2. After applying migrations, verify applied state with Supabase MCP (`list_migrations`) instead of guessing.
-3. Update `docs/operations/migration-status.md` for each environment (local/staging/production):
-   - latest applied version
-   - applied by
-   - applied at
-   - verification notes
-4. Before deploy, compare latest repo migration vs latest applied migration for target environment.
+- For migration create/apply/reconcile work, use `codex-skills/migration-hygiene/SKILL.md`.
+- Keep `docs/operations/migration-status.md` synced to Supabase MCP `list_migrations` after each apply.
 
 ## Tenancy Vocabulary
 - Use **organization** (aka **tenant**) consistently.

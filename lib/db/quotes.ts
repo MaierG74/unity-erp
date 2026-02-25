@@ -59,7 +59,7 @@ export interface QuoteItemCluster {
 export interface QuoteClusterLine {
   id: string; // uuid
   cluster_id: string; // uuid
-  line_type: 'component' | 'manual' | 'labor';
+  line_type: 'component' | 'manual' | 'labor' | 'overhead';
   component_id?: number | null;
   supplier_component_id?: number | null; // References the specific supplier offer used
   description?: string | null;
@@ -72,6 +72,9 @@ export interface QuoteClusterLine {
   rate?: number | null;
   sort_order: number;
   cutlist_slot?: 'primary' | 'backer' | 'band16' | 'band32' | null;
+  overhead_element_id?: number | null;
+  overhead_cost_type?: 'fixed' | 'percentage' | null;
+  overhead_percentage_basis?: 'materials' | 'labor' | 'total' | null;
   created_at: string;
   updated_at: string;
 }
@@ -685,6 +688,35 @@ export async function fetchProductLabor(productId: number): Promise<ProductLabor
     return items as ProductLaborItem[];
   } catch (e) {
     console.warn('fetchProductLabor error:', e);
+    return [];
+  }
+}
+
+// Product overhead items for quote explosion
+export interface ProductOverheadItem {
+  id: number;
+  element_id: number;
+  quantity: number;
+  override_value: number | null;
+  element: {
+    element_id: number;
+    code: string;
+    name: string;
+    cost_type: 'fixed' | 'percentage';
+    default_value: number;
+    percentage_basis: 'materials' | 'labor' | 'total' | null;
+  };
+}
+
+export async function fetchProductOverhead(productId: number): Promise<ProductOverheadItem[]> {
+  try {
+    const res = await fetch(`/api/products/${productId}/overhead`, { cache: 'no-store' });
+    if (!res.ok) return [];
+    const json = await res.json();
+    const items = json?.items ?? json;
+    return Array.isArray(items) ? items : [];
+  } catch (e) {
+    console.warn('fetchProductOverhead error:', e);
     return [];
   }
 }

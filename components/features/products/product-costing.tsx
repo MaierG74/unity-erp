@@ -19,8 +19,16 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
 import { Plus, Trash2 } from 'lucide-react'
 import { AddOverheadDialog } from './AddOverheadDialog'
+import { ProductBOM } from './product-bom'
+import { ProductBOL } from './product-bol'
 import { useToast } from '@/components/ui/use-toast'
 
 type BomRow = {
@@ -325,193 +333,133 @@ export function ProductCosting({ productId }: { productId: number }) {
 
   return (
     <div className="space-y-6">
-      {/* Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Cost Summary Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
-          <CardHeader><CardTitle>Materials Cost</CardTitle></CardHeader>
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Materials</CardTitle></CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{fmtMoney(materialsCost)}</div>
             {missingPrices > 0 && (
-              <CardDescription>{missingPrices} item(s) missing prices</CardDescription>
+              <p className="text-xs text-amber-500 mt-1">{missingPrices} item(s) missing prices</p>
             )}
           </CardContent>
         </Card>
         <Card>
-          <CardHeader><CardTitle>Labor Cost</CardTitle></CardHeader>
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Labor</CardTitle></CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{fmtMoney(labourCost)}</div>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader><CardTitle>Overhead Cost</CardTitle></CardHeader>
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Overhead</CardTitle></CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{fmtMoney(overheadCost)}</div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader><CardTitle>Unit Cost</CardTitle></CardHeader>
+        <Card className="bg-primary/5 border-primary/20">
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Unit Cost</CardTitle></CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{fmtMoney(unitCost)}</div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Materials Breakdown */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Materials Breakdown</CardTitle>
-          <CardDescription>{usingEffective ? 'From Effective BOM (explicit + linked)' : 'From Bill of Materials'}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {materialsLoading ? (
-            <div className="py-4">Loading materials…</div>
-          ) : (
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Component</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead className="text-right">Qty</TableHead>
-                    <TableHead className="text-right">Unit Price</TableHead>
-                    <TableHead className="text-right">Line Total</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {materials.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="py-4 text-center text-muted-foreground">No components</TableCell>
-                    </TableRow>
-                  ) : (
-                    materials.map((m, idx) => (
-                      <TableRow key={idx}>
-                        <TableCell className="font-mono">{m.code}</TableCell>
-                        <TableCell>{m.description}</TableCell>
-                        <TableCell className="text-right">{m.qty}</TableCell>
-                        <TableCell className="text-right">{fmtMoney(m.unitPrice)}</TableCell>
-                        <TableCell className="text-right">{fmtMoney(m.lineTotal)}</TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
+      {/* Accordion Sections */}
+      <Accordion type="multiple" defaultValue={['materials']} className="space-y-3">
+        {/* Materials (BOM) */}
+        <AccordionItem value="materials" className="border rounded-lg px-4">
+          <AccordionTrigger className="hover:no-underline">
+            <div className="flex items-center gap-3">
+              <span className="font-semibold">Bill of Materials</span>
+              <span className="text-sm text-muted-foreground">{materials.length} component{materials.length !== 1 ? 's' : ''}</span>
+              <span className="text-sm font-medium ml-auto mr-4">{fmtMoney(materialsCost)}</span>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </AccordionTrigger>
+          <AccordionContent>
+            <ProductBOM productId={productId} />
+          </AccordionContent>
+        </AccordionItem>
 
-      {/* Labor Breakdown */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Labor Breakdown</CardTitle>
-          <CardDescription>From Bill of Labor</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {bolLoading ? (
-            <div className="py-4">Loading labor…</div>
-          ) : (
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Job</TableHead>
-                    <TableHead className="text-right">Hours</TableHead>
-                    <TableHead className="text-right">Qty</TableHead>
-                    <TableHead className="text-right">Rate</TableHead>
-                    <TableHead className="text-right">Line Total</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {labour.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={6} className="py-4 text-center text-muted-foreground">No labor</TableCell>
-                    </TableRow>
-                  ) : (
-                    labour.map((l, idx) => (
-                      <TableRow key={idx}>
-                        <TableCell>{l.category}</TableCell>
-                        <TableCell>{l.job}</TableCell>
-                        <TableCell className="text-right">{l.hours.toFixed(2)}</TableCell>
-                        <TableCell className="text-right">{l.qty}</TableCell>
-                        <TableCell className="text-right">{fmtMoney(l.hourlyRate)}</TableCell>
-                        <TableCell className="text-right">{fmtMoney(l.lineTotal)}</TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
+        {/* Labor (BOL) */}
+        <AccordionItem value="labor" className="border rounded-lg px-4">
+          <AccordionTrigger className="hover:no-underline">
+            <div className="flex items-center gap-3">
+              <span className="font-semibold">Bill of Labor</span>
+              <span className="text-sm text-muted-foreground">{labour.length} operation{labour.length !== 1 ? 's' : ''}</span>
+              <span className="text-sm font-medium ml-auto mr-4">{fmtMoney(labourCost)}</span>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </AccordionTrigger>
+          <AccordionContent>
+            <ProductBOL productId={productId} />
+          </AccordionContent>
+        </AccordionItem>
 
-      {/* Overhead Breakdown */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle>Overhead Breakdown</CardTitle>
-            <CardDescription>Indirect costs and overhead allocations</CardDescription>
-          </div>
-          <Button size="sm" onClick={() => setAddOverheadOpen(true)}>
-            <Plus className="h-4 w-4 mr-1" />
-            Add Overhead
-          </Button>
-        </CardHeader>
-        <CardContent>
-          {overheadLoading ? (
-            <div className="py-4">Loading overhead…</div>
-          ) : overhead.length === 0 ? (
-            <div className="py-4 text-muted-foreground">No overhead costs assigned. Click "Add Overhead" to assign overhead elements to this product.</div>
-          ) : (
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Code</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead className="text-right">Value</TableHead>
-                    <TableHead className="text-right">Qty</TableHead>
-                    <TableHead className="text-right">Line Total</TableHead>
-                    <TableHead className="w-10"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {overhead.map((o, idx) => (
-                    <TableRow key={idx}>
-                      <TableCell className="font-mono text-sm">{o.code}</TableCell>
-                      <TableCell>{o.name}</TableCell>
-                      <TableCell className="capitalize">{o.type === 'fixed' ? 'Fixed' : 'Percentage'}</TableCell>
-                      <TableCell className="text-right">
-                        {o.type === 'fixed' ? fmtMoney(o.value) : `${o.value}%`}
-                      </TableCell>
-                      <TableCell className="text-right">{o.quantity}</TableCell>
-                      <TableCell className="text-right font-medium">{fmtMoney(o.lineTotal)}</TableCell>
-                      <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={() => handleRemoveOverhead(o.element_id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {overhead.length > 1 && (
-                    <TableRow className="font-semibold bg-muted/50">
-                      <TableCell colSpan={6} className="text-right">Total Overhead</TableCell>
-                      <TableCell className="text-right">{fmtMoney(overheadCost)}</TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
+        {/* Overhead */}
+        <AccordionItem value="overhead" className="border rounded-lg px-4">
+          <AccordionTrigger className="hover:no-underline">
+            <div className="flex items-center gap-3">
+              <span className="font-semibold">Overhead</span>
+              <span className="text-sm text-muted-foreground">{overhead.length} element{overhead.length !== 1 ? 's' : ''}</span>
+              <span className="text-sm font-medium ml-auto mr-4">{fmtMoney(overheadCost)}</span>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </AccordionTrigger>
+          <AccordionContent>
+            <div className="space-y-4">
+              <div className="flex justify-end">
+                <Button size="sm" onClick={() => setAddOverheadOpen(true)}>
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add Overhead
+                </Button>
+              </div>
+              {overheadLoading ? (
+                <div className="py-4 text-muted-foreground">Loading overhead...</div>
+              ) : overhead.length === 0 ? (
+                <div className="py-4 text-muted-foreground">No overhead costs assigned. Click &quot;Add Overhead&quot; to assign overhead elements to this product.</div>
+              ) : (
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Code</TableHead>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead className="text-right">Value</TableHead>
+                        <TableHead className="text-right">Qty</TableHead>
+                        <TableHead className="text-right">Line Total</TableHead>
+                        <TableHead className="w-10"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {overhead.map((o, idx) => (
+                        <TableRow key={idx}>
+                          <TableCell className="font-mono text-sm">{o.code}</TableCell>
+                          <TableCell>{o.name}</TableCell>
+                          <TableCell className="capitalize">{o.type === 'fixed' ? 'Fixed' : 'Percentage'}</TableCell>
+                          <TableCell className="text-right">
+                            {o.type === 'fixed' ? fmtMoney(o.value) : `${o.value}%`}
+                          </TableCell>
+                          <TableCell className="text-right">{o.quantity}</TableCell>
+                          <TableCell className="text-right font-medium">{fmtMoney(o.lineTotal)}</TableCell>
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive hover:text-destructive"
+                              onClick={() => handleRemoveOverhead(o.element_id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </div>
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
 
       {/* Add Overhead Dialog */}
       <AddOverheadDialog

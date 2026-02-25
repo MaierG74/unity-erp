@@ -113,31 +113,30 @@ export function ForOrderEditPopover({
     setEditMode('split');
   }, [customerOrderLinks, orderQuantity]);
 
-  // Single-order mutation (existing behavior)
+  // Single-order mutation — uses atomic RPC
   const updateAllocationMutation = useMutation({
     mutationFn: async (params: { type: 'order'; orderId: number; orderNumber: string } | { type: 'stock' } | { type: 'clear' }) => {
       const oldDisplay = currentOrderLink?.customer_order
         ? currentOrderLink.customer_order.order_number
         : currentStockOnly ? 'Stock' : '—';
 
-      const { error: deleteError } = await supabase
-        .from('supplier_order_customer_orders')
-        .delete()
-        .eq('supplier_order_id', supplierOrderId);
+      let newAllocations: object[];
+      if (params.type === 'order') {
+        newAllocations = [{ order_id: params.orderId, quantity_for_order: orderQuantity, quantity_for_stock: 0 }];
+      } else if (params.type === 'stock') {
+        newAllocations = [{ order_id: null, quantity_for_order: 0, quantity_for_stock: orderQuantity }];
+      } else {
+        newAllocations = [];
+      }
 
-      if (deleteError) throw new Error(`Failed to clear allocation: ${deleteError.message}`);
+      const { error } = await supabase.rpc('update_supplier_order_allocations', {
+        target_supplier_order_id: supplierOrderId,
+        new_allocations: newAllocations,
+        target_purchase_order_id: Number(purchaseOrderId),
+      });
+      if (error) throw new Error(`Failed to update allocation: ${error.message}`);
 
       if (params.type === 'order') {
-        const { error: insertError } = await supabase
-          .from('supplier_order_customer_orders')
-          .insert({
-            supplier_order_id: supplierOrderId,
-            order_id: params.orderId,
-            quantity_for_order: orderQuantity,
-            quantity_for_stock: 0,
-          });
-        if (insertError) throw new Error(`Failed to set allocation: ${insertError.message}`);
-
         await logPOActivity({
           purchaseOrderId,
           actionType: 'for_order_changed',
@@ -145,16 +144,6 @@ export function ForOrderEditPopover({
           metadata: { supplier_order_id: supplierOrderId, old_value: oldDisplay, new_value: params.orderNumber, new_order_id: params.orderId },
         });
       } else if (params.type === 'stock') {
-        const { error: insertError } = await supabase
-          .from('supplier_order_customer_orders')
-          .insert({
-            supplier_order_id: supplierOrderId,
-            order_id: null,
-            quantity_for_order: 0,
-            quantity_for_stock: orderQuantity,
-          });
-        if (insertError) throw new Error(`Failed to set stock allocation: ${insertError.message}`);
-
         await logPOActivity({
           purchaseOrderId,
           actionType: 'for_order_changed',
@@ -181,7 +170,7 @@ export function ForOrderEditPopover({
     },
   });
 
-  // Multi-order save mutation
+  // Multi-order save mutation — uses atomic RPC
   const saveSplitMutation = useMutation({
     mutationFn: async (rows: AllocationRow[]) => {
       const oldDisplay = hasMultipleOrders
@@ -190,44 +179,32 @@ export function ForOrderEditPopover({
           ? currentOrderLink.customer_order.order_number
           : currentStockOnly ? 'Stock' : '—';
 
-      // Delete all existing junction records
-      const { error: deleteError } = await supabase
-        .from('supplier_order_customer_orders')
-        .delete()
-        .eq('supplier_order_id', supplierOrderId);
-      if (deleteError) throw new Error(`Failed to clear allocations: ${deleteError.message}`);
-
       const allocSum = rows.reduce((sum, r) => sum + (r.quantity || 0), 0);
       const stockRemaining = Math.max(0, orderQuantity - allocSum);
-
-      // Insert order allocations
       const orderRows = rows.filter(r => r.customer_order_id && r.quantity > 0);
-      if (orderRows.length > 0) {
-        const { error: insertError } = await supabase
-          .from('supplier_order_customer_orders')
-          .insert(
-            orderRows.map(r => ({
-              supplier_order_id: supplierOrderId,
-              order_id: r.customer_order_id,
-              quantity_for_order: r.quantity,
-              quantity_for_stock: 0,
-            }))
-          );
-        if (insertError) throw new Error(`Failed to save allocations: ${insertError.message}`);
+
+      // Build the allocations array for the RPC
+      const newAllocations: object[] = orderRows.map(r => ({
+        order_id: r.customer_order_id,
+        quantity_for_order: r.quantity,
+        quantity_for_stock: 0,
+      }));
+
+      // Add stock remainder
+      if (stockRemaining > 0 || orderRows.length === 0) {
+        newAllocations.push({
+          order_id: null,
+          quantity_for_order: 0,
+          quantity_for_stock: orderRows.length === 0 ? orderQuantity : stockRemaining,
+        });
       }
 
-      // Insert stock remainder
-      if (stockRemaining > 0 || orderRows.length === 0) {
-        const { error: stockError } = await supabase
-          .from('supplier_order_customer_orders')
-          .insert({
-            supplier_order_id: supplierOrderId,
-            order_id: null,
-            quantity_for_order: 0,
-            quantity_for_stock: orderRows.length === 0 ? orderQuantity : stockRemaining,
-          });
-        if (stockError) throw new Error(`Failed to save stock allocation: ${stockError.message}`);
-      }
+      const { error } = await supabase.rpc('update_supplier_order_allocations', {
+        target_supplier_order_id: supplierOrderId,
+        new_allocations: newAllocations,
+        target_purchase_order_id: Number(purchaseOrderId),
+      });
+      if (error) throw new Error(`Failed to save allocations: ${error.message}`);
 
       // Build new display for activity log
       const newParts = orderRows.map(r => {

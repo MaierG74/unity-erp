@@ -1440,7 +1440,7 @@ export function NewPurchaseOrderForm() {
                           </label>
                           <button
                             type="button"
-                            className="text-[11px] text-blue-600 hover:text-blue-700 hover:underline flex items-center gap-1"
+                            className="text-xs font-medium text-blue-600 hover:text-blue-700 border border-blue-300 hover:border-blue-400 rounded-md px-2 py-0.5 flex items-center gap-1 transition-colors"
                             onClick={() => {
                               const currentOrderId = watchedItems[index]?.customer_order_id;
                               const currentQty = watchedItems[index]?.quantity || 0;
@@ -1455,7 +1455,7 @@ export function NewPurchaseOrderForm() {
                               setSplitModeItems((prev) => new Set(prev).add(index));
                             }}
                           >
-                            <Split className="h-3 w-3" />
+                            <Split className="h-3.5 w-3.5" />
                             Split
                           </button>
                         </div>

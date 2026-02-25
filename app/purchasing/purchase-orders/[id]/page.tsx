@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams, notFound } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { SO_STATUS } from '@/types/purchasing';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import {
@@ -867,7 +868,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     if (!purchaseOrder?.supplier_orders) return;
     const validLineIds = new Set(
       purchaseOrder.supplier_orders
-        .filter((order) => order.status_id !== 4 && (order.order_quantity - (order.total_received || 0)) > 0)
+        .filter((order) => order.status_id !== SO_STATUS.CANCELLED && (order.order_quantity - (order.total_received || 0)) > 0)
         .map((order) => order.order_id)
     );
     setSelectedLineItemIds((prev) => prev.filter((orderId) => validLineIds.has(orderId)));
@@ -1714,6 +1715,25 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     },
   });
 
+  // Delete entire draft PO
+  const [showDeleteDraftDialog, setShowDeleteDraftDialog] = useState(false);
+  const deleteDraftMutation = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.rpc('delete_draft_purchase_order', {
+        target_purchase_order_id: Number(id),
+      });
+      if (error) throw new Error(`Failed to delete draft: ${error.message}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
+      toast({ title: 'Draft deleted', description: 'The draft purchase order has been deleted.' });
+      router.push('/purchasing/purchase-orders');
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Failed to delete', description: error.message, variant: 'destructive' });
+    },
+  });
+
   // Enter edit mode
   const handleEnterEditMode = () => {
     setEditedNotes(purchaseOrder?.notes || '');
@@ -1912,7 +1932,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const hasOutstandingItems = purchaseOrder.supplier_orders?.some(o => (o.order_quantity - (o.total_received || 0)) > 0);
 
   // Calculate totals (exclude cancelled line items)
-  const activeOrders = purchaseOrder.supplier_orders?.filter(o => o.status_id !== 4) || [];
+  const activeOrders = purchaseOrder.supplier_orders?.filter(o => o.status_id !== SO_STATUS.CANCELLED) || [];
   const totalItems = activeOrders.reduce((sum, order) => sum + order.order_quantity, 0);
   const totalAmount = activeOrders.reduce((sum, order) => {
     return sum + (order.supplier_component?.price || 0) * order.order_quantity;
@@ -2439,7 +2459,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                       const supplier = order.supplier_component?.supplier;
                       const price = order.supplier_component?.price || 0;
                       const lineTotal = price * order.order_quantity;
-                      const isLineCancelled = order.status_id === 4;
+                      const isLineCancelled = order.status_id === SO_STATUS.CANCELLED;
                       const remainingToReceive = Math.max(0, order.order_quantity - (order.total_received || 0));
 
                       const editedQty = editedQuantities[order.order_id] ?? order.order_quantity;
@@ -2577,7 +2597,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                       {isApproved && <TableCell />}
                       <TableCell className="text-right font-semibold">
                         R{isEditMode
-                          ? purchaseOrder.supplier_orders?.filter(o => o.status_id !== 4).reduce((sum, order) => {
+                          ? purchaseOrder.supplier_orders?.filter(o => o.status_id !== SO_STATUS.CANCELLED).reduce((sum, order) => {
                               const qty = editedQuantities[order.order_id] ?? order.order_quantity;
                               const price = order.supplier_component?.price || 0;
                               return sum + (price * qty);
@@ -2944,10 +2964,21 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
         {/* Bottom action bar */}
         <div className="sticky bottom-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-t shadow-sm px-4 py-3 flex items-center justify-end gap-3">
           {isDraft && !isEditMode && (
-            <Button onClick={handleSubmit} disabled={submitMutation.isPending}>
-              {submitMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Submit for Approval
-            </Button>
+            <>
+              <Button
+                variant="destructive"
+                onClick={() => setShowDeleteDraftDialog(true)}
+                disabled={deleteDraftMutation.isPending}
+              >
+                {deleteDraftMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete Draft
+              </Button>
+              <Button onClick={handleSubmit} disabled={submitMutation.isPending}>
+                {submitMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                Submit for Approval
+              </Button>
+            </>
           )}
           {isPendingApproval && (
             <div className="flex items-center gap-2">
@@ -3134,6 +3165,35 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
       </Dialog>
 
       {/* Cancel approved order dialog */}
+      {/* Delete draft PO dialog */}
+      <Dialog open={showDeleteDraftDialog} onOpenChange={(open) => { if (!open) setShowDeleteDraftDialog(false); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Draft Purchase Order</DialogTitle>
+            <DialogDescription>
+              This will permanently delete PO #{purchaseOrder?.purchase_order_id} and all its line items. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="pt-4">
+            <Button
+              variant="outline"
+              onClick={() => setShowDeleteDraftDialog(false)}
+              disabled={deleteDraftMutation.isPending}
+            >
+              Keep Draft
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => deleteDraftMutation.mutate()}
+              disabled={deleteDraftMutation.isPending}
+            >
+              {deleteDraftMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Delete Draft
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={showCancelDialog} onOpenChange={(open) => { if (!open) { setShowCancelDialog(false); setCancelReason(''); } }}>
         <DialogContent>
           <DialogHeader>

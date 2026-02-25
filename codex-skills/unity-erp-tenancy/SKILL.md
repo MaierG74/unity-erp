@@ -25,6 +25,16 @@ description: Use when implementing or modifying multi-tenant (organization/org_i
   - no broad `USING true` / `WITH CHECK true` authenticated policies
 - Before doing new tenancy work, run the org-scope audit from the runbook and confirm it returns no rows.
 
+## Timekeeper Scanner Compatibility (2026-02-25)
+- External Timekeeper scanner currently uses **anon Supabase access** (no user login).
+- Production hotfix chain applied:
+  - `20260225073626_timekeeper_anon_read_hotfix_qbutton.sql`
+  - `20260225074120_timekeeper_anon_insert_policy_fix.sql`
+  - `20260225074246_timekeeper_anon_policy_uuid_lock_fix.sql`
+  - `20260225074503_timekeeper_trigger_security_definer_fix.sql`
+- These restore scanner read/insert for active `Qbutton` staff while keeping authenticated org-scoped policies intact.
+- Guardrail: do not remove `anon` policies on `staff` / `time_clock_events` without replacing scanner auth flow first.
+
 ## Must-Run Checks (before tightening RLS)
 Read `docs/operations/tenant-data-isolation-zero-downtime-runbook.md` and use the queries in:
 - Stage 0 (preflight)

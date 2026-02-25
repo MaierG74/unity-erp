@@ -1,5 +1,21 @@
 import { SupplierComponent } from "./suppliers";
 
+/**
+ * Supplier order status IDs — mirrors `supplier_order_statuses` table.
+ * Use these constants instead of hard-coded numeric IDs.
+ */
+export const SO_STATUS = {
+  OPEN: 1,
+  IN_PROGRESS: 2,
+  COMPLETED: 3,
+  CANCELLED: 4,
+  DRAFT: 5,
+  PENDING_APPROVAL: 6,
+  APPROVED: 7,
+  PARTIALLY_RECEIVED: 8,
+  FULLY_RECEIVED: 9,
+} as const;
+
 // Define Component type based on what's in the InventoryItem
 export type Component = {
   component_id: number;

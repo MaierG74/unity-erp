@@ -23,8 +23,6 @@ import Link from 'next/link';
 import React from 'react';
 import { ImageGallery } from '@/components/features/products/image-gallery';
 import { CategoryDialog } from '@/components/features/products/category-dialog';
-import { ProductBOM } from '@/components/features/products/product-bom';
-import { ProductBOL } from '@/components/features/products/product-bol';
 import ProductCosting from '@/components/features/products/product-costing';
 import { ProductOptionsTab } from '@/components/features/products/ProductOptionsTab';
 import { ProductCutlistTab } from '@/components/features/products/ProductCutlistTab';
@@ -365,11 +363,9 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="images">Images</TabsTrigger>
           <TabsTrigger value="categories">Categories</TabsTrigger>
-          <TabsTrigger value="bom">Bill of Materials</TabsTrigger>
-          <TabsTrigger value="cutlist">Cutlist</TabsTrigger>
-          <TabsTrigger value="bol">Bill of Labor</TabsTrigger>
-          <TabsTrigger value="options">Options</TabsTrigger>
           <TabsTrigger value="costing">Costing</TabsTrigger>
+          <TabsTrigger value="cutlist">Cutlist</TabsTrigger>
+          <TabsTrigger value="options">Options</TabsTrigger>
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
         </TabsList>
         
@@ -625,10 +621,6 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
           </Card>
         </TabsContent>
         
-        <TabsContent value="bom" className="space-y-4">
-          <ProductBOM productId={product.product_id} />
-        </TabsContent>
-
         <TabsContent value="cutlist" className="space-y-4">
           <div className="flex gap-2">
             {canUseConfigurator ? (
@@ -659,10 +651,6 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
           <ProductCutlistTab productId={product.product_id} />
         </TabsContent>
         
-        <TabsContent value="bol" className="space-y-4">
-          <ProductBOL productId={product.product_id} />
-        </TabsContent>
-
         <TabsContent value="options" className="space-y-4">
           <ProductOptionsTab productId={product.product_id} />
         </TabsContent>
