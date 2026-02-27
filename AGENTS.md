@@ -20,6 +20,10 @@ This repository is being actively migrated to **multi-tenant** (organization/ten
 - Fast validation commands: `npm run lint`, `npm run build`, and `npm run schema` when schema-level changes are involved.
 - Non-obvious guardrails: staff attendance payroll rules rely on `time_clock_events`; keep `@react-pdf/renderer` lazily/dynamically imported to avoid build timeouts.
 
+## Migration Tracking (All Features)
+- For migration create/apply/reconcile work, use `codex-skills/migration-hygiene/SKILL.md`.
+- Keep `docs/operations/migration-status.md` synced to Supabase MCP `list_migrations` after each apply.
+
 ## Tenancy Vocabulary
 - Use **organization** (aka **tenant**) consistently.
 
