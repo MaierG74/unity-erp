@@ -630,6 +630,19 @@ export interface ProductLaborItem {
   piece_rate?: number | null
 }
 
+async function routeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers ?? {});
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    if (!error && data?.session?.access_token) {
+      headers.set('Authorization', `Bearer ${data.session.access_token}`);
+    }
+  } catch {
+    // Keep request best-effort for contexts without an interactive auth session.
+  }
+  return fetch(input, { ...init, headers });
+}
+
 export async function fetchProducts(): Promise<Product[]> {
   const { data, error } = await supabase
     .from('products')
@@ -678,7 +691,7 @@ export async function fetchProductComponents(
 // Fetch Effective BOL (labor) for a product via API route
 export async function fetchProductLabor(productId: number): Promise<ProductLaborItem[]> {
   try {
-    const res = await fetch(`/api/products/${productId}/effective-bol`, { cache: 'no-store' });
+    const res = await routeFetch(`/api/products/${productId}/effective-bol`, { cache: 'no-store' });
     if (!res.ok) {
       console.warn('fetchProductLabor failed:', res.status, await res.text());
       return [];
@@ -710,7 +723,7 @@ export interface ProductOverheadItem {
 
 export async function fetchProductOverhead(productId: number): Promise<ProductOverheadItem[]> {
   try {
-    const res = await fetch(`/api/products/${productId}/overhead`, { cache: 'no-store' });
+    const res = await routeFetch(`/api/products/${productId}/overhead`, { cache: 'no-store' });
     if (!res.ok) return [];
     const json = await res.json();
     const items = json?.items ?? json;
@@ -758,7 +771,7 @@ export async function fetchEffectiveBOM(
       ? `/api/products/${productId}/effective-bom?${query}`
       : `/api/products/${productId}/effective-bom`;
 
-    const res = await fetch(url, { cache: 'no-store' });
+    const res = await routeFetch(url, { cache: 'no-store' });
     if (!res.ok) return [];
     const json = (await res.json()) as { items?: any[] };
     const items = Array.isArray(json?.items) ? json!.items! : [];

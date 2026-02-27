@@ -78,7 +78,11 @@ const formSchema = z.object({
 }).superRefine((data, ctx) => {
   data.items.forEach((item, idx) => {
     if (item.allocations && item.allocations.length > 0 && item.quantity > 0) {
-      const allocSum = item.allocations.reduce((sum, a) => sum + (a.quantity || 0), 0);
+      // Filter out incomplete rows (no order selected) before validation
+      const validAllocations = item.allocations.filter(
+        (a) => a.customer_order_id && a.customer_order_id > 0
+      );
+      const allocSum = validAllocations.reduce((sum, a) => sum + (a.quantity || 0), 0);
       if (allocSum > item.quantity) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -86,15 +90,6 @@ const formSchema = z.object({
           path: ['items', idx, 'allocations'],
         });
       }
-      item.allocations.forEach((a, aIdx) => {
-        if (!a.customer_order_id || a.customer_order_id <= 0) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: 'Please select a customer order',
-            path: ['items', idx, 'allocations', aIdx, 'customer_order_id'],
-          });
-        }
-      });
     }
   });
 });
@@ -215,14 +210,18 @@ function buildLinePayload(item: {
   allocations?: { customer_order_id: number; quantity: number }[];
   notes?: string;
 }): SupplierOrderLinePayload {
-  if (item.allocations && item.allocations.length > 0) {
+  // Filter out incomplete allocation rows (no order selected)
+  const validAllocations = (item.allocations || []).filter(
+    (a) => a.customer_order_id && a.customer_order_id > 0 && a.quantity > 0
+  );
+  if (validAllocations.length > 0) {
     return {
       supplier_component_id: item.supplier_component_id,
       order_quantity: item.quantity,
       component_id: item.component_id,
       quantity_for_order: 0,
       quantity_for_stock: 0,
-      allocations: item.allocations.map((a) => ({
+      allocations: validAllocations.map((a) => ({
         customer_order_id: a.customer_order_id,
         quantity_for_order: a.quantity,
       })),
@@ -647,8 +646,7 @@ export function NewPurchaseOrderForm() {
       const { data, error } = await supabase
         .from('orders')
         .select('order_id, order_number, customer:customers(name)')
-        .order('created_at', { ascending: false })
-        .limit(50);
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
       return (

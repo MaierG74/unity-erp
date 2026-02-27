@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -152,7 +153,7 @@ export function ProductBOL({ productId }: ProductBOLProps) {
     queryKey: ['effectiveBOL', productId],
     queryFn: async () => {
       try {
-        const res = await fetch(`/api/products/${productId}/effective-bol`)
+        const res = await authorizedFetch(`/api/products/${productId}/effective-bol`)
         if (!res.ok) return { items: [] }
         return (await res.json()) as { items: any[] }
       } catch {

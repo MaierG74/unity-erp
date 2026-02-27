@@ -24,6 +24,7 @@ interface ProcurementLineDetail {
   line_status: string | null;
   last_receipt_date: string | null;
   quantity_for_order: number;
+  received_quantity: number | null;
 }
 
 interface POGroup {
@@ -59,6 +60,7 @@ async function fetchOrderProcurement(orderId: number): Promise<ProcurementLineDe
     .from('supplier_order_customer_orders')
     .select(`
       quantity_for_order,
+      received_quantity,
       supplier_order:supplier_orders(
         order_id,
         order_quantity,
@@ -108,7 +110,10 @@ async function fetchOrderProcurement(orderId: number): Promise<ProcurementLineDe
       supplier_name: po?.supplier?.name || null,
       line_status: status?.status_name || null,
       last_receipt_date: null,
-      quantity_for_order: row.quantity_for_order || 0,
+      quantity_for_order: Number(row.quantity_for_order || 0),
+      received_quantity: row.received_quantity !== null && row.received_quantity !== undefined
+        ? Number(row.received_quantity)
+        : null,
     });
   }
 
@@ -215,10 +220,13 @@ function effectiveQty(line: ProcurementLineDetail) {
   return line.quantity_for_order > 0 ? line.quantity_for_order : line.order_quantity;
 }
 
-// Effective received: cap total_received at the allocated quantity so a line
-// that received more than its share (possible when receiving against the full
-// PO line) doesn't show >100% on the customer order side.
+// Effective received:
+// - If allocation tracking is available, use it directly.
+// - Otherwise, fall back to capped PO-line received quantity.
 function effectiveReceived(line: ProcurementLineDetail) {
+  if (line.received_quantity !== null) {
+    return line.received_quantity;
+  }
   const qty = effectiveQty(line);
   return Math.min(line.total_received, qty);
 }

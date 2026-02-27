@@ -114,9 +114,10 @@ interface Return {
 
 interface CustomerOrderLink {
   id: number;
-  order_id: number;
+  order_id: number | null;
   quantity_for_order: number;
   quantity_for_stock: number;
+  received_quantity: number | null;
   customer_order: {
     order_id: number;
     order_number: string;
@@ -223,6 +224,7 @@ async function fetchPurchaseOrderById(id: string) {
           order_id,
           quantity_for_order,
           quantity_for_stock,
+          received_quantity,
           customer_order:orders(
             order_id,
             order_number

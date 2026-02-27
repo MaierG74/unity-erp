@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { authorizedFetch } from '@/lib/client/auth-fetch'
 import {
   Table,
   TableBody,
@@ -108,7 +109,7 @@ export function ProductCosting({ productId }: { productId: number }) {
     queryKey: ['effective-bom', productId],
     queryFn: async () => {
       try {
-        const res = await fetch(`/api/products/${productId}/effective-bom`)
+        const res = await authorizedFetch(`/api/products/${productId}/effective-bom`)
         if (!res.ok) return { items: [] as EffectiveItem[] }
         return (await res.json()) as { items: EffectiveItem[] }
       } catch {
@@ -214,7 +215,7 @@ export function ProductCosting({ productId }: { productId: number }) {
     queryKey: ['effective-bol', productId],
     queryFn: async () => {
       try {
-        const res = await fetch(`/api/products/${productId}/effective-bol`)
+        const res = await authorizedFetch(`/api/products/${productId}/effective-bol`)
         if (!res.ok) return { items: [] as EffectiveBolItem[] }
         return (await res.json()) as { items: EffectiveBolItem[] }
       } catch {

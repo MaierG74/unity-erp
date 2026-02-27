@@ -2,6 +2,8 @@
 
 This document proposes a complete approach for reusable, composable sets of components and labor that can be attached to a product’s Bill of Materials (BOM) and Bill of Labor (BOL). These sets are called collections and enable faster product setup, consistency, and reliable costing.
 
+For the current manufacturing-first deep plan focused on stocked sub-assemblies, nested requirements, and job-card impacts, see: `docs/plans/stocked-subassembly-manufacturing-plan.md`.
+
 ## Current Status (collections)
 - Status field: `status` shows `draft | published | archived`.
 - Using a draft: You can Apply (copy) a draft collection to a product’s BOM.

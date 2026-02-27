@@ -25,11 +25,15 @@ test('effective BOM resolver passes underscored arguments to RPC', async () => {
         error: null,
       }
     },
-    from: (_table: string) => ({
-      select: (_columns: unknown) => ({
-        eq: async () => ({ data: [], error: null }),
-      }),
-    }),
+    from: (_table: string) => {
+      const builder: any = {
+        select: (_columns: unknown) => builder,
+        eq: () => builder,
+        then: (resolve: (value: { data: any[]; error: null }) => void) =>
+          resolve({ data: [], error: null }),
+      }
+      return builder
+    },
   }
 
   try {
@@ -37,7 +41,7 @@ test('effective BOM resolver passes underscored arguments to RPC', async () => {
       '@/app/api/products/[productId]/effective-bom/route'
     )
 
-    const { items, meta } = await resolveEffectiveBom(mockClient as any, 55, { HS: 'BOWH' })
+    const { items, meta } = await resolveEffectiveBom(mockClient as any, 55, { HS: 'BOWH' }, 'test-org')
 
     assert.ok(Array.isArray(items))
     assert.deepEqual(meta, { direct_count: 1, links_count: 0, exploded_count: 0 })

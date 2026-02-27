@@ -91,6 +91,24 @@ export type PurchaseOrderAllocation = {
   quantity: number;
 };
 
+export type SupplierOrderCustomerOrderLink = {
+  id: number;
+  supplier_order_id?: number;
+  order_id: number | null;
+  quantity_for_order: number;
+  quantity_for_stock: number;
+  received_quantity: number | null;
+  customer_order?: {
+    order_id: number;
+    order_number: string;
+  } | null;
+};
+
+export type AllocationReceipt = {
+  allocation_id: number;
+  quantity: number;
+};
+
 export type PurchaseOrderFormData = {
   order_date: string;
   notes: string;

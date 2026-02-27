@@ -79,6 +79,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - New: [`plans/permissions-and-logging-plan.md`](plans/permissions-and-logging-plan.md) – unified roadmap for role-based access control, permissions UI, and audit logging rollout
   - New: [`plans/tenant-module-entitlements-rollout-plan.md`](plans/tenant-module-entitlements-rollout-plan.md) – multi-tenant module licensing architecture and phased rollout (starts with Furniture Configurator toggle)
   - New: [`plans/sunday-doubletime-payroll-rollout-plan.md`](plans/sunday-doubletime-payroll-rollout-plan.md) – live-safe rollout plan to align Sunday/double-time calculations across attendance summaries, weekly views, and payroll
+  - New: [`plans/stocked-subassembly-manufacturing-plan.md`](plans/stocked-subassembly-manufacturing-plan.md) – manufacturing-first plan for stocked sub-assemblies, nested product resolution, and job-card integration
   - New: [`plans/todo-module-plan.md`](plans/todo-module-plan.md) – To-Do module planning doc covering cross-module task assignments
   - New: [`plans/products-section-upgrade.md`](plans/products-section-upgrade.md) – Modernize the Products area with inventory-parity tabs, transactions, and finished-good reports
   - New: [`plans/purchase-order-return-communications-plan.md`](plans/purchase-order-return-communications-plan.md) – Return Goods UX, document, and supplier email improvements

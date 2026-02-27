@@ -1,17 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { requireModuleAccess } from '@/lib/api/module-access'
+import { MODULE_KEYS } from '@/lib/modules/keys'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
-function admin() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  )
+async function requireProductsAccess(request: NextRequest) {
+  const access = await requireModuleAccess(request, MODULE_KEYS.PRODUCTS_BOM, {
+    forbiddenMessage: 'Products module access is disabled for your organization',
+  })
+  if ('error' in access) {
+    return { error: access.error }
+  }
+
+  if (!access.orgId) {
+    return {
+      error: NextResponse.json(
+        {
+          error: 'Organization context is required for products access',
+          reason: 'missing_org_context',
+          module_key: access.moduleKey,
+        },
+        { status: 403 }
+      ),
+    }
+  }
+
+  return { orgId: access.orgId }
 }
 
 // Apply a sub-product's BOM to a parent product by copying its BOM rows
 // Also copies Bill of Labour rows, scaling quantities by the same factor.
 // Body: { sub_product_id: number, quantity?: number }
 export async function POST(req: NextRequest, context: { params: Promise<{ productId: string }> }) {
+  const auth = await requireProductsAccess(req)
+  if ('error' in auth) return auth.error
+
   try {
     const { productId } = await context.params
     const parentProductId = Number(productId)
@@ -33,10 +55,28 @@ export async function POST(req: NextRequest, context: { params: Promise<{ produc
       return NextResponse.json({ error: 'Cannot apply a product to itself' }, { status: 400 })
     }
 
-    const supabase = admin()
+    const { data: parent, error: parentErr } = await supabaseAdmin
+      .from('products')
+      .select('product_id')
+      .eq('product_id', parentProductId)
+      .eq('org_id', auth.orgId)
+      .maybeSingle()
+    if (parentErr || !parent) {
+      return NextResponse.json({ error: 'Parent product not found' }, { status: 404 })
+    }
+
+    const { data: sub, error: subErr } = await supabaseAdmin
+      .from('products')
+      .select('product_id')
+      .eq('product_id', subProductId)
+      .eq('org_id', auth.orgId)
+      .maybeSingle()
+    if (subErr || !sub) {
+      return NextResponse.json({ error: 'Sub product not found' }, { status: 404 })
+    }
 
     // Fetch the sub-product's BOM rows
-    const { data: childBom, error: bomErr } = await supabase
+    const { data: childBom, error: bomErr } = await supabaseAdmin
       .from('billofmaterials')
       .select('component_id, quantity_required, supplier_component_id')
       .eq('product_id', subProductId)
@@ -57,14 +97,15 @@ export async function POST(req: NextRequest, context: { params: Promise<{ produc
     }))
 
     // Insert all BOM rows
-    const { error: insBomErr } = await supabase.from('billofmaterials').insert(rows)
+    const { error: insBomErr } = await supabaseAdmin.from('billofmaterials').insert(rows)
     if (insBomErr) throw insBomErr
 
     // Fetch the sub-product's BOL rows
-    const { data: childBol, error: bolErr } = await supabase
+    const { data: childBol, error: bolErr } = await supabaseAdmin
       .from('billoflabour')
       .select('job_id, time_required, time_unit, quantity, rate_id, pay_type, piece_rate_id, hourly_rate_id')
       .eq('product_id', subProductId)
+      .eq('org_id', auth.orgId)
 
     if (bolErr) throw bolErr
 
@@ -80,7 +121,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ produc
 
         if (payType === 'piece') {
           // Resolve piece rate for the PARENT product (prefer product-specific, else job default)
-          const { data: prates, error: prErr } = await supabase
+          const { data: prates, error: prErr } = await supabaseAdmin
             .from('piece_work_rates')
             .select('rate_id, product_id, effective_date, end_date')
             .eq('job_id', row.job_id)
@@ -92,7 +133,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ produc
           pieceRateId = chosen ? chosen.rate_id : null
         } else {
           // Resolve latest hourly rate for this job
-          const { data: hrates, error: hErr } = await supabase
+          const { data: hrates, error: hErr } = await supabaseAdmin
             .from('job_hourly_rates')
             .select('rate_id, effective_date, end_date')
             .eq('job_id', row.job_id)
@@ -114,11 +155,12 @@ export async function POST(req: NextRequest, context: { params: Promise<{ produc
           pay_type: payType,
           piece_rate_id: pieceRateId,
           hourly_rate_id: hourlyRateId,
+          org_id: auth.orgId,
         })
       }
 
       if (resultRows.length > 0) {
-        const { error: insBolErr } = await supabase.from('billoflabour').insert(resultRows)
+        const { error: insBolErr } = await supabaseAdmin.from('billoflabour').insert(resultRows)
         if (insBolErr) throw insBolErr
         bolAdded = resultRows.length
       }

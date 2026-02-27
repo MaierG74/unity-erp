@@ -1,11 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { format } from 'date-fns';
-import { Loader2, Download, Eye, Mail, X, CheckCircle2 } from 'lucide-react';
+import { Loader2, Download, Mail, CheckCircle2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -22,6 +22,7 @@ import { ReturnGoodsPDFDownload } from '@/components/features/purchasing/ReturnG
 import DeliveryNoteUpload from '@/components/features/purchasing/DeliveryNoteUpload';
 import { uploadPOAttachment } from '@/lib/db/purchase-order-attachments';
 import { useQuery } from '@tanstack/react-query';
+import { AllocationReceipt, SupplierOrderCustomerOrderLink } from '@/types/purchasing';
 
 // Helper to format company info
 const getCompanyInfo = (settings: any) => {
@@ -103,6 +104,7 @@ interface ReceiveItemsModalProps {
       purchase_order_id: number;
       q_number: string;
     };
+    customer_order_links?: SupplierOrderCustomerOrderLink[];
   };
   onSuccess: () => void;
 }
@@ -126,6 +128,7 @@ export function ReceiveItemsModal({
   const [deliveryNoteFile, setDeliveryNoteFile] = useState<File | null>(null);
   const [isUploadingNote, setIsUploadingNote] = useState(false);
   const [noteUploaded, setNoteUploaded] = useState(false);
+  const [allocationReceipts, setAllocationReceipts] = useState<Record<number, number>>({});
 
   const component = supplierOrder?.supplier_component?.component;
   const componentCode =
@@ -136,6 +139,11 @@ export function ReceiveItemsModal({
   const supplierName = supplierOrder?.supplier_component?.supplier?.name ?? 'Supplier';
 
   const remainingToReceive = Math.max(0, supplierOrder.order_quantity - (supplierOrder.total_received || 0));
+  const allocationRows = supplierOrder.customer_order_links || [];
+  const hasSplitAllocations = allocationRows.length > 1;
+  const allocationTrackingStarted = allocationRows.some(
+    (row) => row.received_quantity !== null && row.received_quantity !== undefined
+  );
 
   // Fetch company settings
   const { data: companySettings } = useQuery({
@@ -177,6 +185,36 @@ export function ReceiveItemsModal({
   const totalQuantity = quantityReceived + quantityRejected;
   const receiveTooHigh = quantityReceived > remainingToReceive;
   const hasQuantity = totalQuantity > 0;
+  const allocationReceivedNowTotal = hasSplitAllocations
+    ? allocationRows.reduce((sum, row) => sum + (allocationReceipts[row.id] || 0), 0)
+    : 0;
+  const allocationMismatch = hasSplitAllocations && quantityReceived > 0 && allocationReceivedNowTotal !== quantityReceived;
+  const allocationOverCap = hasSplitAllocations && allocationRows.some((row) => {
+    const cap = row.order_id === null
+      ? Number(row.quantity_for_stock || 0)
+      : Number(row.quantity_for_order || 0);
+    const alreadyReceived = row.received_quantity !== null && row.received_quantity !== undefined
+      ? Number(row.received_quantity)
+      : 0;
+    return (allocationReceipts[row.id] || 0) > Math.max(0, cap - alreadyReceived);
+  });
+
+  useEffect(() => {
+    if (!open) return;
+    const initial: Record<number, number> = {};
+    for (const row of allocationRows) {
+      initial[row.id] = 0;
+    }
+    setAllocationReceipts(initial);
+  }, [open, supplierOrder.order_id]);
+
+  const setAllocationQuantity = (allocationId: number, value: string) => {
+    const parsed = Number.parseFloat(value);
+    setAllocationReceipts((prev) => ({
+      ...prev,
+      [allocationId]: Number.isFinite(parsed) && parsed > 0 ? parsed : 0,
+    }));
+  };
 
   const onSubmit = async (data: ReceiveItemsFormValues) => {
     setSubmissionError(null);
@@ -206,13 +244,40 @@ export function ReceiveItemsModal({
 
       // Call the RPC function to process receipt when quantity is provided
       if ((data.quantity_received || 0) > 0) {
+        let allocationPayload: AllocationReceipt[] | null = null;
+
+        if (hasSplitAllocations) {
+          allocationPayload = allocationRows
+            .map((row) => ({
+              allocation_id: row.id,
+              quantity: Number(allocationReceipts[row.id] || 0),
+            }))
+            .filter((row) => row.quantity > 0);
+
+          const payloadTotal = allocationPayload.reduce((sum, row) => sum + row.quantity, 0);
+          if (payloadTotal !== (data.quantity_received || 0)) {
+            throw new Error('Allocation breakdown must equal Quantity Received');
+          }
+        }
+
+        const rpcPayload: {
+          p_order_id: number;
+          p_quantity: number;
+          p_receipt_date: string;
+          p_allocation_receipts?: AllocationReceipt[] | null;
+        } = {
+          p_order_id: supplierOrder.order_id,
+          p_quantity: data.quantity_received || 0,
+          p_receipt_date: receiptTimestamp,
+        };
+
+        if (allocationPayload) {
+          rpcPayload.p_allocation_receipts = allocationPayload;
+        }
+
         const { error: receiptError } = await supabase.rpc(
           'process_supplier_order_receipt',
-          {
-            p_order_id: supplierOrder.order_id,
-            p_quantity: data.quantity_received || 0,
-            p_receipt_date: receiptTimestamp,
-          }
+          rpcPayload
         );
 
         if (receiptError) {
@@ -407,6 +472,66 @@ export function ReceiveItemsModal({
                 </Alert>
               )}
 
+              {hasSplitAllocations && (
+                <div className="rounded-md border">
+                  <div className="border-b bg-muted/30 px-3 py-2 text-sm font-medium">
+                    Split Allocation Receipt Breakdown
+                  </div>
+                  <div className="p-3 space-y-2">
+                    {!allocationTrackingStarted && (
+                      <Alert>
+                        <AlertDescription>
+                          This split line has historical receipts without allocation tracking. New receipts entered here will start tracked allocation receipts.
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                    <div className="space-y-2">
+                      {allocationRows.map((row) => {
+                        const cap = row.order_id === null
+                          ? Number(row.quantity_for_stock || 0)
+                          : Number(row.quantity_for_order || 0);
+                        const alreadyReceived = row.received_quantity !== null && row.received_quantity !== undefined
+                          ? Number(row.received_quantity)
+                          : 0;
+                        const remainingCap = Math.max(0, cap - alreadyReceived);
+                        const rowLabel = row.customer_order?.order_number || 'Stock';
+
+                        return (
+                          <div key={row.id} className="grid grid-cols-4 gap-2 items-center text-sm">
+                            <div className="font-medium truncate">{rowLabel}</div>
+                            <div className="text-muted-foreground">Allocated: {cap}</div>
+                            <div className="text-muted-foreground">
+                              Already: {row.received_quantity === null ? 'Not tracked' : alreadyReceived}
+                            </div>
+                            <Input
+                              type="number"
+                              min="0"
+                              max={remainingCap}
+                              value={allocationReceipts[row.id] || 0}
+                              onChange={(event) => setAllocationQuantity(row.id, event.target.value)}
+                              placeholder="0"
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Allocation total: {allocationReceivedNowTotal} / {quantityReceived || 0}
+                    </div>
+                    {allocationMismatch && (
+                      <p className="text-xs text-destructive">
+                        Allocation total must exactly match Quantity Received.
+                      </p>
+                    )}
+                    {allocationOverCap && (
+                      <p className="text-xs text-destructive">
+                        One or more allocations exceed their remaining capacity.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {quantityRejected > 0 && (
                 <div>
                   <Label htmlFor="rejection_reason">
@@ -483,7 +608,7 @@ export function ReceiveItemsModal({
                 </Button>
                 <Button
                   type="submit"
-                  disabled={isSubmitting || isUploadingNote || receiveTooHigh || !hasQuantity}
+                  disabled={isSubmitting || isUploadingNote || receiveTooHigh || !hasQuantity || allocationMismatch || allocationOverCap}
                 >
                   {isSubmitting || isUploadingNote ? (
                     <>

@@ -1,6 +1,6 @@
 ---
 title: TODO Index
-last_updated: 2026-02-22
+last_updated: 2026-02-26
 ---
 
 Unity ERP's documentation spreads TODOs and open questions across domain guides, changelogs, and technical references. Use this index as a single starting point to see what still needs attention and where the authoritative source of truth lives.
@@ -25,6 +25,9 @@ Unity ERP's documentation spreads TODOs and open questions across domain guides,
 - **Implement stock issuance** — Status: _Completed_, Owner: _Unassigned_. ✅ Stock issuance functionality implemented on Order Detail page with BOM integration, PDF generation, and issuance tracking. Includes `process_stock_issuance` and `reverse_stock_issuance` RPC functions, `IssueStockTab` UI component, and `StockIssuancePDF` component. Source: [stock issuance plan](../plans/stock-issuance-plan.md), [implementation changelog](../changelogs/stock-issuance-implementation-20250104.md).
 - **Implement supplier returns** — Status: _Planning_, Owner: _Unassigned_. Build functionality to return goods to suppliers, handling both immediate rejections on delivery and later returns. Requires `supplier_order_returns` table, RPC function, and UI components. Source: [supplier returns plan](../plans/supplier-returns-plan.md).
 - **Per-allocation receipt tracking for split POs** — Status: _Planned_, Owner: _Unassigned_. When a PO line is split across multiple customer orders (e.g. 70 to Order A, 20 to Order B), receipts are currently tracked at the PO line level only (`supplier_orders.total_received`). Need to add per-allocation received quantity (e.g. `received_for_order` on `supplier_order_customer_orders`) and update the receiving UI to allocate incoming goods across customer orders. Source: [PO split allocation resume](../resume/po-split-quantity-allocations.md).
+
+## Components & Manufacturing
+- **Introduce stocked sub-assembly planning (avoid always exploding child BOM/BOL)** — Status: _In progress (policy finalized 2026-02-26)_, Owner: _Unassigned_. Add a stocked link mode for product-to-product BOM links, route order/job-card planning through a nested requirements resolver, and ensure parent workflows first check sub-assembly stock before exploding into child raw materials/labor. Include org-safe API/RLS hardening for BOM/BOL/link tables touched by this flow. Source: [stocked sub-assembly policy spec v1](../plans/stocked-subassembly-policy-spec-v1.md), [stocked sub-assembly plan](../plans/stocked-subassembly-manufacturing-plan.md), [subcomponent planning & execution](../domains/components/subcomponent-planning-and-execution.md), [orders master](../domains/orders/orders-master.md).
 
 ## Timekeeping
 - **Ensure double-time minutes are persisted** — Status: _In progress_, Owner: _Unassigned_. Update `add_manual_clock_event_v2` (and any other summary writers) so inserts/updates to `time_daily_summary` always set `dt_minutes` (default 0 for non-Sunday days) to satisfy the new NOT NULL constraint and keep manual event entry unblocked. Also backfill existing rows. Source: [time & attendance working doc](../domains/timekeeping/time-attendance-working.md#database-tables-supabase), [Sunday + double-time payroll rollout plan](../plans/sunday-doubletime-payroll-rollout-plan.md).

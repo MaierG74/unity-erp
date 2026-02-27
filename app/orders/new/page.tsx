@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { ArrowLeft, ChevronsUpDown, Check, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, ChevronsUpDown, Check, AlertTriangle, Loader2 } from 'lucide-react';
 import { useState, useMemo, useRef } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { fetchQuotes } from '@/lib/db/quotes';
@@ -40,22 +40,30 @@ export default function NewOrderPage() {
     onSuccess: (order: any) => router.push(`/orders/${order.order_id}`),
   });
 
+  const [isCreatingFromQuote, setIsCreatingFromQuote] = useState(false);
+  const isAnyCreating = isCreating || isCreatingFromQuote;
+
   const handleCreateFromQuote = async () => {
     if (!selectedQuote || selectedQuote === 'loading') return;
-    // Prefer API that seeds header fields from quote
-    const res = await fetch('/api/orders/from-quote', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ quoteId: selectedQuote })
-    });
-    if (!res.ok) {
-      // Fallback to basic insert
-      await createOrderMutation({ quote_id: selectedQuote });
-      return;
+    setIsCreatingFromQuote(true);
+    try {
+      // Prefer API that seeds header fields from quote
+      const res = await fetch('/api/orders/from-quote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quoteId: selectedQuote })
+      });
+      if (!res.ok) {
+        // Fallback to basic insert
+        await createOrderMutation({ quote_id: selectedQuote });
+        return;
+      }
+      const json = await res.json();
+      const order = json?.order;
+      if (order?.order_id) router.push(`/orders/${order.order_id}`);
+    } catch {
+      setIsCreatingFromQuote(false);
     }
-    const json = await res.json();
-    const order = json?.order;
-    if (order?.order_id) router.push(`/orders/${order.order_id}`);
   };
 
   const [customerId, setCustomerId] = useState<string>('');
@@ -157,8 +165,9 @@ export default function NewOrderPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <Button onClick={handleCreateFromQuote} disabled={isCreating || !selectedQuote || selectedQuote === 'loading'}>
-                    {isCreating ? 'Creating...' : 'Create Order from Quote'}
+                  <Button onClick={handleCreateFromQuote} disabled={isAnyCreating || !selectedQuote || selectedQuote === 'loading'}>
+                    {isCreatingFromQuote && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {isCreatingFromQuote ? 'Creating Order...' : 'Create Order from Quote'}
                   </Button>
                 </div>
 
@@ -306,8 +315,9 @@ export default function NewOrderPage() {
                       </div>
                     </div>
                   </div>
-                  <Button variant="secondary" onClick={handleCreateFromScratch} disabled={isCreating || !customerId}>
-                    {isCreating ? 'Creating...' : 'Create Empty Order'}
+                  <Button variant="secondary" onClick={handleCreateFromScratch} disabled={isAnyCreating || !customerId}>
+                    {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {isCreating ? 'Creating Order...' : 'Create Empty Order'}
                   </Button>
                 </div>
 

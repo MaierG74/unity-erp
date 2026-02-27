@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -417,7 +418,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
     queryKey: ['effectiveBOM', productId],
     queryFn: async () => {
       try {
-        const res = await fetch(`/api/products/${productId}/effective-bom`)
+        const res = await authorizedFetch(`/api/products/${productId}/effective-bom`)
         if (!res.ok) return { items: [] }
         return (await res.json()) as { items: EffectiveBOMItem[] }
       } catch {
@@ -456,7 +457,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
     queryKey: ['quickEffectiveBOM', quickViewProductId],
     queryFn: async () => {
       try {
-        const res = await fetch(`/api/products/${quickViewProductId}/effective-bom`)
+        const res = await authorizedFetch(`/api/products/${quickViewProductId}/effective-bom`)
         if (!res.ok) return { items: [] }
         return (await res.json()) as { items: EffectiveBOMItem[] }
       } catch {

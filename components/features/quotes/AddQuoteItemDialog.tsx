@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Package, Search } from 'lucide-react';
 import { fetchProducts, type Product, type QuoteItemType, type QuoteItemTextAlign } from '@/lib/db/quotes';
 import { AlignLeft, AlignCenter, AlignRight } from 'lucide-react';
 import {
@@ -62,6 +62,7 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
   const [productsLoading, setProductsLoading] = React.useState(false);
   const [optionsLoading, setOptionsLoading] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
+  const productSearchInputRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
     if (open && tab === 'product') {
@@ -76,6 +77,14 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
       })();
     }
   }, [open, tab]);
+
+  React.useEffect(() => {
+    if (tab !== 'product' || selectedProduct) return;
+    const id = window.setTimeout(() => {
+      productSearchInputRef.current?.focus();
+    }, 50);
+    return () => window.clearTimeout(id);
+  }, [tab, selectedProduct]);
 
   React.useEffect(() => {
     if (!selectedProduct) {
@@ -142,6 +151,7 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
     setExplode(true);
     setAttachImage(true);
     setIncludeLabor(true);
+    setIncludeOverhead(true);
     setOptionsLoading(false);
     // Reset text fields
     setTextContent('');
@@ -230,10 +240,20 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
     }
   };
 
-  const filteredProducts = products.filter(p =>
-    (p.internal_code || '').toLowerCase().includes(productQuery.toLowerCase()) ||
-    (p.name || '').toLowerCase().includes(productQuery.toLowerCase())
-  );
+  const matchesAllTokens = (query: string, ...fields: Array<string | null | undefined>) => {
+    const tokens = query
+      .toLowerCase()
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    if (tokens.length === 0) return true;
+    const hay = fields
+      .map((f) => (f || '').toLowerCase())
+      .join(' ');
+    return tokens.every((token) => hay.includes(token));
+  };
+
+  const filteredProducts = products.filter((p) => matchesAllTokens(productQuery, p.internal_code, p.name));
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -267,24 +287,77 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
           </TabsContent>
 
           <TabsContent value="product" className="space-y-3 mt-3">
-            <div>
-              <Label htmlFor="p-search">Search Products</Label>
-              <Input id="p-search" value={productQuery} onChange={(e) => setProductQuery(e.target.value)} placeholder="Search by code or name" />
-            </div>
-            {productsLoading ? (
-              <div className="text-center py-4">Loading products…</div>
+            {selectedProduct ? (
+              <div className="flex items-center gap-2 px-3 py-2 border border-input rounded-lg bg-muted/30">
+                <Package className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium truncate">{selectedProduct.name}</div>
+                  {selectedProduct.internal_code && (
+                    <div className="text-xs text-muted-foreground">{selectedProduct.internal_code}</div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedProduct(null)}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                >
+                  Change
+                </button>
+              </div>
             ) : (
-              <div className="max-h-56 overflow-y-auto border border-input rounded bg-card">
-                {filteredProducts.length === 0 ? (
-                  <div className="text-center py-4 text-muted-foreground">No products found</div>
-                ) : (
-                  filteredProducts.map((p) => (
-                    <div key={p.product_id} className={`p-3 border-b border-input cursor-pointer hover:bg-muted/40 ${selectedProduct?.product_id === p.product_id ? 'bg-accent text-accent-foreground' : ''}`} onClick={() => setSelectedProduct(p)}>
-                      <div className="font-medium">{p.name}</div>
-                      {p.internal_code && <div className="text-sm">Code: {p.internal_code}</div>}
-                    </div>
-                  ))
-                )}
+              <div className="flex flex-col border border-input rounded-lg overflow-hidden" style={{ height: '220px' }}>
+                <div className="p-2 border-b shrink-0">
+                  <div className="relative">
+                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                    <input
+                      ref={productSearchInputRef}
+                      id="p-search"
+                      type="text"
+                      value={productQuery}
+                      onChange={(e) => setProductQuery(e.target.value)}
+                      placeholder="Search by code or name..."
+                      className="w-full h-8 pl-7 pr-2 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                  </div>
+                </div>
+                <div className="flex-1 overflow-auto">
+                  {productsLoading ? (
+                    <div className="p-4 text-sm text-muted-foreground">Loading products...</div>
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead className="sticky top-0 bg-background border-b">
+                        <tr className="text-muted-foreground">
+                          <th className="text-left p-2 font-medium">Product</th>
+                          <th className="p-2 w-16"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredProducts.map((p) => (
+                          <tr key={p.product_id} className="border-b hover:bg-muted/40">
+                            <td className="p-2 max-w-0">
+                              <div className="truncate">{p.name}</div>
+                              {p.internal_code && (
+                                <div className="text-xs text-muted-foreground truncate">{p.internal_code}</div>
+                              )}
+                            </td>
+                            <td className="p-2 text-right">
+                              <Button size="sm" className="h-7 text-xs px-2" onClick={() => setSelectedProduct(p)}>
+                                Select
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                        {filteredProducts.length === 0 && (
+                          <tr>
+                            <td className="p-4 text-center text-muted-foreground" colSpan={2}>
+                              {products.length === 0 ? 'No products available' : 'No products match your search'}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
               </div>
             )}
             {selectedProduct && (

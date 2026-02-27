@@ -1,12 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { requireModuleAccess } from '@/lib/api/module-access'
+import { MODULE_KEYS } from '@/lib/modules/keys'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
-export function createAdminClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  )
+async function requireProductsAccess(request: NextRequest) {
+  const access = await requireModuleAccess(request, MODULE_KEYS.PRODUCTS_BOM, {
+    forbiddenMessage: 'Products module access is disabled for your organization',
+  })
+  if ('error' in access) {
+    return { error: access.error }
+  }
+
+  if (!access.orgId) {
+    return {
+      error: NextResponse.json(
+        {
+          error: 'Organization context is required for products access',
+          reason: 'missing_org_context',
+          module_key: access.moduleKey,
+        },
+        { status: 403 }
+      ),
+    }
+  }
+
+  return { orgId: access.orgId }
 }
 
 type SelectedOptions = Record<string, string>
@@ -14,8 +33,13 @@ type SelectedOptions = Record<string, string>
 export async function resolveEffectiveBom(
   supabase: SupabaseClient,
   productId: number,
-  selectedOptions: SelectedOptions
+  selectedOptions: SelectedOptions,
+  orgId: string
 ) {
+  if (!orgId) {
+    throw new Error('resolveEffectiveBom requires orgId')
+  }
+
   let direct: any[] = []
   const { data: resolved, error: resolvedErr } = await supabase
     .rpc('get_product_components', {
@@ -75,6 +99,7 @@ export async function resolveEffectiveBom(
     .from('product_bom_links')
     .select('sub_product_id, scale, mode')
     .eq('product_id', productId)
+    .eq('org_id', orgId)
   if (linkErr) throw linkErr
 
   const exploded: any[] = []
@@ -119,13 +144,15 @@ export async function resolveEffectiveBom(
 
 // Returns an effective BOM: explicit rows + attached sub-product rows (scaled). Single-level, phantom.
 export async function GET(req: NextRequest, context: { params: Promise<{ productId: string }> }) {
+  const auth = await requireProductsAccess(req)
+  if ('error' in auth) return auth.error
+
   try {
     const { productId: productIdParam } = await context.params
     const productId = Number(productIdParam)
     if (!Number.isFinite(productId)) {
       return NextResponse.json({ error: 'Invalid productId' }, { status: 400 })
     }
-    const supabase = createAdminClient()
     const url = new URL(req.url)
     const debug = url.searchParams.get('debug') === '1'
 
@@ -147,7 +174,18 @@ export async function GET(req: NextRequest, context: { params: Promise<{ product
       }
     }
 
-    const { items, meta } = await resolveEffectiveBom(supabase, productId, selectedOptions)
+    const { data: product, error: productErr } = await supabaseAdmin
+      .from('products')
+      .select('product_id')
+      .eq('product_id', productId)
+      .eq('org_id', auth.orgId)
+      .maybeSingle()
+
+    if (productErr || !product) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 })
+    }
+
+    const { items, meta } = await resolveEffectiveBom(supabaseAdmin, productId, selectedOptions, auth.orgId)
 
     if (debug) {
       return NextResponse.json({
@@ -155,6 +193,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ product
         meta: {
           ...meta,
           product_id: productId,
+          org_id: auth.orgId,
         },
       })
     }

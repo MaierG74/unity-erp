@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -28,6 +28,7 @@ import {
 import { supabase } from '@/lib/supabase';
 import { ReturnGoodsPDFDownload } from '@/components/features/purchasing/ReturnGoodsPDFDownload';
 import { useQuery } from '@tanstack/react-query';
+import { AllocationReceipt, SupplierOrderCustomerOrderLink } from '@/types/purchasing';
 
 // Helper to format company info
 const getCompanyInfo = (settings: any) => {
@@ -95,7 +96,19 @@ type BulkReceiveFormValues = z.infer<typeof bulkReceiveSchema>;
 interface BulkReceiveModalProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    supplierOrders: any[]; // Using any[] for now to match the complex type from page.tsx
+    supplierOrders: {
+        order_id: number;
+        order_quantity: number;
+        total_received: number | null;
+        supplier_component?: {
+            supplier_code?: string;
+            component?: {
+                internal_code?: string;
+                description?: string | null;
+            } | null;
+        } | null;
+        customer_order_links?: SupplierOrderCustomerOrderLink[];
+    }[];
     purchaseOrderNumber: string;
     purchaseOrderId: number;
     supplierName: string;
@@ -119,6 +132,7 @@ export function BulkReceiveModal({
         grn?: string;
         returnItems?: any[];
     } | null>(null);
+    const [allocationReceipts, setAllocationReceipts] = useState<Record<number, Record<number, number>>>({});
 
     // Filter only open orders
     const openOrders = supplierOrders.filter(
@@ -127,6 +141,58 @@ export function BulkReceiveModal({
     const openOrdersMissingComponent = openOrders.filter(
         (order) => !order?.supplier_component?.component
     );
+    const allocationLinksByOrderId = openOrders.reduce<Record<number, SupplierOrderCustomerOrderLink[]>>((acc, order) => {
+        acc[order.order_id] = order.customer_order_links || [];
+        return acc;
+    }, {});
+
+    const setAllocationQuantity = (orderId: number, allocationId: number, value: string) => {
+        const parsed = Number.parseFloat(value);
+        setAllocationReceipts((prev) => ({
+            ...prev,
+            [orderId]: {
+                ...(prev[orderId] || {}),
+                [allocationId]: Number.isFinite(parsed) && parsed > 0 ? parsed : 0,
+            },
+        }));
+    };
+
+    const getAllocationPayloadForOrder = (
+        orderId: number,
+        qtyReceived: number
+    ): AllocationReceipt[] | null => {
+        const allocationRows = allocationLinksByOrderId[orderId] || [];
+        if (allocationRows.length <= 1) return null;
+
+        const values = allocationReceipts[orderId] || {};
+        const payload = allocationRows
+            .map((row) => ({
+                allocation_id: row.id,
+                quantity: Number(values[row.id] || 0),
+            }))
+            .filter((row) => row.quantity > 0);
+
+        const payloadSum = payload.reduce((sum, row) => sum + row.quantity, 0);
+        if (payloadSum !== qtyReceived) {
+            throw new Error(`Allocation breakdown must equal received quantity for order ${orderId}`);
+        }
+
+        for (const row of allocationRows) {
+            const qty = Number(values[row.id] || 0);
+            const cap = row.order_id === null
+                ? Number(row.quantity_for_stock || 0)
+                : Number(row.quantity_for_order || 0);
+            const alreadyReceived = row.received_quantity !== null && row.received_quantity !== undefined
+                ? Number(row.received_quantity)
+                : 0;
+            const remainingCap = Math.max(0, cap - alreadyReceived);
+            if (qty > remainingCap) {
+                throw new Error(`Allocation exceeds remaining capacity for order ${orderId}`);
+            }
+        }
+
+        return payload;
+    };
 
     // Fetch company settings
     const { data: companySettings } = useQuery({
@@ -183,6 +249,19 @@ export function BulkReceiveModal({
         control,
         name: 'items',
     });
+    const watchedItems = watch('items');
+    const hasAllocationMismatch = fields.some((field, index) => {
+        const allocationRows = allocationLinksByOrderId[field.order_id] || [];
+        if (allocationRows.length <= 1) return false;
+        const qtyReceived = watchedItems?.[index]?.quantity_received || 0;
+        if (qtyReceived <= 0) return false;
+        const allocationState = allocationReceipts[field.order_id] || {};
+        const allocationTotal = allocationRows.reduce(
+            (sum, row) => sum + Number(allocationState[row.id] || 0),
+            0
+        );
+        return allocationTotal !== qtyReceived;
+    });
 
     const onSubmit = async (data: BulkReceiveFormValues) => {
         setSubmissionError(null);
@@ -205,13 +284,28 @@ export function BulkReceiveModal({
             for (const item of itemsToProcess) {
                 // 1. Process Receipt
                 if ((item.quantity_received || 0) > 0) {
+                    const allocationPayload = getAllocationPayloadForOrder(
+                        item.order_id,
+                        item.quantity_received || 0
+                    );
+                    const receiptPayload: {
+                        p_order_id: number;
+                        p_quantity: number;
+                        p_receipt_date: string;
+                        p_allocation_receipts?: AllocationReceipt[] | null;
+                    } = {
+                        p_order_id: item.order_id,
+                        p_quantity: item.quantity_received || 0,
+                        p_receipt_date: receiptTimestamp,
+                    };
+
+                    if (allocationPayload) {
+                        receiptPayload.p_allocation_receipts = allocationPayload;
+                    }
+
                     const { error: receiptError } = await supabase.rpc(
                         'process_supplier_order_receipt',
-                        {
-                            p_order_id: item.order_id,
-                            p_quantity: item.quantity_received,
-                            p_receipt_date: receiptTimestamp,
-                        }
+                        receiptPayload
                     );
 
                     if (receiptError) {
@@ -270,6 +364,7 @@ export function BulkReceiveModal({
         reset();
         setSubmissionError(null);
         setSuccessData(null);
+        setAllocationReceipts({});
         onOpenChange(false);
     };
 
@@ -294,6 +389,13 @@ export function BulkReceiveModal({
                         {errors.items?.root && (
                             <Alert variant="destructive">
                                 <AlertDescription>{errors.items.root.message}</AlertDescription>
+                            </Alert>
+                        )}
+                        {hasAllocationMismatch && (
+                            <Alert variant="destructive">
+                                <AlertDescription>
+                                    Split lines require allocation totals to match each line's Receive Qty.
+                                </AlertDescription>
                             </Alert>
                         )}
 
@@ -333,49 +435,103 @@ export function BulkReceiveModal({
                                     {fields.map((field, index) => {
                                         const remaining = field.remaining_quantity;
                                         const error = errors.items?.[index];
+                                        const allocationRows = allocationLinksByOrderId[field.order_id] || [];
+                                        const hasSplitAllocations = allocationRows.length > 1;
+                                        const receiveNow = watch(`items.${index}.quantity_received`) || 0;
+                                        const allocationState = allocationReceipts[field.order_id] || {};
+                                        const allocationTotal = hasSplitAllocations
+                                            ? allocationRows.reduce((sum, row) => sum + Number(allocationState[row.id] || 0), 0)
+                                            : 0;
+                                        const allocationMismatch = hasSplitAllocations && receiveNow > 0 && allocationTotal !== receiveNow;
 
                                         return (
-                                            <TableRow key={field.id}>
-                                                <TableCell>
-                                                    <div className="font-medium">{field.component_code}</div>
-                                                    <div className="text-xs text-muted-foreground truncate max-w-[200px]">
-                                                        {field.component_description}
-                                                    </div>
-                                                </TableCell>
-                                                <TableCell className="text-right font-mono">
-                                                    {remaining}
-                                                </TableCell>
-                                                <TableCell>
-                                                    <Input
-                                                        type="number"
-                                                        min="0"
-                                                        max={remaining}
-                                                        {...register(`items.${index}.quantity_received`, { valueAsNumber: true })}
-                                                        className={error?.quantity_received ? 'border-destructive' : ''}
-                                                        placeholder="0"
-                                                    />
-                                                </TableCell>
-                                                <TableCell>
-                                                    <Input
-                                                        type="number"
-                                                        min="0"
-                                                        {...register(`items.${index}.quantity_rejected`, { valueAsNumber: true })}
-                                                        className={error?.quantity_rejected ? 'border-destructive' : ''}
-                                                        placeholder="0"
-                                                    />
-                                                </TableCell>
-                                                <TableCell>
-                                                    <Input
-                                                        {...register(`items.${index}.rejection_reason`)}
-                                                        className={error?.rejection_reason ? 'border-destructive' : ''}
-                                                        placeholder={watch(`items.${index}.quantity_rejected`) ? "Required..." : "Optional"}
-                                                        disabled={!watch(`items.${index}.quantity_rejected`)}
-                                                    />
-                                                    {error?.rejection_reason && (
-                                                        <span className="text-[10px] text-destructive">{error.rejection_reason.message}</span>
-                                                    )}
-                                                </TableCell>
-                                            </TableRow>
+                                            <Fragment key={field.id}>
+                                                <TableRow>
+                                                    <TableCell>
+                                                        <div className="font-medium">{field.component_code}</div>
+                                                        <div className="text-xs text-muted-foreground truncate max-w-[200px]">
+                                                            {field.component_description}
+                                                        </div>
+                                                    </TableCell>
+                                                    <TableCell className="text-right font-mono">
+                                                        {remaining}
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Input
+                                                            type="number"
+                                                            min="0"
+                                                            max={remaining}
+                                                            {...register(`items.${index}.quantity_received`, { valueAsNumber: true })}
+                                                            className={error?.quantity_received ? 'border-destructive' : ''}
+                                                            placeholder="0"
+                                                        />
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Input
+                                                            type="number"
+                                                            min="0"
+                                                            {...register(`items.${index}.quantity_rejected`, { valueAsNumber: true })}
+                                                            className={error?.quantity_rejected ? 'border-destructive' : ''}
+                                                            placeholder="0"
+                                                        />
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Input
+                                                            {...register(`items.${index}.rejection_reason`)}
+                                                            className={error?.rejection_reason ? 'border-destructive' : ''}
+                                                            placeholder={watch(`items.${index}.quantity_rejected`) ? "Required..." : "Optional"}
+                                                            disabled={!watch(`items.${index}.quantity_rejected`)}
+                                                        />
+                                                        {error?.rejection_reason && (
+                                                            <span className="text-[10px] text-destructive">{error.rejection_reason.message}</span>
+                                                        )}
+                                                    </TableCell>
+                                                </TableRow>
+                                                {hasSplitAllocations && (
+                                                    <TableRow>
+                                                        <TableCell colSpan={5} className="bg-muted/20">
+                                                            <div className="space-y-2">
+                                                                <div className="text-xs font-medium">Allocation Breakdown</div>
+                                                                {allocationRows.map((row) => {
+                                                                    const cap = row.order_id === null
+                                                                        ? Number(row.quantity_for_stock || 0)
+                                                                        : Number(row.quantity_for_order || 0);
+                                                                    const alreadyReceived = row.received_quantity !== null && row.received_quantity !== undefined
+                                                                        ? Number(row.received_quantity)
+                                                                        : 0;
+                                                                    const remainingCap = Math.max(0, cap - alreadyReceived);
+                                                                    return (
+                                                                        <div key={row.id} className="grid grid-cols-4 gap-2 items-center text-xs">
+                                                                            <div className="truncate font-medium">
+                                                                                {row.customer_order?.order_number || 'Stock'}
+                                                                            </div>
+                                                                            <div>Allocated: {cap}</div>
+                                                                            <div>Already: {row.received_quantity === null ? 'Not tracked' : alreadyReceived}</div>
+                                                                            <Input
+                                                                                type="number"
+                                                                                min="0"
+                                                                                max={remainingCap}
+                                                                                value={allocationState[row.id] || 0}
+                                                                                onChange={(event) => setAllocationQuantity(field.order_id, row.id, event.target.value)}
+                                                                                placeholder="0"
+                                                                                className="h-8"
+                                                                            />
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                                <div className="text-[11px] text-muted-foreground">
+                                                                    Allocation total: {allocationTotal} / {receiveNow}
+                                                                </div>
+                                                                {allocationMismatch && (
+                                                                    <div className="text-[11px] text-destructive">
+                                                                        Allocation total must match Receive Qty for this line.
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                )}
+                                            </Fragment>
                                         );
                                     })}
                                 </TableBody>
@@ -386,7 +542,7 @@ export function BulkReceiveModal({
                             <Button type="button" variant="outline" onClick={handleClose}>
                                 Cancel
                             </Button>
-                            <Button type="submit" disabled={isSubmitting}>
+                            <Button type="submit" disabled={isSubmitting || hasAllocationMismatch}>
                                 {isSubmitting ? (
                                     <>
                                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />

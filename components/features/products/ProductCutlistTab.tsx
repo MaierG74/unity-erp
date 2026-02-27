@@ -4,6 +4,7 @@ import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import {
   Card,
   CardContent,
@@ -127,7 +128,7 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
   } = useQuery<EffectiveBomResponse>({
     queryKey: ['cutlist-effective-bom', productId],
     queryFn: async () => {
-      const res = await fetch(`/api/products/${productId}/effective-bom`);
+      const res = await authorizedFetch(`/api/products/${productId}/effective-bom`);
       if (!res.ok) {
         throw new Error('Failed to load cutlist data');
       }
