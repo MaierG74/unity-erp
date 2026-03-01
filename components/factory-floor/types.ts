@@ -31,6 +31,7 @@ export interface FloorStaffJob {
   start_minutes: number | null;
   end_minutes: number | null;
   job_status: 'issued' | 'in_progress' | 'on_hold';
+  pay_type: 'hourly' | 'piece' | null;
   issued_at: string | null;
   started_at: string | null;
   completed_at: string | null;

@@ -2,6 +2,7 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { toast } from 'sonner';
 import type { PauseReason } from '@/components/factory-floor/types';
 
 interface CompleteParams {
@@ -22,6 +23,7 @@ interface TransferParams {
   assignmentId: number;
   newStaffId: number;
   notes?: string;
+  earningsSplit?: { item_id: number; original_amount: number }[];
 }
 
 const INVALIDATE_KEYS = [
@@ -53,6 +55,7 @@ export function useJobActions() {
       return data;
     },
     onSuccess: invalidateAll,
+    onError: (error) => toast.error('Failed to complete job', { description: (error as Error).message }),
   });
 
   const pauseJob = useMutation({
@@ -65,6 +68,7 @@ export function useJobActions() {
       if (error) throw error;
     },
     onSuccess: invalidateAll,
+    onError: (error) => toast.error('Failed to pause job', { description: (error as Error).message }),
   });
 
   const resumeJob = useMutation({
@@ -75,19 +79,22 @@ export function useJobActions() {
       if (error) throw error;
     },
     onSuccess: invalidateAll,
+    onError: (error) => toast.error('Failed to resume job', { description: (error as Error).message }),
   });
 
   const transferJob = useMutation({
-    mutationFn: async ({ assignmentId, newStaffId, notes }: TransferParams) => {
+    mutationFn: async ({ assignmentId, newStaffId, notes, earningsSplit }: TransferParams) => {
       const { data, error } = await supabase.rpc('transfer_assignment', {
         p_assignment_id: assignmentId,
         p_new_staff_id: newStaffId,
         p_notes: notes ?? null,
+        p_earnings_split: earningsSplit ?? null,
       });
       if (error) throw error;
       return data;
     },
     onSuccess: invalidateAll,
+    onError: (error) => toast.error('Failed to transfer job', { description: (error as Error).message }),
   });
 
   return {
