@@ -7,6 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -45,6 +46,9 @@ export function PauseJobDialog({ job, open, onOpenChange, onPause, isPending }: 
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Pause Job</DialogTitle>
+          <DialogDescription>
+            Pause a job and stop the clock until it is resumed.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <p className="text-sm text-muted-foreground">

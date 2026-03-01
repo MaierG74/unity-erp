@@ -8,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -131,6 +132,9 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Complete Job</DialogTitle>
+          <DialogDescription>
+            Record completion details and finalize the job assignment.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-5 py-2">
           <p className="text-sm text-muted-foreground">
