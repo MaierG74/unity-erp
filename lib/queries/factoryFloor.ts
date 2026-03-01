@@ -160,3 +160,24 @@ export async function fetchJobCardItems(jobCardId: number): Promise<JobCardItemF
     status: item.status,
   }));
 }
+
+// --------------- Active staff (for transfer dialog) ---------------
+
+export interface StaffOption {
+  staff_id: number;
+  name: string;
+}
+
+export async function fetchActiveStaff(): Promise<StaffOption[]> {
+  const { data, error } = await supabase
+    .from('staff')
+    .select('staff_id, first_name, last_name')
+    .eq('is_active', true)
+    .order('first_name');
+
+  if (error) throw error;
+  return (data ?? []).map((s: any) => ({
+    staff_id: s.staff_id,
+    name: `${s.first_name} ${s.last_name}`,
+  }));
+}
