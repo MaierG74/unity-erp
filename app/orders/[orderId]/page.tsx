@@ -43,6 +43,7 @@ import { OrderHeaderStripe } from '@/components/features/orders/OrderHeaderStrip
 import { SmartButtonsRow } from '@/components/features/orders/SmartButtonsRow';
 import { ProductsTableRow } from '@/components/features/orders/ProductsTableRow';
 import { OrderSlideOutPanel } from '@/components/features/orders/OrderSlideOutPanel';
+import { OrderSidebar } from '@/components/features/orders/OrderSidebar';
 
 type OrderDetailPageProps = {
   params: Promise<{
@@ -738,7 +739,9 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
         
       {/* ── Tab Content ── */}
       {activeTab === 'products' && (
-        <div ref={productsRef} className="space-y-5">
+        <div ref={productsRef} className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-5">
+          {/* Left column */}
+          <div className="space-y-5">
           {/* Products Table */}
           <div>
             <div className="flex items-center justify-between mb-3">
@@ -972,6 +975,9 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
               </div>
             </CardContent>
           </Card>
+          </div>
+          {/* Right sidebar */}
+          <OrderSidebar orderId={orderId} onTabChange={handleTabChange} />
         </div>
       )}
 
