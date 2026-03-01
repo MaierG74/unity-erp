@@ -12,7 +12,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableHeader, TableBody, TableCell, TableHead, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Textarea } from '@/components/ui/textarea';
 import { Loader2, Warehouse, AlertCircle, CheckCircle, Printer, RotateCcw, Info, Plus, X, Search, User, Users, ChevronRight } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -130,6 +129,13 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
   const [reversalDialogOpen, setReversalDialogOpen] = useState(false);
   const [selectedIssuanceForReversal, setSelectedIssuanceForReversal] = useState<StockIssuance | null>(null);
   
+  // Auto-select all products on mount when products exist
+  useEffect(() => {
+    if (order?.details && order.details.length > 0 && selectedOrderDetails.size === 0) {
+      setSelectedOrderDetails(new Set(order.details.map((d: any) => d.order_detail_id)));
+    }
+  }, [order?.details]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Manual component addition state
   const [manualComponents, setManualComponents] = useState<ComponentIssue[]>([]);
   const [componentSearchOpen, setComponentSearchOpen] = useState(false);
@@ -563,18 +569,60 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Warehouse className="h-5 w-5" />
-            Issue Stock
-          </CardTitle>
-          <CardDescription>
-            Select products and issue components from inventory based on their BOM requirements.
-          </CardDescription>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Warehouse className="h-5 w-5" />
+                Issue Stock
+              </CardTitle>
+              <CardDescription>
+                Select products and issue components from inventory based on their BOM requirements.
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {order && (
+                <StockPickingListDownload
+                  order={order}
+                  components={allComponentsToIssue.map(comp => ({
+                    component_id: comp.component_id,
+                    internal_code: comp.internal_code,
+                    description: comp.description,
+                    quantity: issueQuantities[comp.component_id] ?? comp.issue_quantity,
+                  }))}
+                  issuedTo={selectedStaffId ?
+                    `${staffMembers.find(s => s.staff_id === selectedStaffId)?.first_name || ''} ${staffMembers.find(s => s.staff_id === selectedStaffId)?.last_name || ''}`.trim()
+                    : null
+                  }
+                  notes={notes || null}
+                  companyInfo={companyInfo}
+                  disabled={issueStockMutation.isPending}
+                />
+              )}
+              <Button
+                type="button"
+                onClick={handleIssueStock}
+                disabled={issueStockMutation.isPending || allComponentsToIssue.length === 0}
+                size="lg"
+              >
+                {issueStockMutation.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Issuing...
+                  </>
+                ) : (
+                  <>
+                    <Warehouse className="mr-2 h-4 w-4" />
+                    Issue Stock
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
         </CardHeader>
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-4">
           {/* Product Selection */}
           <div>
-            <Label className="text-base font-medium mb-3 block">Select Products</Label>
+            <Label className="text-sm font-medium mb-2 block">Select Products</Label>
             <div className="space-y-2">
               {order?.details?.map((detail) => {
                 const orderDetailId = detail.order_detail_id;
@@ -622,8 +670,8 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
 
           {/* Components to Issue (BOM + Manual) */}
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <Label className="text-base font-medium">Components to Issue</Label>
+            <div className="flex items-center justify-between mb-2">
+              <Label className="text-sm font-medium">Components to Issue</Label>
               <Popover open={componentSearchOpen} onOpenChange={setComponentSearchOpen}>
                 <PopoverTrigger asChild>
                   <Button variant="outline" size="sm">
@@ -788,24 +836,24 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
             )}
           </div>
 
-          {/* Staff Assignment and Notes */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Staff Assignment, PO, and Notes – compact single row */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t">
             <div>
-              <Label htmlFor="staff-select">Issue To (Optional)</Label>
+              <Label htmlFor="staff-select" className="text-xs text-muted-foreground">Issue To</Label>
               <Select
                 value={selectedStaffId?.toString() || 'none'}
                 onValueChange={(value) => setSelectedStaffId(value && value !== 'none' ? parseInt(value) : null)}
               >
-                <SelectTrigger id="staff-select">
+                <SelectTrigger id="staff-select" className="h-9">
                   <SelectValue placeholder="Select staff member...">
                     {selectedStaffId ? (
                       <span className="flex items-center gap-2">
-                        <User className="h-4 w-4" />
+                        <User className="h-3.5 w-3.5" />
                         {staffMembers.find(s => s.staff_id === selectedStaffId)?.first_name}{' '}
                         {staffMembers.find(s => s.staff_id === selectedStaffId)?.last_name}
                       </span>
                     ) : (
-                      <span className="text-muted-foreground">Select staff member...</span>
+                      <span className="text-muted-foreground">Staff member...</span>
                     )}
                   </SelectValue>
                 </SelectTrigger>
@@ -828,67 +876,26 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
               </Select>
             </div>
             <div>
-              <Label htmlFor="purchase-order-id">Purchase Order ID (Optional)</Label>
+              <Label htmlFor="purchase-order-id" className="text-xs text-muted-foreground">PO ID</Label>
               <Input
                 id="purchase-order-id"
                 type="number"
-                placeholder="PO ID if applicable"
+                placeholder="PO ID"
                 value={purchaseOrderId || ''}
                 onChange={(e) => setPurchaseOrderId(e.target.value ? parseInt(e.target.value) : null)}
+                className="h-9"
               />
             </div>
             <div>
-              <Label htmlFor="notes">Notes (Optional)</Label>
-              <Textarea
+              <Label htmlFor="notes" className="text-xs text-muted-foreground">Notes</Label>
+              <Input
                 id="notes"
-                placeholder="Add any notes about this issuance..."
+                placeholder="Issuance notes..."
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                rows={2}
+                className="h-9"
               />
             </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex justify-end gap-2">
-            {/* Picking List PDF Download */}
-            {order && (
-              <StockPickingListDownload
-                order={order}
-                components={allComponentsToIssue.map(comp => ({
-                  component_id: comp.component_id,
-                  internal_code: comp.internal_code,
-                  description: comp.description,
-                  quantity: issueQuantities[comp.component_id] ?? comp.issue_quantity,
-                }))}
-                issuedTo={selectedStaffId ? 
-                  `${staffMembers.find(s => s.staff_id === selectedStaffId)?.first_name || ''} ${staffMembers.find(s => s.staff_id === selectedStaffId)?.last_name || ''}`.trim() 
-                  : null
-                }
-                notes={notes || null}
-                companyInfo={companyInfo}
-                disabled={issueStockMutation.isPending}
-              />
-            )}
-            
-            {/* Issue Stock Button */}
-            <Button
-              type="button"
-              onClick={handleIssueStock}
-              disabled={issueStockMutation.isPending || allComponentsToIssue.length === 0}
-            >
-              {issueStockMutation.isPending ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Issuing...
-                </>
-              ) : (
-                <>
-                  <Warehouse className="mr-2 h-4 w-4" />
-                  Issue Stock
-                </>
-              )}
-            </Button>
           </div>
         </CardContent>
       </Card>
