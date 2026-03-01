@@ -16,6 +16,7 @@ import { useOrgSettings } from '@/hooks/use-org-settings';
 import { useToast } from '@/components/ui/use-toast';
 import { format, parseISO, isValid, isBefore, isAfter, differenceInDays, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
 import { supabase } from '@/lib/supabase';
+import { cn } from '@/lib/utils';
 import { Order, OrderStatus } from '@/types/orders';
 import { effectiveQty, effectiveReceived } from '@/lib/procurement-utils';
 import { Button } from '@/components/ui/button';
@@ -559,6 +560,17 @@ function SummaryStatsBar({ stats, activeFilter, onFilterChange }: {
       ))}
     </div>
   );
+}
+
+// Issuance status badge for the orders table
+function IssuedBadge({ issued, total }: { issued: number; total: number }) {
+  if (total === 0) return <span className="text-muted-foreground/40">—</span>;
+  const color = issued >= total
+    ? 'text-green-600'
+    : issued > 0
+    ? 'text-amber-600'
+    : 'text-muted-foreground';
+  return <span className={cn('text-sm font-medium', color)}>{issued}/{total}</span>;
 }
 
 // Compact procurement indicator for the table row
@@ -1752,6 +1764,70 @@ export default function OrdersPage() {
     queryFn: fetchProcurementSummaries,
   });
 
+  // Fetch issuance progress per order (components issued vs total BOM components)
+  const { data: issuanceSummaries = {} } = useQuery<Record<number, { issued: number; total: number }>>({
+    queryKey: ['issuanceSummaries'],
+    queryFn: async () => {
+      // Get all order_details → product_components (total components per order)
+      const { data: orderDetails } = await supabase
+        .from('order_details')
+        .select('order_id, product_id');
+      if (!orderDetails?.length) return {};
+
+      const { data: productComponents } = await supabase
+        .from('product_components')
+        .select('product_id, component_id');
+
+      // Get issued components per order
+      const { data: issuances } = await supabase
+        .from('stock_issuances')
+        .select('order_id, component_id');
+
+      // Build totals per order
+      const componentsByProduct = new Map<number, Set<number>>();
+      for (const pc of productComponents ?? []) {
+        if (!componentsByProduct.has(pc.product_id)) {
+          componentsByProduct.set(pc.product_id, new Set());
+        }
+        componentsByProduct.get(pc.product_id)!.add(pc.component_id);
+      }
+
+      // Track distinct components per order
+      const componentsByOrder = new Map<number, Set<number>>();
+      for (const od of orderDetails) {
+        if (!componentsByOrder.has(od.order_id)) componentsByOrder.set(od.order_id, new Set());
+        const comps = componentsByProduct.get(od.product_id);
+        if (comps) {
+          for (const cid of comps) {
+            componentsByOrder.get(od.order_id)!.add(cid);
+          }
+        }
+      }
+
+      // Track issued distinct components per order
+      const issuedByOrder = new Map<number, Set<number>>();
+      for (const si of issuances ?? []) {
+        if (!issuedByOrder.has(si.order_id)) issuedByOrder.set(si.order_id, new Set());
+        issuedByOrder.get(si.order_id)!.add(si.component_id);
+      }
+
+      // Build result
+      const result: Record<number, { issued: number; total: number }> = {};
+      for (const [orderId, totalComps] of componentsByOrder) {
+        const issuedComps = issuedByOrder.get(orderId);
+        let issuedCount = 0;
+        if (issuedComps) {
+          for (const cid of issuedComps) {
+            if (totalComps.has(cid)) issuedCount++;
+          }
+        }
+        result[orderId] = { issued: issuedCount, total: totalComps.size };
+      }
+
+      return result;
+    },
+  });
+
   // Inline status change handler
   const handleStatusChange = useCallback(async (
     orderId: number,
@@ -2258,6 +2334,7 @@ export default function OrdersPage() {
                     <SortableHeader label="Delivery Date" field="delivery_date" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
                     <SortableHeader label="Total Amount" field="total_amount" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
                     <TableHead className="font-semibold">Items</TableHead>
+                    <TableHead className="font-semibold w-20">Issued</TableHead>
                     <TableHead className="font-semibold">Supplier</TableHead>
                     <SortableHeader label="Status" field="status" sortField={sortField} sortDirection={sortDirection} onSort={handleSort} />
                     <TableHead className="font-semibold text-center">Customer Order</TableHead>
@@ -2336,6 +2413,13 @@ export default function OrdersPage() {
                             <span className={itemCount === 0 ? 'text-amber-500' : 'text-muted-foreground'}>
                               {itemCount} {itemCount === 1 ? 'item' : 'items'}
                             </span>
+                          </TableCell>
+                          {/* Issuance status */}
+                          <TableCell className="align-middle text-sm py-2 w-20">
+                            <IssuedBadge
+                              issued={issuanceSummaries[order.order_id]?.issued ?? 0}
+                              total={issuanceSummaries[order.order_id]?.total ?? 0}
+                            />
                           </TableCell>
                           {/* Procurement indicator */}
                           <TableCell className="align-middle text-sm py-2">
