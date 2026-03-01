@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Dialog,
@@ -14,14 +14,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import type { FloorStaffJob } from './types';
-import { fetchActiveStaff } from '@/lib/queries/factoryFloor';
+import { fetchActiveStaff, fetchJobCardItems } from '@/lib/queries/factoryFloor';
 
 interface TransferJobDialogProps {
   job: FloorStaffJob | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onTransfer: (newStaffId: number, notes?: string) => void;
+  onTransfer: (newStaffId: number, notes?: string, earningsSplit?: { item_id: number; original_amount: number }[]) => void;
   isPending: boolean;
 }
 
@@ -29,12 +30,42 @@ export function TransferJobDialog({ job, open, onOpenChange, onTransfer, isPendi
   const [selectedStaffId, setSelectedStaffId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [notes, setNotes] = useState('');
+  const [customSplit, setCustomSplit] = useState(false);
+  const [splitAmounts, setSplitAmounts] = useState<Record<number, number>>({});
+
+  const isPiecework = job?.pay_type === 'piece';
+  const isInProgress = job?.job_status === 'in_progress';
+  const showEarningsSplit = isPiecework && isInProgress;
 
   const { data: allStaff, isLoading } = useQuery({
     queryKey: ['active-staff'],
     queryFn: fetchActiveStaff,
     enabled: open,
   });
+
+  const { data: jobItems } = useQuery({
+    queryKey: ['job-card-items', job?.job_card_id],
+    queryFn: () => fetchJobCardItems(job!.job_card_id!),
+    enabled: open && showEarningsSplit && !!job?.job_card_id,
+  });
+
+  const needsCustomSplit = useMemo(() => {
+    if (!jobItems) return false;
+    return jobItems.some((i) => i.quantity === 1 && (i.piece_rate ?? 0) > 0);
+  }, [jobItems]);
+
+  useEffect(() => {
+    if (jobItems && Object.keys(splitAmounts).length === 0) {
+      const initial: Record<number, number> = {};
+      for (const item of jobItems) {
+        if ((item.piece_rate ?? 0) > 0) {
+          const ratio = item.completed_quantity / Math.max(item.quantity, 1);
+          initial[item.item_id] = Math.round((item.piece_rate ?? 0) * ratio * 100) / 100;
+        }
+      }
+      setSplitAmounts(initial);
+    }
+  }, [jobItems]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filteredStaff = useMemo(() => {
     if (!allStaff) return [];
@@ -44,14 +75,21 @@ export function TransferJobDialog({ job, open, onOpenChange, onTransfer, isPendi
   }, [allStaff, job?.staff_id, search]);
 
   const selectedStaff = allStaff?.find((s) => s.staff_id === selectedStaffId);
-  const isInProgress = job?.job_status === 'in_progress';
 
   const handleSubmit = () => {
     if (!selectedStaffId) return;
-    onTransfer(selectedStaffId, notes || undefined);
+    let earningsSplit: { item_id: number; original_amount: number }[] | undefined;
+    if (showEarningsSplit && (needsCustomSplit || customSplit) && jobItems) {
+      earningsSplit = jobItems
+        .filter((i) => (i.piece_rate ?? 0) > 0 && splitAmounts[i.item_id] != null)
+        .map((i) => ({ item_id: i.item_id, original_amount: splitAmounts[i.item_id] }));
+    }
+    onTransfer(selectedStaffId, notes || undefined, earningsSplit);
     setSelectedStaffId(null);
     setSearch('');
     setNotes('');
+    setSplitAmounts({});
+    setCustomSplit(false);
   };
 
   if (!job) return null;
@@ -124,6 +162,72 @@ export function TransferJobDialog({ job, open, onOpenChange, onTransfer, isPendi
                 <span className="text-muted-foreground">To:</span>{' '}
                 <span className="font-medium">{selectedStaff.name}</span>
               </p>
+            </div>
+          )}
+
+          {/* Earnings split for piecework transfers */}
+          {showEarningsSplit && jobItems && jobItems.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label>Earnings Split</Label>
+                {!needsCustomSplit && (
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="custom-split" className="text-xs text-muted-foreground">Custom split</Label>
+                    <Switch id="custom-split" checked={customSplit} onCheckedChange={setCustomSplit} />
+                  </div>
+                )}
+              </div>
+              {(needsCustomSplit || customSplit) ? (
+                <div className="space-y-2">
+                  {jobItems.filter((i) => (i.piece_rate ?? 0) > 0).map((item) => (
+                    <div key={item.item_id} className="p-3 rounded-md border bg-card space-y-2">
+                      <div className="text-sm font-medium truncate">
+                        {item.job_name ?? item.product_name ?? 'Item'}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        Total rate: R{(item.piece_rate ?? 0).toFixed(2)} per piece
+                        {item.quantity > 1 && ` × ${item.quantity} = R${((item.piece_rate ?? 0) * item.quantity).toFixed(2)}`}
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs">{job?.staff_name} earns</Label>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">R</span>
+                            <Input
+                              type="number"
+                              min={0}
+                              max={item.piece_rate ?? 0}
+                              step={0.01}
+                              value={splitAmounts[item.item_id] ?? 0}
+                              onChange={(e) => setSplitAmounts((prev) => ({
+                                ...prev,
+                                [item.item_id]: Math.min(item.piece_rate ?? 0, Math.max(0, parseFloat(e.target.value) || 0)),
+                              }))}
+                              className="pl-7 text-sm"
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">New worker earns</Label>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">R</span>
+                            <Input
+                              type="number"
+                              value={((item.piece_rate ?? 0) - (splitAmounts[item.item_id] ?? 0)).toFixed(2)}
+                              readOnly
+                              className="pl-7 text-sm bg-muted"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Earnings will be split by completed quantities. Toggle &quot;Custom split&quot; to specify rand amounts.
+                </p>
+              )}
             </div>
           )}
 

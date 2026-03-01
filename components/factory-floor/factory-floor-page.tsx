@@ -38,7 +38,7 @@ export function FactoryFloorPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-3 p-4">
       <FloorHeader
         sections={sections}
         isLoading={isLoading}
@@ -52,7 +52,7 @@ export function FactoryFloorPage() {
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {sections.map((s) => (
             <SectionZone
               key={s.section.section_id}
@@ -125,12 +125,13 @@ export function FactoryFloorPage() {
         job={selectedJob}
         open={transferDialogOpen}
         onOpenChange={setTransferDialogOpen}
-        onTransfer={(newStaffId, notes) => {
+        onTransfer={(newStaffId, notes, earningsSplit) => {
           if (!selectedJob) return;
           transferJob.mutate({
             assignmentId: selectedJob.assignment_id,
             newStaffId,
             notes,
+            earningsSplit,
           }, {
             onSuccess: () => {
               setTransferDialogOpen(false);
