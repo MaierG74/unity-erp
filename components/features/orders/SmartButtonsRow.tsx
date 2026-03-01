@@ -4,12 +4,12 @@ import React from 'react';
 import { Package, Wrench, ClipboardList, FileText, ShoppingCart, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-interface SmartButton {
+interface TabButton {
   id: string;
   label: string;
   icon: React.ReactNode;
   count: number;
-  variant?: 'default' | 'warning' | 'danger';
+  countVariant?: 'default' | 'warning' | 'danger';
 }
 
 interface SmartButtonsRowProps {
@@ -19,14 +19,14 @@ interface SmartButtonsRowProps {
   poCount: number;
   documentCount: number;
   issuedCount: number;
-  onButtonClick: (sectionId: string) => void;
-  activeSection?: string | null;
+  onTabChange: (tabId: string) => void;
+  activeTab: string;
 }
 
-const variantStyles = {
-  default: 'bg-muted/60 text-foreground hover:bg-muted',
-  warning: 'bg-amber-500/15 text-amber-700 dark:text-amber-400 hover:bg-amber-500/25',
-  danger: 'bg-red-500/15 text-red-700 dark:text-red-400 hover:bg-red-500/25',
+const countVariantStyles = {
+  default: 'text-muted-foreground',
+  warning: 'text-amber-600 dark:text-amber-400',
+  danger: 'text-red-600 dark:text-red-400',
 };
 
 export function SmartButtonsRow({
@@ -36,10 +36,10 @@ export function SmartButtonsRow({
   poCount,
   documentCount,
   issuedCount,
-  onButtonClick,
-  activeSection,
+  onTabChange,
+  activeTab,
 }: SmartButtonsRowProps) {
-  const buttons: SmartButton[] = [
+  const tabs: TabButton[] = [
     {
       id: 'products',
       label: 'Products',
@@ -51,7 +51,7 @@ export function SmartButtonsRow({
       label: 'Components',
       icon: <Layers className="h-3.5 w-3.5" />,
       count: componentShortfallCount,
-      variant: componentShortfallCount > 0 ? 'danger' : 'default',
+      countVariant: componentShortfallCount > 0 ? 'danger' : 'default',
     },
     {
       id: 'job-cards',
@@ -64,7 +64,7 @@ export function SmartButtonsRow({
       label: 'Procurement',
       icon: <ShoppingCart className="h-3.5 w-3.5" />,
       count: poCount,
-      variant: poCount > 0 ? 'warning' : 'default',
+      countVariant: poCount > 0 ? 'warning' : 'default',
     },
     {
       id: 'documents',
@@ -81,24 +81,27 @@ export function SmartButtonsRow({
   ];
 
   return (
-    <div className="flex items-center gap-2 flex-wrap">
-      {buttons.map((btn) => {
-        const isActive = activeSection === btn.id;
-        const style = variantStyles[btn.variant || 'default'];
+    <div className="flex items-center gap-1 border-b overflow-x-auto">
+      {tabs.map((tab) => {
+        const isActive = activeTab === tab.id;
+        const countStyle = countVariantStyles[tab.countVariant || 'default'];
 
         return (
           <button
-            key={btn.id}
-            onClick={() => onButtonClick(btn.id)}
+            key={tab.id}
+            onClick={() => onTabChange(tab.id)}
             className={cn(
-              'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer',
-              style,
-              isActive && 'ring-2 ring-primary ring-offset-1 ring-offset-background'
+              'inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer whitespace-nowrap border-b-2 -mb-px',
+              isActive
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/30'
             )}
           >
-            {btn.icon}
-            {btn.label}
-            <span className="ml-0.5 opacity-70">({btn.count})</span>
+            {tab.icon}
+            {tab.label}
+            <span className={cn('ml-0.5 text-xs', isActive ? 'text-primary/70' : countStyle)}>
+              ({tab.count})
+            </span>
           </button>
         );
       })}

@@ -9,12 +9,12 @@ import { fetchCustomers } from '@/lib/db/customers';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { Package, Loader2, AlertCircle, ShoppingCart, ChevronDown, CheckCircle, ChevronRight, RotateCcw, ClipboardList, FileText, Wrench } from 'lucide-react';
+import { Package, Loader2, AlertCircle, ShoppingCart, ChevronDown, CheckCircle, ChevronRight, RotateCcw } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { Table, TableHeader, TableBody, TableCell, TableHead, TableRow, TableFooter } from '@/components/ui/table';
 import React from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { IssueStockTab } from '@/components/features/orders/IssueStockTab';
 import { OrderDocumentsTab } from '@/components/features/orders/OrderDocumentsTab';
@@ -37,14 +37,12 @@ import {
 import { fetchOrderComponentRequirements } from '@/lib/queries/order-components';
 import { OrderComponentsDialog } from '@/components/features/orders/OrderComponentsDialog';
 import { AddProductsDialog } from '@/components/features/orders/AddProductsDialog';
-import { determineProductSections } from '@/components/features/orders/StatusBadge';
 
 // New single-scroll layout components
 import { OrderHeaderStripe } from '@/components/features/orders/OrderHeaderStripe';
 import { SmartButtonsRow } from '@/components/features/orders/SmartButtonsRow';
 import { ProductsTableRow } from '@/components/features/orders/ProductsTableRow';
 import { OrderSlideOutPanel } from '@/components/features/orders/OrderSlideOutPanel';
-import { CollapsibleSection } from '@/components/features/orders/CollapsibleSection';
 
 type OrderDetailPageProps = {
   params: Promise<{
@@ -69,9 +67,15 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   const { orderId: orderIdParam } = use(params);
   const orderId = parseInt(orderIdParam, 10);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeSection, setActiveSection] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const activeTab = searchParams?.get('tab') || 'products';
+  const handleTabChange = useCallback((tabId: string) => {
+    const params = new URLSearchParams(searchParams?.toString() || '');
+    params.set('tab', tabId);
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [searchParams, router]);
   const [orderComponentsOpen, setOrderComponentsOpen] = useState<boolean>(false);
   const [statusOptions, setStatusOptions] = useState<any[]>([]);
   // Add state for expanded rows
@@ -80,44 +84,12 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   const [showGlobalContext, setShowGlobalContext] = useState<boolean>(true);
   const [fgReservationsOpen, setFgReservationsOpen] = useState<boolean>(false);
 
-  // Section refs for smart button scroll-to
+  // Section refs
   const productsRef = useRef<HTMLDivElement>(null);
   const componentsRef = useRef<HTMLDivElement>(null);
-  const jobCardsRef = useRef<HTMLDivElement>(null);
-  const procurementRef = useRef<HTMLDivElement>(null);
-  const documentsRef = useRef<HTMLDivElement>(null);
-  const issueStockRef = useRef<HTMLDivElement>(null);
 
   // Slide-out panel state
   const [slideOutProduct, setSlideOutProduct] = useState<any>(null);
-
-  // Section open/close state (all collapsed by default except Products)
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
-    'job-cards': false,
-    'procurement': false,
-    'documents': false,
-    'issue-stock': false,
-  });
-
-  const handleSmartButtonClick = (sectionId: string) => {
-    const refMap: Record<string, React.RefObject<HTMLDivElement | null>> = {
-      products: productsRef,
-      components: componentsRef,
-      'job-cards': jobCardsRef,
-      procurement: procurementRef,
-      documents: documentsRef,
-      'issue-stock': issueStockRef,
-    };
-    const ref = refMap[sectionId];
-    if (ref?.current) {
-      // Open the section if it's collapsible
-      setOpenSections(prev => ({ ...prev, [sectionId]: true }));
-      // Small delay to let animation start, then scroll
-      setTimeout(() => {
-        ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 100);
-    }
-  };
 
   // Inline edit state (always editable, auto-save on change)
   const [editCustomerId, setEditCustomerId] = useState<string>('');
@@ -690,35 +662,16 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     };
   }, [componentRequirements, computeComponentMetrics]);
 
-  // Enhanced filter function to include section filtering
+  // Filter order details by search query
   const filterOrderDetails = (details: any[]) => {
     if (!details) return [];
-    
-    let filteredDetails = [...details];
-    
-    // Apply section filter if active
-    if (activeSection) {
-      filteredDetails = filteredDetails.filter(detail => 
-        determineProductSections(detail.product).includes(activeSection)
-      );
-    }
-    
-    // Apply search query filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      filteredDetails = filteredDetails.filter(detail => 
-        detail.product?.name?.toLowerCase().includes(query) ||
-        detail.product?.description?.toLowerCase().includes(query) ||
-        detail.order_detail_id.toString().includes(query)
-      );
-    }
-    
-    return filteredDetails;
-  };
-
-  // Function to handle section filter clicks
-  const handleSectionFilter = (section: string | null) => {
-    setActiveSection(section);
+    if (!searchQuery) return details;
+    const query = searchQuery.toLowerCase();
+    return details.filter(detail =>
+      detail.product?.name?.toLowerCase().includes(query) ||
+      detail.product?.description?.toLowerCase().includes(query) ||
+      detail.order_detail_id.toString().includes(query)
+    );
   };
 
 
@@ -751,453 +704,428 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header Stripe */}
-      <OrderHeaderStripe
-        orderId={orderId}
-        order={order}
-        customers={customersSorted}
-        customersLoading={customersLoading}
-        editCustomerId={editCustomerId}
-        editOrderNumber={editOrderNumber}
-        editDeliveryDate={editDeliveryDate}
-        statusOptions={statusOptions}
-        updateOrderMutation={updateOrderMutation}
-        updateStatusMutation={updateStatusMutation}
-        onCustomerChange={handleCustomerChange}
-        onOrderNumberChange={setEditOrderNumber}
-        onOrderNumberBlur={handleOrderNumberBlur}
-        onDeliveryDateChange={handleDeliveryDateChange}
-      />
+    <div className="space-y-5">
+      {/* Sticky header: stripe + tab bar */}
+      <div className="sticky top-0 z-10 -mx-4 md:-mx-6 px-4 md:px-6 pb-0 pt-2 space-y-3 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-b shadow-sm">
+        <OrderHeaderStripe
+          orderId={orderId}
+          order={order}
+          customers={customersSorted}
+          customersLoading={customersLoading}
+          editCustomerId={editCustomerId}
+          editOrderNumber={editOrderNumber}
+          editDeliveryDate={editDeliveryDate}
+          statusOptions={statusOptions}
+          updateOrderMutation={updateOrderMutation}
+          updateStatusMutation={updateStatusMutation}
+          onCustomerChange={handleCustomerChange}
+          onOrderNumberChange={setEditOrderNumber}
+          onOrderNumberBlur={handleOrderNumberBlur}
+          onDeliveryDateChange={handleDeliveryDateChange}
+        />
 
-      {/* Smart Buttons Row */}
-      <SmartButtonsRow
-        productCount={order?.details?.length || 0}
-        componentShortfallCount={totals.totalShortfall}
-        jobCardCount={0}
-        poCount={0}
-        documentCount={attachments?.length || 0}
-        issuedCount={0}
-        onButtonClick={handleSmartButtonClick}
-      />
-        
-      {/* ── Products Section (always visible, dominates viewport) ── */}
-      <div ref={productsRef}>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold">Products ({order?.details?.length || 0})</h2>
-          <AddProductsDialog
-            orderId={orderId}
-            onSuccess={() => {
-              queryClient.invalidateQueries({ queryKey: ['order', orderId] });
-              queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
-              queryClient.invalidateQueries({ queryKey: ['component-suppliers', orderId] });
-              toast.success("Products added successfully");
-            }}
-          />
-        </div>
-
-        <Card>
-          <CardContent className="p-0">
-            {order?.details && order.details.length > 0 ? (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Product</TableHead>
-                    <TableHead className="text-right">Qty</TableHead>
-                    <TableHead className="text-right">Reserved</TableHead>
-                    <TableHead className="text-right">To Build</TableHead>
-                    <TableHead className="text-right">Unit Price</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
-                    <TableHead className="text-right w-[100px]"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {order.details.map((detail: any) => {
-                    const isEditing = editingDetailId === detail.order_detail_id;
-                    const coverage = coverageByProduct.get(detail.product_id) ?? {
-                      ordered: Number(detail.quantity ?? 0),
-                      reserved: 0,
-                      remain: Number(detail.quantity ?? 0),
-                      factor: 1,
-                    };
-                    const productBom = componentRequirements
-                      .find((pr: any) => pr.product_id === detail.product_id)
-                      ?.components ?? [];
-                    const productId = detail.product_id?.toString() || detail.order_detail_id?.toString();
-                    const isExpanded = expandedRows[productId] === true;
-
-                    return (
-                      <ProductsTableRow
-                        key={detail.order_detail_id}
-                        detail={detail}
-                        coverage={coverage}
-                        isEditing={isEditing}
-                        editQuantity={editQuantity}
-                        editUnitPrice={editUnitPrice}
-                        isExpanded={isExpanded}
-                        bomComponents={productBom}
-                        computeComponentMetrics={computeComponentMetrics}
-                        showGlobalContext={showGlobalContext}
-                        onToggleExpand={() => toggleRowExpansion(productId)}
-                        onStartEdit={() => handleStartEditDetail(detail)}
-                        onSaveEdit={() => handleSaveDetail(detail.order_detail_id)}
-                        onCancelEdit={handleCancelDetailEdit}
-                        onDelete={() => handleDeleteDetail(detail.order_detail_id, detail.product?.name || 'this product')}
-                        onQuantityChange={setEditQuantity}
-                        onUnitPriceChange={setEditUnitPrice}
-                        updatePending={updateDetailMutation.isPending}
-                        deletePending={deleteDetailMutation.isPending}
-                        onProductClick={() => setSlideOutProduct(detail)}
-                      />
-                    );
-                  })}
-                </TableBody>
-                <TableFooter>
-                  <TableRow>
-                    <TableCell colSpan={5}>Total</TableCell>
-                    <TableCell className="text-right">{formatCurrency(order.total_amount || 0)}</TableCell>
-                    <TableCell />
-                  </TableRow>
-                </TableFooter>
-              </Table>
-            ) : (
-              <div className="py-8 text-center">
-                <p className="text-muted-foreground">No products in this order</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <SmartButtonsRow
+          productCount={order?.details?.length || 0}
+          componentShortfallCount={totals.totalShortfall}
+          jobCardCount={0}
+          poCount={0}
+          documentCount={attachments?.length || 0}
+          issuedCount={0}
+          onTabChange={handleTabChange}
+          activeTab={activeTab}
+        />
       </div>
+        
+      {/* ── Tab Content ── */}
+      {activeTab === 'products' && (
+        <div ref={productsRef} className="space-y-5">
+          {/* Products Table */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold">Products ({order?.details?.length || 0})</h2>
+              <AddProductsDialog
+                orderId={orderId}
+                onSuccess={() => {
+                  queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+                  queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
+                  queryClient.invalidateQueries({ queryKey: ['component-suppliers', orderId] });
+                  toast.success("Products added successfully");
+                }}
+              />
+            </div>
 
-      {/* ── Stock Reservations ── */}
-      <Collapsible open={fgReservationsOpen} onOpenChange={setFgReservationsOpen}>
-        <Card>
-          <CollapsibleTrigger asChild>
-            <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between cursor-pointer hover:bg-muted/50 transition-colors">
-              <div className="flex items-center gap-2">
-                {fgReservationsOpen ? (
-                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+            <Card>
+              <CardContent className="p-0">
+                {order?.details && order.details.length > 0 ? (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Product</TableHead>
+                        <TableHead className="text-right">Qty</TableHead>
+                        <TableHead className="text-right">Reserved</TableHead>
+                        <TableHead className="text-right">To Build</TableHead>
+                        <TableHead className="text-right">Unit Price</TableHead>
+                        <TableHead className="text-right">Total</TableHead>
+                        <TableHead className="text-right w-[100px]"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {order.details.map((detail: any) => {
+                        const isEditing = editingDetailId === detail.order_detail_id;
+                        const coverage = coverageByProduct.get(detail.product_id) ?? {
+                          ordered: Number(detail.quantity ?? 0),
+                          reserved: 0,
+                          remain: Number(detail.quantity ?? 0),
+                          factor: 1,
+                        };
+                        const productBom = componentRequirements
+                          .find((pr: any) => pr.product_id === detail.product_id)
+                          ?.components ?? [];
+                        const productId = detail.product_id?.toString() || detail.order_detail_id?.toString();
+                        const isExpanded = expandedRows[productId] === true;
+
+                        return (
+                          <ProductsTableRow
+                            key={detail.order_detail_id}
+                            detail={detail}
+                            coverage={coverage}
+                            isEditing={isEditing}
+                            editQuantity={editQuantity}
+                            editUnitPrice={editUnitPrice}
+                            isExpanded={isExpanded}
+                            bomComponents={productBom}
+                            computeComponentMetrics={computeComponentMetrics}
+                            showGlobalContext={showGlobalContext}
+                            onToggleExpand={() => toggleRowExpansion(productId)}
+                            onStartEdit={() => handleStartEditDetail(detail)}
+                            onSaveEdit={() => handleSaveDetail(detail.order_detail_id)}
+                            onCancelEdit={handleCancelDetailEdit}
+                            onDelete={() => handleDeleteDetail(detail.order_detail_id, detail.product?.name || 'this product')}
+                            onQuantityChange={setEditQuantity}
+                            onUnitPriceChange={setEditUnitPrice}
+                            updatePending={updateDetailMutation.isPending}
+                            deletePending={deleteDetailMutation.isPending}
+                            onProductClick={() => setSlideOutProduct(detail)}
+                          />
+                        );
+                      })}
+                    </TableBody>
+                    <TableFooter>
+                      <TableRow>
+                        <TableCell colSpan={5}>Total</TableCell>
+                        <TableCell className="text-right">{formatCurrency(order.total_amount || 0)}</TableCell>
+                        <TableCell />
+                      </TableRow>
+                    </TableFooter>
+                  </Table>
                 ) : (
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  <div className="py-8 text-center">
+                    <p className="text-muted-foreground">No products in this order</p>
+                  </div>
                 )}
-                <div>
-                  <CardTitle className="text-lg">Stock Reservations</CardTitle>
-                  <CardDescription>
-                    Reserve pre-built products from stock to reduce the components needed.
-                  </CardDescription>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Stock Reservations */}
+          <Collapsible open={fgReservationsOpen} onOpenChange={setFgReservationsOpen}>
+            <Card>
+              <CollapsibleTrigger asChild>
+                <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between cursor-pointer hover:bg-muted/50 transition-colors">
+                  <div className="flex items-center gap-2">
+                    {fgReservationsOpen ? (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    )}
+                    <div>
+                      <CardTitle className="text-lg">Stock Reservations</CardTitle>
+                      <CardDescription>
+                        Reserve pre-built products from stock to reduce the components needed.
+                      </CardDescription>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      onClick={() => reserveFgMutation.mutate()}
+                      disabled={reserveFgMutation.isPending || orderLoading}
+                      title="Reserve available finished goods from stock for this order"
+                    >
+                      {reserveFgMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Package className="mr-2 h-4 w-4" />
+                      )}
+                      Reserve Stock
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => releaseFgMutation.mutate()}
+                      disabled={!hasFgReservations || releaseFgMutation.isPending}
+                      title="Release reservations back to available stock"
+                    >
+                      {releaseFgMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RotateCcw className="mr-2 h-4 w-4" />
+                      )}
+                      Release
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => consumeFgMutation.mutate()}
+                      disabled={!hasFgReservations || consumeFgMutation.isPending}
+                      title="Mark reserved items as shipped and deduct from inventory"
+                    >
+                      {consumeFgMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <CheckCircle className="mr-2 h-4 w-4" />
+                      )}
+                      Ship
+                    </Button>
+                  </div>
+                </CardHeader>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <CardContent>
+                  {fgReservationsLoading ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading finished-good reservations…
+                    </div>
+                  ) : finishedGoodsRows.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No products on this order have stock available to reserve.
+                    </p>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Product</TableHead>
+                          <TableHead>Ordered</TableHead>
+                          <TableHead className="text-right">Reserved</TableHead>
+                          <TableHead className="text-right">Need to Build</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {finishedGoodsRows.map((row) => {
+                          const reservedPercent = row.ordered > 0
+                            ? Math.round(((row.ordered - row.remain) / row.ordered) * 100)
+                            : 0;
+                          return (
+                            <TableRow key={`fg-row-${row.product_id}`}>
+                              <TableCell>
+                                <div className="font-medium">{row.name}</div>
+                                {row.internal_code && (
+                                  <div className="text-xs text-muted-foreground">{row.internal_code}</div>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">{formatQuantity(row.ordered)}</TableCell>
+                              <TableCell className="text-right">
+                                <span className={cn(
+                                  row.reserved > 0 ? 'text-blue-700 font-medium' : 'text-muted-foreground'
+                                )}>
+                                  {formatQuantity(row.reserved)}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {formatQuantity(row.remain)}
+                                {row.reserved > 0 && (
+                                  <span className="ml-2 text-xs text-muted-foreground">
+                                    {reservedPercent}% reserved
+                                  </span>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  )}
+                  {!hasFgReservations && finishedGoodsRows.length > 0 && (
+                    <div className="mt-3 rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+                      Reserving stock will automatically reduce the components needed for this order.
+                    </div>
+                  )}
+                </CardContent>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
+
+          {/* Financial Summary */}
+          <Card>
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between gap-6 text-sm">
+                <div className="flex items-center gap-4">
+                  <span className="text-muted-foreground">Subtotal</span>
+                  <span className="font-medium">{formatCurrency(order?.total_amount || 0)}</span>
+                </div>
+                <div className="flex items-center gap-4">
+                  <span className="text-muted-foreground">Tax (15%)</span>
+                  <span className="font-medium">{formatCurrency((order?.total_amount || 0) * 0.15)}</span>
+                </div>
+                <div className="flex items-center gap-4">
+                  <span className="font-medium">Total</span>
+                  <span className="font-bold text-base">{formatCurrency((order?.total_amount || 0) * 1.15)}</span>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
-                <Button
-                  onClick={() => reserveFgMutation.mutate()}
-                  disabled={reserveFgMutation.isPending || orderLoading}
-                  title="Reserve available finished goods from stock for this order"
-                >
-                  {reserveFgMutation.isPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Package className="mr-2 h-4 w-4" />
-                  )}
-                  Reserve Stock
-                </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {activeTab === 'components' && (
+        <div ref={componentsRef} className="space-y-5">
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-lg">Components Summary</CardTitle>
+                  <CardDescription>Parts needed to fulfill this order</CardDescription>
+                </div>
                 <Button
                   variant="outline"
-                  onClick={() => releaseFgMutation.mutate()}
-                  disabled={!hasFgReservations || releaseFgMutation.isPending}
-                  title="Release reservations back to available stock"
+                  size="sm"
+                  className="gap-1"
+                  onClick={() => setOrderComponentsOpen(true)}
                 >
-                  {releaseFgMutation.isPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <RotateCcw className="mr-2 h-4 w-4" />
-                  )}
-                  Release
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => consumeFgMutation.mutate()}
-                  disabled={!hasFgReservations || consumeFgMutation.isPending}
-                  title="Mark reserved items as shipped and deduct from inventory"
-                >
-                  {consumeFgMutation.isPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <CheckCircle className="mr-2 h-4 w-4" />
-                  )}
-                  Ship
+                  Order Components
+                  <ShoppingCart className="h-4 w-4" />
                 </Button>
               </div>
             </CardHeader>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <CardContent>
-              {fgReservationsLoading ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading finished-good reservations…
-                </div>
-              ) : finishedGoodsRows.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No products on this order have stock available to reserve.
-                </p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Product</TableHead>
-                      <TableHead>Ordered</TableHead>
-                      <TableHead className="text-right">Reserved</TableHead>
-                      <TableHead className="text-right">Need to Build</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {finishedGoodsRows.map((row) => {
-                      const reservedPercent = row.ordered > 0
-                        ? Math.round(((row.ordered - row.remain) / row.ordered) * 100)
-                        : 0;
-                      return (
-                        <TableRow key={`fg-row-${row.product_id}`}>
-                          <TableCell>
-                            <div className="font-medium">{row.name}</div>
-                            {row.internal_code && (
-                              <div className="text-xs text-muted-foreground">{row.internal_code}</div>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right">{formatQuantity(row.ordered)}</TableCell>
-                          <TableCell className="text-right">
-                            <span className={cn(
-                              row.reserved > 0 ? 'text-blue-700 font-medium' : 'text-muted-foreground'
-                            )}>
-                              {formatQuantity(row.reserved)}
-                            </span>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {formatQuantity(row.remain)}
-                            {row.reserved > 0 && (
-                              <span className="ml-2 text-xs text-muted-foreground">
-                                {reservedPercent}% reserved
-                              </span>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              )}
-              {!hasFgReservations && finishedGoodsRows.length > 0 && (
-                <div className="mt-3 rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-                  Reserving stock will automatically reduce the components needed for this order.
-                </div>
-              )}
-            </CardContent>
-          </CollapsibleContent>
-        </Card>
-      </Collapsible>
-
-      {/* ── Components Summary ── */}
-      <div ref={componentsRef}>
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-lg">Components Summary</CardTitle>
-                <CardDescription>Parts needed to fulfill this order</CardDescription>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1"
-                onClick={() => setOrderComponentsOpen(true)}
-              >
-                Order Components
-                <ShoppingCart className="h-4 w-4" />
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Stock Coverage Progress */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Stock Availability</span>
-                <span className={cn(
-                  "font-semibold",
-                  totals.stockCoverage === 100 ? "text-green-600" : totals.stockCoverage >= 50 ? "text-amber-600" : "text-red-600"
-                )}>
-                  {totals.stockCoverage}% ready
-                </span>
-              </div>
-              <div className="h-2 bg-muted rounded-full overflow-hidden">
-                <div
-                  className={cn(
-                    "h-full transition-all duration-500",
-                    totals.stockCoverage === 100 ? "bg-green-500" : totals.stockCoverage >= 50 ? "bg-amber-500" : "bg-red-500"
-                  )}
-                  style={{ width: `${totals.stockCoverage}%` }}
-                />
-              </div>
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>{totals.componentsInStock} of {totals.totalComponents} components in stock</span>
-                {totals.totalShortfall > 0 && (
-                  <span className="text-red-600 font-medium">{totals.totalShortfall} need ordering</span>
-                )}
-              </div>
-              {totals.componentsPendingDeliveries > 0 && (
-                <div className="flex items-center gap-1 pt-1 text-xs text-amber-600">
-                  <AlertCircle className="w-3.5 h-3.5" />
-                  <span>
-                    Waiting on deliveries for {totals.componentsPendingDeliveries === 1
-                      ? '1 component'
-                      : `${totals.componentsPendingDeliveries} components`}
+            <CardContent className="space-y-4">
+              {/* Stock Coverage Progress */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Stock Availability</span>
+                  <span className={cn(
+                    "font-semibold",
+                    totals.stockCoverage === 100 ? "text-green-600" : totals.stockCoverage >= 50 ? "text-amber-600" : "text-red-600"
+                  )}>
+                    {totals.stockCoverage}% ready
                   </span>
                 </div>
-              )}
-            </div>
-
-            {/* Critical Shortfalls Table */}
-            {totals.criticalShortfalls.length > 0 && (
-              <div className="border rounded-lg overflow-hidden">
-                <div className="bg-destructive/10 px-3 py-2 border-b flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-destructive" />
-                  <span className="text-sm font-medium text-destructive">Components Needing Attention</span>
+                <div className="h-2 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className={cn(
+                      "h-full transition-all duration-500",
+                      totals.stockCoverage === 100 ? "bg-green-500" : totals.stockCoverage >= 50 ? "bg-amber-500" : "bg-red-500"
+                    )}
+                    style={{ width: `${totals.stockCoverage}%` }}
+                  />
                 </div>
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50">
-                    <tr className="text-muted-foreground">
-                      <th className="text-left py-2 px-3 font-medium">Component</th>
-                      <th className="text-right py-2 px-3 font-medium">Need</th>
-                      <th className="text-right py-2 px-3 font-medium">Have</th>
-                      <th className="text-right py-2 px-3 font-medium text-red-600">Short</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {totals.criticalShortfalls.map((comp, idx) => (
-                      <tr key={idx} className="border-t">
-                        <td className="py-2 px-3">
-                          <div className="font-medium">{comp.code}</div>
-                          {comp.description && (
-                            <div className="text-xs text-muted-foreground truncate max-w-[180px]">
-                              {comp.description}
-                            </div>
-                          )}
-                        </td>
-                        <td className="text-right py-2 px-3">{formatQuantity(comp.required)}</td>
-                        <td className="text-right py-2 px-3">
-                          {formatQuantity(comp.inStock)}
-                          {comp.onOrder > 0 && (
-                            <span className="text-blue-600 text-xs ml-1">(+{formatQuantity(comp.onOrder)} coming)</span>
-                          )}
-                        </td>
-                        <td className="text-right py-2 px-3 text-red-600 font-medium">
-                          {formatQuantity(comp.shortfall)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {totals.allShortfalls.length > 5 && (
-                  <div className="px-3 py-2 bg-muted/30 text-xs text-center text-muted-foreground border-t">
-                    + {totals.allShortfalls.length - 5} more components need ordering
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>{totals.componentsInStock} of {totals.totalComponents} components in stock</span>
+                  {totals.totalShortfall > 0 && (
+                    <span className="text-red-600 font-medium">{totals.totalShortfall} need ordering</span>
+                  )}
+                </div>
+                {totals.componentsPendingDeliveries > 0 && (
+                  <div className="flex items-center gap-1 pt-1 text-xs text-amber-600">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span>
+                      Waiting on deliveries for {totals.componentsPendingDeliveries === 1
+                        ? '1 component'
+                        : `${totals.componentsPendingDeliveries} components`}
+                    </span>
                   </div>
                 )}
               </div>
-            )}
 
-            {/* All good message */}
-            {totals.totalShortfall === 0 && totals.totalComponents > 0 && totals.componentsPendingDeliveries === 0 && (
-              <div className="flex items-center gap-2 text-green-600 dark:text-green-400 bg-green-500/10 rounded-lg p-3">
-                <CheckCircle className="w-5 h-5" />
-                <span className="font-medium">All components available in stock</span>
-              </div>
-            )}
-            {totals.totalShortfall === 0 && totals.totalComponents > 0 && totals.componentsPendingDeliveries > 0 && (
-              <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 bg-amber-500/10 rounded-lg p-3">
-                <AlertCircle className="w-5 h-5" />
-                <span className="font-medium">
-                  All components will be available once pending deliveries arrive for {totals.componentsPendingDeliveries === 1
-                    ? '1 component'
-                    : `${totals.componentsPendingDeliveries} components`}.
-                </span>
-              </div>
-            )}
+              {/* Critical Shortfalls Table */}
+              {totals.criticalShortfalls.length > 0 && (
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="bg-destructive/10 px-3 py-2 border-b flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-destructive" />
+                    <span className="text-sm font-medium text-destructive">Components Needing Attention</span>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr className="text-muted-foreground">
+                        <th className="text-left py-2 px-3 font-medium">Component</th>
+                        <th className="text-right py-2 px-3 font-medium">Need</th>
+                        <th className="text-right py-2 px-3 font-medium">Have</th>
+                        <th className="text-right py-2 px-3 font-medium text-red-600">Short</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {totals.criticalShortfalls.map((comp, idx) => (
+                        <tr key={idx} className="border-t">
+                          <td className="py-2 px-3">
+                            <div className="font-medium">{comp.code}</div>
+                            {comp.description && (
+                              <div className="text-xs text-muted-foreground truncate max-w-[180px]">
+                                {comp.description}
+                              </div>
+                            )}
+                          </td>
+                          <td className="text-right py-2 px-3">{formatQuantity(comp.required)}</td>
+                          <td className="text-right py-2 px-3">
+                            {formatQuantity(comp.inStock)}
+                            {comp.onOrder > 0 && (
+                              <span className="text-blue-600 text-xs ml-1">(+{formatQuantity(comp.onOrder)} coming)</span>
+                            )}
+                          </td>
+                          <td className="text-right py-2 px-3 text-red-600 font-medium">
+                            {formatQuantity(comp.shortfall)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {totals.allShortfalls.length > 5 && (
+                    <div className="px-3 py-2 bg-muted/30 text-xs text-center text-muted-foreground border-t">
+                      + {totals.allShortfalls.length - 5} more components need ordering
+                    </div>
+                  )}
+                </div>
+              )}
 
-            {totals.totalComponents === 0 && (
-              <div className="text-center py-4 text-muted-foreground">
-                <p>No bill of materials defined for products in this order</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+              {/* All good message */}
+              {totals.totalShortfall === 0 && totals.totalComponents > 0 && totals.componentsPendingDeliveries === 0 && (
+                <div className="flex items-center gap-2 text-green-600 dark:text-green-400 bg-green-500/10 rounded-lg p-3">
+                  <CheckCircle className="w-5 h-5" />
+                  <span className="font-medium">All components available in stock</span>
+                </div>
+              )}
+              {totals.totalShortfall === 0 && totals.totalComponents > 0 && totals.componentsPendingDeliveries > 0 && (
+                <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 bg-amber-500/10 rounded-lg p-3">
+                  <AlertCircle className="w-5 h-5" />
+                  <span className="font-medium">
+                    All components will be available once pending deliveries arrive for {totals.componentsPendingDeliveries === 1
+                      ? '1 component'
+                      : `${totals.componentsPendingDeliveries} components`}.
+                  </span>
+                </div>
+              )}
 
-      {/* ── Financial Summary (compact inline) ── */}
-      <Card>
-        <CardContent className="py-4">
-          <div className="flex items-center justify-between gap-6 text-sm">
-            <div className="flex items-center gap-4">
-              <span className="text-muted-foreground">Subtotal</span>
-              <span className="font-medium">{formatCurrency(order?.total_amount || 0)}</span>
-            </div>
-            <div className="flex items-center gap-4">
-              <span className="text-muted-foreground">Tax (15%)</span>
-              <span className="font-medium">{formatCurrency((order?.total_amount || 0) * 0.15)}</span>
-            </div>
-            <div className="flex items-center gap-4">
-              <span className="font-medium">Total</span>
-              <span className="font-bold text-base">{formatCurrency((order?.total_amount || 0) * 1.15)}</span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+              {totals.totalComponents === 0 && (
+                <div className="text-center py-4 text-muted-foreground">
+                  <p>No bill of materials defined for products in this order</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
-      {/* ── Collapsible Sections ── */}
-      <div ref={issueStockRef}>
-        <CollapsibleSection
-          id="issue-stock"
-          title="Issue Stock"
-          icon={<Wrench className="h-4 w-4" />}
-          open={openSections['issue-stock']}
-          onOpenChange={(open) => setOpenSections(prev => ({...prev, 'issue-stock': open}))}
-        >
-          <IssueStockTab orderId={orderId} order={order} componentRequirements={componentRequirements} />
-        </CollapsibleSection>
-      </div>
+      {activeTab === 'job-cards' && (
+        <JobCardsTab orderId={orderId} />
+      )}
 
-      <div ref={documentsRef}>
-        <CollapsibleSection
-          id="documents"
-          title="Documents"
-          icon={<FileText className="h-4 w-4" />}
-          open={openSections['documents']}
-          onOpenChange={(open) => setOpenSections(prev => ({...prev, 'documents': open}))}
-        >
-          <OrderDocumentsTab orderId={orderId} />
-        </CollapsibleSection>
-      </div>
+      {activeTab === 'procurement' && (
+        <ProcurementTab orderId={orderId} />
+      )}
 
-      <div ref={procurementRef}>
-        <CollapsibleSection
-          id="procurement"
-          title="Procurement"
-          icon={<ShoppingCart className="h-4 w-4" />}
-          open={openSections['procurement']}
-          onOpenChange={(open) => setOpenSections(prev => ({...prev, 'procurement': open}))}
-        >
-          <ProcurementTab orderId={orderId} />
-        </CollapsibleSection>
-      </div>
+      {activeTab === 'documents' && (
+        <OrderDocumentsTab orderId={orderId} />
+      )}
 
-      <div ref={jobCardsRef}>
-        <CollapsibleSection
-          id="job-cards"
-          title="Job Cards"
-          icon={<ClipboardList className="h-4 w-4" />}
-          open={openSections['job-cards']}
-          onOpenChange={(open) => setOpenSections(prev => ({...prev, 'job-cards': open}))}
-        >
-          <JobCardsTab orderId={orderId} />
-        </CollapsibleSection>
-      </div>
+      {activeTab === 'issue-stock' && (
+        <IssueStockTab orderId={orderId} order={order} componentRequirements={componentRequirements} />
+      )}
 
       {/* ── Slide-out Panel ── */}
       <OrderSlideOutPanel

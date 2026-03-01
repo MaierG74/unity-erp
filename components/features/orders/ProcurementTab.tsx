@@ -10,6 +10,7 @@ import { Progress } from '@/components/ui/progress';
 import { Package, CheckCircle, Clock, Truck, Loader2, ExternalLink, Mail, MessageSquare } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
+import { effectiveQty, effectiveReceived } from '@/lib/procurement-utils';
 
 // Types
 interface ProcurementLineDetail {
@@ -210,25 +211,6 @@ async function fetchPOEmailData(purchaseOrderIds: number[]): Promise<Record<numb
   }
 
   return result;
-}
-
-// Effective quantity for this order's allocation.
-// When a PO line is split across multiple orders, quantity_for_order holds
-// the portion allocated to *this* customer order, which may be less than the
-// full PO line order_quantity.
-function effectiveQty(line: ProcurementLineDetail) {
-  return line.quantity_for_order > 0 ? line.quantity_for_order : line.order_quantity;
-}
-
-// Effective received:
-// - If allocation tracking is available, use it directly.
-// - Otherwise, fall back to capped PO-line received quantity.
-function effectiveReceived(line: ProcurementLineDetail) {
-  if (line.received_quantity !== null) {
-    return line.received_quantity;
-  }
-  const qty = effectiveQty(line);
-  return Math.min(line.total_received, qty);
 }
 
 // Helper: line status colour + progress bar colour

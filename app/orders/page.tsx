@@ -12,10 +12,12 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useDebounce } from '@/hooks/use-debounce';
+import { useOrgSettings } from '@/hooks/use-org-settings';
 import { useToast } from '@/components/ui/use-toast';
 import { format, parseISO, isValid, isBefore, isAfter, differenceInDays, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { Order, OrderStatus } from '@/types/orders';
+import { effectiveQty, effectiveReceived } from '@/lib/procurement-utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -43,6 +45,8 @@ import {
   Trash2, ChevronRight, ChevronLeft, ChevronDown, MoreHorizontal, ArrowUp, ArrowDown,
   ArrowUpDown, Calendar as CalendarIcon, FilterX, Loader2, ClipboardList, Undo2, ExternalLink, X, AlertTriangle,
 } from 'lucide-react';
+import { ProcurementModal } from '@/components/features/orders/ProcurementModal';
+import { JobCardsModal } from '@/components/features/orders/JobCardsModal';
 import { AttachmentPreviewModal } from '@/components/ui/attachment-preview-modal';
 import { FileIcon } from '@/components/ui/file-icon';
 import { PdfThumbnailClient } from '@/components/ui/pdf-thumbnail-client';
@@ -217,6 +221,8 @@ interface ProcurementLine {
   supplier_order_id: number;
   order_quantity: number;
   total_received: number;
+  quantity_for_order: number;
+  received_quantity: number | null;
   po_number: string | null;
   purchase_order_id: number;
   component_code: string | null;
@@ -229,6 +235,8 @@ async function fetchProcurementDetails(orderId: number): Promise<ProcurementLine
     const { data, error } = await supabase
       .from('supplier_order_customer_orders')
       .select(`
+        quantity_for_order,
+        received_quantity,
         supplier_order:supplier_orders(
           order_id,
           order_quantity,
@@ -247,10 +255,14 @@ async function fetchProcurementDetails(orderId: number): Promise<ProcurementLine
     return (data as any[]).map(row => {
       const so = row.supplier_order;
       if (!so) return null;
+      const qtyForOrder = Number(row.quantity_for_order) || 0;
+      const totalQty = Number(so.order_quantity) || 0;
       return {
         supplier_order_id: so.order_id,
-        order_quantity: Number(so.order_quantity) || 0,
+        order_quantity: totalQty,
         total_received: Number(so.total_received) || 0,
+        quantity_for_order: qtyForOrder,
+        received_quantity: row.received_quantity != null ? Number(row.received_quantity) : null,
         po_number: so.purchase_order?.q_number || `PO-${so.purchase_order?.purchase_order_id}`,
         purchase_order_id: so.purchase_order?.purchase_order_id,
         component_code: so.supplier_component?.component?.internal_code || null,
@@ -261,6 +273,23 @@ async function fetchProcurementDetails(orderId: number): Promise<ProcurementLine
   } catch (err) {
     console.error('Error fetching procurement details:', err);
     return [];
+  }
+}
+
+// Fetch job card summary for an order (count + status breakdown)
+async function fetchJobCardSummary(orderId: number): Promise<{ total: number; open: number; completed: number }> {
+  try {
+    const { data, error } = await supabase
+      .from('job_cards')
+      .select('status')
+      .eq('order_id', orderId);
+    if (error || !data) return { total: 0, open: 0, completed: 0 };
+    const total = data.length;
+    const completed = data.filter(r => r.status === 'completed').length;
+    const cancelled = data.filter(r => r.status === 'cancelled').length;
+    return { total, open: total - completed - cancelled, completed };
+  } catch {
+    return { total: 0, open: 0, completed: 0 };
   }
 }
 
@@ -555,13 +584,14 @@ function ProcurementIndicator({ summary }: { summary?: ProcurementSummary }) {
 }
 
 // Detailed procurement section for expanded panel (lazy loaded)
-function ProcurementDetail({ orderId }: { orderId: number }) {
-  const VISIBLE_LIMIT = 5;
-  const [showAll, setShowAll] = useState(false);
+function ProcurementDetail({ orderId, orderNumber, customerName }: { orderId: number; orderNumber: string | null; customerName: string | null }) {
+  const VISIBLE_LIMIT = 3;
+  const [modalOpen, setModalOpen] = useState(false);
 
   const { data: lines = [], isLoading } = useQuery({
     queryKey: ['procurementDetails', orderId],
     queryFn: () => fetchProcurementDetails(orderId),
+    staleTime: 60_000,
   });
 
   if (isLoading) {
@@ -579,21 +609,50 @@ function ProcurementDetail({ orderId }: { orderId: number }) {
     );
   }
 
-  const fullyReceived = lines.filter(l => l.total_received >= l.order_quantity).length;
+  const { fullyReceived, partial } = lines.reduce(
+    (acc, l) => {
+      const qty = effectiveQty(l);
+      const recv = effectiveReceived(l);
+      if (qty > 0 && recv >= qty) acc.fullyReceived++;
+      else if (recv > 0 && recv < qty) acc.partial++;
+      return acc;
+    },
+    { fullyReceived: 0, partial: 0 }
+  );
+  const awaiting = lines.length - fullyReceived - partial;
   const hasMore = lines.length > VISIBLE_LIMIT;
-  const visibleLines = showAll ? lines : lines.slice(0, VISIBLE_LIMIT);
+  const visibleLines = lines.slice(0, VISIBLE_LIMIT);
   const hiddenCount = lines.length - VISIBLE_LIMIT;
 
   return (
     <div>
-      <h4 className="text-sm font-semibold mb-2">
-        Procurement ({fullyReceived}/{lines.length} lines received)
-      </h4>
+      <h4 className="text-sm font-semibold mb-2">Procurement</h4>
+      {/* Stat pills */}
+      <div className="flex flex-wrap items-center gap-1.5 mb-2">
+        <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-muted text-muted-foreground">
+          {lines.length} line{lines.length !== 1 ? 's' : ''}
+        </span>
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${fullyReceived > 0 ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-muted text-muted-foreground'}`}>
+          {fullyReceived} received
+        </span>
+        {partial > 0 && (
+          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-amber-500/15 text-amber-600 dark:text-amber-400">
+            {partial} partial
+          </span>
+        )}
+        {awaiting > 0 && (
+          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-gray-500/15 text-gray-500 dark:text-gray-400">
+            {awaiting} awaiting
+          </span>
+        )}
+      </div>
       <div className="space-y-1">
         {visibleLines.map((line) => {
-          const pct = line.order_quantity > 0 ? Math.min(100, (line.total_received / line.order_quantity) * 100) : 0;
-          const isComplete = line.total_received >= line.order_quantity;
-          const isPartial = line.total_received > 0 && !isComplete;
+          const qty = effectiveQty(line);
+          const recv = effectiveReceived(line);
+          const pct = qty > 0 ? Math.min(100, (recv / qty) * 100) : 0;
+          const isComplete = recv >= qty;
+          const isPartial = recv > 0 && !isComplete;
 
           return (
             <div key={line.supplier_order_id} className="flex items-center gap-3 text-sm py-1.5 px-2 rounded hover:bg-muted/50">
@@ -610,7 +669,7 @@ function ProcurementDetail({ orderId }: { orderId: number }) {
 
               {/* Quantity fraction */}
               <span className={`text-xs tabular-nums flex-shrink-0 font-medium ${isComplete ? 'text-emerald-600 dark:text-emerald-400' : isPartial ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
-                {Number(line.total_received)}/{Number(line.order_quantity)}
+                {recv}/{qty}
               </span>
 
               {/* Mini progress bar */}
@@ -626,23 +685,76 @@ function ProcurementDetail({ orderId }: { orderId: number }) {
       </div>
       {hasMore && (
         <button
-          onClick={() => setShowAll(prev => !prev)}
+          onClick={() => setModalOpen(true)}
           className="mt-2 text-xs text-primary hover:underline flex items-center gap-1 px-2"
         >
-          {showAll ? (
-            <>Show less</>
-          ) : (
-            <>Show {hiddenCount} more line{hiddenCount === 1 ? '' : 's'}</>
-          )}
+          + {hiddenCount} more line{hiddenCount === 1 ? '' : 's'}
         </button>
       )}
+      <ProcurementModal
+        open={modalOpen}
+        onOpenChange={setModalOpen}
+        orderId={orderId}
+        orderNumber={orderNumber}
+        customerName={customerName}
+      />
     </div>
   );
 }
 
-// Expanded order panel (items list, delivery countdown, quick actions)
+// Job cards summary for expanded panel (lazy loaded)
+function JobCardsSummary({ orderId, orderNumber }: { orderId: number; orderNumber: string | null }) {
+  const [modalOpen, setModalOpen] = useState(false);
+  const { data: jc, isLoading } = useQuery({
+    queryKey: ['jobCardSummary', orderId],
+    queryFn: () => fetchJobCardSummary(orderId),
+    staleTime: 60_000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-muted-foreground px-2">
+        <ClipboardList className="h-3.5 w-3.5" />
+        <span>Loading...</span>
+      </div>
+    );
+  }
+
+  if (!jc || jc.total === 0) {
+    return (
+      <>
+        <button
+          onClick={() => setModalOpen(true)}
+          className="flex items-center gap-2 text-xs text-muted-foreground hover:text-primary hover:underline px-2 transition-colors"
+        >
+          <ClipboardList className="h-3.5 w-3.5" />
+          <span>No job cards issued</span>
+        </button>
+        <JobCardsModal open={modalOpen} onOpenChange={setModalOpen} orderId={orderId} orderNumber={orderNumber} />
+      </>
+    );
+  }
+
+  const parts = [`${jc.total} job card${jc.total !== 1 ? 's' : ''}`];
+  if (jc.open > 0) parts.push(`${jc.open} open`);
+  if (jc.completed > 0) parts.push(`${jc.completed} complete`);
+
+  return (
+    <>
+      <button
+        onClick={() => setModalOpen(true)}
+        className="flex items-center gap-2 text-xs text-primary hover:underline px-2"
+      >
+        <ClipboardList className="h-3.5 w-3.5" />
+        <span>{parts.join(' \u00b7 ')}</span>
+      </button>
+      <JobCardsModal open={modalOpen} onOpenChange={setModalOpen} orderId={orderId} orderNumber={orderNumber} />
+    </>
+  );
+}
+
+// Expanded order panel (summary-first: item count, procurement stats, job cards)
 function ExpandedOrderPanel({ order, onViewFull }: { order: Order; onViewFull: () => void }) {
-  const panelRouter = useRouter();
   const details = order.details || [];
   const statusName = order.status?.status_name || 'Unknown';
   const deliveryInfo = getDeliveryDateInfo(order.delivery_date, statusName);
@@ -650,34 +762,21 @@ function ExpandedOrderPanel({ order, onViewFull }: { order: Order; onViewFull: (
   return (
     <div className="px-6 py-4 bg-muted/30 border-l-4 border-l-primary/30">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Products/Items */}
+        {/* Left: Summary sections */}
         <div className="md:col-span-2">
-          <h4 className="text-sm font-semibold mb-2">Order Items ({details.length})</h4>
-          {details.length > 0 ? (
-            <div className="space-y-1">
-              {details.map((detail) => (
-                <div key={detail.order_detail_id} className="flex items-center justify-between text-sm py-1.5 px-2 rounded hover:bg-muted/50">
-                  <span className="font-medium truncate flex-1">{detail.product?.name || `Product #${detail.product_id}`}</span>
-                  <div className="flex items-center gap-4 ml-4 text-muted-foreground">
-                    <span>Qty: {detail.quantity}</span>
-                    {detail.unit_price != null && <span>R {Number(detail.unit_price).toFixed(2)}</span>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground italic">No products added to this order yet</p>
-          )}
+          {/* Order Items summary */}
+          <div className="flex items-center gap-2 text-sm mb-4">
+            <Package className="h-4 w-4 text-muted-foreground" />
+            {details.length === 0 ? (
+              <span className="text-muted-foreground italic">No products added yet</span>
+            ) : (
+              <span className="font-medium">{details.length} product{details.length !== 1 ? 's' : ''} ordered</span>
+            )}
+          </div>
 
           {/* Procurement Status */}
-          <div className="mt-4 pt-3 border-t border-border/50">
-            <ProcurementDetail orderId={order.order_id} />
-            <button
-              onClick={() => panelRouter.push(`/orders/${order.order_id}?tab=procurement`)}
-              className="mt-2 text-xs text-primary hover:underline flex items-center gap-1"
-            >
-              View Procurement <ExternalLink className="h-3 w-3" />
-            </button>
+          <div className="pt-3 border-t border-border/50">
+            <ProcurementDetail orderId={order.order_id} orderNumber={order.order_number} customerName={order.customer?.name ?? null} />
           </div>
         </div>
 
@@ -701,10 +800,7 @@ function ExpandedOrderPanel({ order, onViewFull }: { order: Order; onViewFull: (
               <ExternalLink className="h-3.5 w-3.5 mr-2" />
               View Full Order
             </Button>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground px-2">
-              <ClipboardList className="h-3.5 w-3.5" />
-              <span>No job cards issued</span>
-            </div>
+            <JobCardsSummary orderId={order.order_id} orderNumber={order.order_number} />
           </div>
         </div>
       </div>
@@ -1264,7 +1360,7 @@ function OrderAttachments({ order }: { order: Order }): JSX.Element {
                   className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
                   <ClipboardList className="h-3.5 w-3.5" />
-                  <span className="font-medium">{customerOrderDocs.length}</span>
+                  <span className="font-medium">{customerOrderDocs.length} {customerOrderDocs.length === 1 ? 'card' : 'cards'}</span>
                   {otherDocsCount > 0 && (
                     <span className="text-xs text-muted-foreground/60">+{otherDocsCount}</span>
                   )}
@@ -1428,6 +1524,7 @@ export default function OrdersPage() {
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { weekStartDay } = useOrgSettings();
 
   // Initialize ALL state from URL parameters for full navigation persistence
   const [statusFilter, setStatusFilter] = useState<string>(() => searchParams?.get('status') || 'all');
@@ -1832,8 +1929,8 @@ export default function OrdersPage() {
     // Compute stats from filtered orders (before statsFilter)
     const now = new Date();
     now.setHours(0, 0, 0, 0);
-    const weekStart = startOfWeek(now, { weekStartsOn: 1 });
-    const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
+    const weekStart = startOfWeek(now, { weekStartsOn: weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6 });
+    const weekEnd = endOfWeek(now, { weekStartsOn: weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6 });
 
     const stats = { total: filtered.length, overdue: 0, dueThisWeek: 0, inProduction: 0, readyForDelivery: 0, onHold: 0, awaitingParts: 0 };
     for (const order of filtered) {
