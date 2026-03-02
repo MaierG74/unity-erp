@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { format, startOfWeek, endOfWeek, addDays, addWeeks, subWeeks, parseISO, isSunday } from 'date-fns';
+import { useOrgSettings } from '@/hooks/use-org-settings';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -24,13 +25,14 @@ import {
 
 export default function PayrollPage() {
   const router = useRouter();
+  const { weekStartDay } = useOrgSettings();
   const [error, setError] = useState<string | null>(null);
   const [staff, setStaff] = useState<any[]>([]);
   const [payrollData, setPayrollData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedStaff, setSelectedStaff] = useState<string | null>(null);
   const [selectedWeekStart, setSelectedWeekStart] = useState<Date>(
-    startOfWeek(new Date(), { weekStartsOn: 1 })
+    startOfWeek(new Date(), { weekStartsOn: weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6 })
   );
   const [calculatingPayroll, setCalculatingPayroll] = useState(false);
   const [payrollDetails, setPayrollDetails] = useState<any | null>(null);
@@ -106,7 +108,7 @@ export default function PayrollPage() {
     setError(null);
     
     try {
-      const weekEnd = endOfWeek(selectedWeekStart, { weekStartsOn: 1 });
+      const weekEnd = endOfWeek(selectedWeekStart, { weekStartsOn: weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6 });
       const staffMember = staff.find(s => s.staff_id.toString() === selectedStaff);
       
       // Fetch staff details

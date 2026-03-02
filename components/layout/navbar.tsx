@@ -229,7 +229,7 @@ export function Navbar() {
             </div>
           ) : (
             <Link
-              href="/auth"
+              href="/login"
               className="text-sm text-muted-foreground hover:text-foreground"
             >
               Sign in

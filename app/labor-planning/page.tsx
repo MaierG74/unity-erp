@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { LaborPlanningBoard } from './labor-planning-board';
+import { LaborPlanningBoard } from '@/components/production/labor-planning-board';
 
 export const metadata: Metadata = {
   title: 'Labor Planning',

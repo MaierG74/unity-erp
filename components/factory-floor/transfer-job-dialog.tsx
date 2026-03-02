@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Dialog,
@@ -15,14 +15,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import type { FloorStaffJob } from './types';
+import type { FloorStaffJob, EarningsSplitItem } from './types';
 import { fetchActiveStaff, fetchJobCardItems } from '@/lib/queries/factoryFloor';
 
 interface TransferJobDialogProps {
   job: FloorStaffJob | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onTransfer: (newStaffId: number, notes?: string, earningsSplit?: { item_id: number; original_amount: number }[]) => void;
+  onTransfer: (newStaffId: number, notes?: string, earningsSplit?: EarningsSplitItem[]) => void;
   isPending: boolean;
 }
 
@@ -32,10 +32,23 @@ export function TransferJobDialog({ job, open, onOpenChange, onTransfer, isPendi
   const [notes, setNotes] = useState('');
   const [customSplit, setCustomSplit] = useState(false);
   const [splitAmounts, setSplitAmounts] = useState<Record<number, number>>({});
+  const splitInitializedRef = useRef(false);
 
   const isPiecework = job?.pay_type === 'piece';
   const isInProgress = job?.job_status === 'in_progress';
   const showEarningsSplit = isPiecework && isInProgress;
+
+  // Reset all state when dialog opens/closes or job changes
+  useEffect(() => {
+    if (open) {
+      setSelectedStaffId(null);
+      setSearch('');
+      setNotes('');
+      setSplitAmounts({});
+      setCustomSplit(false);
+      splitInitializedRef.current = false;
+    }
+  }, [open, job?.assignment_id]);
 
   const { data: allStaff, isLoading } = useQuery({
     queryKey: ['active-staff'],
@@ -55,17 +68,17 @@ export function TransferJobDialog({ job, open, onOpenChange, onTransfer, isPendi
   }, [jobItems]);
 
   useEffect(() => {
-    if (jobItems && Object.keys(splitAmounts).length === 0) {
-      const initial: Record<number, number> = {};
-      for (const item of jobItems) {
-        if ((item.piece_rate ?? 0) > 0) {
-          const ratio = item.completed_quantity / Math.max(item.quantity, 1);
-          initial[item.item_id] = Math.round((item.piece_rate ?? 0) * ratio * 100) / 100;
-        }
+    if (!jobItems || splitInitializedRef.current) return;
+    splitInitializedRef.current = true;
+    const initial: Record<number, number> = {};
+    for (const item of jobItems) {
+      if ((item.piece_rate ?? 0) > 0) {
+        const ratio = item.completed_quantity / Math.max(item.quantity, 1);
+        initial[item.item_id] = Math.round((item.piece_rate ?? 0) * ratio * 100) / 100;
       }
-      setSplitAmounts(initial);
     }
-  }, [jobItems]); // eslint-disable-line react-hooks/exhaustive-deps
+    setSplitAmounts(initial);
+  }, [jobItems]);
 
   const filteredStaff = useMemo(() => {
     if (!allStaff) return [];
@@ -78,18 +91,13 @@ export function TransferJobDialog({ job, open, onOpenChange, onTransfer, isPendi
 
   const handleSubmit = () => {
     if (!selectedStaffId) return;
-    let earningsSplit: { item_id: number; original_amount: number }[] | undefined;
+    let earningsSplit: EarningsSplitItem[] | undefined;
     if (showEarningsSplit && (needsCustomSplit || customSplit) && jobItems) {
       earningsSplit = jobItems
         .filter((i) => (i.piece_rate ?? 0) > 0 && splitAmounts[i.item_id] != null)
         .map((i) => ({ item_id: i.item_id, original_amount: splitAmounts[i.item_id] }));
     }
     onTransfer(selectedStaffId, notes || undefined, earningsSplit);
-    setSelectedStaffId(null);
-    setSearch('');
-    setNotes('');
-    setSplitAmounts({});
-    setCustomSplit(false);
   };
 
   if (!job) return null;

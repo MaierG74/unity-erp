@@ -166,12 +166,21 @@ export default function JobCardScanPage() {
     if (!jobCard || jobCard.status !== 'pending') return;
     setActionLoading('start');
     try {
+      const now = new Date().toISOString();
       const { error: err } = await supabase
         .from('job_cards')
         .update({ status: 'in_progress' })
         .eq('job_card_id', jobCardId);
       if (err) throw err;
-      await syncAssignmentStatus('in_progress');
+      // Parallel: update items + sync factory floor assignment
+      await Promise.all([
+        supabase
+          .from('job_card_items')
+          .update({ status: 'in_progress', start_time: now })
+          .eq('job_card_id', jobCardId)
+          .eq('status', 'pending'),
+        syncAssignmentStatus('in_progress'),
+      ]);
       setJobCard((prev) => prev ? { ...prev, status: 'in_progress' } : prev);
       toast.success('Job started');
     } catch (err: any) {

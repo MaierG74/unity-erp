@@ -1,7 +1,5 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Multi-Tenancy
 
 - Any new table holding org-specific data **must** include an `org_id` column with org-scoped RLS.
@@ -17,13 +15,6 @@ Two MCP servers are available. For setup/troubleshooting, see `docs/technical/mc
 
 ## Development Commands
 
-### Core Commands
-- `npm run dev` - Start development server at http://localhost:3000
-- `npm run build` - Build production version  
-- `npm run lint` - Run ESLint code quality checks
-- `npm start` - Start production server
-
-### Database & Scripts
 - `npm run schema` - Get database schema via `tsx scripts/get-schema.ts`
 - `npm run seed` - Seed test data via `tsx scripts/seed-test-data.ts`
 - For database migrations, use the `migration-hygiene` skill.
@@ -33,38 +24,22 @@ Two MCP servers are available. For setup/troubleshooting, see `docs/technical/mc
 - **TODO Overview**: Consult [docs/overview/todo-index.md](docs/overview/todo-index.md) for outstanding work.
 - **Index**: [docs/README.md](docs/README.md) is the reference index for all documentation — consult before working on unfamiliar areas.
 
-## Architecture Overview
+## Architecture
 
-### Tech Stack
-- **Framework**: Next.js 14 with App Router
-- **Database**: Supabase (PostgreSQL) with Row Level Security (RLS)
-- **UI Components**: Radix UI + shadcn/ui + Tailwind CSS
-- **State Management**: TanStack Query (React Query)
-- **Forms**: React Hook Form + Zod validation
-- **Authentication**: Supabase Auth
-
-### Project Structure
-- `app/` - Next.js App Router pages and API routes
-- `components/` - React components organized by:
-  - `common/` - Shared providers, auth, theme
-  - `features/` - Domain-specific components (inventory, purchasing, staff, etc.)
-  - `layout/` - Navigation, sidebar, root layout
-  - `ui/` - Base UI components (shadcn/ui)
-- `lib/` - Utilities, database functions, API clients
-- `types/` - TypeScript type definitions
-- `hooks/` - Custom React hooks
-- `scripts/` - Database and utility scripts
-
-### Business Rules
-
-**Staff & Attendance** (non-obvious logic — do not guess):
-- Tea break deductions: Mon-Thu 30min automatic, Friday none
-- Pay rates: first 9hrs regular, after 9hrs overtime (1.5x), Sunday all double-time (2x)
-- Source of truth: `time_clock_events` table
-
-**File Storage**: Supabase storage, bucket `QButton`, path `Price List/{filename}`
-
-### Development Notes
+- For staff/attendance pay logic and file storage paths, use the `unity-erp-business-rules` skill.
 - Dark theme is default; font is Inter
 - `@react-pdf/renderer` must be lazy/dynamically imported (causes build timeouts)
 
+## Verification
+
+IMPORTANT: Never consider a task complete without verifying it works.
+
+- **UI changes**: Use preview tools (`preview_snapshot`, `preview_screenshot`, `preview_console_logs`) to confirm the change renders correctly and has no runtime errors. Share the screenshot as proof.
+- **Database changes**: Run `mcp__supabase__get_advisors` (security) to check for missing RLS. Verify with a test query.
+- **All changes**: Run `npx tsc --noEmit` and `npm run lint` before finishing.
+- If verification isn't possible (e.g. auth-gated flow, external integration), state what you can't verify and why.
+
+## Code Quality & Batch Processing
+
+- **`/simplify`** — Run automatically before finalising any PR or at the end of any session that modifies more than 3 files. No need to ask — just run it as a final step.
+- **`/batch`** — If a change would touch more than 10 files with a similar pattern (e.g. adding entity-awareness across modules, updating RLS policies, applying a type pattern across features), stop and flag it as a `/batch` candidate, explain scope, and wait for confirmation before proceeding.

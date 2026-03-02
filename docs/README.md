@@ -54,6 +54,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - [`features/cutlist-calculator.md`](features/cutlist-calculator.md) – **Cutlist Calculator** documentation: materials panel, parts table, edge banding, lamination, Deep (SA) optimizer with strip fallback, color-coded presentation, interactive zoom, operator PDF
   - [`features/furniture-configurator.md`](features/furniture-configurator.md) – **Furniture Configurator**: parametric cupboard designer with live SVG preview, auto-generated cutlist parts, and cutlist builder integration
   - [`features/quotes.md`](features/quotes.md) – **Quotes** feature planning and implementation notes
+  - [`features/factory-floor.md`](features/factory-floor.md) – **Factory Floor Map**: real-time overhead view of factory sections with staff, active jobs, and progress tracking
   - [`features/customers-ui-redesign.md`](features/customers-ui-redesign.md) – ✅ **Customers UI redesign** with inline editing, metrics, charts, and streamlined navigation
   - [`features/suppliers-ui-redesign-prompt.md`](features/suppliers-ui-redesign-prompt.md) – **Suppliers UI redesign prompt** (ready to apply in new conversation)
 - Operations:

@@ -3,7 +3,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
-import type { PauseReason } from '@/components/factory-floor/types';
+import type { PauseReason, EarningsSplitItem } from '@/components/factory-floor/types';
 
 interface CompleteParams {
   assignmentId: number;
@@ -23,7 +23,7 @@ interface TransferParams {
   assignmentId: number;
   newStaffId: number;
   notes?: string;
-  earningsSplit?: { item_id: number; original_amount: number }[];
+  earningsSplit?: EarningsSplitItem[];
 }
 
 const INVALIDATE_KEYS = [

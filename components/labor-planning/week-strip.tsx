@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { format, startOfWeek, addDays } from 'date-fns';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useOrgSettings } from '@/hooks/use-org-settings';
 import { fetchWeekSummary, type DaySummary } from '@/lib/queries/laborPlanning';
 
 const WEEK_STRIP_STORAGE_KEY = 'labor-planning-week-strip';
@@ -23,6 +24,7 @@ interface WeekStripProps {
 }
 
 export function WeekStrip({ selectedDate, onDateSelect, staffCapacityMinutes }: WeekStripProps) {
+  const { weekStartDay } = useOrgSettings();
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -38,8 +40,8 @@ export function WeekStrip({ selectedDate, onDateSelect, staffCapacityMinutes }: 
   };
 
   const monday = useMemo(
-    () => startOfWeek(new Date(selectedDate + 'T00:00:00'), { weekStartsOn: 1 }),
-    [selectedDate],
+    () => startOfWeek(new Date(selectedDate + 'T00:00:00'), { weekStartsOn: weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6 }),
+    [selectedDate, weekStartDay],
   );
 
   const weekDates = useMemo(

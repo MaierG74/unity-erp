@@ -5,6 +5,7 @@ import { pdf } from '@react-pdf/renderer';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
+import { useOrgSettings } from '@/hooks/use-org-settings';
 import { useSearchParams, useRouter } from 'next/navigation';
 import {
   format,
@@ -135,6 +136,7 @@ export function WeeklySummary() {
   const queryClient = useQueryClient();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { weekStartDay } = useOrgSettings();
 
   // Get week from URL or default to current week
   const weekParam = searchParams.get('week');
@@ -156,8 +158,8 @@ export function WeeklySummary() {
   const { toast } = useToast();
 
   // Calculate week range (start on Friday)
-  const weekStart = useMemo(() => startOfWeek(selectedWeek, { weekStartsOn: 5 }), [selectedWeek]); // Start on Friday
-  const weekEnd = useMemo(() => endOfWeek(selectedWeek, { weekStartsOn: 5 }), [selectedWeek]); // End on Thursday
+  const weekStart = useMemo(() => startOfWeek(selectedWeek, { weekStartsOn: weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6 }), [selectedWeek, weekStartDay]);
+  const weekEnd = useMemo(() => endOfWeek(selectedWeek, { weekStartsOn: weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6 }), [selectedWeek, weekStartDay]);
 
   // Memoize the days of week calculation to prevent infinite updates
   const daysOfWeek = useMemo(() => {

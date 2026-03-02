@@ -37,6 +37,9 @@ Unity ERP's documentation spreads TODOs and open questions across domain guides,
 ## Cutlist
 - **Cutlist optimizer parity** — Status: _Planned_, Owner: _Unassigned_. Benchmark strip vs guillotine, define offcut-quality metrics, and add optimization priority modes to `/cutlist`. Source: [cutlist optimizer parity plan](../plans/cutlist-optimizer-parity-plan.md).
 
+## Payroll
+- **Remove legacy `/staff/payroll` page** — Status: _Deferred_, Owner: _Unassigned_. The old payroll tab at `app/staff/payroll/page.tsx` is superseded by the new `/payroll-review` page. Keep it as a fallback until the new page is validated in production, then delete. The staff page payroll tab already redirects to `/payroll-review`.
+
 ## UI Tech Debt
 - **Avoid hard‑coded status IDs in dashboard** — Status: _Completed_, Owner: _Unassigned_. Added `SO_STATUS` constant map in `types/purchasing.ts` mirroring the `supplier_order_statuses` table. Replaced all numeric status IDs in `app/purchasing/page.tsx`, `app/purchasing/purchase-orders/[id]/page.tsx`, and `lib/api/suppliers.ts`.
 - **Navbar page chrome rollout** — Status: _Planned_, Owner: _Unassigned_. Move page titles and per-page controls (e.g., toggles, badges) into the top navbar across all pages to free vertical space; leave sidebar for navigation only. See `docs/overview/STYLE_GUIDE.md` (`todo_navbar-page-chrome-rollout`).

@@ -15,7 +15,7 @@ import { getDisplayProgress, getProgressStatus, statusDotClass, statusBadgeConfi
 import { ProgressBar } from './progress-bar';
 import { ExternalLink, CheckCircle, Pause, Play, ArrowRightLeft } from 'lucide-react';
 import type { ShiftInfoWithNow } from '@/hooks/use-shift-info';
-import { computeShiftAwareStatus, minutesToTimeString } from '@/lib/shift-utils';
+import { computeShiftAwareStatus, minutesToTimeString, formatDuration } from '@/lib/shift-utils';
 
 interface FloorDetailPanelProps {
   job: FloorStaffJob | null;
@@ -26,15 +26,6 @@ interface FloorDetailPanelProps {
   onTransfer: (job: FloorStaffJob) => void;
   isUpdating: boolean;
   shiftInfo?: ShiftInfoWithNow;
-}
-
-function formatDuration(minutes: number | null): string {
-  if (minutes == null || minutes <= 0) return '-';
-  if (minutes < 1) return `${Math.round(minutes * 60)}s`;
-  const h = Math.floor(minutes / 60);
-  const m = Math.round(minutes % 60);
-  if (h === 0) return `${m}m`;
-  return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
 export function FloorDetailPanel({
@@ -155,9 +146,12 @@ export function FloorDetailPanel({
           {/* Progress */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
-                Progress
-              </h4>
+              <div>
+                <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                  Progress
+                </h4>
+                <p className="text-[10px] text-muted-foreground/60">Based on estimated time</p>
+              </div>
               <Badge className={badge.className}>
                 {badge.label}
               </Badge>

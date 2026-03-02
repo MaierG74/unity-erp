@@ -159,10 +159,13 @@ export function BulkReceiveModal({
 
     const getAllocationPayloadForOrder = (
         orderId: number,
-        qtyReceived: number
+        qtyReceived: number,
+        qtyRejected: number
     ): AllocationReceipt[] | null => {
         const allocationRows = allocationLinksByOrderId[orderId] || [];
         if (allocationRows.length <= 1) return null;
+
+        const qtyGood = qtyReceived - qtyRejected;
 
         const values = allocationReceipts[orderId] || {};
         const payload = allocationRows
@@ -173,8 +176,8 @@ export function BulkReceiveModal({
             .filter((row) => row.quantity > 0);
 
         const payloadSum = payload.reduce((sum, row) => sum + row.quantity, 0);
-        if (payloadSum !== qtyReceived) {
-            throw new Error(`Allocation breakdown must equal received quantity for order ${orderId}`);
+        if (payloadSum !== qtyGood) {
+            throw new Error(`Allocation breakdown must equal good quantity for order ${orderId}`);
         }
 
         for (const row of allocationRows) {
@@ -254,13 +257,15 @@ export function BulkReceiveModal({
         const allocationRows = allocationLinksByOrderId[field.order_id] || [];
         if (allocationRows.length <= 1) return false;
         const qtyReceived = watchedItems?.[index]?.quantity_received || 0;
-        if (qtyReceived <= 0) return false;
+        const qtyRejected = watchedItems?.[index]?.quantity_rejected || 0;
+        const qtyGood = qtyReceived - qtyRejected;
+        if (qtyGood <= 0) return false;
         const allocationState = allocationReceipts[field.order_id] || {};
         const allocationTotal = allocationRows.reduce(
             (sum, row) => sum + Number(allocationState[row.id] || 0),
             0
         );
-        return allocationTotal !== qtyReceived;
+        return allocationTotal !== qtyGood;
     });
 
     const onSubmit = async (data: BulkReceiveFormValues) => {
@@ -282,17 +287,20 @@ export function BulkReceiveModal({
 
             // Process each item sequentially to avoid race conditions or overwhelming the DB
             for (const item of itemsToProcess) {
-                // 1. Process Receipt
+                // 1. Process Receipt (and combined rejection if both present)
                 if ((item.quantity_received || 0) > 0) {
                     const allocationPayload = getAllocationPayloadForOrder(
                         item.order_id,
-                        item.quantity_received || 0
+                        item.quantity_received || 0,
+                        item.quantity_rejected || 0
                     );
                     const receiptPayload: {
                         p_order_id: number;
                         p_quantity: number;
                         p_receipt_date: string;
                         p_allocation_receipts?: AllocationReceipt[] | null;
+                        p_rejected_quantity?: number;
+                        p_rejection_reason?: string;
                     } = {
                         p_order_id: item.order_id,
                         p_quantity: item.quantity_received || 0,
@@ -303,7 +311,13 @@ export function BulkReceiveModal({
                         receiptPayload.p_allocation_receipts = allocationPayload;
                     }
 
-                    const { error: receiptError } = await supabase.rpc(
+                    // Include rejection in the atomic call
+                    if ((item.quantity_rejected || 0) > 0) {
+                        receiptPayload.p_rejected_quantity = item.quantity_rejected;
+                        receiptPayload.p_rejection_reason = item.rejection_reason;
+                    }
+
+                    const { data: receiptResult, error: receiptError } = await supabase.rpc(
                         'process_supplier_order_receipt',
                         receiptPayload
                     );
@@ -311,10 +325,25 @@ export function BulkReceiveModal({
                     if (receiptError) {
                         throw new Error(`Failed to receive ${item.component_code}: ${receiptError.message}`);
                     }
+
+                    // Extract GRN from combined response if rejection was included
+                    if ((item.quantity_rejected || 0) > 0 && receiptResult && Array.isArray(receiptResult) && receiptResult.length > 0) {
+                        const result = receiptResult[0];
+                        if (result.goods_return_number) {
+                            generatedGrn = result.goods_return_number;
+                            returnItems.push({
+                                component_code: item.component_code,
+                                component_name: item.component_description,
+                                quantity_returned: item.quantity_rejected,
+                                reason: item.rejection_reason,
+                                return_type: 'rejection',
+                            });
+                        }
+                    }
                 }
 
-                // 2. Process Rejection
-                if ((item.quantity_rejected || 0) > 0) {
+                // 2. Process Rejection (reject-only, no receipt)
+                if ((item.quantity_received || 0) === 0 && (item.quantity_rejected || 0) > 0) {
                     const { data: returnData, error: returnError } = await supabase.rpc(
                         'process_supplier_order_return',
                         {
@@ -394,7 +423,7 @@ export function BulkReceiveModal({
                         {hasAllocationMismatch && (
                             <Alert variant="destructive">
                                 <AlertDescription>
-                                    Split lines require allocation totals to match each line's Receive Qty.
+                                    Split lines require allocation totals to match each line&apos;s good quantity (received minus rejected).
                                 </AlertDescription>
                             </Alert>
                         )}
@@ -442,7 +471,9 @@ export function BulkReceiveModal({
                                         const allocationTotal = hasSplitAllocations
                                             ? allocationRows.reduce((sum, row) => sum + Number(allocationState[row.id] || 0), 0)
                                             : 0;
-                                        const allocationMismatch = hasSplitAllocations && receiveNow > 0 && allocationTotal !== receiveNow;
+                                        const rejectNow = watch(`items.${index}.quantity_rejected`) || 0;
+                                        const goodNow = receiveNow - rejectNow;
+                                        const allocationMismatch = hasSplitAllocations && goodNow > 0 && allocationTotal !== goodNow;
 
                                         return (
                                             <Fragment key={field.id}>
@@ -511,8 +542,13 @@ export function BulkReceiveModal({
                                                                                 type="number"
                                                                                 min="0"
                                                                                 max={remainingCap}
-                                                                                value={allocationState[row.id] || 0}
+                                                                                value={allocationState[row.id] || ''}
                                                                                 onChange={(event) => setAllocationQuantity(field.order_id, row.id, event.target.value)}
+                                                                                onBlur={(event) => {
+                                                                                    if (event.target.value === '') {
+                                                                                        setAllocationQuantity(field.order_id, row.id, '0');
+                                                                                    }
+                                                                                }}
                                                                                 placeholder="0"
                                                                                 className="h-8"
                                                                             />
@@ -520,11 +556,11 @@ export function BulkReceiveModal({
                                                                     );
                                                                 })}
                                                                 <div className="text-[11px] text-muted-foreground">
-                                                                    Allocation total: {allocationTotal} / {receiveNow}
+                                                                    Allocation total: {allocationTotal} / {goodNow}
                                                                 </div>
                                                                 {allocationMismatch && (
                                                                     <div className="text-[11px] text-destructive">
-                                                                        Allocation total must match Receive Qty for this line.
+                                                                        Allocation total must match good quantity for this line.
                                                                     </div>
                                                                 )}
                                                             </div>

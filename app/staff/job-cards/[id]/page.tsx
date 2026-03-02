@@ -16,6 +16,13 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
+import { Progress } from '@/components/ui/progress';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -66,6 +73,7 @@ interface JobCardItem {
   } | null;
   jobs: {
     name: string;
+    estimated_minutes: number | null;
   } | null;
 }
 
@@ -143,7 +151,7 @@ export default function JobCardDetailPage() {
         .select(`
           *,
           products:product_id(name, internal_code),
-          jobs:job_id(name)
+          jobs:job_id(name, estimated_minutes)
         `)
         .eq('job_card_id', jobCardId)
         .order('item_id');
@@ -177,6 +185,7 @@ export default function JobCardDetailPage() {
   // Status transition mutation
   const statusMutation = useMutation({
     mutationFn: async ({ newStatus, completionDate }: { newStatus: JobCardStatus; completionDate?: string }) => {
+      const now = new Date().toISOString();
       const updates: Record<string, any> = { status: newStatus };
       if (completionDate) {
         updates.completion_date = completionDate;
@@ -186,9 +195,41 @@ export default function JobCardDetailPage() {
         .update(updates)
         .eq('job_card_id', jobCardId);
       if (error) throw error;
+
+      // Parallel side-effects: update items + sync factory floor assignment
+      const sideEffects: Promise<any>[] = [];
+
+      if (newStatus === 'in_progress') {
+        sideEffects.push(
+          supabase
+            .from('job_card_items')
+            .update({ status: 'in_progress', start_time: now })
+            .eq('job_card_id', jobCardId)
+            .eq('status', 'pending')
+        );
+      }
+
+      if (newStatus === 'in_progress' || newStatus === 'completed') {
+        const jobIds = items.map((i) => i.job_id).filter(Boolean);
+        if (jobIds.length > 0 && jobCard?.staff_id) {
+          const assignmentUpdates: Record<string, any> = { job_status: newStatus };
+          if (newStatus === 'in_progress') assignmentUpdates.started_at = now;
+          if (newStatus === 'completed') assignmentUpdates.completed_at = now;
+          sideEffects.push(
+            supabase
+              .from('labor_plan_assignments')
+              .update(assignmentUpdates)
+              .in('job_id', jobIds)
+              .eq('staff_id', jobCard.staff_id)
+          );
+        }
+      }
+
+      await Promise.all(sideEffects);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobCard', jobCardId] });
+      queryClient.invalidateQueries({ queryKey: ['jobCardItems', jobCardId] });
       queryClient.invalidateQueries({ queryKey: ['jobCards'] });
       toast.success('Job card status updated');
     },
@@ -295,6 +336,37 @@ export default function JobCardDetailPage() {
   const totalItems = items.length;
   const completedItems = items.filter((item) => item.status === 'completed').length;
 
+  // Calculate overall quantity progress and ETA
+  const totalQty = items.reduce((sum, item) => sum + item.quantity, 0);
+  const completedQty = items.reduce((sum, item) => sum + item.completed_quantity, 0);
+  const overallPct = totalQty > 0 ? Math.round((completedQty / totalQty) * 100) : 0;
+
+  const getItemEta = (item: JobCardItem) => {
+    if (!item.jobs?.estimated_minutes || !item.start_time || item.status === 'completed') return null;
+    const totalMinutes = item.jobs.estimated_minutes * item.quantity;
+    const startMs = new Date(item.start_time).getTime();
+    const etaMs = startMs + totalMinutes * 60_000;
+    return new Date(etaMs);
+  };
+
+  // Overall ETA = latest item ETA
+  const overallEta = items.reduce<Date | null>((latest, item) => {
+    const eta = getItemEta(item);
+    if (!eta) return latest;
+    return !latest || eta > latest ? eta : latest;
+  }, null);
+
+  const formatEta = (eta: Date) => {
+    const now = Date.now();
+    const diffMs = eta.getTime() - now;
+    if (diffMs <= 0) return 'Overdue';
+    const mins = Math.round(diffMs / 60_000);
+    if (mins < 60) return `~${mins}m remaining`;
+    const hrs = Math.floor(mins / 60);
+    const rem = mins % 60;
+    return rem > 0 ? `~${hrs}h ${rem}m remaining` : `~${hrs}h remaining`;
+  };
+
   if (loadingJobCard || loadingItems) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -328,6 +400,7 @@ export default function JobCardDetailPage() {
   const isEditable = jobCard.status !== 'completed' && jobCard.status !== 'cancelled';
 
   return (
+    <TooltipProvider>
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -476,7 +549,33 @@ export default function JobCardDetailPage() {
             <p className="text-lg font-medium">
               {completedItems} / {totalItems} items
             </p>
-            <p className="text-sm text-muted-foreground">
+            <div className="mt-2">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div>
+                      <Progress value={overallPct} className="h-2" />
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>{completedQty} / {totalQty} units completed ({overallPct}%)</p>
+                    <p className="text-[10px] text-muted-foreground">Based on completed quantity</p>
+                    {overallEta && jobCard.status === 'in_progress' && (
+                      <p className="text-xs text-muted-foreground">{formatEta(overallEta)}</p>
+                    )}
+                  </TooltipContent>
+                </Tooltip>
+            </div>
+            <div className="flex items-center justify-between mt-1">
+              <p className="text-xs text-muted-foreground">
+                {overallPct}%
+              </p>
+              {overallEta && jobCard.status === 'in_progress' && (
+                <p className="text-xs text-muted-foreground">
+                  ETA {format(overallEta, 'h:mm a')}
+                </p>
+              )}
+            </div>
+            <p className="text-sm text-muted-foreground mt-1">
               R {completedValue.toFixed(2)} / R {totalValue.toFixed(2)}
             </p>
           </CardContent>
@@ -525,6 +624,8 @@ export default function JobCardDetailPage() {
                 const itemStatus = itemStatusConfig[item.status] || itemStatusConfig.pending;
                 const isEditing = editingItemId === item.item_id;
                 const itemTotal = item.completed_quantity * item.piece_rate;
+                const itemPct = item.quantity > 0 ? Math.round((item.completed_quantity / item.quantity) * 100) : 0;
+                const itemEta = getItemEta(item);
 
                 return (
                   <TableRow key={item.item_id}>
@@ -562,7 +663,40 @@ export default function JobCardDetailPage() {
                       R {itemTotal.toFixed(2)}
                     </TableCell>
                     <TableCell>
-                      <Badge variant={itemStatus.variant}>{itemStatus.label}</Badge>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div className="space-y-1 min-w-[90px]">
+                              <Badge variant={itemStatus.variant}>{itemStatus.label}</Badge>
+                              {item.status !== 'pending' && (
+                                <div className="flex items-center gap-1.5">
+                                  <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden">
+                                    <div
+                                      className={`h-full rounded-full transition-all ${
+                                        item.status === 'completed' ? 'bg-emerald-500' : 'bg-blue-500'
+                                      }`}
+                                      style={{ width: `${itemPct}%` }}
+                                    />
+                                  </div>
+                                  <span className="text-[10px] text-muted-foreground tabular-nums">{itemPct}%</span>
+                                </div>
+                              )}
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>{item.completed_quantity} / {item.quantity} units completed</p>
+                            <p className="text-[10px] text-muted-foreground">Based on completed quantity</p>
+                            {itemEta && (
+                              <p className="text-xs text-muted-foreground">
+                                ETA {format(itemEta, 'h:mm a')} ({formatEta(itemEta)})
+                              </p>
+                            )}
+                            {item.status === 'completed' && item.completion_time && (
+                              <p className="text-xs text-muted-foreground">
+                                Done {format(new Date(item.completion_time), 'h:mm a')}
+                              </p>
+                            )}
+                          </TooltipContent>
+                        </Tooltip>
                     </TableCell>
                     <TableCell className="text-right">
                       {isEditable && (
@@ -627,5 +761,6 @@ export default function JobCardDetailPage() {
         </Card>
       )}
     </div>
+    </TooltipProvider>
   );
 }

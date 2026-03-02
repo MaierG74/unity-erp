@@ -11,6 +11,56 @@ interface PdfThumbnailClientProps {
   className?: string;
 }
 
+// Load pdfjs-dist from public/ via script tag to bypass webpack ESM issues.
+// pdfjs-dist v5 ESM modules fail with Next.js webpack (`Object.defineProperty called on non-object`).
+let pdfjsPromise: Promise<any> | null = null;
+
+function loadPdfJs(): Promise<any> {
+  if (pdfjsPromise) return pdfjsPromise;
+  pdfjsPromise = new Promise((resolve, reject) => {
+    // Already loaded from a previous call?
+    if ((window as any).pdfjsLib) {
+      resolve((window as any).pdfjsLib);
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = '/pdf.min.mjs';
+    script.type = 'module';
+
+    // The ESM script sets `window.pdfjsLib` after eval — but ESM scripts
+    // don't expose to window by default. Instead, use a module-scoped import.
+    // We'll use a different approach: inline module that imports and exposes it.
+    const inlineScript = document.createElement('script');
+    inlineScript.type = 'module';
+    inlineScript.textContent = `
+      import * as pdfjsLib from '/pdf.min.mjs';
+      pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+      window.__pdfjsLib = pdfjsLib;
+      window.dispatchEvent(new Event('pdfjsReady'));
+    `;
+
+    const onReady = () => {
+      window.removeEventListener('pdfjsReady', onReady);
+      resolve((window as any).__pdfjsLib);
+    };
+    window.addEventListener('pdfjsReady', onReady);
+
+    // Timeout fallback
+    setTimeout(() => {
+      window.removeEventListener('pdfjsReady', onReady);
+      if ((window as any).__pdfjsLib) {
+        resolve((window as any).__pdfjsLib);
+      } else {
+        reject(new Error('pdfjs-dist load timeout'));
+      }
+    }, 10000);
+
+    document.head.appendChild(inlineScript);
+  });
+  return pdfjsPromise;
+}
+
 /**
  * Canvas-based PDF thumbnail — renders only page 1 via pdf.js.
  * No browser PDF viewer chrome (no sidebar, no toolbar).
@@ -31,10 +81,7 @@ export function PdfThumbnailClient({
     async function render() {
       setStatus('loading');
       try {
-        const pdfjsLib = await import('pdfjs-dist');
-
-        // Use local worker file copied to public/
-        pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+        const pdfjsLib = await loadPdfJs();
 
         const loadingTask = pdfjsLib.getDocument(url);
         const pdf = await loadingTask.promise;
@@ -47,14 +94,14 @@ export function PdfThumbnailClient({
         const container = containerRef.current;
         if (!canvas || !container) return;
 
-        // Scale to fit within the container (both width and height)
-        const containerWidth = container.clientWidth;
-        const containerHeight = container.clientHeight;
+        // Scale to fit within the container
+        const containerWidth = container.clientWidth || 200;
+        const containerHeight = container.clientHeight || 200;
         const unscaledViewport = page.getViewport({ scale: 1 });
         const scale = Math.min(
           containerWidth / unscaledViewport.width,
           containerHeight / unscaledViewport.height
-        );
+        ) || 0.5;
         const viewport = page.getViewport({ scale });
 
         canvas.width = viewport.width;
@@ -66,7 +113,7 @@ export function PdfThumbnailClient({
         await page.render({ canvasContext: ctx, viewport } as any).promise;
         if (!cancelled) setStatus('ready');
       } catch (err) {
-        console.warn('PDF thumbnail render failed', err);
+        console.warn('PDF thumbnail render failed for', url, err);
         if (!cancelled) setStatus('error');
       }
     }

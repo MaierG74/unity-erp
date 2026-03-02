@@ -61,7 +61,7 @@ export default function StaffPage() {
             <Clock className="mr-2 h-4 w-4" />
             Hours Tracking
           </TabsTrigger>
-          <TabsTrigger value="payroll" onClick={() => router.push('/staff/payroll')}>
+          <TabsTrigger value="payroll" onClick={() => router.push('/payroll-review')}>
             <DollarSign className="mr-2 h-4 w-4" />
             Payroll
           </TabsTrigger>

@@ -16,6 +16,9 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import type { FloorStaffJob } from './types';
 import { fetchJobCardItems } from '@/lib/queries/factoryFloor';
+import { formatDuration } from '@/lib/shift-utils';
+import type { ScheduleBreak } from '@/types/work-schedule';
+import type { ShiftInfo } from '@/hooks/use-shift-info';
 
 interface CompleteJobDialogProps {
   job: FloorStaffJob | null;
@@ -28,6 +31,8 @@ interface CompleteJobDialogProps {
     notes?: string;
   }) => void;
   isPending: boolean;
+  /** Shift schedule — used to calculate working hours for overnight jobs and deduct breaks */
+  shiftInfo?: Pick<ShiftInfo, 'startMinutes' | 'effectiveEndMinutes' | 'breaks'>;
 }
 
 function formatTimestampToInput(ts: string | null): string {
@@ -42,22 +47,29 @@ function formatTimestampToInput(ts: string | null): string {
   }
 }
 
-function timeInputToTimestamp(timeStr: string, refDate?: string): string {
+function timeInputToTimestamp(timeStr: string, refDate?: string, addDay?: boolean): string {
   const [h, m] = timeStr.split(':').map(Number);
   const base = refDate ? new Date(refDate) : new Date();
   base.setHours(h, m, 0, 0);
+  if (addDay) base.setDate(base.getDate() + 1);
   return base.toISOString();
 }
 
-function formatDuration(minutes: number): string {
-  if (minutes <= 0) return '-';
-  const h = Math.floor(minutes / 60);
-  const m = Math.round(minutes % 60);
-  if (h === 0) return `${m}m`;
-  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+/** Calculate total break minutes that overlap with a given work period */
+function breakMinutesInRange(breaks: ScheduleBreak[], rangeStart: number, rangeEnd: number): number {
+  let total = 0;
+  for (const b of breaks) {
+    const overlapStart = Math.max(b.startMinutes, rangeStart);
+    const overlapEnd = Math.min(b.endMinutes, rangeEnd);
+    if (overlapEnd > overlapStart) total += overlapEnd - overlapStart;
+  }
+  return total;
 }
 
-export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPending }: CompleteJobDialogProps) {
+export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPending, shiftInfo }: CompleteJobDialogProps) {
+  const shiftStartMinutes = shiftInfo?.startMinutes ?? 420;
+  const shiftEndMinutes = shiftInfo?.effectiveEndMinutes ?? 1020;
+  const breaks = shiftInfo?.breaks ?? [];
   const [actualStart, setActualStart] = useState('');
   const [actualEnd, setActualEnd] = useState('');
   const [notes, setNotes] = useState('');
@@ -91,12 +103,29 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
     }
   }, [items]);
 
-  const actualDurationMinutes = useMemo(() => {
-    if (!actualStart || !actualEnd) return 0;
+  const { actualDurationMinutes, endIsNextDay } = useMemo(() => {
+    if (!actualStart || !actualEnd) return { actualDurationMinutes: 0, endIsNextDay: false };
     const [sh, sm] = actualStart.split(':').map(Number);
     const [eh, em] = actualEnd.split(':').map(Number);
-    return (eh * 60 + em) - (sh * 60 + sm);
-  }, [actualStart, actualEnd]);
+    const startMins = sh * 60 + sm;
+    const endMins = eh * 60 + em;
+    const isNextDay = endMins < startMins;
+
+    let duration: number;
+    if (!isNextDay) {
+      // Same day — subtract breaks that fall within the work period
+      duration = (endMins - startMins) - breakMinutesInRange(breaks, startMins, endMins);
+    } else {
+      // Overnight: working time = (shift end - actual start) + (actual end - shift start)
+      // minus breaks on both days
+      const workDay1 = Math.max(0, shiftEndMinutes - startMins);
+      const workDay2 = Math.max(0, endMins - shiftStartMinutes);
+      duration = workDay1 + workDay2
+        - breakMinutesInRange(breaks, startMins, shiftEndMinutes)
+        - breakMinutesInRange(breaks, shiftStartMinutes, endMins);
+    }
+    return { actualDurationMinutes: duration, endIsNextDay: isNextDay };
+  }, [actualStart, actualEnd, shiftStartMinutes, shiftEndMinutes, breaks]);
 
   const variance = useMemo(() => {
     if (!job?.estimated_minutes || actualDurationMinutes <= 0) return null;
@@ -117,10 +146,11 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
       item_id: item.item_id,
       completed_quantity: quantities[item.item_id] ?? item.quantity,
     }));
+    const refDate = job.assignment_date ?? undefined;
     onComplete({
       items: itemsPayload,
-      actualStart: actualStart ? timeInputToTimestamp(actualStart, job.assignment_date ?? undefined) : undefined,
-      actualEnd: actualEnd ? timeInputToTimestamp(actualEnd, job.assignment_date ?? undefined) : undefined,
+      actualStart: actualStart ? timeInputToTimestamp(actualStart, refDate) : undefined,
+      actualEnd: actualEnd ? timeInputToTimestamp(actualEnd, refDate, endIsNextDay) : undefined,
       notes: notes || undefined,
     });
   };
@@ -149,16 +179,19 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
               <Input type="time" value={actualStart} onChange={(e) => setActualStart(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label>Actual End</Label>
+              <Label>Actual End{endIsNextDay && <span className="text-xs text-muted-foreground ml-1">(next day)</span>}</Label>
               <Input type="time" value={actualEnd} onChange={(e) => setActualEnd(e.target.value)} />
             </div>
           </div>
 
           {/* Duration summary */}
-          <div className="flex gap-4 text-sm">
+          <div className="flex flex-wrap gap-4 text-sm">
             <div>
               <span className="text-muted-foreground">Actual: </span>
-              <span className="font-medium">{formatDuration(actualDurationMinutes)}</span>
+              <span className="font-medium">{actualDurationMinutes > 0 ? formatDuration(actualDurationMinutes) : '-'}</span>
+              {endIsNextDay && actualDurationMinutes > 0 && (
+                <span className="text-xs text-muted-foreground ml-1">(working hrs only)</span>
+              )}
             </div>
             {job.estimated_minutes && (
               <div>

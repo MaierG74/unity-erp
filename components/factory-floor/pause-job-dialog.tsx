@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -33,6 +33,13 @@ interface PauseJobDialogProps {
 export function PauseJobDialog({ job, open, onOpenChange, onPause, isPending }: PauseJobDialogProps) {
   const [reason, setReason] = useState<PauseReason | ''>('');
   const [notes, setNotes] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setReason('');
+      setNotes('');
+    }
+  }, [open]);
 
   const handleSubmit = () => {
     if (!reason) return;

@@ -182,13 +182,14 @@ export function ReceiveItemsModal({
 
   const quantityReceived = watch('quantity_received') || 0;
   const quantityRejected = watch('quantity_rejected') || 0;
+  const goodQuantity = quantityReceived - quantityRejected;
   const totalQuantity = quantityReceived + quantityRejected;
-  const receiveTooHigh = quantityReceived > remainingToReceive;
+  const receiveTooHigh = goodQuantity > remainingToReceive;
   const hasQuantity = totalQuantity > 0;
   const allocationReceivedNowTotal = hasSplitAllocations
     ? allocationRows.reduce((sum, row) => sum + (allocationReceipts[row.id] || 0), 0)
     : 0;
-  const allocationMismatch = hasSplitAllocations && quantityReceived > 0 && allocationReceivedNowTotal !== quantityReceived;
+  const allocationMismatch = hasSplitAllocations && goodQuantity > 0 && allocationReceivedNowTotal !== goodQuantity;
   const allocationOverCap = hasSplitAllocations && allocationRows.some((row) => {
     const cap = row.order_id === null
       ? Number(row.quantity_for_stock || 0)
@@ -255,8 +256,9 @@ export function ReceiveItemsModal({
             .filter((row) => row.quantity > 0);
 
           const payloadTotal = allocationPayload.reduce((sum, row) => sum + row.quantity, 0);
-          if (payloadTotal !== (data.quantity_received || 0)) {
-            throw new Error('Allocation breakdown must equal Quantity Received');
+          const goodQty = (data.quantity_received || 0) - (data.quantity_rejected || 0);
+          if (payloadTotal !== goodQty) {
+            throw new Error('Allocation breakdown must equal good quantity (received minus rejected)');
           }
         }
 
@@ -265,6 +267,8 @@ export function ReceiveItemsModal({
           p_quantity: number;
           p_receipt_date: string;
           p_allocation_receipts?: AllocationReceipt[] | null;
+          p_rejected_quantity?: number;
+          p_rejection_reason?: string;
         } = {
           p_order_id: supplierOrder.order_id,
           p_quantity: data.quantity_received || 0,
@@ -275,7 +279,13 @@ export function ReceiveItemsModal({
           rpcPayload.p_allocation_receipts = allocationPayload;
         }
 
-        const { error: receiptError } = await supabase.rpc(
+        // Include rejection in the same atomic call
+        if ((data.quantity_rejected || 0) > 0) {
+          rpcPayload.p_rejected_quantity = data.quantity_rejected;
+          rpcPayload.p_rejection_reason = data.rejection_reason;
+        }
+
+        const { data: receiptResult, error: receiptError } = await supabase.rpc(
           'process_supplier_order_receipt',
           rpcPayload
         );
@@ -283,10 +293,21 @@ export function ReceiveItemsModal({
         if (receiptError) {
           throw new Error(`Failed to process receipt: ${receiptError.message}`);
         }
+
+        if (receiptResult && Array.isArray(receiptResult) && receiptResult.length > 0) {
+          const result = receiptResult[0];
+          if (result.return_id) {
+            nextSuccessState = {
+              ...nextSuccessState,
+              grn: result.goods_return_number,
+              returnId: result.return_id,
+            };
+          }
+        }
       }
 
-      // If there are rejections, process them
-      if ((data.quantity_rejected || 0) > 0 && data.rejection_reason) {
+      // Handle reject-only case (no items received, only rejected)
+      if ((data.quantity_received || 0) === 0 && (data.quantity_rejected || 0) > 0 && data.rejection_reason) {
         const { data: returnData, error: returnError } = await supabase.rpc(
           'process_supplier_order_return',
           {
@@ -303,7 +324,6 @@ export function ReceiveItemsModal({
           throw new Error(`Failed to process rejection: ${returnError.message}`);
         }
 
-        // Extract GRN from return data
         if (returnData && Array.isArray(returnData) && returnData.length > 0) {
           nextSuccessState = {
             ...nextSuccessState,
@@ -467,7 +487,7 @@ export function ReceiveItemsModal({
               {receiveTooHigh && (
                 <Alert variant="destructive">
                   <AlertDescription>
-                    Quantity received ({quantityReceived}) exceeds remaining to receive ({remainingToReceive})
+                    Good quantity ({goodQuantity}) exceeds remaining to receive ({remainingToReceive})
                   </AlertDescription>
                 </Alert>
               )}
@@ -507,8 +527,13 @@ export function ReceiveItemsModal({
                               type="number"
                               min="0"
                               max={remainingCap}
-                              value={allocationReceipts[row.id] || 0}
+                              value={allocationReceipts[row.id] || ''}
                               onChange={(event) => setAllocationQuantity(row.id, event.target.value)}
+                              onBlur={(event) => {
+                                if (event.target.value === '') {
+                                  setAllocationQuantity(row.id, '0');
+                                }
+                              }}
                               placeholder="0"
                             />
                           </div>
@@ -516,11 +541,11 @@ export function ReceiveItemsModal({
                       })}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      Allocation total: {allocationReceivedNowTotal} / {quantityReceived || 0}
+                      Allocation total: {allocationReceivedNowTotal} / {goodQuantity || 0}
                     </div>
                     {allocationMismatch && (
                       <p className="text-xs text-destructive">
-                        Allocation total must exactly match Quantity Received.
+                        Allocation total must match good quantity (Received − Rejected).
                       </p>
                     )}
                     {allocationOverCap && (

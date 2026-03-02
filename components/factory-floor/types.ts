@@ -90,6 +90,11 @@ export const PAUSE_REASONS = [
 
 export type PauseReason = typeof PAUSE_REASONS[number]['value'];
 
+export interface EarningsSplitItem {
+  item_id: number;
+  original_amount: number;
+}
+
 export function getDisplayProgress(job: FloorStaffJob): number {
   return job.progress_override ?? job.auto_progress;
 }

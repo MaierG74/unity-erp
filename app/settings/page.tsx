@@ -4,7 +4,12 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { DocumentTemplate, POContactInfo } from '@/types/templates';
 import { parsePOContactInfo } from '@/lib/templates';
-import { ChevronDown, ChevronRight, FileText, Mail, ShoppingCart, Plus, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileText, Mail, ShoppingCart, Plus, Trash2, DollarSign } from 'lucide-react';
+import { useOrgSettings } from '@/hooks/use-org-settings';
+import { useAuth } from '@/components/common/auth-provider';
+import { getOrgId } from '@/lib/utils';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 
 interface Settings {
   setting_id: number;
@@ -32,7 +37,46 @@ interface TemplateState {
   po_contact_email: string;
 }
 
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
 export default function SettingsPage() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const orgSettings = useOrgSettings();
+  const [weekStartDay, setWeekStartDay] = useState(5);
+  const [otThreshold, setOtThreshold] = useState(30);
+  const [savingPayroll, setSavingPayroll] = useState(false);
+  const [payrollInitialized, setPayrollInitialized] = useState(false);
+
+  // Sync payroll form state with org settings once loaded
+  useEffect(() => {
+    if (!orgSettings.isLoading && !payrollInitialized) {
+      setWeekStartDay(orgSettings.weekStartDay);
+      setOtThreshold(orgSettings.otThresholdMinutes);
+      setPayrollInitialized(true);
+    }
+  }, [orgSettings.isLoading, orgSettings.weekStartDay, orgSettings.otThresholdMinutes, payrollInitialized]);
+
+  const handleSavePayroll = async () => {
+    const orgId = getOrgId(user);
+    if (!orgId) return;
+    setSavingPayroll(true);
+    const { error } = await supabase
+      .from('organizations')
+      .update({
+        week_start_day: weekStartDay,
+        ot_threshold_minutes: otThreshold,
+      })
+      .eq('id', orgId);
+    setSavingPayroll(false);
+    if (error) {
+      toast.error('Failed to save payroll settings');
+    } else {
+      toast.success('Payroll settings saved');
+      queryClient.invalidateQueries({ queryKey: ['org-settings'] });
+    }
+  };
+
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -625,6 +669,59 @@ export default function SettingsPage() {
                 className="px-4 py-2 rounded bg-primary text-primary-foreground disabled:opacity-50"
               >
                 {savingTemplates ? 'Saving…' : 'Save Templates'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Payroll Settings Card */}
+        <div className="bg-card shadow rounded-lg">
+          <div className="px-6 py-4 border-b">
+            <div className="flex items-center gap-2">
+              <DollarSign className="h-5 w-5 text-green-500" />
+              <h1 className="text-lg font-semibold">Payroll Settings</h1>
+            </div>
+            <p className="text-sm text-muted-foreground">Work week boundaries and overtime threshold</p>
+          </div>
+          <div className="p-6 space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-medium mb-1">Work Week Starts On</label>
+                <p className="text-xs text-muted-foreground mb-2">
+                  First day of the payroll work week
+                </p>
+                <select
+                  className="w-full px-3 py-2 rounded border bg-background"
+                  value={weekStartDay}
+                  onChange={(e) => setWeekStartDay(Number(e.target.value))}
+                >
+                  {DAY_NAMES.map((name, i) => (
+                    <option key={i} value={i}>{name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">OT Threshold (minutes)</label>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Weekly overtime below this is treated as scan drift and auto-zeroed during payroll review
+                </p>
+                <input
+                  type="number"
+                  min="0"
+                  max="600"
+                  className="w-full px-3 py-2 rounded border bg-background"
+                  value={otThreshold}
+                  onChange={(e) => setOtThreshold(Number(e.target.value))}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <button
+                onClick={handleSavePayroll}
+                disabled={savingPayroll}
+                className="px-4 py-2 rounded bg-primary text-primary-foreground disabled:opacity-50"
+              >
+                {savingPayroll ? 'Saving…' : 'Save Payroll Settings'}
               </button>
             </div>
           </div>

@@ -1,18 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Plus, Pencil, XCircle } from 'lucide-react';
 import { useAuth } from '@/components/common/auth-provider';
+import { getOrgId } from '@/lib/utils';
 import { fetchActiveStaff } from '@/lib/queries/factoryFloor';
-import {
-  fetchSupportLinks,
-  createSupportLink,
-  updateSupportLink,
-  deactivateSupportLink,
-  type SupportLink,
-} from '@/lib/queries/staffSupport';
+import { fetchSupportLinks, type SupportLink } from '@/lib/queries/staffSupport';
+import { useSupportLinks } from '@/hooks/use-support-links';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -42,8 +38,8 @@ import {
 
 export function SupportAssignmentsTab() {
   const { user } = useAuth();
-  const queryClient = useQueryClient();
-  const orgId = (user as any)?.app_metadata?.org_id ?? (user as any)?.user_metadata?.org_id ?? null;
+  const orgId = getOrgId(user);
+  const { create: createMutation, update: updateMutation, deactivate: deactivateMutation } = useSupportLinks();
 
   // State for dialogs
   const [addOpen, setAddOpen] = useState(false);
@@ -65,44 +61,6 @@ export function SupportAssignmentsTab() {
   const { data: staffOptions = [] } = useQuery({
     queryKey: ['active-staff'],
     queryFn: fetchActiveStaff,
-  });
-
-  // Mutations
-  const createMutation = useMutation({
-    mutationFn: createSupportLink,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['support-links'] });
-      toast.success('Support link created');
-      resetAddForm();
-    },
-    onError: (err: Error) => {
-      toast.error(`Failed to create link: ${err.message}`);
-    },
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: ({ linkId, pct }: { linkId: number; pct: number }) =>
-      updateSupportLink(linkId, pct),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['support-links'] });
-      toast.success('Cost share updated');
-      setEditOpen(false);
-      setEditingLink(null);
-    },
-    onError: (err: Error) => {
-      toast.error(`Failed to update: ${err.message}`);
-    },
-  });
-
-  const deactivateMutation = useMutation({
-    mutationFn: deactivateSupportLink,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['support-links'] });
-      toast.success('Support link deactivated');
-    },
-    onError: (err: Error) => {
-      toast.error(`Failed to deactivate: ${err.message}`);
-    },
   });
 
   function resetAddForm() {
@@ -128,7 +86,7 @@ export function SupportAssignmentsTab() {
       supportStaffId: parseInt(supportStaffId),
       costSharePct: pct,
       orgId,
-    });
+    }, { onSuccess: resetAddForm });
   }
 
   function handleEdit() {
@@ -138,7 +96,9 @@ export function SupportAssignmentsTab() {
       toast.error('Cost share must be between 0 and 100');
       return;
     }
-    updateMutation.mutate({ linkId: editingLink.link_id, pct });
+    updateMutation.mutate({ linkId: editingLink.link_id, pct }, {
+      onSuccess: () => { setEditOpen(false); setEditingLink(null); },
+    });
   }
 
   function openEdit(link: SupportLink) {
