@@ -17,8 +17,9 @@ import { Textarea } from '@/components/ui/textarea';
 import type { FloorStaffJob } from './types';
 import { fetchJobCardItems } from '@/lib/queries/factoryFloor';
 import { formatDuration } from '@/lib/shift-utils';
-import type { ScheduleBreak } from '@/types/work-schedule';
-import type { ShiftInfo } from '@/hooks/use-shift-info';
+import { supabase } from '@/lib/supabase';
+import { calculateWorkingMinutes } from '@/lib/working-hours';
+import type { DaySchedule, PauseEvent, ShiftOverride } from '@/lib/working-hours';
 
 interface CompleteJobDialogProps {
   job: FloorStaffJob | null;
@@ -31,8 +32,6 @@ interface CompleteJobDialogProps {
     notes?: string;
   }) => void;
   isPending: boolean;
-  /** Shift schedule — used to calculate working hours for overnight jobs and deduct breaks */
-  shiftInfo?: Pick<ShiftInfo, 'startMinutes' | 'effectiveEndMinutes' | 'breaks'>;
 }
 
 function formatTimestampToInput(ts: string | null): string {
@@ -47,31 +46,15 @@ function formatTimestampToInput(ts: string | null): string {
   }
 }
 
-function timeInputToTimestamp(timeStr: string, refDate?: string, addDay?: boolean): string {
-  const [h, m] = timeStr.split(':').map(Number);
-  const base = refDate ? new Date(refDate) : new Date();
-  base.setHours(h, m, 0, 0);
-  if (addDay) base.setDate(base.getDate() + 1);
-  return base.toISOString();
+function toDateKey(d: Date): string {
+  return `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}-${d.getDate().toString().padStart(2,'0')}`;
 }
 
-/** Calculate total break minutes that overlap with a given work period */
-function breakMinutesInRange(breaks: ScheduleBreak[], rangeStart: number, rangeEnd: number): number {
-  let total = 0;
-  for (const b of breaks) {
-    const overlapStart = Math.max(b.startMinutes, rangeStart);
-    const overlapEnd = Math.min(b.endMinutes, rangeEnd);
-    if (overlapEnd > overlapStart) total += overlapEnd - overlapStart;
-  }
-  return total;
-}
-
-export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPending, shiftInfo }: CompleteJobDialogProps) {
-  const shiftStartMinutes = shiftInfo?.startMinutes ?? 420;
-  const shiftEndMinutes = shiftInfo?.effectiveEndMinutes ?? 1020;
-  const breaks = shiftInfo?.breaks ?? [];
+export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPending }: CompleteJobDialogProps) {
   const [actualStart, setActualStart] = useState('');
   const [actualEnd, setActualEnd] = useState('');
+  const [startDate, setStartDate] = useState(''); // YYYY-MM-DD
+  const [endDate, setEndDate] = useState('');     // YYYY-MM-DD
   const [notes, setNotes] = useState('');
   const [quantities, setQuantities] = useState<Record<number, number>>({});
 
@@ -81,11 +64,76 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
     enabled: open && !!job?.job_card_id,
   });
 
+  // Reuse the same cache as useWorkSchedule (raw DB rows)
+  const { data: rawSchedules } = useQuery({
+    queryKey: ['work-schedules', 'active'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('work_schedules')
+        .select('*')
+        .eq('is_active', true)
+        .order('display_order');
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 5 * 60 * 1000,
+    enabled: open,
+  });
+
+  const allSchedules = useMemo(() => {
+    if (!rawSchedules) return [];
+    return rawSchedules.map((row: any) => ({
+      dayGroup: row.day_group,
+      startMinutes: row.start_minutes,
+      endMinutes: row.end_minutes,
+      breaks: (row.breaks ?? []) as { label: string; startMinutes: number; endMinutes: number }[],
+      isActive: row.is_active,
+    })) as DaySchedule[];
+  }, [rawSchedules]);
+
+  const { data: pauseEvents } = useQuery({
+    queryKey: ['pause-events', job?.assignment_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('assignment_pause_events')
+        .select('paused_at, resumed_at')
+        .eq('assignment_id', job!.assignment_id);
+      if (error) throw error;
+      return (data ?? []).map((p: any) => ({
+        pausedAt: new Date(p.paused_at),
+        resumedAt: p.resumed_at ? new Date(p.resumed_at) : null,
+      })) as PauseEvent[];
+    },
+    enabled: open && !!job?.assignment_id,
+  });
+
+  const { data: shiftOverrides } = useQuery({
+    queryKey: ['shift-overrides', startDate, endDate],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('shift_overrides')
+        .select('override_date, extended_end_minutes')
+        .gte('override_date', startDate)
+        .lte('override_date', endDate);
+      if (error) throw error;
+      return (data ?? []).map((o: any) => ({
+        overrideDate: o.override_date,
+        extendedEndMinutes: o.extended_end_minutes,
+      })) as ShiftOverride[];
+    },
+    enabled: open && !!startDate && !!endDate,
+  });
+
   // Pre-fill times when dialog opens
   useEffect(() => {
     if (open && job) {
-      setActualStart(formatTimestampToInput(job.started_at ?? job.issued_at));
+      const startTs = job.started_at ?? job.issued_at;
+      const startDt = startTs ? new Date(startTs) : new Date();
+      setStartDate(toDateKey(startDt));
+      setActualStart(formatTimestampToInput(startTs));
+
       const now = new Date();
+      setEndDate(toDateKey(now));
       setActualEnd(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`);
       setNotes('');
       setQuantities({});
@@ -103,34 +151,29 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
     }
   }, [items]);
 
-  const { actualDurationMinutes, endIsNextDay } = useMemo(() => {
-    if (!actualStart || !actualEnd) return { actualDurationMinutes: 0, endIsNextDay: false };
-    const [sh, sm] = actualStart.split(':').map(Number);
-    const [eh, em] = actualEnd.split(':').map(Number);
-    const startMins = sh * 60 + sm;
-    const endMins = eh * 60 + em;
-    const isNextDay = endMins < startMins;
-
-    let duration: number;
-    if (!isNextDay) {
-      // Same day — subtract breaks that fall within the work period
-      duration = (endMins - startMins) - breakMinutesInRange(breaks, startMins, endMins);
-    } else {
-      // Overnight: working time = (shift end - actual start) + (actual end - shift start)
-      // minus breaks on both days
-      const workDay1 = Math.max(0, shiftEndMinutes - startMins);
-      const workDay2 = Math.max(0, endMins - shiftStartMinutes);
-      duration = workDay1 + workDay2
-        - breakMinutesInRange(breaks, startMins, shiftEndMinutes)
-        - breakMinutesInRange(breaks, shiftStartMinutes, endMins);
+  const workResult = useMemo(() => {
+    if (!actualStart || !actualEnd || !startDate || !endDate) {
+      return { totalMinutes: 0, workingDays: 0, pauseMinutes: 0 };
     }
-    return { actualDurationMinutes: duration, endIsNextDay: isNextDay };
-  }, [actualStart, actualEnd, shiftStartMinutes, shiftEndMinutes, breaks]);
+    const s = new Date(`${startDate}T${actualStart}:00`);
+    const e = new Date(`${endDate}T${actualEnd}:00`);
+    if (isNaN(s.getTime()) || isNaN(e.getTime())) {
+      return { totalMinutes: 0, workingDays: 0, pauseMinutes: 0 };
+    }
+    return calculateWorkingMinutes(
+      s, e,
+      allSchedules ?? [],
+      pauseEvents ?? [],
+      shiftOverrides ?? [],
+    );
+  }, [actualStart, actualEnd, startDate, endDate, allSchedules, pauseEvents, shiftOverrides]);
+
+  const isMultiDay = startDate !== endDate;
 
   const variance = useMemo(() => {
-    if (!job?.estimated_minutes || actualDurationMinutes <= 0) return null;
-    return actualDurationMinutes - job.estimated_minutes;
-  }, [actualDurationMinutes, job?.estimated_minutes]);
+    if (!job?.estimated_minutes || workResult.totalMinutes <= 0) return null;
+    return workResult.totalMinutes - job.estimated_minutes;
+  }, [workResult.totalMinutes, job?.estimated_minutes]);
 
   const totalEarnings = useMemo(() => {
     if (!items) return 0;
@@ -146,11 +189,10 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
       item_id: item.item_id,
       completed_quantity: quantities[item.item_id] ?? item.quantity,
     }));
-    const refDate = job.assignment_date ?? undefined;
     onComplete({
       items: itemsPayload,
-      actualStart: actualStart ? timeInputToTimestamp(actualStart, refDate) : undefined,
-      actualEnd: actualEnd ? timeInputToTimestamp(actualEnd, refDate, endIsNextDay) : undefined,
+      actualStart: actualStart && startDate ? new Date(`${startDate}T${actualStart}:00`).toISOString() : undefined,
+      actualEnd: actualEnd && endDate ? new Date(`${endDate}T${actualEnd}:00`).toISOString() : undefined,
       notes: notes || undefined,
     });
   };
@@ -176,11 +218,37 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Actual Start</Label>
-              <Input type="time" value={actualStart} onChange={(e) => setActualStart(e.target.value)} />
+              <div className="flex gap-2">
+                <Input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="flex-1"
+                />
+                <Input
+                  type="time"
+                  value={actualStart}
+                  onChange={(e) => setActualStart(e.target.value)}
+                  className="w-28"
+                />
+              </div>
             </div>
             <div className="space-y-2">
-              <Label>Actual End{endIsNextDay && <span className="text-xs text-muted-foreground ml-1">(next day)</span>}</Label>
-              <Input type="time" value={actualEnd} onChange={(e) => setActualEnd(e.target.value)} />
+              <Label>Actual End</Label>
+              <div className="flex gap-2">
+                <Input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="flex-1"
+                />
+                <Input
+                  type="time"
+                  value={actualEnd}
+                  onChange={(e) => setActualEnd(e.target.value)}
+                  className="w-28"
+                />
+              </div>
             </div>
           </div>
 
@@ -188,11 +256,21 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
           <div className="flex flex-wrap gap-4 text-sm">
             <div>
               <span className="text-muted-foreground">Actual: </span>
-              <span className="font-medium">{actualDurationMinutes > 0 ? formatDuration(actualDurationMinutes) : '-'}</span>
-              {endIsNextDay && actualDurationMinutes > 0 && (
-                <span className="text-xs text-muted-foreground ml-1">(working hrs only)</span>
+              <span className="font-medium">
+                {workResult.totalMinutes > 0 ? formatDuration(workResult.totalMinutes) : '-'}
+              </span>
+              {isMultiDay && workResult.workingDays > 0 && (
+                <span className="text-xs text-muted-foreground ml-1">
+                  ({workResult.workingDays} working day{workResult.workingDays !== 1 ? 's' : ''})
+                </span>
               )}
             </div>
+            {workResult.pauseMinutes > 0 && (
+              <div>
+                <span className="text-muted-foreground">Paused: </span>
+                <span className="font-medium">{formatDuration(workResult.pauseMinutes)}</span>
+              </div>
+            )}
             {job.estimated_minutes && (
               <div>
                 <span className="text-muted-foreground">Est: </span>
@@ -273,7 +351,7 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={isPending || actualDurationMinutes <= 0}
+            disabled={isPending || workResult.totalMinutes <= 0}
             className="bg-emerald-600 hover:bg-emerald-700"
           >
             {isPending ? 'Completing...' : 'Complete Job'}

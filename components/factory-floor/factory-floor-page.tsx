@@ -83,7 +83,6 @@ export function FactoryFloorPage() {
         job={selectedJob}
         open={completeDialogOpen}
         onOpenChange={setCompleteDialogOpen}
-        shiftInfo={shiftInfo}
         onComplete={({ items, actualStart, actualEnd, notes }) => {
           if (!selectedJob) return;
           completeJob.mutate({
