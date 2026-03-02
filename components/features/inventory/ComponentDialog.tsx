@@ -861,7 +861,7 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                         <span className="col-span-1" />
                       </div>
                     )}
-                    <div className="grid grid-cols-12 gap-3 items-start">
+                    <div className="grid grid-cols-12 gap-3 items-center">
                       <FormField
                         control={form.control}
                         name={`supplierComponents.${index}.supplier_id`}
@@ -942,7 +942,7 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                                   className="w-full"
                                   classNames={{
                                     control: (state) => cn(
-                                      "flex min-h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background text-foreground",
+                                      "flex h-10 w-full rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background text-foreground",
                                       state.isFocused && "ring-2 ring-ring ring-offset-2",
                                       state.isDisabled && "opacity-50 cursor-not-allowed"
                                     ),
