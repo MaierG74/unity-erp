@@ -905,9 +905,9 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                                 <CreatableSelect<OptionType, false>
                                   value={field.value ? { value: field.value, label: field.value } : null}
                                   onChange={(newValue: OptionType | null) => {
-                                    const selectedComponent = supplierComponentsMap[parseInt(selectedSupplierId)]?.find(
+                                    const selectedComponent = selectedSupplierId ? supplierComponentsMap[parseInt(selectedSupplierId)]?.find(
                                       (sc: SupplierComponentWithDescription) => sc.supplier_code === newValue?.value
-                                    )
+                                    ) : undefined
                                     if (selectedComponent) {
                                       field.onChange(selectedComponent.supplier_code)
                                       form.setValue(`supplierComponents.${index}.price`, selectedComponent.price.toString())
