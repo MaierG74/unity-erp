@@ -604,28 +604,28 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             {/* ── Image Section ── */}
-            <div className="space-y-2">
+            <div>
               {currentImageSrc ? (
                 <div className="relative group rounded-lg overflow-hidden border border-border bg-muted/20">
                   <img
                     src={currentImageSrc}
                     alt="Component"
-                    className="w-full object-contain max-h-[200px]"
+                    className="w-full object-contain max-h-[140px]"
                   />
                   <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
                     <Button type="button" size="sm" variant="secondary" onClick={() => setCropDialogOpen(true)}>
-                      <Crop className="h-4 w-4 mr-1.5" />
+                      <Crop className="h-3.5 w-3.5 mr-1.5" />
                       Crop
                     </Button>
                     <Button type="button" size="sm" variant="destructive" onClick={handleRemoveImage}>
-                      <Trash2 className="h-4 w-4 mr-1.5" />
+                      <Trash2 className="h-3.5 w-3.5 mr-1.5" />
                       Remove
                     </Button>
                   </div>
                   {imageFile instanceof File && (
-                    <p className="text-xs text-muted-foreground px-3 py-1.5 border-t border-border bg-muted/30">
+                    <p className="text-xs text-muted-foreground px-3 py-1 border-t border-border bg-muted/30">
                       {imageFile.name} ({(imageFile.size / 1024).toFixed(0)} KB)
                     </p>
                   )}
@@ -636,7 +636,7 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                   onPaste={handlePaste}
                   tabIndex={0}
                   className={cn(
-                    "border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer",
+                    "border-2 border-dashed rounded-lg p-4 text-center transition-colors cursor-pointer",
                     isDragActive ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/50 hover:bg-muted/20",
                     isUploading && "opacity-50 cursor-not-allowed"
                   )}
@@ -645,22 +645,22 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                   <input {...getInputProps()} disabled={isUploading} />
                   {isUploading ? (
                     <>
-                      <Loader2 className="mx-auto h-8 w-8 text-muted-foreground mb-3 animate-spin" />
+                      <Loader2 className="mx-auto h-6 w-6 text-muted-foreground mb-2 animate-spin" />
                       <p className="text-sm text-muted-foreground">Uploading...</p>
                     </>
                   ) : isDragActive ? (
                     <>
-                      <Upload className="mx-auto h-8 w-8 text-primary mb-3" />
+                      <Upload className="mx-auto h-6 w-6 text-primary mb-2" />
                       <p className="text-sm text-foreground font-medium">Drop image here...</p>
                     </>
                   ) : (
                     <>
-                      <Upload className="mx-auto h-8 w-8 text-muted-foreground mb-3" />
+                      <Upload className="mx-auto h-6 w-6 text-muted-foreground mb-2" />
                       <p className="text-sm text-muted-foreground">
                         Drag & drop, paste, or{' '}
                         <span className="text-primary font-medium underline underline-offset-4">browse</span>
                       </p>
-                      <p className="text-xs text-muted-foreground mt-1">PNG, JPG, SVG, GIF or WebP</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">PNG, JPG, SVG, GIF or WebP</p>
                     </>
                   )}
                 </div>
@@ -679,9 +679,9 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
             )}
 
             {/* ── Details Section ── */}
-            <div className="space-y-4">
+            <div className="space-y-3">
               <h4 className="text-sm font-medium text-muted-foreground">Details</h4>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-3">
                 <FormField
                   control={form.control}
                   name="internal_code"
@@ -720,6 +720,31 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                     </FormItem>
                   )}
                 />
+                <FormField
+                  control={form.control}
+                  name="unit_id"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Unit</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || "_none"}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select unit" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="_none">Select unit</SelectItem>
+                          {uniqueUnits.map((unit) => (
+                            <SelectItem key={unit.unit_id} value={unit.unit_id.toString()}>
+                              {unit.unit_name}{unit.unit_code ? ` (${unit.unit_code.toUpperCase()})` : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
 
               <FormField
@@ -729,34 +754,8 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                   <FormItem>
                     <FormLabel>Description</FormLabel>
                     <FormControl>
-                      <Textarea {...field} />
+                      <Textarea {...field} rows={2} />
                     </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="unit_id"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Unit</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value || "_none"}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select unit" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="_none">Select unit</SelectItem>
-                        {uniqueUnits.map((unit) => (
-                          <SelectItem key={unit.unit_id} value={unit.unit_id.toString()}>
-                            {unit.unit_name}{unit.unit_code ? ` (${unit.unit_code.toUpperCase()})` : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -764,9 +763,9 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
             </div>
 
             {/* ── Inventory Section ── */}
-            <div className="space-y-4">
+            <div className="space-y-3">
               <h4 className="text-sm font-medium text-muted-foreground">Inventory</h4>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-3 gap-3">
                 <FormField
                   control={form.control}
                   name="quantity_on_hand"
@@ -1028,7 +1027,7 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
             </div>
 
             {/* ── Footer ── */}
-            <div className="flex justify-end gap-3 pt-4 border-t">
+            <div className="flex justify-end gap-3 pt-3 border-t">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
