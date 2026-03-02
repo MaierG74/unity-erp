@@ -25,7 +25,8 @@ import {
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabaseClient"
 import type { InventoryItem } from "@/types/inventory"
-import { Loader2, Upload, Check, X } from "lucide-react"
+import { Loader2, Upload, X, Crop, Trash2 } from "lucide-react"
+import { ImageCropDialog } from '@/components/ui/image-crop-dialog'
 import { Textarea } from "@/components/ui/textarea"
 import React from "react"
 import { cn } from "@/lib/utils"
@@ -178,6 +179,29 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
       }
     }
   }, [form, isUploading])
+
+  const [cropDialogOpen, setCropDialogOpen] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+
+  // Generate preview URL from File objects
+  const imageFile = form.watch('image')
+  useEffect(() => {
+    if (imageFile instanceof File) {
+      const url = URL.createObjectURL(imageFile)
+      setPreviewUrl(url)
+      return () => URL.revokeObjectURL(url)
+    }
+    setPreviewUrl(null)
+  }, [imageFile])
+
+  // Derived state for current image display
+  const isImageDeleted = form.watch('image_url') === null
+  const currentImageSrc = previewUrl || (!isImageDeleted ? selectedItem?.component.image_url : null) || null
+
+  const handleRemoveImage = () => {
+    form.setValue('image', undefined)
+    form.setValue('image_url', null)
+  }
 
   const { data: units = [] } = useQuery<{ unit_id: number; unit_code?: string; unit_name: string }[]>({
     queryKey: ["units"],
@@ -567,207 +591,168 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} modal={false}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto z-50">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="mb-4">
+          <DialogTitle>
             {selectedItem ? 'Edit Component' : 'Add Component'}
           </DialogTitle>
           <DialogDescription>
-            {selectedItem 
-              ? 'Edit the details of an existing component.' 
+            {selectedItem
+              ? 'Edit the details of an existing component.'
               : 'Add a new component to the inventory system.'}
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-            <div className="grid grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="internal_code"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Code</FormLabel>
-                    <FormControl>
-                      <Input {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="image"
-                render={({ field: { onChange, value, ...field } }) => (
-                  <FormItem>
-                    <FormLabel>Image</FormLabel>
-                    <FormControl>
-                      <div className="flex flex-col gap-2">
-                        <div
-                          {...getRootProps()}
-                          onPaste={handlePaste}
-                          tabIndex={0}
-                          title="Drag files here or paste from clipboard"
-                          className={cn(
-                            "border-2 border-dashed rounded-lg p-4 text-center transition-colors focus:outline-none focus:ring-2 focus:ring-ring",
-                            "cursor-text",
-                            isDragActive ? "border-primary bg-muted/40" : "border-border hover:bg-muted/40",
-                            isUploading && "opacity-50 cursor-not-allowed"
-                          )}
-                        >
-                          <input {...getInputProps()} disabled={isUploading} />
-                          <Upload className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
-                          {isUploading ? (
-                            <p className="text-sm text-muted-foreground">Uploading...</p>
-                          ) : isDragActive ? (
-                            <p className="text-sm text-foreground">Drop image here...</p>
-                          ) : (
-                            <div className="space-y-1">
-                              <p className="text-sm text-muted-foreground">
-                                Drag & drop, or paste with <span className="font-medium">Ctrl/Cmd+V</span>
-                              </p>
-                              <div>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    openFileDialog()
-                                  }}
-                                  disabled={isUploading}
-                                >
-                                  Click to select
-                                </Button>
-                              </div>
-                              <p className="text-xs text-muted-foreground">
-                                SVG, PNG, JPG or GIF (max. 800×400px)
-                              </p>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          {value instanceof File && (
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                              <Check className="h-4 w-4 text-green-500" />
-                              {value.name}
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="h-4 w-4 p-0"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  onChange(undefined);
-                                }}
-                              >
-                                <X className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          )}
-                          {!value && selectedItem?.component.image_url && (
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                              <Check className="h-4 w-4 text-green-500" />
-                              Current image
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="h-4 w-4 p-0"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  form.setValue('image_url', null);
-                                }}
-                              >
-                                <X className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          )}
-                          {isUploading && (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          )}
-                        </div>
-                      </div>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+            {/* ── Image Section ── */}
+            <div className="space-y-2">
+              {currentImageSrc ? (
+                <div className="relative group rounded-lg overflow-hidden border border-border bg-muted/20">
+                  <img
+                    src={currentImageSrc}
+                    alt="Component"
+                    className="w-full object-contain max-h-[200px]"
+                  />
+                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
+                    <Button type="button" size="sm" variant="secondary" onClick={() => setCropDialogOpen(true)}>
+                      <Crop className="h-4 w-4 mr-1.5" />
+                      Crop
+                    </Button>
+                    <Button type="button" size="sm" variant="destructive" onClick={handleRemoveImage}>
+                      <Trash2 className="h-4 w-4 mr-1.5" />
+                      Remove
+                    </Button>
+                  </div>
+                  {imageFile instanceof File && (
+                    <p className="text-xs text-muted-foreground px-3 py-1.5 border-t border-border bg-muted/30">
+                      {imageFile.name} ({(imageFile.size / 1024).toFixed(0)} KB)
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div
+                  {...getRootProps()}
+                  onPaste={handlePaste}
+                  tabIndex={0}
+                  className={cn(
+                    "border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer",
+                    isDragActive ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/50 hover:bg-muted/20",
+                    isUploading && "opacity-50 cursor-not-allowed"
+                  )}
+                  onClick={(e) => { e.stopPropagation(); openFileDialog() }}
+                >
+                  <input {...getInputProps()} disabled={isUploading} />
+                  {isUploading ? (
+                    <>
+                      <Loader2 className="mx-auto h-8 w-8 text-muted-foreground mb-3 animate-spin" />
+                      <p className="text-sm text-muted-foreground">Uploading...</p>
+                    </>
+                  ) : isDragActive ? (
+                    <>
+                      <Upload className="mx-auto h-8 w-8 text-primary mb-3" />
+                      <p className="text-sm text-foreground font-medium">Drop image here...</p>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="mx-auto h-8 w-8 text-muted-foreground mb-3" />
+                      <p className="text-sm text-muted-foreground">
+                        Drag & drop, paste, or{' '}
+                        <span className="text-primary font-medium underline underline-offset-4">browse</span>
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">PNG, JPG, SVG, GIF or WebP</p>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
 
-            <FormField
-              control={form.control}
-              name="description"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Description</FormLabel>
-                  <FormControl>
-                    <Textarea {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            {/* Crop Dialog */}
+            {currentImageSrc && (
+              <ImageCropDialog
+                open={cropDialogOpen}
+                onOpenChange={setCropDialogOpen}
+                imageSrc={currentImageSrc}
+                fileName={imageFile instanceof File ? imageFile.name : 'cropped-component.png'}
+                onCropComplete={(croppedFile) => form.setValue('image', croppedFile)}
+              />
+            )}
 
-            <div className="grid grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="unit_id"
-                render={({ field }) => (
+            {/* ── Details Section ── */}
+            <div className="space-y-4">
+              <h4 className="text-sm font-medium text-muted-foreground">Details</h4>
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="internal_code"
+                  render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Unit</FormLabel>
-                      <Select 
-                        onValueChange={field.onChange} 
-                        value={field.value || "_none"}
-                      >
+                      <FormLabel>Code</FormLabel>
+                      <FormControl>
+                        <Input {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="category_id"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Category</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || "_none"}>
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue placeholder="Select unit" />
+                            <SelectValue placeholder="Select category" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="_none">Select unit</SelectItem>
-                          {uniqueUnits.map((unit) => (
-                            <SelectItem
-                              key={unit.unit_id}
-                              value={unit.unit_id.toString()}
-                            >
-                              {unit.unit_name}{unit.unit_code ? ` (${unit.unit_code.toUpperCase()})` : ''}
+                          <SelectItem value="_none">None</SelectItem>
+                          {categories.map((category) => (
+                            <SelectItem key={category.cat_id} value={category.cat_id.toString()}>
+                              {category.categoryname}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                       <FormMessage />
                     </FormItem>
+                  )}
+                />
+              </div>
+
+              <FormField
+                control={form.control}
+                name="description"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Description</FormLabel>
+                    <FormControl>
+                      <Textarea {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
                 )}
               />
 
               <FormField
                 control={form.control}
-                name="category_id"
+                name="unit_id"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Category</FormLabel>
-                    <Select 
-                      onValueChange={field.onChange} 
-                      value={field.value || "_none"}
-                    >
+                    <FormLabel>Unit</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value || "_none"}>
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue placeholder="Select category" />
+                          <SelectValue placeholder="Select unit" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="_none">None</SelectItem>
-                        {categories.map((category) => (
-                          <SelectItem
-                            key={category.cat_id}
-                            value={category.cat_id.toString()}
-                          >
-                            {category.categoryname}
+                        <SelectItem value="_none">Select unit</SelectItem>
+                        {uniqueUnits.map((unit) => (
+                          <SelectItem key={unit.unit_id} value={unit.unit_id.toString()}>
+                            {unit.unit_name}{unit.unit_code ? ` (${unit.unit_code.toUpperCase()})` : ''}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -778,53 +763,74 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
               />
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
-              <FormField
-                control={form.control}
-                name="quantity_on_hand"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Quantity on Hand</FormLabel>
-                    <FormControl>
-                      <Input {...field} type="number" min="0" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="reorder_level"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Reorder Level</FormLabel>
-                    <FormControl>
-                      <Input {...field} type="number" min="0" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="location"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Location</FormLabel>
-                    <FormControl>
-                      <Input {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+            {/* ── Inventory Section ── */}
+            <div className="space-y-4">
+              <h4 className="text-sm font-medium text-muted-foreground">Inventory</h4>
+              <div className="grid grid-cols-3 gap-4">
+                <FormField
+                  control={form.control}
+                  name="quantity_on_hand"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Qty on Hand</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          type="number"
+                          min="0"
+                          value={field.value || ''}
+                          placeholder="0"
+                          onBlur={(e) => {
+                            if (!e.target.value) field.onChange('0')
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="reorder_level"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Reorder Level</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          type="number"
+                          min="0"
+                          value={field.value || ''}
+                          placeholder="0"
+                          onBlur={(e) => {
+                            if (!e.target.value) field.onChange('0')
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="location"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Location</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="e.g. Shelf A3" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
             </div>
 
-            <div className="space-y-4">
+            {/* ── Suppliers Section ── */}
+            <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <FormLabel className="text-base">Suppliers</FormLabel>
+                <h4 className="text-sm font-medium text-muted-foreground">Suppliers</h4>
                 <Button
                   type="button"
                   variant="outline"
@@ -840,62 +846,51 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                   Add Supplier
                 </Button>
               </div>
-              
-              <div className="space-y-4">
-                {form.watch("supplierComponents")?.map((_, index) => (
-                  <div key={index} className="space-y-4 p-4 border rounded-lg">
-                    <div className="flex justify-between items-center">
-                      <FormLabel>Supplier {index + 1}</FormLabel>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => {
-                          const current = form.getValues("supplierComponents") || []
-                          form.setValue(
-                            "supplierComponents",
-                            current.filter((_, i) => i !== index)
-                          )
-                        }}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
 
-                    <div className="grid grid-cols-12 gap-4 items-start">
+              {(!form.watch("supplierComponents") || form.watch("supplierComponents")!.length === 0) && (
+                <p className="text-sm text-muted-foreground py-4 text-center">No suppliers added</p>
+              )}
+
+              <div className="space-y-3">
+                {form.watch("supplierComponents")?.map((_, index) => (
+                  <React.Fragment key={index}>
+                    {index === 0 && (
+                      <div className="grid grid-cols-12 gap-3 text-xs text-muted-foreground px-0.5">
+                        <span className="col-span-4">Supplier</span>
+                        <span className="col-span-4">Supplier Code</span>
+                        <span className="col-span-3">Price</span>
+                        <span className="col-span-1" />
+                      </div>
+                    )}
+                    <div className="grid grid-cols-12 gap-3 items-start">
                       <FormField
                         control={form.control}
                         name={`supplierComponents.${index}.supplier_id`}
                         render={({ field }) => (
-                            <FormItem className="col-span-4">
-                              <FormLabel>Supplier</FormLabel>
-                              <Select 
-                                onValueChange={(value) => {
-                                  field.onChange(value);
-                                  // Reset other fields when supplier changes
-                                  form.setValue(`supplierComponents.${index}.supplier_code`, "");
-                                  form.setValue(`supplierComponents.${index}.price`, "");
-                                }} 
-                                value={field.value || undefined}
-                              >
-                                <FormControl>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Select supplier" />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                  {suppliers.map((supplier) => (
-                                    <SelectItem
-                                      key={supplier.supplier_id}
-                                      value={supplier.supplier_id.toString()}
-                                    >
-                                      {supplier.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <FormMessage />
-                            </FormItem>
+                          <FormItem className="col-span-4">
+                            <Select
+                              onValueChange={(value) => {
+                                field.onChange(value)
+                                form.setValue(`supplierComponents.${index}.supplier_code`, "")
+                                form.setValue(`supplierComponents.${index}.price`, "")
+                              }}
+                              value={field.value || undefined}
+                            >
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select supplier" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {suppliers.map((supplier) => (
+                                  <SelectItem key={supplier.supplier_id} value={supplier.supplier_id.toString()}>
+                                    {supplier.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
                         )}
                       />
 
@@ -904,111 +899,99 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                         name={`supplierComponents.${index}.supplier_code`}
                         render={({ field }) => {
                           const selectedSupplierId = form.watch(`supplierComponents.${index}.supplier_id`)
-
                           return (
-                          <FormItem className="col-span-5">
-                            <FormLabel>Component</FormLabel>
-                            <FormControl>
-                              <CreatableSelect<OptionType, false>
-                                value={field.value ? {
-                                  value: field.value,
-                                  label: field.value
-                                } : null}
-                                onChange={(newValue: OptionType | null) => {
-                                  const selectedComponent = supplierComponentsMap[parseInt(selectedSupplierId)]?.find(
-                                    (sc: SupplierComponentWithDescription) => sc.supplier_code === newValue?.value
-                                  )
-                                  if (selectedComponent) {
-                                    field.onChange(selectedComponent.supplier_code)
-                                    form.setValue(`supplierComponents.${index}.price`, selectedComponent.price.toString())
-                                    return
+                            <FormItem className="col-span-4">
+                              <FormControl>
+                                <CreatableSelect<OptionType, false>
+                                  value={field.value ? { value: field.value, label: field.value } : null}
+                                  onChange={(newValue: OptionType | null) => {
+                                    const selectedComponent = supplierComponentsMap[parseInt(selectedSupplierId)]?.find(
+                                      (sc: SupplierComponentWithDescription) => sc.supplier_code === newValue?.value
+                                    )
+                                    if (selectedComponent) {
+                                      field.onChange(selectedComponent.supplier_code)
+                                      form.setValue(`supplierComponents.${index}.price`, selectedComponent.price.toString())
+                                      return
+                                    }
+                                    field.onChange(newValue?.value || "")
+                                  }}
+                                  onCreateOption={(inputValue) => {
+                                    const trimmedValue = inputValue.trim()
+                                    if (!trimmedValue) return
+                                    field.onChange(trimmedValue)
+                                  }}
+                                  options={
+                                    selectedSupplierId
+                                      ? (supplierComponentsMap[parseInt(selectedSupplierId)] || [])
+                                          .map((sc: SupplierComponentWithDescription) => ({
+                                            value: sc.supplier_code,
+                                            label: `${sc.supplier_code} - ${sc.description}`,
+                                          }))
+                                      : []
                                   }
-
-                                  field.onChange(newValue?.value || "")
-                                }}
-                                onCreateOption={(inputValue) => {
-                                  const trimmedValue = inputValue.trim()
-                                  if (!trimmedValue) {
-                                    return
+                                  isSearchable
+                                  isDisabled={!selectedSupplierId}
+                                  placeholder={selectedSupplierId ? "Search or type code" : "Select supplier first"}
+                                  formatCreateLabel={(inputValue) => `Create "${inputValue}"`}
+                                  noOptionsMessage={({ inputValue }) =>
+                                    !selectedSupplierId
+                                      ? "Select a supplier first"
+                                      : inputValue
+                                        ? `No matches. Create "${inputValue}".`
+                                        : "Type to search or create"
                                   }
-
-                                  field.onChange(trimmedValue)
-                                }}
-                                options={
-                                  selectedSupplierId
-                                    ? (supplierComponentsMap[parseInt(selectedSupplierId)] || [])
-                                        .map((sc: SupplierComponentWithDescription) => ({
-                                          value: sc.supplier_code,
-                                          label: `${sc.supplier_code} - ${sc.description}`,
-                                        }))
-                                    : []
-                                }
-                                isSearchable
-                                isDisabled={!selectedSupplierId}
-                                placeholder={selectedSupplierId ? "Search or type code" : "Select supplier first"}
-                                formatCreateLabel={(inputValue) => `Create "${inputValue}"`}
-                                noOptionsMessage={({ inputValue }) =>
-                                  !selectedSupplierId
-                                    ? "Select a supplier first"
-                                    :
-                                  inputValue
-                                    ? `No matches. Create "${inputValue}".`
-                                    : "Type to search or create a supplier code"
-                                }
-                                className="w-full"
-                                classNames={{
-                                  control: (state) => cn(
-                                    "flex min-h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background text-foreground",
-                                    state.isFocused && "ring-2 ring-ring ring-offset-2",
-                                    state.isDisabled && "opacity-50 cursor-not-allowed"
-                                  ),
-                                  menu: () => "z-[9999] mt-2 bg-popover text-popover-foreground rounded-md border shadow-md",
-                                  menuList: () => "p-1",
-                                  option: ({ isSelected, isFocused }) => cn(
-                                    "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors",
-                                    isSelected && "bg-primary text-primary-foreground",
-                                    !isSelected && isFocused && "bg-accent text-accent-foreground",
-                                    !isSelected && !isFocused && "text-popover-foreground hover:bg-accent hover:text-accent-foreground"
-                                  ),
-                                  placeholder: () => "text-muted-foreground",
-                                  input: () => "text-sm text-foreground",
-                                  singleValue: () => "text-sm text-foreground",
-                                  valueContainer: () => "gap-1",
-                                  indicatorsContainer: () => "gap-1",
-                                  clearIndicator: () => "text-muted-foreground p-1 hover:text-foreground rounded-sm hover:bg-accent",
-                                  dropdownIndicator: () => "text-muted-foreground p-1 hover:text-foreground rounded-sm hover:bg-accent",
-                                  indicatorSeparator: () => "bg-muted"
-                                }}
-                                theme={(theme) => ({
-                                  ...theme,
-                                  colors: {
-                                    ...theme.colors,
-                                    neutral0: 'hsl(var(--background))',
-                                    neutral5: 'hsl(var(--border))',
-                                    neutral10: 'hsl(var(--input))',
-                                    neutral20: 'hsl(var(--border))',
-                                    neutral30: 'hsl(var(--border))',
-                                    neutral40: 'hsl(var(--muted-foreground))',
-                                    neutral50: 'hsl(var(--muted-foreground))',
-                                    neutral60: 'hsl(var(--foreground))',
-                                    neutral70: 'hsl(var(--foreground))',
-                                    neutral80: 'hsl(var(--foreground))',
-                                    neutral90: 'hsl(var(--foreground))',
-                                    primary: 'hsl(var(--primary))',
-                                    primary25: 'hsl(var(--accent))',
-                                    primary50: 'hsl(var(--accent))',
-                                    primary75: 'hsl(var(--accent))',
-                                  },
-                                })}
-                                unstyled
-                              />
-                            </FormControl>
-                            <p className="text-xs text-muted-foreground">
-                              Pick an existing code or type a new one.
-                            </p>
-                            <FormMessage />
-                          </FormItem>
-                        )}}
+                                  className="w-full"
+                                  classNames={{
+                                    control: (state) => cn(
+                                      "flex min-h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background text-foreground",
+                                      state.isFocused && "ring-2 ring-ring ring-offset-2",
+                                      state.isDisabled && "opacity-50 cursor-not-allowed"
+                                    ),
+                                    menu: () => "z-[9999] mt-2 bg-popover text-popover-foreground rounded-md border shadow-md",
+                                    menuList: () => "p-1",
+                                    option: ({ isSelected, isFocused }) => cn(
+                                      "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors",
+                                      isSelected && "bg-primary text-primary-foreground",
+                                      !isSelected && isFocused && "bg-accent text-accent-foreground",
+                                      !isSelected && !isFocused && "text-popover-foreground hover:bg-accent hover:text-accent-foreground"
+                                    ),
+                                    placeholder: () => "text-muted-foreground",
+                                    input: () => "text-sm text-foreground",
+                                    singleValue: () => "text-sm text-foreground",
+                                    valueContainer: () => "gap-1",
+                                    indicatorsContainer: () => "gap-1",
+                                    clearIndicator: () => "text-muted-foreground p-1 hover:text-foreground rounded-sm hover:bg-accent",
+                                    dropdownIndicator: () => "text-muted-foreground p-1 hover:text-foreground rounded-sm hover:bg-accent",
+                                    indicatorSeparator: () => "bg-muted"
+                                  }}
+                                  theme={(theme) => ({
+                                    ...theme,
+                                    colors: {
+                                      ...theme.colors,
+                                      neutral0: 'hsl(var(--background))',
+                                      neutral5: 'hsl(var(--border))',
+                                      neutral10: 'hsl(var(--input))',
+                                      neutral20: 'hsl(var(--border))',
+                                      neutral30: 'hsl(var(--border))',
+                                      neutral40: 'hsl(var(--muted-foreground))',
+                                      neutral50: 'hsl(var(--muted-foreground))',
+                                      neutral60: 'hsl(var(--foreground))',
+                                      neutral70: 'hsl(var(--foreground))',
+                                      neutral80: 'hsl(var(--foreground))',
+                                      neutral90: 'hsl(var(--foreground))',
+                                      primary: 'hsl(var(--primary))',
+                                      primary25: 'hsl(var(--accent))',
+                                      primary50: 'hsl(var(--accent))',
+                                      primary75: 'hsl(var(--accent))',
+                                    },
+                                  })}
+                                  unstyled
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )
+                        }}
                       />
 
                       <FormField
@@ -1016,39 +999,42 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                         name={`supplierComponents.${index}.price`}
                         render={({ field }) => (
                           <FormItem className="col-span-3">
-                            <FormLabel>Price</FormLabel>
                             <FormControl>
-                              <Input {...field} type="number" step="0.01" />
+                              <Input {...field} type="number" step="0.01" placeholder="0.00" />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
                         )}
                       />
+
+                      <div className="col-span-1 flex items-center justify-center pt-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => {
+                            const current = form.getValues("supplierComponents") || []
+                            form.setValue("supplierComponents", current.filter((_, i) => i !== index))
+                          }}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
-                  </div>
+                  </React.Fragment>
                 ))}
               </div>
             </div>
 
-            <div className="flex justify-end gap-4 pt-4 border-t">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-              >
+            {/* ── Footer ── */}
+            <div className="flex justify-end gap-3 pt-4 border-t">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
               <Button type="submit" disabled={mutation.isPending || isUploading}>
-                {mutation.isPending || isUploading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    {selectedItem ? 'Updating...' : 'Adding...'}
-                  </>
-                ) : selectedItem ? (
-                  'Update Component'
-                ) : (
-                  'Add Component'
-                )}
+                {(mutation.isPending || isUploading) && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {selectedItem ? 'Save Changes' : 'Add Component'}
               </Button>
             </div>
           </form>
