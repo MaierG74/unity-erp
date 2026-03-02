@@ -215,7 +215,7 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
           </p>
 
           {/* Actual times */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-3">
             <div className="space-y-2">
               <Label>Actual Start</Label>
               <div className="flex gap-2">
@@ -229,7 +229,7 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
                   type="time"
                   value={actualStart}
                   onChange={(e) => setActualStart(e.target.value)}
-                  className="w-28"
+                  className="w-32"
                 />
               </div>
             </div>
@@ -246,7 +246,7 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
                   type="time"
                   value={actualEnd}
                   onChange={(e) => setActualEnd(e.target.value)}
-                  className="w-28"
+                  className="w-32"
                 />
               </div>
             </div>
