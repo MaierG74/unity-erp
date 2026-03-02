@@ -25,23 +25,11 @@ import {
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabaseClient"
 import type { InventoryItem } from "@/types/inventory"
-import { Loader2, Upload, Check, ChevronsUpDown, X } from "lucide-react"
+import { Loader2, Upload, Check, X } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
 import React from "react"
 import { cn } from "@/lib/utils"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-} from "@/components/ui/command"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import ReactSelect from "react-select"
+import CreatableSelect from "react-select/creatable"
 import { useToast } from "@/components/ui/use-toast"
 import { useDropzone } from "react-dropzone"
 
@@ -147,7 +135,6 @@ function useComponentForm(selectedItem: ComponentDialogProps['selectedItem']) {
 
 export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentDialogProps) {
   const [isUploading, setIsUploading] = useState(false)
-  const [openPopover, setOpenPopover] = useState<number | null>(null)
   const queryClient = useQueryClient()
   const form = useComponentForm(selectedItem)
   const storageBucket = 'QButton';
@@ -158,7 +145,6 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
     if (acceptedFiles.length > 0) {
       const file = acceptedFiles[0]
       form.setValue('image', file)
-      console.log('Image file dropped/selected:', file.name)
     }
   }, [form])
 
@@ -187,7 +173,6 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
             type: item.type
           })
           form.setValue('image', newFile)
-          console.log('Image pasted from clipboard:', newFile.name)
           break
         }
       }
@@ -202,7 +187,6 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
         .select("unit_id, unit_code, unit_name")
         .order("unit_name")
       if (error) throw error
-      console.log('Fetched units:', data)
       return data
     },
   })
@@ -224,7 +208,6 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
         .select("cat_id, categoryname")
         .order("categoryname")
       if (error) throw error
-      console.log('Fetched categories:', data)
       return data
     },
   })
@@ -237,7 +220,6 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
         .select("supplier_id, name")
         .order("name")
       if (error) throw error
-      console.log('Fetched suppliers:', data)
       return data
     },
   })
@@ -253,23 +235,14 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
           .select('supplier_component_id, component_id, supplier_id, supplier_code, price')
           .order('supplier_code')
         
-        if (supplierComponentsError) {
-          console.error('Error fetching supplier components:', supplierComponentsError)
-          throw supplierComponentsError
-        }
+        if (supplierComponentsError) throw supplierComponentsError
         
         // Fetch components for descriptions
         const { data: components, error: componentsError } = await supabase
           .from('components')
           .select('component_id, description')
         
-        if (componentsError) {
-          console.error('Error fetching components:', componentsError)
-          throw componentsError
-        }
-        
-        console.log('Raw supplier components data:', supplierComponents)
-        console.log('Components data:', components)
+        if (componentsError) throw componentsError
 
         // Group by supplier_id for easier lookup
         return supplierComponents.reduce((acc, item) => {
@@ -292,56 +265,14 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
           return acc
         }, {} as Record<number, SupplierComponentWithDescription[]>)
       } catch (error) {
-        console.error('Error in supplier components query:', error)
         throw error
       }
     }
   })
 
-  // Function to handle selecting an existing supplier component
-  const handleSupplierComponentSelect = (index: number, supplierId: string, componentId: string) => {
-    const supplierComponents = supplierComponentsMap[parseInt(supplierId)] || []
-    const selected = supplierComponents.find((sc: SupplierComponentWithDescription) => 
-      sc.component_id.toString() === componentId
-    )
-    
-    if (selected) {
-      form.setValue(`supplierComponents.${index}.supplier_code`, selected.supplier_code)
-      form.setValue(`supplierComponents.${index}.price`, selected.price.toString())
-    }
-  }
-
-  useEffect(() => {
-    // Simple check to ensure we're authenticated
-    async function checkAuth() {
-      try {
-        console.log('Checking Supabase authentication...');
-        
-        // Check authentication
-        const { data: session } = await supabase.auth.getSession();
-        if (!session?.session) {
-          console.error('Not authenticated - storage operations will fail');
-          return;
-        }
-        
-        console.log('Authentication verified, storage operations should work');
-      } catch (error) {
-        console.error('Error checking authentication:', error);
-      }
-    }
-    
-    checkAuth();
-  }, []);
-
   const mutation = useMutation({
     mutationFn: async ({ values, shouldClose = true }: { values: z.infer<typeof formSchema>, shouldClose?: boolean }) => {
       try {
-        console.log('🔍 Starting component update/create process', { 
-          isUpdate: !!selectedItem,
-          componentId: selectedItem?.component.component_id,
-          values 
-        });
-        
         let image_url = selectedItem?.component.image_url
 
         // Handle image deletion
@@ -355,27 +286,20 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
               // The last two parts should be the bucket name and the file path
               if (pathParts.length >= 3) {
                 const filePath = pathParts.slice(2).join('/');
-                console.log('Attempting to delete file from storage:', filePath);
-                
                 const { error: deleteError } = await supabase.storage
                   .from(storageBucket)
                   .remove([filePath]);
                 
                 if (deleteError) {
-                  console.warn('Error deleting file from storage:', deleteError);
                   // Continue anyway, as we still want to update the database
-                } else {
-                  console.log('File successfully deleted from storage');
                 }
               }
-            } catch (error) {
-              console.warn('Error parsing image URL for deletion:', error);
+            } catch {
               // Continue anyway, as we still want to update the database
             }
           }
           
           image_url = null;
-          console.log('Image deleted, setting image_url to null');
         }
         // Handle image upload if a new file is selected
         else if (values.image) {
@@ -389,14 +313,6 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
             
             // Upload directly to the root of the bucket
             const filePath = fileName
-
-            console.log('Attempting to upload file:', {
-              bucket: storageBucket,
-              filePath,
-              fileName,
-              fileType: file.type,
-              fileSize: file.size
-            })
 
             // Check if we're authenticated
             const { data: session } = await supabase.auth.getSession()
@@ -412,45 +328,19 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                 contentType: file.type
               })
 
-            if (uploadError) {
-              console.error('Upload error:', uploadError);
-              throw uploadError;
-            }
-            
-            console.log('File uploaded successfully:', uploadData);
-            
+            if (uploadError) throw uploadError;
+
             // Get the public URL
             const { data: urlData } = supabase.storage
               .from(storageBucket)
               .getPublicUrl(filePath);
               
-            console.log('Generated public URL:', urlData);
-            
             if (urlData && urlData.publicUrl) {
               image_url = urlData.publicUrl;
-              console.log('Setting image_url to:', image_url);
             } else {
-              console.error('Failed to get public URL for uploaded file');
               throw new Error('Failed to get public URL for uploaded file');
             }
-
-            // Verify the URL is accessible
-            try {
-              const response = await fetch(image_url, { method: 'HEAD' })
-              if (!response.ok) {
-                console.warn('Generated URL might not be accessible:', {
-                  status: response.status,
-                  statusText: response.statusText,
-                  url: image_url
-                })
-              } else {
-                console.log('URL is accessible:', image_url)
-              }
-            } catch (urlError) {
-              console.warn('Could not verify URL accessibility:', urlError)
-            }
-          } catch (error) {
-            console.error('Error uploading image:', error)
+          } catch {
             toast({
               title: "Image Upload Failed",
               description: "The component was updated but the image could not be uploaded. Please try again.",
@@ -461,8 +351,6 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
           } finally {
             setIsUploading(false)
           }
-        } else {
-          console.log('No image change detected, keeping existing image_url:', image_url)
         }
 
         // Update or create component
@@ -474,28 +362,19 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
           image_url,
         }
         
-        console.log('📝 Component data to save:', componentData);
-
         if (selectedItem) {
           // Update existing component
-          console.log('🔄 Updating existing component ID:', selectedItem.component.component_id);
           const { data: updateData, error } = await supabase
             .from('components')
             .update(componentData)
             .eq('component_id', selectedItem.component.component_id)
             .select();
-            
-            console.log('🔄 Component update result:', { data: updateData, error });
-            
-            if (error) {
-              console.error('❌ Component update failed:', error);
-              throw error;
-            }
+
+            if (error) throw error;
 
             // Update or create inventory record
             if (selectedItem.inventory_id) {
               // Update existing inventory record
-              console.log('🔄 Updating inventory record ID:', selectedItem.inventory_id);
               const { data: invData, error: inventoryError } = await supabase
                 .from('inventory')
                 .update({
@@ -505,16 +384,10 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                 })
                 .eq('inventory_id', selectedItem.inventory_id)
                 .select();
-              
-              console.log('🔄 Inventory update result:', { data: invData, error: inventoryError });
-              
-              if (inventoryError) {
-                console.error('❌ Inventory update failed:', inventoryError);
-                throw inventoryError;
-              }
+
+              if (inventoryError) throw inventoryError;
             } else {
               // Create new inventory record
-              console.log('➕ Creating new inventory record for component ID:', selectedItem.component.component_id);
               const { data: invData, error: inventoryError } = await supabase
                 .from('inventory')
                 .insert({
@@ -524,31 +397,20 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                   reorder_level: parseInt(values.reorder_level?.toString() || '0')
                 })
                 .select();
-              
-              console.log('➕ Inventory creation result:', { data: invData, error: inventoryError });
-              
-              if (inventoryError) {
-                console.error('❌ Inventory creation failed:', inventoryError);
-                throw inventoryError;
-              }
+
+              if (inventoryError) throw inventoryError;
             }
 
             // Update supplier components
             if (values.supplierComponents) {
               // First delete all existing supplier components for this component
-              console.log('🗑️ Deleting existing supplier components for component ID:', selectedItem.component.component_id);
               const { data: deleteData, error: deleteError } = await supabase
                 .from('suppliercomponents')
                 .delete()
                 .eq('component_id', selectedItem.component.component_id)
                 .select();
-              
-              console.log('🗑️ Supplier components deletion result:', { data: deleteData, error: deleteError });
 
-              if (deleteError) {
-                console.error('❌ Supplier components deletion failed:', deleteError);
-                throw deleteError;
-              }
+              if (deleteError) throw deleteError;
 
               // Then insert the new supplier components
               if (values.supplierComponents.length > 0) {
@@ -558,20 +420,13 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                   supplier_code: sc.supplier_code,
                   price: parseFloat(sc.price),
                 }));
-                
-                console.log('➕ Inserting new supplier components:', supplierComponentsData);
-                
+
                 const { data: insertData, error: insertError } = await supabase
                   .from('suppliercomponents')
                   .insert(supplierComponentsData)
                   .select();
-                
-                console.log('➕ Supplier components insertion result:', { data: insertData, error: insertError });
 
-                if (insertError) {
-                  console.error('❌ Supplier components insertion failed:', insertError);
-                  throw insertError;
-                }
+                if (insertError) throw insertError;
               }
             }
           } else {
@@ -611,30 +466,15 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
             if (inventoryError) throw inventoryError
           }
 
-          console.log('✅ Component update/create process completed successfully');
-          // Return success to trigger onSuccess callback
           return { success: true, shouldClose }
         } catch (error) {
-          console.error('❌ Mutation error:', error)
           throw error
         }
       },
       onSuccess: async (result) => {
         try {
-          // Log success for debugging
-          console.log('✅ Update successful, refreshing data...');
-          
-          // Verify data in Supabase if we're updating
-          if (selectedItem) {
-            console.log('🔍 Verifying data in Supabase after update');
-            const verificationResult = await verifyDataInSupabase(selectedItem.component.component_id);
-            console.log('🔍 Verification result:', verificationResult);
-          }
-          
           // Invalidate all relevant queries to force a refetch
           await queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
-          
-          // Show success toast
           toast({
             title: selectedItem ? "Component Updated" : "Component Added",
             description: selectedItem 
@@ -643,17 +483,14 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
           });
           
           // Force a complete refetch instead of trying to update the cache
-          console.log('🔄 Forcing refetch of inventory components data');
           await queryClient.refetchQueries({ queryKey: ['inventory', 'components'] });
           
           // Only close dialog if shouldClose is true
           if (result.shouldClose) {
-            console.log('🚪 Closing dialog and resetting form');
             onOpenChange(false);
             form.reset();
           }
-        } catch (error) {
-          console.error('❌ Error in onSuccess callback:', error);
+        } catch {
           toast({
             title: "Warning",
             description: "Component was updated but the UI may not reflect all changes. Please refresh the page.",
@@ -662,8 +499,6 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
         }
       },
       onError: (error) => {
-        console.error('❌ Mutation error:', error);
-        
         // Check for unique constraint violation on internal_code
         const errorMessage = error?.message || '';
         if (errorMessage.includes('duplicate key value') && errorMessage.includes('components_internal_code_key')) {
@@ -683,89 +518,8 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
       }
     })
 
-  // Add a function to check Supabase permissions
-  const checkSupabasePermissions = async () => {
-    console.log('🔍 Checking Supabase permissions and connectivity');
-    
-    try {
-      // Check authentication status
-      const { data: session, error: authError } = await supabase.auth.getSession();
-      
-      if (authError) {
-        console.error('❌ Authentication error:', authError);
-        return { success: false, error: authError };
-      }
-      
-      console.log('✅ Authentication status:', session);
-      
-      // Try a simple read operation
-      const { data: readData, error: readError } = await supabase
-        .from('components')
-        .select('component_id')
-        .limit(1);
-      
-      if (readError) {
-        console.error('❌ Read permission error:', readError);
-        return { success: false, error: readError };
-      }
-      
-      console.log('✅ Read permission check passed');
-      
-      // Try a simple write operation (that we'll roll back)
-      // Create a temporary record
-      const tempCode = `TEMP_${Date.now()}`;
-      const { data: writeData, error: writeError } = await supabase
-        .from('components')
-        .insert({
-          internal_code: tempCode,
-          description: 'Temporary component for permission check',
-          unit_id: 1,
-          category_id: 1
-        })
-        .select();
-      
-      if (writeError) {
-        console.error('❌ Write permission error:', writeError);
-        return { success: false, error: writeError };
-      }
-      
-      console.log('✅ Write permission check passed');
-      
-      // Delete the temporary record
-      if (writeData && writeData.length > 0) {
-        const { error: deleteError } = await supabase
-          .from('components')
-          .delete()
-          .eq('internal_code', tempCode);
-        
-        if (deleteError) {
-          console.error('❌ Delete permission error:', deleteError);
-        } else {
-          console.log('✅ Delete permission check passed');
-        }
-      }
-      
-      return { success: true };
-    } catch (error) {
-      console.error('❌ Error checking permissions:', error);
-      return { success: false, error };
-    }
-  };
-
-  // Add a button to check permissions
-  useEffect(() => {
-    if (open) {
-      // Check permissions when dialog opens
-      checkSupabasePermissions().then(result => {
-        console.log('🔍 Permission check result:', result);
-      });
-    }
-  }, [open]);
-
   // Modify the onSubmit function to include more error handling
   const onSubmit = (values: z.infer<typeof formSchema>) => {
-    console.log('Submitting form with values:', values)
-    
     // Check if we're updating and the internal code has changed
     if (selectedItem && values.internal_code !== selectedItem.component.internal_code) {
       // Check if the new code already exists
@@ -793,130 +547,24 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
         .select('component_id')
         .eq('internal_code', code);
       
-      if (error) {
-        console.error('Error checking internal code:', error);
-        return false;
-      }
-      
+      if (error) return false;
+
       // If we're editing, exclude the current component
       if (selectedItem) {
         return data.some(item => item.component_id !== selectedItem.component.component_id);
       }
-      
+
       // For new components, any existing code is a duplicate
       return data.length > 0;
-    } catch (error) {
-      console.error('Error checking internal code:', error);
+    } catch {
       return false;
     }
   }
   
   // Function to proceed with form submission
   const proceedWithSubmit = (values: z.infer<typeof formSchema>) => {
-    // Log image information for debugging
-    if (values.image) {
-      console.log('Image file being submitted:', {
-        name: values.image.name,
-        type: values.image.type,
-        size: values.image.size
-      });
-    } else if (values.image_url === null) {
-      console.log('Image being removed during submission');
-    } else {
-      console.log('No image change during submission');
-    }
-    
-    // Check network connectivity
-    fetch('https://api.supabase.io', { method: 'HEAD' })
-      .then(() => console.log('✅ Network connectivity check passed'))
-      .catch(error => console.error('❌ Network connectivity issue:', error));
-    
     mutation.mutate({ values, shouldClose: true })
   }
-
-  // Function to verify data in Supabase
-  const verifyDataInSupabase = async (componentId: number) => {
-    console.log('🔍 Verifying data in Supabase for component ID:', componentId);
-    
-    try {
-      // Fetch component data
-      const { data: componentData, error: componentError } = await supabase
-        .from('components')
-        .select('*')
-        .eq('component_id', componentId)
-        .single();
-      
-      if (componentError) {
-        console.error('❌ Failed to verify component data:', componentError);
-        return;
-      }
-      
-      console.log('✅ Component data in Supabase:', componentData);
-      
-      // Fetch inventory data
-      const { data: inventoryData, error: inventoryError } = await supabase
-        .from('inventory')
-        .select('*')
-        .eq('component_id', componentId);
-      
-      if (inventoryError) {
-        console.error('❌ Failed to verify inventory data:', inventoryError);
-        return;
-      }
-      
-      console.log('✅ Inventory data in Supabase:', inventoryData);
-      
-      // Fetch supplier components
-      const { data: supplierComponentsData, error: supplierComponentsError } = await supabase
-        .from('suppliercomponents')
-        .select('*')
-        .eq('component_id', componentId);
-      
-      if (supplierComponentsError) {
-        console.error('❌ Failed to verify supplier components data:', supplierComponentsError);
-        return;
-      }
-      
-      console.log('✅ Supplier components data in Supabase:', supplierComponentsData);
-      
-      return {
-        component: componentData,
-        inventory: inventoryData,
-        supplierComponents: supplierComponentsData
-      };
-    } catch (error) {
-      console.error('❌ Error verifying data in Supabase:', error);
-    }
-  }
-
-  // Add debugging for form values
-  useEffect(() => {
-    console.log('Current form values:', form.getValues())
-  }, [form.watch()])
-
-  // Add debugging for selected item
-  useEffect(() => {
-    if (selectedItem) {
-      console.log('Selected item:', selectedItem)
-    }
-  }, [selectedItem])
-
-  // Add an effect to make sure no "_empty" values remain
-  useEffect(() => {
-    const supplierComponents = form.getValues().supplierComponents || [];
-    let needsUpdate = false;
-    
-    supplierComponents.forEach((component, index) => {
-      if ((component.supplier_id === "_empty" || component.supplier_id === "") && suppliers.length > 0) {
-        form.setValue(`supplierComponents.${index}.supplier_id`, suppliers[0].supplier_id.toString());
-        needsUpdate = true;
-      }
-    });
-    
-    if (needsUpdate) {
-      console.log("Fixed invalid supplier component values");
-    }
-  }, [form.watch("supplierComponents"), suppliers]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange} modal={false}>
@@ -1014,7 +662,6 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                                   e.preventDefault();
                                   e.stopPropagation();
                                   onChange(undefined);
-                                  console.log('Image file selection cleared');
                                 }}
                               >
                                 <X className="h-3 w-3" />
@@ -1033,7 +680,6 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                                 onClick={(e) => {
                                   e.stopPropagation()
                                   form.setValue('image_url', null);
-                                  console.log('Current image marked for deletion');
                                 }}
                               >
                                 <X className="h-3 w-3" />
@@ -1070,13 +716,7 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
               <FormField
                 control={form.control}
                 name="unit_id"
-                render={({ field }) => {
-                  console.log('Unit field render:', {
-                    value: field.value,
-                    type: typeof field.value,
-                    units: units
-                  });
-                  return (
+                render={({ field }) => (
                     <FormItem>
                       <FormLabel>Unit</FormLabel>
                       <Select 
@@ -1102,8 +742,7 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                       </Select>
                       <FormMessage />
                     </FormItem>
-                  );
-                }}
+                )}
               />
 
               <FormField
@@ -1192,11 +831,9 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                   size="sm"
                   onClick={() => {
                     const current = form.getValues("supplierComponents") || []
-                    console.log('Adding new supplier component');
-                    const firstSupplierId = suppliers.length > 0 ? suppliers[0].supplier_id.toString() : "1";
                     form.setValue("supplierComponents", [
                       ...current,
-                      { supplier_id: firstSupplierId, supplier_code: "", price: "" },
+                      { supplier_id: "", supplier_code: "", price: "" },
                     ])
                   }}
                 >
@@ -1225,39 +862,21 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                       </Button>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-4 items-start">
+                    <div className="grid grid-cols-12 gap-4 items-start">
                       <FormField
                         control={form.control}
                         name={`supplierComponents.${index}.supplier_id`}
-                        render={({ field }) => {
-                          // Ensure supplier_id has a valid value
-                          if ((field.value === "_empty" || field.value === "") && suppliers.length > 0) {
-                            field.onChange(suppliers[0].supplier_id.toString());
-                          }
-                          
-                          // Ensure we have a valid value for the Select component
-                          const safeValue = field.value || "_none";
-                          
-                          console.log(`Supplier ${index} field render:`, {
-                            value: field.value,
-                            type: typeof field.value,
-                            suppliers: suppliers
-                          });
-                          return (
-                            <FormItem>
+                        render={({ field }) => (
+                            <FormItem className="col-span-4">
                               <FormLabel>Supplier</FormLabel>
                               <Select 
                                 onValueChange={(value) => {
-                                  console.log(`Supplier ${index} onValueChange:`, {
-                                    newValue: value,
-                                    type: typeof value
-                                  });
                                   field.onChange(value);
                                   // Reset other fields when supplier changes
                                   form.setValue(`supplierComponents.${index}.supplier_code`, "");
                                   form.setValue(`supplierComponents.${index}.price`, "");
                                 }} 
-                                value={safeValue}
+                                value={field.value || undefined}
                               >
                                 <FormControl>
                                   <SelectTrigger>
@@ -1265,7 +884,6 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                                   </SelectTrigger>
                                 </FormControl>
                                 <SelectContent>
-                                  <SelectItem value="_none">Select a supplier</SelectItem>
                                   {suppliers.map((supplier) => (
                                     <SelectItem
                                       key={supplier.supplier_id}
@@ -1278,34 +896,47 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                               </Select>
                               <FormMessage />
                             </FormItem>
-                          );
-                        }}
+                        )}
                       />
 
                       <FormField
                         control={form.control}
                         name={`supplierComponents.${index}.supplier_code`}
-                        render={({ field }) => (
-                          <FormItem>
+                        render={({ field }) => {
+                          const selectedSupplierId = form.watch(`supplierComponents.${index}.supplier_id`)
+
+                          return (
+                          <FormItem className="col-span-5">
                             <FormLabel>Component</FormLabel>
                             <FormControl>
-                              <ReactSelect<OptionType>
+                              <CreatableSelect<OptionType, false>
                                 value={field.value ? {
                                   value: field.value,
                                   label: field.value
                                 } : null}
                                 onChange={(newValue: OptionType | null) => {
-                                  const selectedComponent = supplierComponentsMap[parseInt(form.watch(`supplierComponents.${index}.supplier_id`))]?.find(
+                                  const selectedComponent = supplierComponentsMap[parseInt(selectedSupplierId)]?.find(
                                     (sc: SupplierComponentWithDescription) => sc.supplier_code === newValue?.value
                                   )
                                   if (selectedComponent) {
                                     field.onChange(selectedComponent.supplier_code)
                                     form.setValue(`supplierComponents.${index}.price`, selectedComponent.price.toString())
+                                    return
                                   }
+
+                                  field.onChange(newValue?.value || "")
+                                }}
+                                onCreateOption={(inputValue) => {
+                                  const trimmedValue = inputValue.trim()
+                                  if (!trimmedValue) {
+                                    return
+                                  }
+
+                                  field.onChange(trimmedValue)
                                 }}
                                 options={
-                                  form.watch(`supplierComponents.${index}.supplier_id`) 
-                                    ? (supplierComponentsMap[parseInt(form.watch(`supplierComponents.${index}.supplier_id`))] || [])
+                                  selectedSupplierId
+                                    ? (supplierComponentsMap[parseInt(selectedSupplierId)] || [])
                                         .map((sc: SupplierComponentWithDescription) => ({
                                           value: sc.supplier_code,
                                           label: `${sc.supplier_code} - ${sc.description}`,
@@ -1313,11 +944,21 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                                     : []
                                 }
                                 isSearchable
-                                placeholder="Select component"
+                                isDisabled={!selectedSupplierId}
+                                placeholder={selectedSupplierId ? "Search or type code" : "Select supplier first"}
+                                formatCreateLabel={(inputValue) => `Create "${inputValue}"`}
+                                noOptionsMessage={({ inputValue }) =>
+                                  !selectedSupplierId
+                                    ? "Select a supplier first"
+                                    :
+                                  inputValue
+                                    ? `No matches. Create "${inputValue}".`
+                                    : "Type to search or create a supplier code"
+                                }
                                 className="w-full"
                                 classNames={{
                                   control: (state) => cn(
-                                    "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background text-foreground",
+                                    "flex min-h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background text-foreground",
                                     state.isFocused && "ring-2 ring-ring ring-offset-2",
                                     state.isDisabled && "opacity-50 cursor-not-allowed"
                                   ),
@@ -1362,16 +1003,19 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                                 unstyled
                               />
                             </FormControl>
+                            <p className="text-xs text-muted-foreground">
+                              Pick an existing code or type a new one.
+                            </p>
                             <FormMessage />
                           </FormItem>
-                        )}
+                        )}}
                       />
 
                       <FormField
                         control={form.control}
                         name={`supplierComponents.${index}.price`}
                         render={({ field }) => (
-                          <FormItem>
+                          <FormItem className="col-span-3">
                             <FormLabel>Price</FormLabel>
                             <FormControl>
                               <Input {...field} type="number" step="0.01" />
