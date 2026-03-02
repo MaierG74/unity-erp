@@ -91,7 +91,7 @@ export function OrderTree({ orders, windowSize = 12, onJobDragStart, onJobClick 
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
-                        <span className="truncate text-xs font-semibold">{order.id}</span>
+                        <span className="truncate text-xs font-semibold">{order.orderNumber ?? order.id}</span>
                         <Badge
                           variant="outline"
                           className={cn(
