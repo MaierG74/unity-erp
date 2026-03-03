@@ -9,11 +9,12 @@ import { fetchCustomers } from '@/lib/db/customers';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { Package, Loader2, AlertCircle, ShoppingCart, ChevronDown, CheckCircle, ChevronRight, RotateCcw } from 'lucide-react';
+import { Package, Loader2, AlertCircle, ShoppingCart, ChevronDown, CheckCircle, ChevronRight, RotateCcw, Layers, ExternalLink } from 'lucide-react';
+import Link from 'next/link';
+import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { Table, TableHeader, TableBody, TableCell, TableHead, TableRow, TableFooter } from '@/components/ui/table';
-import React from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { IssueStockTab } from '@/components/features/orders/IssueStockTab';
@@ -34,7 +35,7 @@ import {
   updateOrderStatus,
   deleteAttachment,
 } from '@/lib/queries/order-queries';
-import { fetchOrderComponentRequirements } from '@/lib/queries/order-components';
+import { fetchOrderComponentRequirements, reserveOrderComponents, releaseOrderComponents } from '@/lib/queries/order-components';
 import { OrderComponentsDialog } from '@/components/features/orders/OrderComponentsDialog';
 import { AddProductsDialog } from '@/components/features/orders/AddProductsDialog';
 
@@ -471,16 +472,22 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     );
     const inStock = Number(component?.quantity_in_stock ?? component?.in_stock ?? 0);
     const onOrder = Number(component?.quantity_on_order ?? component?.on_order ?? 0);
+    const reservedByOthers = Number(component?.reserved_by_others ?? 0);
+    const reservedThisOrder = Number(component?.reserved_this_order ?? 0);
     const coverage = coverageByProduct.get(productId);
     const factor = applyFgCoverage ? (coverage?.factor ?? 1) : 1;
     const required = baseRequired * factor;
-    const apparent = Math.max(0, required - inStock);
-    const real = Math.max(0, required - inStock - onOrder);
+    const available = Math.max(0, inStock - reservedByOthers);
+    const apparent = Math.max(0, required - available);
+    const real = Math.max(0, required - available - onOrder);
 
     return {
       required,
       inStock,
       onOrder,
+      available,
+      reservedByOthers,
+      reservedThisOrder,
       apparent,
       real,
       factor,
@@ -579,6 +586,38 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     },
   });
 
+  const reserveComponentsMutation = useMutation({
+    mutationFn: () => reserveOrderComponents(orderId),
+    onSuccess: async () => {
+      toast.success('Components reserved');
+      await Promise.all([refetchComponentRequirements(), refetchComponentReservations()]);
+    },
+    onError: (error: any) => {
+      console.error('[reserve-components] mutation error', error);
+      toast.error('Failed to reserve components');
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['componentReservations', orderId] });
+    },
+  });
+
+  const releaseComponentsMutation = useMutation({
+    mutationFn: () => releaseOrderComponents(orderId),
+    onSuccess: async () => {
+      toast.success('Component reservations released');
+      await Promise.all([refetchComponentRequirements(), refetchComponentReservations()]);
+    },
+    onError: (error: any) => {
+      console.error('[release-components] mutation error', error);
+      toast.error('Failed to release component reservations');
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['componentReservations', orderId] });
+    },
+  });
+
   // Inside the OrderDetailPage component, add this query for component requirements
   const { 
     data: componentRequirements = [], 
@@ -587,6 +626,23 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     queryKey: ['orderComponentRequirements', orderId],
     queryFn: () => fetchOrderComponentRequirements(orderId),
   });
+
+  // Query actual reservation rows — not BOM-derived — so stale reservations
+  // (e.g. after BOM changes) are still visible and releasable.
+  const { data: componentReservationRows = [], refetch: refetchComponentReservations } = useQuery({
+    queryKey: ['componentReservations', orderId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('component_reservations')
+        .select('id, component_id, qty_reserved')
+        .eq('order_id', orderId);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const hasComponentReservations = componentReservationRows.length > 0;
+  const componentReservationCount = componentReservationRows.length;
 
   // Calculate totals and critical shortfalls from component requirements
   const totals = useMemo(() => {
@@ -661,6 +717,57 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       allShortfalls: shortfallComponents,
       stockCoverage
     };
+  }, [componentRequirements, computeComponentMetrics]);
+
+  // Flat deduplicated component list for the Components tab
+  const flatComponents = useMemo(() => {
+    const map = new Map<number, {
+      component_id: number;
+      internal_code: string;
+      description: string;
+      totalRequired: number;
+      inStock: number;
+      onOrder: number;
+      reservedThisOrder: number;
+      reservedByOthers: number;
+      available: number;
+      apparent: number;
+      real: number;
+    }>();
+
+    componentRequirements.forEach((productReq: ProductRequirement) => {
+      (productReq.components ?? []).forEach((component: any) => {
+        const metrics = computeComponentMetrics(component, productReq.product_id);
+        const id = component.component_id;
+        if (!id) return;
+
+        const existing = map.get(id);
+        if (existing) {
+          existing.totalRequired += metrics.required;
+          existing.apparent = Math.max(0, existing.totalRequired - existing.available);
+          existing.real = Math.max(0, existing.totalRequired - existing.available - existing.onOrder);
+        } else {
+          map.set(id, {
+            component_id: id,
+            internal_code: component.internal_code || 'Unknown',
+            description: component.description || '',
+            totalRequired: metrics.required,
+            inStock: metrics.inStock,
+            onOrder: metrics.onOrder,
+            reservedThisOrder: metrics.reservedThisOrder,
+            reservedByOthers: metrics.reservedByOthers,
+            available: metrics.available,
+            apparent: metrics.apparent,
+            real: metrics.real,
+          });
+        }
+      });
+    });
+
+    return Array.from(map.values()).sort((a, b) => {
+      if (b.real !== a.real) return b.real - a.real;
+      return a.internal_code.localeCompare(b.internal_code);
+    });
   }, [componentRequirements, computeComponentMetrics]);
 
   // Filter order details by search query
@@ -956,6 +1063,49 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
             </Card>
           </Collapsible>
 
+          {/* Component Reservations */}
+          <Card className="shadow-sm border-l-3 border-l-orange-500/40">
+            <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between py-3">
+              <div>
+                <CardTitle className="text-lg">Component Reservations</CardTitle>
+                <CardDescription>
+                  {hasComponentReservations
+                    ? `${componentReservationCount} component(s) reserved for this order`
+                    : 'Earmark raw materials/components so other orders can\u2019t claim them'}
+                </CardDescription>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  onClick={() => reserveComponentsMutation.mutate()}
+                  disabled={reserveComponentsMutation.isPending || orderLoading}
+                  size="sm"
+                  title="Reserve available components from inventory for this order"
+                >
+                  {reserveComponentsMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Layers className="mr-2 h-4 w-4" />
+                  )}
+                  Reserve Components
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => releaseComponentsMutation.mutate()}
+                  disabled={!hasComponentReservations || releaseComponentsMutation.isPending}
+                  title="Release component reservations back to available stock"
+                >
+                  {releaseComponentsMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                  )}
+                  Release
+                </Button>
+              </div>
+            </CardHeader>
+          </Card>
+
           {/* Financial Summary */}
           <Card className="shadow-sm">
             <CardContent className="py-4">
@@ -986,9 +1136,32 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
           <Card className="shadow-sm">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-lg">Components Summary</CardTitle>
-                  <CardDescription>Parts needed to fulfill this order</CardDescription>
+                <div className="flex items-center gap-3">
+                  <div>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      Components Summary
+                      {totals.totalComponents > 0 && (
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            'text-xs font-medium',
+                            totals.totalShortfall > 0
+                              ? 'border-red-600 text-red-600 bg-red-500/10'
+                              : totals.componentsPendingDeliveries > 0
+                                ? 'border-amber-600 text-amber-600 bg-amber-500/10'
+                                : 'border-green-600 text-green-600 bg-green-500/10'
+                          )}
+                        >
+                          {totals.totalShortfall > 0
+                            ? 'Shortfall'
+                            : totals.componentsPendingDeliveries > 0
+                              ? 'Partial'
+                              : 'Ready'}
+                        </Badge>
+                      )}
+                    </CardTitle>
+                    <CardDescription>Parts needed to fulfill this order</CardDescription>
+                  </div>
                 </div>
                 <Button
                   variant="outline"
@@ -1023,73 +1196,97 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                   />
                 </div>
                 <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>{totals.componentsInStock} of {totals.totalComponents} components in stock</span>
+                  <span>{totals.componentsInStock} in stock</span>
+                  {totals.componentsPendingDeliveries > 0 && (
+                    <span className="text-amber-600">{totals.componentsPendingDeliveries} on order</span>
+                  )}
                   {totals.totalShortfall > 0 && (
-                    <span className="text-red-600 font-medium">{totals.totalShortfall} need ordering</span>
+                    <span className="text-red-600 font-medium">{totals.totalShortfall} short</span>
                   )}
                 </div>
-                {totals.componentsPendingDeliveries > 0 && (
-                  <div className="flex items-center gap-1 pt-1 text-xs text-amber-600">
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    <span>
-                      Waiting on deliveries for {totals.componentsPendingDeliveries === 1
-                        ? '1 component'
-                        : `${totals.componentsPendingDeliveries} components`}
-                    </span>
-                  </div>
-                )}
               </div>
 
-              {/* Critical Shortfalls Table */}
-              {totals.criticalShortfalls.length > 0 && (
+              {/* Full Component Table */}
+              {flatComponents.length > 0 ? (
                 <div className="border rounded-lg overflow-hidden">
-                  <div className="bg-destructive/10 px-3 py-2 border-b flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 text-destructive" />
-                    <span className="text-sm font-medium text-destructive">Components Needing Attention</span>
-                  </div>
                   <table className="w-full text-sm">
                     <thead className="bg-muted/50">
                       <tr className="text-muted-foreground">
                         <th className="text-left py-2 px-3 font-medium">Component</th>
-                        <th className="text-right py-2 px-3 font-medium">Need</th>
-                        <th className="text-right py-2 px-3 font-medium">Have</th>
-                        <th className="text-right py-2 px-3 font-medium text-red-600">Short</th>
+                        <th className="text-right py-2 px-3 font-medium">Required</th>
+                        <th className="text-right py-2 px-3 font-medium">In Stock</th>
+                        <th className="text-right py-2 px-3 font-medium">Reserved</th>
+                        <th className="text-right py-2 px-3 font-medium">Available</th>
+                        <th className="text-right py-2 px-3 font-medium">On Order</th>
+                        <th className="text-right py-2 px-3 font-medium">Shortfall</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {totals.criticalShortfalls.map((comp, idx) => (
-                        <tr key={idx} className="border-t">
+                      {flatComponents.map((comp) => (
+                        <tr
+                          key={comp.component_id}
+                          className={cn(
+                            'border-t transition-colors',
+                            comp.real > 0
+                              ? 'bg-red-500/5 hover:bg-red-500/10'
+                              : comp.apparent > 0
+                                ? 'bg-amber-500/5 hover:bg-amber-500/10'
+                                : 'hover:bg-muted/50'
+                          )}
+                        >
                           <td className="py-2 px-3">
-                            <div className="font-medium">{comp.code}</div>
-                            {comp.description && (
-                              <div className="text-xs text-muted-foreground truncate max-w-[180px]">
+                            <Link
+                              href={`/inventory/components/${comp.component_id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-baseline gap-2 hover:underline group"
+                            >
+                              <span className="font-medium">{comp.internal_code}</span>
+                              <span className="text-xs text-muted-foreground truncate max-w-[200px]">
                                 {comp.description}
-                              </div>
-                            )}
+                              </span>
+                              <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                            </Link>
                           </td>
-                          <td className="text-right py-2 px-3">{formatQuantity(comp.required)}</td>
-                          <td className="text-right py-2 px-3">
+                          <td className="text-right py-2 px-3 font-medium tabular-nums">
+                            {formatQuantity(comp.totalRequired)}
+                          </td>
+                          <td className="text-right py-2 px-3 tabular-nums">
                             {formatQuantity(comp.inStock)}
-                            {comp.onOrder > 0 && (
-                              <span className="text-blue-600 text-xs ml-1">(+{formatQuantity(comp.onOrder)} coming)</span>
-                            )}
                           </td>
-                          <td className="text-right py-2 px-3 text-red-600 font-medium">
-                            {formatQuantity(comp.shortfall)}
+                          <td className={cn(
+                            'text-right py-2 px-3 tabular-nums',
+                            comp.reservedThisOrder > 0 ? 'text-blue-500 font-medium' : 'text-muted-foreground'
+                          )}>
+                            {formatQuantity(comp.reservedThisOrder)}
+                          </td>
+                          <td className={cn(
+                            'text-right py-2 px-3 tabular-nums',
+                            comp.available < comp.totalRequired ? 'text-orange-500 font-medium' : ''
+                          )}>
+                            {formatQuantity(comp.available)}
+                          </td>
+                          <td className="text-right py-2 px-3 tabular-nums">
+                            {formatQuantity(comp.onOrder)}
+                          </td>
+                          <td className={cn(
+                            'text-right py-2 px-3 font-medium tabular-nums',
+                            comp.real > 0 ? 'text-red-600' : 'text-green-600'
+                          )}>
+                            {formatQuantity(comp.real)}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
-                  {totals.allShortfalls.length > 5 && (
-                    <div className="px-3 py-2 bg-muted/30 text-xs text-center text-muted-foreground border-t">
-                      + {totals.allShortfalls.length - 5} more components need ordering
-                    </div>
-                  )}
                 </div>
-              )}
+              ) : totals.totalComponents === 0 ? (
+                <div className="text-center py-4 text-muted-foreground">
+                  <p>No bill of materials defined for products in this order</p>
+                </div>
+              ) : null}
 
-              {/* All good message */}
+              {/* All good / partial messages */}
               {totals.totalShortfall === 0 && totals.totalComponents > 0 && totals.componentsPendingDeliveries === 0 && (
                 <div className="flex items-center gap-2 text-green-600 dark:text-green-400 bg-green-500/10 rounded-lg p-3">
                   <CheckCircle className="w-5 h-5" />
@@ -1104,12 +1301,6 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                       ? '1 component'
                       : `${totals.componentsPendingDeliveries} components`}.
                   </span>
-                </div>
-              )}
-
-              {totals.totalComponents === 0 && (
-                <div className="text-center py-4 text-muted-foreground">
-                  <p>No bill of materials defined for products in this order</p>
                 </div>
               )}
             </CardContent>
