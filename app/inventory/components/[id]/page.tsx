@@ -21,6 +21,7 @@ export default function ComponentDetailPage() {
   const componentId = parseInt(params.id as string);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
 
   // Fetch component data
   const { data: component, isLoading, error } = useQuery({
@@ -183,61 +184,67 @@ export default function ComponentDetailPage() {
   };
 
   return (
-    <div className="max-w-7xl space-y-4">
-      {/* Header - Customer page style */}
-      <div className="flex justify-between items-center">
-        <div className="flex items-center space-x-4">
-          <Button variant="outline" size="icon" onClick={() => router.back()}>
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <h1 className="text-3xl font-bold">{component.internal_code}</h1>
+    <div className="max-w-7xl space-y-5 bg-muted/30 -mx-4 md:-mx-6 px-4 md:px-6 min-h-screen">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        {/* Sticky Header */}
+        <div className="sticky top-0 z-10 -mx-4 md:-mx-6 px-4 md:px-6 pt-2 pb-3 space-y-3 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-b shadow-sm">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center space-x-4">
+              <Button variant="outline" size="icon" onClick={() => router.back()}>
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+              <h1 className="text-3xl font-bold">{component.internal_code}</h1>
+            </div>
+
+            <div className="flex space-x-2">
+              <Button variant="outline" onClick={() => setEditDialogOpen(true)}>
+                <Edit className="mr-2 h-4 w-4" />
+                Edit
+              </Button>
+              <Button variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex">
+            <TabsList>
+              <TabsTrigger value="overview">Overview</TabsTrigger>
+              <TabsTrigger value="suppliers">Suppliers</TabsTrigger>
+              <TabsTrigger value="transactions">Transactions</TabsTrigger>
+              <TabsTrigger value="orders">Orders</TabsTrigger>
+              <TabsTrigger value="analytics">Analytics</TabsTrigger>
+            </TabsList>
+          </div>
         </div>
-        
-        <div className="flex space-x-2">
-          <Button variant="outline" onClick={() => setEditDialogOpen(true)}>
-            <Edit className="mr-2 h-4 w-4" />
-            Edit
-          </Button>
-          <Button variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
-            <Trash2 className="mr-2 h-4 w-4" />
-            Delete
-          </Button>
+
+        {/* Tab content below sticky area */}
+        <div className="space-y-6">
+          <TabsContent value="overview">
+            <OverviewTab component={componentData} />
+          </TabsContent>
+
+          <TabsContent value="suppliers">
+            <SuppliersTab component={componentData} />
+          </TabsContent>
+
+          <TabsContent value="transactions">
+            <ComponentTransactionsTab
+              componentId={componentId}
+              componentName={component.internal_code}
+              reorderLevel={inventoryRecord?.reorder_level ?? 0}
+            />
+          </TabsContent>
+
+          <TabsContent value="orders">
+            <OrdersTab component={componentData} />
+          </TabsContent>
+
+          <TabsContent value="analytics">
+            <AnalyticsTab component={componentData} />
+          </TabsContent>
         </div>
-      </div>
-
-      {/* Tabs - Reduced to 5 */}
-      <Tabs defaultValue="overview" className="space-y-6">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="suppliers">Suppliers</TabsTrigger>
-          <TabsTrigger value="transactions">Transactions</TabsTrigger>
-          <TabsTrigger value="orders">Orders</TabsTrigger>
-          <TabsTrigger value="analytics">Analytics</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="overview">
-          <OverviewTab component={componentData} />
-        </TabsContent>
-
-        <TabsContent value="suppliers">
-          <SuppliersTab component={componentData} />
-        </TabsContent>
-
-        <TabsContent value="transactions">
-          <ComponentTransactionsTab 
-            componentId={componentId} 
-            componentName={component.internal_code}
-            reorderLevel={inventoryRecord?.reorder_level ?? 0}
-          />
-        </TabsContent>
-
-        <TabsContent value="orders">
-          <OrdersTab component={componentData} />
-        </TabsContent>
-
-        <TabsContent value="analytics">
-          <AnalyticsTab component={componentData} />
-        </TabsContent>
       </Tabs>
 
       {/* Dialogs */}
