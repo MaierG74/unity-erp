@@ -190,7 +190,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
     sourceType: 'all',
     searchQuery: '',
   });
-  
+
   // Fetch current inventory quantity
   const { data: inventoryData } = useQuery({
     queryKey: ['component', componentId, 'inventory'],
@@ -203,6 +203,20 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
 
       if (error) throw error;
       return data;
+    },
+  });
+
+  // Fetch total reserved across all orders
+  const { data: totalReserved = 0 } = useQuery({
+    queryKey: ['component', componentId, 'reservations'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('component_reservations')
+        .select('qty_reserved')
+        .eq('component_id', componentId);
+
+      if (error) throw error;
+      return (data || []).reduce((sum, row) => sum + Number(row.qty_reserved || 0), 0);
     },
   });
 
@@ -385,10 +399,12 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
   const currentStock = inventoryData?.quantity_on_hand ?? 0;
 
   if (transactionsWithBalance.length === 0) {
+    const available = Math.max(0, currentStock - totalReserved);
+
     return (
       <div className="space-y-6">
         {/* Current Stock Banner with Action Buttons - shown even with no transactions */}
-        <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800">
+        <Card className="shadow-sm bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800">
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
@@ -398,6 +414,13 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
                 <div>
                   <p className="text-sm font-medium text-muted-foreground">Current Stock Balance</p>
                   <p className="text-4xl font-bold text-blue-700 dark:text-blue-300">{currentStock}</p>
+                  {totalReserved > 0 && (
+                    <p className="text-sm text-muted-foreground mt-0.5">
+                      <span className="text-blue-500 font-medium">{totalReserved} reserved</span>
+                      {' · '}
+                      <span className="font-medium">{available} available</span>
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="flex gap-2">
@@ -423,7 +446,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shadow-sm">
           <CardContent className="pt-6">
             <div className="text-center text-muted-foreground py-8">
               <Calendar className="h-12 w-12 mx-auto mb-4 opacity-50" />
@@ -461,7 +484,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
   return (
     <div className="space-y-6">
       {/* Current Stock Banner with Action Buttons */}
-      <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800">
+      <Card className="shadow-sm bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800">
         <CardContent className="pt-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -471,6 +494,13 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Current Stock Balance</p>
                 <p className="text-4xl font-bold text-blue-700 dark:text-blue-300">{currentStock}</p>
+                {totalReserved > 0 && (
+                  <p className="text-sm text-muted-foreground mt-0.5">
+                    <span className="text-blue-500 font-medium">{totalReserved} reserved</span>
+                    {' · '}
+                    <span className="font-medium">{Math.max(0, currentStock - totalReserved)} available</span>
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex gap-2">
@@ -498,7 +528,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-        <Card>
+        <Card className="shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total</CardTitle>
             <Calendar className="h-4 w-4 text-muted-foreground" />
@@ -509,7 +539,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Purchased</CardTitle>
             <TrendingUp className="h-4 w-4 text-green-600" />
@@ -522,7 +552,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Issued</CardTitle>
             <PackageMinus className="h-4 w-4 text-purple-600" />
@@ -535,7 +565,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Returned</CardTitle>
             <RotateCcw className="h-4 w-4 text-orange-600" />
@@ -548,7 +578,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Net Change</CardTitle>
             <ArrowRightLeft className="h-4 w-4 text-muted-foreground" />
@@ -572,7 +602,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
       />
 
       {/* Transactions Table */}
-      <Card>
+      <Card className="shadow-sm">
         <CardHeader className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <CardTitle className="flex items-center gap-2">
