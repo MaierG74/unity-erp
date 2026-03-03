@@ -14,6 +14,7 @@ import { OrdersTab } from '@/components/features/inventory/component-detail/Orde
 import { AnalyticsTab } from '@/components/features/inventory/component-detail/AnalyticsTab';
 import { EditComponentDialog } from '@/components/features/inventory/component-detail/EditComponentDialog';
 import { DeleteComponentDialog } from '@/components/features/inventory/component-detail/DeleteComponentDialog';
+import { ComponentSidebar } from '@/components/features/inventory/component-detail/ComponentSidebar';
 
 export default function ComponentDetailPage() {
   const params = useParams();
@@ -222,7 +223,17 @@ export default function ComponentDetailPage() {
         {/* Tab content below sticky area */}
         <div className="space-y-6">
           <TabsContent value="overview">
-            <OverviewTab component={componentData} />
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-5">
+              <OverviewTab component={componentData} />
+              <div className="hidden lg:block">
+                <ComponentSidebar
+                  component={componentData}
+                  activeTab={activeTab}
+                  onTabChange={setActiveTab}
+                  onEdit={() => setEditDialogOpen(true)}
+                />
+              </div>
+            </div>
           </TabsContent>
 
           <TabsContent value="suppliers">
@@ -238,7 +249,17 @@ export default function ComponentDetailPage() {
           </TabsContent>
 
           <TabsContent value="orders">
-            <OrdersTab component={componentData} />
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-5">
+              <OrdersTab component={componentData} />
+              <div className="hidden lg:block">
+                <ComponentSidebar
+                  component={componentData}
+                  activeTab={activeTab}
+                  onTabChange={setActiveTab}
+                  onEdit={() => setEditDialogOpen(true)}
+                />
+              </div>
+            </div>
           </TabsContent>
 
           <TabsContent value="analytics">
