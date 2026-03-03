@@ -644,81 +644,6 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   const hasComponentReservations = componentReservationRows.length > 0;
   const componentReservationCount = componentReservationRows.length;
 
-  // Calculate totals and critical shortfalls from component requirements
-  const totals = useMemo(() => {
-    let totalComponents = 0;
-    let totalShortfall = 0;
-    let componentsInStock = 0;
-    let componentsOnOrder = 0;
-    let componentsInDraftPO = 0;
-    let componentsPendingDeliveries = 0;
-    
-    // Collect shortfall details
-    const shortfallComponents: Array<{
-      code: string;
-      description: string;
-      required: number;
-      inStock: number;
-      onOrder: number;
-      draftPO: number;
-      shortfall: number;
-    }> = [];
-
-    componentRequirements.forEach((productReq: ProductRequirement) => {
-      (productReq.components ?? []).forEach((component: any) => {
-        totalComponents++;
-        const metrics = computeComponentMetrics(component, productReq.product_id);
-        const inStock = Number(component?.quantity_in_stock ?? component?.in_stock ?? 0);
-        const onOrder = Number(component?.quantity_on_order ?? component?.on_order ?? 0);
-        const draftPO = Number(component?.draft_po_quantity ?? 0);
-        
-        const readyNow = metrics.apparent <= 0.0001;
-        const waitingOnDeliveries = metrics.apparent > 0.0001 && metrics.real <= 0.0001;
-
-        if (metrics.real > 0.0001) {
-          totalShortfall++;
-          shortfallComponents.push({
-            code: component?.internal_code || 'Unknown',
-            description: component?.description || '',
-            required: metrics.required,
-            inStock,
-            onOrder,
-            draftPO,
-            shortfall: metrics.real
-          });
-        } else if (readyNow) {
-          componentsInStock++;
-        } else if (waitingOnDeliveries) {
-          componentsPendingDeliveries++;
-        }
-        
-        if (onOrder > 0) componentsOnOrder++;
-        if (draftPO > 0) componentsInDraftPO++;
-      });
-    });
-    
-    // Sort by shortfall and take top 5
-    const criticalShortfalls = shortfallComponents
-      .sort((a, b) => b.shortfall - a.shortfall)
-      .slice(0, 5);
-    
-    const stockCoverage = totalComponents > 0 
-      ? Math.round((componentsInStock / totalComponents) * 100) 
-      : 100;
-
-    return {
-      totalComponents,
-      totalShortfall,
-      componentsInStock,
-      componentsOnOrder,
-      componentsInDraftPO,
-      componentsPendingDeliveries,
-      criticalShortfalls,
-      allShortfalls: shortfallComponents,
-      stockCoverage
-    };
-  }, [componentRequirements, computeComponentMetrics]);
-
   // Flat deduplicated component list for the Components tab
   const flatComponents = useMemo(() => {
     const map = new Map<number, {
@@ -769,6 +694,70 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       return a.internal_code.localeCompare(b.internal_code);
     });
   }, [componentRequirements, computeComponentMetrics]);
+
+  // Calculate totals and critical shortfalls from deduplicated flatComponents
+  const totals = useMemo(() => {
+    const totalComponents = flatComponents.length;
+    let totalShortfall = 0;
+    let componentsInStock = 0;
+    let componentsOnOrder = 0;
+    let componentsInDraftPO = 0;
+    let componentsPendingDeliveries = 0;
+
+    const shortfallComponents: Array<{
+      code: string;
+      description: string;
+      required: number;
+      inStock: number;
+      onOrder: number;
+      draftPO: number;
+      shortfall: number;
+    }> = [];
+
+    flatComponents.forEach((comp) => {
+      const readyNow = comp.apparent <= 0.0001;
+      const waitingOnDeliveries = comp.apparent > 0.0001 && comp.real <= 0.0001;
+
+      if (comp.real > 0.0001) {
+        totalShortfall++;
+        shortfallComponents.push({
+          code: comp.internal_code,
+          description: comp.description,
+          required: comp.totalRequired,
+          inStock: comp.inStock,
+          onOrder: comp.onOrder,
+          draftPO: 0, // draft PO not tracked in flatComponents
+          shortfall: comp.real,
+        });
+      } else if (readyNow) {
+        componentsInStock++;
+      } else if (waitingOnDeliveries) {
+        componentsPendingDeliveries++;
+      }
+
+      if (comp.onOrder > 0) componentsOnOrder++;
+    });
+
+    const criticalShortfalls = shortfallComponents
+      .sort((a, b) => b.shortfall - a.shortfall)
+      .slice(0, 5);
+
+    const stockCoverage = totalComponents > 0
+      ? Math.round((componentsInStock / totalComponents) * 100)
+      : 100;
+
+    return {
+      totalComponents,
+      totalShortfall,
+      componentsInStock,
+      componentsOnOrder,
+      componentsInDraftPO,
+      componentsPendingDeliveries,
+      criticalShortfalls,
+      allShortfalls: shortfallComponents,
+      stockCoverage,
+    };
+  }, [flatComponents]);
 
   // Filter order details by search query
   const filterOrderDetails = (details: any[]) => {
@@ -1271,7 +1260,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                           </td>
                           <td className={cn(
                             'text-right py-2 px-3 font-medium tabular-nums',
-                            comp.real > 0 ? 'text-red-600' : 'text-green-600'
+                            comp.real > 0 ? 'text-red-600' : comp.apparent > 0 ? 'text-amber-600' : 'text-green-600'
                           )}>
                             {formatQuantity(comp.real)}
                           </td>
