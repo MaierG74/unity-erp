@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import {
   ComponentRequirement,
   ProductRequirement,
@@ -215,6 +216,8 @@ export async function fetchOrderComponentRequirements(orderId: number): Promise<
             order_count: orderCount,
             global_apparent_shortfall: globalApparentShortfall,
             global_real_shortfall: globalRealShortfall,
+            reserved_this_order: Number(status?.reserved_this_order ?? 0),
+            reserved_by_others: Number(status?.reserved_by_others ?? 0),
             supplier_options: [],
             selected_supplier: null,
             draft_po_quantity: Number(status?.draft_po_quantity ?? 0),
@@ -238,7 +241,7 @@ export async function fetchOrderComponentRequirements(orderId: number): Promise<
 }
 
 // Function to fetch component suppliers for ordering
-export async function fetchComponentSuppliers(orderId: number) {
+export async function fetchComponentSuppliers(orderId: number, includeInStock = false) {
   try {
     const { data: statusData, error: statusError } = await supabase.rpc('get_detailed_component_status', {
       p_order_id: orderId,
@@ -249,20 +252,22 @@ export async function fetchComponentSuppliers(orderId: number) {
       return [];
     }
 
-    const componentsWithShortfall = (statusData ?? []).filter(
-      (item: any) =>
-        Number(item?.real_shortfall ?? 0) > 0 ||
-        Number(item?.global_real_shortfall ?? 0) > 0
-    );
+    const filteredComponents = includeInStock
+      ? (statusData ?? []).filter((item: any) => item?.component_id)
+      : (statusData ?? []).filter(
+          (item: any) =>
+            Number(item?.real_shortfall ?? 0) > 0 ||
+            Number(item?.global_real_shortfall ?? 0) > 0
+        );
 
-    if (componentsWithShortfall.length === 0) {
+    if (filteredComponents.length === 0) {
       return [];
     }
 
     const componentMetaMap = new Map<number, any>();
     const componentIds: number[] = [];
 
-    componentsWithShortfall.forEach((item: any) => {
+    filteredComponents.forEach((item: any) => {
       if (!item?.component_id) return;
       componentMetaMap.set(item.component_id, item);
       componentIds.push(item.component_id);
@@ -522,4 +527,26 @@ export async function createComponentPurchaseOrders(
     console.error('Error creating purchase orders:', error);
     throw error;
   }
+}
+
+export async function reserveOrderComponents(orderId: number) {
+  const res = await authorizedFetch(`/api/orders/${orderId}/reserve-components`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Failed to reserve components');
+  }
+  return res.json();
+}
+
+export async function releaseOrderComponents(orderId: number) {
+  const res = await authorizedFetch(`/api/orders/${orderId}/release-components`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Failed to release component reservations');
+  }
+  return res.json();
 }

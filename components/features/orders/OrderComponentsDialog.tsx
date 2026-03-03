@@ -30,6 +30,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { Loader2, ChevronDown, AlertCircle, Info, Users } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -55,12 +56,13 @@ export const OrderComponentsDialog = ({
   const [consolidateDialogOpen, setConsolidateDialogOpen] = useState(false);
   const [suppliersWithDrafts, setSuppliersWithDrafts] = useState<SupplierWithDrafts[]>([]);
   const [pendingConsolidationPayload, setPendingConsolidationPayload] = useState<any>(null);
+  const [includeInStock, setIncludeInStock] = useState(false);
   const queryClient = useQueryClient();
 
   // Group components by supplier
   const { data, isLoading, isError, error, refetch } = useQuery<SupplierGroup[]>({
-    queryKey: ['component-suppliers', orderId],
-    queryFn: () => fetchComponentSuppliers(Number(orderId)),
+    queryKey: ['component-suppliers', orderId, includeInStock],
+    queryFn: () => fetchComponentSuppliers(Number(orderId), includeInStock),
     // Refetch when dialog opens to ensure fresh data
     refetchOnMount: true,
     staleTime: 0, // Always consider data stale so it refetches when dialog opens
@@ -132,6 +134,7 @@ export const OrderComponentsDialog = ({
     setNotes({});
     setSelectedComponents({});
     setCreationFailures(null);
+    setIncludeInStock(false);
 
     if (data) {
       const quantities: Record<number, number> = {};
@@ -221,19 +224,10 @@ export const OrderComponentsDialog = ({
     field: 'forThisOrder' | 'forStock',
     value: number
   ) => {
-    const newValue = Math.max(0, value);
-
-    // Find the component to get the shortfall
-    let shortfall = 0;
-    data?.forEach(group => {
-      group.components.forEach(component => {
-        if (component.selectedSupplier.supplier_component_id === supplierComponentId) {
-          shortfall = component.shortfall;
-        }
-      });
-    });
-
     const currentAllocation = allocation[supplierComponentId] || { forThisOrder: 0, forStock: 0 };
+    const currentTotal = currentAllocation.forThisOrder + currentAllocation.forStock;
+    const newValue = Math.min(Math.max(0, value), currentTotal);
+
     let newAllocation = { ...currentAllocation };
 
     if (field === 'forThisOrder') {
@@ -245,7 +239,7 @@ export const OrderComponentsDialog = ({
     } else {
       newAllocation = {
         // If we're decreasing forStock, keep total the same
-        forThisOrder: currentAllocation.forThisOrder + currentAllocation.forStock - newValue,
+        forThisOrder: currentTotal - newValue,
         forStock: newValue
       };
     }
@@ -634,6 +628,19 @@ export const OrderComponentsDialog = ({
           </DialogDescription>
         </DialogHeader>
 
+        {step === 'select' && (
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="include-in-stock"
+              checked={includeInStock}
+              onCheckedChange={(checked) => setIncludeInStock(checked === true)}
+            />
+            <Label htmlFor="include-in-stock" className="text-sm text-muted-foreground cursor-pointer">
+              Include components that are in stock
+            </Label>
+          </div>
+        )}
+
         {creationFailures && creationFailures.length > 0 && (
           <Alert variant="destructive" className="mb-4">
             <AlertTitle>Some purchase orders failed</AlertTitle>
@@ -665,14 +672,43 @@ export const OrderComponentsDialog = ({
                     </div>
                   </CardHeader>
                   <CardContent className="p-0">
+                    <TooltipProvider>
                     <Table>
                       <TableHeader>
                         <TableRow>
                           <TableHead className="w-[50px]"></TableHead>
                           <TableHead className="w-[35%]">Component</TableHead>
                           <TableHead className="w-[12%]">Shortfall</TableHead>
-                          <TableHead className="w-[12%]">Order Quantity</TableHead>
-                          <TableHead className="w-[20%]">Allocation</TableHead>
+                          <TableHead className="w-[120px]">
+                            <div className="flex w-24 items-center gap-1">
+                              <span>Order Qty</span>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-4 w-4 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+                                    aria-label="Explain order quantity"
+                                  >
+                                    <Info className="h-3.5 w-3.5" />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-xs">
+                                  Total PO quantity. The system covers this order first, then treats any extra as stock.
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
+                          </TableHead>
+                          <TableHead className="w-[220px]">
+                            <div className="space-y-1">
+                              <div>Allocation</div>
+                              <div className="grid grid-cols-[48px_80px_48px_80px] gap-x-3 text-xs font-medium text-muted-foreground">
+                                <span />
+                                <span>Order</span>
+                                <span />
+                                <span>Stock</span>
+                              </div>
+                            </div>
+                          </TableHead>
                           <TableHead className="w-[10%] text-right">Price</TableHead>
                           <TableHead className="w-[50px]"></TableHead>
                         </TableRow>
@@ -751,44 +787,33 @@ export const OrderComponentsDialog = ({
                                 </TableCell>
                                 <TableCell className="py-4">
                                   {selectedComponents[supplierComponentId] ? (
-                                    <div className="flex items-center gap-3">
-                                      <div className="flex items-center gap-1.5">
-                                        <Label htmlFor={`forOrder-${supplierComponentId}`} className="text-xs font-medium whitespace-nowrap">
-                                          Order:
-                                        </Label>
-                                        <Input
-                                          id={`forOrder-${supplierComponentId}`}
-                                          type="number"
-                                          min="0"
-                                          value={allocation[supplierComponentId]?.forThisOrder || 0}
-                                          onChange={(e) =>
-                                            handleAllocationChange(
-                                              supplierComponentId,
-                                              'forThisOrder',
-                                              parseInt(e.target.value || '0')
-                                            )
-                                          }
-                                          className="w-20 h-9"
-                                        />
-                                      </div>
-                                      <div className="flex items-center gap-1.5">
-                                        <Label htmlFor={`forStock-${supplierComponentId}`} className="text-xs font-medium whitespace-nowrap">
-                                          Stock:
-                                        </Label>
-                                        <Input
-                                          id={`forStock-${supplierComponentId}`}
-                                          type="number"
-                                          min="0"
-                                          value={allocation[supplierComponentId]?.forStock || 0}
-                                          onChange={(e) =>
-                                            handleAllocationChange(
-                                              supplierComponentId,
-                                              'forStock',
-                                              parseInt(e.target.value || '0')
-                                            )
-                                          }
-                                          className="w-20 h-9"
-                                        />
+                                    <div className="grid grid-cols-[48px_80px_48px_80px] items-center gap-x-3">
+                                      <Label htmlFor={`forOrder-${supplierComponentId}`} className="text-xs font-medium whitespace-nowrap">
+                                        Order:
+                                      </Label>
+                                      <Input
+                                        id={`forOrder-${supplierComponentId}`}
+                                        type="number"
+                                        min="0"
+                                        max={orderQuantities[supplierComponentId] || 0}
+                                        value={allocation[supplierComponentId]?.forThisOrder || 0}
+                                        onChange={(e) =>
+                                          handleAllocationChange(
+                                            supplierComponentId,
+                                            'forThisOrder',
+                                            parseInt(e.target.value || '0')
+                                          )
+                                        }
+                                        className="w-20 h-9"
+                                      />
+                                      <Label htmlFor={`forStock-${supplierComponentId}`} className="text-xs font-medium whitespace-nowrap text-muted-foreground">
+                                        Stock:
+                                      </Label>
+                                      <div
+                                        id={`forStock-${supplierComponentId}`}
+                                        className="flex h-9 w-20 items-center rounded-md border border-input bg-muted/40 px-3 text-sm tabular-nums text-muted-foreground"
+                                      >
+                                        {allocation[supplierComponentId]?.forStock || 0}
                                       </div>
                                     </div>
                                   ) : (
@@ -847,6 +872,7 @@ export const OrderComponentsDialog = ({
                         })}
                       </TableBody>
                     </Table>
+                    </TooltipProvider>
                   </CardContent>
                   <CardFooter className="bg-muted/50 p-4">
                     <div className="w-full">
