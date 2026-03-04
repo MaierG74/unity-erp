@@ -31,7 +31,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
-import { Loader2, ChevronDown, AlertCircle, Info, Users } from 'lucide-react';
+import { Loader2, ChevronDown, AlertCircle, Info, Users, CheckCircle, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 
 export const OrderComponentsDialog = ({
@@ -620,26 +620,28 @@ export const OrderComponentsDialog = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[1200px] max-h-[85vh]">
         <DialogHeader>
-          <DialogTitle>Order Components</DialogTitle>
-          <DialogDescription>
-            {step === 'select'
-              ? 'Select components to order from suppliers'
-              : 'Review and confirm your order'}
-          </DialogDescription>
-        </DialogHeader>
-
-        {step === 'select' && (
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="include-in-stock"
-              checked={includeInStock}
-              onCheckedChange={(checked) => setIncludeInStock(checked === true)}
-            />
-            <Label htmlFor="include-in-stock" className="text-sm text-muted-foreground cursor-pointer">
-              Include components that are in stock
-            </Label>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <DialogTitle>Order Components</DialogTitle>
+              <DialogDescription>
+                {step === 'select'
+                  ? 'Select components to order from suppliers'
+                  : 'Review and confirm your order'}
+              </DialogDescription>
+            </div>
+            {step === 'select' && (
+              <Button
+                variant={includeInStock ? 'default' : 'outline'}
+                size="sm"
+                className="shrink-0 gap-1.5 text-xs"
+                onClick={() => setIncludeInStock(!includeInStock)}
+              >
+                {includeInStock ? <CheckCircle className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                Include in-stock
+              </Button>
+            )}
           </div>
-        )}
+        </DialogHeader>
 
         {creationFailures && creationFailures.length > 0 && (
           <Alert variant="destructive" className="mb-4">
