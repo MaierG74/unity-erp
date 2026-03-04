@@ -644,6 +644,52 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   const hasComponentReservations = componentReservationRows.length > 0;
   const componentReservationCount = componentReservationRows.length;
 
+  // Fetch draft POs for components on this order
+  const { data: draftPOsByComponent = new Map<number, DraftPOBreakdown[]>() } = useQuery({
+    queryKey: ['draftPOsForOrder', orderId],
+    queryFn: async () => {
+      // Get all component IDs from the order
+      const componentIds = componentRequirements.flatMap((pr: ProductRequirement) =>
+        (pr.components ?? []).map((c: any) => c.component_id).filter(Boolean)
+      );
+      if (componentIds.length === 0) return new Map<number, DraftPOBreakdown[]>();
+
+      const { data, error } = await supabase
+        .from('supplier_orders')
+        .select(`
+          order_quantity,
+          purchase_order_id,
+          suppliercomponents!inner(component_id),
+          supplier_order_statuses!inner(status_name),
+          purchase_orders!inner(supplier_id, suppliers(name))
+        `)
+        .in('suppliercomponents.component_id', componentIds)
+        .eq('supplier_order_statuses.status_name', 'Draft');
+
+      if (error) {
+        console.error('[draftPOs] Failed to load draft POs', error);
+        return new Map<number, DraftPOBreakdown[]>();
+      }
+
+      const map = new Map<number, DraftPOBreakdown[]>();
+      (data ?? []).forEach((row: any) => {
+        const componentId = row.suppliercomponents?.component_id;
+        if (!componentId) return;
+        const entry: DraftPOBreakdown = {
+          supplier_order_id: row.order_id ?? 0,
+          purchase_order_id: row.purchase_order_id,
+          supplier_name: row.purchase_orders?.suppliers?.name ?? 'Unknown',
+          quantity: Number(row.order_quantity ?? 0),
+          order_date: '',
+        };
+        if (!map.has(componentId)) map.set(componentId, []);
+        map.get(componentId)!.push(entry);
+      });
+      return map;
+    },
+    enabled: componentRequirements.length > 0,
+  });
+
   // Flat deduplicated component list for the Components tab
   const flatComponents = useMemo(() => {
     const map = new Map<number, {
@@ -687,8 +733,8 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
             available: metrics.available,
             apparent: metrics.apparent,
             real: metrics.real,
-            draftPOQuantity: Number(component.draft_po_quantity ?? 0),
-            draftPOBreakdown: Array.isArray(component.draft_po_breakdown) ? component.draft_po_breakdown : [],
+            draftPOQuantity: (draftPOsByComponent.get(id) ?? []).reduce((sum, po) => sum + po.quantity, 0),
+            draftPOBreakdown: draftPOsByComponent.get(id) ?? [],
           });
         }
       });
@@ -698,7 +744,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       if (b.real !== a.real) return b.real - a.real;
       return a.internal_code.localeCompare(b.internal_code);
     });
-  }, [componentRequirements, computeComponentMetrics]);
+  }, [componentRequirements, computeComponentMetrics, draftPOsByComponent]);
 
   // Calculate totals and critical shortfalls from deduplicated flatComponents
   const totals = useMemo(() => {
