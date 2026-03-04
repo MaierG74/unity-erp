@@ -4,12 +4,12 @@ import { useState, useMemo, useEffect, useCallback, useRef, use } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { type Product, type OrderDetail, type Customer, type FinishedGoodReservation } from '@/types/orders';
-import { type ProductRequirement } from '@/types/components';
+import { type ProductRequirement, type DraftPOBreakdown } from '@/types/components';
 import { fetchCustomers } from '@/lib/db/customers';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { Package, Loader2, AlertCircle, ShoppingCart, ChevronDown, CheckCircle, ChevronRight, RotateCcw, Layers, ExternalLink } from 'lucide-react';
+import { Package, Loader2, AlertCircle, ShoppingCart, ChevronDown, CheckCircle, ChevronRight, RotateCcw, Layers, ExternalLink, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -658,6 +658,8 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       available: number;
       apparent: number;
       real: number;
+      draftPOQuantity: number;
+      draftPOBreakdown: DraftPOBreakdown[];
     }>();
 
     componentRequirements.forEach((productReq: ProductRequirement) => {
@@ -671,6 +673,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
           existing.totalRequired += metrics.required;
           existing.apparent = Math.max(0, existing.totalRequired - existing.available);
           existing.real = Math.max(0, existing.totalRequired - existing.available - existing.onOrder);
+          // draftPO data is component-level, no need to merge
         } else {
           map.set(id, {
             component_id: id,
@@ -684,6 +687,8 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
             available: metrics.available,
             apparent: metrics.apparent,
             real: metrics.real,
+            draftPOQuantity: Number(component.draft_po_quantity ?? 0),
+            draftPOBreakdown: Array.isArray(component.draft_po_breakdown) ? component.draft_po_breakdown : [],
           });
         }
       });
@@ -726,7 +731,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
           required: comp.totalRequired,
           inStock: comp.inStock,
           onOrder: comp.onOrder,
-          draftPO: 0, // draft PO not tracked in flatComponents
+          draftPO: comp.draftPOQuantity,
           shortfall: comp.real,
         });
       } else if (readyNow) {
@@ -1236,6 +1241,22 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                               </span>
                               <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                             </Link>
+                            {comp.draftPOBreakdown.length > 0 && (
+                              <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+                                {comp.draftPOBreakdown.map((po) => (
+                                  <Link
+                                    key={po.purchase_order_id}
+                                    href={`/purchasing/purchase-orders/${po.purchase_order_id}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-xs text-blue-500 hover:text-blue-400 hover:underline inline-flex items-center gap-1"
+                                  >
+                                    <FileText className="h-3 w-3" />
+                                    PO #{po.purchase_order_id} — {formatQuantity(po.quantity)} units (Draft)
+                                  </Link>
+                                ))}
+                              </div>
+                            )}
                           </td>
                           <td className="text-right py-2 px-3 font-medium tabular-nums">
                             {formatQuantity(comp.totalRequired)}
