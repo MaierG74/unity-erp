@@ -85,7 +85,7 @@ export function PedestalPreview({ config }: PedestalPreviewProps) {
   const pencilH = hasPencilDrawer ? pencilDrawerHeight : 0;
   const filingH = hasFilingDrawer ? filingDrawerHeight : 0;
   const standardTotal = carcassHeight - pencilH - filingH - totalGaps;
-  const standardH = drawerCount > 0 ? standardTotal / drawerCount : 0;
+  const standardH = drawerCount > 0 ? Math.round(standardTotal / drawerCount) : 0;
   const frontWidth = baseWidth - drawerGap * 2;
 
   // View layout
@@ -341,14 +341,14 @@ export function PedestalPreview({ config }: PedestalPreviewProps) {
       {/* Adjusters (side view) */}
       {adjusterHeight > 0 && (
         <>
-          <rect x={sx + 5} y={sy + H - adjusterHeight} width={8} height={adjusterHeight} fill={ADJUSTER_FILL} rx={1} />
-          <rect x={sx + carcassDepth - 13} y={sy + H - adjusterHeight} width={8} height={adjusterHeight} fill={ADJUSTER_FILL} rx={1} />
+          <rect x={sx + 5} y={sy + sideHeight + T} width={8} height={adjusterHeight} fill={ADJUSTER_FILL} rx={1} />
+          <rect x={sx + carcassDepth - 13} y={sy + sideHeight + T} width={8} height={adjusterHeight} fill={ADJUSTER_FILL} rx={1} />
         </>
       )}
 
       {/* Side view dimensions */}
-      <DimensionH x1={sx} x2={sx + D} y={sy + H + u} label={`${D}`} side="below" u={u} />
-      <DimensionV y1={sy} y2={sy + H} x={sx + D + u} label={`${H}`} side="right" u={u} />
+      <DimensionH x1={sx} x2={sx + D} y={sy + sideHeight + T + adjusterHeight + u} label={`${D}`} side="below" u={u} />
+      <DimensionV y1={sy} y2={sy + sideHeight + T + adjusterHeight} x={sx + D + u} label={`${H}`} side="right" u={u} />
     </>
   );
 
