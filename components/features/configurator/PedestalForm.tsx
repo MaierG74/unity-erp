@@ -32,6 +32,7 @@ function NumberInput({
   max,
   onChange,
   disabled,
+  className: extraClassName,
 }: {
   id?: string;
   value: number;
@@ -39,6 +40,7 @@ function NumberInput({
   max: number;
   onChange: (value: number) => void;
   disabled?: boolean;
+  className?: string;
 }) {
   const [display, setDisplay] = React.useState(String(value));
   const [focused, setFocused] = React.useState(false);
@@ -55,7 +57,7 @@ function NumberInput({
       min={min}
       max={max}
       disabled={disabled}
-      className="h-8"
+      className={`h-8 ${extraClassName ?? ''}`}
       onChange={(e) => {
         const raw = e.target.value;
         setDisplay(raw);
@@ -165,11 +167,21 @@ export function PedestalForm({ config, onChange }: PedestalFormProps) {
         <div className="space-y-2 mt-3">
           <div className="flex items-center justify-between">
             <Label htmlFor="ped-pencil" className="text-sm">Pencil drawer</Label>
-            <Switch id="ped-pencil" checked={config.hasPencilDrawer} onCheckedChange={(v) => update({ hasPencilDrawer: v })} />
+            <div className="flex items-center gap-2">
+              {config.hasPencilDrawer && (
+                <NumberInput id="ped-pencil-h" value={config.pencilDrawerHeight} min={10} max={200} className="w-20" onChange={(v) => update({ pencilDrawerHeight: v })} />
+              )}
+              <Switch id="ped-pencil" checked={config.hasPencilDrawer} onCheckedChange={(v) => update({ hasPencilDrawer: v })} />
+            </div>
           </div>
           <div className="flex items-center justify-between">
             <Label htmlFor="ped-filing" className="text-sm">Filing drawer</Label>
-            <Switch id="ped-filing" checked={config.hasFilingDrawer} onCheckedChange={(v) => update({ hasFilingDrawer: v })} />
+            <div className="flex items-center gap-2">
+              {config.hasFilingDrawer && (
+                <NumberInput id="ped-filing-h" value={config.filingDrawerHeight} min={50} max={600} className="w-20" onChange={(v) => update({ filingDrawerHeight: v })} />
+              )}
+              <Switch id="ped-filing" checked={config.hasFilingDrawer} onCheckedChange={(v) => update({ hasFilingDrawer: v })} />
+            </div>
           </div>
         </div>
         <p className="text-xs text-muted-foreground mt-1.5">
@@ -229,22 +241,6 @@ export function PedestalForm({ config, onChange }: PedestalFormProps) {
               <div className="space-y-1">
                 <Label htmlFor="ped-slot" className="text-xs text-muted-foreground">Back Slot Depth</Label>
                 <NumberInput id="ped-slot" value={config.backSlotDepth} min={0} max={15} onChange={(v) => update({ backSlotDepth: v })} />
-              </div>
-            </div>
-          )}
-          {config.hasPencilDrawer && (
-            <div className="grid grid-cols-3 gap-2">
-              <div className="space-y-1">
-                <Label htmlFor="ped-pencil-h" className="text-xs text-muted-foreground">Pencil Height</Label>
-                <NumberInput id="ped-pencil-h" value={config.pencilDrawerHeight} min={10} max={100} onChange={(v) => update({ pencilDrawerHeight: v })} />
-              </div>
-            </div>
-          )}
-          {config.hasFilingDrawer && (
-            <div className="grid grid-cols-3 gap-2">
-              <div className="space-y-1">
-                <Label htmlFor="ped-filing-h" className="text-xs text-muted-foreground">Filing Height</Label>
-                <NumberInput id="ped-filing-h" value={config.filingDrawerHeight} min={100} max={600} onChange={(v) => update({ filingDrawerHeight: v })} />
               </div>
             </div>
           )}

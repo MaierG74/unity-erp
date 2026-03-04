@@ -175,7 +175,7 @@ export const DEFAULT_PEDESTAL_CONFIG: PedestalConfig = {
   materialThickness: 16,
   drawerCount: 3,
   hasPencilDrawer: true,
-  pencilDrawerHeight: 19,
+  pencilDrawerHeight: 90,
   hasFilingDrawer: false,
   filingDrawerHeight: 390,
   drawerGap: 2,
