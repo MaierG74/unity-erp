@@ -350,6 +350,29 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
     },
   });
 
+  // ── Fetch active pool exceptions for this order ────────────────────────
+  const { data: poolExceptions = [] } = useQuery({
+    queryKey: ['orderPoolExceptions', orderId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('job_work_pool_exceptions')
+        .select('exception_id, work_pool_id, exception_type, status, variance_qty')
+        .eq('order_id', orderId)
+        .in('status', ['open', 'acknowledged']);
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: workPool.length > 0,
+  });
+
+  const exceptionByPoolId = useMemo(() => {
+    const map = new Map<number, { exception_type: string; status: string; variance_qty: number }>();
+    for (const ex of poolExceptions) {
+      map.set(ex.work_pool_id, ex);
+    }
+    return map;
+  }, [poolExceptions]);
+
   // ── Fetch staff for issue dialog picker ─────────────────────────────────
   const { data: staffOptions = [] } = useQuery({
     queryKey: ['staff', 'forIssuePicker'],
@@ -515,9 +538,23 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {workPool.map((row) => (
+                {workPool.map((row) => {
+                  const exception = exceptionByPoolId.get(row.pool_id);
+                  return (
                   <TableRow key={row.pool_id}>
-                    <TableCell className="font-medium">{row.jobs?.name ?? 'Unknown'}</TableCell>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-1.5">
+                        {row.jobs?.name ?? 'Unknown'}
+                        {exception && (
+                          <Badge
+                            variant="destructive"
+                            className="text-[10px] px-1.5 py-0"
+                          >
+                            {exception.status === 'open' ? 'Exception' : 'Acknowledged'}
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{row.products?.name ?? '-'}</TableCell>
                     <TableCell className="text-right">{row.required_qty}</TableCell>
                     <TableCell className="text-right">{row.issued_qty}</TableCell>
@@ -555,7 +592,8 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
                       )}
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           </CardContent>
