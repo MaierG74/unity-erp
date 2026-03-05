@@ -137,22 +137,6 @@ const statusConfig: Record<string, { label: string; variant: 'default' | 'second
   completed: { label: 'Completed', variant: 'outline', icon: <CheckCircle className="h-3 w-3 text-green-500" /> },
 };
 
-async function createJobCard(orderId: number): Promise<number> {
-  const { data: newCard, error: createErr } = await supabase
-    .from('job_cards')
-    .insert({
-      order_id: orderId,
-      staff_id: null,
-      issue_date: new Date().toISOString().split('T')[0],
-      status: 'pending',
-    })
-    .select('job_card_id')
-    .single();
-
-  if (createErr) throw createErr;
-  return newCard.job_card_id;
-}
-
 // ── Main Component ──────────────────────────────────────────────────────────────
 
 export function JobCardsTab({ orderId }: JobCardsTabProps) {
@@ -640,24 +624,35 @@ function AddJobDialog({
 
   const addMutation = useMutation({
     mutationFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+      const { data: membership } = await supabase
+        .from('organization_members')
+        .select('org_id')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .single();
+      if (!membership?.org_id) throw new Error('No organization');
+
       const qty = parseInt(quantity) || 1;
-      const jobCardId = await createJobCard(orderId);
-
-      const { error } = await supabase.from('job_card_items').insert({
-        job_card_id: jobCardId,
-        job_id: parseInt(selectedJobId),
+      const { error } = await supabase.from('job_work_pool').insert({
+        org_id: membership.org_id,
+        order_id: orderId,
+        order_detail_id: null,
         product_id: null,
-        quantity: qty,
-        completed_quantity: 0,
+        job_id: parseInt(selectedJobId),
+        bol_id: null,
+        source: 'manual',
+        required_qty: qty,
+        pay_type: pieceRate ? 'piece' : 'hourly',
         piece_rate: pieceRate ? parseFloat(pieceRate) : null,
-        status: 'pending',
+        status: 'active',
       });
-
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['orderJobCardItems', orderId] });
-      toast.success('Job added to order');
+      queryClient.invalidateQueries({ queryKey: ['orderWorkPool', orderId] });
+      toast.success('Job added to work pool');
       resetForm();
       onOpenChange(false);
     },
@@ -689,9 +684,9 @@ function AddJobDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add Job to Order</DialogTitle>
+          <DialogTitle>Add Job to Work Pool</DialogTitle>
           <DialogDescription>
-            Add a job manually to this order. Staff assignment can be done later.
+            Add a manual job to the work pool. Issue job cards from the pool after adding.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -748,7 +743,7 @@ function AddJobDialog({
             </Button>
             <Button type="submit" disabled={addMutation.isPending || !selectedJobId}>
               {addMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Add Job
+              Add to Work Pool
             </Button>
           </DialogFooter>
         </form>
