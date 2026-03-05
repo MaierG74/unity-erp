@@ -247,10 +247,11 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
 
       // Get issuance counts from job_card_items linked to these pool rows
       const poolIds = poolRows.map((r) => r.pool_id);
-      const { data: issuanceData } = await supabase
+      const { data: issuanceData, error: issuanceErr } = await supabase
         .from('job_card_items')
         .select('work_pool_id, quantity, completed_quantity, status, job_cards!inner(status)')
         .in('work_pool_id', poolIds);
+      if (issuanceErr) throw issuanceErr;
 
       // Compute issued/completed per pool row (excluding cancelled cards/items)
       const issuanceMap = new Map<number, { issued: number; completed: number }>();
@@ -407,6 +408,8 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
                     <TableCell className="text-right font-medium">
                       {row.remaining_qty > 0 ? (
                         row.remaining_qty
+                      ) : row.remaining_qty < 0 ? (
+                        <span className="text-destructive">{row.remaining_qty}</span>
                       ) : (
                         <span className="text-green-500">0</span>
                       )}
@@ -423,6 +426,11 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
                           <Send className="h-3.5 w-3.5 mr-1.5" />
                           Issue Card
                         </Button>
+                      ) : row.remaining_qty < 0 ? (
+                        <Badge variant="destructive" className="gap-1">
+                          <AlertTriangle className="h-3 w-3" />
+                          Over-issued by {Math.abs(row.remaining_qty)}
+                        </Badge>
                       ) : (
                         <Badge variant="outline" className="border-green-500 text-green-500">
                           <CheckCircle className="h-3 w-3 mr-1" />
@@ -831,7 +839,9 @@ function GenerateBOLDialog({
           let timePerUnit: number | null = null;
           if (bol.time_required) {
             const raw = Number(bol.time_required);
-            timePerUnit = bol.time_unit === 'hours' ? raw * 60 : raw;
+            if (bol.time_unit === 'hours') timePerUnit = raw * 60;
+            else if (bol.time_unit === 'seconds') timePerUnit = raw / 60;
+            else timePerUnit = raw; // minutes (default)
           }
 
           preview.push({
