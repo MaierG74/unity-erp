@@ -35,6 +35,7 @@ import { useTodoList, useCreateTodo, useUpdateTodo } from '@/hooks/useTodosApi';
 import { useDebounce } from '@/hooks/use-debounce';
 import { useTaskKeyboard } from '@/hooks/useTaskKeyboard';
 import { TaskRow } from '@/components/features/todos/TaskRow';
+import { TaskSidePanel } from '@/components/features/todos/TaskSidePanel';
 import { TodoCreateDialog } from '@/components/features/todos/TodoCreateDialog';
 
 import type { TodoItem, TodoPriority } from '@/lib/db/todos';
@@ -324,7 +325,7 @@ export function TaskList() {
   return (
     <div className="flex h-[calc(100vh-4rem)]">
       {/* Left: list pane */}
-      <div className={cn('flex-1 min-w-0 flex flex-col overflow-hidden')}>
+      <div className={cn('flex-1 min-w-0 flex flex-col overflow-hidden', selectedId && 'max-w-[calc(100%-480px)]')}>
         {/* Header row */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/40">
           <h1 className="text-lg font-semibold">Tasks</h1>
@@ -481,7 +482,13 @@ export function TaskList() {
         </div>
       </div>
 
-      {/* TaskSidePanel will be rendered here in Task 6 */}
+      {/* Side panel */}
+      {selectedId && (
+        <TaskSidePanel
+          todoId={selectedId}
+          onClose={() => setSelectedId(null)}
+        />
+      )}
 
       {/* Create dialog */}
       <TodoCreateDialog
