@@ -4,11 +4,13 @@ import { useAuth } from '@/components/common/auth-provider';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { ThemeToggle } from '@/components/common/theme-toggle';
-import { Menu, ChevronLeft } from 'lucide-react';
+import { Menu, ChevronLeft, ListTodo } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useSidebar } from './sidebar';
 import { EmailIssuesIndicator } from '@/components/features/emails/EmailIssuesIndicator';
+import { TaskQuickCreate } from '@/components/features/todos/TaskQuickCreate';
+import { useTaskKeyboard } from '@/hooks/useTaskKeyboard';
 import { useEffect, useMemo, useState } from 'react';
 import { usePathname, useSearchParams, useRouter } from 'next/navigation';
 import { useWorkSchedule } from '@/hooks/use-work-schedule';
@@ -20,6 +22,11 @@ export function Navbar() {
   const { collapsed, setCollapsed } = useSidebar();
   const [isMobile, setIsMobile] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+
+  useTaskKeyboard({
+    onNewTask: () => setQuickCreateOpen(true),
+  }, true);
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -195,6 +202,16 @@ export function Navbar() {
               </Link>
             </div>
           )}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setQuickCreateOpen(true)}
+            title="New task (T)"
+            className="h-9 w-9"
+          >
+            <ListTodo className="h-4 w-4" />
+          </Button>
+          <TaskQuickCreate open={quickCreateOpen} onOpenChange={setQuickCreateOpen} />
           <EmailIssuesIndicator />
           <ThemeToggle />
           {user ? (
@@ -205,8 +222,8 @@ export function Navbar() {
               <button
                 onClick={async () => {
                   try {
-                    // Sign out from Supabase (use global scope to invalidate all sessions)
-                    await supabase.auth.signOut({ scope: 'global' });
+                    // Sign out from Supabase (local scope only — global would kill sessions on other devices/browsers)
+                    await supabase.auth.signOut({ scope: 'local' });
                   } catch (error) {
                     console.error('Sign out error:', error);
                   }
