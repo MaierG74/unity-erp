@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -34,6 +34,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import { format } from 'date-fns';
 import {
   ArrowLeft,
@@ -47,13 +55,14 @@ import {
   Download,
   FileText,
   ExternalLink,
+  Undo2,
 } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { JobCardPDFDownload } from '@/components/features/job-cards/JobCardPDFDownload';
 
 type JobCardStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
-type ItemStatus = 'pending' | 'in_progress' | 'completed';
+type ItemStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
 
 interface JobCardItem {
   item_id: number;
@@ -67,6 +76,7 @@ interface JobCardItem {
   start_time: string | null;
   completion_time: string | null;
   notes: string | null;
+  work_pool_id: number | null;
   products: {
     name: string;
     internal_code: string;
@@ -107,10 +117,11 @@ const statusConfig: Record<JobCardStatus, { label: string; variant: 'default' | 
   cancelled: { label: 'Cancelled', variant: 'destructive', icon: <XCircle className="h-3 w-3" /> },
 };
 
-const itemStatusConfig: Record<ItemStatus, { label: string; variant: 'default' | 'secondary' | 'outline' }> = {
+const itemStatusConfig: Record<ItemStatus, { label: string; variant: 'default' | 'secondary' | 'outline' | 'destructive' }> = {
   pending: { label: 'Pending', variant: 'secondary' },
   in_progress: { label: 'In Progress', variant: 'default' },
   completed: { label: 'Completed', variant: 'outline' },
+  cancelled: { label: 'Cancelled', variant: 'destructive' },
 };
 
 export default function JobCardDetailPage() {
@@ -121,6 +132,9 @@ export default function JobCardDetailPage() {
 
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
   const [editingQuantity, setEditingQuantity] = useState<number>(0);
+  const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
+  const [completeQuantities, setCompleteQuantities] = useState<Record<number, number>>({});
+  const [isConfirming, setIsConfirming] = useState(false);
 
   // Fetch job card details
   const { data: jobCard, isLoading: loadingJobCard, error: jobCardError, refetch: refetchJobCard } = useQuery({
@@ -209,6 +223,16 @@ export default function JobCardDetailPage() {
         );
       }
 
+      if (newStatus === 'cancelled') {
+        sideEffects.push(
+          supabase
+            .from('job_card_items')
+            .update({ status: 'cancelled' })
+            .eq('job_card_id', jobCardId)
+            .in('status', ['pending', 'in_progress'])
+        );
+      }
+
       if (newStatus === 'in_progress' || newStatus === 'completed') {
         const jobIds = items.map((i) => i.job_id).filter(Boolean);
         if (jobIds.length > 0 && jobCard?.staff_id) {
@@ -273,13 +297,52 @@ export default function JobCardDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobCardItems', jobCardId] });
       setEditingItemId(null);
-      toast.success('Item updated');
-
-      // Check if all items are completed to auto-complete job card
-      checkAutoComplete();
+      if (!completeDialogOpen) {
+        toast.success('Item updated');
+        checkAutoComplete();
+      }
     },
     onError: (error: any) => {
       toast.error(error.message || 'Failed to update item');
+    },
+  });
+
+  const reopenMutation = useMutation({
+    mutationFn: async () => {
+      // 1. Reopen the job card
+      const { error: cardErr } = await supabase
+        .from('job_cards')
+        .update({ status: 'in_progress', completion_date: null })
+        .eq('job_card_id', jobCardId);
+      if (cardErr) throw cardErr;
+
+      // 2. Revert completed items to in_progress (keep completed_quantity)
+      const { error: itemsErr } = await supabase
+        .from('job_card_items')
+        .update({ status: 'in_progress', completion_time: null })
+        .eq('job_card_id', jobCardId)
+        .eq('status', 'completed');
+      if (itemsErr) throw itemsErr;
+
+      // 3. Revert linked assignments
+      const jobIds = items.map((i) => i.job_id).filter(Boolean);
+      if (jobIds.length > 0 && jobCard?.staff_id) {
+        await supabase
+          .from('labor_plan_assignments')
+          .update({ job_status: 'in_progress', completed_at: null })
+          .in('job_id', jobIds)
+          .eq('staff_id', jobCard.staff_id)
+          .eq('job_status', 'completed');
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobCard', jobCardId] });
+      queryClient.invalidateQueries({ queryKey: ['jobCardItems', jobCardId] });
+      queryClient.invalidateQueries({ queryKey: ['jobCards'] });
+      toast.success('Job card reopened');
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to reopen job card');
     },
   });
 
@@ -306,10 +369,36 @@ export default function JobCardDetailPage() {
   };
 
   const handleMarkComplete = () => {
-    statusMutation.mutate({
-      newStatus: 'completed',
-      completionDate: new Date().toISOString().split('T')[0],
-    });
+    const initial: Record<number, number> = {};
+    for (const item of items) {
+      initial[item.item_id] = item.completed_quantity > 0 ? item.completed_quantity : item.quantity;
+    }
+    setCompleteQuantities(initial);
+    setCompleteDialogOpen(true);
+  };
+
+  const handleConfirmComplete = async () => {
+    setIsConfirming(true);
+    try {
+      await Promise.all(
+        items.map((item) =>
+          itemMutation.mutateAsync({
+            itemId: item.item_id,
+            completedQuantity: completeQuantities[item.item_id] ?? item.quantity,
+          }),
+        ),
+      );
+    } catch {
+      // itemMutation.onError already shows a toast
+      setIsConfirming(false);
+      return;
+    }
+    setIsConfirming(false);
+
+    statusMutation.mutate(
+      { newStatus: 'completed', completionDate: new Date().toISOString().split('T')[0] },
+      { onSuccess: () => { setCompleteDialogOpen(false); setCompleteQuantities({}); } },
+    );
   };
 
   const handleCancel = () => {
@@ -330,16 +419,45 @@ export default function JobCardDetailPage() {
     setEditingQuantity(0);
   };
 
-  // Calculate totals
-  const totalValue = items.reduce((sum, item) => sum + item.quantity * item.piece_rate, 0);
-  const completedValue = items.reduce((sum, item) => sum + item.completed_quantity * item.piece_rate, 0);
-  const totalItems = items.length;
-  const completedItems = items.filter((item) => item.status === 'completed').length;
+  // Calculate totals in a single pass
+  const { totalValue, completedValue, totalItems, completedItems, totalQty, completedQty, overallPct, overallEta } = useMemo(() => {
+    let tv = 0, cv = 0, ci = 0, tq = 0, cq = 0;
+    let latestEta: Date | null = null;
 
-  // Calculate overall quantity progress and ETA
-  const totalQty = items.reduce((sum, item) => sum + item.quantity, 0);
-  const completedQty = items.reduce((sum, item) => sum + item.completed_quantity, 0);
-  const overallPct = totalQty > 0 ? Math.round((completedQty / totalQty) * 100) : 0;
+    for (const item of items) {
+      tv += item.quantity * item.piece_rate;
+      cv += item.completed_quantity * item.piece_rate;
+      tq += item.quantity;
+      cq += item.completed_quantity;
+      if (item.status === 'completed') ci++;
+
+      // Calculate ETA per item
+      if (item.jobs?.estimated_minutes && item.start_time && item.status !== 'completed') {
+        const totalMinutes = item.jobs.estimated_minutes * item.quantity;
+        const etaMs = new Date(item.start_time).getTime() + totalMinutes * 60_000;
+        const eta = new Date(etaMs);
+        if (!latestEta || eta > latestEta) latestEta = eta;
+      }
+    }
+
+    return {
+      totalValue: tv,
+      completedValue: cv,
+      totalItems: items.length,
+      completedItems: ci,
+      totalQty: tq,
+      completedQty: cq,
+      overallPct: tq > 0 ? Math.round((cq / tq) * 100) : 0,
+      overallEta: latestEta,
+    };
+  }, [items]);
+
+  const dialogEarnings = useMemo(() => {
+    return items.reduce((sum, item) => {
+      const qty = completeQuantities[item.item_id] ?? item.quantity;
+      return sum + qty * item.piece_rate;
+    }, 0);
+  }, [items, completeQuantities]);
 
   const getItemEta = (item: JobCardItem) => {
     if (!item.jobs?.estimated_minutes || !item.start_time || item.status === 'completed') return null;
@@ -348,13 +466,6 @@ export default function JobCardDetailPage() {
     const etaMs = startMs + totalMinutes * 60_000;
     return new Date(etaMs);
   };
-
-  // Overall ETA = latest item ETA
-  const overallEta = items.reduce<Date | null>((latest, item) => {
-    const eta = getItemEta(item);
-    if (!eta) return latest;
-    return !latest || eta > latest ? eta : latest;
-  }, null);
 
   const formatEta = (eta: Date) => {
     const now = Date.now();
@@ -405,11 +516,9 @@ export default function JobCardDetailPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" asChild>
-            <Link href="/staff/job-cards">
+          <Button variant="ghost" size="sm" onClick={() => router.back()}>
               <ArrowLeft className="h-4 w-4 mr-2" />
               Back
-            </Link>
           </Button>
           <div>
             <h1 className="text-2xl font-bold">Job Card #{jobCard.job_card_id}</h1>
@@ -423,6 +532,30 @@ export default function JobCardDetailPage() {
             {status.icon}
             {status.label}
           </Badge>
+          {jobCard.status === 'completed' && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm" disabled={reopenMutation.isPending}>
+                  <Undo2 className="h-3.5 w-3.5 mr-1.5" />
+                  Reopen
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Reopen Job Card?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will return the job card to In Progress status. Completed quantities will be preserved.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Keep Completed</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => reopenMutation.mutate()}>
+                    Reopen Job Card
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
         </div>
       </div>
 
@@ -761,6 +894,68 @@ export default function JobCardDetailPage() {
         </Card>
       )}
     </div>
+    <Dialog open={completeDialogOpen} onOpenChange={setCompleteDialogOpen}>
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Complete Job Card #{jobCard.job_card_id}</DialogTitle>
+          <DialogDescription>
+            Review and confirm completed quantities for each item.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          {items.map((item) => (
+            <div key={item.item_id} className="flex items-center gap-3 p-3 rounded-md border bg-card">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">{item.products?.name ?? 'Unknown Product'}</div>
+                <div className="text-xs text-muted-foreground truncate">{item.jobs?.name ?? 'Unknown Job'}</div>
+                {item.piece_rate > 0 && (
+                  <div className="text-xs text-muted-foreground">
+                    R{item.piece_rate.toFixed(2)}/pc = R{((completeQuantities[item.item_id] ?? item.quantity) * item.piece_rate).toFixed(2)}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={0}
+                  max={item.quantity}
+                  value={completeQuantities[item.item_id] === 0 ? '' : (completeQuantities[item.item_id] ?? item.quantity)}
+                  placeholder="0"
+                  onChange={(e) => setCompleteQuantities((prev) => ({
+                    ...prev,
+                    [item.item_id]: Math.min(item.quantity, Math.max(0, Number(e.target.value) || 0)),
+                  }))}
+                  onBlur={(e) => {
+                    if (e.target.value === '') {
+                      setCompleteQuantities((prev) => ({ ...prev, [item.item_id]: 0 }));
+                    }
+                  }}
+                  className="w-20 text-center"
+                />
+                <span className="text-sm text-muted-foreground">/ {item.quantity}</span>
+              </div>
+            </div>
+          ))}
+          {dialogEarnings > 0 && (
+            <div className="text-sm font-medium text-right">
+              Total Earnings: R{dialogEarnings.toFixed(2)}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => { setCompleteDialogOpen(false); setCompleteQuantities({}); }} disabled={isConfirming || statusMutation.isPending}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleConfirmComplete}
+            disabled={isConfirming || statusMutation.isPending}
+            className="bg-emerald-600 hover:bg-emerald-700"
+          >
+            {isConfirming || statusMutation.isPending ? 'Completing...' : 'Complete Job Card'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     </TooltipProvider>
   );
 }
