@@ -763,6 +763,9 @@ function normalizePoolRow(orderId: number, pool: SchedulerPoolRow): PlanningJobW
     hourlyRateId: pool.hourly_rate_id,
     pieceRateId: pool.piece_rate_id,
     scheduleStatus: 'unscheduled',
+    poolId: pool.pool_id,
+    remainingQty: pool.remaining_qty,
+    timePerUnit: perUnitMinutes,
   };
 }
 

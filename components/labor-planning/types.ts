@@ -26,6 +26,12 @@ export interface PlanningJob {
   pieceRateId?: number | null;
   scheduleStatus?: PlanningJobScheduleStatus;
   jobStatus?: 'scheduled' | 'issued' | 'in_progress' | 'completed' | 'on_hold' | null;
+  /** Set when this job originates from a work pool row (non-null = pool demand, null = legacy BOL) */
+  poolId?: number | null;
+  /** Remaining unissued quantity in the pool (only set for pool-sourced jobs) */
+  remainingQty?: number | null;
+  /** Time per unit in minutes (from pool row) */
+  timePerUnit?: number | null;
 }
 
 export interface PlanningOrder {
