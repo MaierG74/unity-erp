@@ -701,7 +701,7 @@ export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardPro
             </TooltipProvider>
           </div>
           <div className="flex-1 overflow-auto px-1 py-1">
-            <OrderTree orders={filteredOrders as PlanningOrder[]} onJobClick={handleJobClick} />
+            <OrderTree orders={filteredOrders as PlanningOrder[]} onJobClick={handleJobClick} stalePoolOrderIds={data?.stalePoolOrderIds} />
           </div>
         </Card>
 

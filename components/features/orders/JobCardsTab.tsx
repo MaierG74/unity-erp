@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
@@ -44,7 +44,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   Plus,
   Wand2,
@@ -56,6 +56,7 @@ import {
   PlayCircle,
   AlertTriangle,
   Send,
+  RefreshCw,
 } from 'lucide-react';
 
 // ── Types ───────────────────────────────────────────────────────────────────────
@@ -261,6 +262,94 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
     },
   });
 
+  // ── Stale pool detection ──────────────────────────────────────────────
+  interface StalePoolRow {
+    pool_id: number;
+    job_name: string | null;
+    product_name: string | null;
+    pool_required: number;
+    current_required: number;
+    issued_qty: number;
+    diff: number;
+  }
+
+  const { data: staleItems = [] } = useQuery<StalePoolRow[]>({
+    queryKey: ['orderPoolStaleCheck', orderId],
+    queryFn: async () => {
+      // Only check BOL-sourced pool rows (manual ones don't drift)
+      const bolPool = workPool.filter((p) => p.source === 'bol' && p.bol_id != null && p.order_detail_id != null);
+      if (bolPool.length === 0) return [];
+
+      // Fetch current order_details + BOL quantities
+      const detailIds = [...new Set(bolPool.map((p) => p.order_detail_id!))];
+      const { data: details, error } = await supabase
+        .from('order_details')
+        .select(`
+          order_detail_id,
+          quantity,
+          products:product_id(
+            billoflabour(bol_id, quantity)
+          )
+        `)
+        .in('order_detail_id', detailIds);
+      if (error) throw error;
+
+      // Build a lookup: bol_id → current total qty (order_detail.qty × bol.qty)
+      const currentQtyByBol = new Map<number, number>();
+      for (const detail of details ?? []) {
+        const product = detail.products as any;
+        const bols = Array.isArray(product?.billoflabour) ? product.billoflabour : [];
+        for (const bol of bols) {
+          currentQtyByBol.set(bol.bol_id, (detail.quantity || 1) * (bol.quantity || 1));
+        }
+      }
+
+      // Compare against pool required_qty
+      const stale: StalePoolRow[] = [];
+      for (const row of bolPool) {
+        const currentReq = currentQtyByBol.get(row.bol_id!) ?? 0;
+        if (currentReq !== row.required_qty) {
+          stale.push({
+            pool_id: row.pool_id,
+            job_name: row.jobs?.name ?? null,
+            product_name: row.products?.name ?? null,
+            pool_required: row.required_qty,
+            current_required: currentReq,
+            issued_qty: row.issued_qty,
+            diff: currentReq - row.required_qty,
+          });
+        }
+      }
+      return stale;
+    },
+    enabled: workPool.length > 0,
+  });
+
+  // ── Reconciliation mutation ─────────────────────────────────────────────
+  const reconcileMutation = useMutation({
+    mutationFn: async (items: StalePoolRow[]) => {
+      for (const item of items) {
+        const { error } = await supabase
+          .from('job_work_pool')
+          .update({
+            required_qty: item.current_required,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('pool_id', item.pool_id);
+        if (error) throw error;
+      }
+      return items.length;
+    },
+    onSuccess: (count) => {
+      queryClient.invalidateQueries({ queryKey: ['orderWorkPool', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderPoolStaleCheck', orderId] });
+      toast.success(`Updated ${count} work pool row${count !== 1 ? 's' : ''} to match current demand`);
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to update work pool');
+    },
+  });
+
   // ── Fetch staff for issue dialog picker ─────────────────────────────────
   const { data: staffOptions = [] } = useQuery({
     queryKey: ['staff', 'forIssuePicker'],
@@ -358,6 +447,49 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
           </Button>
         </div>
       </div>
+
+      {/* Stale Pool Warning */}
+      {staleItems.length > 0 && (
+        <Alert variant="destructive" className="border-amber-500/50 bg-amber-950/20 text-amber-200 [&>svg]:text-amber-400">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Work pool out of date</AlertTitle>
+          <AlertDescription>
+            <p className="text-sm mb-2">
+              Order quantities have changed since the work pool was generated.
+            </p>
+            <div className="space-y-1 text-sm mb-3">
+              {staleItems.map((s) => (
+                <div key={s.pool_id} className="flex items-center gap-2">
+                  <span className="font-medium">{s.job_name ?? 'Job'}</span>
+                  {s.product_name && <span className="text-muted-foreground">({s.product_name})</span>}
+                  <span>
+                    Pool: {s.pool_required} → Current: {s.current_required}
+                  </span>
+                  {s.current_required < s.issued_qty && (
+                    <Badge variant="destructive" className="ml-1">
+                      Over-issued by {s.issued_qty - s.current_required}
+                    </Badge>
+                  )}
+                </div>
+              ))}
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-amber-500/50 hover:bg-amber-500/20"
+              onClick={() => reconcileMutation.mutate(staleItems)}
+              disabled={reconcileMutation.isPending}
+            >
+              {reconcileMutation.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+              )}
+              Update Pool
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Work Pool */}
       {workPool.length > 0 && (

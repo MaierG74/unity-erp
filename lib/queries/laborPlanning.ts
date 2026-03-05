@@ -57,6 +57,8 @@ export interface LaborPlanningPayload {
   assignments: LaborPlanAssignment[];
   /** True if work pool queries failed — pool orders may show stale BOL data */
   workPoolError?: boolean;
+  /** Order IDs where pool required_qty differs from current BOL demand */
+  stalePoolOrderIds?: Set<number>;
 }
 
 const CLOSED_STATUS_NAMES = ['completed', 'cancelled', 'closed', 'delivered'];
@@ -64,6 +66,7 @@ interface OpenOrdersResult {
   orders: PlanningOrderWithMeta[];
   jobCardData: JobCardData;
   workPoolData: WorkPoolData;
+  stalePoolOrderIds: Set<number>;
 }
 
 export async function fetchOpenOrdersWithLabor(): Promise<OpenOrdersResult> {
@@ -134,7 +137,10 @@ export async function fetchOpenOrdersWithLabor(): Promise<OpenOrdersResult> {
     .map((row: any) => normalizeOrderRow(row, jobCardData, workPoolData))
     .filter(Boolean) as PlanningOrderWithMeta[];
 
-  return { orders, jobCardData, workPoolData };
+  // Compute stale pool detection using already-fetched order detail data
+  const stalePoolOrderIds = computeStalePoolOrders(rows, workPoolData);
+
+  return { orders, jobCardData, workPoolData, stalePoolOrderIds };
 }
 
 export async function fetchStaffRoster(options: StaffRosterOptions = {}): Promise<StaffRosterEntry[]> {
@@ -222,7 +228,7 @@ export async function fetchLaborPlanningPayload(options: { date?: string } = {})
     fetchStaffRoster({ date: options.date }),
     fetchLaborAssignments({ date: options.date }),
   ]);
-  const { orders, jobCardData, workPoolData } = openOrdersResult;
+  const { orders, jobCardData, workPoolData, stalePoolOrderIds } = openOrdersResult;
 
   const assignmentsByJob = new Map(assignments.map((assignment) => [assignment.jobKey, assignment]));
   const annotatedOrders: PlanningOrderWithMeta[] = orders.map((order) => ({
@@ -355,6 +361,7 @@ export async function fetchLaborPlanningPayload(options: { date?: string } = {})
     unscheduledJobs,
     assignments,
     workPoolError: workPoolData.hasError,
+    stalePoolOrderIds,
   };
 }
 
@@ -741,6 +748,46 @@ async function loadWorkPoolByOrder(): Promise<WorkPoolData> {
   }
 
   return { poolByOrder, ordersWithPool };
+}
+
+/**
+ * Compare pool required_qty against current BOL-derived demand using
+ * already-fetched order data (no extra queries).
+ */
+function computeStalePoolOrders(orderRows: any[], workPoolData: WorkPoolData): Set<number> {
+  const stale = new Set<number>();
+  if (workPoolData.hasError) return stale;
+
+  for (const [orderId, poolRows] of workPoolData.poolByOrder) {
+    // Only check BOL-sourced rows
+    const bolPoolRows = poolRows.filter((p) => p.source === 'bol' && p.bol_id != null);
+    if (bolPoolRows.length === 0) continue;
+
+    // Find the matching order row to get current BOL quantities
+    const orderRow = orderRows.find((r: any) => r.order_id === orderId);
+    if (!orderRow) continue;
+
+    // Build bol_id → current total qty from order data
+    const currentQtyByBol = new Map<number, number>();
+    const details = Array.isArray(orderRow.order_details) ? orderRow.order_details : [];
+    for (const detail of details) {
+      const product = detail.products as any;
+      const bols = Array.isArray(product?.billoflabour) ? product.billoflabour : [];
+      for (const bol of bols) {
+        currentQtyByBol.set(bol.bol_id, (detail.quantity || 1) * (bol.quantity || 1));
+      }
+    }
+
+    for (const poolRow of bolPoolRows) {
+      const currentReq = currentQtyByBol.get(poolRow.bol_id!) ?? 0;
+      if (currentReq !== poolRow.required_qty) {
+        stale.add(orderId);
+        break;
+      }
+    }
+  }
+
+  return stale;
 }
 
 function normalizePoolRow(orderId: number, pool: SchedulerPoolRow): PlanningJobWithMeta {

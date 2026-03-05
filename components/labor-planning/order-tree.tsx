@@ -4,7 +4,8 @@ import { useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
-import { CalendarClock, CheckCircle2, ChevronRight, ClipboardList, Clock3, Flame, GripVertical, Loader2, Pause, Play, Sparkles } from 'lucide-react';
+import { AlertTriangle, CalendarClock, CheckCircle2, ChevronRight, ClipboardList, Clock3, Flame, GripVertical, Loader2, Pause, Play, Sparkles } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { PlanningOrder, PlanningJob } from './types';
 
 const ESTIMATED_ROW_HEIGHT = 48;
@@ -14,6 +15,7 @@ interface OrderTreeProps {
   windowSize?: number;
   onJobDragStart?: (event: React.DragEvent<HTMLDivElement>, job: PlanningJob, order: PlanningOrder) => void;
   onJobClick?: (job: PlanningJob, order: PlanningOrder) => void;
+  stalePoolOrderIds?: Set<number>;
 }
 
 const priorityStyles: Record<PlanningOrder['priority'], string> = {
@@ -41,7 +43,7 @@ const formatDate = (input?: string | null) => {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(parsed);
 };
 
-export function OrderTree({ orders, windowSize = 12, onJobDragStart, onJobClick }: OrderTreeProps) {
+export function OrderTree({ orders, windowSize = 12, onJobDragStart, onJobClick, stalePoolOrderIds }: OrderTreeProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [openOrders, setOpenOrders] = useState<Set<string>>(() => new Set());
@@ -92,6 +94,18 @@ export function OrderTree({ orders, windowSize = 12, onJobDragStart, onJobClick 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
                         <span className="truncate text-xs font-semibold">{order.orderNumber ?? order.id}</span>
+                        {stalePoolOrderIds?.has(order.orderId ?? 0) && (
+                          <TooltipProvider delayDuration={200}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <AlertTriangle className="h-3 w-3 shrink-0 text-amber-500" />
+                              </TooltipTrigger>
+                              <TooltipContent side="right">
+                                <p className="text-xs">Work pool quantities out of date — update on order page</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        )}
                         <Badge
                           variant="outline"
                           className={cn(
