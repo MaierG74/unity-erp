@@ -195,6 +195,13 @@ export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardPro
   // Live-sync: invalidate queries when other clients change labor tables
   useLaborRealtime();
 
+  // Warn if work pool queries failed (pool orders may show stale BOL data)
+  useEffect(() => {
+    if (data?.workPoolError) {
+      toast.warning('Work pool data failed to load — some orders may show outdated job data');
+    }
+  }, [data?.workPoolError]);
+
   const jobLookup = useMemo(
     () => buildJobLookup(data?.orders ?? []),
     [data?.orders]
@@ -811,12 +818,12 @@ export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardPro
           job={issueDialogState.job}
           staffLane={issueDialogState.staffLane}
           snappedStart={issueDialogState.snappedStart}
-          wallEnd={issueDialogState.wallEnd}
           selectedDate={selectedDate}
+          scheduleBreaks={scheduleBreaks}
+          startMinutes={START_MINUTES}
+          endMinutes={END_MINUTES}
           onClose={() => setIssueDialogState(null)}
-          onIssued={(cardId, issuedQty, jobKey) => {
-            // After successful issuance, create the schedule assignment
-            // Use the card-based job key so it maps to the issued card
+          onIssued={(cardId, issuedQty, jobKey, computedEnd) => {
             const assignJob: PlanningJob = {
               ...issueDialogState.job,
               id: jobKey,
@@ -826,7 +833,7 @@ export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardPro
               job: assignJob,
               staffId: Number(issueDialogState.staffLane.id),
               startMinutes: issueDialogState.snappedStart,
-              endMinutes: issueDialogState.wallEnd,
+              endMinutes: computedEnd,
               assignmentDate: selectedDate,
             });
             setIssueDialogState(null);
@@ -845,18 +852,22 @@ function IssueAndScheduleDialog({
   job,
   staffLane,
   snappedStart,
-  wallEnd,
   selectedDate,
+  scheduleBreaks,
+  startMinutes: shiftStart,
+  endMinutes: shiftEnd,
   onClose,
   onIssued,
 }: {
   job: PlanningJob;
   staffLane: StaffLane;
   snappedStart: number;
-  wallEnd: number;
   selectedDate: string;
+  scheduleBreaks: ScheduleBreak[];
+  startMinutes: number;
+  endMinutes: number;
   onClose: () => void;
-  onIssued: (cardId: number, qty: number, jobKey: string) => void;
+  onIssued: (cardId: number, qty: number, jobKey: string, computedEnd: number) => void;
 }) {
   const remaining = job.remainingQty ?? job.quantity ?? 1;
   const [qty, setQty] = useState(remaining);
@@ -869,11 +880,40 @@ function IssueAndScheduleDialog({
   const estHours = estMinutes != null ? Math.floor(estMinutes / 60) : null;
   const estMins = estMinutes != null ? Math.round(estMinutes % 60) : null;
 
+  // Recompute end time based on current qty (stretch for breaks)
+  const workMinutes = Math.max(estMinutes ?? MIN_DURATION, MIN_DURATION);
+  const stretched = stretchForBreaks(snappedStart, workMinutes, scheduleBreaks);
+  const computedEnd = Math.min(stretched.wallEnd, shiftEnd);
+
   const canSubmit =
     qty >= 1 && (!isOverIssue || overrideReason.trim().length > 0) && !isSubmitting;
 
   const handleSubmit = async () => {
     if (!canSubmit || job.poolId == null) return;
+
+    // Re-check lane constraints with the qty-based duration
+    const laneAssignments = staffLane.assignments ?? [];
+    const constraints = checkLaneConstraints(
+      laneAssignments.map((a) => ({
+        id: a.id,
+        startMinutes: a.startMinutes,
+        endMinutes: a.endMinutes,
+        label: a.label,
+      })),
+      { id: `pool-${job.poolId}`, startMinutes: snappedStart, endMinutes: computedEnd },
+      {
+        window: { startMinutes: shiftStart, endMinutes: shiftEnd },
+        availability: staffLane.availability,
+      },
+    );
+
+    if (constraints.hasConflict) {
+      toast.error('Cannot fit job in this slot', {
+        description: constraints.issues[0]?.message ?? 'Lane conflict with adjusted duration.',
+      });
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -887,12 +927,11 @@ function IssueAndScheduleDialog({
 
       if (error) throw error;
 
-      // Build the assignment job key: pool + card reference
       const jobKey = `pool-${job.poolId}:card-${cardId}`;
       toast.success('Job card issued & scheduled', {
         description: `Card #${cardId} — ${qty} units of ${job.name} assigned to ${staffLane.name}`,
       });
-      onIssued(cardId as number, qty, jobKey);
+      onIssued(cardId as number, qty, jobKey, computedEnd);
     } catch (err: any) {
       toast.error('Failed to issue job card', { description: err.message });
     } finally {

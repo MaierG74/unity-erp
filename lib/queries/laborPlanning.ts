@@ -55,6 +55,8 @@ export interface LaborPlanningPayload {
   staff: StaffRosterEntry[];
   unscheduledJobs: PlanningJobWithMeta[];
   assignments: LaborPlanAssignment[];
+  /** True if work pool queries failed — pool orders may show stale BOL data */
+  workPoolError?: boolean;
 }
 
 const CLOSED_STATUS_NAMES = ['completed', 'cancelled', 'closed', 'delivered'];
@@ -347,7 +349,13 @@ export async function fetchLaborPlanningPayload(options: { date?: string } = {})
       scheduleStatus: 'unscheduled' as const,
     }));
 
-  return { orders: annotatedOrders, staff, unscheduledJobs, assignments };
+  return {
+    orders: annotatedOrders,
+    staff,
+    unscheduledJobs,
+    assignments,
+    workPoolError: workPoolData.hasError,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -474,10 +482,18 @@ function normalizeOrderRow(
   let jobs: PlanningJobWithMeta[];
 
   if (hasPool) {
-    // New model: show pool items with remaining demand as draggable jobs
-    jobs = poolRows
+    // New model: pool demand (remaining > 0) + issued-but-active card items
+    const poolDemandJobs = poolRows
       .filter((p) => p.remaining_qty > 0)
       .map((p) => normalizePoolRow(orderId, p));
+
+    // Include issued card items linked to pool rows so they can be scheduled
+    const cardItems = jobCardData?.itemsByOrder.get(orderId) ?? [];
+    const issuedPoolJobs = cardItems
+      .filter((ci) => ci.work_pool_id != null)
+      .map((ci) => normalizeIssuedPoolCardItem(orderId, ci));
+
+    jobs = [...poolDemandJobs, ...issuedPoolJobs];
   } else {
     // Legacy fallback: no pool, use raw BOL + job card items
     const details = Array.isArray(row.order_details) ? row.order_details : [];
@@ -642,6 +658,8 @@ interface WorkPoolData {
   poolByOrder: Map<number, SchedulerPoolRow[]>;
   /** Order IDs that have at least one active pool row */
   ordersWithPool: Set<number>;
+  /** True if the pool query failed — prevents silent BOL fallback */
+  hasError?: boolean;
 }
 
 async function loadWorkPoolByOrder(): Promise<WorkPoolData> {
@@ -658,8 +676,8 @@ async function loadWorkPoolByOrder(): Promise<WorkPoolData> {
     .eq('status', 'active');
 
   if (poolErr) {
-    console.warn('[laborPlanning] Failed to load work pool', poolErr);
-    return { poolByOrder: new Map(), ordersWithPool: new Set() };
+    console.error('[laborPlanning] Failed to load work pool', poolErr);
+    return { poolByOrder: new Map(), ordersWithPool: new Set(), hasError: true };
   }
 
   const rows = poolRows ?? [];
@@ -673,8 +691,8 @@ async function loadWorkPoolByOrder(): Promise<WorkPoolData> {
     .in('work_pool_id', poolIds);
 
   if (issuanceErr) {
-    console.warn('[laborPlanning] Failed to load pool issuance data', issuanceErr);
-    return { poolByOrder: new Map(), ordersWithPool: new Set() };
+    console.error('[laborPlanning] Failed to load pool issuance data', issuanceErr);
+    return { poolByOrder: new Map(), ordersWithPool: new Set(), hasError: true };
   }
 
   // Aggregate issued qty per pool_id (exclude cancelled cards/items)
@@ -788,6 +806,7 @@ interface JobCardItemRow {
   product_name: string | null;
   estimated_minutes: number | null;
   job_time_unit: string | null;
+  work_pool_id: number | null;
 }
 
 interface JobCardData {
@@ -829,6 +848,7 @@ async function loadJobCardItemsByOrder(): Promise<JobCardData> {
       quantity,
       piece_rate,
       status,
+      work_pool_id,
       jobs:job_id(job_id, name, estimated_minutes, time_unit, job_categories:category_id(category_id, name)),
       products:product_id(product_id, name)
     `)
@@ -865,6 +885,7 @@ async function loadJobCardItemsByOrder(): Promise<JobCardData> {
       product_name: product?.name ?? null,
       estimated_minutes: job?.estimated_minutes ? Number(job.estimated_minutes) : null,
       job_time_unit: job?.time_unit ?? null,
+      work_pool_id: (row as any).work_pool_id ?? null,
     };
 
     if (!result.has(orderId)) result.set(orderId, []);
@@ -872,6 +893,45 @@ async function loadJobCardItemsByOrder(): Promise<JobCardData> {
   }
 
   return { itemsByOrder: result, ordersWithCards };
+}
+
+/** Converts an issued pool-linked card item into a PlanningJobWithMeta.
+ *  Uses `pool-X:card-Y` key format matching what IssueAndScheduleDialog creates. */
+function normalizeIssuedPoolCardItem(orderId: number, item: JobCardItemRow): PlanningJobWithMeta {
+  const categoryName = item.job_category_name ?? null;
+  const categoryColor = getCategoryColor(item.job_category_id ?? categoryName);
+  const rawEstimatedTime = item.estimated_minutes ?? null;
+  const estimatedMinutesPerUnit = rawEstimatedTime != null
+    ? convertToMinutes(rawEstimatedTime, item.job_time_unit)
+    : null;
+  const totalMinutes = estimatedMinutesPerUnit != null ? estimatedMinutesPerUnit * item.quantity : null;
+  const payType: PayType = item.piece_rate != null ? 'piece' : 'hourly';
+
+  return {
+    id: `pool-${item.work_pool_id}:card-${item.job_card_id}`,
+    name: item.job_name ?? `Job Card Item ${item.item_id}`,
+    status: 'ready',
+    durationHours: totalMinutes != null ? Number((totalMinutes / 60).toFixed(2)) : 0,
+    durationMinutes: estimatedMinutesPerUnit,
+    owner: categoryName ?? item.product_name ?? 'Unassigned',
+    start: undefined,
+    end: undefined,
+    orderId,
+    orderDetailId: null,
+    productId: item.product_id ? Number(item.product_id) : null,
+    productName: item.product_name,
+    bolId: null,
+    jobId: item.job_id,
+    categoryName,
+    categoryColor,
+    payType,
+    quantity: item.quantity,
+    timeUnit: (item.job_time_unit as TimeUnit) ?? 'hours',
+    rateId: null,
+    hourlyRateId: null,
+    pieceRateId: null,
+    scheduleStatus: 'unscheduled',
+  };
 }
 
 function normalizeJobCardItem(orderId: number, item: JobCardItemRow): PlanningJobWithMeta {
