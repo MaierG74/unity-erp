@@ -328,27 +328,17 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
   // ── Reconciliation mutation ─────────────────────────────────────────────
   const reconcileMutation = useMutation({
     mutationFn: async (items: StalePoolRow[]) => {
-      const now = new Date().toISOString();
+      // Atomic reconciliation: updates required_qty + creates/resolves exceptions server-side
       const results = await Promise.all(
         items.map((item) =>
-          supabase
-            .from('job_work_pool')
-            .update({ required_qty: item.current_required, updated_at: now })
-            .eq('pool_id', item.pool_id)
+          supabase.rpc('reconcile_work_pool_row', {
+            p_pool_id: item.pool_id,
+            p_new_required_qty: item.current_required,
+          })
         ),
       );
       const failed = results.find((r) => r.error);
       if (failed?.error) throw failed.error;
-
-      // Auto-resolve exceptions where variance is now cleared
-      await Promise.all(
-        items.map((item) =>
-          supabase.rpc('resolve_job_work_pool_exception_if_cleared', {
-            p_work_pool_id: item.pool_id,
-            p_exception_type: 'over_issued_after_reconcile',
-          })
-        ),
-      );
 
       return items.length;
     },

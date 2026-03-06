@@ -124,10 +124,9 @@ function PoolExceptionCard({ exception }: { exception: PoolException }) {
 
   const acknowledgeMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase
-        .from('job_work_pool_exceptions')
-        .update({ status: 'acknowledged', acknowledged_at: new Date().toISOString() })
-        .eq('exception_id', exception.exception_id);
+      const { error } = await supabase.rpc('acknowledge_work_pool_exception', {
+        p_exception_id: exception.exception_id,
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -238,15 +237,11 @@ function ResolveExceptionDialog({
 
   const resolveMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase
-        .from('job_work_pool_exceptions')
-        .update({
-          status: 'resolved',
-          resolution_type: resolutionType,
-          resolution_notes: notes.trim() || null,
-          resolved_at: new Date().toISOString(),
-        })
-        .eq('exception_id', exception.exception_id);
+      const { error } = await supabase.rpc('resolve_work_pool_exception', {
+        p_exception_id: exception.exception_id,
+        p_resolution_type: resolutionType,
+        p_notes: notes.trim() || null,
+      });
       if (error) throw error;
     },
     onSuccess: () => {
