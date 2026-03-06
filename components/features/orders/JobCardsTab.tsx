@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
@@ -128,6 +128,16 @@ interface StaffOption {
 
 interface JobCardsTabProps {
   orderId: number;
+}
+
+interface StalePoolRow {
+  pool_id: number;
+  job_name: string | null;
+  product_name: string | null;
+  pool_required: number;
+  current_required: number;
+  issued_qty: number;
+  diff: number;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
@@ -263,16 +273,6 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
   });
 
   // ── Stale pool detection ──────────────────────────────────────────────
-  interface StalePoolRow {
-    pool_id: number;
-    job_name: string | null;
-    product_name: string | null;
-    pool_required: number;
-    current_required: number;
-    issued_qty: number;
-    diff: number;
-  }
-
   const { data: staleItems = [] } = useQuery<StalePoolRow[]>({
     queryKey: ['orderPoolStaleCheck', orderId],
     queryFn: async () => {
@@ -328,16 +328,17 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
   // ── Reconciliation mutation ─────────────────────────────────────────────
   const reconcileMutation = useMutation({
     mutationFn: async (items: StalePoolRow[]) => {
-      for (const item of items) {
-        const { error } = await supabase
-          .from('job_work_pool')
-          .update({
-            required_qty: item.current_required,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('pool_id', item.pool_id);
-        if (error) throw error;
-      }
+      const now = new Date().toISOString();
+      const results = await Promise.all(
+        items.map((item) =>
+          supabase
+            .from('job_work_pool')
+            .update({ required_qty: item.current_required, updated_at: now })
+            .eq('pool_id', item.pool_id)
+        ),
+      );
+      const failed = results.find((r) => r.error);
+      if (failed?.error) throw failed.error;
       return items.length;
     },
     onSuccess: (count) => {

@@ -498,7 +498,7 @@ function normalizeOrderRow(
     const cardItems = jobCardData?.itemsByOrder.get(orderId) ?? [];
     const issuedPoolJobs = cardItems
       .filter((ci) => ci.work_pool_id != null)
-      .map((ci) => normalizeIssuedPoolCardItem(orderId, ci));
+      .map((ci) => normalizeCardItem(orderId, ci));
 
     jobs = [...poolDemandJobs, ...issuedPoolJobs];
   } else {
@@ -527,7 +527,7 @@ function normalizeOrderRow(
           (bj) => bj.jobId === item.job_id && bj.productId === item.product_id,
         );
       })
-      .map((item) => normalizeJobCardItem(orderId, item));
+      .map((item) => normalizeCardItem(orderId, item));
 
     jobs = [...bolJobs, ...manualJobs];
   }
@@ -758,13 +758,16 @@ function computeStalePoolOrders(orderRows: any[], workPoolData: WorkPoolData): S
   const stale = new Set<number>();
   if (workPoolData.hasError) return stale;
 
+  // Pre-build lookup to avoid O(N*M) linear scan
+  const orderRowById = new Map<number, any>();
+  for (const r of orderRows) orderRowById.set(r.order_id, r);
+
   for (const [orderId, poolRows] of workPoolData.poolByOrder) {
     // Only check BOL-sourced rows
     const bolPoolRows = poolRows.filter((p) => p.source === 'bol' && p.bol_id != null);
     if (bolPoolRows.length === 0) continue;
 
-    // Find the matching order row to get current BOL quantities
-    const orderRow = orderRows.find((r: any) => r.order_id === orderId);
+    const orderRow = orderRowById.get(orderId);
     if (!orderRow) continue;
 
     // Build bol_id → current total qty from order data
@@ -932,7 +935,7 @@ async function loadJobCardItemsByOrder(): Promise<JobCardData> {
       product_name: product?.name ?? null,
       estimated_minutes: job?.estimated_minutes ? Number(job.estimated_minutes) : null,
       job_time_unit: job?.time_unit ?? null,
-      work_pool_id: (row as any).work_pool_id ?? null,
+      work_pool_id: row.work_pool_id ?? null,
     };
 
     if (!result.has(orderId)) result.set(orderId, []);
@@ -942,9 +945,9 @@ async function loadJobCardItemsByOrder(): Promise<JobCardData> {
   return { itemsByOrder: result, ordersWithCards };
 }
 
-/** Converts an issued pool-linked card item into a PlanningJobWithMeta.
- *  Uses `pool-X:card-Y` key format matching what IssueAndScheduleDialog creates. */
-function normalizeIssuedPoolCardItem(orderId: number, item: JobCardItemRow): PlanningJobWithMeta {
+/** Converts a job card item into a PlanningJobWithMeta.
+ *  Pool-linked items use `pool-X:card-Y` key; legacy items use `order-X:jci-Y`. */
+function normalizeCardItem(orderId: number, item: JobCardItemRow): PlanningJobWithMeta {
   const categoryName = item.job_category_name ?? null;
   const categoryColor = getCategoryColor(item.job_category_id ?? categoryName);
   const rawEstimatedTime = item.estimated_minutes ?? null;
@@ -954,54 +957,16 @@ function normalizeIssuedPoolCardItem(orderId: number, item: JobCardItemRow): Pla
   const totalMinutes = estimatedMinutesPerUnit != null ? estimatedMinutesPerUnit * item.quantity : null;
   const payType: PayType = item.piece_rate != null ? 'piece' : 'hourly';
 
+  const id = item.work_pool_id != null
+    ? `pool-${item.work_pool_id}:card-${item.job_card_id}`
+    : `order-${orderId}:jci-${item.item_id}`;
+
   return {
-    id: `pool-${item.work_pool_id}:card-${item.job_card_id}`,
+    id,
     name: item.job_name ?? `Job Card Item ${item.item_id}`,
     status: 'ready',
     durationHours: totalMinutes != null ? Number((totalMinutes / 60).toFixed(2)) : 0,
     durationMinutes: estimatedMinutesPerUnit,
-    owner: categoryName ?? item.product_name ?? 'Unassigned',
-    start: undefined,
-    end: undefined,
-    orderId,
-    orderDetailId: null,
-    productId: item.product_id ? Number(item.product_id) : null,
-    productName: item.product_name,
-    bolId: null,
-    jobId: item.job_id,
-    categoryName,
-    categoryColor,
-    payType,
-    quantity: item.quantity,
-    timeUnit: (item.job_time_unit as TimeUnit) ?? 'hours',
-    rateId: null,
-    hourlyRateId: null,
-    pieceRateId: null,
-    scheduleStatus: 'unscheduled',
-  };
-}
-
-function normalizeJobCardItem(orderId: number, item: JobCardItemRow): PlanningJobWithMeta {
-  const categoryName = item.job_category_name ?? null;
-  const categoryColor = getCategoryColor(item.job_category_id ?? categoryName);
-
-  // Estimate duration from job's estimated_minutes, converting from job_time_unit to minutes
-  const rawEstimatedTime = item.estimated_minutes ?? null;
-  const estimatedMinutesPerUnit = rawEstimatedTime != null
-    ? convertToMinutes(rawEstimatedTime, item.job_time_unit)
-    : null;
-  const totalMinutes = estimatedMinutesPerUnit != null ? estimatedMinutesPerUnit * item.quantity : null;
-  // durationMinutes stores per-unit value for calculateDurationMinutes (which multiplies by quantity)
-  const perUnitMinutes = estimatedMinutesPerUnit;
-
-  const payType: PayType = item.piece_rate != null ? 'piece' : 'hourly';
-
-  return {
-    id: `order-${orderId}:jci-${item.item_id}`,
-    name: item.job_name ?? `Job Card Item ${item.item_id}`,
-    status: 'ready',
-    durationHours: totalMinutes != null ? Number((totalMinutes / 60).toFixed(2)) : 0,
-    durationMinutes: perUnitMinutes,
     owner: categoryName ?? item.product_name ?? 'Unassigned',
     start: undefined,
     end: undefined,

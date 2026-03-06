@@ -196,9 +196,13 @@ export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardPro
   useLaborRealtime();
 
   // Warn if work pool queries failed (pool orders may show stale BOL data)
+  const poolErrorShown = useRef(false);
   useEffect(() => {
-    if (data?.workPoolError) {
+    if (data?.workPoolError && !poolErrorShown.current) {
+      poolErrorShown.current = true;
       toast.warning('Work pool data failed to load — some orders may show outdated job data');
+    } else if (!data?.workPoolError) {
+      poolErrorShown.current = false;
     }
   }, [data?.workPoolError]);
 
