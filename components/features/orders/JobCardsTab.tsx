@@ -339,11 +339,23 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
       );
       const failed = results.find((r) => r.error);
       if (failed?.error) throw failed.error;
+
+      // Auto-resolve exceptions where variance is now cleared
+      await Promise.all(
+        items.map((item) =>
+          supabase.rpc('resolve_job_work_pool_exception_if_cleared', {
+            p_work_pool_id: item.pool_id,
+            p_exception_type: 'over_issued_after_reconcile',
+          })
+        ),
+      );
+
       return items.length;
     },
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ['orderWorkPool', orderId] });
       queryClient.invalidateQueries({ queryKey: ['orderPoolStaleCheck', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderPoolExceptions', orderId] });
       toast.success(`Updated ${count} work pool row${count !== 1 ? 's' : ''} to match current demand`);
     },
     onError: (error: any) => {

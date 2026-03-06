@@ -231,6 +231,21 @@ export default function JobCardDetailPage() {
             .eq('job_card_id', jobCardId)
             .in('status', ['pending', 'in_progress'])
         );
+
+        // Auto-resolve pool exceptions if variance is now cleared
+        const poolIds = [...new Set(items.map((i) => i.work_pool_id).filter(Boolean))] as number[];
+        for (const poolId of poolIds) {
+          sideEffects.push(
+            supabase.rpc('resolve_job_work_pool_exception_if_cleared', {
+              p_work_pool_id: poolId,
+              p_exception_type: 'over_issued_override',
+            }),
+            supabase.rpc('resolve_job_work_pool_exception_if_cleared', {
+              p_work_pool_id: poolId,
+              p_exception_type: 'over_issued_after_reconcile',
+            }),
+          );
+        }
       }
 
       if (newStatus === 'in_progress' || newStatus === 'completed') {
