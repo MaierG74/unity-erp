@@ -21,6 +21,10 @@ DECLARE
   v_current_issued INTEGER;
   v_variance INTEGER;
 BEGIN
+  IF p_new_required_qty < 0 THEN
+    RAISE EXCEPTION 'required_qty cannot be negative';
+  END IF;
+
   -- Lock and fetch the pool row
   SELECT * INTO v_pool
   FROM job_work_pool
@@ -29,6 +33,11 @@ BEGIN
 
   IF v_pool IS NULL THEN
     RAISE EXCEPTION 'Work pool entry % not found', p_pool_id;
+  END IF;
+
+  -- Org membership check
+  IF NOT public.is_org_member(v_pool.org_id) THEN
+    RAISE EXCEPTION 'Access denied: pool belongs to different organization';
   END IF;
 
   -- Update required_qty
@@ -100,6 +109,10 @@ BEGIN
     RAISE EXCEPTION 'Exception % not found or not in open status', p_exception_id;
   END IF;
 
+  IF NOT public.is_org_member(v_ex.org_id) THEN
+    RAISE EXCEPTION 'Access denied: exception belongs to different organization';
+  END IF;
+
   UPDATE job_work_pool_exceptions SET
     status = 'acknowledged',
     acknowledged_by = auth.uid(),
@@ -143,6 +156,10 @@ BEGIN
     RAISE EXCEPTION 'Exception % not found or already resolved', p_exception_id;
   END IF;
 
+  IF NOT public.is_org_member(v_ex.org_id) THEN
+    RAISE EXCEPTION 'Access denied: exception belongs to different organization';
+  END IF;
+
   UPDATE job_work_pool_exceptions SET
     status = 'resolved',
     resolved_by = auth.uid(),
@@ -153,17 +170,12 @@ BEGIN
   WHERE exception_id = p_exception_id;
 
   PERFORM public.log_job_work_pool_exception_activity(
-    v_ex.exception_id, v_ex.org_id, 'resolution_selected', auth.uid(), p_notes,
+    v_ex.exception_id, v_ex.org_id, 'resolved', auth.uid(), p_notes,
     jsonb_build_object(
       'resolution_type', p_resolution_type,
       'exception_type', v_ex.exception_type,
       'variance_qty', v_ex.variance_qty
     )
-  );
-
-  PERFORM public.log_job_work_pool_exception_activity(
-    v_ex.exception_id, v_ex.org_id, 'resolved', auth.uid(), p_notes,
-    jsonb_build_object('resolution_type', p_resolution_type)
   );
 END;
 $$;

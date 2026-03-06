@@ -231,21 +231,25 @@ export default function JobCardDetailPage() {
           .eq('job_card_id', jobCardId)
           .in('status', ['pending', 'in_progress']);
 
-        // Now auto-resolve pool exceptions (RPC reads updated item statuses)
-        const poolIds = [...new Set(items.map((i) => i.work_pool_id).filter(Boolean))] as number[];
+        // Auto-resolve pool exceptions (best-effort — card is already cancelled)
+        const poolIds = [...new Set(items.map((i) => i.work_pool_id).filter((id): id is number => id != null))];
         if (poolIds.length > 0) {
-          await Promise.all(
-            poolIds.flatMap((poolId) => [
-              supabase.rpc('resolve_job_work_pool_exception_if_cleared', {
-                p_work_pool_id: poolId,
-                p_exception_type: 'over_issued_override',
-              }),
-              supabase.rpc('resolve_job_work_pool_exception_if_cleared', {
-                p_work_pool_id: poolId,
-                p_exception_type: 'over_issued_after_reconcile',
-              }),
-            ])
-          );
+          try {
+            await Promise.all(
+              poolIds.flatMap((poolId) => [
+                supabase.rpc('resolve_job_work_pool_exception_if_cleared', {
+                  p_work_pool_id: poolId,
+                  p_exception_type: 'over_issued_override',
+                }),
+                supabase.rpc('resolve_job_work_pool_exception_if_cleared', {
+                  p_work_pool_id: poolId,
+                  p_exception_type: 'over_issued_after_reconcile',
+                }),
+              ])
+            );
+          } catch {
+            console.error('[job-card] Auto-resolution failed for pools', poolIds);
+          }
         }
       }
 
