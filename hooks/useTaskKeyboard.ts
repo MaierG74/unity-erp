@@ -1,7 +1,7 @@
 // hooks/useTaskKeyboard.ts
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 interface TaskKeyboardActions {
   onNewTask?: () => void;           // T
@@ -23,13 +23,18 @@ function isInputFocused(): boolean {
 }
 
 export function useTaskKeyboard(actions: TaskKeyboardActions, enabled = true) {
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
+
   useEffect(() => {
     if (!enabled) return;
 
     function handleKeyDown(e: KeyboardEvent) {
+      const a = actionsRef.current;
+
       // Esc always works (closes panels/modals)
       if (e.key === 'Escape') {
-        actions.onClosePanel?.();
+        a.onClosePanel?.();
         return;
       }
 
@@ -42,32 +47,32 @@ export function useTaskKeyboard(actions: TaskKeyboardActions, enabled = true) {
       switch (e.key.toLowerCase()) {
         case 't':
           e.preventDefault();
-          actions.onNewTask?.();
+          a.onNewTask?.();
           break;
         case 'arrowup':
           e.preventDefault();
-          actions.onNavigateUp?.();
+          a.onNavigateUp?.();
           break;
         case 'arrowdown':
           e.preventDefault();
-          actions.onNavigateDown?.();
+          a.onNavigateDown?.();
           break;
         case 'enter':
           e.preventDefault();
-          actions.onOpenPanel?.();
+          a.onOpenPanel?.();
           break;
         case 'x':
           e.preventDefault();
-          actions.onToggleComplete?.();
+          a.onToggleComplete?.();
           break;
         case 'e':
           e.preventDefault();
-          actions.onEditTask?.();
+          a.onEditTask?.();
           break;
       }
     }
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [actions, enabled]);
+  }, [enabled]);
 }

@@ -8,19 +8,8 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useUpdateTodo } from '@/hooks/useTodosApi';
+import { PRIORITY_CONFIG, initials, getContextLabel } from '@/components/features/todos/task-utils';
 import type { TodoItem } from '@/lib/db/todos';
-
-const PRIORITY_COLORS: Record<string, string> = {
-  urgent: 'bg-red-500',
-  high: 'bg-orange-500',
-  medium: 'bg-blue-500',
-  low: 'bg-gray-400',
-};
-
-function initials(name?: string | null): string {
-  if (!name) return '?';
-  return name.split(/\s+/).slice(0, 2).map(p => p[0]?.toUpperCase() ?? '').join('');
-}
 
 interface TaskRowProps {
   todo: TodoItem;
@@ -49,11 +38,7 @@ export function TaskRow({ todo, isActive, isFocused, onSelect }: TaskRowProps) {
     ? format(parseISO(todo.dueAt), 'MMM d')
     : null;
 
-  const contextLabel = todo.contextSnapshot
-    ? (typeof todo.contextSnapshot === 'object' && 'label' in todo.contextSnapshot
-        ? String(todo.contextSnapshot.label)
-        : todo.contextPath)
-    : todo.contextPath;
+  const contextLabel = getContextLabel(todo);
 
   return (
     <div
@@ -83,7 +68,7 @@ export function TaskRow({ todo, isActive, isFocused, onSelect }: TaskRowProps) {
 
       {/* Priority dot */}
       <span
-        className={cn('h-2 w-2 rounded-full flex-shrink-0', PRIORITY_COLORS[todo.priority] ?? PRIORITY_COLORS.medium)}
+        className={cn('h-2 w-2 rounded-full flex-shrink-0', PRIORITY_CONFIG[todo.priority]?.dotColor ?? PRIORITY_CONFIG.medium.dotColor)}
         title={todo.priority}
       />
 

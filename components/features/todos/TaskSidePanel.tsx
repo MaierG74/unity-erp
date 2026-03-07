@@ -50,6 +50,7 @@ import {
 } from '@/lib/client/todos';
 import { TaskMetadataChips } from '@/components/features/todos/TaskMetadataChips';
 import { TodoEntityLinkPicker } from '@/components/features/todos/TodoEntityLinkPicker';
+import { initials, formatFileSize } from '@/components/features/todos/task-utils';
 
 import type { TodoChecklistItem, TodoComment, TodoActivity } from '@/lib/db/todos';
 import type { EntityLink } from '@/lib/client/entity-links';
@@ -61,26 +62,6 @@ import type { EntityLink } from '@/lib/client/entity-links';
 interface TaskSidePanelProps {
   todoId: string;
   onClose: () => void;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function initials(name?: string | null): string {
-  if (!name) return '?';
-  return name
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((p) => p[0]?.toUpperCase() ?? '')
-    .join('');
-}
-
-function formatFileSize(bytes: number | null): string {
-  if (bytes === null || bytes === undefined) return '';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 // ---------------------------------------------------------------------------
@@ -241,7 +222,7 @@ export function TaskSidePanel({ todoId, onClose }: TaskSidePanelProps) {
   );
 
   const handleDownload = useCallback(
-    (attachmentId: string, fileName: string) => {
+    (attachmentId: string) => {
       window.open(`/api/todos/${todoId}/attachments/${attachmentId}`, '_blank');
     },
     [todoId],
@@ -521,7 +502,7 @@ export function TaskSidePanel({ todoId, onClose }: TaskSidePanelProps) {
             >
               <FileIcon className="h-4 w-4 text-muted-foreground shrink-0" />
               <button
-                onClick={() => handleDownload(att.id, att.fileName)}
+                onClick={() => handleDownload(att.id)}
                 className="flex-1 text-left"
               >
                 <span className="text-sm truncate block">{att.fileName}</span>

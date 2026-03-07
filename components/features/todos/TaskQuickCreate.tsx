@@ -16,25 +16,7 @@ import { useCreateTodo } from '@/hooks/useTodosApi';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useAuth } from '@/components/common/auth-provider';
 import { useTaskContext, type TaskContext } from '@/hooks/useTaskContext';
-
-const PRIORITY_CONFIG: Record<string, { label: string; dotColor: string }> = {
-  urgent: { label: 'Urgent', dotColor: 'bg-red-500' },
-  high: { label: 'High', dotColor: 'bg-orange-500' },
-  medium: { label: 'Medium', dotColor: 'bg-blue-500' },
-  low: { label: 'Low', dotColor: 'bg-gray-400' },
-};
-
-function initials(name?: string | null): string {
-  if (!name) return '?';
-  return name
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((p) => p[0]?.toUpperCase() ?? '')
-    .join('');
-}
-
-const chipBase =
-  'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs border cursor-pointer hover:bg-muted/50 transition-colors select-none border-border';
+import { PRIORITY_CONFIG, initials, chipBase } from '@/components/features/todos/task-utils';
 
 interface TaskQuickCreateProps {
   open: boolean;

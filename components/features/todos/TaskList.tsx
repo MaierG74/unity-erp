@@ -192,10 +192,23 @@ export function groupTodos(todos: TodoItem[], groupBy: GroupBy): TodoGroup[] {
 
 function sortWithinGroup(todos: TodoItem[], sortBy: SortBy): TodoItem[] {
   return [...todos].sort((a, b) => {
-    // Primary: priority (urgent first)
-    const pa = PRIORITY_ORDER[a.priority] ?? 2;
-    const pb = PRIORITY_ORDER[b.priority] ?? 2;
-    if (pa !== pb) return pa - pb;
+    if (sortBy === 'dueDate') {
+      // Tasks with no due date go last
+      if (!a.dueAt && !b.dueAt) return 0;
+      if (!a.dueAt) return 1;
+      if (!b.dueAt) return -1;
+      const diff = new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime();
+      if (diff !== 0) return diff;
+    } else if (sortBy === 'status') {
+      const sa = STATUS_ORDER[a.status] ?? 0;
+      const sb = STATUS_ORDER[b.status] ?? 0;
+      if (sa !== sb) return sa - sb;
+    } else {
+      // Default: priority (urgent first)
+      const pa = PRIORITY_ORDER[a.priority] ?? 2;
+      const pb = PRIORITY_ORDER[b.priority] ?? 2;
+      if (pa !== pb) return pa - pb;
+    }
 
     // Secondary: created_at desc
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
@@ -266,6 +279,13 @@ export function TaskList() {
 
   // Flat list for keyboard nav
   const flatList = useMemo(() => flattenGroups(groups, collapsedGroups), [groups, collapsedGroups]);
+
+  // O(1) index lookup for render loop
+  const flatIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    flatList.forEach((t, i) => map.set(t.id, i));
+    return map;
+  }, [flatList]);
 
   const focusedTodo = flatList[focusedIndex] ?? null;
 
@@ -465,7 +485,7 @@ export function TaskList() {
                 {/* Group rows */}
                 {!isCollapsed &&
                   group.todos.map(todo => {
-                    const globalIdx = flatList.findIndex(t => t.id === todo.id);
+                    const globalIdx = flatIndexMap.get(todo.id) ?? -1;
                     return (
                       <TaskRow
                         key={todo.id}
