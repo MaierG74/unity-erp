@@ -21,6 +21,7 @@
   - **Date Filtering:** The date range filter uses `order_date` if available, falling back to `created_at` for filtering. Filtering is done client-side after fetching all orders. The "From Date" and "To Date" pickers allow selecting a date range, and orders are filtered to show only those within the selected range. See `app/purchasing/purchase-orders/page.tsx:268-289` for the filtering logic.
 - **PO Details:** Review items, totals, suppliers; submit for approval; approve with Q number; receive items; view receipt history.
   - Page: `app/purchasing/purchase-orders/[id]/page.tsx:1` (page), `app/purchasing/purchase-orders/[id]/page.tsx:115` (fetch with joins), `app/purchasing/purchase-orders/[id]/page.tsx:201` (approve → send emails), `app/purchasing/purchase-orders/[id]/page.tsx:232` (submit for approval), `app/purchasing/purchase-orders/[id]/page.tsx:313` (receipt: total_received), `app/purchasing/purchase-orders/[id]/page.tsx:346` (receipt: inventory), `app/purchasing/purchase-orders/[id]/page.tsx:528` (status flags, UI state), `app/purchasing/purchase-orders/[id]/page.tsx:720` (receipt history section).
+  - Layout: the detail page now prioritizes `Order Items` first, places `Receipt History` immediately after it, and renders the remaining sections collapsed by default. `Attachments` stays near the bottom with a compact upload dropzone so supporting files do not dominate the page.
   - **Sticky Header:** Uses the "Page-Level Sticky Header" pattern (see `docs/overview/STYLE_GUIDE.md`) with dynamic offset calculation to position the blue header bar flush below the navbar. Implementation: `app/purchasing/purchase-orders/[id]/page.tsx:1078` (header), `app/purchasing/purchase-orders/[id]/page.module.css:1` (styles), `app/purchasing/purchase-orders/[id]/page.tsx:584` (offset calculation).
 - **Create PO (manual):** Multi-line form to select components, pick supplier per-line, and set quantities/notes.
   - Page: `app/purchasing/purchase-orders/new/page.tsx:1` (page wrapper)
@@ -75,6 +76,11 @@
   - Payload: `{ supplier_id, line_items: [{ supplier_component_id, order_quantity, component_id, quantity_for_order, quantity_for_stock, customer_order_id }] }`.
   - UI builds one payload per supplier. Each line item can be optionally linked to a specific `customer_order_id`. If linked, `quantity_for_order` is set; otherwise, it defaults to `quantity_for_stock`.
   - Entry point: `components/features/purchasing/new-purchase-order-form.tsx:210`.
+- Shared draft workspace (repo implementation landed 2026-03-06; migration still needs to be applied before rollout):
+  - Manual PO composition now targets `purchase_order_drafts` + `purchase_order_draft_lines` instead of browser-only session storage.
+  - Drafts are scoped by `org_id`, shared across users inside the same organization, and autosaved through the `save_purchase_order_draft` RPC so header + lines + version bump happen atomically.
+  - Operators can open an existing shared draft, rename it, discard it, or continue editing from another workstation/browser after sign-in.
+  - Successful PO creation marks the draft `converted` via `set_purchase_order_draft_status`; incomplete work no longer needs to live in `purchase_orders`.
 
 **Create POs From Sales Order**
 
@@ -119,6 +125,7 @@
   - Show success state with PDF download and email notification options. The PDF generation fetches company settings (logo, address) from `quote_company_settings` to ensure correct branding.
 - **Auto-refresh:** After receiving stock, the page automatically updates without manual refresh. The mutation invalidates and refetches queries with `refetchOnMount: true` and `staleTime: 0` configured on the purchase order query. Both inline per-row receipts (`receiveOneMutation`) and bulk receipts (`receiptMutation`) trigger immediate refetch of active queries.
 - Receipt history renders under the PO with all receipts per line: `app/purchasing/purchase-orders/[id]/page.tsx:760`. Detail page implementation lives in `components/features/purchasing/order-detail.tsx`.
+- Receiving guardrails: the PO detail page and bulk receive modal now detect allocation/data mismatches before calling the receipt RPC. If a line has allocation rows whose totals do not equal the supplier-order quantity, the UI shows a plain-English warning and blocks receiving for that line until the `For Order` allocation is corrected.
 - Deployment: apply `supabase/migrations/20251107_process_supplier_receipt.sql` via the Supabase CLI (`supabase db push` after linking the project) or run the script directly in SQL to enable the RPC before deploying updated UI.
 - Component picker: `components/features/purchasing/new-purchase-order-form.tsx` now uses an async-friendly search box powered by `react-select`. Typing filters by component code or description, selecting a result resets the supplier dropdown to avoid stale matches, and the input supports clearing selections.
 
@@ -135,6 +142,7 @@
 **Types**
 
 - Primary types used across UI: `types/purchasing.ts:57` (`PurchaseOrder`), `types/purchasing.ts:20` (`SupplierOrder`), `types/purchasing.ts:30` (`PurchaseOrder.purchase_order_id` nullable usage in some contexts), plus Zod form types in the new PO form.
+- Shared draft helpers/types: `types/purchasing.ts` now also defines `PurchaseOrderDraftStatus` / `PurchaseOrderDraft` / `PurchaseOrderDraftLine`, and `lib/client/purchase-order-drafts.ts` handles fetch/save/status transitions for the shared draft workspace.
 
 **Security & Auth**
 
@@ -152,6 +160,8 @@
 - Deploy `process_supplier_order_receipt` everywhere so we can eventually remove the manual fallback logic from the UI.
 - `schema.txt` may be out of sync with `supplier_orders.purchase_order_id` addition; the script adds it, but `schema.txt` does not show it in the first definition block. Align schema snapshot.
 - Validation: Prevent receiving quantities > remaining; UI enforces `max` but add server-side checks in RPCs.
+- Historical allocation repair: pre-`2026-02-24` supplier orders can exist with allocation rows whose totals do not match the supplier-order quantity. Production migration `20260303145040_backfill_open_underallocated_supplier_order_stock_rows.sql` backfills the missing remainder to a stock allocation row for still-open lines so receiving does not fail with `receipt exceeds allocation cap`.
+- Shared manual-PO drafts: repo support for `purchase_order_drafts` / `purchase_order_draft_lines` and Supabase autosave landed on 2026-03-06, and production now has `20260306161654_purchase_order_shared_drafts.sql` applied. Complete rollout verification in remaining target environments before treating backend-backed draft recovery as fully shipped everywhere.
 - Resolved — Receiving insert bug: `receiveStock` in `app/purchasing/purchase-orders/[id]/page.tsx` now mirrors the working `OrderDetail` logic. It looks up the component first, omits the sales‑order FK when inserting into `inventory_transactions`, records the receipt, updates on‑hand inventory, and recomputes `total_received` via `update_order_received_quantity` (with manual fallback).
 - Resolved — Purchase order detail page auto-refresh: Added `refetchOnMount: true` and `staleTime: 0` to the purchase order query, and updated receipt mutations to use `refetchQueries` with `type: 'active'` to ensure the page updates immediately after receiving stock without manual refresh.
 - Resolved — "Owing" column added: The Order Items table now displays Ordered, Received, and Owing columns. Owing shows `order_quantity - total_received` with orange highlighting when > 0, making it easy to see remaining stock to receive.
