@@ -6,7 +6,25 @@ This repository is being actively migrated to **multi-tenant** (organization/ten
 1. Read `docs/README.md` and locate the canonical area docs for the feature.
 2. Check `docs/overview/todo-index.md` for active tasks and source docs.
 3. Apply organization scoping (`org_id`) and verify access behavior under RLS.
-4. Update the relevant docs before marking the work done.
+4. Update the canonical feature/domain docs before marking the work done.
+
+## Branch Workflow
+- `main` is release-only. Do not use it as the default branch for ongoing feature work.
+- Use a dedicated short-lived branch for each task.
+- If local work, cloud Codex, and cloud Claude are running at the same time, each must use a different branch.
+- Branch names should use the `codex/` prefix and clearly describe the worker and task, for example:
+  - `codex/local-purchasing-fix`
+  - `codex/cloud-codex-assistant-routing`
+  - `codex/cloud-claude-docs-purchasing`
+- Treat anything going to `main` as a release slice: only move reviewed, production-safe changes.
+
+## Documentation Update Rules
+- Always update the canonical doc for the feature or domain you changed.
+- Do not update shared summary/index docs such as `docs/README.md` or `docs/overview/todo-index.md` unless one of these is true:
+  - the task status materially changed
+  - a new workstream or source doc was introduced
+  - you are doing release or migration reconciliation
+- Prefer release-time reconciliation for shared index docs when multiple branches are active, to reduce merge conflicts.
 
 ## Canonical Docs (start here)
 - Documentation index: `docs/README.md`
