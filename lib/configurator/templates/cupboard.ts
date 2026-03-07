@@ -25,7 +25,7 @@ import { DEFAULT_CUPBOARD_CONFIG } from './types';
 export function generateCupboardParts(config: CupboardConfig): CutlistPart[] {
   const { width: W, height: H, depth: D, materialThickness: T } = config;
   const { shelfCount, doorStyle, hasBack, backMaterialThickness: BT } = config;
-  const { doorGap, shelfSetback, adjusterHeight, backSlotDepth } = config;
+  const { doorGap, shelfSetback, adjusterHeight, backSlotDepth, backRecess } = config;
   const { topOverhangSides, topOverhangBack, baseOverhangSides, baseOverhangBack } = config;
 
   const T2 = T * 2; // 32mm laminated thickness
@@ -110,7 +110,7 @@ export function generateCupboardParts(config: CupboardConfig): CutlistPart[] {
 
   // ── SHELVES ──
   if (shelfCount > 0) {
-    const shelfDepth = carcassDepth - shelfSetback - (hasBack ? BT : 0);
+    const shelfDepth = carcassDepth - shelfSetback - (hasBack ? BT + backRecess : 0);
     if (shelfDepth > 0 && internalWidth > 0) {
       parts.push({
         id: nextId(),

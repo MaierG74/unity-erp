@@ -423,28 +423,60 @@ export function DataTable<T extends { [key: string]: any }>({
         </Table>
       </div>
 
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-muted-foreground">
-          Page {pageIndex + 1} of {pageCount}
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handlePageIndexChange(Math.max(0, pageIndex - 1))}
-            disabled={pageIndex === 0}
-          >
-            Previous
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handlePageIndexChange(Math.min(pageCount - 1, pageIndex + 1))}
-            disabled={pageIndex === pageCount - 1}
-          >
-            Next
-          </Button>
-        </div>
+      <div
+        className={`flex items-center px-3 py-2.5 sm:px-4 ${
+          pageCount <= 1 ? "justify-center gap-2" : "justify-between"
+        }`}
+      >
+        {pageCount <= 1 ? (
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handlePageIndexChange(Math.max(0, pageIndex - 1))}
+              disabled={pageIndex === 0}
+              className="disabled:opacity-35"
+            >
+              Previous
+            </Button>
+            <div className="min-w-24 text-center text-sm text-muted-foreground">
+              Page {pageIndex + 1} of {pageCount}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handlePageIndexChange(Math.min(pageCount - 1, pageIndex + 1))}
+              disabled={pageIndex === pageCount - 1}
+              className="disabled:opacity-35"
+            >
+              Next
+            </Button>
+          </>
+        ) : (
+          <>
+            <div className="text-sm text-muted-foreground">
+              Page {pageIndex + 1} of {pageCount}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handlePageIndexChange(Math.max(0, pageIndex - 1))}
+                disabled={pageIndex === 0}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handlePageIndexChange(Math.min(pageCount - 1, pageIndex + 1))}
+                disabled={pageIndex === pageCount - 1}
+              >
+                Next
+              </Button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

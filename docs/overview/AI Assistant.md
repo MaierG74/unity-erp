@@ -59,6 +59,136 @@ These map to current tables (from Supabase) like `components`, `inventory`, `inv
 - Slack/Email Summaries (later phase)
   - “Every morning at 8am, send a summary of late POs and low stock” → scheduled queries + webhook/email.
 
+### Prototype Status (2026-03-06)
+- A first UI shell now exists as a floating assistant launcher rendered from the shared app layout.
+- The first structured assistant card is now live for production staffing answers, so the dock can render a compact table with metrics instead of only plain-text chat output.
+- Structured assistant table cards are now live for production staffing, unassigned production work, inventory snapshot answers, open-order answers, late-order answers, low-stock answers, due-this-week order answers, supplier follow-up answers, supplier-order-by-item answers, next-delivery answers, late-supplier-order answers, manufacturing-progress answers, manufacturing-status answers, and latest-customer-order answers, and the first structured chart card is now live for "orders last 7 days" trend questions, so the dock can render compact operational summaries instead of only plain-text chat output.
+- The chat dock now gives these cards clearer visual hierarchy with domain-tinted headers, stronger metric tiles, status badges, and cleaner row treatment so operational answers read more like mini dashboards than raw tables.
+- Card actions can now expose clickable record links for high-value answers like recent customer orders, so the assistant can open the matching order directly instead of only naming it in chat text.
+- Current prototype behavior is intentionally narrow:
+  - Unity-only scope
+  - no general web/world knowledge
+  - no hallucinated answers
+  - if no trusted tool is available, the assistant says "I don't know" instead of guessing
+  - request interpretation is now model-assisted with `gpt-5-mini`, but verified answers still come only from trusted Unity data tools
+- Live read-only tools now shipped:
+  - inventory snapshot questions from the assistant chat dock
+  - operational summary questions for open customer orders, due-this-week orders, late orders, and below-reorder inventory
+  - customer-scoped operational summaries and short order lists for prompts like "How many open orders for Office Group?", "Show open orders for Office Group", "Which orders are due this week for Typestar?", and "Which orders are late for Typestar?"
+  - per-order blocker summary using the existing component shortfall RPC where order component data exists
+  - product and order manufacturing status questions for prompts like "Has product TEST-002 been manufactured?", "Who manufactured TEST-002?", "When was TEST-002 completed?", "Has order TEST-LC-001 been manufactured?", and "Who completed order Test5566?"
+  - production-list summaries for prompts like "Which orders are still in production?", "Which orders finished this week?", "Who is working on orders in production?", and "Which orders have unassigned work?"
+  - a structured table card for production-staffing answers, with summary metrics and per-order staff assignment rows inside the chat dock
+  - a structured table card for unassigned production work, showing which active orders still need staff assignment
+  - a structured card for inventory snapshot answers, including on-hand, reserved, available, and on-order context from the same verified component snapshot
+  - a structured table card for open customer orders, showing order, customer, due date, and status rows for either the next due sample or customer-scoped list requests
+  - a structured table card for late orders, showing due date and days-late ranking
+  - a structured table card for due-this-week orders, showing current-week delivery commitments
+  - a structured chart card for order-creation trends over the last 7 days, showing daily counts, total orders, average per day, and busiest day
+  - a structured table card for latest-customer-order lookups, showing the newest matching order, recent order history, and direct open-order actions
+  - a structured table card for low-stock items, showing on-hand, reorder, and shortage values
+  - a structured table card for supplier follow-up, showing which open supplier lines need chasing first
+  - a structured table card for supplier orders by item, showing supplier, status, ordered date, and outstanding quantities for the requested component
+  - a structured card for next-delivery lookups, showing either the verified ETA set or the open supplier lines when no ETA is recorded
+  - a structured card for late supplier orders, including the explicit no-ETA and no-late-lines states
+  - a structured card for manufacturing progress, showing completion percentages, quantities, open job cards, and recent verified completions for products or orders
+  - a structured card for manufacturing status, showing latest completion, completed-by, and active/completed job-card state for products or orders
+  - order production-progress questions for prompts like "Show production progress for order TEST-LC-001" and "How far along is order Test5566?"
+  - purchasing item lookups for open supplier orders and next-delivery checks
+  - purchasing-wide follow-up summary for open supplier lines that are old or missing verified ETA data
+  - supplier lateness checks that explicitly refuse to guess when no verified ETA exists
+  - component demand questions for "which orders need this item?" and "do we have enough for open demand?"
+  - examples:
+    - "How much of 400mm Runner WHT do we have in stock?"
+    - "How much of 400mm Runner WHT do we have on order?"
+    - "How much of WID2 is reserved?"
+    - "How many open customer orders do we have?"
+    - "How many open orders for Office Group?"
+    - "What was the last order from Office Group?"
+    - "Show open orders for Office Group"
+    - "Which orders are due this week for Typestar?"
+    - "Which orders are late for Typestar?"
+    - "Has product TEST-002 been manufactured?"
+    - "Who manufactured TEST-002?"
+    - "When was TEST-002 completed?"
+    - "Has order TEST-LC-001 been manufactured?"
+    - "Who completed order Test5566?"
+    - "When was order Test5566 completed?"
+    - "Which orders are still in production?"
+    - "Who is working on orders in production?"
+    - "Which orders have unassigned work?"
+    - "Which orders finished this week?"
+    - "Show production progress for order TEST-LC-001"
+    - "How far along is order Test5566?"
+    - "For Typestar order number 1841, do we have all the components?"
+    - "Which orders are due this week?"
+    - "How many orders did we create in the last 7 days?"
+    - "What were last week's orders?"
+    - "Which orders are late?"
+    - "Which items are below reorder level?"
+    - "What is blocking order TEST-LC-001?"
+    - "Which supplier orders need follow-up?"
+    - "Which supplier orders are late?"
+    - "Which supplier orders include 400mm Runner WHT?"
+    - "When is the next delivery for 400mm Runner WHT?"
+    - "Which customer orders need WID2?"
+    - "Do we have enough WID2 for open demand?"
+  - current verified fields:
+    - on hand
+    - reserved
+    - available
+    - on order
+    - received on open supplier lines
+    - open supplier order count
+    - open purchase order count
+    - supplier breakdown
+    - reservation breakdown
+    - open customer order count
+    - overdue order count
+    - due-this-week order count
+    - late order list with days-late ranking
+    - short open-order list by customer
+    - open-order status breakdown
+    - below-reorder item count
+    - per-order blocked component count
+    - per-order waiting-on-deliveries component count
+    - open supplier line list by item
+    - open purchase-order count by item
+    - explicit supplier ETA, but only when a supplier follow-up response has a recorded `expected_delivery_date`
+    - follow-up supplier line count, oldest open supplier lines, and supplier chase ranking
+    - open order count requiring a component
+    - tracked open demand quantity by component
+    - ready-now / waiting-on-deliveries / blocked-now demand coverage by component
+    - linked product manufacturing completion status
+    - latest linked manufacturing completion date
+    - latest linked completing staff member
+    - active linked job-card count for in-production checks
+    - order-level manufacturing completion status
+    - order-level latest verified completion date
+    - order-level latest completing staff member
+    - order-level active vs completed job-card counts
+    - list of orders with active manufacturing job cards
+    - current staff assignments across active manufacturing job cards, including unassigned work
+    - list of active orders with unassigned production job cards
+    - list of orders completed in the current week
+    - order-level completed quantity vs planned quantity progress
+    - order-level progress percentage using linked job-card quantities
+- Current data caveat:
+  - most existing customer orders do not yet have an explicit order status row linked in production data
+  - the assistant currently treats missing order status as open, matching the current Orders UI behavior instead of hiding those orders
+  - order blocker answers depend on `order_details` + BOM/component requirement data being present for that order
+  - current supplier follow-up data often has no explicit `expected_delivery_date`, so next-delivery questions intentionally return "I don't know" rather than guessing from PO dates
+  - current supplier "late order" questions also intentionally return "I don't know" when no verified `expected_delivery_date` exists on the open supplier lines, even if some lines are very old
+  - current component-demand answers only cover orders that have verifiable BOM / requirement data for that component; if no verified demand rows exist, the assistant answers conservatively instead of inferring
+  - current product manufacturing answers only work where `job_card_items.product_id` is populated on the linked manufacturing records; some older completed job-card rows still have `product_id = null`, so the assistant will refuse to infer completion history from partial data
+  - order-level manufacturing answers are broader than product-level answers because `job_cards.order_id` is populated more consistently than `job_card_items.product_id`; however, per-product details inside older order history may still be incomplete
+  - the model layer is limited to choosing from known Unity assistant actions and extracting refs like customer / component / order; it does not answer from model memory
+- Current limitation:
+  - documentation/RAG, broader business metrics, and audit logging are still pending
+  - the current assistant route is still a curated prototype, not a freeform NLQ system
+  - model routing currently uses live API calls and should be monitored for latency/cost before broader rollout
+- Next backend milestone: add more trusted read-only tools, starting with richer shortage drilldowns, supplier follow-up drilldowns by supplier/item, and doc-backed "how do I...?" answers.
+
 ### Digests (Scheduled Summaries) — Explained
 Purpose: automated, read-only summaries sent on a schedule (e.g., daily at 8am) to keep teams aligned without opening the app. These DO NOT modify data.
 
@@ -509,6 +639,11 @@ from public.billoflabour bl;
 - Build a server-side assistant endpoint `POST /api/assistant` with streaming.
 - Implement tool catalog for read queries listed above; enforce RLS by using user session.
 - Add a small chat dock + command palette; add page-scoped context providers.
+- Current delivered slice:
+  - floating assistant launcher available in the shared authenticated layout
+  - Unity-only scope enforcement with explicit "I don't know" fallback
+  - trusted inventory snapshot tool backed by Supabase reads under the signed-in user's session
+  - trusted operational summary tools for open customer orders, due-this-week orders, and low-stock questions
 {{ ... }}
 - Logging & analytics: prompt, tools, row counts, latency.
 

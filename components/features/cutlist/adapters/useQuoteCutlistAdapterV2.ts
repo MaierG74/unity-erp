@@ -1,9 +1,12 @@
 'use client';
 
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import type { CutlistCalculatorData } from '@/components/features/cutlist/CutlistCalculator';
 import type { CompactPart, BoardMaterial, EdgingMaterial } from '@/components/features/cutlist/primitives';
 import type { SheetBillingOverride, CutlistLineRefs } from '@/lib/cutlist/types';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
+import { cutlistDataToQuoteLayout } from '@/lib/cutlist/calculatorData';
+import { useDebouncedAsyncCallback } from './shared';
 
 // =============================================================================
 // Types
@@ -44,13 +47,11 @@ export interface QuoteCutlistLayoutV2 {
  * starts fresh with pinned material defaults.
  */
 export function useQuoteCutlistAdapterV2(quoteItemId: string | null | undefined) {
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
   const load = useCallback(async (): Promise<QuoteCutlistLayoutV2 | null> => {
     if (!quoteItemId) return null;
 
     try {
-      const res = await fetch(`/api/quote-items/${quoteItemId}/cutlist`);
+      const res = await authorizedFetch(`/api/quote-items/${quoteItemId}/cutlist`);
       if (res.status === 204) return null; // No saved cutlist
       if (!res.ok) {
         console.warn('Failed to load quote cutlist', res.status);
@@ -74,23 +75,10 @@ export function useQuoteCutlistAdapterV2(quoteItemId: string | null | undefined)
   const save = useCallback(async (data: CutlistCalculatorData, lineRefs?: CutlistLineRefs): Promise<void> => {
     if (!quoteItemId) return;
 
-    const layout: QuoteCutlistLayoutV2 = {
-      version: 2,
-      parts: data.parts,
-      primaryBoards: data.primaryBoards,
-      backerBoards: data.backerBoards,
-      edging: data.edging,
-      kerf: data.kerf,
-      optimizationPriority: data.optimizationPriority,
-      sheetOverrides: data.sheetOverrides,
-      globalFullBoard: data.globalFullBoard,
-      backerSheetOverrides: data.backerSheetOverrides,
-      backerGlobalFullBoard: data.backerGlobalFullBoard,
-      lineRefs,
-    };
+    const layout = cutlistDataToQuoteLayout(data, lineRefs);
 
     try {
-      const res = await fetch(`/api/quote-items/${quoteItemId}/cutlist`, {
+      const res = await authorizedFetch(`/api/quote-items/${quoteItemId}/cutlist`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ layout }),
@@ -104,15 +92,7 @@ export function useQuoteCutlistAdapterV2(quoteItemId: string | null | undefined)
     }
   }, [quoteItemId]);
 
-  /** Debounced save — call on every data change */
-  const debouncedSave = useCallback((data: CutlistCalculatorData, lineRefs?: CutlistLineRefs) => {
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
-    saveTimeoutRef.current = setTimeout(() => {
-      save(data, lineRefs);
-    }, 500);
-  }, [save]);
+  const { debounced: debouncedSave, cancelPending } = useDebouncedAsyncCallback(save, 500);
 
-  return { load, save, debouncedSave };
+  return { load, save, debouncedSave, cancelPending };
 }

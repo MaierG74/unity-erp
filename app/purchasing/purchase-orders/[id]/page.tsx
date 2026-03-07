@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, use, useState, useEffect, useMemo, useLayoutEffect, useRef } from 'react';
+import { Fragment, ReactNode, use, useState, useEffect, useMemo, useLayoutEffect, useRef } from 'react';
 import { useToast } from '@/components/ui/use-toast';
 import Link from 'next/link';
 import { useRouter, useSearchParams, notFound } from 'next/navigation';
@@ -31,6 +31,7 @@ import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import styles from './page.module.css';
 import { fetchPOAttachments, POAttachment } from '@/lib/db/purchase-order-attachments';
 import POAttachmentManager from '@/components/features/purchasing/POAttachmentManager';
@@ -74,6 +75,68 @@ function StatusBadge({ status, className }: { status: string; className?: string
     >
       {status}
     </Badge>
+  );
+}
+
+function SectionCard({
+  title,
+  description,
+  open,
+  onOpenChange,
+  badge,
+  headerActions,
+  children,
+  className,
+  contentClassName,
+}: {
+  title: string;
+  description?: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  badge?: ReactNode;
+  headerActions?: ReactNode;
+  children: ReactNode;
+  className?: string;
+  contentClassName?: string;
+}) {
+  return (
+    <Collapsible open={open} onOpenChange={onOpenChange}>
+      <Card className={className}>
+        <CardHeader className="gap-3 pb-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="flex w-full items-start justify-between gap-3 text-left transition-colors hover:text-foreground/80 md:flex-1"
+              >
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CardTitle className="text-xl font-bold">{title}</CardTitle>
+                    {badge}
+                  </div>
+                  {description ? (
+                    <CardDescription className="text-sm">{description}</CardDescription>
+                  ) : null}
+                </div>
+                {open ? (
+                  <ChevronDown className="mt-1 h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="mt-1 h-4 w-4 text-muted-foreground" />
+                )}
+              </button>
+            </CollapsibleTrigger>
+            {headerActions ? (
+              <div className="flex flex-wrap items-center gap-2" onClick={(event) => event.stopPropagation()}>
+                {headerActions}
+              </div>
+            ) : null}
+          </div>
+        </CardHeader>
+        <CollapsibleContent>
+          <CardContent className={contentClassName}>{children}</CardContent>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
   );
 }
 
@@ -156,9 +219,29 @@ type SupplierOrderWithParent = SupplierOrder & {
   };
 };
 
-// Add new interfaces for receipt handling
-interface ReceiptFormData {
-  [key: string]: number;  // order_id -> quantity mapping
+function getAllocationTotal(links: CustomerOrderLink[] | undefined): number {
+  return (links || []).reduce(
+    (sum, link) => sum + Number(link.quantity_for_order || 0) + Number(link.quantity_for_stock || 0),
+    0
+  );
+}
+
+function getAllocationIssue(order: SupplierOrder): string | null {
+  const links = order.customer_order_links || [];
+  if (links.length === 0) return null;
+
+  const allocationTotal = getAllocationTotal(links);
+  const expectedTotal = Number(order.order_quantity || 0);
+
+  if (Math.abs(allocationTotal - expectedTotal) < 0.000001) {
+    return null;
+  }
+
+  if (allocationTotal < expectedTotal) {
+    return `Only ${allocationTotal} of ${expectedTotal} item${expectedTotal === 1 ? '' : 's'} are allocated.`;
+  }
+
+  return `Allocations add up to ${allocationTotal}, but the line quantity is ${expectedTotal}.`;
 }
 
 // Interface for return form data
@@ -370,174 +453,6 @@ function validateQNumber(qNumber: string): boolean {
   return regex.test(qNumber);
 }
 
-// Add receipt function
-async function receiveStock(purchaseOrderId: string, receipts: ReceiptFormData) {
-  try {
-    // Start a Supabase transaction
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError) throw new Error('Could not get current user');
-
-    for (const [orderId, quantityReceived] of Object.entries(receipts)) {
-      if (quantityReceived <= 0) continue;
-
-      // 1. Fetch supplier order details for validation and component lookup
-      const { data: orderRow, error: orderFetchError } = await supabase
-        .from('supplier_orders')
-        .select('supplier_component_id, order_quantity, total_received')
-        .eq('order_id', orderId)
-        .single();
-
-      if (orderFetchError || !orderRow?.supplier_component_id) {
-        throw new Error(`Failed to get supplier order info: ${orderFetchError?.message || 'Order not found'}`);
-      }
-
-      // 1a. Validate quantity does not exceed remaining
-      const remaining = Math.max((orderRow.order_quantity || 0) - (orderRow.total_received || 0), 0);
-      if (quantityReceived > remaining) {
-        throw new Error(`Quantity exceeds remaining to receive (remaining: ${remaining}) for order ${orderId}`);
-      }
-
-      // 2. Resolve component from supplier component
-      const { data: componentData, error: componentError } = await supabase
-        .from('suppliercomponents')
-        .select('component_id')
-        .eq('supplier_component_id', orderRow.supplier_component_id)
-        .single();
-      if (componentError || !componentData?.component_id) {
-        throw new Error(`Failed to get component info: ${componentError?.message || 'Component not found'}`);
-      }
-      const componentId = componentData.component_id as number;
-
-      const receiptTimestamp = new Date().toISOString();
-
-      // Try the transactional RPC first; fall back to manual inserts if it is unavailable
-      const { error: rpcError } = await supabase.rpc('process_supplier_order_receipt', {
-        p_order_id: parseInt(orderId),
-        p_quantity: quantityReceived,
-        p_receipt_date: receiptTimestamp,
-      });
-
-      if (!rpcError) {
-        continue;
-      }
-
-      console.warn('process_supplier_order_receipt RPC failed, using manual fallback:', rpcError);
-
-      // 3. Ensure PURCHASE transaction type exists and get its ID
-      let purchaseTypeId: number | null = null;
-      const { data: typeData, error: typeError } = await supabase
-        .from('transaction_types')
-        .select('transaction_type_id')
-        .eq('type_name', 'PURCHASE')
-        .single();
-      if (typeError) {
-        const { data: insertData, error: insertError } = await supabase
-          .from('transaction_types')
-          .insert({ type_name: 'PURCHASE' })
-          .select('transaction_type_id')
-          .single();
-        if (insertError) {
-          throw new Error(`Failed to ensure PURCHASE transaction type: ${insertError.message}`);
-        }
-        purchaseTypeId = insertData.transaction_type_id as number;
-      } else {
-        purchaseTypeId = typeData.transaction_type_id as number;
-      }
-
-      // 4. Create inventory transaction (omit order_id; it refers to sales orders)
-      const { data: transactionData, error: transactionError } = await supabase
-        .from('inventory_transactions')
-        .insert({
-          component_id: componentId,
-          quantity: quantityReceived,
-          transaction_type_id: purchaseTypeId,
-          transaction_date: receiptTimestamp
-        })
-        .select('transaction_id')
-        .single();
-      if (transactionError) {
-        throw new Error(`Failed to create inventory transaction: ${transactionError.message}`);
-      }
-
-      // 5. Create receipt record
-      const { error: receiptError } = await supabase
-        .from('supplier_order_receipts')
-        .insert({
-          order_id: parseInt(orderId),
-          transaction_id: transactionData.transaction_id,
-          quantity_received: quantityReceived,
-          receipt_date: receiptTimestamp
-        });
-      if (receiptError) throw new Error(`Failed to create receipt record: ${receiptError.message}`);
-
-      // 6. Update inventory on-hand table
-      const { data: existingInventory, error: inventorySelectError } = await supabase
-        .from('inventory')
-        .select('inventory_id, quantity_on_hand')
-        .eq('component_id', componentId)
-        .single();
-      if (inventorySelectError && (inventorySelectError as any).code !== 'PGRST116') {
-        throw new Error(`Failed to check inventory: ${inventorySelectError.message}`);
-      }
-      if (existingInventory) {
-        const newQty = (existingInventory.quantity_on_hand || 0) + quantityReceived;
-        const { error: invUpdateError } = await supabase
-          .from('inventory')
-          .update({ quantity_on_hand: newQty })
-          .eq('inventory_id', existingInventory.inventory_id);
-        if (invUpdateError) throw new Error(`Failed to update inventory quantity: ${invUpdateError.message}`);
-      } else {
-        const { error: invInsertError } = await supabase
-          .from('inventory')
-          .insert({ component_id: componentId, quantity_on_hand: quantityReceived, location: null, reorder_level: 0 });
-        if (invInsertError) throw new Error(`Failed to create inventory record: ${invInsertError.message}`);
-      }
-
-      // 7. Recompute total_received and status via existing RPC; fallback to manual if unavailable
-      const { error: recomputeError } = await supabase.rpc('update_order_received_quantity', { order_id_param: parseInt(orderId) });
-      if (recomputeError) {
-        // Fallback: manual recompute (mirrors components/features/purchasing/order-detail.tsx)
-        const { data: receiptsData, error: receiptsError } = await supabase
-          .from('supplier_order_receipts')
-          .select('quantity_received')
-          .eq('order_id', parseInt(orderId));
-        if (receiptsError) throw new Error(`Failed to fetch receipts: ${receiptsError.message}`);
-        const totalReceived = (receiptsData || []).reduce((sum: number, r: any) => sum + (r.quantity_received || 0), 0);
-
-        const { data: soData, error: soError } = await supabase
-          .from('supplier_orders')
-          .select('order_quantity, status_id')
-          .eq('order_id', parseInt(orderId))
-          .single();
-        if (soError) throw new Error(`Failed to fetch order for status update: ${soError.message}`);
-
-        const { data: statusRows, error: statusErr } = await supabase
-          .from('supplier_order_statuses')
-          .select('status_id, status_name');
-        if (statusErr) throw new Error(`Failed to fetch status IDs: ${statusErr.message}`);
-        const statusMap = (statusRows || []).reduce((m: Record<string, number>, s: any) => {
-          m[s.status_name] = s.status_id; return m;
-        }, {} as Record<string, number>);
-
-        let newStatusId = soData.status_id;
-        if (totalReceived >= (soData.order_quantity || 0)) newStatusId = statusMap['Fully Received'] ?? newStatusId;
-        else if (totalReceived > 0) newStatusId = statusMap['Partially Received'] ?? newStatusId;
-
-        const { error: manualUpdateError } = await supabase
-          .from('supplier_orders')
-          .update({ total_received: totalReceived, status_id: newStatusId })
-          .eq('order_id', parseInt(orderId));
-        if (manualUpdateError) throw new Error(`Failed to update order totals: ${manualUpdateError.message}`);
-      }
-    }
-
-    return true;
-  } catch (error) {
-    console.error('Error in receiveStock:', error);
-    throw error;
-  }
-}
-
 // Add return function
 async function returnStock(purchaseOrderId: string, returns: ReturnFormData) {
   try {
@@ -599,7 +514,6 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
 
   const [qNumber, setQNumber] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [receiptQuantities, setReceiptQuantities] = useState<ReceiptFormData>({});
   const [returnQuantities, setReturnQuantities] = useState<ReturnFormData>({});
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -613,6 +527,13 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const [bulkReceiveModalOpen, setBulkReceiveModalOpen] = useState(false);
   const [selectedOrderForReceive, setSelectedOrderForReceive] = useState<SupplierOrderWithParent | null>(null);
   const [autoReceiveHandled, setAutoReceiveHandled] = useState(false);
+  const [summaryExpanded, setSummaryExpanded] = useState(false);
+  const [supplierInfoExpanded, setSupplierInfoExpanded] = useState(false);
+  const [orderItemsExpanded, setOrderItemsExpanded] = useState(true);
+  const [attachmentsExpanded, setAttachmentsExpanded] = useState(false);
+  const [receiptHistoryExpanded, setReceiptHistoryExpanded] = useState(false);
+  const [returnGoodsExpanded, setReturnGoodsExpanded] = useState(false);
+  const [returnHistoryExpanded, setReturnHistoryExpanded] = useState(false);
   
   // Edit mode state
   const [isEditMode, setIsEditMode] = useState(false);
@@ -1427,79 +1348,6 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     },
   });
 
-  // Add receipt mutation
-  const receiptMutation = useMutation({
-    mutationFn: () => receiveStock(id, receiptQuantities),
-    onSuccess: async () => {
-      // Invalidate all relevant queries first
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['purchaseOrder', id] }),
-        queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] }),
-        queryClient.invalidateQueries({ queryKey: ['purchase-orders'] }),
-        queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] }),
-        queryClient.invalidateQueries({ queryKey: ['inventory'] }),
-        queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] }),
-      ]);
-      // Force immediate refetch of the current purchase order - this is critical for the page to update
-      await queryClient.refetchQueries({
-        queryKey: ['purchaseOrder', id],
-        type: 'active' // Only refetch active queries
-      });
-      // Also refetch list queries if they're active
-      await Promise.all([
-        queryClient.refetchQueries({ queryKey: ['purchaseOrders'], type: 'active' }),
-        queryClient.refetchQueries({ queryKey: ['purchase-orders'], type: 'active' }),
-      ]);
-      // Reset the receipt quantities
-      setReceiptQuantities({});
-      // Clear any errors
-      setError(null);
-    },
-    onError: (error: Error) => {
-      setError(`Failed to receive stock: ${error.message}`);
-    },
-  });
-
-  // Inline per-row receipt mutation
-  const receiveOneMutation = useMutation({
-    mutationFn: (payload: { orderId: string; qty: number }) =>
-      receiveStock(id, { [payload.orderId]: payload.qty }),
-    onSuccess: async () => {
-      // Invalidate all relevant queries first
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['purchaseOrder', id] }),
-        queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] }),
-        queryClient.invalidateQueries({ queryKey: ['purchase-orders'] }),
-        queryClient.invalidateQueries({ queryKey: ['all-purchase-orders'] }),
-        queryClient.invalidateQueries({ queryKey: ['inventory'] }),
-        queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] }),
-      ]);
-      // Force immediate refetch of the current purchase order - this is critical for the page to update
-      await queryClient.refetchQueries({
-        queryKey: ['purchaseOrder', id],
-        type: 'active' // Only refetch active queries
-      });
-      // Also refetch list queries if they're active
-      await Promise.all([
-        queryClient.refetchQueries({ queryKey: ['purchaseOrders'], type: 'active' }),
-        queryClient.refetchQueries({ queryKey: ['purchase-orders'], type: 'active' }),
-      ]);
-      // Clear the receipt quantity for this specific order
-      setReceiptQuantities(prev => {
-        const updated = { ...prev };
-        const orderIdToClear = Object.keys(prev).find(key => prev[key] > 0);
-        if (orderIdToClear) {
-          delete updated[orderIdToClear];
-        }
-        return updated;
-      });
-      setError(null);
-    },
-    onError: (error: Error) => {
-      setError(`Failed to receive stock: ${error.message}`);
-    },
-  });
-
   // Return mutation
   const returnMutation = useMutation({
     mutationFn: () => returnStock(id, returnQuantities),
@@ -1806,20 +1654,6 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     approveMutation.mutate({ qNumber });
   };
 
-  // Handle receipt quantity change
-  const handleReceiptQuantityChange = (orderId: string, quantity: string) => {
-    setReceiptQuantities(prev => ({
-      ...prev,
-      [orderId]: parseInt(quantity) || 0
-    }));
-  };
-
-  // Handle submit receipts
-  const handleSubmitReceipts = () => {
-    setError(null);
-    receiptMutation.mutate();
-  };
-
   // Handle return quantity change
   const handleReturnQuantityChange = (orderId: string, quantity: string) => {
     setReturnQuantities(prev => ({
@@ -1942,6 +1776,27 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const totalReceived = activeOrders.reduce((sum, order) => {
     return sum + (order.total_received || 0);
   }, 0);
+  const supplierNames = Array.from(new Set(
+    purchaseOrder.supplier_orders?.map((order) => order.supplier_component?.supplier?.name).filter(Boolean) || []
+  ));
+  const totalReceiptEntries = purchaseOrder.supplier_orders?.reduce(
+    (sum, order) => sum + (order.receipts?.length || 0),
+    0
+  ) || 0;
+  const totalReturnEntries = purchaseOrder.supplier_orders?.reduce(
+    (sum, order) => sum + (order.returns?.length || 0),
+    0
+  ) || 0;
+  const allocationBlockedOrders = (purchaseOrder.supplier_orders || []).filter((order) => {
+    if (order.status_id === SO_STATUS.CANCELLED) return false;
+    const remainingToReceive = Math.max(0, order.order_quantity - (order.total_received || 0));
+    return remainingToReceive > 0 && getAllocationIssue(order) !== null;
+  });
+  const receivableOpenOrders = (purchaseOrder.supplier_orders || []).filter((order) => {
+    if (order.status_id === SO_STATUS.CANCELLED) return false;
+    const remainingToReceive = Math.max(0, order.order_quantity - (order.total_received || 0));
+    return remainingToReceive > 0 && getAllocationIssue(order) === null;
+  });
 
   return (
     <div className="space-y-6">
@@ -1975,9 +1830,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
               )}
               <span className="text-muted-foreground">•</span>
               <span className="text-sm font-medium text-muted-foreground">
-                {Array.from(new Set(
-                  purchaseOrder.supplier_orders?.map(o => o.supplier_component?.supplier?.name).filter(Boolean) || []
-                )).join(', ') || 'Supplier'}
+                {supplierNames.join(', ') || 'Supplier'}
               </span>
             </div>
             <p className="text-muted-foreground text-sm">Created {format(new Date(purchaseOrder.created_at), 'PPP')}</p>
@@ -1996,387 +1849,23 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           </Alert>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Order Summary</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+        {allocationBlockedOrders.length > 0 && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              {allocationBlockedOrders.length === 1 ? 'One line is' : `${allocationBlockedOrders.length} lines are`} blocked from receiving because the hidden order/stock allocation does not match the line quantity. Fix the line allocation before receiving more stock.
+            </AlertDescription>
+          </Alert>
+        )}
 
-              <div>
-                <p className="text-sm font-medium mb-1">Order Date</p>
-                <p>{purchaseOrder.order_date
-                  ? format(new Date(purchaseOrder.order_date), 'PPP')
-                  : 'Not specified'}</p>
-              </div>
-
-              <div>
-                <p className="text-sm font-medium mb-1">Status</p>
-                <StatusBadge status={getOrderStatus(purchaseOrder)} />
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <p className="text-sm font-medium">Notes</p>
-                  {(isDraft || isPendingApproval) && !isEditMode && !isEditingNotes && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 text-xs text-muted-foreground"
-                      onClick={() => {
-                        setInlineNotes(purchaseOrder.notes || '');
-                        setIsEditingNotes(true);
-                      }}
-                    >
-                      <Pencil className="h-3 w-3 mr-1" />
-                      Edit
-                    </Button>
-                  )}
-                </div>
-                {isEditMode ? (
-                  <Textarea
-                    value={editedNotes}
-                    onChange={(e) => setEditedNotes(e.target.value)}
-                    placeholder="Add notes..."
-                    className="min-h-[80px]"
-                  />
-                ) : isEditingNotes ? (
-                  <div className="space-y-2">
-                    <Textarea
-                      value={inlineNotes}
-                      onChange={(e) => setInlineNotes(e.target.value)}
-                      placeholder="Add notes..."
-                      className="min-h-[80px]"
-                      autoFocus
-                    />
-                    <div className="flex gap-2 justify-end">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setIsEditingNotes(false)}
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        size="sm"
-                        disabled={editPurchaseOrderMutation.isPending}
-                        onClick={() => {
-                          editPurchaseOrderMutation.mutate({ notes: inlineNotes }, {
-                            onSuccess: () => {
-                              setIsEditingNotes(false);
-                            },
-                          });
-                        }}
-                      >
-                        {editPurchaseOrderMutation.isPending ? (
-                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                        ) : (
-                          <Save className="h-3 w-3 mr-1" />
-                        )}
-                        Save
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="whitespace-pre-wrap">{purchaseOrder.notes || 'No notes'}</p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Supplier Info</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <p className="text-sm font-medium mb-1">Suppliers</p>
-                <div className="flex flex-wrap gap-2">
-                  {Array.from(new Set(purchaseOrder.supplier_orders?.map(
-                    order => order.supplier_component?.supplier?.name
-                  ) || [])).map((supplier, i) => (
-                    <Badge key={i} variant="outline">{String(supplier)}</Badge>
-                  ))}
-                </div>
-              </div>
-              {isApproved && (
-                <div className="text-sm text-muted-foreground">
-                  Approved on {purchaseOrder.approved_at ? format(new Date(purchaseOrder.approved_at), 'PPP') : 'Unknown'}
-                </div>
-              )}
-
-              {/* Email History & Follow-up - Collapsible */}
-              {isApproved && ((emailHistory && emailHistory.length > 0) || purchaseOrder.supplier_orders?.some(o => 
-                (o.order_quantity - (o.total_received || 0)) > 0
-              )) && (
-                <div className="pt-2 border-t">
-                  <button
-                    onClick={() => setEmailHistoryExpanded(!emailHistoryExpanded)}
-                    className="w-full flex items-center justify-between text-sm font-medium hover:bg-muted/50 rounded-md py-1 px-1 -mx-1"
-                  >
-                    <span className="flex items-center gap-2">
-                      <Mail className="h-4 w-4" />
-                      Email Activity
-                      {emailHistory && emailHistory.length > 0 && (
-                        <Badge variant="secondary" className="text-[10px] h-5">
-                          {emailHistory.length}
-                        </Badge>
-                      )}
-                      {emailHistory && emailHistory.some(e => e.delivery_status === 'bounced' || e.delivery_status === 'complained') && (
-                        <Badge variant="destructive" className="text-[10px] h-5">
-                          Issues
-                        </Badge>
-                      )}
-                      {followUpResponses && followUpResponses.some(f => f.response?.responded_at) && (
-                        <Badge variant="default" className="text-[10px] h-5 bg-green-600">
-                          {followUpResponses.filter(f => f.response?.responded_at).length} response{followUpResponses.filter(f => f.response?.responded_at).length !== 1 ? 's' : ''}
-                        </Badge>
-                      )}
-                    </span>
-                    {emailHistoryExpanded ? (
-                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    )}
-                  </button>
-                  
-                  {emailHistoryExpanded && (
-                    <div className="mt-2 space-y-3">
-                      {/* Alert for bounced/failed emails */}
-                      {emailHistory && emailHistory.some(e => e.delivery_status === 'bounced' || e.delivery_status === 'complained') && (
-                        <Alert variant="destructive" className="py-2">
-                          <AlertCircle className="h-4 w-4" />
-                          <AlertDescription className="text-xs">
-                            Some emails bounced or were marked as spam. Please verify email addresses and try resending.
-                          </AlertDescription>
-                        </Alert>
-                      )}
-
-                      {/* Supplier Responses */}
-                      {followUpResponses && followUpResponses.some(f => f.response?.responded_at) && (
-                        <div className="space-y-2">
-                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Supplier Responses</p>
-                          {followUpResponses.filter(f => f.response?.responded_at).map((followUp) => {
-                            const resp = followUp.response;
-                            const statusColors: Record<string, string> = {
-                              on_track: 'bg-green-100 border-green-300 text-green-800',
-                              delayed: 'bg-amber-100 border-amber-300 text-amber-800',
-                              issue: 'bg-red-100 border-red-300 text-red-800',
-                            };
-                            const statusLabels: Record<string, string> = {
-                              on_track: 'On Track',
-                              delayed: 'Delayed',
-                              issue: 'Issue',
-                            };
-                            return (
-                              <div
-                                key={followUp.id}
-                                className={cn(
-                                  "text-xs p-2 rounded-md border",
-                                  statusColors[resp?.status || ''] || 'bg-blue-50 border-blue-200'
-                                )}
-                              >
-                                <div className="flex items-center justify-between">
-                                  <span className="font-medium">{followUp.supplier_name}</span>
-                                  <Badge variant="outline" className={cn("text-[10px]", statusColors[resp?.status || ''])}>
-                                    {statusLabels[resp?.status || ''] || resp?.status || 'Responded'}
-                                  </Badge>
-                                </div>
-                                {resp?.expected_delivery_date && (
-                                  <div className="text-muted-foreground mt-1">
-                                    Expected: {format(new Date(resp.expected_delivery_date), 'PP')}
-                                  </div>
-                                )}
-                                {resp?.notes && (
-                                  <div className="mt-1 italic">"{resp.notes}"</div>
-                                )}
-                                {/* Per-item responses */}
-                                {resp?.line_item_responses && Array.isArray(resp.line_item_responses) && resp.line_item_responses.some((item: any) => item.item_status || item.item_notes || item.item_expected_date) && (
-                                  <div className="mt-2 space-y-1.5">
-                                    {(resp.line_item_responses as any[]).map((item: any, idx: number) => {
-                                      const itemStatusColors: Record<string, string> = {
-                                        on_track: 'text-green-700',
-                                        shipped: 'text-blue-700',
-                                        delayed: 'text-amber-700',
-                                        issue: 'text-red-700',
-                                      };
-                                      const itemStatusLabels: Record<string, string> = {
-                                        on_track: 'On Track',
-                                        shipped: 'Shipped',
-                                        delayed: 'Delayed',
-                                        issue: 'Issue',
-                                      };
-                                      return (
-                                        <div key={idx} className="flex items-start gap-2 pl-2 border-l-2 border-border/50">
-                                          <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2">
-                                              <span className="font-mono text-[10px]">{item.supplier_code || item.description}</span>
-                                              {item.item_status && (
-                                                <span className={`text-[10px] font-medium ${itemStatusColors[item.item_status] || ''}`}>
-                                                  {itemStatusLabels[item.item_status] || item.item_status}
-                                                </span>
-                                              )}
-                                              {item.item_expected_date && (
-                                                <span className="text-[10px] text-muted-foreground">
-                                                  ETA: {format(new Date(item.item_expected_date), 'PP')}
-                                                </span>
-                                              )}
-                                            </div>
-                                            {item.item_notes && (
-                                              <p className="text-[10px] text-muted-foreground italic mt-0.5">"{item.item_notes}"</p>
-                                            )}
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                                <div className="text-muted-foreground mt-1">
-                                  Responded: {resp?.responded_at ? format(new Date(resp.responded_at), 'PP · p') : 'Unknown'}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {/* Email History List with Delivery Status */}
-                      {emailHistory && emailHistory.length > 0 && (
-                        <div className="space-y-2">
-                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Emails Sent</p>
-                          <div className="space-y-2 max-h-32 overflow-y-auto">
-                            {emailHistory.map((email) => {
-                              const isBounced = email.delivery_status === 'bounced';
-                              const isDelivered = email.delivery_status === 'delivered';
-                              const isComplained = email.delivery_status === 'complained';
-                              const hasIssue = isBounced || isComplained;
-                              const emailTypeLabel = (() => {
-                                if (email.email_type === 'po_cancel') return 'PO Cancel';
-                                if (email.email_type === 'po_line_cancel') return 'Line Cancel';
-                                if (email.email_type === 'po_follow_up') return 'Follow-up';
-                                return 'PO Send';
-                              })();
-
-                              return (
-                                <div
-                                  key={email.email_id}
-                                  className={cn(
-                                    "text-xs p-2 rounded-md border",
-                                    hasIssue ? "bg-red-50 border-red-300 dark:bg-red-950/30 dark:border-red-800" :
-                                    isDelivered ? "bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800" :
-                                    email.status === 'sent' ? "bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800" :
-                                    "bg-red-50 border-red-200"
-                                  )}
-                                >
-                                  <div className="flex items-center justify-between gap-2">
-                                    <span className="font-medium truncate">
-                                      {email.supplier?.name || 'Unknown'}
-                                    </span>
-                                    <div className="flex items-center gap-1">
-                                      <Badge variant="outline" className="text-[10px]">
-                                        {emailTypeLabel}
-                                      </Badge>
-                                      {isBounced && (
-                                        <Badge variant="destructive" className="text-[10px]">
-                                          Bounced
-                                        </Badge>
-                                      )}
-                                      {isComplained && (
-                                        <Badge variant="destructive" className="text-[10px]">
-                                          Spam
-                                        </Badge>
-                                      )}
-                                      {isDelivered && (
-                                        <Badge className="text-[10px] bg-green-600">
-                                          Delivered
-                                        </Badge>
-                                      )}
-                                      {!hasIssue && !isDelivered && email.status === 'sent' && (
-                                        <Badge variant="secondary" className="text-[10px]">
-                                          Sent
-                                        </Badge>
-                                      )}
-                                      {email.status === 'failed' && (
-                                        <Badge variant="destructive" className="text-[10px]">
-                                          Failed
-                                        </Badge>
-                                      )}
-                                    </div>
-                                  </div>
-                                  <div className="text-muted-foreground mt-1">
-                                    To: {email.recipient_email}
-                                  </div>
-                                  {email.bounce_reason && (
-                                    <div className="text-red-600 dark:text-red-400 mt-1 text-[10px]">
-                                      Reason: {email.bounce_reason}
-                                    </div>
-                                  )}
-                                  <div className="text-muted-foreground">
-                                    {format(new Date(email.sent_at), 'PP · p')}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Activity Log - Collapsible */}
-              {activityLog && activityLog.length > 0 && (
-                <div className="pt-2 border-t">
-                  <button
-                    onClick={() => setActivityExpanded(!activityExpanded)}
-                    className="w-full flex items-center justify-between text-sm font-medium hover:bg-muted/50 rounded-md py-1 px-1 -mx-1"
-                  >
-                    <span className="flex items-center gap-2">
-                      <ClipboardList className="h-4 w-4" />
-                      Activity Log
-                      <Badge variant="secondary" className="text-[10px] h-5">
-                        {activityLog.length}
-                      </Badge>
-                    </span>
-                    {activityExpanded ? (
-                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    )}
-                  </button>
-
-                  {activityExpanded && (
-                    <div className="mt-2 space-y-2 max-h-48 overflow-y-auto">
-                      {activityLog.map((entry) => (
-                        <div
-                          key={entry.id}
-                          className="text-xs p-2 rounded-md border bg-muted/30"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-medium">{entry.performer_name}</span>
-                            <span className="text-muted-foreground">
-                              {format(new Date(entry.created_at), 'PP · p')}
-                            </span>
-                          </div>
-                          <p className="text-muted-foreground mt-1">{entry.description}</p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Summary card moved above; removing duplicate compact bar */}
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-xl font-bold">Order Items</CardTitle>
-            <div className="flex items-center gap-2">
+        <SectionCard
+          title="Order Items"
+          description="Primary working area for receiving, editing, and line-level actions."
+          open={orderItemsExpanded}
+          onOpenChange={setOrderItemsExpanded}
+          badge={<Badge variant="secondary">{activeOrders.length} active</Badge>}
+          headerActions={
+            <>
               {(isDraft || isPendingApproval) && !isEditMode && (
                 <Button
                   variant="outline"
@@ -2412,30 +1901,45 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                   </Button>
                 </>
               )}
-            </div>
-            {isApproved && (
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setBulkReceiveModalOpen(true)}
-                  disabled={!purchaseOrder.supplier_orders?.some(o => (o.order_quantity - (o.total_received || 0)) > 0)}
-                >
-                  Bulk Receive
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => setCancelLineItemIds(selectedLineItemIds)}
-                  disabled={selectedLineItemIds.length === 0 || cancelLineItemMutation.isPending}
-                >
-                  Cancel Selected
-                  {selectedLineItemIds.length > 0 ? ` (${selectedLineItemIds.length})` : ''}
-                </Button>
+              {isApproved && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setBulkReceiveModalOpen(true)}
+                    disabled={receivableOpenOrders.length === 0}
+                  >
+                    Bulk Receive
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setCancelLineItemIds(selectedLineItemIds)}
+                    disabled={selectedLineItemIds.length === 0 || cancelLineItemMutation.isPending}
+                  >
+                    Cancel Selected
+                    {selectedLineItemIds.length > 0 ? ` (${selectedLineItemIds.length})` : ''}
+                  </Button>
+                </>
+              )}
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-lg border bg-muted/30 px-4 py-3">
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">Ordered</div>
+                <div className="mt-1 text-2xl font-semibold">{totalItems}</div>
               </div>
-            )}
-          </CardHeader>
-          <CardContent>
+              <div className="rounded-lg border bg-muted/30 px-4 py-3">
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">Received</div>
+                <div className="mt-1 text-2xl font-semibold">{totalReceived}</div>
+              </div>
+              <div className="rounded-lg border bg-muted/30 px-4 py-3">
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">Outstanding</div>
+                <div className="mt-1 text-2xl font-semibold text-orange-600">{Math.max(0, totalItems - totalReceived)}</div>
+              </div>
+            </div>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -2469,8 +1973,8 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
 
                       // Build customer order display
                       const customerOrderLinks = order.customer_order_links || [];
-                      const hasOrderLinks = customerOrderLinks.some(link => link.customer_order);
-                      const hasStockAllocation = customerOrderLinks.some(link => Number(link.quantity_for_stock) > 0);
+                      const allocationIssue = getAllocationIssue(order);
+                      const receiveBlockedByAllocation = remainingToReceive > 0 && allocationIssue !== null;
 
                       return (
                         <Fragment key={order.order_id}>
@@ -2523,7 +2027,8 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                                   variant="outline"
                                   size="sm"
                                   onClick={() => handleOpenReceiveModal(order)}
-                                  disabled={remainingToReceive <= 0}
+                                  disabled={remainingToReceive <= 0 || receiveBlockedByAllocation}
+                                  title={receiveBlockedByAllocation ? 'Allocation mismatch must be fixed before receiving this line.' : undefined}
                                 >
                                   Receive
                                 </Button>
@@ -2570,6 +2075,15 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                             </TableCell>
                           )}
                         </TableRow>
+                        {receiveBlockedByAllocation && (
+                          <TableRow className="border-b bg-destructive/5">
+                            <TableCell colSpan={isEditMode ? (isApproved ? 8 : 7) : (isApproved ? 11 : 9)} className="py-2 pl-8">
+                              <p className="text-xs text-destructive">
+                                Receiving blocked: {allocationIssue} Edit the &quot;For Order&quot; allocation so the line totals match before receiving the remaining {remainingToReceive}.
+                              </p>
+                            </TableCell>
+                          </TableRow>
+                        )}
                         {order.notes && (
                           <TableRow className="border-b">
                             <TableCell colSpan={isEditMode ? (isApproved ? 8 : 7) : (isApproved ? 11 : 9)} className="py-2 pl-8">
@@ -2623,31 +2137,19 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                 )}
               </TableBody>
             </Table>
-
-          </CardContent>
-        </Card>
-
-        {purchaseOrder && (
-          <div className="mt-6">
-            <POAttachmentManager
-              purchaseOrderId={purchaseOrder.purchase_order_id}
-              attachments={poAttachments}
-              onAttachmentsChange={(atts) => refetchAttachments()}
-              disabled={isCancelled}
-            />
           </div>
-        )}
+        </SectionCard>
 
         {purchaseOrder && (
-          <Card className="mt-6">
-            <CardHeader>
-              <CardTitle>Receipt History</CardTitle>
-              <CardDescription>
-                Record of all received items for this purchase order
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
+          <SectionCard
+            title="Receipt History"
+            description="Recent receiving records stay near the top, but out of the way until needed."
+            open={receiptHistoryExpanded}
+            onOpenChange={setReceiptHistoryExpanded}
+            badge={<Badge variant="secondary">{totalReceiptEntries}</Badge>}
+            className="mt-6"
+          >
+            <div className="space-y-6">
                 {purchaseOrder.supplier_orders.map((order) => {
                   if (!order.receipts || order.receipts.length === 0) return null;
 
@@ -2734,22 +2236,390 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                     </CardContent>
                   </Card>
                 )}
-              </div>
-            </CardContent>
-          </Card>
+            </div>
+          </SectionCard>
         )}
 
-        {/* Return Goods Section */}
+        <SectionCard
+          title="Supplier Info"
+          description="Suppliers, approval details, email activity, and audit trail."
+          open={supplierInfoExpanded}
+          onOpenChange={setSupplierInfoExpanded}
+          badge={<Badge variant="outline">{supplierNames.length} supplier{supplierNames.length === 1 ? '' : 's'}</Badge>}
+        >
+          <div className="space-y-4">
+            <div>
+              <p className="mb-1 text-sm font-medium">Suppliers</p>
+              <div className="flex flex-wrap gap-2">
+                {supplierNames.map((supplier, i) => (
+                  <Badge key={i} variant="outline">{String(supplier)}</Badge>
+                ))}
+              </div>
+            </div>
+            {isApproved && (
+              <div className="text-sm text-muted-foreground">
+                Approved on {purchaseOrder.approved_at ? format(new Date(purchaseOrder.approved_at), 'PPP') : 'Unknown'}
+              </div>
+            )}
+
+            {isApproved && ((emailHistory && emailHistory.length > 0) || purchaseOrder.supplier_orders?.some(o =>
+              (o.order_quantity - (o.total_received || 0)) > 0
+            )) && (
+              <div className="border-t pt-2">
+                <button
+                  onClick={() => setEmailHistoryExpanded(!emailHistoryExpanded)}
+                  className="flex w-full items-center justify-between rounded-md px-1 py-1 text-sm font-medium hover:bg-muted/50"
+                >
+                  <span className="flex items-center gap-2">
+                    <Mail className="h-4 w-4" />
+                    Email Activity
+                    {emailHistory && emailHistory.length > 0 && (
+                      <Badge variant="secondary" className="h-5 text-[10px]">
+                        {emailHistory.length}
+                      </Badge>
+                    )}
+                    {emailHistory && emailHistory.some(e => e.delivery_status === 'bounced' || e.delivery_status === 'complained') && (
+                      <Badge variant="destructive" className="h-5 text-[10px]">
+                        Issues
+                      </Badge>
+                    )}
+                    {followUpResponses && followUpResponses.some(f => f.response?.responded_at) && (
+                      <Badge variant="default" className="h-5 bg-green-600 text-[10px]">
+                        {followUpResponses.filter(f => f.response?.responded_at).length} response{followUpResponses.filter(f => f.response?.responded_at).length !== 1 ? 's' : ''}
+                      </Badge>
+                    )}
+                  </span>
+                  {emailHistoryExpanded ? (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </button>
+
+                {emailHistoryExpanded && (
+                  <div className="mt-2 space-y-3">
+                    {emailHistory && emailHistory.some(e => e.delivery_status === 'bounced' || e.delivery_status === 'complained') && (
+                      <Alert variant="destructive" className="py-2">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertDescription className="text-xs">
+                          Some emails bounced or were marked as spam. Please verify email addresses and try resending.
+                        </AlertDescription>
+                      </Alert>
+                    )}
+
+                    {followUpResponses && followUpResponses.some(f => f.response?.responded_at) && (
+                      <div className="space-y-2">
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Supplier Responses</p>
+                        {followUpResponses.filter(f => f.response?.responded_at).map((followUp) => {
+                          const resp = followUp.response;
+                          const statusColors: Record<string, string> = {
+                            on_track: 'bg-green-100 border-green-300 text-green-800',
+                            delayed: 'bg-amber-100 border-amber-300 text-amber-800',
+                            issue: 'bg-red-100 border-red-300 text-red-800',
+                          };
+                          const statusLabels: Record<string, string> = {
+                            on_track: 'On Track',
+                            delayed: 'Delayed',
+                            issue: 'Issue',
+                          };
+                          return (
+                            <div
+                              key={followUp.id}
+                              className={cn(
+                                "rounded-md border p-2 text-xs",
+                                statusColors[resp?.status || ''] || 'bg-blue-50 border-blue-200'
+                              )}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-medium">{followUp.supplier_name}</span>
+                                <Badge variant="outline" className={cn("text-[10px]", statusColors[resp?.status || ''])}>
+                                  {statusLabels[resp?.status || ''] || resp?.status || 'Responded'}
+                                </Badge>
+                              </div>
+                              {resp?.expected_delivery_date && (
+                                <div className="mt-1 text-muted-foreground">
+                                  Expected: {format(new Date(resp.expected_delivery_date), 'PP')}
+                                </div>
+                              )}
+                              {resp?.notes && (
+                                <div className="mt-1 italic">"{resp.notes}"</div>
+                              )}
+                              {resp?.line_item_responses && Array.isArray(resp.line_item_responses) && resp.line_item_responses.some((item: any) => item.item_status || item.item_notes || item.item_expected_date) && (
+                                <div className="mt-2 space-y-1.5">
+                                  {(resp.line_item_responses as any[]).map((item: any, idx: number) => {
+                                    const itemStatusColors: Record<string, string> = {
+                                      on_track: 'text-green-700',
+                                      shipped: 'text-blue-700',
+                                      delayed: 'text-amber-700',
+                                      issue: 'text-red-700',
+                                    };
+                                    const itemStatusLabels: Record<string, string> = {
+                                      on_track: 'On Track',
+                                      shipped: 'Shipped',
+                                      delayed: 'Delayed',
+                                      issue: 'Issue',
+                                    };
+                                    return (
+                                      <div key={idx} className="flex items-start gap-2 border-l-2 border-border/50 pl-2">
+                                        <div className="min-w-0 flex-1">
+                                          <div className="flex items-center gap-2">
+                                            <span className="font-mono text-[10px]">{item.supplier_code || item.description}</span>
+                                            {item.item_status && (
+                                              <span className={`text-[10px] font-medium ${itemStatusColors[item.item_status] || ''}`}>
+                                                {itemStatusLabels[item.item_status] || item.item_status}
+                                              </span>
+                                            )}
+                                            {item.item_expected_date && (
+                                              <span className="text-[10px] text-muted-foreground">
+                                                ETA: {format(new Date(item.item_expected_date), 'PP')}
+                                              </span>
+                                            )}
+                                          </div>
+                                          {item.item_notes && (
+                                            <p className="mt-0.5 text-[10px] italic text-muted-foreground">"{item.item_notes}"</p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                              <div className="mt-1 text-muted-foreground">
+                                Responded: {resp?.responded_at ? format(new Date(resp.responded_at), 'PP · p') : 'Unknown'}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {emailHistory && emailHistory.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Emails Sent</p>
+                        <div className="max-h-32 space-y-2 overflow-y-auto">
+                          {emailHistory.map((email) => {
+                            const isBounced = email.delivery_status === 'bounced';
+                            const isDelivered = email.delivery_status === 'delivered';
+                            const isComplained = email.delivery_status === 'complained';
+                            const hasIssue = isBounced || isComplained;
+                            const emailTypeLabel = (() => {
+                              if (email.email_type === 'po_cancel') return 'PO Cancel';
+                              if (email.email_type === 'po_line_cancel') return 'Line Cancel';
+                              if (email.email_type === 'po_follow_up') return 'Follow-up';
+                              return 'PO Send';
+                            })();
+
+                            return (
+                              <div
+                                key={email.email_id}
+                                className={cn(
+                                  "rounded-md border p-2 text-xs",
+                                  hasIssue ? "bg-red-50 border-red-300 dark:bg-red-950/30 dark:border-red-800" :
+                                  isDelivered ? "bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800" :
+                                  email.status === 'sent' ? "bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800" :
+                                  "bg-red-50 border-red-200"
+                                )}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="truncate font-medium">
+                                    {email.supplier?.name || 'Unknown'}
+                                  </span>
+                                  <div className="flex items-center gap-1">
+                                    <Badge variant="outline" className="text-[10px]">
+                                      {emailTypeLabel}
+                                    </Badge>
+                                    {isBounced && (
+                                      <Badge variant="destructive" className="text-[10px]">
+                                        Bounced
+                                      </Badge>
+                                    )}
+                                    {isComplained && (
+                                      <Badge variant="destructive" className="text-[10px]">
+                                        Spam
+                                      </Badge>
+                                    )}
+                                    {isDelivered && (
+                                      <Badge className="bg-green-600 text-[10px]">
+                                        Delivered
+                                      </Badge>
+                                    )}
+                                    {!hasIssue && !isDelivered && email.status === 'sent' && (
+                                      <Badge variant="secondary" className="text-[10px]">
+                                        Sent
+                                      </Badge>
+                                    )}
+                                    {email.status === 'failed' && (
+                                      <Badge variant="destructive" className="text-[10px]">
+                                        Failed
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="mt-1 text-muted-foreground">
+                                  To: {email.recipient_email}
+                                </div>
+                                {email.bounce_reason && (
+                                  <div className="mt-1 text-[10px] text-red-600 dark:text-red-400">
+                                    Reason: {email.bounce_reason}
+                                  </div>
+                                )}
+                                <div className="text-muted-foreground">
+                                  {format(new Date(email.sent_at), 'PP · p')}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activityLog && activityLog.length > 0 && (
+              <div className="border-t pt-2">
+                <button
+                  onClick={() => setActivityExpanded(!activityExpanded)}
+                  className="flex w-full items-center justify-between rounded-md px-1 py-1 text-sm font-medium hover:bg-muted/50"
+                >
+                  <span className="flex items-center gap-2">
+                    <ClipboardList className="h-4 w-4" />
+                    Activity Log
+                    <Badge variant="secondary" className="h-5 text-[10px]">
+                      {activityLog.length}
+                    </Badge>
+                  </span>
+                  {activityExpanded ? (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </button>
+
+                {activityExpanded && (
+                  <div className="mt-2 max-h-48 space-y-2 overflow-y-auto">
+                    {activityLog.map((entry) => (
+                      <div
+                        key={entry.id}
+                        className="rounded-md border bg-muted/30 p-2 text-xs"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium">{entry.performer_name}</span>
+                          <span className="text-muted-foreground">
+                            {format(new Date(entry.created_at), 'PP · p')}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-muted-foreground">{entry.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </SectionCard>
+
+        <SectionCard
+          title="Order Summary"
+          description="Reference details and notes for this purchase order."
+          open={summaryExpanded}
+          onOpenChange={setSummaryExpanded}
+          badge={<StatusBadge status={getOrderStatus(purchaseOrder)} />}
+          headerActions={(isDraft || isPendingApproval) && !isEditMode && !isEditingNotes ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-xs text-muted-foreground"
+              onClick={() => {
+                setInlineNotes(purchaseOrder.notes || '');
+                setIsEditingNotes(true);
+                setSummaryExpanded(true);
+              }}
+            >
+              <Pencil className="mr-1 h-3 w-3" />
+              Edit Notes
+            </Button>
+          ) : undefined}
+        >
+          <div className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <p className="mb-1 text-sm font-medium">Order Date</p>
+                <p>{purchaseOrder.order_date
+                  ? format(new Date(purchaseOrder.order_date), 'PPP')
+                  : 'Not specified'}</p>
+              </div>
+              <div>
+                <p className="mb-1 text-sm font-medium">Status</p>
+                <StatusBadge status={getOrderStatus(purchaseOrder)} />
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-1 flex items-center justify-between">
+                <p className="text-sm font-medium">Notes</p>
+              </div>
+              {isEditMode ? (
+                <Textarea
+                  value={editedNotes}
+                  onChange={(e) => setEditedNotes(e.target.value)}
+                  placeholder="Add notes..."
+                  className="min-h-[80px]"
+                />
+              ) : isEditingNotes ? (
+                <div className="space-y-2">
+                  <Textarea
+                    value={inlineNotes}
+                    onChange={(e) => setInlineNotes(e.target.value)}
+                    placeholder="Add notes..."
+                    className="min-h-[80px]"
+                    autoFocus
+                  />
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsEditingNotes(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={editPurchaseOrderMutation.isPending}
+                      onClick={() => {
+                        editPurchaseOrderMutation.mutate({ notes: inlineNotes }, {
+                          onSuccess: () => {
+                            setIsEditingNotes(false);
+                          },
+                        });
+                      }}
+                    >
+                      {editPurchaseOrderMutation.isPending ? (
+                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                      ) : (
+                        <Save className="mr-1 h-3 w-3" />
+                      )}
+                      Save
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p className="whitespace-pre-wrap">{purchaseOrder.notes || 'No notes'}</p>
+              )}
+            </div>
+          </div>
+        </SectionCard>
+
         {purchaseOrder && isApproved && (
-          <Card className="mt-6">
-            <CardHeader>
-              <CardTitle>Return Goods</CardTitle>
-              <CardDescription>
-                Return goods to suppliers. Select components and quantities to return.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
+          <SectionCard
+            title="Return Goods"
+            description="Record supplier returns and rejections without crowding the primary receive workflow."
+            open={returnGoodsExpanded}
+            onOpenChange={setReturnGoodsExpanded}
+            className="mt-6"
+          >
+            <div className="space-y-4">
                 {purchaseOrder.supplier_orders && purchaseOrder.supplier_orders.length > 0 ? (
                   <>
                     {purchaseOrder.supplier_orders
@@ -2868,22 +2738,20 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                     No items in this purchase order
                   </div>
                 )}
-              </div>
-            </CardContent>
-          </Card>
+            </div>
+          </SectionCard>
         )}
 
-        {/* Return History Section */}
         {purchaseOrder && (
-          <Card className="mt-6">
-            <CardHeader>
-              <CardTitle>Return History</CardTitle>
-              <CardDescription>
-                Record of all returned items for this purchase order
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
+          <SectionCard
+            title="Return History"
+            description="Past returns stay available but collapsed until needed."
+            open={returnHistoryExpanded}
+            onOpenChange={setReturnHistoryExpanded}
+            badge={<Badge variant="secondary">{totalReturnEntries}</Badge>}
+            className="mt-6"
+          >
+            <div className="space-y-6">
                 {purchaseOrder.supplier_orders.map((order) => {
                   if (!order.returns || order.returns.length === 0) return null;
 
@@ -2959,9 +2827,30 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                     </CardContent>
                   </Card>
                 )}
-              </div>
-            </CardContent>
-          </Card>
+            </div>
+          </SectionCard>
+        )}
+
+        {purchaseOrder && (
+          <SectionCard
+            title="Attachments"
+            description="Supporting files are available here when needed, without dominating the main workflow."
+            open={attachmentsExpanded}
+            onOpenChange={setAttachmentsExpanded}
+            badge={<Badge variant="secondary">{poAttachments.length}</Badge>}
+            className="mt-6"
+            contentClassName="pt-0"
+          >
+            <POAttachmentManager
+              purchaseOrderId={purchaseOrder.purchase_order_id}
+              attachments={poAttachments}
+              onAttachmentsChange={() => {
+                void refetchAttachments();
+              }}
+              disabled={isCancelled}
+              compact
+            />
+          </SectionCard>
         )}
         {/* Bottom action bar */}
         <div className="sticky bottom-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-t shadow-sm px-4 py-3 flex items-center justify-end gap-3">
@@ -3045,13 +2934,6 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                   Send Follow-up
                 </Button>
               )}
-              <Button
-                onClick={handleSubmitReceipts}
-                disabled={receiptMutation.isPending || Object.keys(receiptQuantities).length === 0}
-              >
-                {receiptMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                Receive Stock
-              </Button>
             </>
           )}
         </div>

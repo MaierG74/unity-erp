@@ -1,11 +1,5 @@
-import type { Metadata } from 'next';
-import { LaborPlanningBoard } from '@/components/production/labor-planning-board';
+import { redirect } from 'next/navigation';
 
-export const metadata: Metadata = {
-  title: 'Labor Planning',
-  description: 'Plan labor across orders with time-scaled staff swimlanes.',
-};
-
-export default function LaborPlanningPage() {
-  return <LaborPlanningBoard />;
+export default function LaborPlanningRedirect() {
+  redirect('/production?view=schedule');
 }

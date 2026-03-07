@@ -6,13 +6,8 @@ import { ArrowLeft, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import dynamic from 'next/dynamic';
-import { authorizedFetch } from '@/lib/client/auth-fetch';
-import { MODULE_KEYS } from '@/lib/modules/keys';
 import type { CutlistCalculatorData } from '@/components/features/cutlist/CutlistCalculator';
-import {
-  flattenGroupsToCompactParts,
-  regroupPartsToApiGroups,
-} from '@/lib/configurator/cutlistGroupConversion';
+import { useProductCutlistBuilderAdapter } from '@/components/features/cutlist/adapters';
 
 // Dynamic import to avoid SSR issues
 const CutlistCalculator = dynamic(
@@ -41,7 +36,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
   const [saving, setSaving] = useState(false);
   const [calculatorKey, setCalculatorKey] = useState(0);
   const dataRef = useRef<CutlistCalculatorData | null>(null);
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const adapter = useProductCutlistBuilderAdapter(productId);
 
   // Load product cutlist groups on mount
   useEffect(() => {
@@ -51,16 +46,9 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
 
     async function loadGroups() {
       try {
-        const res = await authorizedFetch(
-          `/api/products/${productId}/cutlist-groups?module=${MODULE_KEYS.CUTLIST_OPTIMIZER}`
-        );
-        if (!res.ok) throw new Error('Failed to load');
-        const json = await res.json();
-        const groups = json?.groups;
-
-        if (!cancelled && groups && groups.length > 0) {
-          const parts = flattenGroupsToCompactParts(groups);
-          setInitialData({ parts });
+        const loaded = await adapter.load();
+        if (!cancelled && loaded) {
+          setInitialData(loaded);
           setCalculatorKey((k) => k + 1);
         }
       } catch (err) {
@@ -80,34 +68,18 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
   const handleDataChange = useCallback(
     (data: CutlistCalculatorData) => {
       dataRef.current = data;
-
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      saveTimeoutRef.current = setTimeout(async () => {
-        if (!data.parts.length) return;
-        try {
-          const groups = regroupPartsToApiGroups(data.parts);
-          await authorizedFetch(
-            `/api/products/${productId}/cutlist-groups?module=${MODULE_KEYS.CUTLIST_OPTIMIZER}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ groups }),
-            }
-          );
-        } catch {
-          // Silent fail for auto-save — user can manually save
-        }
-      }, 2000);
+      if (!data.parts.length) return;
+      adapter.debouncedSave(data);
     },
-    [productId]
+    [adapter]
   );
 
   // Cleanup timeout on unmount
   useEffect(() => {
     return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      adapter.cancelPendingSave();
     };
-  }, []);
+  }, [adapter]);
 
   // Manual save
   const handleSave = useCallback(async () => {
@@ -116,23 +88,14 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
 
     setSaving(true);
     try {
-      const groups = regroupPartsToApiGroups(data.parts);
-      const res = await authorizedFetch(
-        `/api/products/${productId}/cutlist-groups?module=${MODULE_KEYS.CUTLIST_OPTIMIZER}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ groups }),
-        }
-      );
-      if (!res.ok) throw new Error('Failed to save');
+      await adapter.save(data);
       toast.success('Cutlist saved to product');
     } catch {
       toast.error('Failed to save cutlist');
     } finally {
       setSaving(false);
     }
-  }, [productId]);
+  }, [adapter]);
 
   if (isNaN(productId)) {
     return (

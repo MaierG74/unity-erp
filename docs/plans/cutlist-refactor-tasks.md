@@ -6,7 +6,9 @@
 
 This document tracks the progress of refactoring the cutlist system into reusable primitives.
 
-**Goal**: Create a unified component library that can be composed differently for:
+> Historical note (2026-03-07): the active Unity architecture now standardizes on `CutlistCalculator` for the supported Product and Quote cutlist flows. The `CutlistWorkspace` work described here is retained as implementation history, not the current recommended path.
+
+**Historical goal**: Create a unified component library that could be composed differently for:
 - `/cutlist` page (standalone)
 - Quote modal (embedded in quotes)
 - Product BOM tab (bill of materials)
@@ -72,7 +74,7 @@ Barrel export for all cutlist types and utilities.
 
 ---
 
-## Architecture
+## Architecture (Historical Snapshot)
 
 ```
 lib/cutlist/                      ← Core logic
@@ -92,12 +94,12 @@ components/features/cutlist/
 │   ├── CSVDropzone.tsx
 │   ├── PartCard.tsx
 │   ├── GroupCard.tsx
-│   ├── GroupedPartsPanel.tsx     ← (in progress)
+│   ├── GroupedPartsPanel.tsx
 │   └── index.ts
 │
-├── CutlistWorkspace.tsx          ← (planned) Main composable component
-├── CutlistTool.tsx               ← Legacy (to be replaced)
-└── CutlistBuilder.tsx            ← Legacy (to be replaced)
+├── CutlistWorkspace.tsx          ← deleted in March 2026
+├── CutlistTool.tsx               ← historical name / replaced
+└── CutlistBuilder.tsx            ← historical concept / replaced
 ```
 
 ---

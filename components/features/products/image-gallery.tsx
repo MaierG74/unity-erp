@@ -1,18 +1,21 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import Image from "next/image"
 import { ImageUpload } from "./image-upload"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
 import { supabase } from "@/lib/supabase"
-import { Trash2 } from "lucide-react"
+import { Crop, Trash2 } from "lucide-react"
+import type { CropParams } from '@/types/image-editor'
+import { ProductImageDisplay } from './ProductImageDisplay'
+import { ProductImageEditorDialog } from './ProductImageEditorDialog'
 
 interface ProductImage {
   image_id: string | number
   product_id: string | number
   image_url: string
   is_primary: boolean
+  crop_params?: CropParams | null
 }
 
 interface ImageGalleryProps {
@@ -20,6 +23,7 @@ interface ImageGalleryProps {
   productCode: string
   images: ProductImage[]
   onImagesChange?: () => void
+  onPendingUploadsChange?: (hasPending: boolean) => void
 }
 
 export function ImageGallery({
@@ -27,9 +31,11 @@ export function ImageGallery({
   productCode,
   images,
   onImagesChange,
+  onPendingUploadsChange,
 }: ImageGalleryProps) {
   const [localImages, setLocalImages] = useState<ProductImage[]>(images)
   const [selectedImage, setSelectedImage] = useState<ProductImage | null>(null)
+  const [editingImage, setEditingImage] = useState<ProductImage | null>(null)
   const { toast } = useToast()
 
   useEffect(() => {
@@ -47,15 +53,41 @@ export function ImageGallery({
     }
   }, [localImages, selectedImage])
 
-  const handleImageUpload = (url: string) => {
-    const tempImage: ProductImage = {
-      image_id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      product_id: productId,
+  const handleImageUpload = ({
+    imageId,
+    productId: uploadedProductId,
+    url,
+    isPrimary,
+    cropParams,
+  }: {
+    imageId: string | number
+    productId: string | number
+    url: string
+    isPrimary: boolean
+    cropParams: CropParams | null
+  }) => {
+    const uploadedImage: ProductImage = {
+      image_id: imageId,
+      product_id: uploadedProductId,
       image_url: url,
-      is_primary: false,
+      is_primary: isPrimary,
+      crop_params: cropParams,
     }
-    setLocalImages((prev) => [tempImage, ...prev])
-    setSelectedImage(tempImage)
+    setLocalImages((prev) => {
+      const withoutDuplicate = prev.filter((image) => image.image_id !== imageId)
+      return [uploadedImage, ...withoutDuplicate]
+    })
+    setSelectedImage(uploadedImage)
+    onImagesChange?.()
+  }
+
+  const handleCropSaved = (imageId: string | number, cropParams: CropParams | null) => {
+    setLocalImages((prev) =>
+      prev.map((image) => (image.image_id === imageId ? { ...image, crop_params: cropParams } : image))
+    )
+    setSelectedImage((prev) =>
+      prev && prev.image_id === imageId ? { ...prev, crop_params: cropParams } : prev
+    )
     onImagesChange?.()
   }
 
@@ -141,11 +173,12 @@ export function ImageGallery({
       {/* Main image display */}
       <div className="relative h-[400px] w-full max-w-[600px] mx-auto overflow-hidden rounded-lg bg-card ring-0 dark:bg-white/5 dark:ring-1 dark:ring-white/10">
         {selectedImage ? (
-          <Image
-            src={selectedImage.image_url}
+          <ProductImageDisplay
+            imageUrl={selectedImage.image_url}
+            cropParams={selectedImage.crop_params}
             alt="Product image"
-            fill
-            className="object-contain dark:brightness-110 dark:drop-shadow-[0_8px_30px_rgba(0,0,0,0.85)]"
+            fit="contain"
+            priority
           />
         ) : (
           <div className="flex h-full items-center justify-center text-muted-foreground">
@@ -163,13 +196,25 @@ export function ImageGallery({
               }`}
             onClick={() => setSelectedImage(image)}
           >
-            <Image
-              src={image.image_url}
+            <ProductImageDisplay
+              imageUrl={image.image_url}
+              cropParams={image.crop_params}
               alt="Product thumbnail"
-              fill
-              className="object-cover dark:brightness-110"
+              fit="cover"
             />
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60 opacity-0 transition-opacity group-hover:opacity-100">
+              <Button
+                variant="secondary"
+                size="sm"
+                className="text-xs"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setEditingImage(image)
+                }}
+              >
+                <Crop className="mr-1.5 h-3 w-3" />
+                {image.crop_params ? 'Edit Crop' : 'Crop'}
+              </Button>
               {!image.is_primary && (
                 <Button
                   variant="secondary"
@@ -203,6 +248,16 @@ export function ImageGallery({
         productId={productId}
         productCode={productCode}
         onUploadComplete={handleImageUpload}
+        onPendingStateChange={onPendingUploadsChange}
+      />
+
+      <ProductImageEditorDialog
+        open={editingImage !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingImage(null)
+        }}
+        image={editingImage}
+        onSaved={handleCropSaved}
       />
     </div>
   )

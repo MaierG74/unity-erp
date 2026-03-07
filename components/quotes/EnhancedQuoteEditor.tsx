@@ -22,6 +22,12 @@ import { EmailActivityCard } from '@/components/features/emails/EmailActivityCar
 import { useToast } from '@/components/ui/use-toast';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
+  QUOTE_STATUSES,
+  getQuoteStatusBadgeVariant,
+  getQuoteStatusLabel,
+} from '@/lib/quotes/status';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
+import {
   Save,
   Image as ImageIcon,
   Calculator,
@@ -135,7 +141,7 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
   const refreshQuoteData = React.useCallback(async () => {
     if (!quoteId) return;
     try {
-      const response = await fetch(`/api/quotes/${quoteId}`);
+      const response = await authorizedFetch(`/api/quotes/${quoteId}`);
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || 'Failed to fetch quote');
@@ -324,10 +330,10 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
             </>
           )}
           <Badge
-            variant={quote.status === 'draft' ? 'outline' : quote.status === 'sent' ? 'warning' : 'default'}
+            variant={getQuoteStatusBadgeVariant(quote.status)}
             className="w-fit"
           >
-            {quote.status}
+            {getQuoteStatusLabel(quote.status)}
           </Badge>
         </div>
 
@@ -417,11 +423,11 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="draft">Draft</SelectItem>
-                      <SelectItem value="in_progress">In Progress</SelectItem>
-                      <SelectItem value="sent">Sent</SelectItem>
-                      <SelectItem value="won">Won</SelectItem>
-                      <SelectItem value="lost">Lost</SelectItem>
+                      {QUOTE_STATUSES.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {getQuoteStatusLabel(status)}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -639,6 +645,11 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
         quote={emailQuote}
         companyInfo={settingsCompanyInfo || defaultCompanyInfo}
         onEmailSent={() => {
+          setQuote((current) =>
+            current && current.status !== 'ordered'
+              ? { ...current, status: 'sent' }
+              : current
+          );
           toast({
             title: 'Email sent successfully',
             description: `Quote ${quote.quote_number} has been emailed to ${quote.customer?.email || 'the customer'}.`,

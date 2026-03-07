@@ -62,13 +62,3 @@ export {
   type LaminationConfig,
   type BoardOption,
 } from './CustomLaminationModal';
-
-// Workspace (composable wrapper)
-export {
-  CutlistWorkspace,
-  type CutlistWorkspaceProps,
-  type CutlistWorkspaceMode,
-  type CutlistSnapshot,
-  type CutlistPersistenceAdapter,
-  type CutlistExportAdapter,
-} from '../CutlistWorkspace';

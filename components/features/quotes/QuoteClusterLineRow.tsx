@@ -42,6 +42,9 @@ const QuoteClusterLineRow: React.FC<QuoteClusterLineRowProps> = ({ line, onUpdat
     ? line.line_type.charAt(0).toUpperCase() + line.line_type.slice(1)
     : '';
   const badgeClass = typeBadgeClass[line.line_type ?? ''] ?? 'bg-gray-100 text-gray-600';
+  const missingCostClass = missingCost
+    ? 'border-amber-500/70 bg-amber-500/10 text-foreground placeholder:text-amber-700/70 dark:border-amber-400/60 dark:bg-amber-400/12 dark:text-amber-50 dark:placeholder:text-amber-200/70'
+    : 'border-border';
 
   return (
     <TableRow>
@@ -76,7 +79,7 @@ const QuoteClusterLineRow: React.FC<QuoteClusterLineRowProps> = ({ line, onUpdat
           onChange={e => setUnitCost(e.target.value)}
           onBlur={() => { const numCost = Math.round((Number(unitCost) || 0) * 100) / 100; handleBlur('unit_cost', numCost as QuoteClusterLine['unit_cost']); setUnitCost(String(numCost)); }}
           onFocus={e => e.target.select()}
-          className={`text-sm h-8 w-24 bg-background text-foreground border ${missingCost ? 'border-amber-400 bg-amber-50' : 'border-border'}`}
+          className={`text-sm h-8 w-24 border ${missingCostClass}`}
         />
       </TableCell>
       <TableCell className="text-sm text-right font-medium">{formatCurrency((Number(qty) || 0) * (Number(unitCost) || 0))}</TableCell>

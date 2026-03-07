@@ -246,7 +246,7 @@ export const StockIssuancePDFDocument: React.FC<StockIssuancePDFProps> = ({
           </View>
           <View>
             <Text style={styles.documentTitle}>STOCK ISSUANCE</Text>
-            <Text style={styles.documentNumber}>Order #: {order.order_id}</Text>
+            <Text style={styles.documentNumber}>Order #: {order.order_number || order.order_id}</Text>
             <Text style={styles.documentDate}>
               Issuance Date: {format(new Date(issuanceDate), 'MMM d, yyyy HH:mm')}
             </Text>
@@ -257,7 +257,7 @@ export const StockIssuancePDFDocument: React.FC<StockIssuancePDFProps> = ({
         <View style={styles.orderSection}>
           <Text style={styles.sectionTitle}>Order Information</Text>
           <Text style={styles.sectionContent}>
-            Order Number: {order.order_id}
+            Order Number: {order.order_number || order.order_id}
           </Text>
           {order.customer && (
             <Text style={styles.sectionContent}>
@@ -393,7 +393,7 @@ export const StockIssuancePDFDownload: React.FC<StockIssuancePDFDownloadProps> =
       ).toBlob();
       
       const pdfBlob = new Blob([blob], { type: 'application/pdf' });
-      const filename = `stock_issuance_order_${order.order_id}_${format(new Date(issuanceDate), 'yyyy-MM-dd')}.pdf`;
+      const filename = `stock_issuance_${order.order_number || order.order_id}_${format(new Date(issuanceDate), 'yyyy-MM-dd')}.pdf`;
 
       // Prefer native Save dialog when supported
       const anyWindow = window as any;

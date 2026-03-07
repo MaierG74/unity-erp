@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import type { SelectedItem } from '@/components/features/shared/ItemSelectionDialog';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -72,11 +73,9 @@ import {
 } from '@/lib/cutlist/cutlistDimensions';
 
 // Dynamically import dialogs on the client only to avoid server bundling issues
-const AddFromCollectionDialog = dynamic(() => import('./AddFromCollectionDialog'), { ssr: false });
-const AddProductToBOMDialog = dynamic(() => import('./AddProductToBOMDialog'), { ssr: false });
-const AddComponentDialog = dynamic(() => import('./AddComponentDialog'), { ssr: false });
 const BOMOverrideDialog = dynamic(() => import('./BOMOverrideDialog'), { ssr: false });
 const ImportCutlistCSVDialog = dynamic(() => import('./ImportCutlistCSVDialog'), { ssr: false });
+const ItemSelectionDialog = dynamic(() => import('@/components/features/shared/ItemSelectionDialog'), { ssr: false });
 
 // Define types
 interface Component {
@@ -279,9 +278,8 @@ export function ProductBOM({ productId }: ProductBOMProps) {
   const [browseSupplierQuery, setBrowseSupplierQuery] = useState('');
   const [browseComponentQuery, setBrowseComponentQuery] = useState('');
   const [browseSupplierId, setBrowseSupplierId] = useState<number | null>(null);
-  // Add Component (controlled) state for opening dialog from Browse-by-supplier
-  const [addComponentOpen, setAddComponentOpen] = useState(false)
-  const [addComponentPrefill, setAddComponentPrefill] = useState<{ component_id?: number; supplier_component_id?: number } | undefined>(undefined)
+  // Shared Item Selection Dialog state
+  const [itemDialogOpen, setItemDialogOpen] = useState(false)
   const [overrideDialog, setOverrideDialog] = useState<{ bomId: number; componentId: number | null } | null>(null)
   
   // Initialize form
@@ -1609,6 +1607,65 @@ const renderCutlistEditor = () => {
     };
   }, [supplierDropdownRef, formSupplierDropdownRef]);
 
+  // Handle item selected from shared ItemSelectionDialog
+  const handleItemDialogAdd = async (item: SelectedItem) => {
+    try {
+      if (item.type === 'database') {
+        // Add component to BOM
+        const insert: Record<string, unknown> = {
+          product_id: productId,
+          component_id: item.component_id,
+          quantity_required: item.qty || 1,
+        }
+        if (supplierFeatureAvailable && item.supplier_component_id) {
+          insert.supplier_component_id = item.supplier_component_id
+        }
+        const { error } = await supabase.from('billofmaterials').insert(insert)
+        if (error) throw error
+        queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] })
+        queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
+        queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] })
+        queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] })
+      } else if (item.type === 'collection' && item.collection_id) {
+        // Apply collection to BOM
+        const res = await fetch(`/api/products/${productId}/bom/apply-collection`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ collection_id: item.collection_id, scale: item.qty || 1 }),
+        })
+        if (!res.ok) throw new Error('Failed to apply collection')
+        queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] })
+        queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
+        queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] })
+        queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] })
+      } else if (item.type === 'product' && item.product_id) {
+        // Add product BOM (apply or attach)
+        const mode = item.bom_product_mode || 'apply'
+        const quantity = item.bom_product_quantity || item.qty || 1
+        const url = mode === 'attach'
+          ? `/api/products/${productId}/bom/attach-product`
+          : `/api/products/${productId}/bom/apply-product`
+        const payload = mode === 'attach'
+          ? { sub_product_id: item.product_id, scale: quantity, mode: 'phantom' }
+          : { sub_product_id: item.product_id, quantity }
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (!res.ok) throw new Error('Failed to add product')
+        queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] })
+        queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
+        queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] })
+        queryClient.invalidateQueries({ queryKey: ['productBOMLinks', productId] })
+        queryClient.invalidateQueries({ queryKey: ['productBOL', productId] })
+        queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] })
+      }
+    } catch (e) {
+      console.error('Add item to BOM failed', e)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <Card>
@@ -1621,20 +1678,6 @@ const renderCutlistEditor = () => {
               </CardDescription>
             </div>
             <div className="flex gap-2">
-              {/* Add From Collection */}
-              <AddFromCollectionDialog
-                productId={productId}
-                onApplied={() => {
-                  queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] })
-                  queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
-                  queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] })
-                  queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] })
-                }}
-              />
-              {/* Browse by supplier (opens right-side panel) */}
-              <Button variant="outline" onClick={() => setBrowseOpen(true)}>
-                <Building2 className="h-4 w-4 mr-2" /> Browse by supplier
-              </Button>
               {/* Import CSV (SketchUp cutlist) */}
               <ImportCutlistCSVDialog
                 productId={productId}
@@ -1645,29 +1688,10 @@ const renderCutlistEditor = () => {
                   queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] })
                 }}
               />
-              {/* Add Component */}
-              <AddComponentDialog
-                productId={productId}
-                supplierFeatureAvailable={supplierFeatureAvailable}
-                onApplied={() => {
-                  queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] })
-                  queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
-                  queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] })
-                  queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] })
-                }}
-              />
-              {/* Add Product (explode/copy its BOM) */}
-              <AddProductToBOMDialog
-                productId={productId}
-                onApplied={() => {
-                  queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] })
-                  queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
-                  queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] })
-                  queryClient.invalidateQueries({ queryKey: ['productBOMLinks', productId] })
-                  queryClient.invalidateQueries({ queryKey: ['productBOL', productId] })
-                  queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] })
-                }}
-              />
+              {/* Add Item (shared dialog: Component / Product / Collection / Supplier tabs) */}
+              <Button variant="secondary" onClick={() => setItemDialogOpen(true)}>
+                <Plus className="h-4 w-4 mr-2" /> Add Item
+              </Button>
             </div>
           </div>
         </CardHeader>
@@ -2351,20 +2375,18 @@ const renderCutlistEditor = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Controlled Add Component dialog for prefill from Browse-by-supplier */}
-      <AddComponentDialog
-        productId={productId}
-        supplierFeatureAvailable={supplierFeatureAvailable}
-        showTriggerButton={false}
-        open={addComponentOpen}
-        onOpenChange={setAddComponentOpen}
-        prefill={addComponentPrefill}
-        onApplied={() => {
-          setAddComponentPrefill(undefined)
-          queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] })
-          queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
-          queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] })
-          queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] })
+      {/* Shared Item Selection Dialog for adding to BOM */}
+      <ItemSelectionDialog
+        open={itemDialogOpen}
+        onClose={() => setItemDialogOpen(false)}
+        onAddComponent={handleItemDialogAdd}
+        tabs={['component', 'product', 'cluster', 'supplier']}
+        defaultTab="component"
+        requireSupplier={supplierFeatureAvailable}
+        hideCost
+        productBomMode={{
+          productId,
+          enableAttach: featureAttach,
         }}
       />
 
@@ -2456,10 +2478,16 @@ const renderCutlistEditor = () => {
                                   <Button 
                                     size="sm" 
                                     className="min-w-[80px]" 
-                                    onClick={() => {
-                                      setAddComponentPrefill({ component_id: it.component_id, supplier_component_id: supplierFeatureAvailable ? it.supplier_component_id : undefined })
+                                    onClick={async () => {
+                                      await handleItemDialogAdd({
+                                        type: 'database',
+                                        description: it.component?.description || '',
+                                        qty: 1,
+                                        unit_cost: Number(it.price || 0),
+                                        component_id: it.component_id,
+                                        supplier_component_id: supplierFeatureAvailable ? it.supplier_component_id : undefined,
+                                      })
                                       setBrowseOpen(false)
-                                      setAddComponentOpen(true)
                                     }}
                                   >
                                     Select

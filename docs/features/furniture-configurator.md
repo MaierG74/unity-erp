@@ -4,7 +4,9 @@
 
 The Furniture Configurator is a parametric design tool that auto-generates cutlist parts from dimension inputs. It replaces the SketchUp workflow for standard melamine furniture products by letting users configure dimensions, shelves, doors, and construction options, then immediately generating a complete parts list compatible with the cutlist optimizer.
 
-**Status**: POC complete (cupboard template). Extensible to desks, pedestals, bookshelves.
+**Status**: Pilot implementation live for cupboard, pigeonhole, and desk-height pedestal templates. The cupboard preview now runs on a shared technical SVG foundation; the other templates still use older one-off preview components.
+
+**Deep dive plan**: [`../plans/2026-03-01-furniture-configurator-manufacturing-deep-dive.md`](../plans/2026-03-01-furniture-configurator-manufacturing-deep-dive.md)
 
 **Route**: `/products/[productId]/configurator`
 
@@ -24,11 +26,25 @@ FurnitureTemplate<TConfig> {
 }
 ```
 
-Templates are registered in `lib/configurator/templates/index.ts`. Adding a new furniture type (e.g., desk) requires:
+Templates are registered in `lib/configurator/templates/index.ts`. Adding a new furniture type requires:
 1. Define config interface and defaults in `types.ts`
 2. Create generator function in a new file (e.g., `desk.ts`)
 3. Register in `index.ts`
-4. Create form and preview components
+4. Create form and preview scene/component wiring
+
+### Preview Layer
+
+The technical preview is now being split into a shared scene model plus reusable SVG renderer, rather than keeping all geometry and drawing logic embedded in each React component.
+
+- `ConfiguratorPreviewScene` is the intermediate drawing model used by the renderer.
+- `TechnicalSvgPreview` handles zoom, pan, fit-to-drawing framing, fullscreen, and SVG export.
+- Template-specific scene builders convert configurator state into technical drawing nodes.
+
+The cupboard template is the first adopter of this structure and currently renders:
+- front view
+- side view
+- top view
+- exploded assembly schematic
 
 ### File Structure
 
@@ -37,8 +53,11 @@ Templates are registered in `lib/configurator/templates/index.ts`. Adding a new 
 | `lib/configurator/templates/types.ts` | `CupboardConfig` interface, defaults, `FurnitureTemplate` generic |
 | `lib/configurator/templates/cupboard.ts` | Pure function: config -> `CutlistPart[]` |
 | `lib/configurator/templates/index.ts` | Template registry with lookup helpers |
+| `lib/configurator/preview/scene.ts` | Shared preview scene types, dimension helpers, SVG serialization/export |
+| `lib/configurator/preview/cupboardScene.ts` | Cupboard technical scene builder |
+| `components/features/configurator/shared/TechnicalSvgPreview.tsx` | Shared SVG renderer with pan/zoom/fit/fullscreen/export |
 | `components/features/configurator/CupboardForm.tsx` | Configuration form with all options |
-| `components/features/configurator/CupboardPreview.tsx` | SVG 2D preview (front + side views) |
+| `components/features/configurator/CupboardPreview.tsx` | Thin wrapper that builds the cupboard scene and renders the shared preview |
 | `components/features/configurator/FurnitureConfigurator.tsx` | Orchestrator: form + preview + parts table + save |
 | `app/products/[productId]/configurator/page.tsx` | Next.js page route |
 
@@ -128,10 +147,24 @@ Real-world melamine cupboard assembly (bottom to top):
 1. Navigate to product detail page
 2. Click "Design with Configurator" button in Cutlist tab
 3. Adjust dimensions and options in the left panel
-4. SVG preview updates in real-time on the right
+4. Technical SVG preview updates in real-time on the right
 5. Review generated parts table below
 6. Click "Save to Product" or "Save & Open Cutlist Builder"
 7. Parts flow into existing cutlist optimizer for sheet nesting
+
+For the cupboard template, the live preview now includes front, side, top, and exploded views with download-to-SVG support, a fit-to-drawing action, and a fullscreen mode that scales to the available viewport.
+
+## Current Gaps
+
+The current implementation is strong as a product-authoring proof of concept, but it is not yet a full manufacturing handoff.
+
+- **Persistence stops at cutlist groups**: saving writes `product_cutlist_groups`, but does not persist a versioned configurator definition, drawing artifact, or frozen manufacturing snapshot.
+- **No job-card handoff yet**: the job-card PDF can accept a drawing, but configurator-generated drawings are not yet persisted or attached to job cards.
+- **Shared preview architecture is only partially adopted**: cupboard uses the new scene-based renderer, but pigeonhole and pedestal previews still need to migrate onto the same technical drawing foundation.
+- **Banding override flow is incomplete**: cutlist rows can be edited one-by-one, but configurator-driven work still needs better bulk controls such as reset/apply defaults for edge banding.
+- **Generated parts need richer metadata**: future drawing generation, assembly instructions, and factory packets need semantic fields like `part_role`, assembly grouping, and view anchors, not only dimensions and edge flags.
+
+See the deep-dive plan for the recommended architecture and phased rollout.
 
 ## Future Extensions
 

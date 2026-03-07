@@ -13,7 +13,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, Package, Clock, Settings2, AlertTriangle, TrendingUp, ArrowRight } from 'lucide-react'
 import { AddOverheadDialog } from './AddOverheadDialog'
 import { ProductBOM } from './product-bom'
 import { ProductBOL } from './product-bol'
@@ -92,11 +92,11 @@ function fmtMoney(v: number | null | undefined) {
   return `R${v.toFixed(2)}`
 }
 
-type CostingSection = 'materials' | 'labor' | 'overhead'
+type CostingSection = 'summary' | 'materials' | 'labor' | 'overhead'
 
 export function ProductCosting({ productId }: { productId: number }) {
   const [addOverheadOpen, setAddOverheadOpen] = useState(false)
-  const [activeSection, setActiveSection] = useState<CostingSection>('materials')
+  const [activeSection, setActiveSection] = useState<CostingSection>('summary')
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
@@ -224,13 +224,17 @@ export function ProductCosting({ productId }: { productId: number }) {
     },
   })
 
-  const labour = (featureAttach ? effBol.items : bol).map((r: any) => {
+  const effectiveBolItems = Array.isArray(effBol?.items) ? effBol.items : []
+  const usingEffectiveBol = featureAttach && effectiveBolItems.length > 0
+  const labourRows = usingEffectiveBol ? effectiveBolItems : bol
+
+  const labour = labourRows.map((r: any) => {
     const qty = Number(r.quantity || 1)
     if ((r.pay_type || 'hourly') === 'piece') {
-      const rate = featureAttach ? Number(r.piece_rate || 0) : Number(r.piece_work_rates?.rate || 0)
+      const rate = usingEffectiveBol ? Number(r.piece_rate || 0) : Number(r.piece_work_rates?.rate || 0)
       return {
-        category: featureAttach ? (r.category_name || '') : (r.jobs?.job_categories?.name || ''),
-        job: featureAttach ? (r.job_name || '') : (r.jobs?.name || ''),
+        category: usingEffectiveBol ? (r.category_name || '') : (r.jobs?.job_categories?.name || ''),
+        job: usingEffectiveBol ? (r.job_name || '') : (r.jobs?.name || ''),
         hours: 0,
         qty,
         hourlyRate: rate, // displayed generically as Rate
@@ -238,13 +242,13 @@ export function ProductCosting({ productId }: { productId: number }) {
       }
     } else {
       const hours = toHours(Number(r.time_required), r.time_unit)
-      const rate = featureAttach
+      const rate = usingEffectiveBol
         ? Number(r.hourly_rate ?? 0)
         : Number(r.job_hourly_rates?.hourly_rate ?? r.jobs?.job_categories?.current_hourly_rate ?? 0)
       const line = hours * qty * rate
       return {
-        category: featureAttach ? (r.category_name || '') : (r.jobs?.job_categories?.name || ''),
-        job: featureAttach ? (r.job_name || '') : (r.jobs?.name || ''),
+        category: usingEffectiveBol ? (r.category_name || '') : (r.jobs?.job_categories?.name || ''),
+        job: usingEffectiveBol ? (r.job_name || '') : (r.jobs?.name || ''),
         hours,
         qty,
         hourlyRate: rate,
@@ -322,11 +326,42 @@ export function ProductCosting({ productId }: { productId: number }) {
     setAddOverheadOpen(false)
   }
 
-  const sections: { key: CostingSection; label: string; count: number; cost: number }[] = [
+  const sections: { key: CostingSection; label: string; count?: number; cost?: number }[] = [
+    { key: 'summary', label: 'Summary' },
     { key: 'materials', label: 'Materials', count: materials.length, cost: materialsCost },
     { key: 'labor', label: 'Labor', count: labour.length, cost: labourCost },
     { key: 'overhead', label: 'Overhead', count: overhead.length, cost: overheadCost },
   ]
+
+  // Build cost driver rows for summary: top items across all categories
+  const costDrivers: { name: string; category: 'Materials' | 'Labor' | 'Overhead'; amount: number }[] = []
+  materials.forEach((m) => {
+    if (m.lineTotal && m.lineTotal > 0) {
+      costDrivers.push({ name: m.code + (m.description ? ` – ${m.description}` : ''), category: 'Materials', amount: m.lineTotal })
+    }
+  })
+  labour.forEach((l) => {
+    if (l.lineTotal > 0) {
+      costDrivers.push({ name: l.job || l.category, category: 'Labor', amount: l.lineTotal })
+    }
+  })
+  overhead.forEach((o) => {
+    if (o.lineTotal > 0) {
+      costDrivers.push({ name: o.name || o.code, category: 'Overhead', amount: o.lineTotal })
+    }
+  })
+  costDrivers.sort((a, b) => b.amount - a.amount)
+  const topDrivers = costDrivers.slice(0, 8)
+
+  const pctOf = (v: number) => (unitCost > 0 ? ((v / unitCost) * 100).toFixed(1) : '0.0')
+
+  const categoryMeta: Record<string, { color: string; bg: string; icon: React.ReactNode }> = {
+    Materials: { color: 'text-blue-400', bg: 'bg-blue-500', icon: <Package className="h-4 w-4" /> },
+    Labor:     { color: 'text-emerald-400', bg: 'bg-emerald-500', icon: <Clock className="h-4 w-4" /> },
+    Overhead:  { color: 'text-amber-400', bg: 'bg-amber-500', icon: <Settings2 className="h-4 w-4" /> },
+  }
+
+  const isAnyLoading = materialsLoading || (usingEffectiveBol ? effBolLoading : bolLoading) || overheadLoading
 
   return (
     <div className="space-y-0">
@@ -347,8 +382,12 @@ export function ProductCosting({ productId }: { productId: number }) {
               `}
             >
               <span>{s.label}</span>
-              <span className="ml-2 text-xs text-muted-foreground">({s.count})</span>
-              <span className="ml-2 text-xs font-semibold">{fmtMoney(s.cost)}</span>
+              {s.count != null && (
+                <>
+                  <span className="ml-2 text-xs text-muted-foreground">({s.count})</span>
+                  <span className="ml-2 text-xs font-semibold">{fmtMoney(s.cost ?? 0)}</span>
+                </>
+              )}
             </button>
           ))}
         </div>
@@ -365,6 +404,167 @@ export function ProductCosting({ productId }: { productId: number }) {
 
       {/* Section content */}
       <div className="pt-4">
+        {activeSection === 'summary' && (
+          <div className="space-y-5">
+            {isAnyLoading ? (
+              <div className="py-8 text-center text-muted-foreground">Loading cost data...</div>
+            ) : (
+              <>
+                {/* Hero unit cost + composition bar */}
+                <div className="rounded-lg border bg-card p-5">
+                  <div className="flex items-baseline justify-between mb-4">
+                    <div>
+                      <div className="text-sm font-medium text-muted-foreground mb-1">Total Unit Cost</div>
+                      <div className="text-3xl font-bold tracking-tight">{fmtMoney(unitCost)}</div>
+                    </div>
+                    {missingPrices > 0 && (
+                      <div className="flex items-center gap-1.5 text-amber-500 text-sm">
+                        <AlertTriangle className="h-4 w-4" />
+                        <span>{missingPrices} item{missingPrices !== 1 ? 's' : ''} missing prices</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Composition bar */}
+                  {unitCost > 0 ? (
+                    <div className="space-y-2">
+                      <div className="flex h-3 w-full overflow-hidden rounded-full bg-muted/50">
+                        {materialsCost > 0 && (
+                          <div
+                            className="bg-blue-500 transition-all duration-500"
+                            style={{ width: `${pctOf(materialsCost)}%` }}
+                          />
+                        )}
+                        {labourCost > 0 && (
+                          <div
+                            className="bg-emerald-500 transition-all duration-500"
+                            style={{ width: `${pctOf(labourCost)}%` }}
+                          />
+                        )}
+                        {overheadCost > 0 && (
+                          <div
+                            className="bg-amber-500 transition-all duration-500"
+                            style={{ width: `${pctOf(overheadCost)}%` }}
+                          />
+                        )}
+                      </div>
+                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1.5">
+                          <span className="inline-block h-2.5 w-2.5 rounded-full bg-blue-500" />
+                          Materials {pctOf(materialsCost)}%
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                          Labor {pctOf(labourCost)}%
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-500" />
+                          Overhead {pctOf(overheadCost)}%
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">No costs recorded yet.</div>
+                  )}
+                </div>
+
+                {/* Category cards */}
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { label: 'Materials', cost: materialsCost, count: materials.length, section: 'materials' as CostingSection },
+                    { label: 'Labor', cost: labourCost, count: labour.length, section: 'labor' as CostingSection },
+                    { label: 'Overhead', cost: overheadCost, count: overhead.length, section: 'overhead' as CostingSection },
+                  ].map((cat) => {
+                    const meta = categoryMeta[cat.label]
+                    return (
+                      <button
+                        key={cat.label}
+                        onClick={() => setActiveSection(cat.section)}
+                        className="group rounded-lg border bg-card p-4 text-left transition-colors hover:bg-accent/50"
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <div className={`flex items-center gap-2 text-sm font-medium ${meta.color}`}>
+                            {meta.icon}
+                            {cat.label}
+                          </div>
+                          <ArrowRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </div>
+                        <div className="text-xl font-bold">{fmtMoney(cat.cost)}</div>
+                        <div className="text-xs text-muted-foreground mt-1">
+                          {cat.count} {cat.count === 1 ? 'item' : 'items'}
+                          {unitCost > 0 && (
+                            <span className="ml-1.5">· {pctOf(cat.cost)}% of total</span>
+                          )}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {/* Top cost drivers */}
+                {topDrivers.length > 0 && (
+                  <div className="rounded-lg border bg-card">
+                    <div className="flex items-center gap-2 px-4 py-3 border-b">
+                      <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">Cost Drivers</span>
+                      <span className="text-xs text-muted-foreground ml-auto">Largest line items across all categories</span>
+                    </div>
+                    <div className="divide-y">
+                      {topDrivers.map((d, i) => {
+                        const meta = categoryMeta[d.category]
+                        const barWidth = costDrivers[0]?.amount ? (d.amount / costDrivers[0].amount) * 100 : 0
+                        return (
+                          <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+                            <span className="text-xs text-muted-foreground w-5 text-right tabular-nums">{i + 1}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium truncate">{d.name}</div>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className={`inline-block h-2 w-2 rounded-full ${meta.bg}`} />
+                                <span className="text-xs text-muted-foreground">{d.category}</span>
+                              </div>
+                            </div>
+                            <div className="w-28 hidden sm:block">
+                              <div className="h-1.5 w-full rounded-full bg-muted/50 overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full ${meta.bg} opacity-60 transition-all duration-500`}
+                                  style={{ width: `${barWidth}%` }}
+                                />
+                              </div>
+                            </div>
+                            <div className="text-sm font-semibold tabular-nums w-20 text-right">{fmtMoney(d.amount)}</div>
+                            <div className="text-xs text-muted-foreground tabular-nums w-12 text-right">{pctOf(d.amount)}%</div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Empty state */}
+                {unitCost === 0 && costDrivers.length === 0 && (
+                  <div className="rounded-lg border border-dashed p-8 text-center">
+                    <Package className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                    <div className="text-sm font-medium mb-1">No costs defined yet</div>
+                    <div className="text-xs text-muted-foreground mb-4">
+                      Add materials, labor, or overhead items to see the cost summary.
+                    </div>
+                    <div className="flex justify-center gap-2">
+                      <Button variant="outline" size="sm" onClick={() => setActiveSection('materials')}>
+                        <Package className="h-3.5 w-3.5 mr-1.5" />
+                        Add Materials
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => setActiveSection('labor')}>
+                        <Clock className="h-3.5 w-3.5 mr-1.5" />
+                        Add Labor
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         {activeSection === 'materials' && (
           <ProductBOM productId={productId} />
         )}

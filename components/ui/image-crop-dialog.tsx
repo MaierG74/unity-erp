@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import Cropper, { type Area } from 'react-easy-crop'
 import {
   Dialog,
@@ -12,12 +12,15 @@ import {
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { Label } from '@/components/ui/label'
+import type { CropParams } from '@/types/image-editor'
 
 interface ImageCropDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   imageSrc: string
-  onCropComplete: (croppedFile: File) => void
+  onCropComplete?: (croppedFile: File) => void
+  onCropParamsComplete?: (cropParams: CropParams | null) => void
+  initialCrop?: CropParams | null
   fileName?: string
 }
 
@@ -63,11 +66,41 @@ export function ImageCropDialog({
   onOpenChange,
   imageSrc,
   onCropComplete,
+  onCropParamsComplete,
+  initialCrop,
   fileName = 'cropped-image.png',
 }: ImageCropDialogProps) {
   const [crop, setCrop] = useState({ x: 0, y: 0 })
-  const [zoom, setZoom] = useState(1)
+  const [zoom, setZoom] = useState(initialCrop?.zoom ?? 1)
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null)
+  const [aspect, setAspect] = useState(4 / 3)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadAspect() {
+      const image = new Image()
+      image.crossOrigin = 'anonymous'
+
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve()
+        image.onerror = reject
+        image.src = imageSrc
+      })
+
+      if (!cancelled && image.naturalWidth > 0 && image.naturalHeight > 0) {
+        setAspect(image.naturalWidth / image.naturalHeight)
+      }
+    }
+
+    loadAspect().catch(() => {
+      if (!cancelled) setAspect(4 / 3)
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [imageSrc])
 
   const onCropAreaComplete = useCallback(
     (_croppedArea: Area, croppedPixels: Area) => {
@@ -78,15 +111,27 @@ export function ImageCropDialog({
 
   const handleApply = useCallback(async () => {
     if (!croppedAreaPixels) return
-    const croppedFile = await getCroppedImg(imageSrc, croppedAreaPixels, fileName)
-    onCropComplete(croppedFile)
+    const cropParams: CropParams = {
+      x: croppedAreaPixels.x,
+      y: croppedAreaPixels.y,
+      width: croppedAreaPixels.width,
+      height: croppedAreaPixels.height,
+      zoom,
+    }
+
+    if (onCropParamsComplete) {
+      onCropParamsComplete(cropParams)
+    } else if (onCropComplete) {
+      const croppedFile = await getCroppedImg(imageSrc, croppedAreaPixels, fileName)
+      onCropComplete(croppedFile)
+    }
     onOpenChange(false)
-  }, [croppedAreaPixels, imageSrc, fileName, onCropComplete, onOpenChange])
+  }, [croppedAreaPixels, imageSrc, fileName, onCropComplete, onCropParamsComplete, onOpenChange, zoom])
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (nextOpen) {
       setCrop({ x: 0, y: 0 })
-      setZoom(1)
+      setZoom(initialCrop?.zoom ?? 1)
       setCroppedAreaPixels(null)
     }
     onOpenChange(nextOpen)
@@ -104,7 +149,17 @@ export function ImageCropDialog({
             image={imageSrc}
             crop={crop}
             zoom={zoom}
-            aspect={4 / 3}
+            aspect={aspect}
+            initialCroppedAreaPixels={
+              initialCrop
+                ? {
+                    x: initialCrop.x,
+                    y: initialCrop.y,
+                    width: initialCrop.width,
+                    height: initialCrop.height,
+                  }
+                : undefined
+            }
             onCropChange={setCrop}
             onZoomChange={setZoom}
             onCropComplete={onCropAreaComplete}

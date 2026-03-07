@@ -1,5 +1,6 @@
 import type { CutlistPart, BoardType, LaminationType } from '@/lib/cutlist/types';
 import type { CompactPart } from '@/components/features/cutlist/primitives/CompactPartsTable';
+import { boardTypeToLamination, parseSheetThickness, getBoardTypeLabel } from '@/lib/cutlist/boardCalculator';
 
 /**
  * Database group format from the product cutlist API.
@@ -31,18 +32,21 @@ interface ApiCutlistGroup {
   sort_order: number;
 }
 
-const BOARD_TYPE_TO_LAMINATION: Record<BoardType, LaminationType> = {
-  '16mm': 'none',
-  '32mm-both': 'same-board',
-  '32mm-backer': 'with-backer',
-};
-
-const LAMINATION_TO_BOARD_TYPE: Record<string, BoardType> = {
-  none: '16mm',
-  'same-board': '32mm-both',
-  'with-backer': '32mm-backer',
-  custom: '16mm', // custom lamination defaults to 16mm group
-};
+/**
+ * Derive board_type string from lamination type and material thickness.
+ */
+function laminationToBoardType(lam: LaminationType, materialThickness: number = 16): BoardType {
+  switch (lam) {
+    case 'same-board':
+      return `${materialThickness * 2}mm-both`;
+    case 'with-backer':
+      return `${materialThickness * 2}mm-backer`;
+    case 'custom':
+    case 'none':
+    default:
+      return `${materialThickness}mm`;
+  }
+}
 
 /**
  * Flatten product cutlist groups into a flat CompactPart[] array.
@@ -51,14 +55,17 @@ const LAMINATION_TO_BOARD_TYPE: Record<string, BoardType> = {
 export function flattenGroupsToCompactParts(
   groups: DatabaseCutlistGroup[]
 ): CompactPart[] {
-  return groups.flatMap((group) =>
-    group.parts.map((part) => ({
+  return groups.flatMap((group) => {
+    const groupLamination = boardTypeToLamination(group.board_type);
+    const sheetThickness = parseSheetThickness(group.board_type);
+    return group.parts.map((part) => ({
       ...part,
-      lamination_type: part.lamination_type || BOARD_TYPE_TO_LAMINATION[group.board_type] || 'none',
+      lamination_type: part.lamination_type || groupLamination,
       lamination_config: part.lamination_config as CompactPart['lamination_config'],
       material_id: part.material_id || group.primary_material_id?.toString() || undefined,
-    }))
-  );
+      material_thickness: part.material_thickness || sheetThickness,
+    }));
+  });
 }
 
 /**
@@ -73,17 +80,17 @@ export function regroupPartsToApiGroups(
   for (const part of parts) {
     const lam = part.lamination_type || 'none';
     const matId = part.material_id || '';
-    const key = `${lam}::${matId}`;
+    const mt = part.material_thickness || 16;
+    const key = `${lam}::${matId}::${mt}`;
 
     if (!groupMap.has(key)) {
       groupMap.set(key, {
         parts: [],
-        boardType: LAMINATION_TO_BOARD_TYPE[lam] || '16mm',
+        boardType: laminationToBoardType(lam, mt),
         materialId: matId || null,
       });
     }
 
-    // Convert back to CutlistPart (strip CompactPart-specific fields)
     const cutlistPart: CutlistPart = {
       id: part.id,
       name: part.name,
@@ -98,6 +105,7 @@ export function regroupPartsToApiGroups(
       material_label: part.material_label,
       edging_material_id: part.edging_material_id,
       lamination_group: part.lamination_group,
+      material_thickness: part.material_thickness,
     };
 
     groupMap.get(key)!.parts.push(cutlistPart);
@@ -107,12 +115,9 @@ export function regroupPartsToApiGroups(
   let sortOrder = 0;
 
   for (const [, value] of groupMap) {
-    const boardType = value.boardType;
-    const label = boardType === '16mm' ? 'Panels (16mm)' : boardType === '32mm-both' ? 'Laminated (32mm)' : 'Laminated w/ Backer (32mm)';
-
     groups.push({
-      name: label,
-      board_type: boardType,
+      name: getBoardTypeLabel(value.boardType),
+      board_type: value.boardType,
       primary_material_id: value.materialId,
       primary_material_name: null,
       backer_material_id: null,

@@ -149,15 +149,14 @@ export async function loadMaterialDefaults(): Promise<MaterialDefaults | null> {
       .from('cutlist_material_defaults')
       .select('*')
       .eq('user_id', session.user.id)
-      .single();
+      .maybeSingle();
 
     if (error) {
-      // PGRST116 = no rows found (not an error, just no defaults saved yet)
-      if (error.code === 'PGRST116') {
-        // Check localStorage for migrating existing local defaults
-        return loadFromLocalStorage();
-      }
       console.error('Error loading material defaults:', error);
+      return loadFromLocalStorage();
+    }
+
+    if (!data) {
       return loadFromLocalStorage();
     }
 

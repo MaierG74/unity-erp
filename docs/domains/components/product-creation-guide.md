@@ -113,6 +113,7 @@ CREATE TABLE public.billoflabour (
   - **Details** – Basic product information
   - **Images** – Image management with gallery
   - **Categories** – Category assignment management
+- Active detail tab persists in the URL via `?tab=` so refresh/back-forward returns to the same product section.
 - **Bill of Materials** – Component requirements (inline editing, supplier-aware tooling)
   - Inline editor now includes a **Cutlist** section so authors can capture base panel dimensions, edging sides, laminate/backer components, and material notes directly on the BOM row. These defaults seed overrides when option sets are attached and keep quote/order cutlists aligned without requiring JSON edits.
 - **Cutlist** – Aggregated view of every BOM row flagged as a cutlist item. Shows per-part dimension summaries, total part counts, and material groupings. Authors can:
@@ -143,8 +144,11 @@ CREATE TABLE public.billoflabour (
 ### Product Image Management
 
 #### Image Upload Component (`/components/features/products/image-upload.tsx`)
-- Drag-and-drop image upload interface
+- Drag-and-drop, click-to-browse, and clipboard-paste image upload interface
 - Supports PNG, JPG, GIF, WEBP formats
+- Stages selected images for preview before upload so authors can crop the currently selected image with the shared `ImageCropDialog`
+- Pre-upload crop is non-destructive: the original file is uploaded unchanged and the chosen crop is saved as metadata for display/editing
+- Warns on refresh, page leave, back navigation, and product-tab changes when an image is staged but not yet uploaded
 - Uploads to Supabase storage bucket "QButton"
 - Automatically creates database records in `product_images` table
 
@@ -152,6 +156,7 @@ CREATE TABLE public.billoflabour (
 - Displays all product images in a grid
 - Supports setting primary images
 - Allows deleting images
+- Uploaded images can be re-cropped non-destructively after upload; the original storage object remains unchanged and `product_images.crop_params` controls how the image is displayed
 - Shows upload progress for multiple files
  - Thumbnails and main image use the same neutral frame/light ring pattern as the details view
 

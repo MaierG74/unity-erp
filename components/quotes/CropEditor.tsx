@@ -19,6 +19,7 @@ export default function CropEditor({
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(initialCrop?.zoom ?? 1);
   const [imageAspect, setImageAspect] = useState<number | undefined>(undefined);
+  const [cropperKey, setCropperKey] = useState(0);
 
   // Load image to get its natural aspect ratio
   useEffect(() => {
@@ -28,6 +29,12 @@ export default function CropEditor({
     };
     img.src = imageUrl;
   }, [imageUrl]);
+
+  useEffect(() => {
+    setCrop({ x: 0, y: 0 });
+    setZoom(initialCrop?.zoom ?? 1);
+    setCropperKey((current) => current + 1);
+  }, [initialCrop]);
 
   const onCropComplete = useCallback(
     (_croppedArea: Area, croppedAreaPixels: Area) => {
@@ -57,11 +64,22 @@ export default function CropEditor({
     <div className="space-y-4">
       <div className="relative h-[400px] bg-muted rounded-lg overflow-hidden">
         <Cropper
+          key={cropperKey}
           image={imageUrl}
           crop={crop}
           zoom={zoom}
           aspect={imageAspect}
           objectFit="contain"
+          initialCroppedAreaPixels={
+            initialCrop
+              ? {
+                  x: initialCrop.x,
+                  y: initialCrop.y,
+                  width: initialCrop.width,
+                  height: initialCrop.height,
+                }
+              : undefined
+          }
           onCropChange={setCrop}
           onZoomChange={setZoom}
           onCropComplete={onCropComplete}

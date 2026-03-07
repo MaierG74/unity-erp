@@ -62,6 +62,7 @@
 - `suppliercomponents.component_id` → FK to `components.component_id` (the master component).
 - On the Suppliers → Components tab, the first column shows the master component’s `internal_code` and now links to the inventory page.
 - Deep link: clicking the code opens `/inventory?focusComponent={component_id}` and the inventory page auto-selects that component in the details pane.
+- Inventory → Add Component also supports creating the supplier mapping inline: after choosing a supplier, the row’s Component field accepts either an existing supplier code or a newly typed code, and submit creates the `suppliercomponents` record together with the new master component.
 
 **Associate from Suppliers page**
 - Add and Edit flows already pick the master component via a selector (react-select of the `components` table).

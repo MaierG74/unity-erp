@@ -1,6 +1,7 @@
 'use client';
 
 import { useAuth } from '@/components/common/auth-provider';
+import { AssistantDock } from '@/components/features/assistant/AssistantDock';
 import { Navbar } from './navbar';
 import { Sidebar, useSidebar } from './sidebar';
 import { useEffect, useState } from 'react';
@@ -34,9 +35,6 @@ export function RootLayout({ children }: { children: React.ReactNode }) {
     // Skip for standalone routes
     if (isStandaloneRoute) return;
 
-    // Log authentication state for debugging
-    console.log('Authentication state:', { user, loading });
-
     // If there's no user after loading is complete, check auth directly
     if (!loading && !user) {
       checkDirectAuth();
@@ -66,7 +64,6 @@ export function RootLayout({ children }: { children: React.ReactNode }) {
       if (hasSupabaseEnv) {
         const { data } = await supabase.auth.getSession();
         if (data.session) {
-          console.log('Direct auth check found session:', data.session);
           setForceShowSidebar(true);
           return;
         }
@@ -74,7 +71,6 @@ export function RootLayout({ children }: { children: React.ReactNode }) {
       // Use localStorage as a last resort (for development/debugging)
       const debugMode = localStorage.getItem('debug-show-sidebar') === 'true';
       if (debugMode) {
-        console.log('Debug mode enabled - showing sidebar');
         setForceShowSidebar(true);
       }
     } catch (err) {
@@ -118,19 +114,25 @@ export function RootLayout({ children }: { children: React.ReactNode }) {
   }
 
   return shouldShowSidebar ? (
-    <div className="flex h-screen w-screen bg-background overflow-hidden">
-      <Sidebar />
-      <Content>{children}</Content>
-    </div>
+    <>
+      <div className="flex h-screen w-screen bg-background overflow-hidden">
+        <Sidebar />
+        <Content>{children}</Content>
+      </div>
+      <AssistantDock enabled={shouldShowSidebar} />
+    </>
   ) : (
-    <div className="flex h-screen flex-col bg-background">
-      <Navbar />
-      <main className="flex-1 w-full pt-16 overflow-auto">
-        <div className="container mx-auto p-4 md:p-6">
-          {children}
-        </div>
-      </main>
-    </div>
+    <>
+      <div className="flex h-screen flex-col bg-background">
+        <Navbar />
+        <main className="flex-1 w-full pt-16 overflow-auto">
+          <div className="container mx-auto p-4 md:p-6">
+            {children}
+          </div>
+        </main>
+      </div>
+      <AssistantDock enabled={shouldShowSidebar} />
+    </>
   );
 }
 

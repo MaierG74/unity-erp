@@ -2,6 +2,7 @@
 export type { CutlistLineRefs, CutlistLineInput } from '@/lib/cutlist/types';
 
 import type { CutlistLineRefs, CutlistLineInput } from '@/lib/cutlist/types';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 
 export async function exportCutlistToQuote(params: {
   quoteItemId: string;
@@ -59,7 +60,7 @@ export async function exportCutlistToQuote(params: {
     }
   }
 
-  const response = await fetch(`/api/quote-items/${quoteItemId}/cutlist/export`, {
+  const response = await authorizedFetch(`/api/quote-items/${quoteItemId}/cutlist/export`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

@@ -1,7 +1,7 @@
 import React, { FC, useState } from 'react';
 import { QuoteItemCluster, QuoteClusterLine, fetchProductComponents, formatCurrency } from '@/lib/db/quotes';
 import QuoteClusterLineRow from './QuoteClusterLineRow';
-import ComponentSelectionDialog from './ComponentSelectionDialog';
+import ComponentSelectionDialog from '@/components/features/shared/ItemSelectionDialog';
 import EditClusterLineDialog from './EditClusterLineDialog';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';

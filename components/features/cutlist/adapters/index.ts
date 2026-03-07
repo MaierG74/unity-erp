@@ -1,36 +1,22 @@
 /**
  * Cutlist Persistence Adapters
  *
- * These adapters implement the CutlistPersistenceAdapter interface from CutlistWorkspace
- * to support different storage backends:
+ * These adapters provide persistence bridges for the canonical CutlistCalculator flow.
  *
- * - useLocalStorageAdapter: For standalone /cutlist page, persists to browser localStorage
- * - useQuoteCutlistAdapter: For quote modal, persists to quote_item_cutlists table via API
- * - useProductCutlistAdapter: For product BOM, persists to product_cutlist_groups table via API
+ * Active adapter:
+ * - useQuoteCutlistAdapterV2: For quote cutlist pages, persists the CutlistCalculator
+ *   layout format to quote_item_cutlists via the quote cutlist API.
+ * - useProductCutlistBuilderAdapter: For product cutlist pages, loads/saves
+ *   CutlistCalculator parts via product_cutlist_groups and effective BOM seeding.
  *
  * @example
  * ```tsx
- * // Standalone page with localStorage
- * const adapter = useLocalStorageAdapter({ storageKey: 'my-cutlist' });
- *
- * // Quote modal with API persistence
- * const adapter = useQuoteCutlistAdapter(quoteItemId);
- *
- * // Product BOM with API persistence
- * const adapter = useProductCutlistAdapter(productId);
- *
- * <CutlistWorkspace persistenceAdapter={adapter} />
+ * const adapter = useQuoteCutlistAdapterV2(quoteItemId);
+ * const productAdapter = useProductCutlistBuilderAdapter(productId);
  * ```
  */
 
-export { useLocalStorageAdapter } from './useLocalStorageAdapter';
-export type { UseLocalStorageAdapterOptions } from './useLocalStorageAdapter';
-
-export { useQuoteCutlistAdapter } from './useQuoteCutlistAdapter';
-export type { UseQuoteCutlistAdapterOptions } from './useQuoteCutlistAdapter';
-
-export { useProductCutlistAdapter } from './useProductCutlistAdapter';
-export type { UseProductCutlistAdapterOptions } from './useProductCutlistAdapter';
-
 export { useQuoteCutlistAdapterV2 } from './useQuoteCutlistAdapterV2';
 export type { QuoteCutlistLayoutV2 } from './useQuoteCutlistAdapterV2';
+
+export { useProductCutlistBuilderAdapter } from './useProductCutlistBuilderAdapter';

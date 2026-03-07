@@ -113,47 +113,39 @@ export function OrderSidebar({ orderId, onTabChange }: OrderSidebarProps) {
           <CardTitle className="text-sm font-semibold">Order Progress</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {/* Stock Issuances */}
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Stock issued</span>
-            <span className={cn(
-              'font-medium',
-              (progress?.issuedCount ?? 0) > 0 ? 'text-green-600' : 'text-muted-foreground'
-            )}>
-              {progress?.issuedCount ?? 0} items
-            </span>
-          </div>
-
-          {/* Job Cards */}
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Job cards</span>
-            <span className="font-medium">
-              {progress?.totalJobs === 0 ? (
-                <span className="text-muted-foreground">None</span>
-              ) : (
-                <>
-                  {(progress?.activeJobs ?? 0) > 0 && (
-                    <span className="text-amber-600">{progress?.activeJobs} active</span>
-                  )}
-                  {(progress?.activeJobs ?? 0) > 0 && (progress?.completeJobs ?? 0) > 0 && ', '}
-                  {(progress?.completeJobs ?? 0) > 0 && (
-                    <span className="text-green-600">{progress?.completeJobs} complete</span>
-                  )}
-                </>
-              )}
-            </span>
-          </div>
-
-          {/* Procurement */}
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Purchase orders</span>
-            <span className={cn(
-              'font-medium',
-              (progress?.poCount ?? 0) > 0 ? 'text-amber-600' : 'text-muted-foreground'
-            )}>
-              {(progress?.poCount ?? 0) > 0 ? `${progress?.poCount} pending` : 'None'}
-            </span>
-          </div>
+          {(() => {
+            const { issuedCount = 0, activeJobs = 0, completeJobs = 0, totalJobs = 0, poCount = 0 } = progress ?? {};
+            return (
+              <>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Stock issued</span>
+                  <span className={cn('font-medium', issuedCount > 0 ? 'text-green-600' : 'text-muted-foreground')}>
+                    {issuedCount} items
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Job cards</span>
+                  <span className="font-medium">
+                    {totalJobs === 0 ? (
+                      <span className="text-muted-foreground">None</span>
+                    ) : (
+                      <>
+                        {activeJobs > 0 && <span className="text-amber-600">{activeJobs} active</span>}
+                        {activeJobs > 0 && completeJobs > 0 && ', '}
+                        {completeJobs > 0 && <span className="text-green-600">{completeJobs} complete</span>}
+                      </>
+                    )}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Purchase orders</span>
+                  <span className={cn('font-medium', poCount > 0 ? 'text-amber-600' : 'text-muted-foreground')}>
+                    {poCount > 0 ? `${poCount} pending` : 'None'}
+                  </span>
+                </div>
+              </>
+            );
+          })()}
         </CardContent>
       </Card>
 

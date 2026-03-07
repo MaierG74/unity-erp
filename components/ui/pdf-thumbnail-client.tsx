@@ -24,13 +24,6 @@ function loadPdfJs(): Promise<any> {
       return;
     }
 
-    const script = document.createElement('script');
-    script.src = '/pdf.min.mjs';
-    script.type = 'module';
-
-    // The ESM script sets `window.pdfjsLib` after eval — but ESM scripts
-    // don't expose to window by default. Instead, use a module-scoped import.
-    // We'll use a different approach: inline module that imports and exposes it.
     const inlineScript = document.createElement('script');
     inlineScript.type = 'module';
     inlineScript.textContent = `
@@ -45,6 +38,11 @@ function loadPdfJs(): Promise<any> {
       resolve((window as any).__pdfjsLib);
     };
     window.addEventListener('pdfjsReady', onReady);
+
+    inlineScript.onerror = () => {
+      window.removeEventListener('pdfjsReady', onReady);
+      reject(new Error('pdfjs-dist script failed to load'));
+    };
 
     // Timeout fallback
     setTimeout(() => {

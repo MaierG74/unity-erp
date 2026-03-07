@@ -54,7 +54,7 @@ Reference: CutList Optimizer – feature inspiration only. We will focus on an i
 - Performance target: <100 ms for ~50 parts; optimize by pooling rectangles and early exits.
 
 ### Files
-- `components/features/cutlist/CutlistTool.tsx` – top-level UI (parts table, stock table, options, results, preview)
+- `components/features/cutlist/CutlistCalculator.tsx` – current top-level UI (materials, parts, optimization, results, preview)
 - `components/features/cutlist/packing.ts` – pure functions: `packPartsIntoSheets(parts, stock, options)` returns `LayoutResult`
 - `components/features/cutlist/preview.tsx` – SVG renderer for one `SheetLayout`
 - `components/features/cutlist/export.ts` – helper to push results to Quote cluster lines
@@ -90,7 +90,7 @@ Reference: CutList Optimizer – feature inspiration only. We will focus on an i
     - `updated_at timestamptz DEFAULT now()`
   - Index on `(quote_item_id)` for fast lookups; optionally `(quote_item_id, created_at DESC)` for history.
 
-- **Client flow** (`components/features/cutlist/CutlistTool.tsx`)
+- **Client flow** (`components/features/cutlist/CutlistCalculator.tsx`)
   - Auto-loads the latest snapshot on modal open (hydrates parts, stock, costing fields, overrides, layout).
   - Auto-saves (debounced) whenever results or billing overrides change; manual saves occur after calculate/export.
   - Shows a "Saving…" status while snapshot persistence is in-flight so operators see progress feedback.

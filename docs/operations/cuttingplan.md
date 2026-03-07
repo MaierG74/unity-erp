@@ -24,7 +24,7 @@ This document summarizes algorithm, UI, integration, and performance suggestions
 - Edge banding mapping: if rot=90° map top→left, right→top, bottom→right, left→bottom.
 - Edgebanding split by thickness: parts flagged with `laminate: true` contribute banding to 32mm, others to 16mm.
 
-## UI (CutlistTool.tsx)
+## UI (CutlistCalculator.tsx)
 
 - Parts table + Stock table + Options panel (kerf, single-sheet, offcut thresholds).
 - Grain selector per part using a compact Select: Any, Length, Width.
@@ -66,7 +66,7 @@ This document summarizes algorithm, UI, integration, and performance suggestions
 - Select components for: Primary sheet, Backer sheet, Edgebanding 16mm, Edgebanding 32mm (via existing Component Selection dialog)
 - Prices default from selected supplier component; can be overridden manually.
 - Export uses selected components and meters/sheets calculated by the tool.
-- Standalone `/cutlist` runs the full material palette (per-part material selector + palette persistence); the Quote modal keeps the legacy costing layout without the palette to preserve the established workflow.
+- Standalone `/cutlist` runs the full material palette (per-part material selector + palette persistence); the quote-specific cutlist page adds quote export behavior on top of the same main calculator.
 - Cards default to a collapsed state so operators can expand only the sections they need; price fields show a leading `R` to match local currency.
 
 ## UX / Feature Ideas

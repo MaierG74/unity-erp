@@ -28,6 +28,7 @@
   - `transaction_id`, `component_id`, `quantity`, `transaction_type` ('IN'|'OUT'|'ADJUST'), `transaction_date`, optional `order_id`/reference.
 - `suppliercomponents`
   - Supplier mapping with `supplier_code`, `price`, `lead_time`, `min_order_quantity`.
+  - Add Component dialog: when attaching suppliers during new component creation, the supplier row can now either pick an existing supplier code or create a new supplier-specific code inline. Saving the component inserts the corresponding `suppliercomponents` row in the same submission, so users do not need a second pass through the component detail page.
 - Reference: `component_categories`, `unitsofmeasure` (standardized; case‑insensitive unique).
 
 ## Core Operations
@@ -65,6 +66,14 @@
 ## Performance Notes
 - Current list uses client-side pagination/filtering; consider server-side for large datasets.
 - Multiple joins per row; keep detail fetches scoped and cache with React Query.
+
+## Component Reservations
+- `component_reservations` table earmarks on-hand stock for specific customer orders. Reservations are soft holds — they reduce available stock for other orders but do not block issuance.
+- Reserve/release via `reserve_order_components` / `release_order_components` RPCs (called from Order Detail page).
+- Per-order shortfall calculations (`get_detailed_component_status`) subtract other orders' reservations from available stock. Global shortfalls are unaffected (reservations redistribute, not consume).
+- Auto-released when the order moves to Completed or Cancelled.
+- Component detail Transactions tab hero card shows total reserved and available quantities.
+- See [orders-master § Component Reservations](../orders/orders-master.md) for full API/migration details.
 
 ## Known Gaps
 - Canonical spec for `inventory_transactions` (types, invariants, reconciliation) — see `inventory-transactions.md` (kept current with manual issuance notes).

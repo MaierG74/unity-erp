@@ -1,7 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireModuleAccess } from '@/lib/api/module-access';
+import { MODULE_KEYS } from '@/lib/modules/keys';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { sendQuoteEmail } from '@/lib/email';
 import { QuoteEmailProps } from '@/emails/quote-email';
+
+async function requireQuotesAccess(request: NextRequest) {
+  const access = await requireModuleAccess(request, MODULE_KEYS.QUOTING_PROPOSALS, {
+    forbiddenMessage: 'Quoting module access is disabled for your organization',
+  });
+
+  if ('error' in access) {
+    return { error: access.error };
+  }
+
+  if (!access.orgId) {
+    return {
+      error: NextResponse.json(
+        {
+          error: 'Organization context is required for quotes access',
+          reason: 'missing_org_context',
+          module_key: access.moduleKey,
+        },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return { orgId: access.orgId };
+}
 
 /**
  * POST /api/quotes/[id]/send-email
@@ -11,6 +38,9 @@ export async function POST(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireQuotesAccess(req);
+  if ('error' in auth) return auth.error;
+
   const { id } = await context.params;
   const quoteId = id;
   try {
@@ -37,6 +67,7 @@ export async function POST(
       .from('quotes')
       .select('*, customer:customers(id, name, email, telephone)')
       .eq('id', quoteId)
+      .eq('org_id', auth.orgId)
       .single();
 
     if (quoteError || !quote) {
@@ -72,13 +103,15 @@ export async function POST(
     const { data: items } = await supabaseAdmin
       .from('quote_items')
       .select('*, quote_item_clusters(*, quote_cluster_lines(*))')
-      .eq('quote_id', quoteId);
+      .eq('quote_id', quoteId)
+      .eq('org_id', auth.orgId);
 
     // Fetch attachments separately
     const { data: attachments } = await supabaseAdmin
       .from('quote_attachments')
       .select('*')
-      .eq('quote_id', quoteId);
+      .eq('quote_id', quoteId)
+      .eq('org_id', auth.orgId);
 
     // Group attachments by scope and quote_item_id
     const allAttachments = attachments || [];
@@ -106,6 +139,7 @@ export async function POST(
       .from('quote_company_settings')
       .select('*')
       .eq('setting_id', 1)
+      .eq('org_id', auth.orgId)
       .single();
 
     // Build company info for email and PDF
@@ -176,6 +210,7 @@ export async function POST(
         // Log each send
         await supabaseAdmin.from('quote_email_log').insert({
           quote_id: quoteId,
+          org_id: auth.orgId,
           recipient_email: email,
           resend_message_id: messageId,
           status: success ? 'sent' : 'failed',
@@ -189,6 +224,7 @@ export async function POST(
         // Log failed attempt
         await supabaseAdmin.from('quote_email_log').insert({
           quote_id: quoteId,
+          org_id: auth.orgId,
           recipient_email: email,
           status: 'failed',
           error_message: err.message,
@@ -201,6 +237,18 @@ export async function POST(
 
     const allSucceeded = results.every(r => r.success);
     const anySucceeded = results.some(r => r.success);
+
+    if (anySucceeded && quote.status !== 'ordered') {
+      const { error: statusError } = await supabaseAdmin
+        .from('quotes')
+        .update({ status: 'sent' })
+        .eq('id', quoteId)
+        .eq('org_id', auth.orgId);
+
+      if (statusError) {
+        console.error('Failed to update quote status after email send:', statusError);
+      }
+    }
 
     if (!anySucceeded) {
       return NextResponse.json(
@@ -223,6 +271,7 @@ export async function POST(
     try {
       await supabaseAdmin.from('quote_email_log').insert({
         quote_id: quoteId,
+        org_id: auth.orgId,
         recipient_email: 'unknown',
         status: 'failed',
         error_message: error.message,

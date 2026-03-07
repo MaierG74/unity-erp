@@ -1,7 +1,7 @@
 **Orders Reset Guide**
 
-- **Purpose:** Clean Orders data (headers, lines, attachments, and junction links) to prepare a fresh test order. Purchasing can be cleaned separately.
-- **Scope:** `orders`, `order_details`, `order_attachments`, `stock_issuances`, `supplier_order_customer_orders`, related `inventory_transactions`, and Supabase Storage files under `qbutton/Orders/Customer/<customer_id>/`.
+- **Purpose:** Clean Orders data for a tightly scoped test run such as `TEST-LC-001`. Purchasing can be cleaned separately.
+- **Scope:** `orders`, `order_details`, `order_attachments`, `stock_issuances`, `supplier_order_customer_orders`, `job_cards`, `job_card_items`, related `inventory_transactions`, and Supabase Storage files under `qbutton/Orders/Customer/<customer_id>/`.
 
 **Dry‑Run (SQL preview)**
 
@@ -29,10 +29,13 @@ Note: Storage files are not visible via SQL; use the script below to list and re
 
 - Use `scripts/cleanup-orders.ts` (see below) to:
   - Reverse inventory for stock issuances (adds back issued quantities).
+  - Delete `job_card_items` and `job_cards` for the targeted order ids.
   - Delete `stock_issuances` and their linked `inventory_transactions`.
   - Delete DB rows in order: junctions → attachments → details → orders.
   - Remove files in Storage under `Orders/Customer/<customer_id>/` for affected customers.
   - Supports `--dry-run`, `--after=YYYY-MM-DD`, and `--orderIds=...` flags.
+  - Supports `--include-labor-assignments` when you also want to delete `labor_plan_assignments` rows for the same order ids.
+  - By default, it only warns when `labor_plan_assignments` rows still reference the order.
 
 **Tables Affected**
 
@@ -45,6 +48,9 @@ Note: Storage files are not visible via SQL; use the script below to list and re
 | `inventory_transactions` | Issuance transactions deleted |
 | `inventory` | `quantity_on_hand` reversed (issued qty added back) |
 | `supplier_order_customer_orders` | Junction links deleted |
+| `job_cards` | Deleted for targeted orders |
+| `job_card_items` | Deleted for targeted order job cards |
+| `labor_plan_assignments` | Deleted only when `--include-labor-assignments` is passed |
 
 Commands:
 
@@ -52,14 +58,18 @@ Commands:
 - Apply all: `npx tsx scripts/cleanup-orders.ts`
 - Filter by date: `npx tsx scripts/cleanup-orders.ts --after=2025-01-01`
 - Filter by IDs: `npx tsx scripts/cleanup-orders.ts --orderIds=23955,23950`
+- Single test order: `npx tsx scripts/cleanup-orders.ts --dry-run --orderIds=<TEST_ORDER_ID>`
+- Single test order with labor cleanup: `npx tsx scripts/cleanup-orders.ts --dry-run --orderIds=<TEST_ORDER_ID> --include-labor-assignments`
 
 **Post‑Cleanup**
 
 - Refresh component views if used: `SELECT refresh_component_views();`
 - Optional: Run Purchasing reset if you want a fully clean pipeline (see `docs/domains/purchasing/purchasing-reset-guide.md`).
+- If your test used labor planning or factory-floor issuance, either include `--include-labor-assignments` during the order reset or clean those rows separately before re-running the scenario.
 
 **Caveats**
 
 - Storage deletion is destructive. Ensure you are targeting the correct customers and have backups if needed.
 - If you keep existing POs, their supplier orders will remain but the link to the cleaned orders is removed.
-
+- The script is intended for narrow test cleanup. Prefer `--orderIds=<single id>` for lifecycle tests instead of broad date-based wipes.
+- `--include-labor-assignments` is intentionally opt-in because it removes factory-floor planning records, not just order execution records.

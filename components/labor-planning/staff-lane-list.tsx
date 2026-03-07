@@ -589,7 +589,11 @@ export function StaffLaneList({
                 setDragIndicator(null);
                 const payload = parsePayload(event);
                 if (!payload) return;
-                const dropMinutes = computeMinutesFromEvent(event);
+                const rawMinutes = computeMinutesFromEvent(event);
+                // Snap to the same grid the visual indicator uses so what
+                // the user sees matches what gets saved.
+                const snappedMinutes = Math.round(rawMinutes / dragSnapIncrement) * dragSnapIncrement;
+                const dropMinutes = Math.min(Math.max(snappedMinutes, startMinutes), endMinutes);
                 onDrop({ staff: lane, startMinutes: dropMinutes, payload });
               }}
             >

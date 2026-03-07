@@ -47,8 +47,32 @@ export async function getAccessToken(): Promise<string> {
   }
 }
 
+async function wait(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getAccessTokenWithRetry(retries = 4, delayMs = 250): Promise<string> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await getAccessToken();
+    } catch (error) {
+      lastError = error;
+      const code = (error as Error & { code?: string })?.code;
+      if (code !== 'NO_TOKEN' || attempt === retries) {
+        throw error;
+      }
+      clearTokenCache();
+      await wait(delayMs);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('Missing Supabase access token');
+}
+
 export async function authorizedFetch(input: RequestInfo | URL, init?: FetchOptions) {
-  const token = await getAccessToken();
+  const token = await getAccessTokenWithRetry();
   const headers = new Headers(init?.headers ?? {});
   headers.set('Authorization', `Bearer ${token}`);
   if (init?.body && !headers.has('Content-Type')) {

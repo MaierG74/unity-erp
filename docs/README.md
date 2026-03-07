@@ -84,6 +84,7 @@ Start with the [TODO Index](overview/todo-index.md) when triaging work—it aggr
   - New: [`plans/todo-module-plan.md`](plans/todo-module-plan.md) – To-Do module planning doc covering cross-module task assignments
   - New: [`plans/products-section-upgrade.md`](plans/products-section-upgrade.md) – Modernize the Products area with inventory-parity tabs, transactions, and finished-good reports
   - New: [`plans/purchase-order-return-communications-plan.md`](plans/purchase-order-return-communications-plan.md) – Return Goods UX, document, and supplier email improvements
+  - New: [`plans/2026-03-01-furniture-configurator-deep-dive.md`](plans/2026-03-01-furniture-configurator-deep-dive.md) – **Furniture Configurator deep dive**: naming, edge banding improvements, assembly drawing generation, job card integration, new templates (pedestal, bookcase, table), phased roadmap
   - Completed: [`plans/stock-issuance-plan.md`](plans/stock-issuance-plan.md) – Stock issuance from customer orders (see [`changelogs/stock-issuance-implementation-20250104.md`](changelogs/stock-issuance-implementation-20250104.md) for implementation)
   - Completed: [`plans/fix-on-order-calculation-inner-join.md`](plans/fix-on-order-calculation-inner-join.md) – Fix "On Order" calculation with INNER JOIN patterns (see [`changelogs/on-order-calculation-fix-20250110.md`](changelogs/on-order-calculation-fix-20250110.md) for implementation)
   - New: [`plans/supplier-returns-plan.md`](plans/supplier-returns-plan.md) – Return goods to suppliers (rejections and later returns)

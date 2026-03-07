@@ -7,16 +7,13 @@ export interface InputProps
 
 const Input = React.forwardRef<HTMLInputElement, InputProps>(
   ({ className, type, onFocus, ...props }, ref) => {
-    const handleFocus = React.useCallback(
-      (e: React.FocusEvent<HTMLInputElement>) => {
-        // Auto-select content on focus for number inputs so users can type over the value
-        if (type === "number") {
+    const handleFocus = type === "number"
+      ? (e: React.FocusEvent<HTMLInputElement>) => {
+          // Auto-select content on focus for number inputs so users can type over the value
           e.target.select()
+          onFocus?.(e)
         }
-        onFocus?.(e)
-      },
-      [type, onFocus]
-    )
+      : onFocus
 
     return (
       <input

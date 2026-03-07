@@ -557,30 +557,29 @@ export function ReceiveItemsModal({
                 </div>
               )}
 
-              {quantityRejected > 0 && (
-                <div>
-                  <Label htmlFor="rejection_reason">
-                    Rejection Reason <span className="text-red-500">*</span>
-                  </Label>
-                  <select
-                    id="rejection_reason"
-                    {...register('rejection_reason')}
-                    className="w-full border border-gray-300 rounded-md p-2"
-                  >
-                    <option value="">Select reason...</option>
-                    <option value="Damaged">Damaged</option>
-                    <option value="Wrong item">Wrong item</option>
-                    <option value="Defective">Defective</option>
-                    <option value="Quality issue">Quality issue</option>
-                    <option value="Incomplete delivery">Incomplete delivery</option>
-                    <option value="Not as described">Not as described</option>
-                    <option value="Other">Other</option>
-                  </select>
-                  {errors.rejection_reason && (
-                    <p className="text-sm text-destructive mt-1">{errors.rejection_reason.message}</p>
-                  )}
-                </div>
-              )}
+              <div>
+                <Label htmlFor="rejection_reason" className={quantityRejected > 0 ? '' : 'text-muted-foreground'}>
+                  Rejection Reason {quantityRejected > 0 && <span className="text-red-500">*</span>}
+                </Label>
+                <select
+                  id="rejection_reason"
+                  {...register('rejection_reason')}
+                  disabled={quantityRejected <= 0}
+                  className={`w-full border rounded-md p-2 ${quantityRejected > 0 ? 'border-gray-300' : 'border-muted bg-muted/50 text-muted-foreground cursor-not-allowed'}`}
+                >
+                  <option value="">Select reason...</option>
+                  <option value="Damaged">Damaged</option>
+                  <option value="Wrong item">Wrong item</option>
+                  <option value="Defective">Defective</option>
+                  <option value="Quality issue">Quality issue</option>
+                  <option value="Incomplete delivery">Incomplete delivery</option>
+                  <option value="Not as described">Not as described</option>
+                  <option value="Other">Other</option>
+                </select>
+                {errors.rejection_reason && (
+                  <p className="text-sm text-destructive mt-1">{errors.rejection_reason.message}</p>
+                )}
+              </div>
 
               <div>
                 <Label htmlFor="receipt_date">Receipt Date</Label>

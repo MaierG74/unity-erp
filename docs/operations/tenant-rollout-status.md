@@ -86,6 +86,7 @@ Expand-only `org_id` columns have been added and backfilled (but RLS has NOT bee
 - `quote_item_cutlists.org_id` is now constraint-enforced (FK validated + `NOT NULL`) via migration `tenant_org_scoping_phase_b_step65_quote_item_cutlists_enforce_org`, and `quote_item_cutlists` now has org-scoped RLS via `tenant_rls_step66_quote_item_cutlists_enable_org` (applied + smoke-verified 2026-02-22 on `/quotes` and quote detail).
 - Phase B + staff/quotes constraint enforcement is now complete for the scoped tables in this rollout batch.
 - Local app hardening update (2026-02-22): replaced optional `time_daily_summary` `.single()` reads with `.limit(1)` in `components/features/staff/DailyAttendanceGrid.tsx` and `components/features/staff/DailyHoursDetailDialog.tsx` to remove expected-but-noisy `406` responses for missing per-staff daily summary rows; local smoke on `/staff/hours` as normal user shows `200` responses for those reads.
+- Local app hardening update (2026-03-07): redirected legacy `/purchasing/[orderId]` route to the allocation-aware PO detail page and removed the orphaned legacy `receiveStock` helper/button from `app/purchasing/purchase-orders/[id]/page.tsx` so split-line receipts cannot bypass `p_allocation_receipts` handling before `per_allocation_receipt_phase_b`.
 
 ## What’s Next (recommended order)
 1. Continue production hardening checks and normal-user smoke tests across the most-used flows while constraints/RLS are now in place across current `org_id` tables.

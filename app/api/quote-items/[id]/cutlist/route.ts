@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+
+import { requireQuoteItemAccess } from '@/lib/api/quotes-access';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { z } from 'zod';
 
@@ -13,7 +15,7 @@ const payloadSchema = z.object({
 });
 
 export async function GET(
-  _req: NextRequest,
+  request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   const params = await context.params;
@@ -26,11 +28,16 @@ export async function GET(
   }
 
   const quoteItemId = parsed.data.id;
+  const auth = await requireQuoteItemAccess(request, quoteItemId);
+  if ('error' in auth) {
+    return auth.error;
+  }
 
   const { data, error } = await supabaseAdmin
     .from('quote_item_cutlists')
     .select('*')
     .eq('quote_item_id', quoteItemId)
+    .eq('org_id', auth.orgId)
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -64,6 +71,10 @@ export async function PUT(
   }
 
   const quoteItemId = parsedParams.data.id;
+  const auth = await requireQuoteItemAccess(request, quoteItemId);
+  if ('error' in auth) {
+    return auth.error;
+  }
 
   const body = await request.json();
   const parsedBody = payloadSchema.safeParse(body);
@@ -76,21 +87,9 @@ export async function PUT(
 
   const { optionsHash, layout, billingOverrides } = parsedBody.data;
 
-  const { data: quoteItem, error: quoteItemError } = await supabaseAdmin
-    .from('quote_items')
-    .select('id, quote_id')
-    .eq('id', quoteItemId)
-    .single();
-
-  if (quoteItemError || !quoteItem) {
-    return NextResponse.json(
-      { error: 'Quote item not found or access denied' },
-      { status: 404 }
-    );
-  }
-
   const payload = {
     quote_item_id: quoteItemId,
+    org_id: auth.orgId,
     options_hash: optionsHash ?? null,
     layout_json: layout,
     billing_overrides: billingOverrides ?? null,
@@ -100,6 +99,7 @@ export async function PUT(
     .from('quote_item_cutlists')
     .upsert(payload, { onConflict: 'quote_item_id' })
     .select('*')
+    .eq('org_id', auth.orgId)
     .single();
 
   if (error) {

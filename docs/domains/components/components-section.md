@@ -8,6 +8,7 @@ Manage components, stock levels, locations, supplier links, and images. Provide 
 ### Primary UI Entrypoints
 - `app/inventory/page.tsx` — main inventory page with tabbed interface (Components, Categories, On Order, Transactions, Reports) using `DataTable`.
 - `app/inventory/components/[id]/page.tsx` — dedicated component detail page with tabbed layout (Overview, Edit, Inventory, Suppliers, Transactions, Orders, Analytics).
+  - Analytics tab stock health banner uses semantic status gradients with matching dark-mode variants so status text remains legible across themes.
 - `app/inventory/inventory-client.tsx` — alternative client layout that composes `InventoryFilters`, `DataGrid`, `InventoryDetails`, and `TransactionHistory`.
 
 ### Key Feature Components
@@ -290,5 +291,4 @@ Types referenced:
 ```
 
 Keep this document updated with structural changes, decisions, and TODOs.
-
 

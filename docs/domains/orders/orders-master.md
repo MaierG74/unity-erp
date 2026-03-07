@@ -37,6 +37,21 @@
 - Read route:
   - `GET fg-reservations` → reads `product_reservations` then merges product info.
 
+**Component Reservations (Raw Material Earmarking)**
+
+- Earmarks on-hand raw materials/components for a specific order so other orders see reduced available stock.
+- Table: `component_reservations` (`order_id`, `component_id`, `qty_reserved`, `org_id`; unique on `order_id + component_id`).
+- RPCs:
+  - `reserve_order_components(p_order_id, p_org_id)` — idempotent: deletes existing reservations, then inserts new ones based on current BOM requirements vs available stock (minus other orders' reservations). Safe to re-run when stock changes.
+  - `release_order_components(p_order_id, p_org_id)` — deletes all reservations for the order.
+- API routes (same auth pattern as FG):
+  - `POST /api/orders/[orderId]/reserve-components`
+  - `POST /api/orders/[orderId]/release-components`
+- Auto-release trigger: reservations are deleted when an order moves to Completed or Cancelled (`trg_auto_release_component_reservations`).
+- Shortfall math: per-order `apparent_shortfall` and `real_shortfall` in `get_detailed_component_status` use `in_stock - reserved_by_others` as available stock. Global shortfalls are unchanged (reservations redistribute existing stock, they don't change totals).
+- UI: Reserve/Release buttons on Order Detail page; BOM table shows RESERVED column (blue when > 0); component detail Transactions tab hero card shows "X reserved · Y available" when reservations exist.
+- Migrations: `20260303085534` through `20260303151451` (7 files, see `supabase/migrations/`).
+
 **UI & Routes**
 
 - Orders list: status filter, debounced search (order number, customer name, numeric ID), section chips, attachment count, upload dialog.

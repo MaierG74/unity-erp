@@ -159,6 +159,8 @@ const pieceworkRateSchema = z.object({
   product_id: z.string().optional(),
 });
 
+const DEFAULT_PRODUCT_OPTION = '__default_product__';
+
 interface JobDetailProps {
   jobId: number;
 }
@@ -1233,14 +1235,17 @@ export function JobDetail({ jobId }: JobDetailProps) {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Product (optional)</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select
+                      onValueChange={(value) => field.onChange(value === DEFAULT_PRODUCT_OPTION ? '' : value)}
+                      value={field.value || DEFAULT_PRODUCT_OPTION}
+                    >
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Default (all products)" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="">Default (all products)</SelectItem>
+                        <SelectItem value={DEFAULT_PRODUCT_OPTION}>Default (all products)</SelectItem>
                         {products.map((p: any) => (
                           <SelectItem key={p.product_id} value={p.product_id.toString()}>
                             {p.name} ({p.internal_code})

@@ -1,5 +1,7 @@
 // Types for the Quotes System
 
+import type { QuoteStatus } from '@/lib/quotes/status';
+
 export interface Quote {
   quote_id: number;
   quote_number: string;
@@ -8,7 +10,7 @@ export interface Quote {
   created_at: string;
   updated_at: string;
   valid_until: string | null;
-  status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
+  status: QuoteStatus;
   subtotal: number;
   vat_rate: number;
   vat_amount: number;

@@ -24,7 +24,6 @@ import {
   Ruler,
   Layers,
   LayoutGrid,
-  Clock,
   Factory,
   DollarSign,
 } from 'lucide-react';
@@ -122,11 +121,6 @@ const navigation = [
     name: 'Option Sets',
     href: '/settings/option-sets',
     icon: Layers
-  },
-  {
-    name: 'Work Schedules',
-    href: '/settings/work-schedules',
-    icon: Clock
   },
   {
     name: 'Settings',

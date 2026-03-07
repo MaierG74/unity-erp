@@ -178,6 +178,7 @@ Tables involved and their key columns and relationships. Source: Supabase MCP qu
 - File: components/features/labor/piecework-rates-manager.tsx:1
 - Features:
   - Manage per-piece rates by job, with optional product-specific overrides.
+  - The "Default (all products)" picker option maps to a null `product_id` in storage; UI selects must use a non-empty sentinel value and translate it back to null/empty form state.
   - View versioned rate history for the selected job and scope (default vs product).
   - Add new rate versions; UI computes end_date gaps similar to category hourly rates.
 - Job selection at scale:

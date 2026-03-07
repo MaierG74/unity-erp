@@ -97,21 +97,23 @@ function calculateEdgeLengthMm(
 }
 
 /**
- * Get the edge thickness based on lamination type.
+ * Get the edge thickness based on lamination type and material thickness.
+ * @param materialThickness - Sheet thickness in mm (defaults to 16 for backwards compat)
  */
 function getEdgeThickness(
   laminationType: LaminationType | undefined,
+  materialThickness: number = 16,
   laminationConfig?: CustomLaminationConfig
 ): number {
   switch (laminationType) {
     case 'none':
     case undefined:
-      return 16;
+      return materialThickness;
     case 'with-backer':
     case 'same-board':
-      return 32;
+      return materialThickness * 2;
     case 'custom':
-      return laminationConfig?.edgeThickness || 48;
+      return laminationConfig?.edgeThickness || materialThickness * 3;
   }
 }
 
@@ -194,8 +196,9 @@ export function expandPartsWithLamination(
     const materialKey = part.material_id || defaultMaterialId || 'unassigned';
     const baseQty = part.quantity;
 
-    // Calculate edge thickness based on lamination type
-    const edgeThickness = getEdgeThickness(laminationType, part.lamination_config);
+    // Calculate edge thickness based on lamination type and material thickness
+    const materialThickness = part.material_thickness || 16;
+    const edgeThickness = getEdgeThickness(laminationType, materialThickness, part.lamination_config);
 
     // Helper to add edging with correct quantity
     const addEdging = (finishedPartCount: number) => {
@@ -345,6 +348,36 @@ export function expandedPartsToPartSpecs(expandedParts: ExpandedPart[]): PartSpe
 }
 
 // ============================================================================
+// Board Type Helpers
+// ============================================================================
+
+/**
+ * Parse the sheet thickness in mm from a board_type string.
+ * e.g., '16mm' → 16, '32mm-both' → 16 (half because it's laminated),
+ * '22mm' → 22, '44mm-both' → 22
+ */
+export function parseSheetThickness(boardType: string): number {
+  const match = boardType.match(/^(\d+)mm/);
+  if (!match) return 16;
+  const totalThickness = parseInt(match[1], 10);
+  // For laminated types, the sheet thickness is half the total
+  if (boardType.includes('-both') || boardType.includes('-backer')) {
+    return Math.round(totalThickness / 2);
+  }
+  return totalThickness;
+}
+
+/**
+ * Derive lamination type from a board_type string.
+ * Replaces the old hardcoded BOARD_TYPE_TO_LAMINATION map.
+ */
+export function boardTypeToLamination(boardType: string): LaminationType {
+  if (boardType.endsWith('-both')) return 'same-board';
+  if (boardType.endsWith('-backer')) return 'with-backer';
+  return 'none';
+}
+
+// ============================================================================
 // Group-Level Expansion (LEGACY - for backward compatibility)
 // ============================================================================
 
@@ -363,8 +396,7 @@ export function expandGroupsToPartSpecs(groups: CutlistGroup[]): BoardCalculatio
   const primaryByMaterial = new Map<string, PartSpec[]>();
   const backerByMaterial = new Map<string, { parts: PartSpec[]; materialName?: string }>();
 
-  let edging16mm = 0;
-  let edging32mm = 0;
+  const edgingByThicknessMap = new Map<number, number>();
   let totalPrimaryParts = 0;
   let totalBackerParts = 0;
 
@@ -373,28 +405,30 @@ export function expandGroupsToPartSpecs(groups: CutlistGroup[]): BoardCalculatio
 
     const materialKey = group.primaryMaterialId || 'unassigned';
     const backerKey = group.backerMaterialId || group.primaryMaterialId || 'unassigned-backer';
+    const sheetThickness = parseSheetThickness(group.boardType);
+    const lamType = boardTypeToLamination(group.boardType);
 
     for (const part of group.parts) {
       const baseQty = part.quantity;
 
-      switch (group.boardType) {
-        case '16mm': {
-          // Simple: parts as-is, 16mm edging
+      switch (lamType) {
+        case 'none': {
+          // Simple: parts as-is, edging = sheet thickness
           const partSpec = toPartSpec(part, baseQty, false);
           const existing = primaryByMaterial.get(materialKey) || [];
           existing.push(partSpec);
           primaryByMaterial.set(materialKey, existing);
 
           const edging = calculateEdgeBanding(part, baseQty);
-          edging16mm += edging.length16mm;
+          const edgeThick = sheetThickness;
+          edgingByThicknessMap.set(edgeThick, (edgingByThicknessMap.get(edgeThick) || 0) + edging.length16mm);
           totalPrimaryParts += baseQty;
           break;
         }
 
-        case '32mm-both': {
+        case 'same-board': {
           // Same board lamination - pieces are paired during assembly
           // Qty = pieces to cut, Finished parts = Qty ÷ 2
-          // Example: Qty=4 pieces → 2 finished 32mm parts → edge for 2 parts
           const partSpec = toPartSpec(part, baseQty, true);
           const existing = primaryByMaterial.get(materialKey) || [];
           existing.push(partSpec);
@@ -403,20 +437,19 @@ export function expandGroupsToPartSpecs(groups: CutlistGroup[]): BoardCalculatio
           // Edging is for FINISHED parts, not pieces
           const finishedParts = Math.floor(baseQty / 2);
           const edging = calculateEdgeBanding(part, finishedParts);
-          edging32mm += edging.length16mm;
+          const edgeThick = sheetThickness * 2;
+          edgingByThicknessMap.set(edgeThick, (edgingByThicknessMap.get(edgeThick) || 0) + edging.length16mm);
           totalPrimaryParts += baseQty;
           break;
         }
 
-        case '32mm-backer': {
-          // Split: original → primary, duplicate → backer, 32mm edging
-          // Primary parts
+        case 'with-backer': {
+          // Split: original → primary, duplicate → backer, doubled edging
           const primarySpec = toPartSpec(part, baseQty, true);
           const existingPrimary = primaryByMaterial.get(materialKey) || [];
           existingPrimary.push(primarySpec);
           primaryByMaterial.set(materialKey, existingPrimary);
 
-          // Backer parts (same dimensions, different material)
           const backerSpec = toPartSpec(
             { ...part, id: `${part.id}-backer` },
             baseQty,
@@ -430,7 +463,8 @@ export function expandGroupsToPartSpecs(groups: CutlistGroup[]): BoardCalculatio
           backerByMaterial.set(backerKey, existingBacker);
 
           const edging = calculateEdgeBanding(part, baseQty);
-          edging32mm += edging.length16mm; // Same edge count, but 32mm width
+          const edgeThick = sheetThickness * 2;
+          edgingByThicknessMap.set(edgeThick, (edgingByThicknessMap.get(edgeThick) || 0) + edging.length16mm);
           totalPrimaryParts += baseQty;
           totalBackerParts += baseQty;
           break;
@@ -462,11 +496,16 @@ export function expandGroupsToPartSpecs(groups: CutlistGroup[]): BoardCalculatio
     });
   }
 
+  // Backwards compat: extract 16mm and 32mm from the map
+  const edging16mm = edgingByThicknessMap.get(16) || 0;
+  const edging32mm = edgingByThicknessMap.get(32) || 0;
+
   return {
     primarySets,
     backerSets,
     edging16mm,
     edging32mm,
+    edgingByThickness: edgingByThicknessMap,
     summary: {
       totalPrimaryParts,
       totalBackerParts,
@@ -485,31 +524,32 @@ export const expandGroupsToPartSets = expandGroupsToPartSpecs;
 // ============================================================================
 
 /**
- * Get display label for board type (legacy)
+ * Get display label for board type.
  */
 export function getBoardTypeLabel(boardType: BoardType): string {
-  switch (boardType) {
-    case '16mm':
-      return '16mm Single';
-    case '32mm-both':
-      return '32mm Both Sides';
-    case '32mm-backer':
-      return '32mm With Backer';
+  if (boardType.endsWith('-both')) {
+    const thickness = parseInt(boardType, 10);
+    return `${thickness}mm Both Sides`;
   }
+  if (boardType.endsWith('-backer')) {
+    const thickness = parseInt(boardType, 10);
+    return `${thickness}mm With Backer`;
+  }
+  return `${parseInt(boardType, 10) || boardType}mm Single`;
 }
 
 /**
- * Get description for board type (legacy)
+ * Get description for board type.
  */
 export function getBoardTypeDescription(boardType: BoardType): string {
-  switch (boardType) {
-    case '16mm':
-      return 'Standard single board, 16mm edging';
-    case '32mm-both':
-      return 'Paired during assembly, both sides visible (e.g., desk legs)';
-    case '32mm-backer':
-      return '1× primary + 1× backer board, only top visible (e.g., desk tops)';
+  const sheetThickness = parseSheetThickness(boardType);
+  if (boardType.endsWith('-both')) {
+    return `2× ${sheetThickness}mm paired during assembly, both sides visible`;
   }
+  if (boardType.endsWith('-backer')) {
+    return `${sheetThickness}mm primary + ${sheetThickness}mm backer, top side visible`;
+  }
+  return `Standard ${sheetThickness}mm single board, ${sheetThickness}mm edging`;
 }
 
 /**

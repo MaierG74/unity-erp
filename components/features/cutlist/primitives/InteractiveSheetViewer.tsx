@@ -279,7 +279,7 @@ export function InteractiveSheetViewer({
           the board to overflow below the visible dialog area. */}
       <DialogContent
         className={[
-          'max-w-6xl h-[85vh] flex flex-col p-0 gap-0 overflow-hidden',
+          'w-[96vw] max-w-[1600px] h-[88vh] flex flex-col p-0 gap-0 overflow-hidden',
           // Target the inner <div> that shadcn wraps around {children}
           '[&>div:first-child]:!overflow-hidden',
           '[&>div:first-child]:!max-h-none',
@@ -302,9 +302,9 @@ export function InteractiveSheetViewer({
 
         {/* Body: flex-1 min-h-0 ensures it takes remaining space without
             growing beyond the dialog's fixed height. */}
-        <div className="flex flex-1 min-h-0">
+        <div className="flex flex-1 min-h-0 overflow-hidden">
           {/* Left: diagram with pan/zoom (70%) */}
-          <div className="relative flex-[7] min-w-0 min-h-0 border-r">
+          <div className="relative flex-1 min-w-0 min-h-0 border-r">
             {/* Zoom controls — semi-transparent bg so they don't clash with dimension labels */}
             <div className="absolute top-2 right-2 z-10 flex gap-1 bg-background/80 backdrop-blur-sm rounded-md p-0.5">
               <Button
@@ -352,7 +352,7 @@ export function InteractiveSheetViewer({
                   sheetLength={sheetLength}
                   layout={sheetLayout}
                   fillContainer
-                  maxWidth={800}
+                  maxWidth={720}
                   maxHeight={600}
                   colorMap={colorMap}
                   highlightedPartId={highlightedPartId}
@@ -383,11 +383,11 @@ export function InteractiveSheetViewer({
           </div>
 
           {/* Right: legend table (30%) */}
-          <div className="flex-[3] min-w-[240px] max-w-[340px] overflow-y-auto p-3 border-l">
+          <div className="w-[500px] min-w-[460px] max-w-[560px] overflow-x-auto overflow-y-auto p-3 border-l">
             <div className="text-sm font-medium text-muted-foreground mb-2">
               Parts Legend ({sheetLayout.placements.length} placements)
             </div>
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[440px] text-sm">
               <thead>
                 <tr className="border-b text-muted-foreground">
                   <th className="text-left py-1 pr-1 w-5"></th>
@@ -395,7 +395,8 @@ export function InteractiveSheetViewer({
                   <th className="text-left py-1 pr-2">Part</th>
                   <th className="text-right py-1 pr-2 w-8">Qty</th>
                   <th className="text-right py-1 pr-2">L x W</th>
-                  <th className="text-right py-1 pr-1">Info</th>
+                  <th className="text-right py-1 pr-2">Grain</th>
+                  <th className="text-right py-1 pr-1">Edges</th>
                 </tr>
               </thead>
               <tbody>
@@ -420,7 +421,7 @@ export function InteractiveSheetViewer({
                     <td className="py-1.5 pr-1 font-mono font-semibold text-muted-foreground">
                       {row.letter}
                     </td>
-                    <td className="py-1.5 pr-2 font-medium truncate max-w-[100px]">
+                    <td className="py-1.5 pr-2 font-medium truncate max-w-[140px]">
                       {row.baseName}
                     </td>
                     <td className="py-1.5 pr-2 text-right text-muted-foreground">
@@ -429,9 +430,11 @@ export function InteractiveSheetViewer({
                     <td className="py-1.5 pr-2 text-right text-muted-foreground whitespace-nowrap">
                       {Math.round(row.h)} x {Math.round(row.w)}
                     </td>
+                    <td className="py-1.5 pr-2 text-right text-muted-foreground whitespace-nowrap">
+                      {row.grain && row.grain !== 'any' ? (row.grain === 'length' ? '↕' : '↔') : 'None'}
+                    </td>
                     <td className="py-1.5 pl-1 text-right text-muted-foreground whitespace-nowrap">
-                      {row.grain && row.grain !== 'any' ? (row.grain === 'length' ? '↕' : '↔') : ''}
-                      {row.bandEdges ? ` ${edgeLabel(row.bandEdges)}` : ''}
+                      {row.bandEdges ? edgeLabel(row.bandEdges) : 'None'}
                     </td>
                   </tr>
                   );

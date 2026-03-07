@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, use } from 'react';
+import { useState, useMemo, use, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import {
@@ -14,9 +14,19 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Package, Edit, Plus, Trash2, Save, X } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -31,6 +41,7 @@ import { ProductTransactionsTab } from '@/components/features/products/ProductTr
 import { useModuleAccess } from '@/lib/hooks/use-module-access';
 import { MODULE_KEYS } from '@/lib/modules/keys';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
+import type { CropParams } from '@/types/image-editor';
 
 interface ProductDetailPageProps {
   params: Promise<{
@@ -53,12 +64,22 @@ interface ProductImage {
   product_id: string | number;
   image_url: string;
   is_primary: boolean;
+  crop_params?: CropParams | null;
 }
 
 interface ProductCategory {
   product_cat_id: number;
   categoryname: string;
 }
+
+const PRODUCT_DETAIL_TABS = ['details', 'images', 'categories', 'costing', 'cutlist', 'options', 'transactions'] as const;
+type ProductDetailTab = typeof PRODUCT_DETAIL_TABS[number];
+type PendingNavigation =
+  | { type: 'back' }
+  | { type: 'browser-back' }
+  | { type: 'tab'; tab: ProductDetailTab }
+  | { type: 'link'; href: string }
+  | null;
 
 // Fetch a single product by ID
 async function fetchProduct(productId: number): Promise<Product | null> {
@@ -129,7 +150,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
   const { productId: productIdParam } = use(params);
   const productId = parseInt(productIdParam, 10);
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState('details');
+  const searchParams = useSearchParams();
   const { toast } = useToast();
   const [editOpen, setEditOpen] = useState(false);
   const [editCode, setEditCode] = useState('');
@@ -140,8 +161,30 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
   const [addFgLocation, setAddFgLocation] = useState('');
   const [addingFg, setAddingFg] = useState(false);
   const [reservationsOpen, setReservationsOpen] = useState(false);
+  const [hasPendingImageUploads, setHasPendingImageUploads] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation>(null);
+  const bypassPopstateRef = useRef(false);
 
   console.log('ProductDetailPage mounted, productId:', productId);
+
+  const activeTabParam = searchParams?.get('tab');
+  const activeTab: ProductDetailTab = PRODUCT_DETAIL_TABS.includes(activeTabParam as ProductDetailTab)
+    ? (activeTabParam as ProductDetailTab)
+    : 'details';
+
+  const updateTabInUrl = (nextTab: ProductDetailTab) => {
+    const params = new URLSearchParams(searchParams?.toString() || '');
+
+    if (nextTab === 'details') {
+      params.delete('tab');
+    } else {
+      params.set('tab', nextTab);
+    }
+
+    const query = params.toString();
+    const url = query ? `/products/${productId}?${query}` : `/products/${productId}`;
+    router.replace(url, { scroll: false });
+  };
 
   // Fetch product
   const { data: product, isLoading, error, refetch } = useQuery({
@@ -230,9 +273,90 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
     return map;
   }, [orderAttachments]);
 
+  const requestNavigation = (nextNavigation: Exclude<PendingNavigation, null>) => {
+    if (hasPendingImageUploads) {
+      setPendingNavigation(nextNavigation);
+      return;
+    }
+
+    if (nextNavigation.type === 'back' || nextNavigation.type === 'browser-back') {
+      bypassPopstateRef.current = true;
+      router.back();
+      return;
+    }
+
+    if (nextNavigation.type === 'tab') {
+      updateTabInUrl(nextNavigation.tab);
+      return;
+    }
+
+    router.push(nextNavigation.href);
+  };
+
   // Handle back button - use router.back() to preserve URL params (filters)
   const handleBack = () => {
-    router.back();
+    requestNavigation({ type: 'back' });
+  };
+
+  const handleTabChange = (nextTab: string) => {
+    requestNavigation({ type: 'tab', tab: nextTab as ProductDetailTab });
+  };
+
+  useEffect(() => {
+    if (!hasPendingImageUploads || activeTab !== 'images') return;
+
+    const handlePopState = () => {
+      if (bypassPopstateRef.current) {
+        bypassPopstateRef.current = false;
+        return;
+      }
+
+      window.history.go(1);
+      setPendingNavigation({ type: 'browser-back' });
+    };
+
+    const handleDocumentClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      const link = target?.closest('a[href]') as HTMLAnchorElement | null;
+      if (!link) return;
+      if (link.target === '_blank' || link.hasAttribute('download')) return;
+      if (!link.href.startsWith(window.location.origin)) return;
+      if (link.href === window.location.href) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const href = `${link.pathname}${link.search}${link.hash}`;
+      setPendingNavigation({ type: 'link', href });
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    document.addEventListener('click', handleDocumentClick, true);
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      document.removeEventListener('click', handleDocumentClick, true);
+    };
+  }, [activeTab, hasPendingImageUploads]);
+
+  const handleConfirmPendingNavigation = () => {
+    if (!pendingNavigation) return;
+
+    if (pendingNavigation.type === 'back' || pendingNavigation.type === 'browser-back') {
+      setPendingNavigation(null);
+      bypassPopstateRef.current = true;
+      router.back();
+      return;
+    }
+
+    if (pendingNavigation.type === 'tab') {
+      updateTabInUrl(pendingNavigation.tab);
+      setPendingNavigation(null);
+      return;
+    }
+
+    router.push(pendingNavigation.href);
+    setPendingNavigation(null);
   };
 
   const openEdit = () => {
@@ -358,7 +482,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
         </Dialog>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
         <TabsList>
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="images">Images</TabsTrigger>
@@ -550,6 +674,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
                 productCode={product.internal_code}
                 images={product.images || []}
                 onImagesChange={() => refetch()}
+                onPendingUploadsChange={setHasPendingImageUploads}
               />
             </CardContent>
           </Card>
@@ -671,6 +796,29 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <AlertDialog open={pendingNavigation !== null} onOpenChange={(open) => (!open ? setPendingNavigation(null) : undefined)}>
+        <AlertDialogContent className="max-w-md border-border/60 bg-background/95 backdrop-blur">
+          <AlertDialogHeader className="space-y-3 text-left">
+            <AlertDialogTitle className="text-xl">Upload Not Finished</AlertDialogTitle>
+            <AlertDialogDescription className="text-sm leading-6 text-muted-foreground">
+              You have an image staged on the Images tab, but it has not been uploaded yet. If you leave now, that pasted or cropped image will be lost.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            Click <span className="font-semibold text-foreground">Upload Image</span> first if you want to keep it attached to this product.
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingNavigation(null)}>Stay On Images</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmPendingNavigation}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Leave Without Uploading
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

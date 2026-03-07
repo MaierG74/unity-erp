@@ -1,7 +1,8 @@
 'use client';
 
 import React from 'react';
-import { ChevronRight, ChevronDown, Edit, Trash, Check, X, Loader2, Info } from 'lucide-react';
+import Link from 'next/link';
+import { ChevronRight, ChevronDown, Edit, Trash, Check, X, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { TableCell, TableRow } from '@/components/ui/table';
@@ -57,6 +58,9 @@ export function ProductsTableRow({
     const metrics = computeComponentMetrics(comp, detail.product_id);
     return metrics.real > 0.0001;
   });
+  const bomGridClass = showGlobalContext
+    ? 'grid grid-cols-[minmax(180px,1fr)_65px_65px_65px_65px_65px_65px_65px] items-center gap-x-4'
+    : 'grid grid-cols-[minmax(180px,1fr)_65px_65px_65px_65px_65px_65px] items-center gap-x-4';
 
   return (
     <>
@@ -95,7 +99,7 @@ export function ProductsTableRow({
         </TableCell>
 
         {/* Qty */}
-        <TableCell className="text-right">
+        <TableCell className="text-right tabular-nums">
           {isEditing ? (
             <Input
               type="number"
@@ -111,13 +115,13 @@ export function ProductsTableRow({
         </TableCell>
 
         {/* Reserved */}
-        <TableCell className="text-right">{formatQuantity(coverage.reserved)}</TableCell>
+        <TableCell className="text-right tabular-nums">{formatQuantity(coverage.reserved)}</TableCell>
 
         {/* To Build */}
-        <TableCell className="text-right">{formatQuantity(coverage.remain)}</TableCell>
+        <TableCell className="text-right tabular-nums">{formatQuantity(coverage.remain)}</TableCell>
 
         {/* Unit Price */}
-        <TableCell className="text-right">
+        <TableCell className="text-right tabular-nums">
           {isEditing ? (
             <Input
               type="number"
@@ -133,7 +137,7 @@ export function ProductsTableRow({
         </TableCell>
 
         {/* Total */}
-        <TableCell className="text-right">
+        <TableCell className="text-right tabular-nums">
           {isEditing
             ? formatCurrency(
                 parseFloat(editQuantity || '0') * parseFloat(editUnitPrice || '0')
@@ -194,14 +198,16 @@ export function ProductsTableRow({
           {/* BOM header row */}
           <TableRow className="bg-muted/30">
             <TableCell colSpan={7} className="py-1.5 px-4 pl-12">
-              <div className="flex items-center gap-6 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                <span className="min-w-[200px]">Component</span>
-                <span className="w-20 text-right">Required</span>
-                <span className="w-20 text-right">In Stock</span>
-                <span className="w-20 text-right">On Order</span>
-                <span className="w-20 text-right">Shortfall</span>
+              <div className={cn(bomGridClass, 'text-xs font-medium text-muted-foreground uppercase tracking-wider')}>
+                <span className="min-w-[180px]">Component</span>
+                <span className="block text-right tabular-nums">Required</span>
+                <span className="block text-right tabular-nums">In Stock</span>
+                <span className="block text-right tabular-nums">Reserved</span>
+                <span className="block text-right tabular-nums">Available</span>
+                <span className="block text-right tabular-nums">On Order</span>
+                <span className="block text-right tabular-nums">Shortfall</span>
                 {showGlobalContext && (
-                  <span className="w-20 text-right">Global</span>
+                  <span className="block text-right tabular-nums">Global</span>
                 )}
               </div>
             </TableCell>
@@ -221,27 +227,63 @@ export function ProductsTableRow({
                 )}
               >
                 <TableCell colSpan={7} className="py-1.5 px-4 pl-12">
-                  <div className="flex items-center gap-6 text-sm">
-                    <div className="min-w-[200px]">
-                      <span className="font-medium">
-                        {component.internal_code || 'Unknown'}
-                      </span>
-                      <span className="text-muted-foreground ml-2 text-xs">
-                        {component.description || ''}
-                      </span>
+                  <div className={cn(bomGridClass, 'text-sm')}>
+                    <div className="min-w-[180px] min-w-0">
+                      {component.component_id ? (
+                        <Link
+                          href={`/inventory/components/${component.component_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex min-w-0 items-baseline gap-2 hover:underline"
+                        >
+                          <span className="font-medium">
+                            {component.internal_code || 'Unknown'}
+                          </span>
+                          <span className="truncate text-muted-foreground text-xs">
+                            {component.description || ''}
+                          </span>
+                        </Link>
+                      ) : (
+                        <>
+                          <span className="font-medium">
+                            {component.internal_code || 'Unknown'}
+                          </span>
+                          <span className="text-muted-foreground ml-2 text-xs">
+                            {component.description || ''}
+                          </span>
+                        </>
+                      )}
                     </div>
-                    <span className="w-20 text-right font-medium">
+                    <span className="block text-right font-medium tabular-nums">
                       {formatQuantity(metrics.required)}
                     </span>
-                    <span className="w-20 text-right">
+                    <span className="block text-right tabular-nums">
                       {formatQuantity(metrics.inStock)}
                     </span>
-                    <span className="w-20 text-right">
+                    <span className={cn(
+                      'block text-right tabular-nums',
+                      (metrics.reservedThisOrder ?? 0) > 0
+                        ? 'text-blue-500 font-medium'
+                        : 'text-muted-foreground'
+                    )}>
+                      {formatQuantity(metrics.reservedThisOrder ?? 0)}
+                    </span>
+                    <span
+                      className={cn(
+                        'block text-right tabular-nums',
+                        (metrics.available ?? metrics.inStock) < metrics.required
+                          ? 'text-orange-500 font-medium'
+                          : ''
+                      )}
+                    >
+                      {formatQuantity(metrics.available ?? metrics.inStock)}
+                    </span>
+                    <span className="block text-right tabular-nums">
                       {formatQuantity(metrics.onOrder)}
                     </span>
                     <span
                       className={cn(
-                        'w-20 text-right font-medium',
+                        'block text-right font-medium tabular-nums',
                         metrics.real > 0 ? 'text-red-600' : 'text-green-600'
                       )}
                     >
@@ -250,7 +292,7 @@ export function ProductsTableRow({
                     {showGlobalContext && (
                       <span
                         className={cn(
-                          'w-20 text-right font-medium',
+                          'block text-right font-medium tabular-nums',
                           globalShortfall > 0 ? 'text-red-600' : 'text-green-600'
                         )}
                       >

@@ -2,13 +2,32 @@
 
 > **Status**: Active development
 > **Location**: `/app/cutlist/page.tsx`
-> **Last Updated**: 2026-01-26
+> **Last Updated**: 2026-03-07
 
 ---
 
 ## Overview
 
 The Cutlist Calculator is a tool for planning sheet material cuts. Users enter parts with dimensions, and the calculator optimizes how to cut them from stock boards with minimal waste.
+
+## Canonical Internal Entry Points
+
+The `CutlistCalculator` component is now the canonical cutlist experience inside Unity ERP.
+
+- `/cutlist` remains the standalone calculator for ad-hoc work.
+- `/products/[productId]/cutlist-builder` is the canonical product cutlist workspace.
+- `/quotes/[id]/cutlist/[itemId]` is the canonical quote cutlist workspace.
+
+Product cutlist builder behavior:
+- When saved `product_cutlist_groups` exist, the builder loads those first.
+- When no saved groups exist, the builder seeds the calculator from the product's effective BOM cutlist rows so the product Cutlist tab and the builder page start from the same manufacturing data.
+- The product Cutlist tab's **Generate Cutlist** action routes into the builder page instead of opening the legacy product-specific calculator dialog.
+- The quote cutlist API routes now follow the quoting module/org access pattern before reading or mutating quote cutlist snapshots and costing lines.
+- Quote cutlist client requests now send the signed-in session token, and the calculator falls back cleanly when no saved cutlist material defaults row exists yet.
+- Reusable offcut thresholds are organization-level defaults, so each tenant can decide what counts as a usable leftover piece.
+- Both active embedded flows now use explicit persistence bridges:
+  - quote cutlists use `useQuoteCutlistAdapterV2`
+  - product cutlists use `useProductCutlistBuilderAdapter`
 
 ---
 
@@ -144,7 +163,11 @@ Shows the optimized cutting layout after clicking **Calculate Layout**:
 - Visual board layouts with parts positioned
 - Waste calculation and efficiency percentage
 - Material costs breakdown
+  - Primary board costing is derived from the actual packed sheets per material, not a proportional estimate from raw part area.
+  - Backer board costing follows the packed backer layout and the same per-sheet billing overrides used in the preview.
+  - Backer cost is reported as an overall lamination run cost rather than being allocated into individual primary-board material cards.
 - **Backer board cutlist** when parts are set to **With Backer** lamination, with the same per-sheet billing toggles
+- The zoomed sheet viewer shows separate **Grain** and **Edges** columns in the legend and uses a wider dialog so the legend is less likely to clip on desktop screens.
 
 ---
 
@@ -381,3 +404,4 @@ Currently assumes 16mm boards (32mm when laminated). See `plans/cutlist-improvem
 *Updated: 2026-01-26 - Added Lamination Groups and Optimization Priority features*
 *Updated: 2026-02-13 - Added Deep (SA) simulated annealing optimizer with Web Worker, progressive UI, and time budget control*
 *Updated: 2026-02-13 - World-class presentation: color system, interactive zoom, operator PDF, SA compactness fix, strip fallback, UX polish*
+*Updated: 2026-03-06 - Documented the canonical internal cutlist entry points and product BOM seeding into the builder page*

@@ -17,6 +17,8 @@ import { useRouter } from 'next/navigation';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 
 // Helper functions for South African date format (dd/mm/yyyy)
 const formatToSA = (isoDate: string): string => {
@@ -41,27 +43,40 @@ export default function NewOrderPage() {
   });
 
   const [isCreatingFromQuote, setIsCreatingFromQuote] = useState(false);
+  const [createFromQuoteError, setCreateFromQuoteError] = useState<string | null>(null);
   const isAnyCreating = isCreating || isCreatingFromQuote;
 
   const handleCreateFromQuote = async () => {
     if (!selectedQuote || selectedQuote === 'loading') return;
     setIsCreatingFromQuote(true);
+    setCreateFromQuoteError(null);
     try {
       // Prefer API that seeds header fields from quote
-      const res = await fetch('/api/orders/from-quote', {
+      const res = await authorizedFetch('/api/orders/from-quote', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ quoteId: selectedQuote })
       });
       if (!res.ok) {
-        // Fallback to basic insert
-        await createOrderMutation({ quote_id: selectedQuote });
-        return;
+        let message = 'Failed to create order from quote';
+        try {
+          const json = await res.json();
+          if (json?.error) {
+            message = json.error;
+          }
+        } catch {
+          // Ignore JSON parse issues and keep the generic message.
+        }
+        throw new Error(message);
       }
       const json = await res.json();
       const order = json?.order;
-      if (order?.order_id) router.push(`/orders/${order.order_id}`);
-    } catch {
+      if (!order?.order_id) {
+        throw new Error('Order conversion succeeded but no order id was returned');
+      }
+      router.push(`/orders/${order.order_id}`);
+    } catch (error) {
+      setCreateFromQuoteError(error instanceof Error ? error.message : 'Failed to create order from quote');
+    } finally {
       setIsCreatingFromQuote(false);
     }
   };
@@ -169,6 +184,11 @@ export default function NewOrderPage() {
                     {isCreatingFromQuote && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     {isCreatingFromQuote ? 'Creating Order...' : 'Create Order from Quote'}
                   </Button>
+                  {createFromQuoteError && (
+                    <Alert variant="destructive">
+                      <AlertDescription>{createFromQuoteError}</AlertDescription>
+                    </Alert>
+                  )}
                 </div>
 
                 <div className="space-y-4">

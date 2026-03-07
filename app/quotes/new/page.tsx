@@ -15,6 +15,8 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { ChevronsUpDown, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { QUOTE_STATUSES, getQuoteStatusLabel } from '@/lib/quotes/status';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 
 export default function NewQuotePage() {
   const router = useRouter();
@@ -62,9 +64,8 @@ export default function NewQuotePage() {
   const handleCreate = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/quotes', {
+      const res = await authorizedFetch('/api/quotes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           quote_number: quoteNumber,
           customer_id: Number(customerId),
@@ -182,11 +183,11 @@ export default function NewQuotePage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="draft">Draft</SelectItem>
-              <SelectItem value="in_progress">In Progress</SelectItem>
-              <SelectItem value="sent">Sent</SelectItem>
-              <SelectItem value="won">Won</SelectItem>
-              <SelectItem value="lost">Lost</SelectItem>
+              {QUOTE_STATUSES.map((quoteStatus) => (
+                <SelectItem key={quoteStatus} value={quoteStatus}>
+                  {getQuoteStatusLabel(quoteStatus)}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>

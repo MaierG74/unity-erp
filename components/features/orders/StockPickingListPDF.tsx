@@ -294,7 +294,7 @@ export const StockPickingListPDFDocument: React.FC<StockPickingListPDFProps> = (
           </View>
           <View>
             <Text style={styles.documentTitle}>STOCK PICKING LIST</Text>
-            <Text style={styles.documentNumber}>Order #: {order.order_id}</Text>
+            <Text style={styles.documentNumber}>Order #: {order.order_number || order.order_id}</Text>
             <Text style={styles.documentDate}>
               Date: {format(new Date(), 'MMM d, yyyy')}
             </Text>
@@ -308,15 +308,9 @@ export const StockPickingListPDFDocument: React.FC<StockPickingListPDFProps> = (
         <View style={styles.orderSection}>
           <Text style={styles.sectionTitle}>Order Details</Text>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Order ID:</Text>
-            <Text style={styles.infoValue}>{order.order_id}</Text>
+            <Text style={styles.infoLabel}>Order Number:</Text>
+            <Text style={styles.infoValue}>{order.order_number || order.order_id}</Text>
           </View>
-          {order.order_number && (
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Order Number:</Text>
-              <Text style={styles.infoValue}>{order.order_number}</Text>
-            </View>
-          )}
           {order.customer && (
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Customer:</Text>

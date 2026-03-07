@@ -30,7 +30,12 @@ export async function uploadOrderAttachment(
 ): Promise<OrderAttachment> {
   const timestamp = Date.now();
   const unique = crypto.randomUUID();
-  const filePath = `order-attachments/${orderId}/${timestamp}_${unique}_${file.name}`;
+  // Sanitise filename: strip control chars (newlines, tabs, etc.) and collapse whitespace
+  const safeName = file.name
+    .replace(/[\x00-\x1f\x7f]/g, '')  // remove control characters (^J = newline, etc.)
+    .replace(/\s+/g, ' ')              // collapse whitespace
+    .trim();
+  const filePath = `order-attachments/${orderId}/${timestamp}_${unique}_${safeName}`;
 
   const { data: uploadData, error: uploadError } = await supabase
     .storage

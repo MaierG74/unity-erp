@@ -115,6 +115,27 @@ interface BulkReceiveModalProps {
     onSuccess: () => void;
 }
 
+function getAllocationIssueForOrder(order: BulkReceiveModalProps['supplierOrders'][number]): string | null {
+    const links = order.customer_order_links || [];
+    if (links.length === 0) return null;
+
+    const allocationTotal = links.reduce(
+        (sum, link) => sum + Number(link.quantity_for_order || 0) + Number(link.quantity_for_stock || 0),
+        0
+    );
+    const expectedTotal = Number(order.order_quantity || 0);
+
+    if (Math.abs(allocationTotal - expectedTotal) < 0.000001) {
+        return null;
+    }
+
+    if (allocationTotal < expectedTotal) {
+        return `Only ${allocationTotal} of ${expectedTotal} item${expectedTotal === 1 ? '' : 's'} are allocated.`;
+    }
+
+    return `Allocations add up to ${allocationTotal}, but the line quantity is ${expectedTotal}.`;
+}
+
 export function BulkReceiveModal({
     open,
     onOpenChange,
@@ -138,10 +159,12 @@ export function BulkReceiveModal({
     const openOrders = supplierOrders.filter(
         (order) => (order.order_quantity - (order.total_received || 0)) > 0
     );
+    const blockedOrders = openOrders.filter((order) => getAllocationIssueForOrder(order) !== null);
+    const receivableOrders = openOrders.filter((order) => getAllocationIssueForOrder(order) === null);
     const openOrdersMissingComponent = openOrders.filter(
         (order) => !order?.supplier_component?.component
     );
-    const allocationLinksByOrderId = openOrders.reduce<Record<number, SupplierOrderCustomerOrderLink[]>>((acc, order) => {
+    const allocationLinksByOrderId = receivableOrders.reduce<Record<number, SupplierOrderCustomerOrderLink[]>>((acc, order) => {
         acc[order.order_id] = order.customer_order_links || [];
         return acc;
     }, {});
@@ -226,7 +249,7 @@ export function BulkReceiveModal({
         resolver: zodResolver(bulkReceiveSchema),
         defaultValues: {
             receipt_date: format(new Date(), 'yyyy-MM-dd'),
-            items: openOrders.map((order) => {
+            items: receivableOrders.map((order) => {
                 const component = order?.supplier_component?.component;
                 const component_code =
                     component?.internal_code ??
@@ -437,6 +460,14 @@ export function BulkReceiveModal({
                             </Alert>
                         )}
 
+                        {blockedOrders.length > 0 && (
+                            <Alert variant="destructive">
+                                <AlertDescription>
+                                    {blockedOrders.length === 1 ? 'One open line is' : `${blockedOrders.length} open lines are`} excluded from bulk receiving because the hidden order/stock allocation does not match the line quantity. Fix those allocations on the PO first.
+                                </AlertDescription>
+                            </Alert>
+                        )}
+
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <Label htmlFor="receipt_date">Receipt Date</Label>
@@ -570,6 +601,13 @@ export function BulkReceiveModal({
                                             </Fragment>
                                         );
                                     })}
+                                    {fields.length === 0 && (
+                                        <TableRow>
+                                            <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
+                                                No receivable lines are available. Fix any blocked allocations on the purchase order first.
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
                                 </TableBody>
                             </Table>
                         </div>
@@ -578,7 +616,7 @@ export function BulkReceiveModal({
                             <Button type="button" variant="outline" onClick={handleClose}>
                                 Cancel
                             </Button>
-                            <Button type="submit" disabled={isSubmitting || hasAllocationMismatch}>
+                            <Button type="submit" disabled={isSubmitting || hasAllocationMismatch || fields.length === 0}>
                                 {isSubmitting ? (
                                     <>
                                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />

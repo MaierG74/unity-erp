@@ -14,7 +14,7 @@ import type { CutlistCalculatorData, CutlistSummary } from '@/components/feature
 
 // Import the V2 adapter for quote persistence
 import { useQuoteCutlistAdapterV2 } from '@/components/features/cutlist/adapters';
-import type { QuoteCutlistLayoutV2 } from '@/components/features/cutlist/adapters';
+import { quoteLayoutToInitialData } from '@/lib/cutlist/calculatorData';
 
 // Import export function
 import { exportCutlistToQuote } from '@/components/features/cutlist/export';
@@ -60,6 +60,12 @@ export default function QuoteCutlistPage() {
   }, [adapter]);
 
   React.useEffect(() => {
+    return () => {
+      adapter.cancelPending();
+    };
+  }, [adapter]);
+
+  React.useEffect(() => {
     lineRefsRef.current = lineRefs;
   }, [lineRefs]);
 
@@ -84,18 +90,7 @@ export default function QuoteCutlistPage() {
         // Load saved cutlist data
         const savedLayout = await adapter.load();
         if (savedLayout) {
-          setInitialData({
-            parts: savedLayout.parts,
-            primaryBoards: savedLayout.primaryBoards,
-            backerBoards: savedLayout.backerBoards,
-            edging: savedLayout.edging,
-            kerf: savedLayout.kerf,
-            optimizationPriority: savedLayout.optimizationPriority,
-            sheetOverrides: savedLayout.sheetOverrides,
-            globalFullBoard: savedLayout.globalFullBoard,
-            backerSheetOverrides: savedLayout.backerSheetOverrides,
-            backerGlobalFullBoard: savedLayout.backerGlobalFullBoard,
-          });
+          setInitialData(quoteLayoutToInitialData(savedLayout));
           if (savedLayout.lineRefs) {
             setLineRefs(savedLayout.lineRefs);
           }
@@ -119,11 +114,11 @@ export default function QuoteCutlistPage() {
 
   const handleDataChange = React.useCallback((data: CutlistCalculatorData) => {
     calculatorDataRef.current = data;
-    adapterRef.current.debouncedSave(data, lineRefsRef.current);
     if (suppressNextDirtyRef.current) {
       suppressNextDirtyRef.current = false;
       return;
     }
+    adapterRef.current.debouncedSave(data, lineRefsRef.current);
     setIsDirty(true);
   }, []);
 
