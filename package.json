@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint . --ext .js,.jsx,.ts,.tsx --cache --cache-location .next/cache/eslint/ --no-error-on-unmatched-pattern",
     "schema": "tsx scripts/get-schema.ts",
     "seed": "tsx scripts/seed-test-data.ts",
     "init-purchasing": "tsx scripts/init-purchasing-data.ts",

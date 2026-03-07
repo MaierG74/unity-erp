@@ -28,17 +28,35 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260226145953
-- Latest applied migration name: stocked_subassembly_tenancy_enforce_rls
-- Applied at (UTC): 2026-02-26 15:08:36 UTC
+- Latest applied migration version: 20260306161654
+- Latest applied migration name: purchase_order_shared_drafts
+- Applied at (UTC): 2026-03-06 16:18:08 UTC
 - Applied by: Codex via Supabase MCP
 - Verification notes:
+  - Current batch (2026-03-06, Codex):
+    1. `purchase_order_shared_drafts` (20260306161654): added `purchase_order_drafts` and `purchase_order_draft_lines`, org-scoped RLS using `organization_members`, autosave/status RPCs, and updated `create_purchase_order_with_lines` to stamp `created_by = auth.uid()`.
+    2. Verified with MCP `list_migrations`: production history now includes `20260306161654`.
+    3. Verified with MCP table inspection: `public.purchase_order_drafts` and `public.purchase_order_draft_lines` both exist with RLS enabled.
+    4. Verified with MCP SQL: `public.save_purchase_order_draft`, `public.set_purchase_order_draft_status`, and `public.create_purchase_order_with_lines` all exist in the `public` schema.
+  - Current batch (2026-03-06, Codex):
+    1. `create_job_work_pool` (20260305195332): added `job_work_pool`, `job_work_pool_status`, `job_work_pool_exceptions`, `job_work_pool_exception_activity`, and `job_card_items.work_pool_id` with org-scoped RLS on the new pool/exception tables.
+    2. `work_pool_exception_rpcs` (20260306100303): added `reconcile_work_pool_row`, `acknowledge_work_pool_exception`, and `resolve_work_pool_exception` RPCs for audit-compliant exception transitions.
+    3. `work_pool_exception_rpcs_v2` (20260306100805): hardened the new RPCs with `is_org_member()` checks, non-negative reconciliation validation, and simplified resolve audit output to a single terminal event.
+    4. Verified with MCP `list_migrations`: production history includes `20260305195332`, `20260306100303`, and `20260306100805`.
+    5. Verified with MCP SQL: `public.reconcile_work_pool_row`, `public.acknowledge_work_pool_exception`, and `public.resolve_work_pool_exception` all exist in the `public` schema.
+  - Current batch (2026-03-03, Codex):
+    1. Verified with MCP SQL: `public.product_images.crop_params` exists as nullable `jsonb`.
+    2. Verified live row shape for product `826`: uploaded image records now persist `crop_params` metadata separately from `image_url`, enabling non-destructive crop reset behavior once the UI saves against the real `image_id`.
   - Previous batch (2026-02-25, Codex):
     1. `timekeeper_anon_read_hotfix_qbutton` (20260225073626): restored limited `anon` read on `public.staff` + `public.time_clock_events` for active Qbutton staff.
     2. `timekeeper_anon_insert_policy_fix` (20260225074120): relaxed `anon` insert policy predicate to work with scanner payload shape.
     3. `timekeeper_anon_policy_uuid_lock_fix` (20260225074246): removed `organizations` table dependency from anon policy checks and locked predicates to Qbutton org UUID.
     4. `timekeeper_trigger_security_definer_fix` (20260225074503): made `update_daily_work_summary` trigger function `SECURITY DEFINER` and propagated `org_id` in summary upserts.
     5. External scanner behavior verified via real anon REST calls.
+  - Reconciliation note (2026-03-07, Codex):
+    1. Verified with Supabase MCP `list_migrations` that production history includes `20260225065251_add_overhead_line_type_to_quote_clusters`.
+    2. Reconciled local repo drift by adding the missing canonical file `supabase/migrations/20260225065251_add_overhead_line_type_to_quote_clusters.sql`.
+    3. No production apply was performed on 2026-03-07; this was a local migration-history reconciliation only.
   - Current batch (2026-02-26, Claude Code):
     1. `per_allocation_receipt_phase_a` (20260226075243): added `received_quantity` column to `supplier_order_customer_orders`, 4-arg `process_supplier_order_receipt` overload with allocation-aware tracking, org auth via `is_org_member()`, 3-arg backward-compatible wrapper.
     2. `block_reallocation_after_receipts` (20260226075254): updated `update_supplier_order_allocations` to block reallocation when any allocation has `received_quantity > 0`.
@@ -49,6 +67,18 @@ Source of truth for what is actually applied is still Supabase migration history
     3. `stocked_subassembly_tenancy_enforce_rls` (20260226145953): validated/enforced constraints and enabled org-scoped RLS/policies on `product_bom_links`, `billoflabour`, and `billofmaterials`.
     4. Verified with MCP SQL: `product_bom_links.org_id` and `billoflabour.org_id` are `NOT NULL`, and RLS is enabled with org-member policies.
     5. Verified in UI smoke (`/products/782` as normal user): `/api/products/782/effective-bom` and `/api/products/782/effective-bol` now return `200`.
+  - Current batch (2026-03-03, Codex):
+    1. `backfill_open_underallocated_supplier_order_stock_rows` (20260303145040): added missing stock allocation remainder for legacy open supplier-order lines where allocation rows existed but summed below `supplier_orders.order_quantity`.
+    2. Verified with MCP SQL: only `Q26-184` matched the open under-allocated shape before the backfill; after apply, its supplier order `269` has allocation totals equal to line quantity (`2` for order `24608`, `1` for stock), unblocking receipt of the final unit.
+  - Component reservations batch (2026-03-03, Claude Code):
+    1. `component_reservations_table` (20260303085534): `component_reservations` table with RLS and unique constraint on `(order_id, component_id)`.
+    2. `component_reservation_rpcs` (20260303085548): `reserve_order_components` and `release_order_components` RPCs.
+    3. `fix_component_reservation_rpc_ambiguity` (20260303085611): no-op (fix folded into RPCs file).
+    4. `extend_component_status_with_reservations_v2` (20260303085711): added `reserved_this_order` and `reserved_by_others` columns to `get_detailed_component_status` return type.
+    5. `auto_release_component_reservations_trigger` (20260303085743): auto-delete reservations when order moves to Completed/Cancelled.
+    6. `fix_shortfall_math_reservation_aware` (20260303144322): per-order shortfall formulas now use `in_stock - reserved_by_others` as available stock.
+    7. `component_reservations_rls_and_indexes` (20260303151451): replaced `profiles.org_id` RLS with standard `organization_members` pattern; added indexes on `order_id`, `component_id`, `org_id`.
+    8. Verified: RLS enabled, security advisors clean, no missing-policy warnings.
   - Phase B enforcement (`per_allocation_receipt_phase_b`) is staged locally but NOT yet applied — will be applied after UI deploy and production verification of split receipts.
 
 ## Pre-Deploy Migration Checklist
