@@ -41,8 +41,6 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
   const baseWidth = carcassWidth + baseOverhangSides * 2;
   const baseDepth = carcassDepth + baseOverhangBack;
   const shelfDepth = carcassDepth - shelfSetback - (hasBack ? BT + backRecess : 0);
-  const backWidth = internalWidth;
-  const backHeight = sideHeight + backSlotDepth;
 
   if (sideHeight <= 0 || internalWidth <= 0 || carcassDepth <= T) {
     return {
@@ -74,7 +72,7 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
   const columnGap = u * 8;
   const rowGap = u * 7;
   const titleOffset = u * 6;
-  const smallText = u * 1.7;
+  const smallText = u * 1.15;
 
   const frontX = margin;
   const frontY = margin + titleOffset;
@@ -83,23 +81,7 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
   const topX = sideX + D + columnGap;
   const topY = frontY;
 
-  const explodedScale = Math.min(0.45, (H * 0.46) / Math.max(sideHeight, topWidth));
-  const exTopW = topWidth * explodedScale;
-  const exTopH = Math.max(T2 * explodedScale, u * 0.6);
-  const exBaseW = baseWidth * explodedScale;
-  const exBaseH = Math.max(T2 * explodedScale, u * 0.6);
-  const exSideW = Math.max(carcassDepth * explodedScale, u * 1.1);
-  const exSideH = sideHeight * explodedScale;
-  const exShelfW = Math.max(internalWidth * explodedScale, u * 6);
-  const exShelfH = Math.max(T * explodedScale, u * 0.55);
-  const exBackW = Math.max(backWidth * explodedScale, u * 6);
-  const exBackH = backHeight * explodedScale;
-  const exDoorW =
-    doorStyle === 'double'
-      ? Math.max(Math.floor((carcassWidth - doorGap * 3) / 2) * explodedScale, u * 5)
-      : Math.max((carcassWidth - doorGap * 2) * explodedScale, u * 5);
-  const exDoorH = Math.max((sideHeight - doorGap * 2) * explodedScale, u * 7);
-  const explodedWidth = Math.max(exTopW, exBaseW, exSideW * 2 + exShelfW + u * 8, exBackW + u * 10, exDoorW * (doorStyle === 'double' ? 2 : 1) + u * 8) + u * 8;
+  const explodedWidth = Math.max(topWidth, u * 60);
   const explodedY = topY + D + rowGap + titleOffset;
 
   const nodes: PreviewNode[] = [];
@@ -118,6 +100,27 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
       fontWeight: 600,
       fontFamily: 'sans-serif',
       textAnchor: 'middle',
+      meta: { viewKey },
+    });
+  };
+
+  const addNoteText = (
+    x: number,
+    y: number,
+    text: string,
+    viewKey: string,
+    fontWeight: number | string = 500
+  ) => {
+    nodes.push({
+      type: 'text',
+      x,
+      y,
+      text,
+      fill: TECHNICAL_PREVIEW_COLORS.dimText,
+      fontSize: smallText,
+      fontWeight,
+      fontFamily: 'sans-serif',
+      textAnchor: 'start',
       meta: { viewKey },
     });
   };
@@ -640,53 +643,152 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
     })
   );
 
-  addViewTitle(topX + explodedWidth / 2, explodedY - u * 2, 'Exploded Assembly', 'exploded');
+  addViewTitle(topX + explodedWidth / 2, explodedY - u * 2, 'Assembly Details', 'exploded');
 
   const exOriginX = topX;
   const exOriginY = explodedY;
-  const exTopX = exOriginX + (explodedWidth - exTopW) / 2;
-  const exTopY = exOriginY + u * 4;
-  const exSideTopY = exTopY + exTopH + u * 5;
-  const exLeftSideX = exOriginX + u * 2;
-  const exRightSideX = exOriginX + explodedWidth - u * 2 - exSideW;
-  const exBackX = exOriginX + (explodedWidth - exBackW) / 2;
-  const exBackY = exSideTopY - u * 1.5;
-  const exShelfX = exOriginX + (explodedWidth - exShelfW) / 2;
-  const exBaseY = exSideTopY + exSideH + u * 6;
-  const exBaseX = exOriginX + (explodedWidth - exBaseW) / 2;
-  const shelfCountForSketch = Math.max(1, Math.min(shelfCount, 3));
+  const assemblyBoxX = exOriginX + u * 1.4;
+  const assemblyBoxY = exOriginY + u * 2.2;
+  const assemblyBoxW = explodedWidth - u * 2.8;
+  const stepColumnW = assemblyBoxW * 0.43;
+  const diagramColumnX = assemblyBoxX + stepColumnW + u * 2.4;
+  const diagramColumnW = assemblyBoxW - stepColumnW - u * 3.6;
+  const orderScale = Math.min(0.26, (diagramColumnW - u * 4) / W, (u * 20.5) / sideHeight);
+  const orderTopH = Math.max(T2 * orderScale, u * 0.72);
+  const orderBaseH = Math.max(T2 * orderScale, u * 0.72);
+  const orderSideH = sideHeight * orderScale;
+  const assemblyBoxH = Math.max(u * 24, orderTopH + orderSideH + orderBaseH + u * 9.5);
+  const orderTitleY = assemblyBoxY + u * 2.1;
+  const sideOverhangNote =
+    topOverhangSides === baseOverhangSides
+      ? `Side overhang: ${rounded(topOverhangSides)}mm each side`
+      : `Side overhangs: top ${rounded(topOverhangSides)} / base ${rounded(baseOverhangSides)}mm`;
 
   nodes.push(
     {
       type: 'rect',
-      x: exBackX,
-      y: exBackY,
-      width: exBackW,
-      height: exBackH,
-      fill: TECHNICAL_PREVIEW_COLORS.backFill,
+      x: assemblyBoxX,
+      y: assemblyBoxY,
+      width: assemblyBoxW,
+      height: assemblyBoxH,
+      fill: TECHNICAL_PREVIEW_COLORS.explodedNoteFill,
       fillOpacity: 0.55,
-      stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
+      stroke: TECHNICAL_PREVIEW_COLORS.guideStroke,
       strokeWidth: u * 0.08,
-      dashArray: `${u * 0.45},${u * 0.35}`,
-      meta: explodedMeta('back', 'back'),
+      rx: u * 0.45,
+      meta: explodedMeta(undefined, 'panel'),
     },
     {
+      type: 'line',
+      x1: diagramColumnX - u * 1.2,
+      y1: assemblyBoxY + u * 1.6,
+      x2: diagramColumnX - u * 1.2,
+      y2: assemblyBoxY + assemblyBoxH - u * 1.6,
+      stroke: TECHNICAL_PREVIEW_COLORS.guideStroke,
+      strokeWidth: u * 0.06,
+      dashArray: `${u * 0.45},${u * 0.35}`,
+      meta: explodedMeta(undefined, 'guide'),
+    },
+    {
+      type: 'text',
+      x: assemblyBoxX + u * 2,
+      y: orderTitleY,
+      text: 'Assembly Order',
+      fill: TECHNICAL_PREVIEW_COLORS.dimText,
+      fontSize: u * 1.55,
+      fontWeight: 600,
+      fontFamily: 'sans-serif',
+      textAnchor: 'start',
+      meta: explodedMeta(undefined, 'note'),
+    }
+  );
+
+  const assemblySteps = [
+    '1. Base assembly sits on adjusters',
+    '2. Side panels sit on the base',
+    shelfCount > 0
+      ? `3. ${shelfCount} shelf${shelfCount === 1 ? '' : 'es'} fit between the sides`
+      : '3. Open carcass between the sides',
+    hasBack ? '4. Back panel installs from the rear' : '4. No back panel in this build',
+    hasBack ? '5. Top lowers to capture the back' : '5. Top closes the carcass',
+  ];
+
+  assemblySteps.forEach((step, index) => {
+    addNoteText(
+      assemblyBoxX + u * 2,
+      orderTitleY + u * 2.7 + index * (smallText * 1.45),
+      step,
+      'exploded',
+      500
+    );
+  });
+
+  addNoteText(
+    assemblyBoxX + u * 2,
+    orderTitleY + u * 2.7 + assemblySteps.length * (smallText * 1.45) + u * 0.8,
+    sideOverhangNote,
+    'exploded',
+    600
+  );
+
+  if (doorStyle !== 'none') {
+    addNoteText(
+      assemblyBoxX + u * 2,
+      orderTitleY + u * 2.7 + assemblySteps.length * (smallText * 1.45) + u * 2.6,
+      `${doorStyle === 'double' ? 'Doors' : 'Door'} install${doorStyle === 'double' ? '' : 's'} after carcass assembly`,
+      'exploded',
+      500
+    );
+  }
+
+  const orderOverallWidth = W * orderScale;
+  const orderDiagramX = diagramColumnX + (diagramColumnW - orderOverallWidth) / 2;
+  const orderTopY = assemblyBoxY + u * 4.7;
+  const orderTopBottomY = orderTopY + orderTopH;
+  const orderSideTopY = orderTopBottomY + u * 2.2;
+  const orderSideBottomY = orderSideTopY + orderSideH;
+  const orderBaseY = orderSideBottomY;
+  const orderBaseBottomY = orderBaseY + orderBaseH;
+  const orderOverhangSides = Math.max(topOverhangSides, baseOverhangSides) * orderScale;
+  const orderTopX =
+    orderDiagramX + (Math.max(topOverhangSides, baseOverhangSides) - topOverhangSides) * orderScale;
+  const orderBaseX =
+    orderDiagramX + (Math.max(topOverhangSides, baseOverhangSides) - baseOverhangSides) * orderScale;
+  const orderSideWidth = Math.max(T * orderScale, u * 0.45);
+  const orderSideLeftX = orderDiagramX + orderOverhangSides;
+  const orderSideRightX = orderDiagramX + orderOverallWidth - orderOverhangSides - orderSideWidth;
+  const orderInteriorLeftX = orderSideLeftX + orderSideWidth;
+  const orderInteriorRightX = orderSideRightX;
+
+  nodes.push(
+    {
       type: 'rect',
-      x: exTopX,
-      y: exTopY,
-      width: exTopW,
-      height: exTopH,
+      x: orderTopX,
+      y: orderTopY,
+      width: topWidth * orderScale,
+      height: orderTopH,
       fill: TECHNICAL_PREVIEW_COLORS.topFill,
       stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
       strokeWidth: u * 0.08,
       meta: explodedMeta('top', 'top'),
     },
     {
+      type: 'line',
+      x1: orderDiagramX + orderOverallWidth / 2,
+      y1: orderTopBottomY + u * 0.35,
+      x2: orderDiagramX + orderOverallWidth / 2,
+      y2: orderSideTopY - u * 0.45,
+      stroke: TECHNICAL_PREVIEW_COLORS.dimColor,
+      strokeWidth: u * 0.09,
+      markerEnd: 'arrow',
+      meta: explodedMeta('top', 'top'),
+    },
+    {
       type: 'rect',
-      x: exLeftSideX,
-      y: exSideTopY,
-      width: exSideW,
-      height: exSideH,
+      x: orderSideLeftX,
+      y: orderSideTopY,
+      width: orderSideWidth,
+      height: orderSideH,
       fill: TECHNICAL_PREVIEW_COLORS.panelFill,
       stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
       strokeWidth: u * 0.08,
@@ -694,10 +796,10 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
     },
     {
       type: 'rect',
-      x: exRightSideX,
-      y: exSideTopY,
-      width: exSideW,
-      height: exSideH,
+      x: orderSideRightX,
+      y: orderSideTopY,
+      width: orderSideWidth,
+      height: orderSideH,
       fill: TECHNICAL_PREVIEW_COLORS.panelFill,
       stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
       strokeWidth: u * 0.08,
@@ -705,10 +807,10 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
     },
     {
       type: 'rect',
-      x: exBaseX,
-      y: exBaseY,
-      width: exBaseW,
-      height: exBaseH,
+      x: orderBaseX,
+      y: orderBaseY,
+      width: baseWidth * orderScale,
+      height: orderBaseH,
       fill: TECHNICAL_PREVIEW_COLORS.topFill,
       stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
       strokeWidth: u * 0.08,
@@ -716,102 +818,255 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
     }
   );
 
-  for (let index = 0; index < shelfCountForSketch; index += 1) {
-    const shelfY = exSideTopY + u * 4 + index * (u * 4.4);
-    nodes.push({
-      type: 'rect',
-      x: exShelfX,
-      y: shelfY,
-      width: exShelfW,
-      height: exShelfH,
-      fill: TECHNICAL_PREVIEW_COLORS.panelFill,
-      stroke: TECHNICAL_PREVIEW_COLORS.shelfStroke,
-      strokeWidth: u * 0.08,
-      dashArray: `${u * 0.4},${u * 0.25}`,
-      meta: explodedMeta(`shelf-${index + 1}`, 'shelf'),
-    });
-  }
-
-  if (doorStyle !== 'none') {
-    const exDoorY = exSideTopY + u * 4;
-    const singleDoorX =
-      doorStyle === 'double' ? exOriginX + (explodedWidth - exDoorW * 2 - u * 2) / 2 : exOriginX + (explodedWidth - exDoorW) / 2;
-
-    nodes.push({
-      type: 'rect',
-      x: singleDoorX,
-      y: exDoorY,
-      width: exDoorW,
-      height: exDoorH,
-      fill: TECHNICAL_PREVIEW_COLORS.doorFill,
-      fillOpacity: 0.45,
-      stroke: TECHNICAL_PREVIEW_COLORS.doorStroke,
-      strokeWidth: u * 0.1,
-      rx: u * 0.25,
-      meta: explodedMeta(doorStyle === 'double' ? 'door-left' : 'door', doorStyle === 'double' ? 'door-left' : 'door'),
-    });
-
-    if (doorStyle === 'double') {
+  if (shelfCount > 0) {
+    for (let index = 1; index <= shelfCount; index += 1) {
+      const shelfY = orderSideTopY + (sideHeight * index) / (shelfCount + 1) * orderScale - Math.max(T * orderScale, u * 0.4) / 2;
       nodes.push({
         type: 'rect',
-        x: singleDoorX + exDoorW + u * 2,
-        y: exDoorY,
-        width: exDoorW,
-        height: exDoorH,
-        fill: TECHNICAL_PREVIEW_COLORS.doorFill,
-        fillOpacity: 0.45,
-        stroke: TECHNICAL_PREVIEW_COLORS.doorStroke,
-        strokeWidth: u * 0.1,
-        rx: u * 0.25,
-        meta: explodedMeta('door-right', 'door-right'),
+        x: orderInteriorLeftX,
+        y: shelfY,
+        width: orderInteriorRightX - orderInteriorLeftX,
+        height: Math.max(T * orderScale, u * 0.4),
+        fill: TECHNICAL_PREVIEW_COLORS.panelFill,
+        stroke: TECHNICAL_PREVIEW_COLORS.shelfStroke,
+        strokeWidth: u * 0.08,
+        dashArray: `${u * 0.35},${u * 0.24}`,
+        meta: explodedMeta(`shelf-${index}`, 'shelf'),
       });
     }
   }
 
-  const callout = (text: string, x: number, y: number, partKey: string, partRole: string) => {
+  nodes.push(
+    createCenteredLabel({
+      x: orderDiagramX + orderOverallWidth / 2,
+      y: orderBaseBottomY + u * 1.9,
+      text: hasBack ? 'Back relation shown in rear detail below' : 'Open carcass view',
+      unit: u * 0.7,
+      fill: TECHNICAL_PREVIEW_COLORS.dimText,
+      meta: explodedMeta(undefined, 'note'),
+    })
+  );
+
+  const detailBoxX = assemblyBoxX;
+  const detailBoxY = assemblyBoxY + assemblyBoxH + u * 2.8;
+  const detailBoxW = assemblyBoxW;
+  const detailBoxH = u * 18;
+  const detailTitleY = detailBoxY + u * 2.1;
+  const detailDiagramW = detailBoxW * 0.58;
+  const detailNotesX = detailBoxX + detailDiagramW + u * 4.3;
+  const maxRearOverhang = Math.max(topOverhangBack, baseOverhangBack);
+  const rearVisibleFront = Math.max(20, backRecess + Math.max(BT, 1) + shelfSetback + 16);
+  const rearStartMm = -rearVisibleFront;
+  const rearEndMm = maxRearOverhang + 8;
+  const detailScaleX = (detailDiagramW - u * 5) / Math.max(1, rearEndMm - rearStartMm);
+  const detailScaleY = Math.max(
+    1.2,
+    Math.min(2.2, (detailBoxH - u * 8) / Math.max(1, T2 * 2 + backSlotDepth + 42))
+  );
+  const detailToX = (mm: number) => detailBoxX + u * 2.4 + (mm - rearStartMm) * detailScaleX;
+  const detailTopY = detailBoxY + u * 4.6;
+  const detailTopH = Math.max(T2 * detailScaleY, u * 1.45);
+  const detailBaseH = Math.max(T2 * detailScaleY, u * 1.45);
+  const detailBaseY = detailBoxY + detailBoxH - u * 4 - detailBaseH;
+  const detailTopUndersideY = detailTopY + detailTopH;
+  const detailBaseTopY = detailBaseY;
+  const detailSideRearX = detailToX(0);
+  const detailTopRearX = detailToX(topOverhangBack);
+  const detailBaseRearX = detailToX(baseOverhangBack);
+  const detailFrontX = detailToX(rearStartMm);
+  const detailBackRearX = detailToX(-backRecess);
+  const detailBackFrontX = detailToX(-backRecess - Math.max(BT, 1));
+  const detailBackTopY = detailTopUndersideY - backSlotDepth * detailScaleY;
+  const detailShelfY = detailTopUndersideY + (detailBaseTopY - detailTopUndersideY) * 0.58;
+  const detailShelfRearX = detailToX(-backRecess - Math.max(BT, 1) - shelfSetback);
+
+  nodes.push(
+    {
+      type: 'rect',
+      x: detailBoxX,
+      y: detailBoxY,
+      width: detailBoxW,
+      height: detailBoxH,
+      fill: TECHNICAL_PREVIEW_COLORS.explodedNoteFill,
+      fillOpacity: 0.4,
+      stroke: TECHNICAL_PREVIEW_COLORS.guideStroke,
+      strokeWidth: u * 0.08,
+      rx: u * 0.45,
+      meta: explodedMeta(undefined, 'panel'),
+    },
+    {
+      type: 'text',
+      x: detailBoxX + u * 2,
+      y: detailTitleY,
+      text: 'Rear Detail (NTS)',
+      fill: TECHNICAL_PREVIEW_COLORS.dimText,
+      fontSize: u * 1.55,
+      fontWeight: 600,
+      fontFamily: 'sans-serif',
+      textAnchor: 'start',
+      meta: explodedMeta(undefined, 'note'),
+    },
+    {
+      type: 'rect',
+      x: detailFrontX,
+      y: detailTopY,
+      width: detailTopRearX - detailFrontX,
+      height: detailTopH,
+      fill: TECHNICAL_PREVIEW_COLORS.topFill,
+      stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
+      strokeWidth: u * 0.08,
+      meta: explodedMeta('top', 'top'),
+    },
+    {
+      type: 'rect',
+      x: detailFrontX,
+      y: detailBaseY,
+      width: detailBaseRearX - detailFrontX,
+      height: detailBaseH,
+      fill: TECHNICAL_PREVIEW_COLORS.topFill,
+      stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
+      strokeWidth: u * 0.08,
+      meta: explodedMeta('base', 'base'),
+    },
+    {
+      type: 'line',
+      x1: detailSideRearX,
+      y1: detailTopUndersideY,
+      x2: detailSideRearX,
+      y2: detailBaseTopY,
+      stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
+      strokeWidth: u * 0.09,
+      dashArray: `${u * 0.35},${u * 0.25}`,
+      meta: explodedMeta(undefined, 'guide'),
+    }
+  );
+
+  if (hasBack) {
     nodes.push(
       {
         type: 'rect',
-        x: x - u * 2.2,
-        y: y - u * 1.45,
-        width: u * 4.4,
-        height: u * 2.9,
-        fill: TECHNICAL_PREVIEW_COLORS.explodedNoteFill,
+        x: detailBackFrontX,
+        y: detailBackTopY,
+        width: detailBackRearX - detailBackFrontX,
+        height: detailBaseTopY - detailBackTopY,
+        fill: TECHNICAL_PREVIEW_COLORS.backFill,
         stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
         strokeWidth: u * 0.08,
-        rx: u * 0.4,
-        meta: explodedMeta(partKey, partRole),
+        meta: explodedMeta('back', 'back'),
       },
-      createCenteredLabel({
-        x,
-        y,
-        text,
-        unit: u * 0.7,
-        fill: TECHNICAL_PREVIEW_COLORS.dimText,
-        meta: explodedMeta(partKey, partRole),
+      {
+        type: 'rect',
+        x: detailBackFrontX,
+        y: detailBackTopY,
+        width: detailBackRearX - detailBackFrontX,
+        height: Math.max(backSlotDepth * detailScaleY, u * 0.4),
+        fill: 'none',
+        stroke: TECHNICAL_PREVIEW_COLORS.guideStroke,
+        strokeWidth: u * 0.07,
+        dashArray: `${u * 0.3},${u * 0.2}`,
+        meta: explodedMeta('back', 'back'),
+      }
+    );
+  }
+
+  if (shelfCount > 0) {
+    nodes.push({
+      type: 'line',
+      x1: detailFrontX + u * 1.2,
+      y1: detailShelfY,
+      x2: detailShelfRearX,
+      y2: detailShelfY,
+      stroke: TECHNICAL_PREVIEW_COLORS.shelfStroke,
+      strokeWidth: u * 0.11,
+      dashArray: `${u * 0.35},${u * 0.24}`,
+      meta: explodedMeta('shelf', 'shelf'),
+    });
+  }
+
+  push(
+    ...createHorizontalDimension({
+      x1: detailSideRearX,
+      x2: detailTopRearX,
+      y: detailTopY - u * 0.9,
+      label: `${rounded(topOverhangBack)} top OH`,
+      side: 'above',
+      unit: u * 0.55,
+      meta: explodedMeta(undefined, 'dimension'),
+    }),
+    ...createHorizontalDimension({
+      x1: detailSideRearX,
+      x2: detailBaseRearX,
+      y: detailBaseY + detailBaseH + u * 0.8,
+      label: `${rounded(baseOverhangBack)} base OH`,
+      side: 'below',
+      unit: u * 0.55,
+      meta: explodedMeta(undefined, 'dimension'),
+    })
+  );
+
+  if (hasBack && backRecess > 0) {
+    push(
+      ...createHorizontalDimension({
+        x1: detailBackRearX,
+        x2: detailSideRearX,
+        y: detailBaseTopY - u * 1.1,
+        label: `${rounded(backRecess)} recess`,
+        side: 'above',
+        unit: u * 0.55,
+        meta: explodedMeta(undefined, 'dimension'),
       })
     );
-  };
-
-  callout('Top', exTopX + exTopW / 2, exTopY - u * 1.8, 'top', 'top');
-  callout('L Side', exLeftSideX + exSideW / 2, exSideTopY + exSideH / 2, 'left-side', 'side-left');
-  callout('R Side', exRightSideX + exSideW / 2, exSideTopY + exSideH / 2, 'right-side', 'side-right');
-  callout('Base', exBaseX + exBaseW / 2, exBaseY + exBaseH + u * 2, 'base', 'base');
-  if (hasBack) {
-    callout('Back', exBackX + exBackW / 2, exBackY + exBackH / 2, 'back', 'back');
   }
-  if (shelfCount > 0) {
-    callout(
-      shelfCount === 1 ? 'Shelf' : `${shelfCount} Shelves`,
-      exShelfX + exShelfW / 2,
-      exSideTopY + u * 1.7,
-      'shelf',
-      'shelf'
+
+  if (hasBack && backSlotDepth > 0) {
+    push(
+      ...createVerticalDimension({
+        y1: detailBackTopY,
+        y2: detailTopUndersideY,
+        x: detailBackFrontX - u * 0.85,
+        label: `${rounded(backSlotDepth)} slot`,
+        side: 'left',
+        unit: u * 0.55,
+        meta: explodedMeta(undefined, 'dimension'),
+      })
     );
   }
 
+  if (hasBack && shelfCount > 0 && shelfSetback > 0) {
+    push(
+      ...createHorizontalDimension({
+        x1: detailShelfRearX,
+        x2: detailBackFrontX,
+        y: detailShelfY - u * 0.7,
+        label: `${rounded(shelfSetback)} setback`,
+        side: 'above',
+        unit: u * 0.55,
+        meta: explodedMeta(undefined, 'dimension'),
+      })
+    );
+  }
+
+  const rearNotes = [
+    hasBack ? 'Back sits on the base top surface' : 'Back panel disabled for this build',
+    `Rear OH: top ${rounded(topOverhangBack)} / base ${rounded(baseOverhangBack)}mm`,
+    sideOverhangNote,
+    hasBack ? `Back panel: ${rounded(BT)}mm board` : null,
+    hasBack ? `Top groove capture: ${rounded(backSlotDepth)}mm` : null,
+    shelfCount > 0 ? `Shelf setback: ${rounded(shelfSetback)}mm before the back` : null,
+  ].filter(Boolean) as string[];
+
+  rearNotes.forEach((note, index) => {
+    addNoteText(
+      detailNotesX,
+      detailTitleY + u * 1.8 + index * (smallText * 1.45),
+      note,
+      'exploded',
+      index === 0 ? 600 : 500
+    );
+  });
+
   const sceneWidth = topX + Math.max(topWidth, explodedWidth) + margin;
-  const sceneHeight = Math.max(frontY + H + margin, exBaseY + exBaseH + u * 5 + margin);
+  const sceneHeight = Math.max(frontY + H + margin, detailBoxY + detailBoxH + u * 4 + margin);
 
   return {
     width: sceneWidth,

@@ -44,7 +44,8 @@ The cupboard template is the first adopter of this structure and currently rende
 - front view
 - side view
 - top view
-- exploded assembly schematic
+- assembly-order detail
+- rear detail inset
 
 ### File Structure
 
@@ -152,7 +153,7 @@ Real-world melamine cupboard assembly (bottom to top):
 6. Click "Save to Product" or "Save & Open Cutlist Builder"
 7. Parts flow into existing cutlist optimizer for sheet nesting
 
-For the cupboard template, the live preview now includes front, side, top, and exploded views with download-to-SVG support, a fit-to-drawing action, and a fullscreen mode that scales to the available viewport.
+For the cupboard template, the live preview now includes front, side, top, assembly-order, and rear-detail views with download-to-SVG support, a fit-to-drawing action, and a fullscreen mode that scales to the available viewport.
 
 ## Current Gaps
 
