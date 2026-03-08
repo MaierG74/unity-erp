@@ -90,7 +90,7 @@ export function TaskQuickCreate({ open, onOpenChange }: TaskQuickCreateProps) {
           <DialogTitle className="text-base">New Task</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-3 -mt-1">
           {/* Title input */}
           <Input
             autoFocus
