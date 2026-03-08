@@ -141,7 +141,7 @@ export function TaskQuickCreate({ open, onOpenChange }: TaskQuickCreateProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[420px] p-5">
-        <DialogHeader>
+        <DialogHeader className="pb-1">
           <DialogTitle className="text-base">New Task</DialogTitle>
         </DialogHeader>
 
@@ -274,14 +274,6 @@ export function TaskQuickCreate({ open, onOpenChange }: TaskQuickCreateProps) {
               </PopoverContent>
             </Popover>
 
-            {/* Attach file button */}
-            <button
-              className={cn(chipBase, 'border-dashed border-border text-muted-foreground')}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <Paperclip className="h-3 w-3" />
-              Attach
-            </button>
             <input
               ref={fileInputRef}
               type="file"
@@ -313,8 +305,8 @@ export function TaskQuickCreate({ open, onOpenChange }: TaskQuickCreateProps) {
             </div>
           )}
 
-          {/* Staged files */}
-          {stagedFiles.length > 0 && (
+          {/* Staged files / drop zone */}
+          {stagedFiles.length > 0 ? (
             <div className="space-y-1">
               {stagedFiles.map((file, i) => (
                 <div
@@ -333,13 +325,25 @@ export function TaskQuickCreate({ open, onOpenChange }: TaskQuickCreateProps) {
                 </div>
               ))}
             </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className={cn(
+                'flex w-full items-center justify-center gap-2 rounded-md border border-dashed px-3 py-2.5 text-xs text-muted-foreground transition-colors cursor-pointer',
+                isDragging
+                  ? 'border-primary bg-primary/5 text-primary'
+                  : 'border-border/60 hover:border-primary/40 hover:text-foreground',
+              )}
+            >
+              <Paperclip className="h-3.5 w-3.5" />
+              Drop, paste, or click to attach files
+            </button>
           )}
 
           {/* Footer */}
           <div className="flex items-center justify-between pt-1">
-            <span className="text-xs text-muted-foreground">
-              {isDragging ? 'Drop files here' : 'Esc to cancel · paste or drop files'}
-            </span>
+            <span className="text-xs text-muted-foreground">Esc to cancel</span>
             <Button
               size="sm"
               onClick={handleSubmit}
