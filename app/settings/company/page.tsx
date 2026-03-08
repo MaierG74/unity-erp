@@ -3,6 +3,8 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 interface Settings {
   setting_id: number;
@@ -147,19 +149,19 @@ export default function CompanySettingsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Company Name</label>
-              <input className="w-full px-3 py-2 rounded border bg-background" value={settings.company_name || ''} onChange={(e) => onChange('company_name', e.target.value)} />
+              <Input value={settings.company_name || ''} onChange={(e) => onChange('company_name', e.target.value)} />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Phone</label>
-              <input className="w-full px-3 py-2 rounded border bg-background" value={settings.phone || ''} onChange={(e) => onChange('phone', e.target.value)} />
+              <Input value={settings.phone || ''} onChange={(e) => onChange('phone', e.target.value)} />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Email</label>
-              <input className="w-full px-3 py-2 rounded border bg-background" value={settings.email || ''} onChange={(e) => onChange('email', e.target.value)} />
+              <Input value={settings.email || ''} onChange={(e) => onChange('email', e.target.value)} />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Website</label>
-              <input className="w-full px-3 py-2 rounded border bg-background" value={settings.website || ''} onChange={(e) => onChange('website', e.target.value)} />
+              <Input value={settings.website || ''} onChange={(e) => onChange('website', e.target.value)} />
             </div>
           </div>
 
@@ -167,23 +169,23 @@ export default function CompanySettingsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Address line 1</label>
-              <input className="w-full px-3 py-2 rounded border bg-background" value={settings.address_line1 || ''} onChange={(e) => onChange('address_line1', e.target.value)} />
+              <Input value={settings.address_line1 || ''} onChange={(e) => onChange('address_line1', e.target.value)} />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Address line 2</label>
-              <input className="w-full px-3 py-2 rounded border bg-background" value={settings.address_line2 || ''} onChange={(e) => onChange('address_line2', e.target.value)} />
+              <Input value={settings.address_line2 || ''} onChange={(e) => onChange('address_line2', e.target.value)} />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">City</label>
-              <input className="w-full px-3 py-2 rounded border bg-background" value={settings.city || ''} onChange={(e) => onChange('city', e.target.value)} />
+              <Input value={settings.city || ''} onChange={(e) => onChange('city', e.target.value)} />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Postal Code</label>
-              <input className="w-full px-3 py-2 rounded border bg-background" value={settings.postal_code || ''} onChange={(e) => onChange('postal_code', e.target.value)} />
+              <Input value={settings.postal_code || ''} onChange={(e) => onChange('postal_code', e.target.value)} />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Country</label>
-              <input className="w-full px-3 py-2 rounded border bg-background" value={settings.country || ''} onChange={(e) => onChange('country', e.target.value)} />
+              <Input value={settings.country || ''} onChange={(e) => onChange('country', e.target.value)} />
             </div>
           </div>
 
@@ -191,18 +193,18 @@ export default function CompanySettingsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">VAT Number</label>
-              <input className="w-full px-3 py-2 rounded border bg-background" value={settings.vat_number || ''} onChange={(e) => onChange('vat_number', e.target.value)} />
+              <Input value={settings.vat_number || ''} onChange={(e) => onChange('vat_number', e.target.value)} />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Bank Details</label>
-              <input className="w-full px-3 py-2 rounded border bg-background" value={settings.bank_details || ''} onChange={(e) => onChange('bank_details', e.target.value)} />
+              <Input value={settings.bank_details || ''} onChange={(e) => onChange('bank_details', e.target.value)} />
             </div>
           </div>
 
           <div className="flex justify-end">
-            <button onClick={() => save()} disabled={saving} className="px-4 py-2 rounded bg-primary text-primary-foreground disabled:opacity-50">
+            <Button onClick={() => save()} disabled={saving}>
               {saving ? 'Saving...' : 'Save Settings'}
-            </button>
+            </Button>
           </div>
         </div>
       </div>

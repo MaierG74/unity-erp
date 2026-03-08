@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useOrgSettings, type ConfiguratorDefaults } from '@/hooks/use-org-settings';
 import { useAuth } from '@/components/common/auth-provider';
@@ -8,6 +8,8 @@ import { getOrgId } from '@/lib/utils';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { DEFAULT_CUPBOARD_CONFIG } from '@/lib/configurator/templates/types';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 export default function ConfiguratorSettingsPage() {
   const { user } = useAuth();
@@ -16,15 +18,15 @@ export default function ConfiguratorSettingsPage() {
 
   const [configDefaults, setConfigDefaults] = useState<ConfiguratorDefaults>({});
   const [saving, setSaving] = useState(false);
-  const [initialized, setInitialized] = useState(false);
+  const initialized = useRef(false);
 
   // Sync from orgSettings on load
   useEffect(() => {
-    if (!orgSettings.isLoading && !initialized) {
+    if (!orgSettings.isLoading && !initialized.current) {
       setConfigDefaults(orgSettings.configuratorDefaults);
-      setInitialized(true);
+      initialized.current = true;
     }
-  }, [orgSettings.isLoading, orgSettings.configuratorDefaults, initialized]);
+  }, [orgSettings.isLoading, orgSettings.configuratorDefaults]);
 
   const updateConfigDefault = (key: keyof ConfiguratorDefaults, value: number | string | boolean | undefined) => {
     setConfigDefaults(prev => ({ ...prev, [key]: value }));
@@ -70,11 +72,10 @@ export default function ConfiguratorSettingsPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div>
           <label className="block text-sm font-medium mb-1">Board Thickness (mm)</label>
-          <input
+          <Input
             type="number"
             min={3}
             max={50}
-            className="w-full px-3 py-2 rounded border bg-background"
             value={configDefaults.materialThickness ?? ''}
             placeholder={String(DEFAULT_CUPBOARD_CONFIG.materialThickness)}
             onChange={(e) => updateConfigDefault('materialThickness', e.target.value ? Number(e.target.value) : undefined)}
@@ -82,11 +83,10 @@ export default function ConfiguratorSettingsPage() {
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Back Panel Thickness (mm)</label>
-          <input
+          <Input
             type="number"
             min={3}
             max={50}
-            className="w-full px-3 py-2 rounded border bg-background"
             value={configDefaults.backMaterialThickness ?? ''}
             placeholder={String(DEFAULT_CUPBOARD_CONFIG.backMaterialThickness)}
             onChange={(e) => updateConfigDefault('backMaterialThickness', e.target.value ? Number(e.target.value) : undefined)}
@@ -94,11 +94,10 @@ export default function ConfiguratorSettingsPage() {
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Adjuster Height (mm)</label>
-          <input
+          <Input
             type="number"
             min={0}
             max={100}
-            className="w-full px-3 py-2 rounded border bg-background"
             value={configDefaults.adjusterHeight ?? ''}
             placeholder={String(DEFAULT_CUPBOARD_CONFIG.adjusterHeight)}
             onChange={(e) => updateConfigDefault('adjusterHeight', e.target.value ? Number(e.target.value) : undefined)}
@@ -112,11 +111,10 @@ export default function ConfiguratorSettingsPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div>
             <label className="block text-xs text-muted-foreground mb-1">Top — Sides</label>
-            <input
+            <Input
               type="number"
               min={0}
               max={100}
-              className="w-full px-3 py-2 rounded border bg-background"
               value={configDefaults.topOverhangSides ?? ''}
               placeholder={String(DEFAULT_CUPBOARD_CONFIG.topOverhangSides)}
               onChange={(e) => updateConfigDefault('topOverhangSides', e.target.value ? Number(e.target.value) : undefined)}
@@ -124,11 +122,10 @@ export default function ConfiguratorSettingsPage() {
           </div>
           <div>
             <label className="block text-xs text-muted-foreground mb-1">Top — Back</label>
-            <input
+            <Input
               type="number"
               min={0}
               max={100}
-              className="w-full px-3 py-2 rounded border bg-background"
               value={configDefaults.topOverhangBack ?? ''}
               placeholder={String(DEFAULT_CUPBOARD_CONFIG.topOverhangBack)}
               onChange={(e) => updateConfigDefault('topOverhangBack', e.target.value ? Number(e.target.value) : undefined)}
@@ -136,11 +133,10 @@ export default function ConfiguratorSettingsPage() {
           </div>
           <div>
             <label className="block text-xs text-muted-foreground mb-1">Base — Sides</label>
-            <input
+            <Input
               type="number"
               min={0}
               max={100}
-              className="w-full px-3 py-2 rounded border bg-background"
               value={configDefaults.baseOverhangSides ?? ''}
               placeholder={String(DEFAULT_CUPBOARD_CONFIG.baseOverhangSides)}
               onChange={(e) => updateConfigDefault('baseOverhangSides', e.target.value ? Number(e.target.value) : undefined)}
@@ -148,11 +144,10 @@ export default function ConfiguratorSettingsPage() {
           </div>
           <div>
             <label className="block text-xs text-muted-foreground mb-1">Base — Back</label>
-            <input
+            <Input
               type="number"
               min={0}
               max={100}
-              className="w-full px-3 py-2 rounded border bg-background"
               value={configDefaults.baseOverhangBack ?? ''}
               placeholder={String(DEFAULT_CUPBOARD_CONFIG.baseOverhangBack)}
               onChange={(e) => updateConfigDefault('baseOverhangBack', e.target.value ? Number(e.target.value) : undefined)}
@@ -165,11 +160,10 @@ export default function ConfiguratorSettingsPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div>
           <label className="block text-sm font-medium mb-1">Door Gap (mm)</label>
-          <input
+          <Input
             type="number"
             min={0}
             max={20}
-            className="w-full px-3 py-2 rounded border bg-background"
             value={configDefaults.doorGap ?? ''}
             placeholder={String(DEFAULT_CUPBOARD_CONFIG.doorGap)}
             onChange={(e) => updateConfigDefault('doorGap', e.target.value ? Number(e.target.value) : undefined)}
@@ -177,11 +171,10 @@ export default function ConfiguratorSettingsPage() {
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Shelf Setback (mm)</label>
-          <input
+          <Input
             type="number"
             min={0}
             max={50}
-            className="w-full px-3 py-2 rounded border bg-background"
             value={configDefaults.shelfSetback ?? ''}
             placeholder={String(DEFAULT_CUPBOARD_CONFIG.shelfSetback)}
             onChange={(e) => updateConfigDefault('shelfSetback', e.target.value ? Number(e.target.value) : undefined)}
@@ -189,11 +182,10 @@ export default function ConfiguratorSettingsPage() {
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Back Slot Depth (mm)</label>
-          <input
+          <Input
             type="number"
             min={0}
             max={20}
-            className="w-full px-3 py-2 rounded border bg-background"
             value={configDefaults.backSlotDepth ?? ''}
             placeholder={String(DEFAULT_CUPBOARD_CONFIG.backSlotDepth)}
             onChange={(e) => updateConfigDefault('backSlotDepth', e.target.value ? Number(e.target.value) : undefined)}
@@ -218,11 +210,10 @@ export default function ConfiguratorSettingsPage() {
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Default Shelf Count</label>
-          <input
+          <Input
             type="number"
             min={0}
             max={10}
-            className="w-full px-3 py-2 rounded border bg-background"
             value={configDefaults.shelfCount ?? ''}
             placeholder={String(DEFAULT_CUPBOARD_CONFIG.shelfCount)}
             onChange={(e) => updateConfigDefault('shelfCount', e.target.value ? Number(e.target.value) : undefined)}
@@ -241,13 +232,12 @@ export default function ConfiguratorSettingsPage() {
       </div>
 
       <div className="flex justify-end">
-        <button
+        <Button
           onClick={handleSave}
           disabled={saving}
-          className="px-4 py-2 rounded bg-primary text-primary-foreground disabled:opacity-50"
         >
           {saving ? 'Saving...' : 'Save Configurator Defaults'}
-        </button>
+        </Button>
       </div>
     </div>
   );

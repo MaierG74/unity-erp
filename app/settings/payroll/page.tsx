@@ -1,12 +1,14 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/common/auth-provider';
 import { useOrgSettings } from '@/hooks/use-org-settings';
 import { getOrgId } from '@/lib/utils';
 import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -19,16 +21,16 @@ export default function PayrollSettingsPage() {
   const [weekStartDay, setWeekStartDay] = useState(5);
   const [otThreshold, setOtThreshold] = useState(30);
   const [saving, setSaving] = useState(false);
-  const [initialized, setInitialized] = useState(false);
+  const initialized = useRef(false);
 
   // Sync local state from org settings on load
   useEffect(() => {
-    if (!orgSettings.isLoading && !initialized) {
+    if (!orgSettings.isLoading && !initialized.current) {
       setWeekStartDay(orgSettings.weekStartDay);
       setOtThreshold(orgSettings.otThresholdMinutes);
-      setInitialized(true);
+      initialized.current = true;
     }
-  }, [orgSettings.isLoading, orgSettings.weekStartDay, orgSettings.otThresholdMinutes, initialized]);
+  }, [orgSettings.isLoading, orgSettings.weekStartDay, orgSettings.otThresholdMinutes]);
 
   const handleSave = async () => {
     if (!orgId) {
@@ -94,9 +96,8 @@ export default function PayrollSettingsPage() {
             {/* OT Threshold */}
             <div>
               <label className="block text-sm font-medium mb-1">OT Threshold (minutes)</label>
-              <input
+              <Input
                 type="number"
-                className="w-full px-3 py-2 rounded border bg-background"
                 value={otThreshold}
                 onChange={(e) => setOtThreshold(Number(e.target.value))}
                 min={0}
@@ -109,13 +110,12 @@ export default function PayrollSettingsPage() {
           </div>
 
           <div className="flex justify-end">
-            <button
+            <Button
               onClick={handleSave}
               disabled={saving}
-              className="px-4 py-2 rounded bg-primary text-primary-foreground disabled:opacity-50"
             >
               {saving ? 'Saving...' : 'Save Payroll Settings'}
-            </button>
+            </Button>
           </div>
         </div>
       </div>

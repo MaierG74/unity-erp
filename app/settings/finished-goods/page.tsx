@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
 
 export default function FinishedGoodsSettingsPage() {
   const [autoConsume, setAutoConsume] = useState(false);
@@ -76,13 +77,12 @@ export default function FinishedGoodsSettingsPage() {
       </div>
 
       <div className="flex justify-end">
-        <button
+        <Button
           onClick={handleSave}
           disabled={saving}
-          className="px-4 py-2 rounded bg-primary text-primary-foreground disabled:opacity-50"
         >
           {saving ? 'Saving...' : 'Save Settings'}
-        </button>
+        </Button>
       </div>
     </div>
   );

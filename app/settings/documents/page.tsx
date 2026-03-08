@@ -2,6 +2,8 @@
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   ChevronDown,
   ChevronRight,
@@ -301,8 +303,8 @@ export default function DocumentTemplatesPage() {
                 {quoteTermsTemplates.map((qt) => (
                   <div key={qt.template_id} className="space-y-2">
                     <div className="flex items-center gap-2">
-                      <input
-                        className="flex-1 px-3 py-2 rounded border bg-background text-sm"
+                      <Input
+                        className="flex-1"
                         value={qt.name}
                         onChange={(e) =>
                           updateQuoteTerm(qt.template_id, 'name', e.target.value)
@@ -335,8 +337,8 @@ export default function DocumentTemplatesPage() {
 
                 {/* Add template row */}
                 <div className="flex items-center gap-2">
-                  <input
-                    className="flex-1 px-3 py-2 rounded border bg-background text-sm"
+                  <Input
+                    className="flex-1"
                     value={newTemplateName}
                     onChange={(e) => setNewTemplateName(e.target.value)}
                     placeholder="New template name"
@@ -385,8 +387,7 @@ export default function DocumentTemplatesPage() {
                       <label className="block text-xs text-muted-foreground mb-1">
                         Contact Name
                       </label>
-                      <input
-                        className="w-full px-3 py-2 rounded border bg-background"
+                      <Input
                         value={templates.po_contact_name}
                         onChange={(e) =>
                           setTemplates((prev) => ({
@@ -400,8 +401,7 @@ export default function DocumentTemplatesPage() {
                       <label className="block text-xs text-muted-foreground mb-1">
                         Contact Email
                       </label>
-                      <input
-                        className="w-full px-3 py-2 rounded border bg-background"
+                      <Input
                         value={templates.po_contact_email}
                         onChange={(e) =>
                           setTemplates((prev) => ({
@@ -440,8 +440,7 @@ export default function DocumentTemplatesPage() {
                   <label className="block text-sm font-medium mb-1">
                     Default CC Email for Purchase Orders
                   </label>
-                  <input
-                    className="w-full px-3 py-2 rounded border bg-background"
+                  <Input
                     type="email"
                     value={poDefaultCcEmail}
                     onChange={(e) => setPoDefaultCcEmail(e.target.value)}
@@ -454,14 +453,13 @@ export default function DocumentTemplatesPage() {
 
           {/* Save button */}
           <div className="flex justify-end pt-2">
-            <button
+            <Button
               type="button"
               onClick={saveTemplates}
               disabled={saving}
-              className="px-4 py-2 rounded bg-primary text-primary-foreground disabled:opacity-50"
             >
               {saving ? 'Saving...' : 'Save Templates'}
-            </button>
+            </Button>
           </div>
         </div>
       </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { WorkSchedulesContent } from '@/app/settings/work-schedules/page';
+import { WorkSchedulesContent } from '@/app/settings/work-schedules/work-schedules-content';
 
 export default function SchedulesSettingsPage() {
   return (

@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useOrgSettings, type CutlistDefaults } from '@/hooks/use-org-settings';
 import { useAuth } from '@/components/common/auth-provider';
 import { getOrgId } from '@/lib/utils';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 export default function CutlistSettingsPage() {
   const { user } = useAuth();
@@ -15,15 +17,15 @@ export default function CutlistSettingsPage() {
 
   const [cutlistDefaults, setCutlistDefaults] = useState<CutlistDefaults>({});
   const [saving, setSaving] = useState(false);
-  const [initialized, setInitialized] = useState(false);
+  const initialized = useRef(false);
 
   // Sync from orgSettings on load
   useEffect(() => {
-    if (!orgSettings.isLoading && !initialized) {
+    if (!orgSettings.isLoading && !initialized.current) {
       setCutlistDefaults(orgSettings.cutlistDefaults);
-      setInitialized(true);
+      initialized.current = true;
     }
-  }, [orgSettings.isLoading, orgSettings.cutlistDefaults, initialized]);
+  }, [orgSettings.isLoading, orgSettings.cutlistDefaults]);
 
   const updateCutlistDefault = (key: keyof CutlistDefaults, value: number | undefined) => {
     setCutlistDefaults(prev => ({ ...prev, [key]: value }));
@@ -63,10 +65,9 @@ export default function CutlistSettingsPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div>
           <label className="block text-sm font-medium mb-1">Minimum reusable dimension (mm)</label>
-          <input
+          <Input
             type="number"
             min={1}
-            className="w-full px-3 py-2 rounded border bg-background"
             value={cutlistDefaults.minReusableOffcutDimensionMm ?? 150}
             onChange={(e) => updateCutlistDefault('minReusableOffcutDimensionMm', Number(e.target.value) || undefined)}
           />
@@ -76,10 +77,9 @@ export default function CutlistSettingsPage() {
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Preferred offcut dimension (mm)</label>
-          <input
+          <Input
             type="number"
             min={1}
-            className="w-full px-3 py-2 rounded border bg-background"
             value={cutlistDefaults.preferredOffcutDimensionMm ?? 300}
             onChange={(e) => updateCutlistDefault('preferredOffcutDimensionMm', Number(e.target.value) || undefined)}
           />
@@ -89,10 +89,9 @@ export default function CutlistSettingsPage() {
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Minimum reusable area (mm²)</label>
-          <input
+          <Input
             type="number"
             min={1}
-            className="w-full px-3 py-2 rounded border bg-background"
             value={cutlistDefaults.minReusableOffcutAreaMm2 ?? 100000}
             onChange={(e) => updateCutlistDefault('minReusableOffcutAreaMm2', Number(e.target.value) || undefined)}
           />
@@ -103,13 +102,12 @@ export default function CutlistSettingsPage() {
       </div>
 
       <div className="flex justify-end">
-        <button
+        <Button
           onClick={handleSave}
           disabled={saving}
-          className="px-4 py-2 rounded bg-primary text-primary-foreground disabled:opacity-50"
         >
           {saving ? 'Saving...' : 'Save Cutlist Defaults'}
-        </button>
+        </Button>
       </div>
     </div>
   );
