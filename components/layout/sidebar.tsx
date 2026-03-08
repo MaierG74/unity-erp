@@ -22,7 +22,6 @@ import {
   FileText,
   CheckSquare,
   Ruler,
-  Layers,
   LayoutGrid,
   Factory,
   DollarSign,
@@ -116,11 +115,6 @@ const navigation = [
     name: 'Reports', 
     href: '/reports',
     icon: BarChart 
-  },
-  {
-    name: 'Option Sets',
-    href: '/settings/option-sets',
-    icon: Layers
   },
   {
     name: 'Settings',
