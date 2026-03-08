@@ -32,21 +32,23 @@ type ChatMessage = {
   card?: AssistantCard;
 };
 
-type PanelWidth = 'compact' | 'wide';
+type PanelWidth = 'compact' | 'wide' | 'focus';
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-const COMPACT_WIDTH = 340;
-const WIDE_WIDTH = 520;
-const WIDE_WIDTH_SMALL_VIEWPORT = 420;
+const COMPACT_WIDTH = 380;
+const WIDE_WIDTH = 540;
+const FOCUS_WIDTH = 700;
+const WIDE_WIDTH_SMALL_VIEWPORT = 440;
+const FOCUS_WIDTH_SMALL_VIEWPORT = 560;
 const SMALL_VIEWPORT_BREAKPOINT = 1400;
 const MOBILE_BREAKPOINT = 768;
-/** Force compact if panel would exceed this fraction of viewport */
-const MAX_PANEL_RATIO = 0.4;
 /** Auto-close if compact would exceed this fraction of viewport */
 const CLOSE_PANEL_RATIO = 0.6;
+/** Max fraction of viewport for focus mode */
+const FOCUS_MAX_RATIO = 0.55;
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -200,16 +202,19 @@ function findActionHref(card: AssistantCard, label: string): string | null {
 function resolveWidth(preference: PanelWidth, viewportWidth: number): number | 'closed' {
   const compactPx = COMPACT_WIDTH;
   const widePx = viewportWidth < SMALL_VIEWPORT_BREAKPOINT ? WIDE_WIDTH_SMALL_VIEWPORT : WIDE_WIDTH;
+  const focusPx = viewportWidth < SMALL_VIEWPORT_BREAKPOINT ? FOCUS_WIDTH_SMALL_VIEWPORT : FOCUS_WIDTH;
+  const maxFocusPx = Math.floor(viewportWidth * FOCUS_MAX_RATIO);
 
   if (compactPx > viewportWidth * CLOSE_PANEL_RATIO) {
     return 'closed';
   }
 
+  if (preference === 'focus') {
+    return Math.min(focusPx, maxFocusPx);
+  }
+
   if (preference === 'wide') {
-    if (widePx > viewportWidth * MAX_PANEL_RATIO) {
-      return compactPx;
-    }
-    return widePx;
+    return Math.min(widePx, maxFocusPx);
   }
 
   return compactPx;
@@ -469,6 +474,7 @@ export function AssistantDock({ enabled }: { enabled: boolean }) {
   const [submitting, setSubmitting] = React.useState(false);
   const [messages, setMessages] = React.useState<ChatMessage[]>(() => [buildWelcomeMessage(null)]);
   const [widthPreference, setWidthPreference] = React.useState<PanelWidth>('compact');
+  const [userOverrodeWidth, setUserOverrodeWidth] = React.useState(false);
   const [viewportWidth, setViewportWidth] = React.useState(
     typeof window !== 'undefined' ? window.innerWidth : 1440
   );
@@ -502,6 +508,8 @@ export function AssistantDock({ enabled }: { enabled: boolean }) {
     }
     setMessages([buildWelcomeMessage(pathname)]);
     setInput('');
+    setWidthPreference('compact');
+    setUserOverrodeWidth(false);
   }, [pathname]);
 
   // Close when disabled
@@ -590,6 +598,11 @@ export function AssistantDock({ enabled }: { enabled: boolean }) {
         };
 
         setMessages(prev => [...prev, assistantMessage]);
+
+        // Auto-expand panel when a card with data arrives
+        if (payload.card && !userOverrodeWidth) {
+          setWidthPreference('wide');
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Assistant request failed';
         setMessages(prev => [
@@ -614,7 +627,6 @@ export function AssistantDock({ enabled }: { enabled: boolean }) {
   const isMobile = viewportWidth < MOBILE_BREAKPOINT;
   const resolvedWidth = resolveWidth(widthPreference, viewportWidth);
   const panelPx = resolvedWidth === 'closed' ? COMPACT_WIDTH : resolvedWidth;
-  const isWide = panelPx > COMPACT_WIDTH;
 
   const fabPositionClass =
     process.env.NODE_ENV === 'development'
@@ -663,10 +675,20 @@ export function AssistantDock({ enabled }: { enabled: boolean }) {
                   variant="ghost"
                   size="icon"
                   className="h-7 w-7"
-                  onClick={() => setWidthPreference(prev => prev === 'compact' ? 'wide' : 'compact')}
-                  aria-label={isWide ? 'Compact view' : 'Wide view'}
+                  onClick={() => {
+                    setUserOverrodeWidth(true);
+                    setWidthPreference(prev => {
+                      if (prev === 'compact') return 'wide';
+                      if (prev === 'wide') return 'focus';
+                      return 'compact';
+                    });
+                  }}
+                  aria-label={
+                    widthPreference === 'compact' ? 'Expand panel' :
+                    widthPreference === 'wide' ? 'Focus mode' : 'Compact panel'
+                  }
                 >
-                  {isWide ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+                  {widthPreference === 'focus' ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
                 </Button>
               ) : null}
               <Button

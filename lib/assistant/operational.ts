@@ -823,7 +823,7 @@ export async function getOrdersLast7DaysSummary(
     average_per_day: recentOrders.length / 7,
     busiest_day: busiestDay,
     daily_counts: dailyCounts,
-    recent_orders: recentOrders.slice(0, 5),
+    recent_orders: recentOrders.slice(0, 15),
   };
 }
 
@@ -1258,7 +1258,7 @@ export function buildOrdersLast7DaysAnswer(summary: AssistantOrdersLast7DaysSumm
   if (summary.recent_orders.length > 0) {
     lines.push('');
     lines.push('Most recent orders:');
-    for (const order of summary.recent_orders.slice(0, 3)) {
+    for (const order of summary.recent_orders.slice(0, 5)) {
       const orderLabel = order.order_number?.trim() || `Order ${order.order_id}`;
       const customerLabel = order.customer_name?.trim() || 'Unknown customer';
       const createdLabel = order.created_date ? formatDateForAnswer(order.created_date) : 'Unknown date';
@@ -1340,13 +1340,13 @@ export function buildLastCustomerOrderCard(summary: AssistantLastCustomerOrderSu
       delivery: order.delivery_date ? formatDateForAnswer(order.delivery_date) : 'No delivery date',
       status: order.status_name?.trim() || 'No status set',
     })),
-    actions: summary.recent_orders.slice(0, 3).map(order => ({
+    actions: summary.recent_orders.map(order => ({
       label: `Open ${order.order_number?.trim() || `Order ${order.order_id}`}`,
       href: `/orders/${order.order_id}`,
     })),
     footer:
       summary.recent_orders.length > 0
-        ? 'Use the action buttons to open the latest matching orders.'
+        ? 'Click a row to open the order.'
         : undefined,
   };
 }
@@ -1378,13 +1378,13 @@ export function buildOrdersLast7DaysCard(summary: AssistantOrdersLast7DaysSummar
       label: point.label,
       value: point.count,
     })),
-    details: summary.recent_orders.slice(0, 3).map(order => ({
+    details: summary.recent_orders.map(order => ({
       label: order.order_number?.trim() || `Order ${order.order_id}`,
       value: order.created_date
         ? `${formatDateForAnswer(order.created_date)} | ${order.customer_name?.trim() || 'Unknown customer'}`
         : order.customer_name?.trim() || 'Unknown customer',
     })),
-    actions: summary.recent_orders.slice(0, 3).map(order => ({
+    actions: summary.recent_orders.map(order => ({
       label: `Open ${order.order_number?.trim() || `Order ${order.order_id}`}`,
       href: `/orders/${order.order_id}`,
     })),
