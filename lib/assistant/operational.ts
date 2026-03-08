@@ -54,6 +54,7 @@ type OrderStatusRpcRow = {
 export type AssistantOperationalIntent =
   | 'open_orders'
   | 'last_customer_order'
+  | 'order_search'
   | 'orders_last_7_days'
   | 'orders_due_this_week'
   | 'late_orders'
@@ -137,6 +138,20 @@ export type AssistantLastCustomerOrderSummary = {
     status_name: string | null;
   } | null;
   recent_orders: Array<{
+    order_id: number;
+    order_number: string | null;
+    customer_name: string | null;
+    created_date: string | null;
+    delivery_date: string | null;
+    status_name: string | null;
+  }>;
+};
+
+export type AssistantOrderSearchSummary = {
+  query_term: string;
+  match_mode: 'starts_with' | 'contains';
+  order_count: number;
+  orders: Array<{
     order_id: number;
     order_number: string | null;
     customer_name: string | null;
@@ -878,6 +893,64 @@ export async function getLastCustomerOrderSummary(
   };
 }
 
+export async function getOrderSearchSummary(
+  supabase: SupabaseClient,
+  searchTerm: string,
+  matchMode: 'starts_with' | 'contains'
+): Promise<AssistantOrderSearchSummary> {
+  const normalizedTerm = searchTerm.trim();
+  if (!normalizedTerm) {
+    return {
+      query_term: searchTerm,
+      match_mode: matchMode,
+      order_count: 0,
+      orders: [],
+    };
+  }
+
+  let query = supabase
+    .from('orders')
+    .select(
+      'order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name)'
+    )
+    .not('order_number', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(8);
+
+  const escapedTerm = escapeIlikeTerm(normalizedTerm);
+  query =
+    matchMode === 'starts_with'
+      ? query.ilike('order_number', `${escapedTerm}%`)
+      : query.ilike('order_number', `%${escapedTerm}%`);
+
+  const { data, error } = await query;
+  if (error) {
+    throw error;
+  }
+
+  const orders = ((data ?? []) as OrderRow[]).map(row => {
+    const customer = getRelationRecord(row.customer);
+    const status = getRelationRecord(row.status);
+    const createdAt = row.created_at?.trim() || null;
+
+    return {
+      order_id: row.order_id,
+      order_number: row.order_number?.trim() || null,
+      customer_name: customer?.name?.trim() || null,
+      created_date: createdAt ? getDateInZoneFromTimestamp(createdAt) : null,
+      delivery_date: row.delivery_date?.slice(0, 10) || null,
+      status_name: status?.status_name?.trim() || null,
+    };
+  });
+
+  return {
+    query_term: normalizedTerm,
+    match_mode: matchMode,
+    order_count: orders.length,
+    orders,
+  };
+}
+
 export async function getLateOrdersSummary(
   supabase: SupabaseClient,
   customerName?: string | null
@@ -988,6 +1061,13 @@ export async function getOrderBlockerSummary(
 
 export function detectOperationalIntent(message: string): AssistantOperationalIntent | null {
   const normalized = message.toLowerCase();
+
+  if (
+    /\b(order|orders)\b/.test(normalized) &&
+    /\b(start(?:s|ing)? with|contain(?:s|ing)?|matching|match|begin(?:s|ning)? with)\b/.test(normalized)
+  ) {
+    return 'order_search';
+  }
 
   if (
     /\b(last|latest|most recent)\b/.test(normalized) &&
@@ -1101,6 +1181,42 @@ export function extractLatestOrderCustomerReference(message: string) {
     const candidate = match?.[1]?.trim();
     if (candidate) {
       return candidate.replace(/^(customer\s+)/i, '').trim();
+    }
+  }
+
+  return null;
+}
+
+export function detectOrderSearchMode(message: string): 'starts_with' | 'contains' {
+  const normalized = message.toLowerCase();
+  if (/\b(start(?:s|ing)? with|begin(?:s|ning)? with)\b/.test(normalized)) {
+    return 'starts_with';
+  }
+
+  return 'contains';
+}
+
+export function extractOrderSearchReference(message: string) {
+  const normalized = message
+    .replace(/[?]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const patterns = [
+    /\b(?:order|orders)\s+(?:that\s+)?(?:start|starts|starting|begin|begins|beginning)\s+with\s+(?:the\s+word\s+|the\s+name\s+|name\s+|word\s+)?["']?([^"']+)["']?$/i,
+    /\b(?:order|orders)\s+(?:that\s+)?contain(?:s|ing)?\s+(?:the\s+word\s+|the\s+name\s+|name\s+|word\s+)?["']?([^"']+)["']?$/i,
+    /\b(?:find|show|list|which|what)\s+(?:customer\s+)?orders?\s+(?:matching|match)\s+["']?([^"']+)["']?$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    const candidate = match?.[1]?.trim();
+    if (candidate) {
+      return candidate
+        .replace(/^(?:with\s+)?(?:the\s+word|the\s+name|word|name)\s+/i, '')
+        .replace(/^(?:with\s+)+/i, '')
+        .replace(/\b(?:the\s+word|the\s+name|word|name)\b/gi, '')
+        .trim();
     }
   }
 
@@ -1348,6 +1464,71 @@ export function buildLastCustomerOrderCard(summary: AssistantLastCustomerOrderSu
       summary.recent_orders.length > 0
         ? 'Click a row to open the order.'
         : undefined,
+  };
+}
+
+export function buildOrderSearchAnswer(summary: AssistantOrderSearchSummary) {
+  const modeLabel =
+    summary.match_mode === 'starts_with' ? 'start with' : 'contain';
+  const lines = [
+    `Orders that ${modeLabel} "${summary.query_term}": ${formatNumber(summary.order_count)}`,
+  ];
+
+  if (summary.orders.length > 0) {
+    lines.push('');
+    lines.push('Matches:');
+    for (const order of summary.orders.slice(0, 5)) {
+      lines.push(
+        `- ${order.order_number?.trim() || `Order ${order.order_id}`} | ${
+          order.customer_name?.trim() || 'Unknown customer'
+        } | ${order.created_date ? formatDateForAnswer(order.created_date) : 'Unknown date'}`
+      );
+    }
+  } else {
+    lines.push('No matching orders were found.');
+  }
+
+  return lines.join('\n');
+}
+
+export function buildOrderSearchCard(summary: AssistantOrderSearchSummary): AssistantCard {
+  return {
+    type: 'table',
+    title:
+      summary.match_mode === 'starts_with'
+        ? `Orders starting with "${summary.query_term}"`
+        : `Orders containing "${summary.query_term}"`,
+    description: 'Matching order numbers from live Unity order data.',
+    metrics: [
+      {
+        label: 'Matches',
+        value: formatNumber(summary.order_count),
+      },
+      {
+        label: 'Mode',
+        value: summary.match_mode === 'starts_with' ? 'Starts with' : 'Contains',
+      },
+    ],
+    columns: [
+      { key: 'order', label: 'Order' },
+      { key: 'customer', label: 'Customer' },
+      { key: 'created', label: 'Created' },
+      { key: 'status', label: 'Status' },
+    ],
+    rows: summary.orders.map(order => ({
+      order: order.order_number?.trim() || `Order ${order.order_id}`,
+      customer: order.customer_name?.trim() || 'Unknown customer',
+      created: order.created_date ? formatDateForAnswer(order.created_date) : 'Unknown date',
+      status: order.status_name?.trim() || 'No status set',
+    })),
+    actions: summary.orders.slice(0, 3).map(order => ({
+      label: `Open ${order.order_number?.trim() || `Order ${order.order_id}`}`,
+      href: `/orders/${order.order_id}`,
+    })),
+    footer:
+      summary.order_count > summary.orders.length
+        ? 'Only the most recent matching orders are shown here.'
+        : 'All matching orders shown here are clickable from the action row.',
   };
 }
 

@@ -84,7 +84,7 @@ function formatAmPm(minutes: number): string {
   return `${normalized}:${m.toString().padStart(2, '0')} ${suffix}`;
 }
 
-export default function WorkSchedulesPage() {
+export function WorkSchedulesContent() {
   const queryClient = useQueryClient();
   const [schedules, setSchedules] = useState<ScheduleRow[]>([]);
   const [saving, setSaving] = useState(false);
@@ -206,177 +206,178 @@ export default function WorkSchedulesPage() {
 
   if (isLoading) {
     return (
-      <div className="container mx-auto max-w-4xl space-y-6 py-8">
-        <div className="h-8 w-64 animate-pulse rounded bg-muted" />
-        <div className="space-y-4">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-48 animate-pulse rounded-lg bg-muted" />
-          ))}
-        </div>
+      <div className="space-y-4">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="h-48 animate-pulse rounded-lg bg-muted" />
+        ))}
       </div>
     );
   }
 
   if (isError) {
     return (
-      <div className="container mx-auto max-w-4xl py-8">
-        <p className="text-sm text-destructive">Failed to load work schedules. Please refresh and try again.</p>
-      </div>
+      <p className="text-sm text-destructive">Failed to load work schedules. Please refresh and try again.</p>
     );
   }
 
   return (
-    <div className="container mx-auto max-w-4xl space-y-6 py-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Work Schedules</h1>
-          <p className="text-sm text-muted-foreground">
-            Configure shift hours and break times per day group. Changes apply to the labor planning board.
-          </p>
-        </div>
-        <Button onClick={handleSave} disabled={saving || !dirty}>
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button onClick={handleSave} disabled={saving || !dirty} size="sm">
           <Save className="mr-2 h-4 w-4" />
           {saving ? 'Saving...' : 'Save All'}
         </Button>
       </div>
 
-      <div className="space-y-4">
-        {schedules.map((schedule) => (
-          <Card key={schedule.day_group}>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <Clock className="h-5 w-5 text-muted-foreground" />
-                  {DAY_GROUP_LABELS[schedule.day_group] ?? schedule.day_group}
-                </CardTitle>
-                <div className="flex items-center gap-2">
-                  <Label htmlFor={`active-${schedule.day_group}`} className="text-sm text-muted-foreground">
-                    Active
-                  </Label>
-                  <Switch
-                    id={`active-${schedule.day_group}`}
-                    checked={schedule.is_active}
-                    onCheckedChange={(checked) =>
-                      updateSchedule(schedule.day_group, { is_active: checked })
-                    }
-                  />
-                </div>
+      {schedules.map((schedule) => (
+        <Card key={schedule.day_group}>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Clock className="h-5 w-5 text-muted-foreground" />
+                {DAY_GROUP_LABELS[schedule.day_group] ?? schedule.day_group}
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                <Label htmlFor={`active-${schedule.day_group}`} className="text-sm text-muted-foreground">
+                  Active
+                </Label>
+                <Switch
+                  id={`active-${schedule.day_group}`}
+                  checked={schedule.is_active}
+                  onCheckedChange={(checked) =>
+                    updateSchedule(schedule.day_group, { is_active: checked })
+                  }
+                />
               </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Shift hours */}
-              <div className="flex items-end gap-4">
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Shift start</Label>
-                  <Input
-                    type="time"
-                    value={minutesToTimeString(schedule.start_minutes)}
-                    onChange={(e) =>
-                      updateSchedule(schedule.day_group, {
-                        start_minutes: timeStringToMinutes(e.target.value),
-                      })
-                    }
-                    className="w-32"
-                    step={900}
-                  />
-                </div>
-                <span className="pb-2 text-muted-foreground">–</span>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Shift end</Label>
-                  <Input
-                    type="time"
-                    value={minutesToTimeString(schedule.end_minutes)}
-                    onChange={(e) =>
-                      updateSchedule(schedule.day_group, {
-                        end_minutes: timeStringToMinutes(e.target.value),
-                      })
-                    }
-                    className="w-32"
-                    step={900}
-                  />
-                </div>
-                <span className="pb-2 text-sm text-muted-foreground">
-                  ({formatAmPm(schedule.start_minutes)} – {formatAmPm(schedule.end_minutes)})
-                </span>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Shift hours */}
+            <div className="flex items-end gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Shift start</Label>
+                <Input
+                  type="time"
+                  value={minutesToTimeString(schedule.start_minutes)}
+                  onChange={(e) =>
+                    updateSchedule(schedule.day_group, {
+                      start_minutes: timeStringToMinutes(e.target.value),
+                    })
+                  }
+                  className="w-32"
+                  step={900}
+                />
+              </div>
+              <span className="pb-2 text-muted-foreground">–</span>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Shift end</Label>
+                <Input
+                  type="time"
+                  value={minutesToTimeString(schedule.end_minutes)}
+                  onChange={(e) =>
+                    updateSchedule(schedule.day_group, {
+                      end_minutes: timeStringToMinutes(e.target.value),
+                    })
+                  }
+                  className="w-32"
+                  step={900}
+                />
+              </div>
+              <span className="pb-2 text-sm text-muted-foreground">
+                ({formatAmPm(schedule.start_minutes)} – {formatAmPm(schedule.end_minutes)})
+              </span>
+            </div>
+
+            {/* Breaks */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium">Breaks</Label>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => addBreak(schedule.day_group)}
+                >
+                  <Plus className="mr-1 h-3 w-3" />
+                  Add Break
+                </Button>
               </div>
 
-              {/* Breaks */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label className="text-sm font-medium">Breaks</Label>
+              {schedule.breaks.length === 0 && (
+                <p className="text-sm text-muted-foreground italic">No breaks configured</p>
+              )}
+
+              {schedule.breaks.map((brk, i) => (
+                <div key={i} className="flex items-end gap-3 rounded-md border bg-muted/30 p-2">
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-muted-foreground">Label</Label>
+                    <Input
+                      value={brk.label}
+                      onChange={(e) =>
+                        updateBreak(schedule.day_group, i, { label: e.target.value })
+                      }
+                      className="h-8 w-36 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-muted-foreground">Start</Label>
+                    <Input
+                      type="time"
+                      value={minutesToTimeString(brk.startMinutes)}
+                      onChange={(e) =>
+                        updateBreak(schedule.day_group, i, {
+                          startMinutes: timeStringToMinutes(e.target.value),
+                        })
+                      }
+                      className="h-8 w-28 text-sm"
+                      step={300}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-muted-foreground">End</Label>
+                    <Input
+                      type="time"
+                      value={minutesToTimeString(brk.endMinutes)}
+                      onChange={(e) =>
+                        updateBreak(schedule.day_group, i, {
+                          endMinutes: timeStringToMinutes(e.target.value),
+                        })
+                      }
+                      className="h-8 w-28 text-sm"
+                      step={300}
+                    />
+                  </div>
+                  <span className="pb-1 text-xs text-muted-foreground">
+                    {brk.endMinutes - brk.startMinutes} min
+                  </span>
                   <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 text-xs"
-                    onClick={() => addBreak(schedule.day_group)}
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10"
+                    onClick={() => removeBreak(schedule.day_group, i)}
                   >
-                    <Plus className="mr-1 h-3 w-3" />
-                    Add Break
+                    <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
 
-                {schedule.breaks.length === 0 && (
-                  <p className="text-sm text-muted-foreground italic">No breaks configured</p>
-                )}
-
-                {schedule.breaks.map((brk, i) => (
-                  <div key={i} className="flex items-end gap-3 rounded-md border bg-muted/30 p-2">
-                    <div className="space-y-1">
-                      <Label className="text-[10px] text-muted-foreground">Label</Label>
-                      <Input
-                        value={brk.label}
-                        onChange={(e) =>
-                          updateBreak(schedule.day_group, i, { label: e.target.value })
-                        }
-                        className="h-8 w-36 text-sm"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[10px] text-muted-foreground">Start</Label>
-                      <Input
-                        type="time"
-                        value={minutesToTimeString(brk.startMinutes)}
-                        onChange={(e) =>
-                          updateBreak(schedule.day_group, i, {
-                            startMinutes: timeStringToMinutes(e.target.value),
-                          })
-                        }
-                        className="h-8 w-28 text-sm"
-                        step={300}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-[10px] text-muted-foreground">End</Label>
-                      <Input
-                        type="time"
-                        value={minutesToTimeString(brk.endMinutes)}
-                        onChange={(e) =>
-                          updateBreak(schedule.day_group, i, {
-                            endMinutes: timeStringToMinutes(e.target.value),
-                          })
-                        }
-                        className="h-8 w-28 text-sm"
-                        step={300}
-                      />
-                    </div>
-                    <span className="pb-1 text-xs text-muted-foreground">
-                      {brk.endMinutes - brk.startMinutes} min
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10"
-                      onClick={() => removeBreak(schedule.day_group, i)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+export default function WorkSchedulesPage() {
+  return (
+    <div className="container mx-auto max-w-4xl space-y-6 py-8">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Work Schedules</h1>
+        <p className="text-sm text-muted-foreground">
+          Configure shift hours and break times per day group. Changes apply to the labor planning board.
+        </p>
       </div>
+      <WorkSchedulesContent />
     </div>
   );
 }

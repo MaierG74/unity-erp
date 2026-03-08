@@ -62,7 +62,7 @@ These map to current tables (from Supabase) like `components`, `inventory`, `inv
 ### Prototype Status (2026-03-06)
 - A first UI shell now exists as a floating assistant launcher rendered from the shared app layout.
 - The first structured assistant card is now live for production staffing answers, so the dock can render a compact table with metrics instead of only plain-text chat output.
-- Structured assistant table cards are now live for production staffing, unassigned production work, inventory snapshot answers, open-order answers, late-order answers, low-stock answers, due-this-week order answers, supplier follow-up answers, supplier-order-by-item answers, next-delivery answers, late-supplier-order answers, manufacturing-progress answers, manufacturing-status answers, and latest-customer-order answers, and the first structured chart card is now live for "orders last 7 days" trend questions, so the dock can render compact operational summaries instead of only plain-text chat output.
+- Structured assistant table cards are now live for production staffing, unassigned production work, inventory snapshot answers, open-order answers, order-search answers, late-order answers, low-stock answers, due-this-week order answers, supplier follow-up answers, supplier-order-by-item answers, next-delivery answers, late-supplier-order answers, manufacturing-progress answers, manufacturing-status answers, and latest-customer-order answers, and the first structured chart card is now live for "orders last 7 days" trend questions, so the dock can render compact operational summaries instead of only plain-text chat output.
 - The chat dock now gives these cards clearer visual hierarchy with domain-tinted headers, stronger metric tiles, status badges, and cleaner row treatment so operational answers read more like mini dashboards than raw tables.
 - Card actions can now expose clickable record links for high-value answers like recent customer orders, so the assistant can open the matching order directly instead of only naming it in chat text.
 - Current prototype behavior is intentionally narrow:
@@ -86,6 +86,7 @@ These map to current tables (from Supabase) like `components`, `inventory`, `inv
   - a structured table card for due-this-week orders, showing current-week delivery commitments
   - a structured chart card for order-creation trends over the last 7 days, showing daily counts, total orders, average per day, and busiest day
   - a structured table card for latest-customer-order lookups, showing the newest matching order, recent order history, and direct open-order actions
+  - a structured table card for order-number searches, showing recent matching orders for prompts like "Which orders start with TEST?"
   - a structured table card for low-stock items, showing on-hand, reorder, and shortage values
   - a structured table card for supplier follow-up, showing which open supplier lines need chasing first
   - a structured table card for supplier orders by item, showing supplier, status, ordered date, and outstanding quantities for the requested component
@@ -105,6 +106,7 @@ These map to current tables (from Supabase) like `components`, `inventory`, `inv
     - "How many open customer orders do we have?"
     - "How many open orders for Office Group?"
     - "What was the last order from Office Group?"
+    - "What orders start with TEST?"
     - "Show open orders for Office Group"
     - "Which orders are due this week for Typestar?"
     - "Which orders are late for Typestar?"

@@ -4,8 +4,8 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { DocumentTemplate, POContactInfo } from '@/types/templates';
 import { parsePOContactInfo } from '@/lib/templates';
-import { ChevronDown, ChevronRight, FileText, Mail, ShoppingCart, Plus, Trash2, DollarSign, Ruler, Clock, ChevronRightIcon } from 'lucide-react';
-import Link from 'next/link';
+import { ChevronDown, ChevronRight, FileText, Mail, ShoppingCart, Plus, Trash2, DollarSign, Ruler, Clock } from 'lucide-react';
+import { WorkSchedulesContent } from '@/app/settings/work-schedules/page';
 import { useOrgSettings, type ConfiguratorDefaults, type CutlistDefaults } from '@/hooks/use-org-settings';
 import { useAuth } from '@/components/common/auth-provider';
 import { getOrgId } from '@/lib/utils';
@@ -54,6 +54,7 @@ export default function SettingsPage() {
   const [configDefaults, setConfigDefaults] = useState<ConfiguratorDefaults>({});
   const [savingConfig, setSavingConfig] = useState(false);
   const [configExpanded, setConfigExpanded] = useState(false);
+  const [schedulesExpanded, setSchedulesExpanded] = useState(false);
   const [configInitialized, setConfigInitialized] = useState(false);
   const [cutlistDefaults, setCutlistDefaults] = useState<CutlistDefaults>({});
   const [savingCutlist, setSavingCutlist] = useState(false);
@@ -1073,19 +1074,28 @@ export default function SettingsPage() {
           )}
         </div>
 
-        {/* Work Schedules Link */}
-        <Link href="/settings/work-schedules" className="block bg-card shadow rounded-lg hover:ring-1 hover:ring-primary/40 transition-shadow">
-          <div className="px-6 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
+        {/* Work Schedules Card */}
+        <div className="bg-card shadow rounded-lg">
+          <div className="px-6 py-4 border-b">
+            <button
+              type="button"
+              onClick={() => setSchedulesExpanded(!schedulesExpanded)}
+              className="flex items-center gap-2 w-full text-left"
+            >
+              {schedulesExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
               <Clock className="h-5 w-5 text-blue-500" />
               <div>
-                <h2 className="text-lg font-semibold">Work Schedules</h2>
+                <h1 className="text-lg font-semibold">Work Schedules</h1>
                 <p className="text-sm text-muted-foreground">Shift hours and break times for the labor planning board</p>
               </div>
-            </div>
-            <ChevronRightIcon className="h-5 w-5 text-muted-foreground" />
+            </button>
           </div>
-        </Link>
+          {schedulesExpanded && (
+            <div className="p-6">
+              <WorkSchedulesContent />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ export const assistantModelRouteSchema = z.object({
   action: z.enum([
     'open_orders',
     'last_customer_order',
+    'order_search',
     'orders_last_7_days',
     'orders_due_this_week',
     'late_orders',
@@ -61,6 +62,7 @@ function buildRoutingInstructions() {
     'Use unassigned_production_work for questions about unassigned production job cards, orders with unassigned work, or what needs assignment in production.',
     'Use open_orders when the user wants an open-order count, summary, or list, optionally for a specific customer.',
     'Use last_customer_order when the user asks for the last, latest, or most recent single order for a specific customer.',
+    'Use order_search when the user asks which orders start with, contain, or match a piece of order text or a partial order number. Put the search text in order_ref.',
     'Use orders_last_7_days for questions about orders created in the last week, past 7 days, or this week so far, including customer-scoped variants. Do not use last_customer_order for time-period questions like last week or past 7 days.',
     'Use orders_due_this_week for due-this-week order questions, including when they are scoped to a specific customer.',
     'Use late_orders for late or overdue order questions, including when they are scoped to a specific customer.',

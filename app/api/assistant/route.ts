@@ -45,10 +45,14 @@ import {
   buildLowStockCard,
   buildOpenOrdersAnswer,
   buildOpenOrdersCard,
+  buildOrderSearchAnswer,
+  buildOrderSearchCard,
   buildOrdersLast7DaysAnswer,
   buildOrdersLast7DaysCard,
   buildOrderBlockerAnswer,
+  detectOrderSearchMode,
   detectOperationalIntent,
+  extractOrderSearchReference,
   extractLatestOrderCustomerReference,
   extractOpenOrdersCustomerReference,
   extractRecentOrdersCustomerReference,
@@ -57,6 +61,7 @@ import {
   getLateOrdersSummary,
   getLowStockSummary,
   getOpenCustomerOrdersSummary,
+  getOrderSearchSummary,
   getOrderBlockerSummary,
   getOrdersLast7DaysSummary,
   getOrdersDueThisWeekSummary,
@@ -158,6 +163,7 @@ function getOperationalIntentFromModelAction(
   switch (action) {
     case 'open_orders':
     case 'last_customer_order':
+    case 'order_search':
     case 'orders_last_7_days':
     case 'orders_due_this_week':
     case 'late_orders':
@@ -315,6 +321,43 @@ export async function POST(req: NextRequest) {
         status: 'unknown',
         message:
           'I don\'t know right now because the latest-order lookup failed. I am not going to guess.',
+      });
+      return NextResponse.json(reply);
+    }
+  } else if (operationalIntent === 'order_search') {
+    const searchRef = modelRoute?.order_ref?.trim() || extractOrderSearchReference(normalized);
+
+    if (!searchRef) {
+      reply = buildReply(pathname, {
+        status: 'clarify',
+        message:
+          'I understood that as an order search, but I could not tell what order text to match.',
+      });
+      return NextResponse.json(reply);
+    }
+
+    try {
+      const matchMode = detectOrderSearchMode(normalized);
+      const summary = await getOrderSearchSummary(routeClient.supabase, searchRef, matchMode);
+      reply = buildReply(pathname, {
+        status: 'answered',
+        message: buildOrderSearchAnswer(summary),
+        card: buildOrderSearchCard(summary),
+        suggestions: [
+          ...(summary.orders[0]?.customer_name?.trim()
+            ? [`What was the last order from ${summary.orders[0].customer_name.trim()}?`]
+            : []),
+          'How many open customer orders do we have?',
+          'Which orders are due this week?',
+        ],
+      });
+      return NextResponse.json(reply);
+    } catch (error) {
+      console.error('[assistant] order search failed', error);
+      reply = buildReply(pathname, {
+        status: 'unknown',
+        message:
+          'I don\'t know right now because the order-search tool failed. I am not going to guess.',
       });
       return NextResponse.json(reply);
     }
