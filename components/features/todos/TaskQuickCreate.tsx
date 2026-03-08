@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { format } from 'date-fns';
-import { CalendarIcon, Link2, X, Loader2 } from 'lucide-react';
+import { CalendarIcon, Link2, Paperclip, X, Loader2, FileIcon } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -16,7 +16,7 @@ import { useCreateTodo } from '@/hooks/useTodosApi';
 import { useProfiles } from '@/hooks/useProfiles';
 import { useAuth } from '@/components/common/auth-provider';
 import { useTaskContext, type TaskContext } from '@/hooks/useTaskContext';
-import { PRIORITY_CONFIG, initials, chipBase } from '@/components/features/todos/task-utils';
+import { PRIORITY_CONFIG, initials, chipBase, formatFileSize } from '@/components/features/todos/task-utils';
 
 interface TaskQuickCreateProps {
   open: boolean;
@@ -40,6 +40,13 @@ export function TaskQuickCreate({ open, onOpenChange }: TaskQuickCreateProps) {
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [dateOpen, setDateOpen] = useState(false);
 
+  // Staged files (uploaded after task creation)
+  const [stagedFiles, setStagedFiles] = useState<File[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dropZoneRef = useRef<HTMLDivElement>(null);
+
   // Reset form when dialog opens
   useEffect(() => {
     if (open) {
@@ -48,8 +55,42 @@ export function TaskQuickCreate({ open, onOpenChange }: TaskQuickCreateProps) {
       setPriority('medium');
       setDueDate(null);
       setLinkedContext(detectedContext);
+      setStagedFiles([]);
+      setUploading(false);
     }
   }, [open, user?.id, detectedContext]);
+
+  // Paste handler — capture images/files from clipboard
+  useEffect(() => {
+    if (!open) return;
+
+    function handlePaste(e: ClipboardEvent) {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const files: File[] = [];
+      for (const item of Array.from(items)) {
+        if (item.kind === 'file') {
+          const file = item.getAsFile();
+          if (file) files.push(file);
+        }
+      }
+      if (files.length > 0) {
+        setStagedFiles((prev) => [...prev, ...files]);
+      }
+    }
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [open]);
+
+  const addFiles = useCallback((files: FileList | File[]) => {
+    setStagedFiles((prev) => [...prev, ...Array.from(files)]);
+  }, []);
+
+  const removeFile = useCallback((index: number) => {
+    setStagedFiles((prev) => prev.filter((_, i) => i !== index));
+  }, []);
 
   const assignee = profiles.find((p) => p.id === assigneeId);
   const assigneeName = assignee?.display_name ?? assignee?.username ?? 'Unassigned';
@@ -59,7 +100,7 @@ export function TaskQuickCreate({ open, onOpenChange }: TaskQuickCreateProps) {
     if (!title.trim()) return;
 
     try {
-      await createMutation.mutateAsync({
+      const result = await createMutation.mutateAsync({
         title: title.trim(),
         priority,
         assignedTo: assigneeId ?? user?.id,
@@ -71,6 +112,20 @@ export function TaskQuickCreate({ open, onOpenChange }: TaskQuickCreateProps) {
         contextPath: linkedContext?.contextPath ?? undefined,
         contextSnapshot: linkedContext ? { label: linkedContext.contextLabel } : undefined,
       });
+
+      // Upload staged files if any
+      const todoId = result.todo?.id;
+      if (todoId && stagedFiles.length > 0) {
+        setUploading(true);
+        const uploadMutation = useUploadTodoAttachmentDirect(todoId);
+        for (const file of stagedFiles) {
+          try {
+            await uploadMutation(file);
+          } catch {
+            // Non-fatal — task is created, attachment failed
+          }
+        }
+      }
 
       toast({ title: 'Task created', description: title.trim() });
       onOpenChange(false);
@@ -90,7 +145,30 @@ export function TaskQuickCreate({ open, onOpenChange }: TaskQuickCreateProps) {
           <DialogTitle className="text-base">New Task</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-3 -mt-1">
+        <div
+          ref={dropZoneRef}
+          className={cn(
+            'space-y-4 rounded-lg transition-colors',
+            isDragging && 'bg-primary/5 ring-1 ring-primary/30',
+          )}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setIsDragging(true);
+          }}
+          onDragLeave={(e) => {
+            // Only clear if we're leaving the drop zone, not entering a child
+            if (dropZoneRef.current && !dropZoneRef.current.contains(e.relatedTarget as Node)) {
+              setIsDragging(false);
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            setIsDragging(false);
+            if (e.dataTransfer.files.length) {
+              addFiles(e.dataTransfer.files);
+            }
+          }}
+        >
           {/* Title input */}
           <Input
             autoFocus
@@ -98,7 +176,7 @@ export function TaskQuickCreate({ open, onOpenChange }: TaskQuickCreateProps) {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && title.trim()) {
+              if (e.key === 'Enter' && title.trim() && !createMutation.isPending && !uploading) {
                 e.preventDefault();
                 handleSubmit();
               }
@@ -195,6 +273,27 @@ export function TaskQuickCreate({ open, onOpenChange }: TaskQuickCreateProps) {
                 />
               </PopoverContent>
             </Popover>
+
+            {/* Attach file button */}
+            <button
+              className={cn(chipBase, 'border-dashed border-border text-muted-foreground')}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Paperclip className="h-3 w-3" />
+              Attach
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              multiple
+              onChange={(e) => {
+                if (e.target.files?.length) {
+                  addFiles(e.target.files);
+                  e.target.value = '';
+                }
+              }}
+            />
           </div>
 
           {/* Context link chip */}
@@ -214,15 +313,39 @@ export function TaskQuickCreate({ open, onOpenChange }: TaskQuickCreateProps) {
             </div>
           )}
 
+          {/* Staged files */}
+          {stagedFiles.length > 0 && (
+            <div className="space-y-1">
+              {stagedFiles.map((file, i) => (
+                <div
+                  key={`${file.name}-${i}`}
+                  className="flex items-center gap-2 rounded-md bg-muted/30 px-2 py-1.5 text-xs"
+                >
+                  <FileIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <span className="flex-1 truncate">{file.name}</span>
+                  <span className="text-muted-foreground shrink-0">{formatFileSize(file.size)}</span>
+                  <button
+                    onClick={() => removeFile(i)}
+                    className="text-muted-foreground hover:text-destructive shrink-0"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Footer */}
           <div className="flex items-center justify-between pt-1">
-            <span className="text-xs text-muted-foreground">Esc to cancel</span>
+            <span className="text-xs text-muted-foreground">
+              {isDragging ? 'Drop files here' : 'Esc to cancel · paste or drop files'}
+            </span>
             <Button
               size="sm"
               onClick={handleSubmit}
-              disabled={!title.trim() || createMutation.isPending}
+              disabled={!title.trim() || createMutation.isPending || uploading}
             >
-              {createMutation.isPending ? (
+              {(createMutation.isPending || uploading) ? (
                 <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
               ) : null}
               Create Task
@@ -232,4 +355,29 @@ export function TaskQuickCreate({ open, onOpenChange }: TaskQuickCreateProps) {
       </DialogContent>
     </Dialog>
   );
+}
+
+// Direct upload function (not a hook — used after task creation)
+function useUploadTodoAttachmentDirect(todoId: string) {
+  return async (file: File) => {
+    const { supabase } = await import('@/lib/supabase');
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw error;
+    const token = data?.session?.access_token;
+    if (!token) throw new Error('Not authenticated');
+
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await fetch(`/api/todos/${todoId}/attachments`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error('Upload failed');
+    }
+
+    return response.json();
+  };
 }
