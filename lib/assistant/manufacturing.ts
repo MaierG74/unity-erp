@@ -1529,25 +1529,7 @@ export function buildOrderJobCardsAnswer(summary: AssistantOrderManufacturingSum
     return `There are no job cards currently attached to ${label}.`;
   }
 
-  const lines = [
-    `Job cards attached to ${label}: ${formatNumber(summary.total_job_cards)}`,
-    `Open job cards: ${formatNumber(summary.active_job_cards)}`,
-    `Completed job cards: ${formatNumber(summary.completed_job_cards)}`,
-    '',
-    'Attached job cards:',
-  ];
-
-  for (const jobCard of summary.job_cards.slice(0, 6)) {
-    const products =
-      jobCard.product_labels.length > 0 ? ` — ${jobCard.product_labels.join(', ')}` : '';
-    lines.push(
-      `- JC-${jobCard.job_card_id} | ${formatJobCardStatus(jobCard.status)} | ${
-        jobCard.staff_name ?? 'Unassigned'
-      }${products}`
-    );
-  }
-
-  return lines.join('\n');
+  return `Here are the job cards currently attached to ${label}.`;
 }
 
 export function buildOrderJobCardsCard(

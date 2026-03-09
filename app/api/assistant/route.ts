@@ -263,6 +263,74 @@ function getActiveOrderReference(
   return null;
 }
 
+function detectActiveOrderFollowUpIntent(
+  context: z.infer<typeof requestSchema>['context'],
+  message: string
+): 'order_products' | 'order_blockers' | 'order_job_cards' | 'order_documents' | null {
+  const hasActiveOrder =
+    Boolean(context?.activeOrder?.orderId) ||
+    normalizeConversationText(context?.activeOrder?.orderNumber).length > 0;
+  if (!hasActiveOrder) {
+    return null;
+  }
+
+  const normalized = normalizeConversationText(message).toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  const hasExplicitOrderReference =
+    Boolean(extractOrderReference(normalized)) ||
+    Boolean(extractManufacturingOrderReference(normalized)) ||
+    Boolean(extractOrderProductsReference(normalized));
+  if (hasExplicitOrderReference) {
+    return null;
+  }
+
+  const refersToActiveOrder =
+    /\b(this|that|current|selected|same)\b/.test(normalized) ||
+    /\b(it|them)\b/.test(normalized) ||
+    !/\border\b/.test(normalized);
+  if (!refersToActiveOrder) {
+    return null;
+  }
+
+  if (
+    /\b(open|show|view)\b/.test(normalized) &&
+    /\b(documents|document|docs|client docs|customer docs)\b/.test(normalized)
+  ) {
+    return 'order_documents';
+  }
+
+  if (
+    /\b(job cards?|jobcard)\b/.test(normalized) &&
+    /\b(show|list|what|which|open|attached|owing|remaining|left|are)\b/.test(normalized)
+  ) {
+    return 'order_job_cards';
+  }
+
+  if (
+    (/\b(products?|items?)\b/.test(normalized) &&
+      /\b(show|list|what|which|open)\b/.test(normalized)) ||
+    /\bwhat(?:'s| is) on (?:it|this|that)\b/.test(normalized)
+  ) {
+    return 'order_products';
+  }
+
+  if (
+    /\bstill owing\b/.test(normalized) ||
+    /\boutstanding parts?\b/.test(normalized) ||
+    /\bwhat(?:'s| is) outstanding\b/.test(normalized) ||
+    /\bwhat(?:'s| is) left\b/.test(normalized) ||
+    /\bwhat(?:'s| is) blocking\b/.test(normalized) ||
+    /\bblocking\b/.test(normalized)
+  ) {
+    return 'order_blockers';
+  }
+
+  return null;
+}
+
 function shouldPreferProductOpenOrdersRoute(options: {
   message: string;
   pathname: string | null | undefined;
@@ -434,6 +502,7 @@ export async function POST(req: NextRequest) {
   const explicitManufacturingOrderRef =
     extractManufacturingOrderReference(normalized) ||
     getActiveOrderReference(context, normalized, { allowJobCardLanguage: true });
+  const activeOrderFollowUpIntent = detectActiveOrderFollowUpIntent(context, normalized);
   let modelRoute: Awaited<ReturnType<typeof classifyAssistantRequestWithModel>> = null;
   try {
     modelRoute = await classifyAssistantRequestWithModel(normalized);
@@ -451,17 +520,27 @@ export async function POST(req: NextRequest) {
     modelRoute?.action === 'inventory_snapshot'
       ? modelRoute.inventory_intent ?? detectInventoryIntent(normalized)
       : detectInventoryIntent(normalized);
+  const activeOrderOperationalIntent =
+    activeOrderFollowUpIntent === 'order_products' || activeOrderFollowUpIntent === 'order_blockers'
+      ? activeOrderFollowUpIntent
+      : null;
+  const activeOrderManufacturingIntent =
+    activeOrderFollowUpIntent === 'order_job_cards' ? 'order_job_cards' : null;
   const operationalIntent = openOrdersFollowUp
     ? 'open_orders'
     : explicitManufacturingOrderRef && detectedManufacturingIntent
       ? null
-      : getOperationalIntentFromModelAction(modelRoute?.action) ?? detectedOperationalIntent;
+      : getOperationalIntentFromModelAction(modelRoute?.action) ??
+        detectedOperationalIntent ??
+        activeOrderOperationalIntent;
   const costingIntent =
     getCostingIntentFromModelAction(modelRoute?.action) ?? detectProductCostIntent(normalized);
   const purchasingIntent =
     getPurchasingIntentFromModelAction(modelRoute?.action) ?? detectPurchasingIntent(normalized);
   const manufacturingIntent =
-    getManufacturingIntentFromModelAction(modelRoute?.action) ?? detectedManufacturingIntent;
+    getManufacturingIntentFromModelAction(modelRoute?.action) ??
+    detectedManufacturingIntent ??
+    activeOrderManufacturingIntent;
   const manufacturingFocus = modelRoute?.manufacturing_focus ?? detectManufacturingFocus(normalized);
   const productOpenOrdersRef =
     modelRoute?.product_ref?.trim() || extractProductOpenOrdersReference(normalized);
@@ -573,6 +652,47 @@ export async function POST(req: NextRequest) {
       });
       return NextResponse.json(reply);
     }
+  } else if (activeOrderFollowUpIntent === 'order_documents') {
+    const activeOrderId = context?.activeOrder?.orderId ?? null;
+    const activeOrderNumber = normalizeConversationText(context?.activeOrder?.orderNumber);
+    const orderLabel = activeOrderNumber || (activeOrderId ? `Order ${activeOrderId}` : 'this order');
+
+    if (!activeOrderId) {
+      reply = buildReply(pathname, {
+        status: 'clarify',
+        message:
+          'I understood that as a document follow-up, but I could not tell which order is currently selected.',
+      });
+      return NextResponse.json(reply);
+    }
+
+    reply = buildReply(pathname, {
+      status: 'answered',
+      message: `Here are the documents for ${orderLabel}.`,
+      actions: [
+        {
+          label: 'Open documents',
+          kind: 'navigate',
+          href: `/orders/${activeOrderId}?tab=documents`,
+        },
+        {
+          label: 'Open order',
+          kind: 'navigate',
+          href: `/orders/${activeOrderId}`,
+        },
+        {
+          label: 'Preview order',
+          kind: 'preview_order',
+          orderId: activeOrderId,
+        },
+      ],
+      suggestions: [
+        `What products are on order ${orderLabel}?`,
+        `What job cards are on order ${orderLabel}?`,
+        `What is blocking order ${orderLabel}?`,
+      ],
+    });
+      return NextResponse.json(reply);
   } else if (operationalIntent === 'product_open_orders' || preferProductOpenOrders) {
     const productRef = productOpenOrdersRef;
 

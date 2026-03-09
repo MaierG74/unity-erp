@@ -46,6 +46,7 @@ type ChatMessage = {
   role: 'assistant' | 'user';
   content: string;
   status?: AssistantStatus;
+  actions?: AssistantActionLink[];
   suggestions?: string[];
   card?: AssistantCard;
 };
@@ -95,11 +96,11 @@ type PreviewTransitionPhase = 'idle' | 'switching' | 'entering';
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-const COMPACT_WIDTH = 400;
-const WIDE_WIDTH = 560;
-const FOCUS_WIDTH = 720;
-const WIDE_WIDTH_SMALL_VIEWPORT = 460;
-const FOCUS_WIDTH_SMALL_VIEWPORT = 580;
+const COMPACT_WIDTH = 480;
+const WIDE_WIDTH = 672;
+const FOCUS_WIDTH = 864;
+const WIDE_WIDTH_SMALL_VIEWPORT = 552;
+const FOCUS_WIDTH_SMALL_VIEWPORT = 696;
 const SMALL_VIEWPORT_BREAKPOINT = 1400;
 const MOBILE_BREAKPOINT = 768;
 /** Auto-close if compact would exceed this fraction of viewport */
@@ -142,14 +143,14 @@ function getCardTone(card: AssistantCard) {
 
   if (title.includes('inventory') || title.includes('stock')) {
     return {
-      shell: 'border-emerald-300/25 bg-emerald-950/20',
-      header: 'border-emerald-300/15 bg-emerald-400/10',
-      metric: 'border-emerald-300/15 bg-emerald-400/10',
-      row: 'border-emerald-300/10 even:bg-emerald-400/5',
-      footer: 'border-emerald-300/10 bg-emerald-400/5',
-      tableHead: 'bg-emerald-400/8 text-muted-foreground',
-      bar: 'bg-emerald-500/60',
-      barHover: 'hover:bg-emerald-500/80',
+      shell: 'border-emerald-200 bg-white shadow-[0_10px_28px_rgba(16,24,40,0.08)] dark:border-emerald-500/30 dark:bg-slate-900/80 dark:shadow-[0_12px_32px_rgba(0,0,0,0.18)]',
+      header: 'border-emerald-200 bg-emerald-50 dark:border-emerald-500/25 dark:bg-emerald-500/20',
+      metric: 'border-emerald-200/80 bg-white dark:border-emerald-500/20 dark:bg-emerald-500/10',
+      row: 'border-emerald-100 even:bg-emerald-50/70 dark:border-emerald-500/10 dark:even:bg-emerald-500/5',
+      footer: 'border-emerald-200 bg-emerald-50/80 dark:border-emerald-500/15 dark:bg-emerald-500/5',
+      tableHead: 'bg-emerald-100/85 text-slate-600 dark:bg-emerald-500/12 dark:text-slate-300',
+      bar: 'bg-emerald-500/70 dark:bg-emerald-500/60',
+      barHover: 'hover:bg-emerald-500/85 dark:hover:bg-emerald-500/80',
     };
   }
 
@@ -160,14 +161,14 @@ function getCardTone(card: AssistantCard) {
     title.includes('purchase')
   ) {
     return {
-      shell: 'border-amber-300/25 bg-amber-950/20',
-      header: 'border-amber-300/15 bg-amber-400/10',
-      metric: 'border-amber-300/15 bg-amber-400/10',
-      row: 'border-amber-300/10 even:bg-amber-400/5',
-      footer: 'border-amber-300/10 bg-amber-400/5',
-      tableHead: 'bg-amber-400/8 text-muted-foreground',
-      bar: 'bg-amber-500/60',
-      barHover: 'hover:bg-amber-500/80',
+      shell: 'border-amber-200 bg-white shadow-[0_10px_28px_rgba(16,24,40,0.08)] dark:border-amber-500/30 dark:bg-slate-900/80 dark:shadow-[0_12px_32px_rgba(0,0,0,0.18)]',
+      header: 'border-amber-200 bg-amber-50 dark:border-amber-500/25 dark:bg-amber-500/20',
+      metric: 'border-amber-200/80 bg-white dark:border-amber-500/20 dark:bg-amber-500/10',
+      row: 'border-amber-100 even:bg-amber-50/70 dark:border-amber-500/10 dark:even:bg-amber-500/5',
+      footer: 'border-amber-200 bg-amber-50/80 dark:border-amber-500/15 dark:bg-amber-500/5',
+      tableHead: 'bg-amber-100/85 text-slate-600 dark:bg-amber-500/12 dark:text-slate-300',
+      bar: 'bg-amber-500/70 dark:bg-amber-500/60',
+      barHover: 'hover:bg-amber-500/85 dark:hover:bg-amber-500/80',
     };
   }
 
@@ -177,26 +178,26 @@ function getCardTone(card: AssistantCard) {
     title.includes('job card')
   ) {
     return {
-      shell: 'border-fuchsia-300/25 bg-fuchsia-950/20',
-      header: 'border-fuchsia-300/15 bg-fuchsia-400/10',
-      metric: 'border-fuchsia-300/15 bg-fuchsia-400/10',
-      row: 'border-fuchsia-300/10 even:bg-fuchsia-400/5',
-      footer: 'border-fuchsia-300/10 bg-fuchsia-400/5',
-      tableHead: 'bg-fuchsia-400/8 text-muted-foreground',
-      bar: 'bg-fuchsia-500/60',
-      barHover: 'hover:bg-fuchsia-500/80',
+      shell: 'border-fuchsia-200 bg-white shadow-[0_10px_28px_rgba(16,24,40,0.08)] dark:border-fuchsia-500/30 dark:bg-slate-900/80 dark:shadow-[0_12px_32px_rgba(0,0,0,0.18)]',
+      header: 'border-fuchsia-200 bg-fuchsia-50 dark:border-fuchsia-500/25 dark:bg-fuchsia-500/20',
+      metric: 'border-fuchsia-200/80 bg-white dark:border-fuchsia-500/20 dark:bg-fuchsia-500/10',
+      row: 'border-fuchsia-100 even:bg-fuchsia-50/75 dark:border-fuchsia-500/10 dark:even:bg-fuchsia-500/5',
+      footer: 'border-fuchsia-200 bg-fuchsia-50/80 dark:border-fuchsia-500/15 dark:bg-fuchsia-500/5',
+      tableHead: 'bg-fuchsia-100/85 text-slate-600 dark:bg-fuchsia-500/12 dark:text-slate-300',
+      bar: 'bg-fuchsia-500/70 dark:bg-fuchsia-500/60',
+      barHover: 'hover:bg-fuchsia-500/85 dark:hover:bg-fuchsia-500/80',
     };
   }
 
   return {
-    shell: 'border-cyan-300/25 bg-slate-950/45',
-    header: 'border-cyan-300/15 bg-cyan-300/8',
-    metric: 'border-cyan-300/10 bg-background/40',
-    row: 'border-cyan-300/10 even:bg-background/20',
-    footer: 'border-cyan-300/10 bg-background/20',
-    tableHead: 'bg-background/35 text-muted-foreground',
-    bar: 'bg-cyan-500/60',
-    barHover: 'hover:bg-cyan-500/80',
+    shell: 'border-slate-200 bg-white shadow-[0_10px_28px_rgba(16,24,40,0.08)] dark:border-cyan-500/30 dark:bg-slate-900/80 dark:shadow-[0_12px_32px_rgba(0,0,0,0.18)]',
+    header: 'border-cyan-100 bg-cyan-50/75 dark:border-cyan-500/25 dark:bg-cyan-500/20',
+    metric: 'border-slate-200 bg-slate-50 dark:border-cyan-500/20 dark:bg-cyan-500/10',
+    row: 'border-slate-200 even:bg-slate-50/80 dark:border-slate-600/40 dark:even:bg-slate-700/20',
+    footer: 'border-slate-200 bg-slate-50/90 dark:border-slate-600/40 dark:bg-slate-700/20',
+    tableHead: 'bg-slate-100/90 text-slate-600 dark:bg-slate-700/30 dark:text-slate-300',
+    bar: 'bg-cyan-500/70 dark:bg-cyan-500/60',
+    barHover: 'hover:bg-cyan-500/85 dark:hover:bg-cyan-500/80',
   };
 }
 
@@ -216,20 +217,20 @@ function renderCellValue(columnKey: string, value: string) {
       normalizedValue.includes('approved') ||
       normalizedValue.includes('on time')
     ) {
-      badgeClass = 'border-emerald-400/30 bg-emerald-500/15 text-emerald-100';
+      badgeClass = 'border-emerald-400/30 bg-emerald-500/15 text-emerald-700 dark:text-emerald-100';
     } else if (
       normalizedValue.includes('in production') ||
       normalizedValue.includes('in progress') ||
       normalizedValue.includes('open')
     ) {
-      badgeClass = 'border-sky-400/30 bg-sky-500/15 text-sky-100';
+      badgeClass = 'border-sky-400/30 bg-sky-500/15 text-sky-700 dark:text-sky-100';
     } else if (
       normalizedValue.includes('late') ||
       normalizedValue.includes('unknown') ||
       normalizedValue.includes('no eta') ||
       normalizedValue.includes('unassigned')
     ) {
-      badgeClass = 'border-amber-400/30 bg-amber-500/15 text-amber-100';
+      badgeClass = 'border-amber-400/30 bg-amber-500/15 text-amber-700 dark:text-amber-100';
     }
 
     return (
@@ -262,34 +263,34 @@ function getActionVisual(action: AssistantActionLink) {
   if (action.kind === 'ask') {
     return {
       icon: Bot,
-      className: 'border-emerald-300/25 bg-emerald-500/10 text-emerald-50 hover:bg-emerald-500/15',
+      className: 'border-emerald-300/40 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/15 dark:border-emerald-300/25 dark:text-emerald-50',
     };
   }
 
   if (action.kind === 'preview_order') {
     return {
       icon: Eye,
-      className: 'border-violet-300/25 bg-violet-500/10 text-violet-50 hover:bg-violet-500/15',
+      className: 'border-violet-300/40 bg-violet-500/10 text-violet-700 hover:bg-violet-500/15 dark:border-violet-300/25 dark:text-violet-50',
     };
   }
 
   if (href.startsWith('/quotes/')) {
     return {
       icon: FileText,
-      className: 'border-amber-300/25 bg-amber-500/10 text-amber-50 hover:bg-amber-500/15',
+      className: 'border-amber-300/40 bg-amber-500/10 text-amber-700 hover:bg-amber-500/15 dark:border-amber-300/25 dark:text-amber-50',
     };
   }
 
   if (href.includes('tab=documents')) {
     return {
       icon: FolderOpen,
-      className: 'border-sky-300/25 bg-sky-500/10 text-sky-50 hover:bg-sky-500/15',
+      className: 'border-sky-300/40 bg-sky-500/10 text-sky-700 hover:bg-sky-500/15 dark:border-sky-300/25 dark:text-sky-50',
     };
   }
 
   return {
     icon: ExternalLink,
-    className: 'border-white/15 bg-white/5 text-foreground hover:bg-white/10',
+    className: 'border-slate-300/40 bg-slate-500/5 text-slate-600 hover:bg-slate-500/10 dark:border-white/15 dark:bg-white/5 dark:text-foreground dark:hover:bg-white/10',
   };
 }
 
@@ -343,9 +344,9 @@ function CardShell({
       <div className={cn('border-b px-3 py-2', tone.header)}>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-xs font-semibold text-foreground">{card.title}</div>
+            <div className="text-xs font-semibold text-foreground dark:text-white">{card.title}</div>
             {card.description ? (
-              <div className="mt-0.5 text-[11px] text-muted-foreground">{card.description}</div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground dark:text-slate-400">{card.description}</div>
             ) : null}
           </div>
           <Badge variant="outline" className="border-white/10 bg-black/10 text-[9px] uppercase tracking-[0.18em] text-muted-foreground">
@@ -475,6 +476,42 @@ function CardActions({
         return (
           <button
             key={`card-action-${action.label}-${action.href ?? action.prompt ?? action.orderId ?? ''}`}
+            type="button"
+            onClick={() => onAction(action)}
+            className={cn(
+              'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-medium transition-colors',
+              visual.className
+            )}
+          >
+            <Icon className="h-2.5 w-2.5" />
+            <span>{action.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function MessageActions({
+  actions,
+  onAction,
+}: {
+  actions: AssistantActionLink[];
+  onAction: (action: AssistantActionLink) => void;
+}) {
+  if (actions.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {actions.map(action => {
+        const visual = getActionVisual(action);
+        const Icon = visual.icon;
+
+        return (
+          <button
+            key={`message-action-${action.label}-${action.href ?? action.prompt ?? action.orderId ?? ''}`}
             type="button"
             onClick={() => onAction(action)}
             className={cn(
@@ -916,6 +953,7 @@ export function AssistantDock({ enabled }: { enabled: boolean }) {
           role: 'assistant',
           content: payload.message,
           status: payload.status,
+          actions: payload.actions,
           suggestions: payload.suggestions,
           card: payload.card,
         };
@@ -1067,6 +1105,10 @@ export function AssistantDock({ enabled }: { enabled: boolean }) {
 
                 {message.role === 'assistant' && message.card ? (
                   <AssistantCardRenderer card={message.card} onAction={handleAssistantAction} />
+                ) : null}
+
+                {message.role === 'assistant' && message.actions && message.actions.length > 0 ? (
+                  <MessageActions actions={message.actions} onAction={handleAssistantAction} />
                 ) : null}
 
                 {message.role === 'assistant' && message.suggestions && message.suggestions.length > 0 ? (

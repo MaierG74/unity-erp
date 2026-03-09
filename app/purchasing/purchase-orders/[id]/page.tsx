@@ -1860,7 +1860,6 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
 
         <SectionCard
           title="Order Items"
-          description="Primary working area for receiving, editing, and line-level actions."
           open={orderItemsExpanded}
           onOpenChange={setOrderItemsExpanded}
           badge={<Badge variant="secondary">{activeOrders.length} active</Badge>}
@@ -2143,7 +2142,6 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
         {purchaseOrder && (
           <SectionCard
             title="Receipt History"
-            description="Recent receiving records stay near the top, but out of the way until needed."
             open={receiptHistoryExpanded}
             onOpenChange={setReceiptHistoryExpanded}
             badge={<Badge variant="secondary">{totalReceiptEntries}</Badge>}
@@ -2242,7 +2240,6 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
 
         <SectionCard
           title="Supplier Info"
-          description="Suppliers, approval details, email activity, and audit trail."
           open={supplierInfoExpanded}
           onOpenChange={setSupplierInfoExpanded}
           badge={<Badge variant="outline">{supplierNames.length} supplier{supplierNames.length === 1 ? '' : 's'}</Badge>}
@@ -2522,7 +2519,6 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
 
         <SectionCard
           title="Order Summary"
-          description="Reference details and notes for this purchase order."
           open={summaryExpanded}
           onOpenChange={setSummaryExpanded}
           badge={<StatusBadge status={getOrderStatus(purchaseOrder)} />}
@@ -2614,7 +2610,6 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
         {purchaseOrder && isApproved && (
           <SectionCard
             title="Return Goods"
-            description="Record supplier returns and rejections without crowding the primary receive workflow."
             open={returnGoodsExpanded}
             onOpenChange={setReturnGoodsExpanded}
             className="mt-6"
@@ -2745,7 +2740,6 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
         {purchaseOrder && (
           <SectionCard
             title="Return History"
-            description="Past returns stay available but collapsed until needed."
             open={returnHistoryExpanded}
             onOpenChange={setReturnHistoryExpanded}
             badge={<Badge variant="secondary">{totalReturnEntries}</Badge>}
@@ -2834,7 +2828,6 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
         {purchaseOrder && (
           <SectionCard
             title="Attachments"
-            description="Supporting files are available here when needed, without dominating the main workflow."
             open={attachmentsExpanded}
             onOpenChange={setAttachmentsExpanded}
             badge={<Badge variant="secondary">{poAttachments.length}</Badge>}

@@ -565,7 +565,7 @@ export function ReceiveItemsModal({
                   id="rejection_reason"
                   {...register('rejection_reason')}
                   disabled={quantityRejected <= 0}
-                  className={`w-full border rounded-md p-2 ${quantityRejected > 0 ? 'border-gray-300' : 'border-muted bg-muted/50 text-muted-foreground cursor-not-allowed'}`}
+                  className={`w-full border rounded-md p-2 bg-background ${quantityRejected > 0 ? 'border-border' : 'border-muted bg-muted/50 text-muted-foreground cursor-not-allowed'}`}
                 >
                   <option value="">Select reason...</option>
                   <option value="Damaged">Damaged</option>
@@ -598,7 +598,7 @@ export function ReceiveItemsModal({
                 <textarea
                   id="notes"
                   {...register('notes')}
-                  className="w-full border border-gray-300 rounded-md p-2"
+                  className="w-full border border-border rounded-md p-2 bg-background"
                   rows={3}
                   placeholder="Additional notes about this delivery..."
                 />
@@ -647,22 +647,22 @@ export function ReceiveItemsModal({
             </div>
           </form>
         ) : (
-          <div className="space-y-6">
-            <div className="p-4 bg-green-50 border border-green-200 rounded-md space-y-1">
-              <div className="font-medium text-green-800">Receipt recorded successfully!</div>
-              <div className="text-sm text-green-700 flex flex-col gap-0.5">
+          <div className="space-y-6 pt-2">
+            <div className="p-4 bg-emerald-950/40 border border-emerald-800/50 rounded-md space-y-1">
+              <div className="font-medium text-emerald-300">Receipt recorded successfully!</div>
+              <div className="text-sm text-emerald-400/80 flex flex-col gap-0.5">
                 <span>Received: <strong>{successData.receivedQty}</strong></span>
                 {successData.rejectedQty > 0 && (
                   <span>Rejected: <strong>{successData.rejectedQty}</strong></span>
                 )}
               </div>
               {successData.grn && (
-                <div className="text-sm text-green-700">
+                <div className="text-sm text-emerald-400/80">
                   Goods Return Number: <span className="font-mono font-bold">{successData.grn}</span>
                 </div>
               )}
               {noteUploaded && (
-                <div className="text-sm text-green-700 flex items-center gap-1">
+                <div className="text-sm text-emerald-400/80 flex items-center gap-1">
                   <CheckCircle2 className="h-3.5 w-3.5" />
                   Delivery note attached
                 </div>
@@ -718,13 +718,13 @@ export function ReceiveItemsModal({
                   )}
 
                   {emailStatus === 'sent' && (
-                    <div className="p-3 bg-green-50 border border-green-200 text-green-700 rounded-md text-sm">
+                    <div className="p-3 bg-emerald-950/40 border border-emerald-800/50 text-emerald-400/80 rounded-md text-sm">
                       Email notification sent successfully to supplier
                     </div>
                   )}
 
                   {emailStatus === 'skipped' && (
-                    <div className="p-3 bg-gray-50 border border-gray-200 text-gray-700 rounded-md text-sm">
+                    <div className="p-3 bg-muted/30 border border-border text-muted-foreground rounded-md text-sm">
                       Email notification skipped
                     </div>
                   )}

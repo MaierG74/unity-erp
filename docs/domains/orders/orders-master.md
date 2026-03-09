@@ -97,6 +97,7 @@
   - RPC: `get_detailed_component_status(p_order_id)` for per-order requirements with stock/on-order and global fields.
   - RPC: `get_order_component_history(p_order_id)` for per-component historical context.
   - UI summary now distinguishes **Ready Now** (fully covered by on-hand stock) vs **Pending Deliveries** (covered only once outstanding supplier orders arrive). When any component is pending deliveries, the Components Summary card swaps the "All components available in stock" badge for an amber warning explaining that availability depends on incoming receipts, and it shows the count of affected components so planners know what must arrive before issuing stock.
+  - In the Order Components procurement dialog, toggling `Include in-stock` keeps any user-entered PO quantity and allocation for already listed rows; only newly revealed rows initialize from the computed default shortfall/allocation.
 - Suppliers & PO creation:
   - Suppliers fetched from `suppliercomponents` (with supplier emails joined from `supplier_emails`).
   - Components grouped by supplier; user selects components and quantities, and can allocate between "For this order" vs "For stock".
@@ -170,11 +171,12 @@
   1. create or refresh demand in the `Work Pool`
   2. issue job cards out of that pool
 - `Generate from BOL` on the order page no longer creates job cards directly. It snapshots BOL demand into `job_work_pool`.
+- When every current BOL row already has a matching work-pool snapshot, the `Generate from BOL` button is disabled and shows the tooltip `Bill of Labor in sync already`.
 - `Add Job` on the order page creates a manual `job_work_pool` row (`source='manual'`), so manual jobs and BOL jobs use the same issuance flow.
 - `Required` = the snapped demand quantity on the pool row.
 - `Issued` = the sum of non-cancelled `job_card_items.quantity` linked to that pool row.
 - `Remaining` = `Required - Issued`. It is computed, not stored.
-- Pool rows are snapshots. If the order quantity or BOL changes later, the order page warns that the pool is stale and offers `Update Pool` reconciliation.
+- Pool rows are snapshots. If the order quantity or BOL changes later, the order page warns that the pool is stale and offers `Update Pool` reconciliation. After a successful reconcile, the warning should clear when the refreshed pool matches current demand.
 
 ```mermaid
 flowchart LR

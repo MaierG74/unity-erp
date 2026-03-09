@@ -66,6 +66,7 @@ export type AssistantReply = {
   suggestions: string[];
   scopeLabel: string;
   card?: AssistantCard;
+  actions?: AssistantActionLink[];
 };
 
 function normalizePath(pathname?: string | null) {

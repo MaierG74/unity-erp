@@ -59,6 +59,27 @@ export const OrderComponentsDialog = ({
   const [includeInStock, setIncludeInStock] = useState(false);
   const queryClient = useQueryClient();
 
+  const buildDefaultComponentState = (supplierGroups: SupplierGroup[]) => {
+    const quantities: Record<number, number> = {};
+    const nextAllocation: Record<number, { forThisOrder: number; forStock: number }> = {};
+
+    supplierGroups.forEach(group => {
+      group.components.forEach(component => {
+        const key = component.selectedSupplier.supplier_component_id;
+        const perOrderShortfall = component.shortfall;
+        const globalShortfall = component.global_real_shortfall || 0;
+        const defaultQuantity = perOrderShortfall > 0 ? perOrderShortfall : globalShortfall;
+
+        quantities[key] = defaultQuantity;
+        nextAllocation[key] = perOrderShortfall > 0
+          ? { forThisOrder: perOrderShortfall, forStock: 0 }
+          : { forThisOrder: 0, forStock: globalShortfall };
+      });
+    });
+
+    return { quantities, allocation: nextAllocation };
+  };
+
   // Group components by supplier
   const { data, isLoading, isError, error, refetch } = useQuery<SupplierGroup[]>({
     queryKey: ['component-suppliers', orderId, includeInStock],
@@ -93,39 +114,29 @@ export const OrderComponentsDialog = ({
 
       checkApparentShortfall();
 
-      // Initialize order quantities with shortfall values when data is loaded
-      const quantities: Record<number, number> = {};
-      const newAllocation: Record<number, { forThisOrder: number; forStock: number }> = {};
+      const defaults = buildDefaultComponentState(data);
 
-      data.forEach(group => {
-        group.components.forEach(component => {
-          // Use supplier_component_id as key to distinguish same component across different suppliers
-          const key = component.selectedSupplier.supplier_component_id;
-          const perOrderShortfall = component.shortfall;
-          const globalShortfall = component.global_real_shortfall || 0;
+      setOrderQuantities(prev => {
+        const next: Record<number, number> = {};
 
-          // Default quantity: use global shortfall if no per-order shortfall
-          const defaultQuantity = perOrderShortfall > 0 ? perOrderShortfall : globalShortfall;
-          quantities[key] = defaultQuantity;
-
-          // Smart allocation: per-order shortfall goes to "forThisOrder", global-only goes to "forStock"
-          if (perOrderShortfall > 0) {
-            newAllocation[key] = {
-              forThisOrder: perOrderShortfall,
-              forStock: 0
-            };
-          } else {
-            // Global-only shortfall: allocate to stock
-            newAllocation[key] = {
-              forThisOrder: 0,
-              forStock: globalShortfall
-            };
-          }
+        Object.entries(defaults.quantities).forEach(([key, defaultQuantity]) => {
+          const supplierComponentId = Number(key);
+          next[supplierComponentId] = prev[supplierComponentId] ?? defaultQuantity;
         });
+
+        return next;
       });
 
-      setOrderQuantities(quantities);
-      setAllocation(newAllocation);
+      setAllocation(prev => {
+        const next: Record<number, { forThisOrder: number; forStock: number }> = {};
+
+        Object.entries(defaults.allocation).forEach(([key, defaultAllocation]) => {
+          const supplierComponentId = Number(key);
+          next[supplierComponentId] = prev[supplierComponentId] ?? defaultAllocation;
+        });
+
+        return next;
+      });
     }
   }, [data, orderId]);
 
@@ -137,38 +148,9 @@ export const OrderComponentsDialog = ({
     setIncludeInStock(false);
 
     if (data) {
-      const quantities: Record<number, number> = {};
-      const newAllocation: Record<number, { forThisOrder: number; forStock: number }> = {};
-
-      data.forEach(group => {
-        group.components.forEach(component => {
-          // Use supplier_component_id as key to distinguish same component across different suppliers
-          const key = component.selectedSupplier.supplier_component_id;
-          const perOrderShortfall = component.shortfall;
-          const globalShortfall = component.global_real_shortfall || 0;
-
-          // Default quantity: use global shortfall if no per-order shortfall
-          const defaultQuantity = perOrderShortfall > 0 ? perOrderShortfall : globalShortfall;
-          quantities[key] = defaultQuantity;
-
-          // Smart allocation: per-order shortfall goes to "forThisOrder", global-only goes to "forStock"
-          if (perOrderShortfall > 0) {
-            newAllocation[key] = {
-              forThisOrder: perOrderShortfall,
-              forStock: 0
-            };
-          } else {
-            // Global-only shortfall: allocate to stock
-            newAllocation[key] = {
-              forThisOrder: 0,
-              forStock: globalShortfall
-            };
-          }
-        });
-      });
-
-      setOrderQuantities(quantities);
-      setAllocation(newAllocation);
+      const defaults = buildDefaultComponentState(data);
+      setOrderQuantities(defaults.quantities);
+      setAllocation(defaults.allocation);
     }
   };
 
@@ -620,8 +602,8 @@ export const OrderComponentsDialog = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[1200px] max-h-[85vh]">
         <DialogHeader>
-          <div className="flex items-center justify-between gap-4">
-            <div>
+          <div className="flex flex-col gap-3 pr-10 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
               <DialogTitle>Order Components</DialogTitle>
               <DialogDescription>
                 {step === 'select'
@@ -633,7 +615,7 @@ export const OrderComponentsDialog = ({
               <Button
                 variant={includeInStock ? 'default' : 'outline'}
                 size="sm"
-                className="shrink-0 gap-1.5 text-xs"
+                className="h-9 self-start px-3 sm:mt-0 sm:mr-2 shrink-0 gap-1.5 text-xs"
                 onClick={() => setIncludeInStock(!includeInStock)}
               >
                 {includeInStock ? <CheckCircle className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
@@ -702,7 +684,7 @@ export const OrderComponentsDialog = ({
                           </TableHead>
                           <TableHead className="w-[220px]">
                             <div className="space-y-1">
-                              <div>Allocation</div>
+                              <div className="text-center">Allocation</div>
                               <div className="grid grid-cols-[48px_80px_48px_80px] gap-x-3 text-xs font-medium text-muted-foreground">
                                 <span />
                                 <span>Order</span>

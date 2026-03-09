@@ -45,6 +45,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Plus,
   Wand2,
@@ -147,6 +148,98 @@ const statusConfig: Record<string, { label: string; variant: 'default' | 'second
   in_progress: { label: 'In Progress', variant: 'default', icon: <PlayCircle className="h-3 w-3" /> },
   completed: { label: 'Completed', variant: 'outline', icon: <CheckCircle className="h-3 w-3 text-green-500" /> },
 };
+
+function normalizeOptionalNumber(value: number | null | undefined): number | null {
+  return value == null ? null : Number(value);
+}
+
+function optionalNumbersEqual(a: number | null | undefined, b: number | null | undefined): boolean {
+  return normalizeOptionalNumber(a) === normalizeOptionalNumber(b);
+}
+
+async function fetchOrderBOLPreview(orderId: number): Promise<BOLPreviewItem[]> {
+  const { data: orderDetails, error: odErr } = await supabase
+    .from('order_details')
+    .select(`
+      order_detail_id,
+      product_id,
+      quantity,
+      products:product_id(
+        product_id,
+        name,
+        billoflabour(
+          bol_id,
+          job_id,
+          quantity,
+          pay_type,
+          piece_rate_id,
+          hourly_rate_id,
+          time_required,
+          time_unit,
+          jobs:job_id(job_id, name)
+        )
+      )
+    `)
+    .eq('order_id', orderId);
+
+  if (odErr) throw odErr;
+  if (!orderDetails || orderDetails.length === 0) return [];
+
+  const preview: BOLPreviewItem[] = [];
+
+  for (const detail of orderDetails) {
+    const product = detail.products as any;
+    if (!product) continue;
+
+    const bolEntries = Array.isArray(product.billoflabour)
+      ? product.billoflabour
+      : [];
+
+    for (const bol of bolEntries) {
+      const job = bol.jobs as any;
+      if (!job) continue;
+
+      const orderQty = detail.quantity || 1;
+      const bolQty = bol.quantity || 1;
+      const totalQty = orderQty * bolQty;
+
+      let pieceRate: number | null = null;
+      if (bol.piece_rate_id) {
+        const { data: rateData } = await supabase
+          .from('piece_work_rates')
+          .select('rate')
+          .eq('rate_id', bol.piece_rate_id)
+          .single();
+        pieceRate = rateData?.rate ? Number(rateData.rate) : null;
+      }
+
+      let timePerUnit: number | null = null;
+      if (bol.time_required) {
+        const raw = Number(bol.time_required);
+        if (bol.time_unit === 'hours') timePerUnit = raw * 60;
+        else if (bol.time_unit === 'seconds') timePerUnit = raw / 60;
+        else timePerUnit = raw;
+      }
+
+      preview.push({
+        job_id: job.job_id,
+        job_name: job.name,
+        product_id: product.product_id,
+        product_name: product.name,
+        quantity: totalQty,
+        pay_type: bol.pay_type || 'hourly',
+        piece_rate: pieceRate,
+        order_detail_id: detail.order_detail_id,
+        bol_id: bol.bol_id,
+        piece_rate_id: bol.piece_rate_id ?? null,
+        hourly_rate_id: bol.hourly_rate_id ?? null,
+        time_per_unit: timePerUnit,
+      });
+    }
+  }
+
+  return preview;
+}
 
 // ── Main Component ──────────────────────────────────────────────────────────────
 
@@ -272,9 +365,68 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
     },
   });
 
+  const staleCheckDeps = useMemo(
+    () =>
+      workPool
+        .filter((p) => p.source === 'bol' && p.bol_id != null && p.order_detail_id != null)
+        .map((p) => ({
+          pool_id: p.pool_id,
+          bol_id: p.bol_id,
+          order_detail_id: p.order_detail_id,
+          required_qty: p.required_qty,
+          issued_qty: p.issued_qty,
+        })),
+    [workPool],
+  );
+
+  const { data: bolSync = { hasBolRows: false, isInSync: false } } = useQuery({
+    queryKey: ['orderBolSync', orderId, staleCheckDeps],
+    queryFn: async () => {
+      const bolPreview = await fetchOrderBOLPreview(orderId);
+      if (bolPreview.length === 0) {
+        return { hasBolRows: false, isInSync: false };
+      }
+
+      const bolPool = workPool.filter((row) => row.source === 'bol' && row.bol_id != null && row.order_detail_id != null);
+      const previewByKey = new Map(
+        bolPreview.map((item) => [`${item.order_detail_id}:${item.bol_id}`, item] as const),
+      );
+      const poolByKey = new Map(
+        bolPool.map((row) => [`${row.order_detail_id}:${row.bol_id}`, row] as const),
+      );
+
+      if (previewByKey.size !== poolByKey.size) {
+        return { hasBolRows: true, isInSync: false };
+      }
+
+      for (const [key, item] of previewByKey) {
+        const poolRow = poolByKey.get(key);
+        if (!poolRow) return { hasBolRows: true, isInSync: false };
+
+        const isRowInSync =
+          poolRow.required_qty === item.quantity &&
+          poolRow.pay_type === item.pay_type &&
+          optionalNumbersEqual(poolRow.piece_rate, item.piece_rate) &&
+          optionalNumbersEqual(poolRow.piece_rate_id, item.piece_rate_id) &&
+          optionalNumbersEqual(poolRow.hourly_rate_id, item.hourly_rate_id) &&
+          optionalNumbersEqual(poolRow.time_per_unit, item.time_per_unit);
+
+        if (!isRowInSync) {
+          return { hasBolRows: true, isInSync: false };
+        }
+      }
+
+      return { hasBolRows: true, isInSync: true };
+    },
+    enabled: workPool.length > 0,
+  });
+
+  const isBolGenerateDisabled = bolSync.hasBolRows && bolSync.isInSync;
+
   // ── Stale pool detection ──────────────────────────────────────────────
   const { data: staleItems = [] } = useQuery<StalePoolRow[]>({
-    queryKey: ['orderPoolStaleCheck', orderId],
+    // Include the current pool snapshot in the key because the stale check is derived from it.
+    queryKey: ['orderPoolStaleCheck', orderId, staleCheckDeps],
     queryFn: async () => {
       // Only check BOL-sourced pool rows (manual ones don't drift)
       const bolPool = workPool.filter((p) => p.source === 'bol' && p.bol_id != null && p.order_detail_id != null);
@@ -322,7 +474,7 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
       }
       return stale;
     },
-    enabled: workPool.length > 0,
+    enabled: staleCheckDeps.length > 0,
   });
 
   // ── Reconciliation mutation ─────────────────────────────────────────────
@@ -463,10 +615,28 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setGenerateBOLOpen(true)}>
-            <Wand2 className="h-4 w-4 mr-2" />
-            Generate from BOL
-          </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span tabIndex={isBolGenerateDisabled ? 0 : -1}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setGenerateBOLOpen(true)}
+                    disabled={isBolGenerateDisabled}
+                  >
+                    <Wand2 className="h-4 w-4 mr-2" />
+                    Generate from BOL
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              {isBolGenerateDisabled && (
+                <TooltipContent>
+                  Bill of Labor in sync already
+                </TooltipContent>
+              )}
+            </Tooltip>
+          </TooltipProvider>
           <Button size="sm" onClick={() => setAddJobOpen(true)}>
             <Plus className="h-4 w-4 mr-2" />
             Add Job
@@ -476,45 +646,83 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
 
       {/* Stale Pool Warning */}
       {staleItems.length > 0 && (
-        <Alert variant="destructive" className="border-amber-500/50 bg-amber-950/20 text-amber-200 [&>svg]:text-amber-400">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Work pool out of date</AlertTitle>
-          <AlertDescription>
-            <p className="text-sm mb-2">
-              Order quantities have changed since the work pool was generated.
-            </p>
-            <div className="space-y-1 text-sm mb-3">
-              {staleItems.map((s) => (
-                <div key={s.pool_id} className="flex items-center gap-2">
-                  <span className="font-medium">{s.job_name ?? 'Job'}</span>
-                  {s.product_name && <span className="text-muted-foreground">({s.product_name})</span>}
-                  <span>
-                    Pool: {s.pool_required} → Current: {s.current_required}
-                  </span>
-                  {s.current_required < s.issued_qty && (
-                    <Badge variant="destructive" className="ml-1">
-                      Over-issued by {s.issued_qty - s.current_required}
-                    </Badge>
-                  )}
-                </div>
-              ))}
+        <div className="rounded-lg border border-amber-500/30 bg-amber-50 dark:bg-amber-950/30 overflow-hidden">
+          {/* Header bar */}
+          <div className="flex items-center justify-between px-4 py-2.5 bg-amber-100/80 dark:bg-amber-900/40 border-b border-amber-500/20">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+              <span className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                Work pool out of date
+              </span>
+              <span className="text-xs text-amber-700/70 dark:text-amber-400/60">
+                — quantities have changed since the pool was generated
+              </span>
             </div>
             <Button
               size="sm"
               variant="outline"
-              className="border-amber-500/50 hover:bg-amber-500/20"
+              className="h-7 text-xs border-amber-500/40 bg-white/60 dark:bg-amber-950/50 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/60"
               onClick={() => reconcileMutation.mutate(staleItems)}
               disabled={reconcileMutation.isPending}
             >
               {reconcileMutation.isPending ? (
-                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
               ) : (
-                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                <RefreshCw className="h-3 w-3 mr-1.5" />
               )}
               Update Pool
             </Button>
-          </AlertDescription>
-        </Alert>
+          </div>
+          {/* Mismatch table */}
+          <div className="px-4 py-2">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-amber-700/60 dark:text-amber-400/50">
+                  <th className="text-left font-medium py-1 pr-4">Job</th>
+                  <th className="text-left font-medium py-1 pr-4">Product</th>
+                  <th className="text-right font-medium py-1 pr-4">Pool Qty</th>
+                  <th className="text-right font-medium py-1 pr-4">Current Qty</th>
+                  <th className="text-right font-medium py-1">Diff</th>
+                </tr>
+              </thead>
+              <tbody>
+                {staleItems.map((s) => {
+                  const diff = s.current_required - s.pool_required;
+                  const overIssued = s.current_required < s.issued_qty;
+                  return (
+                    <tr key={s.pool_id} className="border-t border-amber-500/10">
+                      <td className="py-1.5 pr-4 font-medium text-amber-900 dark:text-amber-100">
+                        {s.job_name ?? 'Job'}
+                      </td>
+                      <td className="py-1.5 pr-4 text-amber-800/70 dark:text-amber-300/60">
+                        {s.product_name || '—'}
+                      </td>
+                      <td className="py-1.5 pr-4 text-right tabular-nums text-amber-800/70 dark:text-amber-300/60">
+                        {s.pool_required}
+                      </td>
+                      <td className="py-1.5 pr-4 text-right tabular-nums font-medium text-amber-900 dark:text-amber-100">
+                        {s.current_required}
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums">
+                        <span className={diff > 0
+                          ? 'text-amber-700 dark:text-amber-300'
+                          : 'text-red-600 dark:text-red-400'
+                        }>
+                          {diff > 0 ? '+' : ''}{diff}
+                        </span>
+                        {overIssued && (
+                          <Badge variant="destructive" className="ml-2 text-[10px] px-1.5 py-0">
+                            over-issued
+                          </Badge>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       {/* Work Pool */}
@@ -942,95 +1150,9 @@ function GenerateBOLDialog({
   const {
     data: bolPreview = [],
     isLoading: loadingPreview,
-    refetch,
   } = useQuery({
     queryKey: ['orderBOLPreview', orderId],
-    queryFn: async (): Promise<BOLPreviewItem[]> => {
-      // Get order details with products and their BOL entries
-      const { data: orderDetails, error: odErr } = await supabase
-        .from('order_details')
-        .select(`
-          order_detail_id,
-          product_id,
-          quantity,
-          products:product_id(
-            product_id,
-            name,
-            billoflabour(
-              bol_id,
-              job_id,
-              quantity,
-              pay_type,
-              piece_rate_id,
-              hourly_rate_id,
-              time_required,
-              time_unit,
-              jobs:job_id(job_id, name)
-            )
-          )
-        `)
-        .eq('order_id', orderId);
-
-      if (odErr) throw odErr;
-      if (!orderDetails || orderDetails.length === 0) return [];
-
-      const preview: BOLPreviewItem[] = [];
-
-      for (const detail of orderDetails) {
-        const product = detail.products as any;
-        if (!product) continue;
-
-        const bolEntries = Array.isArray(product.billoflabour)
-          ? product.billoflabour
-          : [];
-
-        for (const bol of bolEntries) {
-          const job = bol.jobs as any;
-          if (!job) continue;
-
-          const orderQty = detail.quantity || 1;
-          const bolQty = bol.quantity || 1;
-          const totalQty = orderQty * bolQty;
-
-          // Lookup piece rate if configured
-          let pieceRate: number | null = null;
-          if (bol.piece_rate_id) {
-            const { data: rateData } = await supabase
-              .from('piece_work_rates')
-              .select('rate')
-              .eq('rate_id', bol.piece_rate_id)
-              .single();
-            pieceRate = rateData?.rate ? Number(rateData.rate) : null;
-          }
-
-          // Compute time_per_unit in minutes from BOL time_required + time_unit
-          let timePerUnit: number | null = null;
-          if (bol.time_required) {
-            const raw = Number(bol.time_required);
-            if (bol.time_unit === 'hours') timePerUnit = raw * 60;
-            else if (bol.time_unit === 'seconds') timePerUnit = raw / 60;
-            else timePerUnit = raw; // minutes (default)
-          }
-
-          preview.push({
-            job_id: job.job_id,
-            job_name: job.name,
-            product_id: product.product_id,
-            product_name: product.name,
-            quantity: totalQty,
-            pay_type: bol.pay_type || 'hourly',
-            piece_rate: pieceRate,
-            order_detail_id: detail.order_detail_id,
-            bol_id: bol.bol_id,
-            piece_rate_id: bol.piece_rate_id ?? null,
-            hourly_rate_id: bol.hourly_rate_id ?? null,
-            time_per_unit: timePerUnit,
-          });
-        }
-      }
-
-      return preview;
-    },
+    queryFn: () => fetchOrderBOLPreview(orderId),
     enabled: open,
   });
 
