@@ -36,7 +36,7 @@ import { useDebounce } from '@/hooks/use-debounce';
 import { useTaskKeyboard } from '@/hooks/useTaskKeyboard';
 import { TaskRow } from '@/components/features/todos/TaskRow';
 import { TaskSidePanel } from '@/components/features/todos/TaskSidePanel';
-import { TodoCreateDialog } from '@/components/features/todos/TodoCreateDialog';
+import { TaskQuickCreate } from '@/components/features/todos/TaskQuickCreate';
 
 import type { TodoItem, TodoPriority } from '@/lib/db/todos';
 
@@ -253,7 +253,7 @@ export function TaskList() {
   const [quickTitle, setQuickTitle] = useState('');
 
   // Dialog state
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
 
   const debouncedSearch = useDebounce(searchInput, 300);
 
@@ -349,7 +349,7 @@ export function TaskList() {
         {/* Header row */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/40">
           <h1 className="text-lg font-semibold">Tasks</h1>
-          <Button size="sm" onClick={() => setCreateDialogOpen(true)}>
+          <Button size="sm" onClick={() => setQuickCreateOpen(true)}>
             <Plus className="h-4 w-4 mr-1" />
             New Task
           </Button>
@@ -511,9 +511,9 @@ export function TaskList() {
       )}
 
       {/* Create dialog */}
-      <TodoCreateDialog
-        open={createDialogOpen}
-        onOpenChange={setCreateDialogOpen}
+      <TaskQuickCreate
+        open={quickCreateOpen}
+        onOpenChange={setQuickCreateOpen}
       />
     </div>
   );

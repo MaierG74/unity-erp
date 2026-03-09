@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import {
+  buildAssistantComponentClarifyAnswer,
   getRelationRecord,
   resolveAssistantComponent,
   type AssistantComponentLookupResult,
@@ -461,7 +462,7 @@ export async function getItemDemandSummary(
 
 export function buildOrdersNeedingItemAnswer(summary: AssistantItemDemandSummary) {
   if (summary.kind === 'ambiguous') {
-    return `I found multiple possible components for "${summary.component_ref}". Which one did you mean?`;
+    return buildAssistantComponentClarifyAnswer(summary.component_ref, summary.candidates);
   }
 
   if (summary.kind === 'not_found') {
@@ -504,7 +505,7 @@ export function buildOrdersNeedingItemAnswer(summary: AssistantItemDemandSummary
 
 export function buildDemandCoverageAnswer(summary: AssistantItemDemandSummary) {
   if (summary.kind === 'ambiguous') {
-    return `I found multiple possible components for "${summary.component_ref}". Which one did you mean?`;
+    return buildAssistantComponentClarifyAnswer(summary.component_ref, summary.candidates);
   }
 
   if (summary.kind === 'not_found') {

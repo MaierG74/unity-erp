@@ -1,4 +1,5 @@
 import type { CupboardConfig } from '@/lib/configurator/templates/types';
+import { deriveCupboardGeometry } from '@/lib/configurator/templates/cupboardGeometry';
 
 import {
   createCenteredLabel,
@@ -16,6 +17,8 @@ function rounded(value: number): number {
 export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorPreviewScene {
   const { width: W, height: H, depth: D, materialThickness: T } = config;
   const {
+    topConstruction,
+    baseConstruction,
     shelfCount,
     doorStyle,
     hasBack,
@@ -24,25 +27,40 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
     shelfSetback,
     adjusterHeight,
     topOverhangSides,
+    topOverhangFront,
     topOverhangBack,
     baseOverhangSides,
+    baseOverhangFront,
     baseOverhangBack,
     backSlotDepth,
     backRecess,
   } = config;
+  const {
+    valid,
+    carcassWidth,
+    carcassDepth,
+    sideHeight,
+    internalWidth,
+    topWidth,
+    topDepth,
+    baseWidth,
+    baseDepth,
+    shelfDepth,
+    topThickness,
+    baseThickness,
+    baseCleatWidth,
+  } = deriveCupboardGeometry(config);
+  const backThickness = Math.max(BT, 1);
+  const topBreakY = topThickness > T ? T : null;
+  const baseBreakY = baseThickness > T ? T : null;
+  const topLabel = `Top (${rounded(topThickness)}mm)`;
+  const baseLabel =
+    baseConstruction === 'cleated'
+      ? `Base (${rounded(baseThickness)}mm cleated)`
+      : `Base (${rounded(baseThickness)}mm)`;
+  const sideTopLabel = `Top ${rounded(topThickness)}mm`;
 
-  const T2 = T * 2;
-  const carcassWidth = W - Math.max(topOverhangSides, baseOverhangSides) * 2;
-  const carcassDepth = D - Math.max(topOverhangBack, baseOverhangBack);
-  const sideHeight = H - adjusterHeight - T2 - T2;
-  const internalWidth = carcassWidth - T * 2;
-  const topWidth = carcassWidth + topOverhangSides * 2;
-  const topDepth = carcassDepth + topOverhangBack;
-  const baseWidth = carcassWidth + baseOverhangSides * 2;
-  const baseDepth = carcassDepth + baseOverhangBack;
-  const shelfDepth = carcassDepth - shelfSetback - (hasBack ? BT + backRecess : 0);
-
-  if (sideHeight <= 0 || internalWidth <= 0 || carcassDepth <= T) {
+  if (!valid) {
     return {
       width: 840,
       height: 420,
@@ -109,7 +127,8 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
     y: number,
     text: string,
     viewKey: string,
-    fontWeight: number | string = 500
+    fontWeight: number | string = 500,
+    fontSize: number = smallText
   ) => {
     nodes.push({
       type: 'text',
@@ -117,7 +136,7 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
       y,
       text,
       fill: TECHNICAL_PREVIEW_COLORS.dimText,
-      fontSize: smallText,
+      fontSize,
       fontWeight,
       fontFamily: 'sans-serif',
       textAnchor: 'start',
@@ -147,10 +166,10 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
   });
 
   const topYFront = frontY;
-  const topBottomY = frontY + T2;
+  const topBottomY = frontY + topThickness;
   const sideBottomY = topBottomY + sideHeight;
   const baseTopY = sideBottomY;
-  const baseBottomY = sideBottomY + T2;
+  const baseBottomY = sideBottomY + baseThickness;
   const adjusterBottomY = baseBottomY + adjusterHeight;
   const overhangSides = Math.max(topOverhangSides, baseOverhangSides);
   const sideLeftOuterX = frontX + overhangSides;
@@ -161,6 +180,7 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
   const topRightX = topLeftX + topWidth;
   const baseLeftX = frontX + overhangSides - baseOverhangSides;
   const baseRightX = baseLeftX + baseWidth;
+  const overhangFront = Math.max(topOverhangFront, baseOverhangFront);
   const shelfPositions: number[] = [];
 
   if (shelfCount > 0) {
@@ -180,27 +200,16 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
       x: topLeftX,
       y: topYFront,
       width: topWidth,
-      height: T2,
+      height: topThickness,
       fill: TECHNICAL_PREVIEW_COLORS.topFill,
       stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
       strokeWidth: u * 0.1,
       meta: frontMeta('top', 'top'),
     },
-    {
-      type: 'line',
-      x1: topLeftX,
-      y1: topYFront + T,
-      x2: topRightX,
-      y2: topYFront + T,
-      stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
-      strokeWidth: u * 0.06,
-      dashArray: `${u * 0.6},${u * 0.4}`,
-      meta: frontMeta('top', 'top'),
-    },
     createCenteredLabel({
       x: (topLeftX + topRightX) / 2,
-      y: topYFront + T2 / 2,
-      text: `Top (${T2}mm)`,
+      y: topYFront + topThickness / 2,
+      text: topLabel,
       unit: u,
       meta: frontMeta('top', 'top'),
     }),
@@ -245,31 +254,48 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
       x: baseLeftX,
       y: baseTopY,
       width: baseWidth,
-      height: T2,
+      height: baseThickness,
       fill: TECHNICAL_PREVIEW_COLORS.topFill,
       stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
       strokeWidth: u * 0.1,
       meta: frontMeta('base', 'base'),
     },
-    {
-      type: 'line',
-      x1: baseLeftX,
-      y1: baseTopY + T,
-      x2: baseRightX,
-      y2: baseTopY + T,
-      stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
-      strokeWidth: u * 0.06,
-      dashArray: `${u * 0.6},${u * 0.4}`,
-      meta: frontMeta('base', 'base'),
-    },
     createCenteredLabel({
       x: (baseLeftX + baseRightX) / 2,
-      y: baseTopY + T2 / 2,
-      text: `Base (${T2}mm)`,
+      y: baseTopY + baseThickness / 2,
+      text: baseLabel,
       unit: u,
       meta: frontMeta('base', 'base'),
     })
   );
+
+  if (topBreakY !== null) {
+    nodes.push({
+      type: 'line',
+      x1: topLeftX,
+      y1: topYFront + topBreakY,
+      x2: topRightX,
+      y2: topYFront + topBreakY,
+      stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
+      strokeWidth: u * 0.06,
+      dashArray: `${u * 0.6},${u * 0.4}`,
+      meta: frontMeta('top', 'top'),
+    });
+  }
+
+  if (baseBreakY !== null) {
+    nodes.push({
+      type: 'line',
+      x1: baseLeftX,
+      y1: baseTopY + baseBreakY,
+      x2: baseRightX,
+      y2: baseTopY + baseBreakY,
+      stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
+      strokeWidth: u * 0.06,
+      dashArray: `${u * 0.6},${u * 0.4}`,
+      meta: frontMeta('base', 'base'),
+    });
+  }
 
   shelfPositions.forEach((shelfY, index) => {
     nodes.push(
@@ -398,40 +424,33 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
 
   addViewTitle(sideX + D / 2, sideY - u * 2, 'Side View', 'side');
 
+  const sideCarcassX = sideX + overhangFront;
+  const sideTopX = sideX + overhangFront - topOverhangFront;
+  const sideBaseX = sideX + overhangFront - baseOverhangFront;
+
   nodes.push(
     {
       type: 'rect',
-      x: sideX,
+      x: sideTopX,
       y: sideY,
       width: topDepth,
-      height: T2,
+      height: topThickness,
       fill: TECHNICAL_PREVIEW_COLORS.topFill,
       stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
       strokeWidth: u * 0.1,
       meta: sideMeta('top', 'top'),
     },
-    {
-      type: 'line',
-      x1: sideX,
-      y1: sideY + T,
-      x2: sideX + topDepth,
-      y2: sideY + T,
-      stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
-      strokeWidth: u * 0.06,
-      dashArray: `${u * 0.6},${u * 0.4}`,
-      meta: sideMeta('top', 'top'),
-    },
     createCenteredLabel({
-      x: sideX + topDepth / 2,
-      y: sideY + T,
-      text: `Top ${T2}mm`,
+      x: sideTopX + topDepth / 2,
+      y: sideY + topThickness / 2,
+      text: sideTopLabel,
       unit: u,
       meta: sideMeta('top', 'top'),
     }),
     {
       type: 'rect',
-      x: sideX,
-      y: sideY + T2,
+      x: sideCarcassX,
+      y: sideY + topThickness,
       width: carcassDepth,
       height: sideHeight,
       fill: TECHNICAL_PREVIEW_COLORS.panelFill,
@@ -441,33 +460,50 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
     },
     {
       type: 'rect',
-      x: sideX,
-      y: sideY + T2 + sideHeight,
+      x: sideBaseX,
+      y: sideY + topThickness + sideHeight,
       width: baseDepth,
-      height: T2,
+      height: baseThickness,
       fill: TECHNICAL_PREVIEW_COLORS.topFill,
       stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
       strokeWidth: u * 0.1,
       meta: sideMeta('base', 'base'),
-    },
-    {
+    }
+  );
+
+  if (topBreakY !== null) {
+    nodes.push({
       type: 'line',
-      x1: sideX,
-      y1: sideY + T2 + sideHeight + T,
-      x2: sideX + baseDepth,
-      y2: sideY + T2 + sideHeight + T,
+      x1: sideTopX,
+      y1: sideY + topBreakY,
+      x2: sideTopX + topDepth,
+      y2: sideY + topBreakY,
+      stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
+      strokeWidth: u * 0.06,
+      dashArray: `${u * 0.6},${u * 0.4}`,
+      meta: sideMeta('top', 'top'),
+    });
+  }
+
+  if (baseBreakY !== null) {
+    nodes.push({
+      type: 'line',
+      x1: sideBaseX,
+      y1: sideY + topThickness + sideHeight + baseBreakY,
+      x2: sideBaseX + baseDepth,
+      y2: sideY + topThickness + sideHeight + baseBreakY,
       stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
       strokeWidth: u * 0.06,
       dashArray: `${u * 0.6},${u * 0.4}`,
       meta: sideMeta('base', 'base'),
-    }
-  );
+    });
+  }
 
   if (hasBack) {
     nodes.push({
       type: 'rect',
-      x: sideX + carcassDepth - backRecess - Math.max(BT, 1),
-      y: sideY + T2,
+      x: sideCarcassX + carcassDepth - backRecess - Math.max(BT, 1),
+      y: sideY + topThickness,
       width: Math.max(BT, 1),
       height: sideHeight + backSlotDepth,
       fill: TECHNICAL_PREVIEW_COLORS.backFill,
@@ -480,7 +516,7 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
   shelfPositions.forEach((shelfY, index) => {
     nodes.push({
       type: 'rect',
-      x: sideX,
+      x: sideCarcassX,
       y: shelfY - T / 2,
       width: carcassDepth - (hasBack ? BT + backRecess : 0) - shelfSetback,
       height: T,
@@ -496,7 +532,7 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
     nodes.push(
       {
         type: 'rect',
-        x: sideX + 5,
+        x: sideCarcassX + 5,
         y: sideY + H - adjusterHeight,
         width: 8,
         height: adjusterHeight,
@@ -506,7 +542,7 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
       },
       {
         type: 'rect',
-        x: sideX + carcassDepth - 13,
+        x: sideCarcassX + carcassDepth - 13,
         y: sideY + H - adjusterHeight,
         width: 8,
         height: adjusterHeight,
@@ -543,9 +579,11 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
   const topOuterY = topY;
   const topInnerY = topOuterY + topOverhangBack;
   const topInnerDepth = carcassDepth;
-  const backStripY = topInnerY + carcassDepth - backRecess - Math.max(BT, 1);
+  const backStripY = topInnerY + backRecess;
   const sidePlanLeftX = topX + topOverhangSides;
   const sidePlanRightX = topX + topOverhangSides + carcassWidth - T;
+  const topBackLabelY =
+    backThickness >= u * 1.15 ? backStripY + backThickness / 2 : backStripY + backThickness + u * 0.7;
 
   nodes.push(
     {
@@ -597,17 +635,33 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
   );
 
   if (hasBack) {
-    nodes.push({
-      type: 'rect',
-      x: topX + topOverhangSides + T,
-      y: backStripY,
-      width: internalWidth,
-      height: Math.max(BT, 1),
-      fill: TECHNICAL_PREVIEW_COLORS.backFill,
-      stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
-      strokeWidth: u * 0.08,
-      meta: topMeta('back', 'back'),
-    });
+    nodes.push(
+      {
+        type: 'rect',
+        x: topX + topOverhangSides + T,
+        y: backStripY,
+        width: internalWidth,
+        height: backThickness,
+        fill: '#cbd5e1',
+        fillOpacity: 0.95,
+        stroke: TECHNICAL_PREVIEW_COLORS.labelColor,
+        strokeWidth: u * 0.1,
+        meta: topMeta('back', 'back'),
+      },
+      {
+        type: 'text',
+        x: topX + topWidth / 2,
+        y: topBackLabelY,
+        text: `Back ${rounded(BT)}mm`,
+        fill: TECHNICAL_PREVIEW_COLORS.labelColor,
+        fontSize: smallText * 0.95,
+        fontWeight: 600,
+        fontFamily: 'sans-serif',
+        textAnchor: 'middle',
+        dominantBaseline: backThickness >= u * 1.15 ? 'central' : 'hanging',
+        meta: topMeta('back', 'back'),
+      }
+    );
   }
 
   nodes.push(
@@ -653,16 +707,27 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
   const stepColumnW = assemblyBoxW * 0.43;
   const diagramColumnX = assemblyBoxX + stepColumnW + u * 2.4;
   const diagramColumnW = assemblyBoxW - stepColumnW - u * 3.6;
-  const orderScale = Math.min(0.26, (diagramColumnW - u * 4) / W, (u * 20.5) / sideHeight);
-  const orderTopH = Math.max(T2 * orderScale, u * 0.72);
-  const orderBaseH = Math.max(T2 * orderScale, u * 0.72);
+  const orderScale = Math.min(0.29, (diagramColumnW - u * 3.2) / W, (u * 22.5) / sideHeight);
+  const orderTopH = Math.max(topThickness * orderScale, u * 0.72);
+  const orderBaseH = Math.max(baseThickness * orderScale, u * 0.72);
   const orderSideH = sideHeight * orderScale;
-  const assemblyBoxH = Math.max(u * 24, orderTopH + orderSideH + orderBaseH + u * 9.5);
+  const assemblyBoxH = Math.max(u * 26.5, orderTopH + orderSideH + orderBaseH + u * 11);
   const orderTitleY = assemblyBoxY + u * 2.1;
+  const orderStepFont = smallText * 1.05;
+  const orderNoteFont = smallText;
+  const orderLineHeight = orderStepFont * 1.55;
   const sideOverhangNote =
     topOverhangSides === baseOverhangSides
-      ? `Side overhang: ${rounded(topOverhangSides)}mm each side`
+      ? `Side OH: ${rounded(topOverhangSides)}mm each side`
       : `Side overhangs: top ${rounded(topOverhangSides)} / base ${rounded(baseOverhangSides)}mm`;
+  const frontOverhangNote =
+    topOverhangFront === baseOverhangFront
+      ? `Front OH: ${rounded(topOverhangFront)}mm`
+      : `Front overhangs: top ${rounded(topOverhangFront)} / base ${rounded(baseOverhangFront)}mm`;
+  const rearSideOverhangNote =
+    topOverhangSides === baseOverhangSides
+      ? `Side OH: ${rounded(topOverhangSides)}mm each side`
+      : `Side OH: top ${rounded(topOverhangSides)} / base ${rounded(baseOverhangSides)}mm`;
 
   nodes.push(
     {
@@ -704,42 +769,85 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
   );
 
   const assemblySteps = [
-    '1. Base assembly sits on adjusters',
-    '2. Side panels sit on the base',
+    baseConstruction === 'cleated' ? '1. Cleated base on adjusters' : '1. Base on adjusters',
+    '2. Sides onto base',
     shelfCount > 0
-      ? `3. ${shelfCount} shelf${shelfCount === 1 ? '' : 'es'} fit between the sides`
-      : '3. Open carcass between the sides',
-    hasBack ? '4. Back panel installs from the rear' : '4. No back panel in this build',
-    hasBack ? '5. Top lowers to capture the back' : '5. Top closes the carcass',
+      ? `3. ${shelfCount} ${shelfCount === 1 ? 'shelf' : 'shelves'} between sides`
+      : '3. Open carcass',
+    hasBack ? `4. ${rounded(BT)}mm back from rear onto base` : '4. No back panel',
+    hasBack ? `5. Top down, capture ${rounded(backSlotDepth)}mm` : '5. Top closes carcass',
   ];
 
   assemblySteps.forEach((step, index) => {
     addNoteText(
       assemblyBoxX + u * 2,
-      orderTitleY + u * 2.7 + index * (smallText * 1.45),
+      orderTitleY + u * 2.7 + index * orderLineHeight,
       step,
       'exploded',
-      500
+      500,
+      orderStepFont
     );
   });
 
   addNoteText(
     assemblyBoxX + u * 2,
-    orderTitleY + u * 2.7 + assemblySteps.length * (smallText * 1.45) + u * 0.8,
+    orderTitleY + u * 2.7 + assemblySteps.length * orderLineHeight + u * 1,
     sideOverhangNote,
     'exploded',
-    600
+    600,
+    orderNoteFont
+  );
+  addNoteText(
+    assemblyBoxX + u * 2,
+    orderTitleY + u * 2.7 + assemblySteps.length * orderLineHeight + u * 2.3,
+    frontOverhangNote,
+    'exploded',
+    600,
+    orderNoteFont
   );
 
   if (doorStyle !== 'none') {
     addNoteText(
       assemblyBoxX + u * 2,
-      orderTitleY + u * 2.7 + assemblySteps.length * (smallText * 1.45) + u * 2.6,
+      orderTitleY + u * 2.7 + assemblySteps.length * orderLineHeight + u * 4.2,
       `${doorStyle === 'double' ? 'Doors' : 'Door'} install${doorStyle === 'double' ? '' : 's'} after carcass assembly`,
       'exploded',
-      500
+      500,
+      orderNoteFont
     );
   }
+
+  if (baseConstruction === 'cleated') {
+    addNoteText(
+      assemblyBoxX + u * 2,
+      orderTitleY +
+        u * 2.7 +
+        assemblySteps.length * orderLineHeight +
+        (doorStyle !== 'none' ? u * 5.6 : u * 4.2),
+      `Base build: 16mm panel + ${rounded(baseCleatWidth)}mm underside cleats`,
+      'exploded',
+      500,
+      orderNoteFont
+    );
+  }
+
+  addNoteText(
+    assemblyBoxX + u * 2,
+    orderTitleY +
+      u * 2.7 +
+      assemblySteps.length * orderLineHeight +
+      (doorStyle !== 'none'
+        ? baseConstruction === 'cleated'
+          ? u * 7
+          : u * 5.6
+        : baseConstruction === 'cleated'
+          ? u * 5.6
+          : u * 4.2),
+    `Top build: ${topConstruction === 'single' ? `${rounded(topThickness)}mm single` : `${rounded(topThickness)}mm laminated`}`,
+    'exploded',
+    500,
+    orderNoteFont
+  );
 
   const orderOverallWidth = W * orderScale;
   const orderDiagramX = diagramColumnX + (diagramColumnW - orderOverallWidth) / 2;
@@ -840,7 +948,7 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
     createCenteredLabel({
       x: orderDiagramX + orderOverallWidth / 2,
       y: orderBaseBottomY + u * 1.9,
-      text: hasBack ? 'Back relation shown in rear detail below' : 'Open carcass view',
+      text: hasBack ? 'Top/rear join shown below' : 'Open carcass view',
       unit: u * 0.7,
       fill: TECHNICAL_PREVIEW_COLORS.dimText,
       meta: explodedMeta(undefined, 'note'),
@@ -850,35 +958,39 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
   const detailBoxX = assemblyBoxX;
   const detailBoxY = assemblyBoxY + assemblyBoxH + u * 2.8;
   const detailBoxW = assemblyBoxW;
-  const detailBoxH = u * 18;
+  const detailBoxH = u * 19.5;
   const detailTitleY = detailBoxY + u * 2.1;
-  const detailDiagramW = detailBoxW * 0.58;
-  const detailNotesX = detailBoxX + detailDiagramW + u * 4.3;
-  const maxRearOverhang = Math.max(topOverhangBack, baseOverhangBack);
-  const rearVisibleFront = Math.max(20, backRecess + Math.max(BT, 1) + shelfSetback + 16);
+  const detailDiagramW = detailBoxW * 0.64;
+  const detailNotesX = detailBoxX + detailDiagramW + u * 3;
+  const detailNoteFont = smallText * 1.02;
+  const rearVisibleFront = Math.max(24, backRecess + backThickness + shelfSetback + 22);
   const rearStartMm = -rearVisibleFront;
-  const rearEndMm = maxRearOverhang + 8;
+  const rearEndMm = Math.max(topOverhangBack, 8) + 8;
   const detailScaleX = (detailDiagramW - u * 5) / Math.max(1, rearEndMm - rearStartMm);
+  const detailVisibleDropMm = Math.max(70, shelfSetback + backThickness + 40);
   const detailScaleY = Math.max(
-    1.2,
-    Math.min(2.2, (detailBoxH - u * 8) / Math.max(1, T2 * 2 + backSlotDepth + 42))
+    1.5,
+    Math.min(2.8, (detailBoxH - u * 8) / Math.max(1, topThickness + backSlotDepth + detailVisibleDropMm))
   );
   const detailToX = (mm: number) => detailBoxX + u * 2.4 + (mm - rearStartMm) * detailScaleX;
-  const detailTopY = detailBoxY + u * 4.6;
-  const detailTopH = Math.max(T2 * detailScaleY, u * 1.45);
-  const detailBaseH = Math.max(T2 * detailScaleY, u * 1.45);
-  const detailBaseY = detailBoxY + detailBoxH - u * 4 - detailBaseH;
+  const detailTopY = detailBoxY + u * 4.2;
+  const detailTopH = Math.max(topThickness * detailScaleY, u * 1.55);
   const detailTopUndersideY = detailTopY + detailTopH;
-  const detailBaseTopY = detailBaseY;
+  const detailBackBottomY = Math.min(
+    detailBoxY + detailBoxH - u * 4.2,
+    detailTopUndersideY + detailVisibleDropMm * detailScaleY
+  );
+  const detailContinuationBottomY = detailBoxY + detailBoxH - u * 2.2;
   const detailSideRearX = detailToX(0);
   const detailTopRearX = detailToX(topOverhangBack);
-  const detailBaseRearX = detailToX(baseOverhangBack);
   const detailFrontX = detailToX(rearStartMm);
   const detailBackRearX = detailToX(-backRecess);
-  const detailBackFrontX = detailToX(-backRecess - Math.max(BT, 1));
+  const detailBackFrontX = detailToX(-backRecess - backThickness);
   const detailBackTopY = detailTopUndersideY - backSlotDepth * detailScaleY;
-  const detailShelfY = detailTopUndersideY + (detailBaseTopY - detailTopUndersideY) * 0.58;
-  const detailShelfRearX = detailToX(-backRecess - Math.max(BT, 1) - shelfSetback);
+  const detailSlotCaptureH = Math.max(backSlotDepth * detailScaleY, u * 0.4);
+  const detailShelfY = detailTopUndersideY + Math.min((detailBackBottomY - detailTopUndersideY) * 0.46, u * 4.4);
+  const detailShelfRearX = detailToX(-backRecess - backThickness - shelfSetback);
+  const detailBackMidX = (detailBackFrontX + detailBackRearX) / 2;
 
   nodes.push(
     {
@@ -898,7 +1010,7 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
       type: 'text',
       x: detailBoxX + u * 2,
       y: detailTitleY,
-      text: 'Rear Detail (NTS)',
+      text: 'Top Rear Detail (NTS)',
       fill: TECHNICAL_PREVIEW_COLORS.dimText,
       fontSize: u * 1.55,
       fontWeight: 600,
@@ -918,22 +1030,11 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
       meta: explodedMeta('top', 'top'),
     },
     {
-      type: 'rect',
-      x: detailFrontX,
-      y: detailBaseY,
-      width: detailBaseRearX - detailFrontX,
-      height: detailBaseH,
-      fill: TECHNICAL_PREVIEW_COLORS.topFill,
-      stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
-      strokeWidth: u * 0.08,
-      meta: explodedMeta('base', 'base'),
-    },
-    {
       type: 'line',
       x1: detailSideRearX,
       y1: detailTopUndersideY,
       x2: detailSideRearX,
-      y2: detailBaseTopY,
+      y2: detailContinuationBottomY,
       stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
       strokeWidth: u * 0.09,
       dashArray: `${u * 0.35},${u * 0.25}`,
@@ -946,9 +1047,22 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
       {
         type: 'rect',
         x: detailBackFrontX,
+        y: detailTopUndersideY - detailSlotCaptureH,
+        width: detailBackRearX - detailBackFrontX,
+        height: detailSlotCaptureH,
+        fill: '#93c5fd',
+        fillOpacity: 0.45,
+        stroke: TECHNICAL_PREVIEW_COLORS.doorStroke,
+        strokeWidth: u * 0.06,
+        dashArray: `${u * 0.28},${u * 0.18}`,
+        meta: explodedMeta('top-slot', 'top'),
+      },
+      {
+        type: 'rect',
+        x: detailBackFrontX,
         y: detailBackTopY,
         width: detailBackRearX - detailBackFrontX,
-        height: detailBaseTopY - detailBackTopY,
+        height: detailBackBottomY - detailBackTopY,
         fill: TECHNICAL_PREVIEW_COLORS.backFill,
         stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
         strokeWidth: u * 0.08,
@@ -959,12 +1073,60 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
         x: detailBackFrontX,
         y: detailBackTopY,
         width: detailBackRearX - detailBackFrontX,
-        height: Math.max(backSlotDepth * detailScaleY, u * 0.4),
+        height: detailSlotCaptureH,
         fill: 'none',
         stroke: TECHNICAL_PREVIEW_COLORS.guideStroke,
         strokeWidth: u * 0.07,
         dashArray: `${u * 0.3},${u * 0.2}`,
         meta: explodedMeta('back', 'back'),
+      },
+      {
+        type: 'line',
+        x1: detailBackRearX + u * 1.3,
+        y1: detailTopY + u * 0.7,
+        x2: detailBackRearX + u * 0.28,
+        y2: detailTopUndersideY - detailSlotCaptureH / 2,
+        stroke: TECHNICAL_PREVIEW_COLORS.dimColor,
+        strokeWidth: u * 0.07,
+        markerEnd: 'arrow',
+        meta: explodedMeta(undefined, 'guide'),
+      },
+      {
+        type: 'text',
+        x: detailBackRearX + u * 1.55,
+        y: detailTopY + u * 0.82,
+        text: `${rounded(backSlotDepth)}mm groove capture`,
+        fill: TECHNICAL_PREVIEW_COLORS.dimText,
+        fontSize: detailNoteFont,
+        fontWeight: 600,
+        fontFamily: 'sans-serif',
+        textAnchor: 'start',
+        dominantBaseline: 'middle',
+        meta: explodedMeta(undefined, 'note'),
+      },
+      {
+        type: 'line',
+        x1: detailBackMidX,
+        y1: detailBackBottomY,
+        x2: detailBackMidX,
+        y2: detailContinuationBottomY,
+        stroke: TECHNICAL_PREVIEW_COLORS.panelStroke,
+        strokeWidth: u * 0.08,
+        dashArray: `${u * 0.34},${u * 0.22}`,
+        meta: explodedMeta('back', 'back'),
+      },
+      {
+        type: 'text',
+        x: detailBackMidX,
+        y: detailContinuationBottomY + u * 0.45,
+        text: 'Back continues to base below',
+        fill: TECHNICAL_PREVIEW_COLORS.dimText,
+        fontSize: detailNoteFont * 0.98,
+        fontWeight: 500,
+        fontFamily: 'sans-serif',
+        textAnchor: 'middle',
+        dominantBaseline: 'hanging',
+        meta: explodedMeta(undefined, 'note'),
       }
     );
   }
@@ -992,15 +1154,6 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
       side: 'above',
       unit: u * 0.55,
       meta: explodedMeta(undefined, 'dimension'),
-    }),
-    ...createHorizontalDimension({
-      x1: detailSideRearX,
-      x2: detailBaseRearX,
-      y: detailBaseY + detailBaseH + u * 0.8,
-      label: `${rounded(baseOverhangBack)} base OH`,
-      side: 'below',
-      unit: u * 0.55,
-      meta: explodedMeta(undefined, 'dimension'),
     })
   );
 
@@ -1009,9 +1162,9 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
       ...createHorizontalDimension({
         x1: detailBackRearX,
         x2: detailSideRearX,
-        y: detailBaseTopY - u * 1.1,
+        y: detailTopUndersideY + u * 0.55,
         label: `${rounded(backRecess)} recess`,
-        side: 'above',
+        side: 'below',
         unit: u * 0.55,
         meta: explodedMeta(undefined, 'dimension'),
       })
@@ -1047,12 +1200,11 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
   }
 
   const rearNotes = [
-    hasBack ? 'Back sits on the base top surface' : 'Back panel disabled for this build',
-    `Rear OH: top ${rounded(topOverhangBack)} / base ${rounded(baseOverhangBack)}mm`,
-    sideOverhangNote,
-    hasBack ? `Back panel: ${rounded(BT)}mm board` : null,
-    hasBack ? `Top groove capture: ${rounded(backSlotDepth)}mm` : null,
-    shelfCount > 0 ? `Shelf setback: ${rounded(shelfSetback)}mm before the back` : null,
+    hasBack ? `Back: ${rounded(BT)}mm full-height panel` : 'Back panel disabled',
+    hasBack ? `Top capture: ${rounded(backSlotDepth)}mm into groove` : null,
+    `Rear OH: top ${rounded(topOverhangBack)}mm`,
+    backRecess > 0 ? `Back recess: ${rounded(backRecess)}mm` : 'Back flush to carcass rear',
+    shelfCount > 0 ? `Shelf setback: ${rounded(shelfSetback)}mm` : null,
   ].filter(Boolean) as string[];
 
   rearNotes.forEach((note, index) => {
@@ -1061,7 +1213,8 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
       detailTitleY + u * 1.8 + index * (smallText * 1.45),
       note,
       'exploded',
-      index === 0 ? 600 : 500
+      index === 0 ? 600 : 500,
+      detailNoteFont
     );
   });
 

@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AssistantCard } from '@/lib/assistant/prompt-suggestions';
 
 import {
+  buildAssistantComponentClarifyAnswer,
   getRelationRecord,
   resolveAssistantComponent,
   type AssistantComponentLookupResult,
@@ -956,7 +957,7 @@ function formatComponentLabel(component: AssistantPurchasingComponent) {
 
 export function buildSupplierOrdersAnswer(summary: AssistantItemSupplierOrdersSummary) {
   if (summary.kind === 'ambiguous') {
-    return `I found multiple possible components for "${summary.component_ref}". Which one did you mean?`;
+    return buildAssistantComponentClarifyAnswer(summary.component_ref, summary.candidates);
   }
 
   if (summary.kind === 'not_found') {
@@ -1042,7 +1043,7 @@ export function buildSupplierOrdersCard(summary: AssistantItemSupplierOrdersSumm
 
 export function buildNextDeliveryAnswer(summary: AssistantNextDeliverySummary) {
   if (summary.kind === 'ambiguous') {
-    return `I found multiple possible components for "${summary.component_ref}". Which one did you mean?`;
+    return buildAssistantComponentClarifyAnswer(summary.component_ref, summary.candidates);
   }
 
   if (summary.kind === 'not_found') {

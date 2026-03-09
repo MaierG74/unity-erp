@@ -1,5 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { AssistantCard } from '@/lib/assistant/prompt-suggestions';
+import type { AssistantActionLink, AssistantCard } from '@/lib/assistant/prompt-suggestions';
+import {
+  resolveAssistantProduct,
+  type AssistantProductLookupResult,
+} from '@/lib/assistant/product-resolver';
 
 type OrderRelation = {
   status_name?: string | null;
@@ -7,6 +11,11 @@ type OrderRelation = {
 
 type CustomerRelation = {
   name?: string | null;
+};
+
+type QuoteRelation = {
+  id?: string | number | null;
+  quote_number?: string | null;
 };
 
 type CustomerLookupRow = {
@@ -22,6 +31,7 @@ type OrderRow = {
   delivery_date?: string | null;
   status?: OrderRelation | OrderRelation[] | null;
   customer?: CustomerRelation | CustomerRelation[] | null;
+  quote?: QuoteRelation | QuoteRelation[] | null;
 };
 
 type InventoryRow = {
@@ -51,9 +61,35 @@ type OrderStatusRpcRow = {
   global_real_shortfall?: number | string | null;
 };
 
+type OrderAttachmentLookupRow = {
+  order_id: number;
+  document_type?: string | null;
+};
+
+type OrderProductDetailRow = {
+  order_detail_id: number;
+  quantity?: number | string | null;
+  product?: {
+    name?: string | null;
+    internal_code?: string | null;
+  } | Array<{
+    name?: string | null;
+    internal_code?: string | null;
+  }> | null;
+};
+
+type ProductOrderDetailRow = {
+  order_id?: number | null;
+  quantity?: number | string | null;
+  order?: OrderRow | OrderRow[] | null;
+};
+
 export type AssistantOperationalIntent =
   | 'open_orders'
+  | 'product_open_orders'
+  | 'order_products'
   | 'last_customer_order'
+  | 'recent_customer_orders'
   | 'order_search'
   | 'orders_last_7_days'
   | 'orders_due_this_week'
@@ -63,6 +99,19 @@ export type AssistantOperationalIntent =
 
 const ORDER_QUERY_LIMIT = 60;
 const CUSTOMER_QUERY_LIMIT = 12;
+
+export type AssistantOrderSummaryRow = {
+  order_id: number;
+  order_number: string | null;
+  customer_name: string | null;
+  created_date: string | null;
+  delivery_date: string | null;
+  status_name: string | null;
+  quote_id: string | null;
+  quote_number: string | null;
+  attachment_count: number;
+  customer_order_doc_count: number;
+};
 
 export type AssistantOpenOrdersSummary = {
   customer_name: string | null;
@@ -74,20 +123,8 @@ export type AssistantOpenOrdersSummary = {
     status_name: string;
     count: number;
   }>;
-  next_due_orders: Array<{
-    order_id: number;
-    order_number: string | null;
-    customer_name: string | null;
-    delivery_date: string | null;
-    status_name: string | null;
-  }>;
-  listed_orders: Array<{
-    order_id: number;
-    order_number: string | null;
-    customer_name: string | null;
-    delivery_date: string | null;
-    status_name: string | null;
-  }>;
+  next_due_orders: AssistantOrderSummaryRow[];
+  listed_orders: AssistantOrderSummaryRow[];
 };
 
 export type AssistantDueThisWeekSummary = {
@@ -95,13 +132,7 @@ export type AssistantDueThisWeekSummary = {
   week_start: string;
   week_end: string;
   due_order_count: number;
-  orders: Array<{
-    order_id: number;
-    order_number: string | null;
-    customer_name: string | null;
-    delivery_date: string | null;
-    status_name: string | null;
-  }>;
+  orders: AssistantOrderSummaryRow[];
 };
 
 export type AssistantOrdersLast7DaysSummary = {
@@ -119,46 +150,41 @@ export type AssistantOrdersLast7DaysSummary = {
     label: string;
     count: number;
   }>;
-  recent_orders: Array<{
-    order_id: number;
-    order_number: string | null;
-    customer_name: string | null;
-    created_date: string | null;
-  }>;
+  recent_orders: AssistantOrderSummaryRow[];
 };
 
 export type AssistantLastCustomerOrderSummary = {
   customer_name: string;
-  latest_order: {
-    order_id: number;
-    order_number: string | null;
-    customer_name: string | null;
-    created_date: string | null;
-    delivery_date: string | null;
-    status_name: string | null;
-  } | null;
-  recent_orders: Array<{
-    order_id: number;
-    order_number: string | null;
-    customer_name: string | null;
-    created_date: string | null;
-    delivery_date: string | null;
-    status_name: string | null;
-  }>;
+  latest_order: AssistantOrderSummaryRow | null;
+  recent_orders: AssistantOrderSummaryRow[];
 };
+
+export type AssistantProductOpenOrdersSummary =
+  | {
+      kind: 'summary';
+      product: {
+        product_id: number;
+        internal_code: string | null;
+        name: string | null;
+        description: string | null;
+      };
+      open_order_count: number;
+      total_quantity: number;
+      overdue_order_count: number;
+      due_this_week_count: number;
+      orders: Array<
+        AssistantOrderSummaryRow & {
+          quantity: number;
+        }
+      >;
+    }
+  | Exclude<AssistantProductLookupResult, { kind: 'resolved' }>;
 
 export type AssistantOrderSearchSummary = {
   query_term: string;
   match_mode: 'starts_with' | 'contains';
   order_count: number;
-  orders: Array<{
-    order_id: number;
-    order_number: string | null;
-    customer_name: string | null;
-    created_date: string | null;
-    delivery_date: string | null;
-    status_name: string | null;
-  }>;
+  orders: AssistantOrderSummaryRow[];
 };
 
 export type AssistantLowStockSummary = {
@@ -176,24 +202,21 @@ export type AssistantLowStockSummary = {
 export type AssistantLateOrdersSummary = {
   customer_name: string | null;
   late_order_count: number;
-  late_orders: Array<{
-    order_id: number;
-    order_number: string | null;
-    customer_name: string | null;
-    delivery_date: string | null;
-    status_name: string | null;
+  late_orders: Array<AssistantOrderSummaryRow & {
     days_late: number;
   }>;
 };
 
 export type AssistantOrderBlockerSummary =
-  | { kind: 'summary'; order: {
-      order_id: number;
-      order_number: string | null;
-      customer_name: string | null;
-      delivery_date: string | null;
-      status_name: string | null;
-    };
+  | {
+      kind: 'summary';
+      order: {
+        order_id: number;
+        order_number: string | null;
+        customer_name: string | null;
+        delivery_date: string | null;
+        status_name: string | null;
+      };
       blocked_components: number;
       waiting_on_deliveries_components: number;
       ready_components: number;
@@ -212,6 +235,38 @@ export type AssistantOrderBlockerSummary =
         in_stock: number;
         on_order: number;
         apparent_shortfall: number;
+      }>;
+    }
+  | {
+      kind: 'ambiguous';
+      order_ref: string;
+      candidates: Array<{
+        order_id: number;
+        order_number: string | null;
+        customer_name: string | null;
+      }>;
+    }
+  | {
+      kind: 'not_found';
+      order_ref: string;
+    };
+
+export type AssistantOrderProductsSummary =
+  | {
+      kind: 'summary';
+      order: {
+        order_id: number;
+        order_number: string | null;
+        customer_name: string | null;
+        delivery_date: string | null;
+        status_name: string | null;
+      };
+      line_count: number;
+      total_quantity: number;
+      products: Array<{
+        order_detail_id: number;
+        product_label: string;
+        quantity: number;
       }>;
     }
   | {
@@ -343,6 +398,11 @@ function formatDateForAnswer(dateValue: string) {
   }).format(date);
 }
 
+function formatOrderStatusLabel(statusName: string | null | undefined) {
+  const normalized = statusName?.trim();
+  return normalized && normalized.length > 0 ? normalized : 'Not set';
+}
+
 function formatDayLabel(dateValue: string) {
   const date = parseDateOnly(dateValue);
   return new Intl.DateTimeFormat('en-ZA', {
@@ -378,13 +438,231 @@ function buildOrderLabel(order: {
   return `${orderLabel} (${customerLabel}) due ${dateLabel}`;
 }
 
+function mapOrderRowToSummaryRow(row: OrderRow): AssistantOrderSummaryRow {
+  const status = getRelationRecord(row.status);
+  const customer = getRelationRecord(row.customer);
+  const quote = getRelationRecord(row.quote);
+  const createdAt = row.created_at?.trim() || null;
+
+  return {
+    order_id: row.order_id,
+    order_number: row.order_number?.trim() || null,
+    customer_name: customer?.name?.trim() || null,
+    created_date: createdAt ? getDateInZoneFromTimestamp(createdAt) : null,
+    delivery_date: row.delivery_date?.slice(0, 10) || null,
+    status_name: status?.status_name?.trim() || null,
+    quote_id:
+      quote?.id == null
+        ? null
+        : typeof quote.id === 'string'
+          ? quote.id.trim()
+          : String(quote.id),
+    quote_number: quote?.quote_number?.trim() || null,
+    attachment_count: 0,
+    customer_order_doc_count: 0,
+  };
+}
+
+async function loadOrderLaunchMetadata(
+  supabase: SupabaseClient,
+  orderIds: number[]
+) {
+  const uniqueOrderIds = Array.from(new Set(orderIds.filter(orderId => Number.isFinite(orderId))));
+  const metadata = new Map<number, { attachment_count: number; customer_order_doc_count: number }>();
+
+  for (const orderId of uniqueOrderIds) {
+    metadata.set(orderId, { attachment_count: 0, customer_order_doc_count: 0 });
+  }
+
+  if (uniqueOrderIds.length === 0) {
+    return metadata;
+  }
+
+  const { data, error } = await supabase
+    .from('order_attachments')
+    .select('order_id, document_type')
+    .in('order_id', uniqueOrderIds);
+
+  if (error) {
+    throw error;
+  }
+
+  for (const row of (data ?? []) as OrderAttachmentLookupRow[]) {
+    const current = metadata.get(row.order_id) ?? { attachment_count: 0, customer_order_doc_count: 0 };
+    current.attachment_count += 1;
+    if ((row.document_type?.trim() || '').toLowerCase() === 'customer_order') {
+      current.customer_order_doc_count += 1;
+    }
+    metadata.set(row.order_id, current);
+  }
+
+  return metadata;
+}
+
+async function enrichOrderRows(
+  supabase: SupabaseClient,
+  orders: AssistantOrderSummaryRow[]
+) {
+  const metadata = await loadOrderLaunchMetadata(
+    supabase,
+    orders.map(order => order.order_id)
+  );
+
+  return orders.map(order => {
+    const launch = metadata.get(order.order_id);
+    return {
+      ...order,
+      attachment_count: launch?.attachment_count ?? 0,
+      customer_order_doc_count: launch?.customer_order_doc_count ?? 0,
+    };
+  });
+}
+
+function buildOrderQuickActions(order: AssistantOrderSummaryRow): AssistantActionLink[] {
+  const orderLabel = order.order_number?.trim() || String(order.order_id);
+  const actions: AssistantActionLink[] = [
+    {
+      label: 'Preview',
+      kind: 'preview_order',
+      orderId: order.order_id,
+    },
+    {
+      label: 'Open',
+      href: `/orders/${order.order_id}`,
+      kind: 'navigate',
+    },
+    {
+      label: 'Products',
+      kind: 'ask',
+      prompt: `What products are on order ${orderLabel}?`,
+    },
+    {
+      label: 'Job cards',
+      kind: 'ask',
+      prompt: `What job cards are on order ${orderLabel}?`,
+    },
+    {
+      label: 'Outstanding parts',
+      kind: 'ask',
+      prompt: `What is blocking order ${orderLabel}?`,
+    },
+  ];
+
+  if (order.customer_order_doc_count > 0) {
+    actions.push({
+      label: `Client docs (${formatNumber(order.customer_order_doc_count)})`,
+      href: `/orders/${order.order_id}?tab=documents`,
+      kind: 'navigate',
+    });
+  } else if (order.attachment_count > 0) {
+    actions.push({
+      label: `Docs (${formatNumber(order.attachment_count)})`,
+      href: `/orders/${order.order_id}?tab=documents`,
+      kind: 'navigate',
+    });
+  }
+
+  if (order.quote_id) {
+    actions.push({
+      label: order.quote_number ? `Quote ${order.quote_number}` : 'Quote',
+      href: `/quotes/${order.quote_id}`,
+      kind: 'navigate',
+    });
+  }
+
+  return actions;
+}
+
+function formatAssistantProductLabel(product: {
+  product_id: number;
+  internal_code: string | null;
+  name: string | null;
+}) {
+  const code = product.internal_code?.trim();
+  const name = product.name?.trim();
+
+  if (code && name && code !== name) {
+    return `${name} (${code})`;
+  }
+
+  return name || code || `Product ${product.product_id}`;
+}
+
+async function loadOpenOrdersForProduct(
+  supabase: SupabaseClient,
+  productId: number
+) {
+  const { data, error } = await supabase
+    .from('order_details')
+    .select(
+      'order_id, quantity, order:orders(order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name), quote:quotes(id, quote_number))'
+    )
+    .eq('product_id', productId)
+    .limit(200);
+
+  if (error) {
+    throw error;
+  }
+
+  const aggregated = new Map<
+    number,
+    AssistantOrderSummaryRow & {
+      quantity: number;
+    }
+  >();
+
+  for (const row of (data ?? []) as ProductOrderDetailRow[]) {
+    const orderRow = getRelationRecord(row.order);
+    if (!orderRow) {
+      continue;
+    }
+
+    const order = mapOrderRowToSummaryRow(orderRow);
+    if (isTerminalStatus(order.status_name)) {
+      continue;
+    }
+
+    const current = aggregated.get(order.order_id) ?? {
+      ...order,
+      quantity: 0,
+    };
+    current.quantity += Math.max(toNumber(row.quantity), 0);
+    aggregated.set(order.order_id, current);
+  }
+
+  const enrichedOrders = await enrichOrderRows(
+    supabase,
+    Array.from(aggregated.values()).map(({ quantity: _quantity, ...order }) => order)
+  );
+  const quantityByOrderId = new Map(
+    Array.from(aggregated.values()).map(order => [order.order_id, order.quantity])
+  );
+
+  return enrichedOrders
+    .map(order => ({
+      ...order,
+      quantity: quantityByOrderId.get(order.order_id) ?? 0,
+    }))
+    .sort((a, b) => {
+      const aDate = a.delivery_date ?? '9999-12-31';
+      const bDate = b.delivery_date ?? '9999-12-31';
+      if (aDate !== bDate) {
+        return aDate.localeCompare(bDate);
+      }
+
+      const aCreated = a.created_date ?? '9999-12-31';
+      const bCreated = b.created_date ?? '9999-12-31';
+      return aCreated.localeCompare(bCreated);
+    });
+}
+
 async function loadOpenOrders(
   supabase: SupabaseClient,
   options?: { customerName?: string | null; customerIds?: number[] | null }
 ) {
   let query = supabase
     .from('orders')
-    .select('order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name)')
+    .select('order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name), quote:quotes(id, quote_number)')
     .order('delivery_date', { ascending: true, nullsFirst: false })
     .order('order_id', { ascending: true });
 
@@ -399,20 +677,7 @@ async function loadOpenOrders(
   }
 
   const openOrders = ((data ?? []) as OrderRow[])
-    .map(row => {
-      const status = getRelationRecord(row.status);
-      const customer = getRelationRecord(row.customer);
-      const statusName = status?.status_name?.trim() || null;
-      return {
-        order_id: row.order_id,
-        customer_id: row.customer_id ?? null,
-        order_number: row.order_number?.trim() || null,
-        created_at: row.created_at ?? null,
-        delivery_date: row.delivery_date?.slice(0, 10) || null,
-        customer_name: customer?.name?.trim() || null,
-        status_name: statusName,
-      };
-    })
+    .map(mapOrderRowToSummaryRow)
     .filter(order => !isTerminalStatus(order.status_name));
 
   if (options?.customerName) {
@@ -426,19 +691,7 @@ async function loadOpenOrders(
 }
 
 function mapOrderRows(rows: OrderRow[]) {
-  return rows.map(row => {
-    const status = getRelationRecord(row.status);
-    const customer = getRelationRecord(row.customer);
-    return {
-      order_id: row.order_id,
-      customer_id: row.customer_id ?? null,
-      order_number: row.order_number?.trim() || null,
-      created_at: row.created_at ?? null,
-      delivery_date: row.delivery_date?.slice(0, 10) || null,
-      customer_name: customer?.name?.trim() || null,
-      status_name: status?.status_name?.trim() || null,
-    };
-  });
+  return rows.map(mapOrderRowToSummaryRow);
 }
 
 async function loadCustomerMatches(supabase: SupabaseClient, customerRef: string) {
@@ -471,7 +724,7 @@ async function loadOrderRows(supabase: SupabaseClient, orderRef?: string | null)
   if (!normalizedRef) {
     const { data, error } = await supabase
       .from('orders')
-      .select('order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name)')
+      .select('order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name), quote:quotes(id, quote_number)')
       .order('order_id', { ascending: false })
       .limit(ORDER_QUERY_LIMIT);
 
@@ -487,7 +740,7 @@ async function loadOrderRows(supabase: SupabaseClient, orderRef?: string | null)
 
   const { data: orderNumberRows, error: orderNumberError } = await supabase
     .from('orders')
-    .select('order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name)')
+    .select('order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name), quote:quotes(id, quote_number)')
     .ilike('order_number', `%${escapedRef}%`)
     .order('order_id', { ascending: false })
     .limit(ORDER_QUERY_LIMIT);
@@ -504,7 +757,7 @@ async function loadOrderRows(supabase: SupabaseClient, orderRef?: string | null)
     const numericOrderId = Number.parseInt(normalizedRef, 10);
     const { data: directOrderRows, error: directOrderError } = await supabase
       .from('orders')
-      .select('order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name)')
+      .select('order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name), quote:quotes(id, quote_number)')
       .eq('order_id', numericOrderId)
       .limit(1);
 
@@ -521,7 +774,7 @@ async function loadOrderRows(supabase: SupabaseClient, orderRef?: string | null)
   if (customerMatches.length > 0) {
     const { data: customerOrderRows, error: customerOrderError } = await supabase
       .from('orders')
-      .select('order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name)')
+      .select('order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name), quote:quotes(id, quote_number)')
       .in('customer_id', customerMatches.map(customer => customer.customer_id))
       .order('order_id', { ascending: false })
       .limit(ORDER_QUERY_LIMIT);
@@ -564,6 +817,14 @@ function scoreOrderCandidate(
 
 function normalizeCustomerReference(value: string) {
   return value.trim().toLowerCase();
+}
+
+function cleanCustomerCandidate(value: string) {
+  return value
+    .replace(/^(customer\s+)/i, '')
+    .replace(/\b(?:are there|do we have|right now|currently)$/i, '')
+    .replace(/\b(?:placed|ordered)\s+(?:by|for)\s+/i, '')
+    .trim();
 }
 
 function escapeIlikeTerm(value: string) {
@@ -653,7 +914,7 @@ export async function getOpenCustomerOrdersSummary(
   let missingStatusCount = 0;
 
   for (const order of filteredOrders) {
-    const statusLabel = order.status_name || 'No status set';
+    const statusLabel = order.status_name || 'Not set';
     statusBreakdownMap.set(statusLabel, (statusBreakdownMap.get(statusLabel) ?? 0) + 1);
 
     if (!order.status_name) {
@@ -673,9 +934,17 @@ export async function getOpenCustomerOrdersSummary(
     }
   }
 
-  const nextDueOrders = filteredOrders
-    .filter(order => order.delivery_date != null && order.delivery_date >= today)
-    .slice(0, 5);
+  const nextDueOrders = await enrichOrderRows(
+    supabase,
+    filteredOrders
+      .filter(order => order.delivery_date != null && order.delivery_date >= today)
+      .slice(0, 5)
+  );
+
+  const listedOrders = await enrichOrderRows(
+    supabase,
+    filteredOrders.slice(0, 8)
+  );
 
   return {
     customer_name: customerName?.trim() || null,
@@ -687,7 +956,7 @@ export async function getOpenCustomerOrdersSummary(
       .map(([status_name, count]) => ({ status_name, count }))
       .sort((a, b) => b.count - a.count),
     next_due_orders: nextDueOrders,
-    listed_orders: filteredOrders.slice(0, 8),
+    listed_orders: listedOrders,
   };
 }
 
@@ -749,12 +1018,17 @@ export async function getOrdersDueThisWeekSummary(
     order => order.delivery_date != null && order.delivery_date >= today && order.delivery_date <= week_end
   );
 
+  const enrichedDueOrders = await enrichOrderRows(
+    supabase,
+    dueOrders.slice(0, 8)
+  );
+
   return {
     customer_name: customerName?.trim() || null,
     week_start,
     week_end,
     due_order_count: dueOrders.length,
-    orders: dueOrders.slice(0, 8),
+    orders: enrichedDueOrders,
   };
 }
 
@@ -771,7 +1045,7 @@ export async function getOrdersLast7DaysSummary(
 
   let query = supabase
     .from('orders')
-    .select('order_id, customer_id, order_number, created_at, customer:customers(name)')
+    .select('order_id, customer_id, order_number, created_at, delivery_date, customer:customers(name), quote:quotes(id, quote_number)')
     .gte('created_at', `${range_start}T00:00:00+02:00`)
     .lt('created_at', `${rangeEndExclusive}T00:00:00+02:00`)
     .order('created_at', { ascending: false });
@@ -785,17 +1059,10 @@ export async function getOrdersLast7DaysSummary(
     throw error;
   }
 
-  const recentOrders = ((data ?? []) as OrderRow[]).map(row => {
-    const customer = getRelationRecord(row.customer);
-    const createdAt = row.created_at?.trim() || null;
-
-    return {
-      order_id: row.order_id,
-      order_number: row.order_number?.trim() || null,
-      customer_name: customer?.name?.trim() || null,
-      created_date: createdAt ? getDateInZoneFromTimestamp(createdAt) : null,
-    };
-  });
+  const recentOrders = await enrichOrderRows(
+    supabase,
+    ((data ?? []) as OrderRow[]).map(mapOrderRowToSummaryRow)
+  );
 
   const dailyCountMap = new Map<string, number>();
   for (let offset = 0; offset < 7; offset += 1) {
@@ -861,7 +1128,7 @@ export async function getLastCustomerOrderSummary(
   const { data, error } = await supabase
     .from('orders')
     .select(
-      'order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name)'
+      'order_id, customer_id, order_number, created_at, delivery_date, status:order_statuses(status_name), customer:customers(name), quote:quotes(id, quote_number)'
     )
     .in('customer_id', customerIds)
     .order('created_at', { ascending: false })
@@ -871,25 +1138,98 @@ export async function getLastCustomerOrderSummary(
     throw error;
   }
 
-  const recentOrders = ((data ?? []) as OrderRow[]).map(row => {
-    const customer = getRelationRecord(row.customer);
-    const status = getRelationRecord(row.status);
-    const createdAt = row.created_at?.trim() || null;
-
-    return {
-      order_id: row.order_id,
-      order_number: row.order_number?.trim() || null,
-      customer_name: customer?.name?.trim() || null,
-      created_date: createdAt ? getDateInZoneFromTimestamp(createdAt) : null,
-      delivery_date: row.delivery_date?.slice(0, 10) || null,
-      status_name: status?.status_name?.trim() || null,
-    };
-  });
+  const recentOrders = await enrichOrderRows(
+    supabase,
+    ((data ?? []) as OrderRow[]).map(mapOrderRowToSummaryRow)
+  );
 
   return {
     customer_name: customerName.trim(),
     latest_order: recentOrders[0] ?? null,
     recent_orders: recentOrders,
+  };
+}
+
+export async function getOrderProductsSummary(
+  supabase: SupabaseClient,
+  orderRef: string
+): Promise<AssistantOrderProductsSummary> {
+  const resolved = await resolveOrderReference(supabase, orderRef);
+  if (resolved.kind !== 'resolved') {
+    return resolved;
+  }
+
+  const { data, error } = await supabase
+    .from('order_details')
+    .select('order_detail_id, quantity, product:products(name, internal_code)')
+    .eq('order_id', resolved.order.order_id)
+    .order('order_detail_id', { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  const products = ((data ?? []) as OrderProductDetailRow[]).map(row => {
+    const product = getRelationRecord(row.product);
+    const code = product?.internal_code?.trim() || null;
+    const name = product?.name?.trim() || null;
+    return {
+      order_detail_id: row.order_detail_id,
+      product_label: code && name && code !== name ? `${name} (${code})` : name || code || `Product ${row.order_detail_id}`,
+      quantity: toNumber(row.quantity),
+    };
+  });
+
+  return {
+    kind: 'summary',
+    order: resolved.order,
+    line_count: products.length,
+    total_quantity: products.reduce((sum, row) => sum + row.quantity, 0),
+    products,
+  };
+}
+
+export async function getProductOpenOrdersSummary(
+  supabase: SupabaseClient,
+  productRef: string
+): Promise<AssistantProductOpenOrdersSummary> {
+  const resolved = await resolveAssistantProduct(supabase, productRef);
+  if (resolved.kind !== 'resolved') {
+    return resolved;
+  }
+
+  const today = getCurrentDateInZone();
+  const { week_end } = getWeekRange(today);
+  const orders = await loadOpenOrdersForProduct(supabase, resolved.product.product_id);
+
+  let overdueOrderCount = 0;
+  let dueThisWeekCount = 0;
+  let totalQuantity = 0;
+
+  for (const order of orders) {
+    totalQuantity += order.quantity;
+
+    if (!order.delivery_date) {
+      continue;
+    }
+
+    if (order.delivery_date < today) {
+      overdueOrderCount += 1;
+    }
+
+    if (order.delivery_date >= today && order.delivery_date <= week_end) {
+      dueThisWeekCount += 1;
+    }
+  }
+
+  return {
+    kind: 'summary',
+    product: resolved.product,
+    open_order_count: orders.length,
+    total_quantity: totalQuantity,
+    overdue_order_count: overdueOrderCount,
+    due_this_week_count: dueThisWeekCount,
+    orders: orders.slice(0, 8),
   };
 }
 
@@ -928,20 +1268,10 @@ export async function getOrderSearchSummary(
     throw error;
   }
 
-  const orders = ((data ?? []) as OrderRow[]).map(row => {
-    const customer = getRelationRecord(row.customer);
-    const status = getRelationRecord(row.status);
-    const createdAt = row.created_at?.trim() || null;
-
-    return {
-      order_id: row.order_id,
-      order_number: row.order_number?.trim() || null,
-      customer_name: customer?.name?.trim() || null,
-      created_date: createdAt ? getDateInZoneFromTimestamp(createdAt) : null,
-      delivery_date: row.delivery_date?.slice(0, 10) || null,
-      status_name: status?.status_name?.trim() || null,
-    };
-  });
+  const orders = await enrichOrderRows(
+    supabase,
+    ((data ?? []) as OrderRow[]).map(mapOrderRowToSummaryRow)
+  );
 
   return {
     query_term: normalizedTerm,
@@ -972,11 +1302,19 @@ export async function getLateOrdersSummary(
     .sort((a, b) => b.days_late - a.days_late)
     .slice(0, 8);
 
+  const enrichedLateOrders = (await enrichOrderRows(
+    supabase,
+    lateOrders
+  )).map(order => ({
+    ...order,
+    days_late: lateOrders.find(candidate => candidate.order_id === order.order_id)?.days_late ?? 0,
+  }));
+
   return {
     customer_name: customerName?.trim() || null,
     late_order_count: filteredOrders.filter(order => order.delivery_date != null && order.delivery_date < today)
       .length,
-    late_orders: lateOrders,
+    late_orders: enrichedLateOrders,
   };
 }
 
@@ -1063,6 +1401,33 @@ export function detectOperationalIntent(message: string): AssistantOperationalIn
   const normalized = message.toLowerCase();
 
   if (
+    /\b(products?|items?)\b/.test(normalized) &&
+    /\b(on|for)\s+order\b|\border\b/.test(normalized) &&
+    /\b(what|which|show|list)\b/.test(normalized)
+  ) {
+    return 'order_products';
+  }
+
+  if (
+    /\b(?:customer\s+)?orders?\b/.test(normalized) &&
+    /\b(include|includes|contain|contains|for)\b/.test(normalized) &&
+    !/\b(start(?:s|ing)? with|contain(?:s|ing)?\s+(?:the\s+word|the\s+name|name|word)?|matching|match|begin(?:s|ning)? with)\b/.test(
+      normalized
+    )
+  ) {
+    return 'product_open_orders';
+  }
+
+  if (
+    /\b(last|latest|recent)\b/.test(normalized) &&
+    /\borders\b/.test(normalized) &&
+    /\b(by|for|from)\b/.test(normalized) &&
+    !/\b(last 7 days|past 7 days|last week|this week so far)\b/.test(normalized)
+  ) {
+    return 'recent_customer_orders';
+  }
+
+  if (
     /\b(order|orders)\b/.test(normalized) &&
     /\b(start(?:s|ing)? with|contain(?:s|ing)?|matching|match|begin(?:s|ning)? with)\b/.test(normalized)
   ) {
@@ -1112,6 +1477,59 @@ export function detectOperationalIntent(message: string): AssistantOperationalIn
   return null;
 }
 
+export function extractProductOpenOrdersReference(message: string) {
+  const normalized = message
+    .replace(/[?]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const patterns = [
+    /\b(?:which|what|show|list)\s+(?:customer\s+)?orders?\s+(?:include|includes|contain|contains|for)\s+(.+)$/i,
+    /\b(?:do we have|are there|is there)\s+any\s+(.+?)\s+(?:on order|in order|ordered)(?:\s+at the moment|\s+right now|\s+currently)?$/i,
+    /\bhow many\s+(.+?)\s+(?:are|do we have)?\s*(?:on order|in order|ordered)(?:\s+at the moment|\s+right now|\s+currently)?$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    const candidate = match?.[1]?.trim();
+    if (candidate) {
+      return candidate
+        .replace(/^(?:the|a|an)\s+/i, '')
+        .replace(/\b(?:from customers|for customers|customer orders?)$/i, '')
+        .trim();
+    }
+  }
+
+  return null;
+}
+
+export function extractOrderProductsReference(message: string) {
+  const normalized = message
+    .replace(/[?]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const patterns = [
+    /\b(?:what|which|show|list)\s+(?:products|product|items|item)\s+(?:are\s+)?(?:on|for)\s+order\s+(.+)$/i,
+    /\b(?:what|which|show|list)\s+(?:products|product|items|item)\s+(?:are\s+)?(?:on|for)\s+(.+?)\s+order$/i,
+    /\b(?:what|which|show|list)\s+(?:products|product|items|item)\s+(?:are\s+)?(?:on|for)\s+this\s+order\b/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    const candidate = match?.[1]?.trim();
+    if (candidate) {
+      const cleaned = candidate.replace(/^(?:order\s+)/i, '').trim();
+      if (/^(?:this|that)$/i.test(cleaned)) {
+        return null;
+      }
+      return cleaned;
+    }
+  }
+
+  return null;
+}
+
 export function extractOpenOrdersCustomerReference(message: string) {
   const normalized = message
     .replace(/[?]/g, ' ')
@@ -1120,22 +1538,26 @@ export function extractOpenOrdersCustomerReference(message: string) {
 
   const patterns = [
     /\b(?:how many\s+)?(?:late orders|overdue orders)\s+(?:for|from)\s+(.+)$/i,
+    /\b(?:how many\s+)?(?:late orders|overdue orders)\s+(?:placed|ordered)\s+(?:by|for)\s+(.+)$/i,
     /\b(?:which orders are due this week|orders due this week)\s+(?:for|from)\s+(.+)$/i,
+    /\b(?:which orders are due this week|orders due this week)\s+(?:placed|ordered)\s+(?:by|for)\s+(.+)$/i,
     /\b(?:open customer orders|open orders|customer orders)\s+(?:for|from)\s+(.+)$/i,
+    /\b(?:open customer orders|open orders|customer orders)\s+(?:placed|ordered)\s+(?:by|for)\s+(.+)$/i,
     /\bhow many\s+(?:open customer orders|open orders|customer orders)\s+(?:for|from)\s+(.+)$/i,
+    /\bhow many\s+(?:open customer orders|open orders|customer orders)\s+(?:placed|ordered)\s+(?:by|for)\s+(.+)$/i,
     /\b(?:for|from)\s+(.+?)\s+(?:which orders are due this week|orders due this week)\b/i,
+    /\b(?:placed|ordered)\s+(?:by|for)\s+(.+?)\s+(?:which orders are due this week|orders due this week)\b/i,
     /\b(?:for|from)\s+(.+?)\s+(?:late orders|overdue orders)\b/i,
+    /\b(?:placed|ordered)\s+(?:by|for)\s+(.+?)\s+(?:late orders|overdue orders)\b/i,
     /\b(?:for|from)\s+(.+?)\s+(?:how many\s+)?(?:open customer orders|open orders|customer orders)\b/i,
+    /\b(?:placed|ordered)\s+(?:by|for)\s+(.+?)\s+(?:how many\s+)?(?:open customer orders|open orders|customer orders)\b/i,
   ];
 
   for (const pattern of patterns) {
     const match = normalized.match(pattern);
     const candidate = match?.[1]?.trim();
     if (candidate) {
-      return candidate
-        .replace(/^(customer\s+)/i, '')
-        .replace(/\b(?:are there|do we have|right now|currently)$/i, '')
-        .trim();
+      return cleanCustomerCandidate(candidate);
     }
   }
 
@@ -1150,14 +1572,16 @@ export function extractRecentOrdersCustomerReference(message: string) {
 
   const patterns = [
     /\b(?:orders|customer orders)\s+(?:from|in)\s+(?:the\s+)?(?:last 7 days|past 7 days|last week)\s+(?:for|from)\s+(.+)$/i,
+    /\b(?:orders|customer orders)\s+(?:from|in)\s+(?:the\s+)?(?:last 7 days|past 7 days|last week)\s+(?:placed|ordered)\s+(?:by|for)\s+(.+)$/i,
     /\b(?:for|from)\s+(.+?)\s+(?:orders|customer orders)\s+(?:from|in)\s+(?:the\s+)?(?:last 7 days|past 7 days|last week)\b/i,
+    /\b(?:placed|ordered)\s+(?:by|for)\s+(.+?)\s+(?:orders|customer orders)\s+(?:from|in)\s+(?:the\s+)?(?:last 7 days|past 7 days|last week)\b/i,
   ];
 
   for (const pattern of patterns) {
     const match = normalized.match(pattern);
     const candidate = match?.[1]?.trim();
     if (candidate) {
-      return candidate.replace(/^(customer\s+)/i, '').trim();
+      return cleanCustomerCandidate(candidate);
     }
   }
 
@@ -1172,15 +1596,42 @@ export function extractLatestOrderCustomerReference(message: string) {
 
   const patterns = [
     /\b(?:last|latest|most recent)\s+(?:customer\s+)?order\s+(?:for|from)\s+(.+)$/i,
+    /\b(?:last|latest|most recent)\s+(?:customer\s+)?order\s+(?:placed|ordered)\s+(?:by|for)\s+(.+)$/i,
     /\bwhat\s+was\s+the\s+(?:last|latest|most recent)\s+(?:customer\s+)?order\s+(?:for|from)\s+(.+)$/i,
+    /\bwhat\s+was\s+the\s+(?:last|latest|most recent)\s+(?:customer\s+)?order\s+(?:placed|ordered)\s+(?:by|for)\s+(.+)$/i,
     /\b(?:for|from)\s+(.+?)\s+(?:what\s+was\s+the\s+)?(?:last|latest|most recent)\s+(?:customer\s+)?order\b/i,
+    /\b(?:placed|ordered)\s+(?:by|for)\s+(.+?)\s+(?:what\s+was\s+the\s+)?(?:last|latest|most recent)\s+(?:customer\s+)?order\b/i,
   ];
 
   for (const pattern of patterns) {
     const match = normalized.match(pattern);
     const candidate = match?.[1]?.trim();
     if (candidate) {
-      return candidate.replace(/^(customer\s+)/i, '').trim();
+      return cleanCustomerCandidate(candidate);
+    }
+  }
+
+  return null;
+}
+
+export function extractRecentCustomerOrdersCustomerReference(message: string) {
+  const normalized = message
+    .replace(/[?]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const patterns = [
+    /\b(?:last|latest|recent)\s+orders?\s+(?:placed\s+)?(?:for|from|by)\s+(.+)$/i,
+    /\b(?:last|latest|recent)\s+orders?\s+(?:ordered)\s+(?:for|from|by)\s+(.+)$/i,
+    /\b(?:for|from|by)\s+(.+?)\s+(?:last|latest|recent)\s+orders?\b/i,
+    /\b(?:placed|ordered)\s+(?:by|for)\s+(.+?)\s+(?:last|latest|recent)\s+orders?\b/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    const candidate = match?.[1]?.trim();
+    if (candidate) {
+      return cleanCustomerCandidate(candidate);
     }
   }
 
@@ -1226,7 +1677,11 @@ export function extractOrderSearchReference(message: string) {
 export function shouldListOpenOrders(message: string) {
   const normalized = message.toLowerCase().replace(/[?]/g, ' ').replace(/\s+/g, ' ').trim();
 
-  if (!/\b(open customer orders|open orders|customer orders)\b/.test(normalized)) {
+  const mentionsOpenOrders =
+    /\b(open customer orders|open orders|customer orders)\b/.test(normalized) ||
+    /\b(what|which|show|list)\s+orders?\b/.test(normalized) && /\bopen\b/.test(normalized);
+
+  if (!mentionsOpenOrders) {
     return false;
   }
 
@@ -1293,17 +1748,23 @@ export function buildOpenOrdersCard(
   summary: AssistantOpenOrdersSummary,
   options?: { detailed?: boolean }
 ): AssistantCard {
-  const rows = (options?.detailed ? summary.listed_orders : summary.next_due_orders).map(order => ({
+  const rowSource = options?.detailed
+    ? summary.listed_orders
+    : summary.next_due_orders.length > 0
+      ? summary.next_due_orders
+      : summary.listed_orders;
+  const usingListedFallback = !options?.detailed && summary.next_due_orders.length === 0;
+  const rows = rowSource.map(order => ({
     order: order.order_number?.trim() || `Order ${order.order_id}`,
     customer: order.customer_name?.trim() || 'Unknown customer',
     due_date: order.delivery_date ? formatDateForAnswer(order.delivery_date) : 'No delivery date',
-    status: order.status_name?.trim() || 'No status set',
+    status: order.status_name?.trim() || 'Not set',
   }));
 
   return {
     type: 'table',
     title: summary.customer_name ? `Open orders for ${summary.customer_name}` : 'Open customer orders',
-    description: options?.detailed
+    description: options?.detailed || usingListedFallback
       ? 'Current open orders matching this request.'
       : 'Next due open customer orders.',
     metrics: [
@@ -1327,13 +1788,12 @@ export function buildOpenOrdersCard(
       { key: 'status', label: 'Status' },
     ],
     rows,
-    footer: options?.detailed
+    rowActions: rowSource.map(buildOrderQuickActions),
+    footer: options?.detailed || usingListedFallback
       ? summary.open_order_count > rows.length
-        ? 'Only a sample of matching open orders is shown here.'
-        : 'All matching open orders are shown here.'
-      : summary.next_due_orders.length === 0
-        ? 'No due-date sample is available for the current open orders.'
-        : 'Showing the next due open orders.',
+        ? 'Use Open, Client docs, or Quote to jump into the matching orders. Only a sample is shown here.'
+        : 'Use Open, Client docs, or Quote to jump into the matching orders.'
+      : 'Showing the next due open orders. Use the quick actions to open the order, client docs, or quote.',
   };
 }
 
@@ -1397,7 +1857,7 @@ export function buildLastCustomerOrderAnswer(summary: AssistantLastCustomerOrder
   const lines = [
     `Latest order for ${summary.customer_name}: ${latestOrder.order_number?.trim() || `Order ${latestOrder.order_id}`}`,
     `Created: ${latestOrder.created_date ? formatDateForAnswer(latestOrder.created_date) : 'Unknown date'}`,
-    `Status: ${latestOrder.status_name?.trim() || 'No status set'}`,
+    `Status: ${latestOrder.status_name?.trim() || 'Not set'}`,
   ];
 
   if (latestOrder.delivery_date) {
@@ -1441,7 +1901,7 @@ export function buildLastCustomerOrderCard(summary: AssistantLastCustomerOrderSu
       },
       {
         label: 'Status',
-        value: summary.latest_order.status_name?.trim() || 'No status set',
+        value: summary.latest_order.status_name?.trim() || 'Not set',
       },
     ],
     columns: [
@@ -1454,16 +1914,243 @@ export function buildLastCustomerOrderCard(summary: AssistantLastCustomerOrderSu
       order: order.order_number?.trim() || `Order ${order.order_id}`,
       created: order.created_date ? formatDateForAnswer(order.created_date) : 'Unknown date',
       delivery: order.delivery_date ? formatDateForAnswer(order.delivery_date) : 'No delivery date',
-      status: order.status_name?.trim() || 'No status set',
+      status: order.status_name?.trim() || 'Not set',
     })),
-    actions: summary.recent_orders.map(order => ({
-      label: `Open ${order.order_number?.trim() || `Order ${order.order_id}`}`,
-      href: `/orders/${order.order_id}`,
-    })),
+    rowActions: summary.recent_orders.map(buildOrderQuickActions),
     footer:
       summary.recent_orders.length > 0
-        ? 'Click a row to open the order.'
+        ? 'Use Open, Client docs, or Quote to jump straight into the latest order.'
         : undefined,
+  };
+}
+
+export function buildProductOpenOrdersAnswer(summary: AssistantProductOpenOrdersSummary) {
+  if (summary.kind === 'ambiguous') {
+    const options = summary.candidates
+      .map(candidate => `- ${formatAssistantProductLabel(candidate)}`)
+      .join('\n');
+    return `I found multiple possible products for "${summary.product_ref}". Which one did you mean?\n${options}`;
+  }
+
+  if (summary.kind === 'not_found') {
+    return `I don't know. I couldn't find a product matching "${summary.product_ref}" in Unity.`;
+  }
+
+  const productLabel = formatAssistantProductLabel(summary.product);
+  if (summary.open_order_count === 0) {
+    return `${productLabel} is not currently on any open customer orders.`;
+  }
+
+  const lines = [
+    `${productLabel} is on ${formatNumber(summary.open_order_count)} open customer order${summary.open_order_count === 1 ? '' : 's'}.`,
+    `Total quantity on open orders: ${formatNumber(summary.total_quantity)}`,
+    `Due this week: ${formatNumber(summary.due_this_week_count)}`,
+    `Overdue: ${formatNumber(summary.overdue_order_count)}`,
+  ];
+
+  if (summary.orders.length > 0) {
+    lines.push('');
+    lines.push('Matching open orders:');
+    for (const order of summary.orders.slice(0, 4)) {
+      lines.push(
+        `- ${order.order_number?.trim() || `Order ${order.order_id}`} | ${order.customer_name?.trim() || 'Unknown customer'} | qty ${formatNumber(order.quantity)}`
+      );
+    }
+  }
+
+  return lines.join('\n');
+}
+
+export function buildProductOpenOrdersCard(
+  summary: Extract<AssistantProductOpenOrdersSummary, { kind: 'summary' }>
+): AssistantCard {
+  return {
+    type: 'table',
+    title: `Customer orders for ${formatAssistantProductLabel(summary.product)}`,
+    description: 'Open customer orders that currently include this manufactured product.',
+    metrics: [
+      {
+        label: 'Open orders',
+        value: formatNumber(summary.open_order_count),
+      },
+      {
+        label: 'Qty on order',
+        value: formatNumber(summary.total_quantity),
+      },
+      {
+        label: 'Due this week',
+        value: formatNumber(summary.due_this_week_count),
+      },
+      {
+        label: 'Overdue',
+        value: formatNumber(summary.overdue_order_count),
+      },
+    ],
+    columns: [
+      { key: 'order', label: 'Order' },
+      { key: 'customer', label: 'Customer' },
+      { key: 'qty', label: 'Qty', align: 'right' },
+      { key: 'due_date', label: 'Due date' },
+      { key: 'status', label: 'Status' },
+    ],
+    rows: summary.orders.map(order => ({
+      order: order.order_number?.trim() || `Order ${order.order_id}`,
+      customer: order.customer_name?.trim() || 'Unknown customer',
+      qty: formatNumber(order.quantity),
+      due_date: order.delivery_date ? formatDateForAnswer(order.delivery_date) : 'No delivery date',
+      status: order.status_name?.trim() || 'Not set',
+    })),
+    rowActions: summary.orders.map(buildOrderQuickActions),
+    footer:
+      summary.orders.length > 0
+        ? 'Use Open, Client docs, or Quote to jump into the matching customer orders.'
+        : 'No open customer orders currently include this product.',
+  };
+}
+
+export function buildOrderProductsAnswer(summary: AssistantOrderProductsSummary) {
+  if (summary.kind === 'ambiguous') {
+    const options = summary.candidates
+      .map(candidate => `- ${candidate.order_number?.trim() || `Order ${candidate.order_id}`}${candidate.customer_name ? ` (${candidate.customer_name})` : ''}`)
+      .join('\n');
+    return `I found multiple possible orders for "${summary.order_ref}". Which one did you mean?\n${options}`;
+  }
+
+  if (summary.kind === 'not_found') {
+    return `I don't know. I couldn't find an order matching "${summary.order_ref}" in Unity.`;
+  }
+
+  const orderLabel = summary.order.order_number?.trim() || `Order ${summary.order.order_id}`;
+  const lines = [
+    `Products on ${orderLabel}: ${formatNumber(summary.line_count)}`,
+    `Total quantity: ${formatNumber(summary.total_quantity)}`,
+  ];
+
+  if (summary.products.length > 0) {
+    lines.push('');
+    lines.push('Products:');
+    for (const product of summary.products.slice(0, 6)) {
+      lines.push(`- ${product.product_label} | qty ${formatNumber(product.quantity)}`);
+    }
+  } else {
+    lines.push('No product lines are currently recorded on this order.');
+  }
+
+  return lines.join('\n');
+}
+
+export function buildOrderProductsCard(
+  summary: Extract<AssistantOrderProductsSummary, { kind: 'summary' }>
+): AssistantCard {
+  return {
+    type: 'table',
+    title: `Products on ${summary.order.order_number?.trim() || `Order ${summary.order.order_id}`}`,
+    description: 'Product lines currently recorded on this customer order.',
+    metrics: [
+      { label: 'Product lines', value: formatNumber(summary.line_count) },
+      { label: 'Total qty', value: formatNumber(summary.total_quantity) },
+      { label: 'Status', value: summary.order.status_name?.trim() || 'Not set' },
+    ],
+    columns: [
+      { key: 'product', label: 'Product' },
+      { key: 'qty', label: 'Qty', align: 'right' },
+    ],
+    rows: summary.products.map(product => ({
+      product: product.product_label,
+      qty: formatNumber(product.quantity),
+    })),
+    actions: [
+      {
+        label: 'Preview order',
+        kind: 'preview_order',
+        orderId: summary.order.order_id,
+      },
+      {
+        label: 'Open order',
+        kind: 'navigate',
+        href: `/orders/${summary.order.order_id}`,
+      },
+      {
+        label: 'Job cards',
+        kind: 'ask',
+        prompt: `What job cards are on order ${summary.order.order_number?.trim() || summary.order.order_id}?`,
+      },
+      {
+        label: 'Outstanding parts',
+        kind: 'ask',
+        prompt: `What is blocking order ${summary.order.order_number?.trim() || summary.order.order_id}?`,
+      },
+    ],
+    footer:
+      summary.products.length > 0
+        ? 'Use Job cards or Outstanding parts to keep drilling into this order.'
+        : 'No product lines are currently recorded for this order.',
+  };
+}
+
+export function buildRecentCustomerOrdersAnswer(summary: AssistantLastCustomerOrderSummary) {
+  if (summary.recent_orders.length === 0) {
+    return `I don't know of any orders for ${summary.customer_name} yet.`;
+  }
+
+  const lines = [`Most recent orders for ${summary.customer_name}: ${formatNumber(summary.recent_orders.length)}`];
+  lines.push('');
+  lines.push('Recent orders:');
+
+  for (const order of summary.recent_orders.slice(0, 5)) {
+    lines.push(
+      `- ${order.order_number?.trim() || `Order ${order.order_id}`} | ${
+        order.created_date ? formatDateForAnswer(order.created_date) : 'Unknown date'
+      } | ${order.status_name?.trim() || 'Not set'}`
+    );
+  }
+
+  return lines.join('\n');
+}
+
+export function buildRecentCustomerOrdersCard(
+  summary: AssistantLastCustomerOrderSummary
+): AssistantCard | undefined {
+  if (summary.recent_orders.length === 0) {
+    return undefined;
+  }
+
+  return {
+    type: 'table',
+    title: `Recent orders for ${summary.customer_name}`,
+    description: 'Newest matching customer orders by creation date.',
+    metrics: [
+      {
+        label: 'Shown',
+        value: formatNumber(summary.recent_orders.length),
+      },
+      {
+        label: 'Latest order',
+        value:
+          summary.latest_order?.order_number?.trim() ||
+          (summary.latest_order ? `Order ${summary.latest_order.order_id}` : '—'),
+      },
+      {
+        label: 'Latest created',
+        value: summary.latest_order?.created_date
+          ? formatDateForAnswer(summary.latest_order.created_date)
+          : 'Unknown date',
+      },
+    ],
+    columns: [
+      { key: 'order', label: 'Order' },
+      { key: 'created', label: 'Created' },
+      { key: 'delivery', label: 'Delivery' },
+      { key: 'status', label: 'Status' },
+    ],
+    rows: summary.recent_orders.map(order => ({
+      order: order.order_number?.trim() || `Order ${order.order_id}`,
+      created: order.created_date ? formatDateForAnswer(order.created_date) : 'Unknown date',
+      delivery: order.delivery_date ? formatDateForAnswer(order.delivery_date) : 'No delivery date',
+      status: order.status_name?.trim() || 'Not set',
+    })),
+    rowActions: summary.recent_orders.map(buildOrderQuickActions),
+    footer: 'Use Open, Client docs, or Quote to jump into the latest matching orders.',
   };
 }
 
@@ -1519,16 +2206,13 @@ export function buildOrderSearchCard(summary: AssistantOrderSearchSummary): Assi
       order: order.order_number?.trim() || `Order ${order.order_id}`,
       customer: order.customer_name?.trim() || 'Unknown customer',
       created: order.created_date ? formatDateForAnswer(order.created_date) : 'Unknown date',
-      status: order.status_name?.trim() || 'No status set',
+      status: order.status_name?.trim() || 'Not set',
     })),
-    actions: summary.orders.slice(0, 3).map(order => ({
-      label: `Open ${order.order_number?.trim() || `Order ${order.order_id}`}`,
-      href: `/orders/${order.order_id}`,
-    })),
+    rowActions: summary.orders.map(buildOrderQuickActions),
     footer:
       summary.order_count > summary.orders.length
-        ? 'Only the most recent matching orders are shown here.'
-        : 'All matching orders shown here are clickable from the action row.',
+        ? 'Use Open, Client docs, or Quote to inspect the latest matching orders. Only the most recent matches are shown here.'
+        : 'Use Open, Client docs, or Quote to inspect the matching orders.',
   };
 }
 
@@ -1566,12 +2250,13 @@ export function buildOrdersLast7DaysCard(summary: AssistantOrdersLast7DaysSummar
         : order.customer_name?.trim() || 'Unknown customer',
     })),
     actions: summary.recent_orders.map(order => ({
-      label: `Open ${order.order_number?.trim() || `Order ${order.order_id}`}`,
-      href: `/orders/${order.order_id}`,
+      label: `Preview ${order.order_number?.trim() || `Order ${order.order_id}`}`,
+      kind: 'preview_order',
+      orderId: order.order_id,
     })),
     footer:
       summary.total_order_count > 0
-        ? 'Daily counts are based on order creation timestamps.'
+        ? 'Daily counts are based on order creation timestamps. Click a recent order to preview it.'
         : 'No orders were created in this period.',
   };
 }
@@ -1601,12 +2286,13 @@ export function buildDueThisWeekCard(summary: AssistantDueThisWeekSummary): Assi
       order: order.order_number?.trim() || `Order ${order.order_id}`,
       customer: order.customer_name?.trim() || 'Unknown customer',
       due_date: order.delivery_date ? formatDateForAnswer(order.delivery_date) : 'No delivery date',
-      status: order.status_name?.trim() || 'No status set',
+      status: order.status_name?.trim() || 'Not set',
     })),
+    rowActions: summary.orders.map(buildOrderQuickActions),
     footer:
       summary.due_order_count > summary.orders.length
-        ? 'Only the nearest due orders are shown here.'
-        : 'All open customer orders due this week are shown here.',
+        ? 'Use Open, Client docs, or Quote to inspect the nearest due orders.'
+        : 'Use Open, Client docs, or Quote to inspect the orders due this week.',
   };
 }
 
@@ -1658,10 +2344,11 @@ export function buildLateOrdersCard(summary: AssistantLateOrdersSummary): Assist
       due_date: order.delivery_date ? formatDateForAnswer(order.delivery_date) : 'No delivery date',
       days_late: formatNumber(order.days_late),
     })),
+    rowActions: summary.late_orders.map(buildOrderQuickActions),
     footer:
       summary.late_order_count > summary.late_orders.length
-        ? 'Only the most overdue orders are shown here.'
-        : 'All currently overdue orders are shown here.',
+        ? 'Use Open, Client docs, or Quote to inspect the most overdue orders.'
+        : 'Use Open, Client docs, or Quote to inspect the overdue orders.',
   };
 }
 
@@ -1798,4 +2485,80 @@ export function buildOrderBlockerAnswer(summary: AssistantOrderBlockerSummary) {
   }
 
   return lines.join('\n');
+}
+
+export function buildOrderBlockerCard(
+  summary: Extract<AssistantOrderBlockerSummary, { kind: 'summary' }>
+): AssistantCard {
+  const orderLabel = summary.order.order_number?.trim() || `Order ${summary.order.order_id}`;
+  const rows = [
+    ...summary.blocked_items.map(item => ({
+      component: item.description ? `${item.internal_code} - ${item.description}` : item.internal_code,
+      required: formatNumber(item.required),
+      in_stock: formatNumber(item.in_stock),
+      on_order: formatNumber(item.on_order),
+      status: 'Blocked now',
+    })),
+    ...summary.waiting_items.map(item => ({
+      component: item.description ? `${item.internal_code} - ${item.description}` : item.internal_code,
+      required: formatNumber(item.required),
+      in_stock: formatNumber(item.in_stock),
+      on_order: formatNumber(item.on_order),
+      status: 'Waiting on delivery',
+    })),
+  ];
+
+  return {
+    type: 'table',
+    title: `Outstanding parts for ${orderLabel}`,
+    description: 'Verified component coverage for this order, including incoming supplier deliveries.',
+    metrics: [
+      {
+        label: 'Blocked',
+        value: formatNumber(summary.blocked_components),
+      },
+      {
+        label: 'Waiting on delivery',
+        value: formatNumber(summary.waiting_on_deliveries_components),
+      },
+      {
+        label: 'Ready now',
+        value: formatNumber(summary.ready_components),
+      },
+    ],
+    columns: [
+      { key: 'component', label: 'Component' },
+      { key: 'required', label: 'Required', align: 'right' },
+      { key: 'in_stock', label: 'In stock', align: 'right' },
+      { key: 'on_order', label: 'On order', align: 'right' },
+      { key: 'status', label: 'Status' },
+    ],
+    rows,
+    actions: [
+      {
+        label: 'Preview order',
+        kind: 'preview_order',
+        orderId: summary.order.order_id,
+      },
+      {
+        label: 'Open order',
+        kind: 'navigate',
+        href: `/orders/${summary.order.order_id}`,
+      },
+      {
+        label: 'Products',
+        kind: 'ask',
+        prompt: `What products are on order ${orderLabel}?`,
+      },
+      {
+        label: 'Job cards',
+        kind: 'ask',
+        prompt: `What job cards are on order ${orderLabel}?`,
+      },
+    ],
+    footer:
+      rows.length > 0
+        ? 'Blocked items are short right now. Waiting items are covered by incoming supplier orders.'
+        : 'Nothing is currently blocking this order from a component stock perspective.',
+  };
 }

@@ -57,23 +57,12 @@ export function TodoEntityLinkPicker({ open, onOpenChange, onSelect }: TodoEntit
     }
   }, [open]);
 
-  useEffect(() => {
-    if (open) {
-      console.log('[TodoEntityLinkPicker] Data:', data);
-      console.log('[TodoEntityLinkPicker] Loading:', isLoading);
-      console.log('[TodoEntityLinkPicker] Error:', error);
-      console.log('[TodoEntityLinkPicker] Query:', query);
-    }
-  }, [data, isLoading, error, query, open]);
-
   const groups = useMemo(() => {
-    const result = [
+    return [
       { type: 'order' as const, links: data?.orders ?? [] },
       { type: 'supplier_order' as const, links: data?.supplierOrders ?? [] },
       { type: 'quote' as const, links: data?.quotes ?? [] },
     ].filter(group => group.links.length > 0);
-    console.log('[TodoEntityLinkPicker] Groups:', result);
-    return result;
   }, [data]);
 
   return (
@@ -100,6 +89,10 @@ export function TodoEntityLinkPicker({ open, onOpenChange, onSelect }: TodoEntit
                 <Skeleton key={index} className="h-16 w-full" />
               ))}
             </div>
+          ) : error ? (
+            <div className="py-6 text-center text-sm text-destructive">
+              {error instanceof Error ? error.message : 'Failed to search records.'}
+            </div>
           ) : groups.length === 0 ? (
             <div className="py-6 text-center text-sm text-muted-foreground">
               No results found.
@@ -118,7 +111,6 @@ export function TodoEntityLinkPicker({ open, onOpenChange, onSelect }: TodoEntit
                         <button
                           key={`${link.type}-${link.id}`}
                           onClick={() => {
-                            console.log('[TodoEntityLinkPicker] Clicked:', link);
                             onSelect(link);
                             onOpenChange(false);
                           }}

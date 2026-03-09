@@ -17,6 +17,7 @@ import { useProfiles } from '@/hooks/useProfiles';
 import { useAuth } from '@/components/common/auth-provider';
 import { useTaskContext, type TaskContext } from '@/hooks/useTaskContext';
 import { PRIORITY_CONFIG, initials, chipBase, formatFileSize } from '@/components/features/todos/task-utils';
+import { uploadTodoAttachment } from '@/lib/client/todos';
 
 interface TaskQuickCreateProps {
   open: boolean;
@@ -117,10 +118,9 @@ export function TaskQuickCreate({ open, onOpenChange }: TaskQuickCreateProps) {
       const todoId = result.todo?.id;
       if (todoId && stagedFiles.length > 0) {
         setUploading(true);
-        const uploadMutation = useUploadTodoAttachmentDirect(todoId);
         for (const file of stagedFiles) {
           try {
-            await uploadMutation(file);
+            await uploadTodoAttachment(todoId, file);
           } catch {
             // Non-fatal — task is created, attachment failed
           }
@@ -359,29 +359,4 @@ export function TaskQuickCreate({ open, onOpenChange }: TaskQuickCreateProps) {
       </DialogContent>
     </Dialog>
   );
-}
-
-// Direct upload function (not a hook — used after task creation)
-function useUploadTodoAttachmentDirect(todoId: string) {
-  return async (file: File) => {
-    const { supabase } = await import('@/lib/supabase');
-    const { data, error } = await supabase.auth.getSession();
-    if (error) throw error;
-    const token = data?.session?.access_token;
-    if (!token) throw new Error('Not authenticated');
-
-    const formData = new FormData();
-    formData.append('file', file);
-    const response = await fetch(`/api/todos/${todoId}/attachments`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData,
-    });
-
-    if (!response.ok) {
-      throw new Error('Upload failed');
-    }
-
-    return response.json();
-  };
 }

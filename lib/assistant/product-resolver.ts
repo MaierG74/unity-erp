@@ -1,5 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import type { AssistantActionLink, AssistantCard } from '@/lib/assistant/prompt-suggestions';
+
 type AssistantProductSearchRow = {
   product_id: number;
   internal_code: string | null;
@@ -25,6 +27,92 @@ export type AssistantProductLookupResult =
       kind: 'not_found';
       product_ref: string;
     };
+
+export function formatAssistantProductCandidate(candidate: {
+  internal_code: string | null;
+  name: string | null;
+}) {
+  const code = candidate.internal_code?.trim();
+  const name = candidate.name?.trim();
+
+  if (code && name) {
+    return `${name} (${code})`;
+  }
+
+  return name || code || 'Unnamed product';
+}
+
+export function buildAssistantProductClarifyAnswer(
+  productRef: string,
+  candidates: Array<{
+    product_id: number;
+    internal_code: string | null;
+    name: string | null;
+  }>
+) {
+  const lines = [`I found multiple possible products for "${productRef}". Which one did you mean?`];
+
+  if (candidates.length > 0) {
+    lines.push('');
+    lines.push('Possible matches:');
+    for (const candidate of candidates) {
+      lines.push(`- ${formatAssistantProductCandidate(candidate)}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+export function buildAssistantProductClarifyCard(
+  productRef: string,
+  candidates: Array<{
+    product_id: number;
+    internal_code: string | null;
+    name: string | null;
+  }>,
+  options: {
+    buildPrompt: (candidate: { product_id: number; internal_code: string | null; name: string | null }) => string;
+    primaryActionLabel?: string;
+    description?: string;
+  }
+): AssistantCard {
+  const rowActions: AssistantActionLink[][] = candidates.map(candidate => [
+    {
+      label: options.primaryActionLabel ?? 'Use this',
+      kind: 'ask',
+      prompt: options.buildPrompt(candidate),
+    },
+    {
+      label: 'Open product',
+      kind: 'navigate',
+      href: `/products/${candidate.product_id}`,
+    },
+  ]);
+
+  return {
+    type: 'table',
+    title: `Product options for "${productRef}"`,
+    description:
+      options.description ??
+      'Pick the exact product you want to use for this question, or open it in Products.',
+    metrics: [
+      {
+        label: 'Matches',
+        value: String(candidates.length),
+      },
+    ],
+    columns: [
+      { key: 'code', label: 'Code' },
+      { key: 'name', label: 'Product' },
+    ],
+    rows: candidates.map(candidate => ({
+      code: candidate.internal_code?.trim() || `Product ${candidate.product_id}`,
+      name: candidate.name?.trim() || 'Unnamed product',
+    })),
+    rowActions,
+    footer: 'Click a row or use the action buttons to continue with one exact product.',
+  };
+}
 
 function escapeIlikeTerm(value: string) {
   return value.replace(/[%_,()]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -73,6 +161,20 @@ function scoreCandidate(row: AssistantProductSearchRow, rawReference: string, to
   return score;
 }
 
+function matchesAllTokens(row: AssistantProductSearchRow, tokens: string[]) {
+  if (tokens.length === 0) {
+    return false;
+  }
+
+  const haystacks = [
+    (row.internal_code ?? '').toLowerCase(),
+    (row.name ?? '').toLowerCase(),
+    (row.description ?? '').toLowerCase(),
+  ];
+
+  return tokens.every(token => haystacks.some(value => value.includes(token)));
+}
+
 export async function resolveAssistantProduct(
   supabase: SupabaseClient,
   productRef: string
@@ -119,6 +221,19 @@ export async function resolveAssistantProduct(
   const topCode = (top.row.internal_code ?? '').toLowerCase();
   const topName = (top.row.name ?? '').toLowerCase();
   const exactMatch = topCode === normalizedRef.toLowerCase() || topName === normalizedRef.toLowerCase();
+  const strongTokenMatches = scored.filter(({ row, score }) => score >= 24 && matchesAllTokens(row, tokens));
+
+  if (!exactMatch && strongTokenMatches.length > 1) {
+    return {
+      kind: 'ambiguous',
+      product_ref: productRef,
+      candidates: strongTokenMatches.slice(0, 4).map(({ row }) => ({
+        product_id: row.product_id,
+        internal_code: row.internal_code ?? null,
+        name: row.name ?? null,
+      })),
+    };
+  }
 
   if (!exactMatch && second && second.score >= top.score - 8) {
     return {

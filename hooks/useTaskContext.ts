@@ -15,12 +15,19 @@ export interface TaskContext {
 // Match both UUIDs and numeric IDs
 const ID_PATTERN = '([0-9a-f-]{36}|\\d+)';
 
-const ROUTE_PATTERNS: { pattern: RegExp; type: string; table: string; labelCol: string; prefix: string }[] = [
-  { pattern: new RegExp(`^\\/orders\\/${ID_PATTERN}`), type: 'order', table: 'orders', labelCol: 'order_number', prefix: 'Order' },
-  { pattern: new RegExp(`^\\/purchasing\\/purchase-orders\\/${ID_PATTERN}`), type: 'supplier_order', table: 'supplier_orders', labelCol: 'po_number', prefix: 'PO' },
-  { pattern: new RegExp(`^\\/quotes\\/${ID_PATTERN}`), type: 'quote', table: 'quotes', labelCol: 'quote_number', prefix: 'Quote' },
-  { pattern: new RegExp(`^\\/customers\\/${ID_PATTERN}`), type: 'customer', table: 'customers', labelCol: 'name', prefix: '' },
-  { pattern: new RegExp(`^\\/products\\/${ID_PATTERN}`), type: 'product', table: 'products', labelCol: 'name', prefix: '' },
+const ROUTE_PATTERNS: {
+  pattern: RegExp;
+  type: string;
+  table: string;
+  idCol: string;
+  labelCol: string;
+  prefix: string;
+}[] = [
+  { pattern: new RegExp(`^\\/orders\\/${ID_PATTERN}`), type: 'order', table: 'orders', idCol: 'order_id', labelCol: 'order_number', prefix: 'Order' },
+  { pattern: new RegExp(`^\\/purchasing\\/purchase-orders\\/${ID_PATTERN}`), type: 'supplier_order', table: 'supplier_orders', idCol: 'order_id', labelCol: 'po_number', prefix: 'PO' },
+  { pattern: new RegExp(`^\\/quotes\\/${ID_PATTERN}`), type: 'quote', table: 'quotes', idCol: 'id', labelCol: 'quote_number', prefix: 'Quote' },
+  { pattern: new RegExp(`^\\/customers\\/${ID_PATTERN}`), type: 'customer', table: 'customers', idCol: 'id', labelCol: 'name', prefix: '' },
+  { pattern: new RegExp(`^\\/products\\/${ID_PATTERN}`), type: 'product', table: 'products', idCol: 'product_id', labelCol: 'name', prefix: '' },
 ];
 
 export function useTaskContext(): TaskContext | null {
@@ -52,7 +59,7 @@ export function useTaskContext(): TaskContext | null {
         const { data } = await supabase
           .from(match.table)
           .select(match.labelCol)
-          .eq('id', id)
+          .eq(match.idCol, id)
           .maybeSingle();
 
         if (cancelled) return;

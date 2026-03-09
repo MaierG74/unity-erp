@@ -150,6 +150,40 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     refetchOnWindowFocus: true,
   });
 
+  const { data: smartCounts } = useQuery({
+    queryKey: ['orderSmartCounts', orderId],
+    queryFn: async () => {
+      const [
+        { count: jobCardCount, error: jobCardError },
+        { count: poCount, error: poError },
+        { count: issuedCount, error: issuedError },
+      ] = await Promise.all([
+        supabase
+          .from('job_cards')
+          .select('*', { count: 'exact', head: true })
+          .eq('order_id', orderId),
+        supabase
+          .from('supplier_order_customer_orders')
+          .select('*', { count: 'exact', head: true })
+          .eq('order_id', orderId),
+        supabase
+          .from('stock_issuances')
+          .select('*', { count: 'exact', head: true })
+          .eq('order_id', orderId),
+      ]);
+
+      if (jobCardError) throw jobCardError;
+      if (poError) throw poError;
+      if (issuedError) throw issuedError;
+
+      return {
+        jobCardCount: jobCardCount ?? 0,
+        poCount: poCount ?? 0,
+        issuedCount: issuedCount ?? 0,
+      };
+    },
+  });
+
   // Fetch customers (always fetch for inline editing)
   const { data: customers, isLoading: customersLoading } = useQuery<Customer[], Error>({
     queryKey: ['customers'],
@@ -875,10 +909,10 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
         <SmartButtonsRow
           productCount={order?.details?.length || 0}
           componentShortfallCount={totals.totalShortfall}
-          jobCardCount={0}
-          poCount={0}
+          jobCardCount={smartCounts?.jobCardCount ?? 0}
+          poCount={smartCounts?.poCount ?? 0}
           documentCount={attachments?.length || 0}
-          issuedCount={0}
+          issuedCount={smartCounts?.issuedCount ?? 0}
           onTabChange={handleTabChange}
           activeTab={activeTab}
         />

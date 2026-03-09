@@ -266,6 +266,10 @@ export function InteractiveSheetViewer({
   const usagePct = sheetLayout.used_area_mm2 != null
     ? ((sheetLayout.used_area_mm2 / (sheetWidth * sheetLength)) * 100).toFixed(1)
     : null;
+  const formatAreaCm2 = (areaMm2: number) => {
+    const areaCm2 = areaMm2 / 100;
+    return `${areaCm2.toFixed(areaCm2 >= 1000 ? 0 : 1)} cm²`;
+  };
 
   const title = sheetIndex != null
     ? `Sheet ${sheetIndex + 1}${sheetLayout.material_label ? ` — ${sheetLayout.material_label}` : ''}`
@@ -456,6 +460,18 @@ export function InteractiveSheetViewer({
                   ).toFixed(1)}
                   %
                 </div>
+              )}
+              {sheetLayout.offcut_summary && (
+                <>
+                  <div>
+                    Reusable offcuts: {sheetLayout.offcut_summary.reusableCount} (
+                    {formatAreaCm2(sheetLayout.offcut_summary.reusableArea_mm2)})
+                  </div>
+                  <div>
+                    Scrap pockets: {sheetLayout.offcut_summary.scrapCount} (
+                    {formatAreaCm2(sheetLayout.offcut_summary.scrapArea_mm2)})
+                  </div>
+                </>
               )}
             </div>
           </div>

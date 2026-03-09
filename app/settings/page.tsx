@@ -129,6 +129,11 @@ export default function SettingsPage() {
     setConfigDefaults(prev => ({ ...prev, [key]: value }));
   };
 
+  const minReusableOffcutAreaCm2 =
+    cutlistDefaults.minReusableOffcutAreaMm2 != null
+      ? cutlistDefaults.minReusableOffcutAreaMm2 / 100
+      : 1000;
+
   const handleSaveCutlistDefaults = async () => {
     const orgId = getOrgId(user);
     if (!orgId) return;
@@ -136,7 +141,7 @@ export default function SettingsPage() {
     const cleaned: CutlistDefaults = {
       minReusableOffcutDimensionMm: Number(cutlistDefaults.minReusableOffcutDimensionMm) || 150,
       preferredOffcutDimensionMm: Number(cutlistDefaults.preferredOffcutDimensionMm) || 300,
-      minReusableOffcutAreaMm2: Number(cutlistDefaults.minReusableOffcutAreaMm2) || 100000,
+      minReusableOffcutAreaMm2: Math.round((Number(cutlistDefaults.minReusableOffcutAreaMm2) || 100000)),
     };
     const { error } = await supabase
       .from('organizations')
@@ -608,16 +613,22 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Minimum reusable area (mm²)</label>
+                <label className="block text-sm font-medium mb-1">Minimum reusable area (cm²)</label>
                 <input
                   type="number"
                   min={1}
                   className="w-full px-3 py-2 rounded border bg-background"
-                  value={cutlistDefaults.minReusableOffcutAreaMm2 ?? 100000}
-                  onChange={(e) => updateCutlistDefault('minReusableOffcutAreaMm2', Number(e.target.value) || undefined)}
+                  value={minReusableOffcutAreaCm2}
+                  onChange={(e) => {
+                    const cm2 = Number(e.target.value);
+                    updateCutlistDefault(
+                      'minReusableOffcutAreaMm2',
+                      Number.isFinite(cm2) && cm2 > 0 ? cm2 * 100 : undefined
+                    );
+                  }}
                 />
                 <div className="mt-1 text-xs text-muted-foreground">
-                  Prevents tiny odd-shaped leftovers from being counted as useful stock.
+                  Prevents tiny odd-shaped leftovers from being counted as useful stock. Stored internally in mm².
                 </div>
               </div>
             </div>
@@ -927,10 +938,38 @@ export default function SettingsPage() {
                 </div>
               </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Default Top Build</label>
+                  <select
+                    className="w-full px-3 py-2 rounded border bg-background"
+                    value={configDefaults.topConstruction ?? ''}
+                    onChange={(e) => updateConfigDefault('topConstruction', e.target.value || undefined)}
+                  >
+                    <option value="">Template default ({DEFAULT_CUPBOARD_CONFIG.topConstruction})</option>
+                    <option value="single">Single 16mm</option>
+                    <option value="laminated">32mm Laminated</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Default Base Build</label>
+                  <select
+                    className="w-full px-3 py-2 rounded border bg-background"
+                    value={configDefaults.baseConstruction ?? ''}
+                    onChange={(e) => updateConfigDefault('baseConstruction', e.target.value || undefined)}
+                  >
+                    <option value="">Template default ({DEFAULT_CUPBOARD_CONFIG.baseConstruction})</option>
+                    <option value="single">Single 16mm</option>
+                    <option value="laminated">32mm Laminated</option>
+                    <option value="cleated">32mm Cleated</option>
+                  </select>
+                </div>
+              </div>
+
               {/* Overhangs */}
               <div>
                 <label className="block text-sm font-medium mb-2">Overhangs (mm)</label>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-xs text-muted-foreground mb-1">Top — Sides</label>
                     <input
@@ -941,6 +980,18 @@ export default function SettingsPage() {
                       value={configDefaults.topOverhangSides ?? ''}
                       placeholder={String(DEFAULT_CUPBOARD_CONFIG.topOverhangSides)}
                       onChange={(e) => updateConfigDefault('topOverhangSides', e.target.value ? Number(e.target.value) : undefined)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1">Top — Front</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      className="w-full px-3 py-2 rounded border bg-background"
+                      value={configDefaults.topOverhangFront ?? ''}
+                      placeholder={String(DEFAULT_CUPBOARD_CONFIG.topOverhangFront)}
+                      onChange={(e) => updateConfigDefault('topOverhangFront', e.target.value ? Number(e.target.value) : undefined)}
                     />
                   </div>
                   <div>
@@ -965,6 +1016,18 @@ export default function SettingsPage() {
                       value={configDefaults.baseOverhangSides ?? ''}
                       placeholder={String(DEFAULT_CUPBOARD_CONFIG.baseOverhangSides)}
                       onChange={(e) => updateConfigDefault('baseOverhangSides', e.target.value ? Number(e.target.value) : undefined)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1">Base — Front</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      className="w-full px-3 py-2 rounded border bg-background"
+                      value={configDefaults.baseOverhangFront ?? ''}
+                      placeholder={String(DEFAULT_CUPBOARD_CONFIG.baseOverhangFront)}
+                      onChange={(e) => updateConfigDefault('baseOverhangFront', e.target.value ? Number(e.target.value) : undefined)}
                     />
                   </div>
                   <div>

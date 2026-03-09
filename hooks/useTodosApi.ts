@@ -10,6 +10,7 @@ import {
   createTodo,
   fetchTodoDetail,
   fetchTodoList,
+  uploadTodoAttachment,
   updateTodo,
   type CreateTodoPayload,
   type TodoDetailResponse,
@@ -91,27 +92,7 @@ export function useUploadTodoAttachment(todoId: string | null) {
   return useMutation({
     mutationFn: async (file: File) => {
       if (!todoId) throw new Error('Missing todo id');
-
-      // Get auth token
-      const { data, error } = await supabase.auth.getSession();
-      if (error) throw error;
-      const token = data?.session?.access_token;
-      if (!token) throw new Error('Not authenticated');
-
-      const formData = new FormData();
-      formData.append('file', file);
-      const response = await fetch(`/api/todos/${todoId}/attachments`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-        body: formData,
-      });
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(errorData.error || 'Failed to upload attachment');
-      }
-      return response.json();
+      return uploadTodoAttachment(todoId, file);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: detailKey(todoId) });

@@ -6,19 +6,24 @@ export type AssistantStatus =
   | 'clarify'
   | 'unknown';
 
+export type AssistantDetailItem = {
+  label: string;
+  value: string;
+};
+
 export type AssistantMetricCardItem = {
   label: string;
   value: string;
+  detailTitle?: string;
+  details?: AssistantDetailItem[];
 };
 
 export type AssistantActionLink = {
   label: string;
-  href: string;
-};
-
-export type AssistantDetailItem = {
-  label: string;
-  value: string;
+  href?: string;
+  kind?: 'navigate' | 'preview_order' | 'ask';
+  orderId?: number;
+  prompt?: string;
 };
 
 export type AssistantChartCardPoint = {
@@ -38,6 +43,7 @@ export type AssistantTableCard = {
   }>;
   rows: Array<Record<string, string>>;
   actions?: AssistantActionLink[];
+  rowActions?: Array<AssistantActionLink[]>;
   footer?: string;
 };
 
@@ -138,8 +144,9 @@ export function getAssistantSuggestions(pathname?: string | null): string[] {
       ];
     case 'products':
       return [
+        'Cost of a product',
+        'Customer orders for a product',
         'Manufacturing status for a product',
-        'Who manufactured a product',
         'Production progress for an order',
       ];
     case 'suppliers':

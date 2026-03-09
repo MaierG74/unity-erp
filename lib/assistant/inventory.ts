@@ -1,9 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { AssistantCard } from '@/lib/assistant/prompt-suggestions';
+import type { AssistantActionLink, AssistantCard } from '@/lib/assistant/prompt-suggestions';
 
 import {
   getRelationRecord,
   resolveAssistantComponent,
+  searchAssistantComponents,
+  shouldUseAssistantComponentSearch,
   type AssistantComponentLookupResult,
 } from '@/lib/assistant/component-resolver';
 import { SO_STATUS } from '@/types/purchasing';
@@ -30,6 +32,7 @@ type PurchaseOrderRow = {
 };
 
 type ReservationRow = {
+  component_id?: number | null;
   order_id: number;
   qty_reserved?: number | string | null;
 };
@@ -78,6 +81,21 @@ export type InventoryToolResult =
   | { kind: 'snapshot'; snapshot: AssistantInventorySnapshot }
   | Exclude<AssistantComponentLookupResult, { kind: 'resolved' }>;
 
+export type AssistantInventorySearchSummary = {
+  search_ref: string;
+  match_count: number;
+  matches: Array<{
+    component_id: number;
+    internal_code: string;
+    description: string | null;
+    category_name: string | null;
+    location: string | null;
+    on_hand: number;
+    reserved: number;
+    on_order: number;
+  }>;
+};
+
 function toNumber(value: number | string | null | undefined) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
   if (typeof value === 'string') {
@@ -85,6 +103,113 @@ function toNumber(value: number | string | null | undefined) {
     return Number.isFinite(parsed) ? parsed : 0;
   }
   return 0;
+}
+
+function buildInventoryFollowUpPrompt(code: string, intent: AssistantInventoryIntent) {
+  switch (intent) {
+    case 'on_hand':
+      return `How much of ${code} do we have in stock?`;
+    case 'on_order':
+      return `How much of ${code} do we have on order?`;
+    case 'reserved':
+      return `How much of ${code} is reserved?`;
+    default:
+      return `Show stock snapshot for ${code}`;
+  }
+}
+
+export function shouldUseInventorySearchMode(componentRef: string) {
+  return shouldUseAssistantComponentSearch(componentRef);
+}
+
+export async function getInventorySearchSummary(
+  supabase: SupabaseClient,
+  componentRef: string
+): Promise<AssistantInventorySearchSummary | null> {
+  const matches = await searchAssistantComponents(supabase, componentRef, 8);
+  if (matches.length === 0) {
+    return null;
+  }
+
+  const componentIds = matches.map(match => match.component_id);
+  const { data: reservationRows, error: reservationError } = await supabase
+    .from('component_reservations')
+    .select('component_id, qty_reserved')
+    .in('component_id', componentIds);
+
+  if (reservationError) {
+    throw reservationError;
+  }
+
+  const reservedByComponent = new Map<number, number>();
+  for (const row of (reservationRows ?? []) as ReservationRow[]) {
+    const componentId = row.component_id;
+    if (typeof componentId !== 'number' || !Number.isFinite(componentId)) continue;
+    reservedByComponent.set(componentId, (reservedByComponent.get(componentId) ?? 0) + toNumber(row.qty_reserved));
+  }
+
+  const { data: supplierComponentRows, error: supplierComponentError } = await supabase
+    .from('suppliercomponents')
+    .select('supplier_component_id, component_id')
+    .in('component_id', componentIds);
+
+  if (supplierComponentError) {
+    throw supplierComponentError;
+  }
+
+  const supplierComponentIds: number[] = [];
+  const supplierComponentToComponent = new Map<number, number>();
+  for (const row of (supplierComponentRows ?? []) as Array<{ supplier_component_id: number; component_id?: number | null }>) {
+    if (typeof row.supplier_component_id !== 'number' || !Number.isFinite(row.supplier_component_id)) continue;
+    if (typeof row.component_id !== 'number' || !Number.isFinite(row.component_id)) continue;
+    supplierComponentIds.push(row.supplier_component_id);
+    supplierComponentToComponent.set(row.supplier_component_id, row.component_id);
+  }
+
+  const onOrderByComponent = new Map<number, number>();
+  if (supplierComponentIds.length > 0) {
+    const { data: supplierOrderRows, error: supplierOrderError } = await supabase
+      .from('supplier_orders')
+      .select('supplier_component_id, order_quantity, total_received, status_id')
+      .in('supplier_component_id', supplierComponentIds)
+      .in('status_id', [
+        SO_STATUS.OPEN,
+        SO_STATUS.IN_PROGRESS,
+        SO_STATUS.PENDING_APPROVAL,
+        SO_STATUS.APPROVED,
+        SO_STATUS.PARTIALLY_RECEIVED,
+      ]);
+
+    if (supplierOrderError) {
+      throw supplierOrderError;
+    }
+
+    for (const row of (supplierOrderRows ?? []) as SupplierOrderRow[]) {
+      const componentId = supplierComponentToComponent.get(row.supplier_component_id);
+      if (componentId == null) continue;
+      const outstanding = Math.max(toNumber(row.order_quantity) - toNumber(row.total_received), 0);
+      onOrderByComponent.set(componentId, (onOrderByComponent.get(componentId) ?? 0) + outstanding);
+    }
+  }
+
+  return {
+    search_ref: componentRef,
+    match_count: matches.length,
+    matches: matches.map(match => {
+      const inventory = getRelationRecord(match.inventory);
+      const category = getRelationRecord(match.category);
+      return {
+        component_id: match.component_id,
+        internal_code: match.internal_code ?? `Component ${match.component_id}`,
+        description: match.description ?? null,
+        category_name: category?.categoryname?.trim() || null,
+        location: inventory?.location?.trim() || null,
+        on_hand: toNumber(inventory?.quantity_on_hand),
+        reserved: reservedByComponent.get(match.component_id) ?? 0,
+        on_order: onOrderByComponent.get(match.component_id) ?? 0,
+      };
+    }),
+  };
 }
 
 export async function getInventoryItemSnapshot(
@@ -386,6 +511,78 @@ export function buildInventoryAnswer(snapshot: AssistantInventorySnapshot, inten
   return lines.join('\n');
 }
 
+export function buildInventorySearchAnswer(summary: AssistantInventorySearchSummary) {
+  const lines = [
+    `I found ${formatNumber(summary.match_count)} inventory matches for "${summary.search_ref}". Which one did you mean?`,
+  ];
+
+  if (summary.matches.length > 0) {
+    lines.push('');
+    lines.push('Options:');
+    for (const match of summary.matches) {
+      const label = match.description
+        ? `${match.internal_code} - ${match.description}`
+        : match.internal_code;
+      lines.push(
+        `- ${label} | on hand ${formatNumber(match.on_hand)} | reserved ${formatNumber(match.reserved)} | on order ${formatNumber(match.on_order)}`
+      );
+    }
+  }
+
+  return lines.join('\n');
+}
+
+export function buildInventorySearchCard(
+  summary: AssistantInventorySearchSummary,
+  intent: AssistantInventoryIntent
+): AssistantCard {
+  const rowActions: AssistantActionLink[][] = summary.matches.map(match => [
+    {
+      label: 'Show stock',
+      kind: 'ask',
+      prompt: buildInventoryFollowUpPrompt(match.internal_code, intent),
+    },
+    {
+      label: 'Open inventory',
+      kind: 'navigate',
+      href: `/inventory?tab=components&q=${encodeURIComponent(match.internal_code)}`,
+    },
+  ]);
+
+  return {
+    type: 'table',
+    title: `Inventory options for "${summary.search_ref}"`,
+    description: 'Matching components from the same search/filter behavior used by the Inventory page.',
+    metrics: [
+      {
+        label: 'Matches',
+        value: formatNumber(summary.match_count),
+      },
+      {
+        label: 'Shown',
+        value: formatNumber(summary.matches.length),
+      },
+    ],
+    columns: [
+      { key: 'code', label: 'Code' },
+      { key: 'description', label: 'Description' },
+      { key: 'on_hand', label: 'On hand', align: 'right' },
+      { key: 'reserved', label: 'Reserved', align: 'right' },
+      { key: 'on_order', label: 'On order', align: 'right' },
+    ],
+    rows: summary.matches.map(match => ({
+      code: match.internal_code,
+      description: match.description ?? match.category_name ?? 'No description',
+      on_hand: formatNumber(match.on_hand),
+      reserved: formatNumber(match.reserved),
+      on_order: formatNumber(match.on_order),
+    })),
+    rowActions,
+    footer:
+      'Click "Show stock" to answer for one exact component, or open the filtered Inventory view for the full list.',
+  };
+}
+
 export function buildInventoryCard(
   snapshot: AssistantInventorySnapshot,
   intent: AssistantInventoryIntent
@@ -462,7 +659,7 @@ export function buildInventoryCard(
         snapshot.reservation_breakdown.length > 0
           ? snapshot.reservation_breakdown.map(row => ({
               order: row.order_number?.trim() || `Order ${row.order_id}`,
-              status: row.status_name?.trim() || 'No status set',
+              status: row.status_name?.trim() || 'Not set',
               delivery: row.delivery_date ?? 'No delivery date',
               reserved: formatNumber(row.qty_reserved),
             }))

@@ -7,6 +7,18 @@ import {
   type FinishedGoodReservation,
 } from '@/types/orders';
 
+async function getOrderApiHeaders(): Promise<HeadersInit> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData.session?.access_token;
+  if (!accessToken) {
+    throw new Error('Session expired. Please sign in again.');
+  }
+
+  return {
+    Authorization: `Bearer ${accessToken}`,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Queries
 // ---------------------------------------------------------------------------
@@ -95,8 +107,10 @@ export async function fetchOrderAttachments(orderId: number): Promise<OrderAttac
 
 /** Fetch finished-good reservations for an order via the API route. */
 export async function fetchFinishedGoodReservations(orderId: number): Promise<FinishedGoodReservation[]> {
+  const headers = await getOrderApiHeaders();
   const response = await fetch(`/api/orders/${orderId}/fg-reservations`, {
     method: 'GET',
+    headers,
   });
 
   if (!response.ok) {
@@ -147,8 +161,10 @@ export async function fetchAvailableProducts(): Promise<Product[]> {
 
 /** Reserve finished goods for an order via the API route. */
 export async function reserveFinishedGoods(orderId: number): Promise<FinishedGoodReservation[]> {
+  const headers = await getOrderApiHeaders();
   const response = await fetch(`/api/orders/${orderId}/reserve-fg`, {
     method: 'POST',
+    headers,
   });
 
   if (!response.ok) {
@@ -161,8 +177,10 @@ export async function reserveFinishedGoods(orderId: number): Promise<FinishedGoo
 
 /** Release finished-good reservations for an order via the API route. */
 export async function releaseFinishedGoods(orderId: number): Promise<number | null> {
+  const headers = await getOrderApiHeaders();
   const response = await fetch(`/api/orders/${orderId}/release-fg`, {
     method: 'POST',
+    headers,
   });
 
   if (!response.ok) {
@@ -175,8 +193,10 @@ export async function releaseFinishedGoods(orderId: number): Promise<number | nu
 
 /** Consume (deduct) finished goods for an order via the API route. */
 export async function consumeFinishedGoods(orderId: number): Promise<Array<{ product_id: number; consumed_quantity: number }>> {
+  const headers = await getOrderApiHeaders();
   const response = await fetch(`/api/orders/${orderId}/consume-fg`, {
     method: 'POST',
+    headers,
   });
 
   if (!response.ok) {

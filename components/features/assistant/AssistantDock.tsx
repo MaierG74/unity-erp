@@ -1,7 +1,24 @@
 'use client';
 
 import * as React from 'react';
-import { Bot, Loader2, Maximize2, Minimize2, SendHorizontal, Sparkles, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  Bot,
+  ChevronDown,
+  ChevronUp,
+  ClipboardList,
+  Eye,
+  ExternalLink,
+  FileText,
+  FolderOpen,
+  Package,
+  Loader2,
+  Maximize2,
+  Minimize2,
+  SendHorizontal,
+  Sparkles,
+  X,
+} from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 
 import { authorizedFetch } from '@/lib/client/auth-fetch';
@@ -9,6 +26,7 @@ import {
   getAssistantScopeLabel,
   getAssistantSuggestions,
   type AssistantCard,
+  type AssistantActionLink,
   type AssistantChartCard,
   type AssistantReply,
   type AssistantStatus,
@@ -32,17 +50,56 @@ type ChatMessage = {
   card?: AssistantCard;
 };
 
+type AssistantOrderPreview = {
+  orderId: number;
+  orderNumber: string | null;
+  customerName: string | null;
+  orderDate: string | null;
+  deliveryDate: string | null;
+  statusName: string | null;
+  quote: {
+    id: string;
+    quoteNumber: string | null;
+  } | null;
+  counts: {
+    products: number;
+    attachments: number;
+    customerOrderDocs: number;
+    jobCards: number;
+    purchaseOrders: number;
+    issuedItems: number;
+  };
+  products: Array<{
+    name: string;
+    quantity: number;
+  }>;
+  customerDocuments: Array<{
+    id: number;
+    name: string;
+    uploadedAt: string | null;
+    url: string | null;
+  }>;
+  recentDocuments: Array<{
+    id: number;
+    name: string;
+    type: string | null;
+    uploadedAt: string | null;
+    url: string | null;
+  }>;
+};
+
 type PanelWidth = 'compact' | 'wide' | 'focus';
+type PreviewTransitionPhase = 'idle' | 'switching' | 'entering';
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-const COMPACT_WIDTH = 380;
-const WIDE_WIDTH = 540;
-const FOCUS_WIDTH = 700;
-const WIDE_WIDTH_SMALL_VIEWPORT = 440;
-const FOCUS_WIDTH_SMALL_VIEWPORT = 560;
+const COMPACT_WIDTH = 400;
+const WIDE_WIDTH = 560;
+const FOCUS_WIDTH = 720;
+const WIDE_WIDTH_SMALL_VIEWPORT = 460;
+const FOCUS_WIDTH_SMALL_VIEWPORT = 580;
 const SMALL_VIEWPORT_BREAKPOINT = 1400;
 const MOBILE_BREAKPOINT = 768;
 /** Auto-close if compact would exceed this fraction of viewport */
@@ -186,13 +243,54 @@ function renderCellValue(columnKey: string, value: string) {
 }
 
 /** Extract an href from a card's actions or detail rows if the label matches */
-function findActionHref(card: AssistantCard, label: string): string | null {
-  if (!card.actions) return null;
-  const match = card.actions.find(a =>
-    a.label.toLowerCase().includes(label.toLowerCase()) ||
-    a.href.toLowerCase().includes(label.toLowerCase())
-  );
-  return match?.href ?? null;
+function getPrimaryTableRowAction(
+  card: AssistantTableCard,
+  rowIndex: number
+) {
+  const rowActions = card.rowActions?.[rowIndex] ?? [];
+  return rowActions[0] ?? null;
+}
+
+function getInlineTableRowActions(rowActions: AssistantActionLink[]) {
+  const nonPreviewActions = rowActions.filter(action => action.kind !== 'preview_order');
+  return nonPreviewActions.slice(0, 2);
+}
+
+function getActionVisual(action: AssistantActionLink) {
+  const href = action.href ?? '';
+
+  if (action.kind === 'ask') {
+    return {
+      icon: Bot,
+      className: 'border-emerald-300/25 bg-emerald-500/10 text-emerald-50 hover:bg-emerald-500/15',
+    };
+  }
+
+  if (action.kind === 'preview_order') {
+    return {
+      icon: Eye,
+      className: 'border-violet-300/25 bg-violet-500/10 text-violet-50 hover:bg-violet-500/15',
+    };
+  }
+
+  if (href.startsWith('/quotes/')) {
+    return {
+      icon: FileText,
+      className: 'border-amber-300/25 bg-amber-500/10 text-amber-50 hover:bg-amber-500/15',
+    };
+  }
+
+  if (href.includes('tab=documents')) {
+    return {
+      icon: FolderOpen,
+      className: 'border-sky-300/25 bg-sky-500/10 text-sky-50 hover:bg-sky-500/15',
+    };
+  }
+
+  return {
+    icon: ExternalLink,
+    className: 'border-white/15 bg-white/5 text-foreground hover:bg-white/10',
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -231,11 +329,14 @@ function CardShell({
   card: AssistantCard;
   children: React.ReactNode;
 }) {
+  const [expandedMetricLabel, setExpandedMetricLabel] = React.useState<string | null>(null);
   const tone = getCardTone(card);
   const metricColumnCount =
     card.metrics && card.metrics.length > 0
       ? Math.min(Math.max(card.metrics.length, 1), 4)
       : 0;
+  const expandedMetric =
+    card.metrics?.find(metric => metric.label === expandedMetricLabel && metric.details?.length) ?? null;
 
   return (
     <div className={cn('mt-3 overflow-hidden rounded-xl border shadow-[0_12px_32px_rgba(0,0,0,0.18)]', tone.shell)}>
@@ -258,12 +359,63 @@ function CardShell({
           className="grid gap-1.5 border-b px-2.5 py-2"
           style={{ gridTemplateColumns: `repeat(${metricColumnCount}, minmax(0, 1fr))` }}
         >
-          {card.metrics.map(metric => (
-            <div key={metric.label} className={cn('rounded-lg border px-2 py-1.5', tone.metric)}>
-              <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{metric.label}</div>
-              <div className="mt-0.5 text-xs font-semibold tabular-nums text-foreground">{metric.value}</div>
-            </div>
-          ))}
+          {card.metrics.map(metric => {
+            const isInteractive = Boolean(metric.details?.length);
+            const isExpanded = expandedMetricLabel === metric.label && isInteractive;
+            const Icon = isExpanded ? ChevronUp : ChevronDown;
+
+            if (isInteractive) {
+              return (
+                <button
+                  key={metric.label}
+                  type="button"
+                  onClick={() => {
+                    setExpandedMetricLabel(current => (current === metric.label ? null : metric.label));
+                  }}
+                  className={cn(
+                    'rounded-lg border px-2 py-1.5 text-left transition-colors hover:bg-white/10',
+                    tone.metric,
+                    isExpanded ? 'ring-1 ring-white/20' : null
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{metric.label}</div>
+                    <Icon className="mt-0.5 h-3 w-3 text-muted-foreground" />
+                  </div>
+                  <div className="mt-0.5 text-xs font-semibold tabular-nums text-foreground">{metric.value}</div>
+                  <div className="mt-1 text-[10px] text-muted-foreground">
+                    {isExpanded ? 'Hide details' : 'View details'}
+                  </div>
+                </button>
+              );
+            }
+
+            return (
+              <div key={metric.label} className={cn('rounded-lg border px-2 py-1.5', tone.metric)}>
+                <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{metric.label}</div>
+                <div className="mt-0.5 text-xs font-semibold tabular-nums text-foreground">{metric.value}</div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {expandedMetric ? (
+        <div className="border-b px-3 py-2">
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            {expandedMetric.detailTitle ?? `${expandedMetric.label} details`}
+          </div>
+          <div className="space-y-1">
+            {expandedMetric.details?.map(detail => (
+              <div
+                key={`${card.title}-${expandedMetric.label}-${detail.label}`}
+                className="flex items-center justify-between gap-3 rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-[11px]"
+              >
+                <span className="text-foreground/90">{detail.label}</span>
+                <span className="tabular-nums text-muted-foreground">{detail.value}</span>
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
 
@@ -303,12 +455,48 @@ function ClickableRow({
   );
 }
 
+function CardActions({
+  actions,
+  onAction,
+}: {
+  actions: AssistantActionLink[];
+  onAction: (action: AssistantActionLink) => void;
+}) {
+  if (actions.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-wrap gap-1.5 border-t border-border/40 px-2.5 py-2">
+      {actions.map(action => {
+        const visual = getActionVisual(action);
+        const Icon = visual.icon;
+
+        return (
+          <button
+            key={`card-action-${action.label}-${action.href ?? action.prompt ?? action.orderId ?? ''}`}
+            type="button"
+            onClick={() => onAction(action)}
+            className={cn(
+              'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-medium transition-colors',
+              visual.className
+            )}
+          >
+            <Icon className="h-2.5 w-2.5" />
+            <span>{action.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function TableCardContent({
   card,
-  onNavigate,
+  onAction,
 }: {
   card: AssistantTableCard;
-  onNavigate: (href: string) => void;
+  onAction: (action: AssistantActionLink) => void;
 }) {
   const tone = getCardTone(card);
 
@@ -329,11 +517,17 @@ function TableCardContent({
                   {column.label}
                 </th>
               ))}
+              {card.rowActions?.some(actions => actions.length > 0) ? (
+                <th className="px-2.5 py-1.5 text-left text-[10px] font-medium">Actions</th>
+              ) : null}
             </tr>
           </thead>
           <tbody>
             {card.rows.map((row, rowIndex) => {
-              const rowHref = card.actions?.[rowIndex]?.href;
+              const rowAction = getPrimaryTableRowAction(card, rowIndex);
+              const rowActions = card.rowActions?.[rowIndex] ?? [];
+              const inlineActions = getInlineTableRowActions(rowActions);
+              const hiddenActionCount = Math.max(rowActions.length - inlineActions.length - (rowActions.some(action => action.kind === 'preview_order') ? 1 : 0), 0);
               const rowContent = card.columns.map(column => (
                 <td
                   key={column.key}
@@ -345,15 +539,57 @@ function TableCardContent({
                   {renderCellValue(column.key, row[column.key] ?? '—')}
                 </td>
               ));
+              const actionCell =
+                card.rowActions?.some(actions => actions.length > 0) ? (
+                  <td className="px-2.5 py-1.5">
+                    <div className="flex flex-wrap items-center gap-1">
+                      {inlineActions.map(action => {
+                        const visual = getActionVisual(action);
+                        const Icon = visual.icon;
 
-              if (rowHref) {
+                        return (
+                          <button
+                            key={`${card.title}-${rowIndex}-${action.label}`}
+                            type="button"
+                            onClick={event => {
+                              event.stopPropagation();
+                              onAction(action);
+                            }}
+                            className={cn(
+                              'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors',
+                              visual.className
+                            )}
+                          >
+                            <Icon className="h-2.5 w-2.5" />
+                            <span>{action.label}</span>
+                          </button>
+                        );
+                      })}
+                      {hiddenActionCount > 0 && rowAction ? (
+                        <button
+                          type="button"
+                          onClick={event => {
+                            event.stopPropagation();
+                            onAction(rowAction);
+                          }}
+                          className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
+                        >
+                          <span>+{hiddenActionCount} more</span>
+                        </button>
+                      ) : null}
+                    </div>
+                  </td>
+                ) : null;
+
+              if (rowAction) {
                 return (
                   <tr
                     key={`${card.title}-${rowIndex}`}
                     className={cn('border-t cursor-pointer transition-colors hover:bg-white/8', tone.row)}
-                    onClick={() => onNavigate(rowHref)}
+                    onClick={() => onAction(rowAction)}
                   >
                     {rowContent}
+                    {actionCell}
                   </tr>
                 );
               }
@@ -361,6 +597,7 @@ function TableCardContent({
               return (
                 <tr key={`${card.title}-${rowIndex}`} className={cn('border-t', tone.row)}>
                   {rowContent}
+                  {actionCell}
                 </tr>
               );
             })}
@@ -373,10 +610,10 @@ function TableCardContent({
 
 function ChartCardContent({
   card,
-  onNavigate,
+  onAction,
 }: {
   card: AssistantChartCard;
-  onNavigate: (href: string) => void;
+  onAction: (action: AssistantActionLink) => void;
 }) {
   const tone = getCardTone(card);
   const maxValue = Math.max(...card.points.map(point => point.value), 1);
@@ -414,14 +651,14 @@ function ChartCardContent({
         {card.details && card.details.length > 0 ? (
           <div className="mt-2 space-y-0.5 border-t border-border/40 pt-2">
             {card.details.map((detail, idx) => {
-              const actionHref = card.actions?.[idx]?.href ?? null;
+              const action = card.actions?.[idx] ?? null;
 
-              if (actionHref) {
+              if (action) {
                 return (
                   <ClickableRow
                     key={`${card.title}-${detail.label}`}
-                    href={actionHref}
-                    onNavigate={onNavigate}
+                    href={action.href ?? '#'}
+                    onNavigate={() => onAction(action)}
                     className="flex items-center justify-between gap-2 rounded px-1.5 py-1 text-[11px]"
                   >
                     <span className="font-medium text-foreground">{detail.label}</span>
@@ -440,23 +677,24 @@ function ChartCardContent({
           </div>
         ) : null}
       </div>
+      {card.actions ? <CardActions actions={card.actions} onAction={onAction} /> : null}
     </CardShell>
   );
 }
 
 function AssistantCardRenderer({
   card,
-  onNavigate,
+  onAction,
 }: {
   card: AssistantCard;
-  onNavigate: (href: string) => void;
+  onAction: (action: AssistantActionLink) => void;
 }) {
   if (card.type === 'table') {
-    return <TableCardContent card={card} onNavigate={onNavigate} />;
+    return <TableCardContent card={card} onAction={onAction} />;
   }
 
   if (card.type === 'chart') {
-    return <ChartCardContent card={card} onNavigate={onNavigate} />;
+    return <ChartCardContent card={card} onAction={onAction} />;
   }
 
   return null;
@@ -475,12 +713,18 @@ export function AssistantDock({ enabled }: { enabled: boolean }) {
   const [messages, setMessages] = React.useState<ChatMessage[]>(() => [buildWelcomeMessage(null)]);
   const [widthPreference, setWidthPreference] = React.useState<PanelWidth>('compact');
   const [userOverrodeWidth, setUserOverrodeWidth] = React.useState(false);
+  const [orderPreview, setOrderPreview] = React.useState<AssistantOrderPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = React.useState(false);
+  const [previewError, setPreviewError] = React.useState<string | null>(null);
+  const [previewTransitionPhase, setPreviewTransitionPhase] =
+    React.useState<PreviewTransitionPhase>('idle');
   const [viewportWidth, setViewportWidth] = React.useState(
     typeof window !== 'undefined' ? window.innerWidth : 1440
   );
   const lastAssistantMessageRef = React.useRef<HTMLDivElement | null>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
   const navigatedFromPanel = React.useRef(false);
+  const previewTransitionTimerRef = React.useRef<number | null>(null);
 
   // Track viewport width
   React.useEffect(() => {
@@ -510,7 +754,19 @@ export function AssistantDock({ enabled }: { enabled: boolean }) {
     setInput('');
     setWidthPreference('compact');
     setUserOverrodeWidth(false);
+    setOrderPreview(null);
+    setPreviewLoading(false);
+    setPreviewError(null);
+    setPreviewTransitionPhase('idle');
   }, [pathname]);
+
+  React.useEffect(() => {
+    return () => {
+      if (previewTransitionTimerRef.current != null) {
+        window.clearTimeout(previewTransitionTimerRef.current);
+      }
+    };
+  }, []);
 
   // Close when disabled
   React.useEffect(() => {
@@ -557,6 +813,56 @@ export function AssistantDock({ enabled }: { enabled: boolean }) {
     [router]
   );
 
+  const openOrderPreview = React.useCallback(
+    async (orderId: number) => {
+      if (orderPreview?.orderId === orderId && !previewLoading) {
+        return;
+      }
+
+      const switchingFromExistingPreview =
+        Boolean(orderPreview) && orderPreview?.orderId !== orderId;
+
+      if (previewTransitionTimerRef.current != null) {
+        window.clearTimeout(previewTransitionTimerRef.current);
+        previewTransitionTimerRef.current = null;
+      }
+
+      setPreviewError(null);
+      setPreviewLoading(true);
+      setPreviewTransitionPhase(switchingFromExistingPreview ? 'switching' : 'idle');
+
+      try {
+        const res = await authorizedFetch(`/api/assistant/tools/orders/preview?orderId=${orderId}`);
+        const payload = (await res.json().catch(() => null)) as AssistantOrderPreview | { error?: string } | null;
+
+        if (!res.ok || !payload || !('orderId' in payload)) {
+          throw new Error(
+            payload && 'error' in payload && typeof payload.error === 'string'
+              ? payload.error
+              : 'Failed to load order preview'
+          );
+        }
+
+        setOrderPreview(payload);
+        if (switchingFromExistingPreview) {
+          setPreviewTransitionPhase('entering');
+          previewTransitionTimerRef.current = window.setTimeout(() => {
+            setPreviewTransitionPhase('idle');
+            previewTransitionTimerRef.current = null;
+          }, 30);
+        } else {
+          setPreviewTransitionPhase('idle');
+        }
+      } catch (error) {
+        setPreviewError(error instanceof Error ? error.message : 'Failed to load order preview');
+        setPreviewTransitionPhase('idle');
+      } finally {
+        setPreviewLoading(false);
+      }
+    },
+    [orderPreview, previewLoading]
+  );
+
   const submitPrompt = React.useCallback(
     async (rawPrompt: string) => {
       const prompt = rawPrompt.trim();
@@ -575,7 +881,24 @@ export function AssistantDock({ enabled }: { enabled: boolean }) {
       try {
         const res = await authorizedFetch('/api/assistant', {
           method: 'POST',
-          body: JSON.stringify({ message: prompt, pathname }),
+          body: JSON.stringify({
+            message: prompt,
+            pathname,
+            history: messages.slice(-8).map(message => ({
+              role: message.role,
+              content: message.content,
+              cardTitle: message.card?.title,
+            })),
+            context: orderPreview
+              ? {
+                  activeOrder: {
+                    orderId: orderPreview.orderId,
+                    orderNumber: orderPreview.orderNumber,
+                    customerName: orderPreview.customerName,
+                  },
+                }
+              : undefined,
+          }),
         });
 
         const payload = (await res.json().catch(() => null)) as AssistantReply | { error?: string } | null;
@@ -619,7 +942,26 @@ export function AssistantDock({ enabled }: { enabled: boolean }) {
         setSubmitting(false);
       }
     },
-    [pathname, submitting]
+    [messages, orderPreview, pathname, submitting]
+  );
+
+  const handleAssistantAction = React.useCallback(
+    (action: AssistantActionLink) => {
+      if (action.kind === 'ask' && action.prompt) {
+        void submitPrompt(action.prompt);
+        return;
+      }
+
+      if (action.kind === 'preview_order' && action.orderId) {
+        void openOrderPreview(action.orderId);
+        return;
+      }
+
+      if (action.href) {
+        handleNavigate(action.href);
+      }
+    },
+    [handleNavigate, openOrderPreview, submitPrompt]
   );
 
   if (!enabled) return null;
@@ -724,7 +1066,7 @@ export function AssistantDock({ enabled }: { enabled: boolean }) {
                 <p className="whitespace-pre-wrap leading-5">{message.content}</p>
 
                 {message.role === 'assistant' && message.card ? (
-                  <AssistantCardRenderer card={message.card} onNavigate={handleNavigate} />
+                  <AssistantCardRenderer card={message.card} onAction={handleAssistantAction} />
                 ) : null}
 
                 {message.role === 'assistant' && message.suggestions && message.suggestions.length > 0 ? (
@@ -754,6 +1096,226 @@ export function AssistantDock({ enabled }: { enabled: boolean }) {
 
           {/* Input area */}
           <div className="shrink-0 border-t border-border/60 p-3 pt-2.5">
+            {orderPreview || previewLoading || previewError ? (
+              <div className="mb-2 overflow-hidden rounded-xl border border-violet-300/20 bg-violet-500/8">
+                <div className="flex items-center justify-between border-b border-violet-300/15 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-semibold text-foreground">
+                      {orderPreview
+                        ? orderPreview.orderNumber || `Order ${orderPreview.orderId}`
+                        : 'Order preview'}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground">
+                      {orderPreview?.customerName || 'Loading order context'}
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-[10px]"
+                    onClick={() => {
+                      if (previewTransitionTimerRef.current != null) {
+                        window.clearTimeout(previewTransitionTimerRef.current);
+                        previewTransitionTimerRef.current = null;
+                      }
+                      setOrderPreview(null);
+                      setPreviewError(null);
+                      setPreviewLoading(false);
+                      setPreviewTransitionPhase('idle');
+                    }}
+                  >
+                    <ArrowLeft className="mr-1 h-3 w-3" />
+                    Back
+                  </Button>
+                </div>
+
+                {!orderPreview && previewLoading ? (
+                  <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Loading order preview...
+                  </div>
+                ) : previewError && !orderPreview ? (
+                  <div className="px-3 py-3 text-xs text-amber-100">{previewError}</div>
+                ) : orderPreview ? (
+                  <div className="relative">
+                    {previewLoading ? (
+                      <div className="absolute inset-0 z-10 flex items-center justify-center rounded-b-xl bg-slate-950/18 backdrop-blur-[1px]">
+                        <div className="inline-flex items-center gap-2 rounded-full border border-violet-300/20 bg-slate-950/75 px-3 py-1.5 text-[11px] text-violet-50 shadow-lg">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          Loading next order…
+                        </div>
+                      </div>
+                    ) : null}
+                    {previewError ? (
+                      <div className="border-b border-violet-300/15 px-3 py-2 text-[11px] text-amber-100">
+                        {previewError}
+                      </div>
+                    ) : null}
+                    <div
+                      className={cn(
+                        'space-y-2 p-3 text-xs transition-all duration-200 ease-out',
+                        previewTransitionPhase === 'idle'
+                          ? 'translate-y-0 scale-100 opacity-100'
+                          : 'translate-y-1 scale-[0.995] opacity-60'
+                      )}
+                    >
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <div className="rounded-lg border border-violet-300/15 bg-background/35 px-2 py-1.5">
+                        <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Status</div>
+                        <div className="mt-0.5 font-semibold text-foreground">{orderPreview.statusName || 'Not set'}</div>
+                      </div>
+                      <div className="rounded-lg border border-violet-300/15 bg-background/35 px-2 py-1.5">
+                        <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Delivery</div>
+                        <div className="mt-0.5 font-semibold text-foreground">{orderPreview.deliveryDate || 'No date'}</div>
+                      </div>
+                      <div className="rounded-lg border border-violet-300/15 bg-background/35 px-2 py-1.5">
+                        <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Quote</div>
+                        <div className="mt-0.5 font-semibold text-foreground">{orderPreview.quote?.quoteNumber || 'No linked quote'}</div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5">
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-7 px-2 text-[10px]"
+                        onClick={() => handleNavigate(`/orders/${orderPreview.orderId}`)}
+                      >
+                        <ExternalLink className="mr-1 h-3 w-3" />
+                        Open order
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2 text-[10px]"
+                        onClick={() => handleNavigate(`/orders/${orderPreview.orderId}?tab=documents`)}
+                      >
+                        <FolderOpen className="mr-1 h-3 w-3" />
+                        Documents
+                      </Button>
+                      {orderPreview.quote ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-[10px]"
+                          onClick={() => handleNavigate(`/quotes/${orderPreview.quote?.id}`)}
+                        >
+                          <FileText className="mr-1 h-3 w-3" />
+                          Quote
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2 text-[10px]"
+                        onClick={() =>
+                          void submitPrompt(
+                            `What products are on order ${orderPreview.orderNumber || orderPreview.orderId}?`
+                          )
+                        }
+                      >
+                        <Package className="mr-1 h-3 w-3" />
+                        Products
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2 text-[10px]"
+                        onClick={() =>
+                          void submitPrompt(
+                            `What job cards are on order ${orderPreview.orderNumber || orderPreview.orderId}?`
+                          )
+                        }
+                      >
+                        <ClipboardList className="mr-1 h-3 w-3" />
+                        Job cards
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2 text-[10px]"
+                        onClick={() =>
+                          void submitPrompt(
+                            `What is blocking order ${orderPreview.orderNumber || orderPreview.orderId}?`
+                          )
+                        }
+                      >
+                        <FolderOpen className="mr-1 h-3 w-3" />
+                        Outstanding parts
+                      </Button>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-1.5">
+                      <div className="rounded-lg border border-violet-300/15 bg-background/35 px-2 py-1.5">
+                        <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Products</div>
+                        <div className="mt-0.5 font-semibold text-foreground">{orderPreview.counts.products}</div>
+                      </div>
+                      <div className="rounded-lg border border-violet-300/15 bg-background/35 px-2 py-1.5">
+                        <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Client docs</div>
+                        <div className="mt-0.5 font-semibold text-foreground">{orderPreview.counts.customerOrderDocs}</div>
+                      </div>
+                      <div className="rounded-lg border border-violet-300/15 bg-background/35 px-2 py-1.5">
+                        <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Job cards</div>
+                        <div className="mt-0.5 font-semibold text-foreground">{orderPreview.counts.jobCards}</div>
+                      </div>
+                      <div className="rounded-lg border border-violet-300/15 bg-background/35 px-2 py-1.5">
+                        <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">PO links</div>
+                        <div className="mt-0.5 font-semibold text-foreground">{orderPreview.counts.purchaseOrders}</div>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2 md:grid-cols-2">
+                      <div className="rounded-lg border border-violet-300/15 bg-background/30 p-2">
+                        <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                          <Package className="h-3 w-3" />
+                          Products
+                        </div>
+                        <div className="space-y-1">
+                          {orderPreview.products.length > 0 ? orderPreview.products.map(product => (
+                            <div key={`${orderPreview.orderId}-${product.name}`} className="flex items-center justify-between gap-2 text-[11px]">
+                              <span className="truncate text-foreground">{product.name}</span>
+                              <span className="tabular-nums text-muted-foreground">x{product.quantity}</span>
+                            </div>
+                          )) : (
+                            <div className="text-[11px] text-muted-foreground">No product lines loaded.</div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-violet-300/15 bg-background/30 p-2">
+                        <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                          <ClipboardList className="h-3 w-3" />
+                          Client docs
+                        </div>
+                        <div className="space-y-1">
+                          {orderPreview.customerDocuments.length > 0 ? orderPreview.customerDocuments.map(document => (
+                            <button
+                              key={document.id}
+                              type="button"
+                              onClick={() => document.url ? window.open(document.url, '_blank', 'noopener,noreferrer') : undefined}
+                              className="flex w-full items-center justify-between gap-2 rounded px-1.5 py-1 text-left text-[11px] transition-colors hover:bg-white/8"
+                            >
+                              <span className="truncate text-foreground">{document.name}</span>
+                              <span className="shrink-0 text-muted-foreground">{document.uploadedAt || 'Date unknown'}</span>
+                            </button>
+                          )) : (
+                            <div className="text-[11px] text-muted-foreground">No client-order documents linked yet.</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             <div className="flex gap-2">
               <Textarea
                 ref={textareaRef}

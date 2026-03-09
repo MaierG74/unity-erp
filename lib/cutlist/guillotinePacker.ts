@@ -27,6 +27,7 @@ import type {
   UnplacedPart,
   GrainOrientation,
   BandEdges,
+  SheetOffcutSummary,
 } from './types';
 
 // =============================================================================
@@ -137,6 +138,8 @@ export type SortStrategy =
 export interface SheetOffcutInfo {
   sheetIndex: number;
   freeRects: FreeRect[];
+  usableRects: FreeRect[];
+  scrapRects: FreeRect[];
   largestOffcutArea: number;
   totalOffcutArea: number;
   concentration: number;
@@ -449,6 +452,27 @@ function pruneContainedRects(freeRects: FreeRect[]): void {
       }
     }
   }
+}
+
+function classifyOffcuts(freeRects: FreeRect[], config: PackingConfig): {
+  usableRects: FreeRect[];
+  scrapRects: FreeRect[];
+} {
+  const usableRects: FreeRect[] = [];
+  const scrapRects: FreeRect[] = [];
+
+  for (const rect of freeRects) {
+    const isUsable =
+      Math.min(rect.w, rect.h) >= config.minUsableDimension &&
+      rect.w * rect.h >= config.minUsableArea;
+    if (isUsable) {
+      usableRects.push(rect);
+    } else {
+      scrapRects.push(rect);
+    }
+  }
+
+  return { usableRects, scrapRects };
 }
 
 // =============================================================================
@@ -920,12 +944,15 @@ export function packWithExpandedParts(
 
     // Capture per-sheet offcut info directly from packer state
     const sheetFreeRects = packer.getFreeRects();
+    const { usableRects, scrapRects } = classifyOffcuts(sheetFreeRects, fullConfig);
     const sheetOffcutAreas = sheetFreeRects.map((r) => r.w * r.h);
     const sheetLargestOffcut = sheetOffcutAreas.length > 0 ? Math.max(...sheetOffcutAreas) : 0;
     const sheetTotalOffcut = sheetOffcutAreas.reduce((sum, a) => sum + a, 0);
     perSheetOffcuts.push({
       sheetIndex,
       freeRects: sheetFreeRects,
+      usableRects,
+      scrapRects,
       largestOffcutArea: sheetLargestOffcut,
       totalOffcutArea: sheetTotalOffcut,
       concentration: sheetTotalOffcut > 0 ? sheetLargestOffcut / sheetTotalOffcut : 1,
@@ -1301,7 +1328,41 @@ export async function packPartsGuillotineDeep(
  */
 export function toLayoutResult(result: GuillotinePackResult): LayoutResult {
   return {
-    sheets: result.sheets,
+    sheets: result.sheets.map((sheet, index) => {
+      const offcutInfo = result.perSheetOffcuts?.find((entry) => entry.sheetIndex === index);
+      const offcutSummary: SheetOffcutSummary | undefined = offcutInfo
+        ? {
+            fragments: offcutInfo.fragmentCount,
+            reusableCount: offcutInfo.usableRects.length,
+            scrapCount: offcutInfo.scrapRects.length,
+            reusableArea_mm2: offcutInfo.usableRects.reduce((sum, rect) => sum + rect.w * rect.h, 0),
+            scrapArea_mm2: offcutInfo.scrapRects.reduce((sum, rect) => sum + rect.w * rect.h, 0),
+            largestReusableArea_mm2: offcutInfo.usableRects.reduce(
+              (max, rect) => Math.max(max, rect.w * rect.h),
+              0
+            ),
+            reusableOffcuts: offcutInfo.usableRects.map((rect) => ({
+              x: rect.x,
+              y: rect.y,
+              w: rect.w,
+              h: rect.h,
+              area_mm2: rect.w * rect.h,
+            })),
+            scrapOffcuts: offcutInfo.scrapRects.map((rect) => ({
+              x: rect.x,
+              y: rect.y,
+              w: rect.w,
+              h: rect.h,
+              area_mm2: rect.w * rect.h,
+            })),
+          }
+        : undefined;
+
+      return {
+        ...sheet,
+        offcut_summary: offcutSummary,
+      };
+    }),
     stats: result.stats,
     unplaced: result.unplaced,
   };

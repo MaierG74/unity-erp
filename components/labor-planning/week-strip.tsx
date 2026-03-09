@@ -9,7 +9,7 @@ import { useOrgSettings } from '@/hooks/use-org-settings';
 import { fetchWeekSummary, type DaySummary } from '@/lib/queries/laborPlanning';
 
 const WEEK_STRIP_STORAGE_KEY = 'labor-planning-week-strip';
-const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] as const;
+const DAY_FORMAT = 'EEE' as const;
 
 function getStoredCollapsed(): boolean {
   if (typeof window === 'undefined') return false;
@@ -106,7 +106,7 @@ export function WeekStrip({ selectedDate, onDateSelect, staffCapacityMinutes }: 
                     'text-[10px] font-semibold',
                     isSelected ? 'text-primary' : 'text-muted-foreground',
                   )}>
-                    {DAY_LABELS[i]}
+                    {format(new Date(date + 'T00:00:00'), DAY_FORMAT)}
                   </span>
                   {isToday && (
                     <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />

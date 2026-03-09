@@ -67,6 +67,17 @@ type OrderManufacturingJobCardRow = {
   order?: OrderRelation | OrderRelation[] | null;
 };
 
+type AssistantOrderJobCardDetail = {
+  job_card_id: number;
+  status: string | null;
+  issue_date: string | null;
+  completion_date: string | null;
+  staff_name: string | null;
+  product_labels: string[];
+  planned_quantity: number;
+  completed_quantity: number;
+};
+
 export type AssistantManufacturingSummary =
   | {
       kind: 'summary';
@@ -118,6 +129,7 @@ export type AssistantOrderManufacturingSummary =
       latest_completion_date: string | null;
       latest_completed_by: string | null;
       related_products: string[];
+      job_cards: AssistantOrderJobCardDetail[];
       recent_completions: Array<{
         job_card_id: number;
         completion_date: string | null;
@@ -238,6 +250,21 @@ function formatPercent(value: number) {
   }).format(value);
 }
 
+function formatJobCardStatus(status: string | null | undefined) {
+  switch (status?.trim().toLowerCase()) {
+    case 'in_progress':
+      return 'In progress';
+    case 'pending':
+      return 'Pending';
+    case 'completed':
+      return 'Completed';
+    case 'cancelled':
+      return 'Cancelled';
+    default:
+      return 'Not set';
+  }
+}
+
 function getCurrentDateInZone(timeZone = 'Africa/Johannesburg') {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone,
@@ -309,6 +336,17 @@ export function detectManufacturingIntent(message: string) {
   const normalized = message.toLowerCase();
 
   if (
+    /\b(?:what|which|show|list)\s+job cards?\s+(?:are\s+)?(?:on|for|attached to)\s+(?:this\s+)?order\b/.test(
+      normalized
+    ) ||
+    /\b(?:what|which|show|list)\s+job cards?\s+(?:are\s+)?(?:on|for|attached to)\s+order\s+.+\b/.test(
+      normalized
+    )
+  ) {
+    return 'order_job_cards' as const;
+  }
+
+  if (
     /\b(who|which staff|what staff)\s+(?:is|are)\s+(?:working|assigned|busy)\s+(?:on\s+)?orders?\s+(?:that\s+are\s+)?(?:still\s+)?in\s+production\b/.test(
       normalized
     ) ||
@@ -345,7 +383,12 @@ export function detectManufacturingIntent(message: string) {
     return 'manufacturing_status' as const;
   }
 
-  if (/\b(production progress|how far along|progress on|progress for)\b/.test(normalized)) {
+  if (
+    /\b(production progress|how far along|progress on|progress for)\b/.test(normalized) ||
+    /\b(job cards?\s+(?:are\s+)?(?:owing|remaining|outstanding)|what job cards?\s+(?:are\s+)?(?:owing|remaining|outstanding))\b/.test(
+      normalized
+    )
+  ) {
     return 'manufacturing_status' as const;
   }
 
@@ -379,7 +422,12 @@ export function detectManufacturingFocus(message: string): AssistantManufacturin
     return 'in_production';
   }
 
-  if (/\b(production progress|how far along|progress on|progress for|completion progress)\b/.test(normalized)) {
+  if (
+    /\b(production progress|how far along|progress on|progress for|completion progress)\b/.test(normalized) ||
+    /\b(job cards?\s+(?:are\s+)?(?:owing|remaining|outstanding)|what job cards?\s+(?:are\s+)?(?:owing|remaining|outstanding))\b/.test(
+      normalized
+    )
+  ) {
     return 'progress';
   }
 
@@ -430,6 +478,7 @@ export function extractManufacturingOrderReference(message: string) {
     /\bis\s+order\s+(.+?)\s+in\s+production\b/i,
     /\b(?:show|what(?:'s| is))\s+(?:the\s+)?production progress\s+(?:for\s+)?order\s+(.+?)\b/i,
     /\bhow\s+far\s+along\s+is\s+order\s+(.+?)\b/i,
+    /\b(?:what|which|show|list)\s+job cards?\s+(?:are\s+)?(?:on|for|attached to)\s+order\s+(.+?)\b/i,
   ];
 
   for (const pattern of patterns) {
@@ -606,12 +655,13 @@ export async function getOrderManufacturingSummary(
       completed_job_cards: 0,
       active_job_cards: 0,
       total_completed_quantity: 0,
-      total_planned_quantity: 0,
-      latest_completion_date: null,
-      latest_completed_by: null,
-      related_products: [],
-      recent_completions: [],
-    };
+    total_planned_quantity: 0,
+    latest_completion_date: null,
+    latest_completed_by: null,
+    related_products: [],
+    job_cards: [],
+    recent_completions: [],
+  };
   }
 
   const normalizedRows = rows.map(row => {
@@ -681,6 +731,26 @@ export async function getOrderManufacturingSummary(
       product_labels: Array.from(new Set(row.items.map(item => item.product_label))).slice(0, 3),
     }));
 
+  const jobCards = normalizedRows
+    .slice()
+    .sort((a, b) => {
+      const aDate = a.issue_date ?? a.completion_date ?? '';
+      const bDate = b.issue_date ?? b.completion_date ?? '';
+      return bDate.localeCompare(aDate);
+    })
+    .map(row => ({
+      job_card_id: row.job_card_id,
+      status: row.status,
+      issue_date: row.issue_date,
+      completion_date: row.completion_date,
+      staff_name: row.completed_by,
+      product_labels: Array.from(new Set(row.items.map(item => item.product_label))).filter(
+        label => label !== 'Unknown product'
+      ),
+      planned_quantity: row.items.reduce((sum, item) => sum + item.quantity, 0),
+      completed_quantity: row.items.reduce((sum, item) => sum + item.completed_quantity, 0),
+    }));
+
   const latestCompletion = recentCompletions[0] ?? null;
 
   return {
@@ -694,6 +764,7 @@ export async function getOrderManufacturingSummary(
     latest_completion_date: latestCompletion?.completion_date ?? null,
     latest_completed_by: latestCompletion?.completed_by ?? null,
     related_products: relatedProducts,
+    job_cards: jobCards,
     recent_completions: recentCompletions,
   };
 }
@@ -1441,6 +1512,135 @@ export function buildManufacturingProgressCard(
       summary.active_job_cards > 0
         ? 'This order still has active job cards in production.'
         : 'No active job cards remain for this order.',
+  };
+}
+
+export function buildOrderJobCardsAnswer(summary: AssistantOrderManufacturingSummary) {
+  if (summary.kind === 'ambiguous') {
+    return `I found multiple possible orders for "${summary.order_ref}". Which one did you mean?`;
+  }
+
+  if (summary.kind === 'not_found') {
+    return `I don't know. I couldn't find an order matching "${summary.order_ref}".`;
+  }
+
+  const label = buildOrderLabel(summary.order);
+  if (summary.job_cards.length === 0) {
+    return `There are no job cards currently attached to ${label}.`;
+  }
+
+  const lines = [
+    `Job cards attached to ${label}: ${formatNumber(summary.total_job_cards)}`,
+    `Open job cards: ${formatNumber(summary.active_job_cards)}`,
+    `Completed job cards: ${formatNumber(summary.completed_job_cards)}`,
+    '',
+    'Attached job cards:',
+  ];
+
+  for (const jobCard of summary.job_cards.slice(0, 6)) {
+    const products =
+      jobCard.product_labels.length > 0 ? ` — ${jobCard.product_labels.join(', ')}` : '';
+    lines.push(
+      `- JC-${jobCard.job_card_id} | ${formatJobCardStatus(jobCard.status)} | ${
+        jobCard.staff_name ?? 'Unassigned'
+      }${products}`
+    );
+  }
+
+  return lines.join('\n');
+}
+
+export function buildOrderJobCardsCard(
+  summary: Extract<AssistantOrderManufacturingSummary, { kind: 'summary' }>
+): AssistantCard {
+  const orderLabel = summary.order.order_number?.trim() || `Order ${summary.order.order_id}`;
+
+  return {
+    type: 'table',
+    title: `Job cards for ${orderLabel}`,
+    description: 'All job cards currently linked to this customer order.',
+    metrics: [
+      {
+        label: 'Total cards',
+        value: formatNumber(summary.total_job_cards),
+      },
+      {
+        label: 'Open cards',
+        value: formatNumber(summary.active_job_cards),
+      },
+      {
+        label: 'Completed cards',
+        value: formatNumber(summary.completed_job_cards),
+      },
+      {
+        label: 'Products',
+        value: formatNumber(summary.related_products.length),
+      },
+    ],
+    columns: [
+      { key: 'job_card', label: 'Job card' },
+      { key: 'status', label: 'Status' },
+      { key: 'staff', label: 'Staff' },
+      { key: 'products', label: 'Products' },
+      { key: 'progress', label: 'Progress' },
+    ],
+    rows:
+      summary.job_cards.length > 0
+        ? summary.job_cards.map(jobCard => ({
+            job_card: `JC-${jobCard.job_card_id}`,
+            status: formatJobCardStatus(jobCard.status),
+            staff: jobCard.staff_name ?? 'Unassigned',
+            products:
+              jobCard.product_labels.length > 0
+                ? jobCard.product_labels.join(', ')
+                : 'No products linked',
+            progress: `${formatNumber(jobCard.completed_quantity)} / ${formatNumber(jobCard.planned_quantity)}`,
+          }))
+        : [
+            {
+              job_card: 'No job cards',
+              status: 'Not set',
+              staff: '—',
+              products: '—',
+              progress: '0 / 0',
+            },
+          ],
+    rowActions:
+      summary.job_cards.length > 0
+        ? summary.job_cards.map(jobCard => [
+            {
+              label: 'Open job card',
+              kind: 'navigate',
+              href: `/staff/job-cards/${jobCard.job_card_id}`,
+            },
+          ])
+        : undefined,
+    actions: [
+      {
+        label: 'Preview order',
+        kind: 'preview_order',
+        orderId: summary.order.order_id,
+      },
+      {
+        label: 'Open order',
+        kind: 'navigate',
+        href: `/orders/${summary.order.order_id}`,
+      },
+      {
+        label: 'Documents',
+        kind: 'navigate',
+        href: `/orders/${summary.order.order_id}?tab=documents`,
+      },
+      {
+        label: 'Outstanding parts',
+        kind: 'ask',
+        prompt: `What is blocking order ${orderLabel}?`,
+      },
+    ],
+    footer:
+      summary.job_cards.length > 0
+        ? 'Click a job-card row to open it, or use Outstanding parts to check supplier/component blockers.'
+        : 'No job cards are currently attached to this order.',
   };
 }
 

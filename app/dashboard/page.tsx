@@ -1,200 +1,170 @@
 'use client';
 
+import Link from 'next/link';
+import { format } from 'date-fns';
+import { Factory, Plus, ShoppingBasket } from 'lucide-react';
+
 import { useAuth } from '@/components/common/auth-provider';
-import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
-import { format, subDays } from 'date-fns';
-import { ChevronRight, Plus, FileText, Box, Users as UsersIcon } from 'lucide-react';
-import { Card, CardHeader, CardContent, CardTitle, CardDescription } from '@/components/ui/card';
-import { useState, useEffect } from 'react';
-import { DashboardStats } from './DashboardStats';
-import { RecentActivityChart } from './RecentActivityChart';
-import { LowStockAlerts } from './LowStockAlerts';
 import { Button } from '@/components/ui/button';
-import { motion } from 'framer-motion';
+import { DashboardConfigDrawer } from '@/app/dashboard/DashboardConfigDrawer';
+import { DashboardKPICards, useDashboardKPISummary } from '@/app/dashboard/DashboardKPICards';
+import { DashboardPurchasingWidget } from '@/app/dashboard/DashboardPurchasingWidget';
+import { DashboardQuickActions } from '@/app/dashboard/DashboardQuickActions';
+import { DashboardStaffCheckouts } from '@/app/dashboard/DashboardStaffCheckouts';
+import { DashboardStats } from '@/app/dashboard/DashboardStats';
+import { DashboardTodoWidget } from '@/app/dashboard/DashboardTodoWidget';
+import { LowStockAlerts } from '@/app/dashboard/LowStockAlerts';
+import { PurchaseActivityChart, OrderStatusDonut } from '@/app/dashboard/DashboardCharts';
+import { RecentActivityChart } from '@/app/dashboard/RecentActivityChart';
+import { type DashboardPresetId, type DashboardWidgetId } from '@/app/dashboard/dashboard-config';
+import { useDashboardPreferences } from '@/hooks/use-dashboard-preferences';
+
+const HEADER_ACTIONS: Record<
+  DashboardPresetId,
+  { label: string; href: string; icon: typeof Plus }
+> = {
+  purchasing_clerk: {
+    label: 'New Purchase Order',
+    href: '/purchasing/purchase-orders/new',
+    icon: ShoppingBasket,
+  },
+  general_manager: {
+    label: 'New Order',
+    href: '/orders/new',
+    icon: Plus,
+  },
+  operations_lead: {
+    label: 'Open Orders Board',
+    href: '/orders',
+    icon: Factory,
+  },
+};
+
+function getGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+function getUserFirstName(email: string | undefined, metadata?: Record<string, any>) {
+  if (metadata?.first_name) return metadata.first_name;
+  if (metadata?.full_name) {
+    const first = metadata.full_name.split(' ')[0];
+    if (first) return first;
+  }
+  if (!email) return '';
+  const local = email.split('@')[0];
+  // Capitalize first letter
+  return local.charAt(0).toUpperCase() + local.slice(1);
+}
+
+function GreetingSummary() {
+  const { data } = useDashboardKPISummary();
+  if (!data) return null;
+
+  const parts: string[] = [];
+  if (data.overdueTasks > 0)
+    parts.push(`${data.overdueTasks} overdue task${data.overdueTasks !== 1 ? 's' : ''}`);
+  if (data.awaitingReceipt > 0)
+    parts.push(`${data.awaitingReceipt} item${data.awaitingReceipt !== 1 ? 's' : ''} awaiting delivery`);
+  if (data.lowStockCount > 0)
+    parts.push(`${data.lowStockCount} low stock alert${data.lowStockCount !== 1 ? 's' : ''}`);
+
+  if (parts.length === 0) return <span>All clear — nothing urgent right now.</span>;
+  return <span>{parts.join(' · ')}</span>;
+}
 
 export default function DashboardPage() {
   const { user, loading } = useAuth();
-  const router = useRouter();
-  const [todayPending, setTodayPending] = useState<{ staff_id: number, first_name: string, last_name: string }[]>([]);
-  const [yesterdayPending, setYesterdayPending] = useState<{ staff_id: number, first_name: string, last_name: string }[]>([]);
-  const [showToday, setShowToday] = useState(true);
-  const [showYesterday, setShowYesterday] = useState(true);
+  const {
+    preferences,
+    visibleWidgetIds,
+    isCustomized,
+    isSaving,
+    lastSavedAt,
+    setPreset,
+    toggleWidget,
+    resetToPreset,
+  } = useDashboardPreferences();
 
-  useEffect(() => {
-    async function fetchPending() {
-      const todayStr = format(new Date(), 'yyyy-MM-dd');
-      const { data: todaySummaries, error: err1 } = await supabase
-        .from('time_daily_summary')
-        .select('staff_id')
-        .eq('date_worked', todayStr)
-        .eq('is_complete', false);
-      if (!err1 && todaySummaries) {
-        const ids = todaySummaries.map(s => s.staff_id);
-        if (ids.length) {
-          const { data: staffData } = await supabase
-            .from('staff')
-            .select('staff_id, first_name, last_name')
-            .in('staff_id', ids);
-          setTodayPending(staffData || []);
-        }
-      }
-      const yesterdayStr = format(subDays(new Date(), 1), 'yyyy-MM-dd');
-      const { data: yesterdaySummaries, error: err2 } = await supabase
-        .from('time_daily_summary')
-        .select('staff_id')
-        .eq('date_worked', yesterdayStr)
-        .eq('is_complete', false);
-      if (!err2 && yesterdaySummaries) {
-        const ids2 = yesterdaySummaries.map(s => s.staff_id);
-        if (ids2.length) {
-          const { data: staffData2 } = await supabase
-            .from('staff')
-            .select('staff_id, first_name, last_name')
-            .in('staff_id', ids2);
-          setYesterdayPending(staffData2 || []);
-        }
-      }
-    }
-    fetchPending();
-  }, []);
-
-  // Auth redirects are handled by AuthProvider - no need for redundant check here
   if (loading) return null;
   if (!user) return null;
 
-  // Quick action colors use semantic palette:
-  // - Primary (teal): Main actions like New Order
-  // - Info (blue): Product creation
-  // - Success (green): Customer additions
-  const quickActions = [
-    { label: 'New Order', icon: FileText, href: '/orders/new', color: 'bg-primary' },
-    { label: 'New Product', icon: Box, href: '/products/new', color: 'bg-info' },
-    { label: 'Add Customer', icon: UsersIcon, href: '/customers/new', color: 'bg-success' },
-  ];
+  const primaryAction = HEADER_ACTIONS[preferences.presetId];
+  const PrimaryActionIcon = primaryAction.icon;
+  const showWidget = (widgetId: DashboardWidgetId) =>
+    visibleWidgetIds.has(widgetId);
+
+  const firstName = getUserFirstName(user.email, user.user_metadata);
+  const todayFormatted = format(new Date(), 'EEEE, d MMMM yyyy');
 
   return (
-    <div className="space-y-8 p-8 pt-6">
-      <div className="flex items-center justify-between space-y-2">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">Dashboard</h2>
-          <p className="text-muted-foreground">
-            Welcome back, {user.email}
+    <div className="space-y-5 p-6 pt-5">
+      {/* ─── Greeting Header ───────────────────────────────────────────── */}
+      <div className="flex items-center justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold tracking-tight">
+            {getGreeting()}, {firstName}
+          </h1>
+          <p className="text-sm text-muted-foreground">{todayFormatted}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground/70">
+            <GreetingSummary />
           </p>
         </div>
-        <div className="flex items-center space-x-2">
-          <Button onClick={() => router.push('/orders/new')}>
-            <Plus className="mr-2 h-4 w-4" /> New Order
+        <div className="flex items-center gap-2">
+          <Button asChild size="sm">
+            <Link href={primaryAction.href}>
+              <PrimaryActionIcon className="mr-2 h-4 w-4" />
+              {primaryAction.label}
+            </Link>
           </Button>
+          <DashboardConfigDrawer
+            presetId={preferences.presetId}
+            visibleWidgetIds={visibleWidgetIds}
+            isCustomized={isCustomized}
+            isSaving={isSaving}
+            lastSavedAt={lastSavedAt}
+            onPresetChange={setPreset}
+            onToggleWidget={toggleWidget}
+            onResetToPreset={resetToPreset}
+          />
         </div>
       </div>
 
-      <DashboardStats />
+      {/* ─── KPI Hero Row ──────────────────────────────────────────────── */}
+      <DashboardKPICards />
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-        <RecentActivityChart />
-
-        <motion.div
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.5, delay: 0.3 }}
-          className="col-span-3 space-y-4"
-        >
-          <Card className="shadow-md border-none h-full">
-            <CardHeader>
-              <CardTitle>Quick Actions</CardTitle>
-              <CardDescription>Common tasks you perform often</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-4">
-              {quickActions.map((action) => (
-                <div
-                  key={action.label}
-                  className="flex items-center p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors cursor-pointer group"
-                  onClick={() => router.push(action.href)}
-                >
-                  <div className={`p-2 rounded-full ${action.color} bg-opacity-10 mr-4 group-hover:scale-110 transition-transform`}>
-                    <action.icon className={`h-5 w-5 ${action.color.replace('bg-', 'text-')}`} />
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-medium">{action.label}</p>
-                  </div>
-                  <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:translate-x-1 transition-transform" />
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        </motion.div>
-
-        <LowStockAlerts />
+      {/* ─── Charts Row ────────────────────────────────────────────────── */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <PurchaseActivityChart />
+        <OrderStatusDonut />
       </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.4 }}
-      >
-        <Card className="shadow-md border-none">
-          <CardHeader>
-            <CardTitle>Pending Staff Check Outs</CardTitle>
-            <CardDescription>Staff members who haven't clocked out yet</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Today's pending - uses destructive (red) for urgent, success (green) for all clear */}
-            <div className="rounded-lg border p-4">
-              <button onClick={() => setShowToday(!showToday)} className="flex items-center justify-between w-full text-sm font-medium">
-                <div className="flex items-center space-x-2">
-                  <div className={`w-2 h-2 rounded-full ${todayPending.length > 0 ? 'bg-destructive' : 'bg-success'}`}></div>
-                  <span>Still to Check-Out Today</span>
-                  <span className="px-2 py-0.5 rounded-full bg-muted text-xs">{todayPending.length}</span>
-                </div>
-                <ChevronRight className={`transform transition-transform duration-200 ${showToday ? 'rotate-90' : ''}`} />
-              </button>
-              {showToday && todayPending.length > 0 && (
-                <ul className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {todayPending.map(s => (
-                    <li key={s.staff_id} className="flex items-center p-2 rounded bg-accent/50 text-sm">
-                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center mr-3 text-primary font-bold text-xs">
-                        {s.first_name[0]}{s.last_name[0]}
-                      </div>
-                      {s.first_name} {s.last_name}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {showToday && todayPending.length === 0 && (
-                <p className="mt-2 text-sm text-muted-foreground pl-4">All clear for today!</p>
-              )}
-            </div>
+      {/* ─── Quick Actions Row ─────────────────────────────────────────── */}
+      {showWidget('quick_actions') ? (
+        <DashboardQuickActions presetId={preferences.presetId} />
+      ) : null}
 
-            {/* Yesterday's pending - uses warning color (amber) for caution state */}
-            <div className="rounded-lg border p-4">
-              <button onClick={() => setShowYesterday(!showYesterday)} className="flex items-center justify-between w-full text-sm font-medium">
-                <div className="flex items-center space-x-2">
-                  <div className={`w-2 h-2 rounded-full ${yesterdayPending.length > 0 ? 'bg-warning' : 'bg-success'}`}></div>
-                  <span>Not Checked-Out Yesterday</span>
-                  <span className="px-2 py-0.5 rounded-full bg-muted text-xs">{yesterdayPending.length}</span>
-                </div>
-                <ChevronRight className={`transform transition-transform duration-200 ${showYesterday ? 'rotate-90' : ''}`} />
-              </button>
-              {showYesterday && yesterdayPending.length > 0 && (
-                <ul className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {yesterdayPending.map(s => (
-                    <li key={s.staff_id} className="flex items-center p-2 rounded bg-accent/50 text-sm">
-                      <div className="w-8 h-8 rounded-full bg-warning/10 flex items-center justify-center mr-3 text-warning font-bold text-xs">
-                        {s.first_name[0]}{s.last_name[0]}
-                      </div>
-                      {s.first_name} {s.last_name}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {showYesterday && yesterdayPending.length === 0 && (
-                <p className="mt-2 text-sm text-muted-foreground pl-4">No pending check-outs from yesterday.</p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
+      {/* ─── Stats (Executive) ─────────────────────────────────────────── */}
+      {showWidget('stats') ? <DashboardStats /> : null}
+
+      {/* ─── Revenue Chart (legacy, configurable) ──────────────────────── */}
+      {showWidget('revenue') ? (
+        <div className="grid gap-4 lg:grid-cols-7">
+          <RecentActivityChart />
+        </div>
+      ) : null}
+
+      {/* ─── Operational Widgets ───────────────────────────────────────── */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {showWidget('low_stock') ? <LowStockAlerts /> : null}
+        {showWidget('purchasing_queue') ? <DashboardPurchasingWidget /> : null}
+        {showWidget('todos') ? <DashboardTodoWidget /> : null}
+      </div>
+
+      {/* ─── Staff Checkouts ───────────────────────────────────────────── */}
+      {showWidget('staff_checkouts') ? <DashboardStaffCheckouts /> : null}
     </div>
   );
-} 
+}

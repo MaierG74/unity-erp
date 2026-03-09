@@ -209,7 +209,7 @@ Keyboard shortcuts are registered globally via a `useEffect` with `keydown` list
 - `components/layout/navbar.tsx` -- add task icon + badge + quick-create trigger
 - `app/todos/page.tsx` -- swap TodoDashboard for TaskList
 
-**Deprecated (keep but stop using):**
+**Removed after rollout cleanup:**
 - `TodoDashboard.tsx` -- replaced by TaskList
 - `TodoCreateDialog.tsx` -- replaced by TaskQuickCreate
 - `TodoDetailDialog.tsx` -- replaced by TaskSidePanel

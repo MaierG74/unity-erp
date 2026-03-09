@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
@@ -139,11 +139,47 @@ export function ComponentsTab() {
   });
   const [categorySearch, setCategorySearch] = useState('');
   const [supplierSearch, setSupplierSearch] = useState('');
+  const syncingFromUrlRef = useRef(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
+  // Sync local filter state from URL changes that originated outside this tab,
+  // such as assistant deep-links that open another component in Inventory.
+  useEffect(() => {
+    const nextFilterText = searchParams?.get('q') || '';
+    const nextCategory = searchParams?.get('category') || '_all';
+    const nextSupplier = searchParams?.get('supplier') || '_all';
+    const nextPageParam = Number.parseInt(searchParams?.get('page') || '1', 10);
+    const nextPageSizeParam = Number.parseInt(searchParams?.get('pageSize') || '10', 10);
+    const nextPage = Number.isFinite(nextPageParam) && nextPageParam > 0 ? nextPageParam - 1 : 0;
+    const nextPageSize = Number.isFinite(nextPageSizeParam) && nextPageSizeParam > 0 ? nextPageSizeParam : 10;
+
+    const shouldSync =
+      filterText !== nextFilterText ||
+      selectedCategory !== nextCategory ||
+      selectedSupplier !== nextSupplier ||
+      currentPage !== nextPage ||
+      pageSize !== nextPageSize;
+
+    if (!shouldSync) {
+      return;
+    }
+
+    syncingFromUrlRef.current = true;
+    setFilterText(nextFilterText);
+    setSelectedCategory(nextCategory);
+    setSelectedSupplier(nextSupplier);
+    setCurrentPage(nextPage);
+    setPageSize(nextPageSize);
+  }, [currentPage, filterText, pageSize, searchParams, selectedCategory, selectedSupplier]);
+
   // Sync filter and pagination state to URL (debounced for search, immediate for dropdowns/pagination)
   useEffect(() => {
+    if (syncingFromUrlRef.current) {
+      syncingFromUrlRef.current = false;
+      return;
+    }
+
     const currentUrlQuery = searchParams?.get('q') || '';
     const currentUrlCategory = searchParams?.get('category') || '_all';
     const currentUrlSupplier = searchParams?.get('supplier') || '_all';
@@ -644,4 +680,3 @@ export function ComponentsTab() {
     </div>
   );
 }
-

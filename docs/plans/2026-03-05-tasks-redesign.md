@@ -4,7 +4,7 @@
 
 **Goal:** Replace the card-grid tasks page with a Linear-style list view + side panel detail + contextual quick-create from anywhere in the app.
 
-**Architecture:** New components replace (not modify) the old TodoDashboard/TodoDetailDialog. The existing API routes, hooks (`useTodosApi.ts`), and client lib (`lib/client/todos.ts`) are reused as-is. A `useTaskContext` hook auto-detects entity context from the current URL. A `useTaskKeyboard` hook registers global shortcuts. The Sheet component provides the side panel.
+**Architecture:** New components replace the old Todo task UI. The existing API routes, hooks (`useTodosApi.ts`), and client lib (`lib/client/todos.ts`) remain the integration layer, with small cleanup follow-ups to share attachment-upload behavior and remove legacy task entry points once the rollout is complete. A `useTaskContext` hook auto-detects entity context from the current URL. A `useTaskKeyboard` hook registers global shortcuts. The Sheet component provides the side panel.
 
 **Tech Stack:** Next.js 14, React, shadcn/ui (Sheet, Popover, Badge, Checkbox, Dialog), Tailwind CSS, React Query, Supabase, Lucide icons, date-fns.
 
@@ -599,10 +599,17 @@ git commit -m "feat(tasks): add TaskSidePanel with auto-save, comments, attachme
 - Title input auto-focused on open
 - Assignee defaults to current user, priority to medium, no due date
 - Context auto-populated from `useTaskContext()` if available
+- `useTaskContext()` must map routes to each entity's real primary key column instead of assuming a generic `id`
+  - `orders.order_id`
+  - `supplier_orders.order_id`
+  - `quotes.id`
+  - `customers.id`
+  - `products.product_id`
 - Context chip shows entity label, `x` to clear
 - Enter in title input submits
 - On success: close dialog, toast "Task created", invalidate todo list query
 - Minimal — no description, no watchers, no checklist in quick-create
+- Cleanup follow-up: the live `/todos` page should use `TaskQuickCreate` for its "New Task" entry point, and the legacy `TodoDashboard`, `TodoCreateDialog`, and `TodoDetailDialog` files should be removed once they are no longer referenced
 
 **Step 1: Create TaskQuickCreate**
 
@@ -749,15 +756,15 @@ git commit -m "feat(tasks): polish and visual QA fixes"
 | `components/features/todos/TaskQuickCreate.tsx` | Create | 7 |
 | `components/layout/navbar.tsx` | Modify | 8 |
 
-**Existing files reused as-is (no changes):**
-- `hooks/useTodosApi.ts` — all React Query hooks
-- `lib/client/todos.ts` — all API client functions
+**Shared files updated during cleanup:**
+- `hooks/useTodosApi.ts` — React Query hooks now reuse the shared attachment upload helper
+- `lib/client/todos.ts` — API client utilities now include the shared attachment upload helper
 - `lib/db/todos.ts` — types and server-side queries
 - `app/api/todos/**` — all API routes
-- `components/features/todos/TodoEntityLinkPicker.tsx` — reused in side panel
+- `components/features/todos/TodoEntityLinkPicker.tsx` — reused in side panel with debug logging removed
 - `components/ui/sheet.tsx` — available but not used (using inline panel instead)
 
-**Deprecated (kept, no longer imported from page):**
+**Removed after rollout cleanup:**
 - `components/features/todos/TodoDashboard.tsx`
 - `components/features/todos/TodoCreateDialog.tsx`
 - `components/features/todos/TodoDetailDialog.tsx`

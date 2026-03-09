@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -48,6 +48,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { AlertTriangle, ChevronLeft, ChevronRight, Filter, Loader2, Minus, Plus, Search, ZoomIn } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { format, addDays, subDays } from 'date-fns';
+import { cn } from '@/lib/utils';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
@@ -185,9 +186,10 @@ export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardPro
   const pixelsPerHour = ZOOM_LEVELS[zoomIndex];
   const timelineWidth = totalHours * pixelsPerHour;
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isFetching, isPlaceholderData, isError } = useQuery({
     queryKey,
     queryFn: () => fetchLaborPlanningPayload({ date: selectedDate }),
+    placeholderData: keepPreviousData,
   });
 
   const { assignMutation, updateMutation, unassignMutation } = useLaborPlanningMutations(queryKey);
@@ -530,7 +532,7 @@ export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardPro
     [selectedDate, unassignMutation]
   );
 
-  if (isLoading) {
+  if (isLoading && !data) {
     return (
       <div className="container mx-auto space-y-6 py-6">
         <div className="h-10 w-64 animate-pulse rounded-md bg-muted" />
@@ -606,6 +608,9 @@ export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardPro
               Today
             </Button>
           )}
+          {isPlaceholderData && (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+          )}
         </div>
         <span className="text-muted-foreground">Filter by role:</span>
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
@@ -665,7 +670,7 @@ export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardPro
         </Alert>
       )}
 
-      <div className="grid gap-2 lg:grid-cols-[200px_1fr]">
+      <div className={cn("grid gap-2 lg:grid-cols-[200px_1fr] transition-opacity duration-150", isPlaceholderData && "opacity-50 pointer-events-none")}>
         <Card className="flex flex-col overflow-hidden" style={{ height: columnHeight, maxHeight: columnHeight }}>
           <div className="flex items-center justify-between border-b px-3 py-2">
             <span className="text-sm font-semibold">Orders</span>
@@ -1086,11 +1091,14 @@ function buildStaffLanes(
         rateId: assignment.rateId,
         bolId: assignment.bolId,
         quantity: job?.quantity ?? null,
+        productId: job?.productId ?? null,
         // Time tracking fields
         jobStatus: assignment.jobStatus ?? undefined,
         issuedAt: assignment.issuedAt,
         startedAt: assignment.startedAt,
         assignmentDate: assignment.assignmentDate,
+        customerName: order?.customer ?? null,
+        dueDate: order?.dueDate ?? null,
       };
     });
 

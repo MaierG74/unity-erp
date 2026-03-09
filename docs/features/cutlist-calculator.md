@@ -168,6 +168,7 @@ Shows the optimized cutting layout after clicking **Calculate Layout**:
   - Backer cost is reported as an overall lamination run cost rather than being allocated into individual primary-board material cards.
 - **Backer board cutlist** when parts are set to **With Backer** lamination, with the same per-sheet billing toggles
 - The zoomed sheet viewer shows separate **Grain** and **Edges** columns in the legend and uses a wider dialog so the legend is less likely to clip on desktop screens.
+- When offcut-aware layouts are used, the preview now separates **reusable offcuts** from **scrap pockets** per sheet using the organization's reusable-offcut thresholds.
 
 ---
 

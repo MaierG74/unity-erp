@@ -9,14 +9,27 @@ import {
   getItemDemandSummary,
 } from '@/lib/assistant/demand';
 import {
+  buildProductCostAnswer,
+  buildProductCostCard,
+  detectProductCostIntent,
+  extractProductCostReference,
+  getProductCostSummary,
+} from '@/lib/assistant/costing';
+import {
   buildInventoryAnswer,
   buildInventoryCard,
+  buildInventorySearchAnswer,
+  buildInventorySearchCard,
   detectInventoryIntent,
   extractComponentReference,
+  getInventorySearchSummary,
   getInventoryItemSnapshot,
+  shouldUseInventorySearchMode,
 } from '@/lib/assistant/inventory';
 import {
   buildManufacturingAnswer,
+  buildOrderJobCardsAnswer,
+  buildOrderJobCardsCard,
   buildManufacturingStatusCard,
   buildManufacturingProgressCard,
   buildManufacturingOrderListAnswer,
@@ -47,14 +60,24 @@ import {
   buildOpenOrdersCard,
   buildOrderSearchAnswer,
   buildOrderSearchCard,
+  buildProductOpenOrdersAnswer,
+  buildProductOpenOrdersCard,
+  buildOrderProductsAnswer,
+  buildOrderProductsCard,
+  buildRecentCustomerOrdersAnswer,
+  buildRecentCustomerOrdersCard,
   buildOrdersLast7DaysAnswer,
   buildOrdersLast7DaysCard,
   buildOrderBlockerAnswer,
+  buildOrderBlockerCard,
   detectOrderSearchMode,
   detectOperationalIntent,
+  extractOrderProductsReference,
+  extractProductOpenOrdersReference,
   extractOrderSearchReference,
   extractLatestOrderCustomerReference,
   extractOpenOrdersCustomerReference,
+  extractRecentCustomerOrdersCustomerReference,
   extractRecentOrdersCustomerReference,
   extractOrderReference,
   getLastCustomerOrderSummary,
@@ -63,6 +86,8 @@ import {
   getOpenCustomerOrdersSummary,
   getOrderSearchSummary,
   getOrderBlockerSummary,
+  getOrderProductsSummary,
+  getProductOpenOrdersSummary,
   getOrdersLast7DaysSummary,
   getOrdersDueThisWeekSummary,
   resolveOpenOrdersCustomer,
@@ -85,16 +110,48 @@ import {
   getSupplierOrdersFollowUpSummary,
 } from '@/lib/assistant/purchasing';
 import {
+  getAssistantScope,
   getAssistantScopeLabel,
   getAssistantSuggestions,
   type AssistantReply,
 } from '@/lib/assistant/prompt-suggestions';
+import {
+  buildAssistantComponentClarifyAnswer,
+  buildAssistantComponentClarifyCard,
+} from '@/lib/assistant/component-resolver';
+import {
+  buildAssistantProductClarifyAnswer,
+  buildAssistantProductClarifyCard,
+} from '@/lib/assistant/product-resolver';
 import { classifyAssistantRequestWithModel } from '@/lib/assistant/model-router';
 import { getRouteClient } from '@/lib/supabase-route';
 
 const requestSchema = z.object({
   message: z.string().trim().min(1).max(1000),
   pathname: z.string().trim().max(200).optional().nullable(),
+  history: z
+    .array(
+      z.object({
+        role: z.enum(['assistant', 'user']),
+        content: z.string().trim().min(1).max(2000),
+        cardTitle: z.string().trim().max(200).optional().nullable(),
+      })
+    )
+    .max(12)
+    .optional(),
+  context: z
+    .object({
+      activeOrder: z
+        .object({
+          orderId: z.number().int().positive().optional(),
+          orderNumber: z.string().trim().max(120).optional().nullable(),
+          customerName: z.string().trim().max(160).optional().nullable(),
+        })
+        .optional()
+        .nullable(),
+    })
+    .optional()
+    .nullable(),
 });
 
 const outOfScopePattern =
@@ -114,6 +171,152 @@ function buildReply(
     suggestions: overrides.suggestions ?? getAssistantSuggestions(pathname),
     ...overrides,
   };
+}
+
+type AssistantHistoryEntry = NonNullable<z.infer<typeof requestSchema>['history']>[number];
+
+function normalizeConversationText(value: string | null | undefined) {
+  return value?.replace(/\s+/g, ' ').trim() ?? '';
+}
+
+function isOpenOrdersListFollowUp(message: string) {
+  const normalized = normalizeConversationText(message)
+    .toLowerCase()
+    .replace(/[?!.,]/g, ' ');
+
+  return (
+    /^(?:can you|could you|would you|please)?\s*(?:list|show|display)\b/.test(normalized) &&
+    /\b(them|those|the orders?|the open orders?)\b/.test(normalized)
+  );
+}
+
+function extractOpenOrdersContextFromHistory(history: AssistantHistoryEntry[]) {
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const item = history[index];
+    if (item.role !== 'assistant') {
+      continue;
+    }
+
+    const cardTitle = normalizeConversationText(item.cardTitle);
+    if (cardTitle) {
+      if (/^open customer orders$/i.test(cardTitle)) {
+        return { customerRef: null as string | null };
+      }
+
+      const titleMatch = cardTitle.match(/^open orders for (.+)$/i);
+      if (titleMatch?.[1]) {
+        return { customerRef: titleMatch[1].trim() };
+      }
+    }
+
+    const content = normalizeConversationText(item.content);
+    const contentMatch = content.match(/^Open customer orders(?: for (.+?))?:\s*\d+/i);
+    if (contentMatch) {
+      return { customerRef: contentMatch[1]?.trim() || null };
+    }
+  }
+
+  return null;
+}
+
+function getOpenOrdersFollowUpContext(message: string, history: AssistantHistoryEntry[]) {
+  if (!isOpenOrdersListFollowUp(message) || history.length === 0) {
+    return null;
+  }
+
+  const priorContext = extractOpenOrdersContextFromHistory(history);
+  if (!priorContext) {
+    return null;
+  }
+
+  return {
+    customerRef: priorContext.customerRef,
+    detailed: true,
+  };
+}
+
+function getActiveOrderReference(
+  context: z.infer<typeof requestSchema>['context'],
+  message: string,
+  options?: { allowJobCardLanguage?: boolean }
+) {
+  const normalized = normalizeConversationText(message).toLowerCase();
+  const refersToCurrentOrder =
+    /\b(this|that)\s+order\b/.test(normalized) ||
+    (Boolean(options?.allowJobCardLanguage) &&
+      /\b(job cards?|jobcard)\b/.test(normalized) &&
+      /\b(owing|outstanding|remaining|left|for this order)\b/.test(normalized));
+
+  if (!refersToCurrentOrder) {
+    return null;
+  }
+
+  const orderNumber = normalizeConversationText(context?.activeOrder?.orderNumber);
+  if (orderNumber) {
+    return orderNumber;
+  }
+
+  if (context?.activeOrder?.orderId) {
+    return String(context.activeOrder.orderId);
+  }
+
+  return null;
+}
+
+function shouldPreferProductOpenOrdersRoute(options: {
+  message: string;
+  pathname: string | null | undefined;
+  operationalIntent: ReturnType<typeof detectOperationalIntent>;
+  purchasingIntent: ReturnType<typeof detectPurchasingIntent>;
+  inventoryIntent: ReturnType<typeof detectInventoryIntent>;
+  productRef: string | null;
+}) {
+  if (!options.productRef || options.productRef.length < 2) {
+    return false;
+  }
+
+  if (options.operationalIntent === 'product_open_orders') {
+    return true;
+  }
+
+  const normalized = options.message.toLowerCase();
+  const scope = getAssistantScope(options.pathname);
+  const mentionsSupplierOrInventory =
+    /\b(stock|inventory|component|supplier|supplier orders?|purchase orders?|open po|eta|delivery|incoming|reserved|on hand)\b/.test(
+      normalized
+    );
+  const mentionsCustomerProductOrder =
+    /\b(customer orders?|customers ordered|ordered by customers|on order|in order|ordered)\b/.test(
+      normalized
+    );
+
+  if (!mentionsCustomerProductOrder || mentionsSupplierOrInventory) {
+    return false;
+  }
+
+  if (scope === 'products') {
+    return true;
+  }
+
+  return options.inventoryIntent == null;
+}
+
+function buildInventoryClarifySuggestions(
+  candidates: Array<{ internal_code: string }>,
+  intent: 'snapshot' | 'on_hand' | 'on_order' | 'reserved'
+) {
+  return candidates.map(candidate => {
+    switch (intent) {
+      case 'on_hand':
+        return `How much of ${candidate.internal_code} do we have in stock?`;
+      case 'on_order':
+        return `How much of ${candidate.internal_code} do we have on order?`;
+      case 'reserved':
+        return `How much of ${candidate.internal_code} is reserved?`;
+      default:
+        return `Show stock snapshot for ${candidate.internal_code}`;
+    }
+  });
 }
 
 async function resolveOrdersCustomerOrReply(
@@ -162,7 +365,10 @@ function getOperationalIntentFromModelAction(
 ): ReturnType<typeof detectOperationalIntent> {
   switch (action) {
     case 'open_orders':
+    case 'product_open_orders':
+    case 'order_products':
     case 'last_customer_order':
+    case 'recent_customer_orders':
     case 'order_search':
     case 'orders_last_7_days':
     case 'orders_due_this_week':
@@ -173,6 +379,10 @@ function getOperationalIntentFromModelAction(
     default:
       return null;
   }
+}
+
+function getCostingIntentFromModelAction(action: string | null | undefined) {
+  return action === 'product_cost' ? 'product_cost' : null;
 }
 
 function getPurchasingIntentFromModelAction(
@@ -194,6 +404,7 @@ function getManufacturingIntentFromModelAction(
 ): ReturnType<typeof detectManufacturingIntent> {
   switch (action) {
     case 'manufacturing_status':
+    case 'order_job_cards':
     case 'orders_in_production':
     case 'orders_completed_this_week':
     case 'production_staffing':
@@ -215,8 +426,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'A non-empty "message" is required.' }, { status: 400 });
   }
 
-  const { message, pathname } = parsed.data;
+  const { message, pathname, history = [], context } = parsed.data;
   const normalized = message.trim();
+  const openOrdersFollowUp = getOpenOrdersFollowUpContext(normalized, history);
+  const detectedOperationalIntent = detectOperationalIntent(normalized);
+  const detectedManufacturingIntent = detectManufacturingIntent(normalized);
+  const explicitManufacturingOrderRef =
+    extractManufacturingOrderReference(normalized) ||
+    getActiveOrderReference(context, normalized, { allowJobCardLanguage: true });
   let modelRoute: Awaited<ReturnType<typeof classifyAssistantRequestWithModel>> = null;
   try {
     modelRoute = await classifyAssistantRequestWithModel(normalized);
@@ -234,13 +451,28 @@ export async function POST(req: NextRequest) {
     modelRoute?.action === 'inventory_snapshot'
       ? modelRoute.inventory_intent ?? detectInventoryIntent(normalized)
       : detectInventoryIntent(normalized);
-  const operationalIntent =
-    getOperationalIntentFromModelAction(modelRoute?.action) ?? detectOperationalIntent(normalized);
+  const operationalIntent = openOrdersFollowUp
+    ? 'open_orders'
+    : explicitManufacturingOrderRef && detectedManufacturingIntent
+      ? null
+      : getOperationalIntentFromModelAction(modelRoute?.action) ?? detectedOperationalIntent;
+  const costingIntent =
+    getCostingIntentFromModelAction(modelRoute?.action) ?? detectProductCostIntent(normalized);
   const purchasingIntent =
     getPurchasingIntentFromModelAction(modelRoute?.action) ?? detectPurchasingIntent(normalized);
   const manufacturingIntent =
-    getManufacturingIntentFromModelAction(modelRoute?.action) ?? detectManufacturingIntent(normalized);
+    getManufacturingIntentFromModelAction(modelRoute?.action) ?? detectedManufacturingIntent;
   const manufacturingFocus = modelRoute?.manufacturing_focus ?? detectManufacturingFocus(normalized);
+  const productOpenOrdersRef =
+    modelRoute?.product_ref?.trim() || extractProductOpenOrdersReference(normalized);
+  const preferProductOpenOrders = shouldPreferProductOpenOrdersRoute({
+    message: normalized,
+    pathname,
+    operationalIntent,
+    purchasingIntent,
+    inventoryIntent,
+    productRef: productOpenOrdersRef,
+  });
 
   let reply: AssistantReply;
 
@@ -274,6 +506,201 @@ export async function POST(req: NextRequest) {
       message:
         'I understand that as a Unity workflow question, but the documentation/RAG tools are not wired into this prototype yet, so I do not know the verified answer from docs yet.',
     });
+  } else if (costingIntent === 'product_cost') {
+    const productRef =
+      modelRoute?.product_ref?.trim() || extractProductCostReference(normalized);
+
+    if (!productRef || productRef.length < 2) {
+      reply = buildReply(pathname, {
+        status: 'clarify',
+        message:
+          'I understood that as a costing question, but I could not tell which product you meant. Rephrase it with a product code or product name.',
+        suggestions: [
+          'What is the cost of Apollo Highback?',
+          'What is the cost of Apollo Heavy Duty?',
+          'What is the cost of Apollo Mid Back?',
+        ],
+      });
+      return NextResponse.json(reply);
+    }
+
+    try {
+      const result = await getProductCostSummary(routeClient.supabase, productRef, {
+        origin: req.nextUrl.origin,
+        cookieHeader: req.headers.get('cookie'),
+        authorizationHeader: req.headers.get('authorization'),
+      });
+
+      if (result.kind === 'summary') {
+        const productLabel =
+          result.product.internal_code?.trim() || result.product.name?.trim() || String(result.product.product_id);
+
+        reply = buildReply(pathname, {
+          status: 'answered',
+          message: buildProductCostAnswer(result),
+          card: buildProductCostCard(result),
+          suggestions: [
+            `What is the cost of ${productLabel}?`,
+            `Has product ${productLabel} been manufactured?`,
+            `Show production progress for ${productLabel}`,
+          ],
+        });
+        return NextResponse.json(reply);
+      }
+
+      if (result.kind === 'ambiguous') {
+        reply = buildReply(pathname, {
+          status: 'clarify',
+          message: buildProductCostAnswer(result),
+          suggestions: result.candidates.map(candidate =>
+            `What is the cost of ${candidate.internal_code ?? candidate.name ?? `product ${candidate.product_id}`}?`
+          ),
+        });
+        return NextResponse.json(reply);
+      }
+
+      reply = buildReply(pathname, {
+        status: 'unknown',
+        message: buildProductCostAnswer(result),
+      });
+      return NextResponse.json(reply);
+    } catch (error) {
+      console.error('[assistant] product costing summary failed', error);
+      reply = buildReply(pathname, {
+        status: 'unknown',
+        message:
+          'I don\'t know right now because the product-costing tool failed. I am not going to guess.',
+      });
+      return NextResponse.json(reply);
+    }
+  } else if (operationalIntent === 'product_open_orders' || preferProductOpenOrders) {
+    const productRef = productOpenOrdersRef;
+
+    if (!productRef || productRef.length < 2) {
+      reply = buildReply(pathname, {
+        status: 'clarify',
+        message:
+          'I understood that as a product-order question, but I could not tell which product you meant. Rephrase it with a product code or product name.',
+        suggestions: [
+          'Do we have any Apollo Highback in order at the moment?',
+          'Which customer orders include Apollo Heavy Duty?',
+          'Do we have any Apollo Mid Back on order from customers?',
+        ],
+      });
+      return NextResponse.json(reply);
+    }
+
+    try {
+      const result = await getProductOpenOrdersSummary(routeClient.supabase, productRef);
+
+      if (result.kind === 'summary') {
+        const productLabel =
+          result.product.name?.trim() || result.product.internal_code?.trim() || `Product ${result.product.product_id}`;
+
+        reply = buildReply(pathname, {
+          status: 'answered',
+          message: buildProductOpenOrdersAnswer(result),
+          card: buildProductOpenOrdersCard(result),
+          suggestions: [
+            `What is the cost of ${productLabel}?`,
+            `Has product ${productLabel} been manufactured?`,
+            `Which customer orders include ${productLabel}?`,
+          ],
+        });
+        return NextResponse.json(reply);
+      }
+
+      if (result.kind === 'ambiguous') {
+        reply = buildReply(pathname, {
+          status: 'clarify',
+          message: buildAssistantProductClarifyAnswer(result.product_ref, result.candidates),
+          card: buildAssistantProductClarifyCard(result.product_ref, result.candidates, {
+            buildPrompt: candidate =>
+              `Which customer orders include ${candidate.name?.trim() || candidate.internal_code?.trim() || `product ${candidate.product_id}`}?`,
+            primaryActionLabel: 'Check customer orders',
+            description:
+              'I found multiple product matches for this customer-order question. Pick one to see current open customer orders.',
+          }),
+          suggestions: result.candidates.map(candidate =>
+            `Which customer orders include ${candidate.name?.trim() || candidate.internal_code?.trim() || `product ${candidate.product_id}`}?`
+          ),
+        });
+        return NextResponse.json(reply);
+      }
+
+      reply = buildReply(pathname, {
+        status: 'unknown',
+        message: buildProductOpenOrdersAnswer(result),
+      });
+      return NextResponse.json(reply);
+    } catch (error) {
+      console.error('[assistant] product open orders summary failed', error);
+      reply = buildReply(pathname, {
+        status: 'unknown',
+        message:
+          'I don\'t know right now because the product open-orders tool failed. I am not going to guess.',
+      });
+      return NextResponse.json(reply);
+    }
+  } else if (operationalIntent === 'order_products') {
+    const orderRef =
+      modelRoute?.order_ref?.trim() ||
+      extractOrderProductsReference(normalized) ||
+      extractOrderReference(normalized) ||
+      getActiveOrderReference(context, normalized);
+
+    if (!orderRef || orderRef.length < 1) {
+      reply = buildReply(pathname, {
+        status: 'clarify',
+        message:
+          'I understood that as an order-products question, but I could not tell which order you meant. Rephrase it with an order number.',
+      });
+      return NextResponse.json(reply);
+    }
+
+    try {
+      const summary = await getOrderProductsSummary(routeClient.supabase, orderRef);
+
+      if (summary.kind === 'ambiguous') {
+        reply = buildReply(pathname, {
+          status: 'clarify',
+          message: buildOrderProductsAnswer(summary),
+          suggestions: summary.candidates.map(candidate =>
+            `What products are on order ${candidate.order_number?.trim() || candidate.order_id}?`
+          ),
+        });
+        return NextResponse.json(reply);
+      }
+
+      if (summary.kind === 'not_found') {
+        reply = buildReply(pathname, {
+          status: 'unknown',
+          message: buildOrderProductsAnswer(summary),
+        });
+        return NextResponse.json(reply);
+      }
+
+      const orderLabel = summary.order.order_number?.trim() || String(summary.order.order_id);
+      reply = buildReply(pathname, {
+        status: 'answered',
+        message: buildOrderProductsAnswer(summary),
+        card: buildOrderProductsCard(summary),
+        suggestions: [
+          `Show production progress for order ${orderLabel}`,
+          `What is blocking order ${orderLabel}?`,
+          `Has order ${orderLabel} been manufactured?`,
+        ],
+      });
+      return NextResponse.json(reply);
+    } catch (error) {
+      console.error('[assistant] order products summary failed', error);
+      reply = buildReply(pathname, {
+        status: 'unknown',
+        message:
+          'I don\'t know right now because the order-products tool failed. I am not going to guess.',
+      });
+      return NextResponse.json(reply);
+    }
   } else if (operationalIntent === 'last_customer_order') {
     const customerRef =
       modelRoute?.customer_ref?.trim() || extractLatestOrderCustomerReference(normalized);
@@ -324,6 +751,50 @@ export async function POST(req: NextRequest) {
       });
       return NextResponse.json(reply);
     }
+  } else if (operationalIntent === 'recent_customer_orders') {
+    const customerRef =
+      modelRoute?.customer_ref?.trim() || extractRecentCustomerOrdersCustomerReference(normalized);
+
+    if (!customerRef) {
+      reply = buildReply(pathname, {
+        status: 'clarify',
+        message:
+          'I understood that as a recent-customer-orders question, but I could not tell which customer you meant.',
+      });
+      return NextResponse.json(reply);
+    }
+
+    try {
+      const resolved = await resolveOrdersCustomerOrReply(routeClient.supabase, pathname, customerRef);
+      if (resolved.reply) {
+        reply = resolved.reply;
+        return NextResponse.json(reply);
+      }
+
+      const summary = await getLastCustomerOrderSummary(
+        routeClient.supabase,
+        resolved.resolvedCustomer!.customer_name
+      );
+      reply = buildReply(pathname, {
+        status: summary.recent_orders.length > 0 ? 'answered' : 'unknown',
+        message: buildRecentCustomerOrdersAnswer(summary),
+        card: buildRecentCustomerOrdersCard(summary),
+        suggestions: [
+          `What was the last order from ${resolved.resolvedCustomer!.customer_name}?`,
+          `Orders from last 7 days for ${resolved.resolvedCustomer!.customer_name}`,
+          `How many open orders for ${resolved.resolvedCustomer!.customer_name}?`,
+        ],
+      });
+      return NextResponse.json(reply);
+    } catch (error) {
+      console.error('[assistant] recent customer orders summary failed', error);
+      reply = buildReply(pathname, {
+        status: 'unknown',
+        message:
+          'I don\'t know right now because the recent-customer-orders lookup failed. I am not going to guess.',
+      });
+      return NextResponse.json(reply);
+    }
   } else if (operationalIntent === 'order_search') {
     const searchRef = modelRoute?.order_ref?.trim() || extractOrderSearchReference(normalized);
 
@@ -362,8 +833,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(reply);
     }
   } else if (operationalIntent === 'open_orders') {
-    const customerRef = modelRoute?.customer_ref?.trim() || extractOpenOrdersCustomerReference(normalized);
-    const detailedOpenOrders = shouldListOpenOrders(normalized);
+    const customerRef = openOrdersFollowUp
+      ? openOrdersFollowUp.customerRef
+      : modelRoute?.customer_ref?.trim() || extractOpenOrdersCustomerReference(normalized);
+    const detailedOpenOrders =
+      Boolean(openOrdersFollowUp?.detailed) ||
+      shouldListOpenOrders(normalized) ||
+      (Boolean(customerRef) && !/\b(how many|count|total|number of|summary|overview)\b/i.test(normalized));
 
     try {
       if (customerRef) {
@@ -566,7 +1042,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(reply);
     }
   } else if (operationalIntent === 'order_blockers') {
-    const orderRef = modelRoute?.order_ref?.trim() || extractOrderReference(normalized);
+    const orderRef =
+      modelRoute?.order_ref?.trim() ||
+      extractOrderReference(normalized) ||
+      getActiveOrderReference(context, normalized);
 
     if (!orderRef) {
       reply = buildReply(pathname, {
@@ -602,6 +1081,7 @@ export async function POST(req: NextRequest) {
       reply = buildReply(pathname, {
         status: 'answered',
         message: buildOrderBlockerAnswer(summary),
+        card: buildOrderBlockerCard(summary),
         suggestions: [
           `What is blocking order ${summary.order.order_number?.trim() || summary.order.order_id}?`,
           'Which orders are late?',
@@ -618,11 +1098,70 @@ export async function POST(req: NextRequest) {
       });
       return NextResponse.json(reply);
     }
+  } else if (manufacturingIntent === 'order_job_cards') {
+    const orderRef =
+      modelRoute?.order_ref?.trim() ||
+      extractManufacturingOrderReference(normalized) ||
+      getActiveOrderReference(context, normalized, { allowJobCardLanguage: true });
+
+    if (!orderRef || orderRef.length < 1) {
+      reply = buildReply(pathname, {
+        status: 'clarify',
+        message:
+          'I understood that as an order job-cards question, but I could not tell which order you meant. Rephrase it with an order number.',
+      });
+      return NextResponse.json(reply);
+    }
+
+    try {
+      const summary = await getOrderManufacturingSummary(routeClient.supabase, orderRef);
+
+      if (summary.kind === 'ambiguous') {
+        reply = buildReply(pathname, {
+          status: 'clarify',
+          message: buildOrderJobCardsAnswer(summary),
+          suggestions: summary.candidates.map(candidate =>
+            `What job cards are on order ${candidate.order_number?.trim() || candidate.order_id}?`
+          ),
+        });
+        return NextResponse.json(reply);
+      }
+
+      if (summary.kind === 'not_found') {
+        reply = buildReply(pathname, {
+          status: 'unknown',
+          message: buildOrderJobCardsAnswer(summary),
+        });
+        return NextResponse.json(reply);
+      }
+
+      const orderLabel = summary.order.order_number ?? String(summary.order.order_id);
+      reply = buildReply(pathname, {
+        status: 'answered',
+        message: buildOrderJobCardsAnswer(summary),
+        card: buildOrderJobCardsCard(summary),
+        suggestions: [
+          `What products are on order ${orderLabel}?`,
+          `What is blocking order ${orderLabel}?`,
+          `Show production progress for order ${orderLabel}`,
+        ],
+      });
+      return NextResponse.json(reply);
+    } catch (error) {
+      console.error('[assistant] order job cards summary failed', error);
+      reply = buildReply(pathname, {
+        status: 'unknown',
+        message:
+          'I don\'t know right now because the order job-cards tool failed. I am not going to guess.',
+      });
+      return NextResponse.json(reply);
+    }
   } else if (manufacturingIntent === 'manufacturing_status') {
     const orderRef =
       modelRoute?.order_ref?.trim() ||
       extractManufacturingOrderReference(normalized) ||
-      (/\border\b|\bpo[-\s]?\d/i.test(normalized) ? extractOrderReference(normalized) : null);
+      (/\border\b|\bpo[-\s]?\d/i.test(normalized) ? extractOrderReference(normalized) : null) ||
+      getActiveOrderReference(context, normalized, { allowJobCardLanguage: true });
     const productRef =
       !orderRef ? modelRoute?.product_ref?.trim() || extractManufacturingProductReference(normalized) : null;
 
@@ -854,6 +1393,12 @@ export async function POST(req: NextRequest) {
         reply = buildReply(pathname, {
           status: 'clarify',
           message: buildSupplierOrdersAnswer(result),
+          card: buildAssistantComponentClarifyCard(result.component_ref, result.candidates, {
+            buildPrompt: internalCode => `Which supplier orders include ${internalCode}?`,
+            primaryActionLabel: 'Check orders',
+            description:
+              'I found multiple component matches for this purchasing question. Pick one to see its supplier orders.',
+          }),
           suggestions: result.candidates.map(
             candidate => `Which supplier orders include ${candidate.internal_code}?`
           ),
@@ -909,6 +1454,12 @@ export async function POST(req: NextRequest) {
         reply = buildReply(pathname, {
           status: 'clarify',
           message: buildNextDeliveryAnswer(result),
+          card: buildAssistantComponentClarifyCard(result.component_ref, result.candidates, {
+            buildPrompt: internalCode => `When is the next delivery for ${internalCode}?`,
+            primaryActionLabel: 'Check delivery',
+            description:
+              'I found multiple component matches for this delivery question. Pick one to see the verified ETA state.',
+          }),
           suggestions: result.candidates.map(
             candidate => `When is the next delivery for ${candidate.internal_code}?`
           ),
@@ -1017,6 +1568,18 @@ export async function POST(req: NextRequest) {
             demandIntent === 'orders_needing_item'
               ? buildOrdersNeedingItemAnswer(result)
               : buildDemandCoverageAnswer(result),
+          card: buildAssistantComponentClarifyCard(result.component_ref, result.candidates, {
+            buildPrompt: internalCode =>
+              demandIntent === 'orders_needing_item'
+                ? `Which customer orders need ${internalCode}?`
+                : `Do we have enough ${internalCode} for open demand?`,
+            primaryActionLabel:
+              demandIntent === 'orders_needing_item' ? 'Check demand' : 'Check coverage',
+            description:
+              demandIntent === 'orders_needing_item'
+                ? 'I found multiple component matches. Pick one to see which orders need it.'
+                : 'I found multiple component matches. Pick one to see whether open demand is covered.',
+          }),
           suggestions: result.candidates.map(candidate =>
             demandIntent === 'orders_needing_item'
               ? `Which customer orders need ${candidate.internal_code}?`
@@ -1054,7 +1617,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(reply);
     }
   } else if (inventoryIntent) {
-    const componentRef = modelRoute?.component_ref?.trim() || extractComponentReference(normalized);
+    const extractedComponentRef = extractComponentReference(normalized);
+    const modelComponentRef =
+      modelRoute?.component_ref?.trim() || modelRoute?.product_ref?.trim() || '';
+    const componentRef = shouldUseInventorySearchMode(extractedComponentRef)
+      ? extractedComponentRef
+      : modelComponentRef || extractedComponentRef;
 
     if (!componentRef || componentRef.length < 2) {
       reply = buildReply(pathname, {
@@ -1066,6 +1634,22 @@ export async function POST(req: NextRequest) {
     }
 
     try {
+      if (shouldUseInventorySearchMode(componentRef)) {
+        const searchSummary = await getInventorySearchSummary(routeClient.supabase, componentRef);
+
+        if (searchSummary && searchSummary.matches.length > 1) {
+          reply = buildReply(pathname, {
+            status: 'clarify',
+            message: buildInventorySearchAnswer(searchSummary),
+            card: buildInventorySearchCard(searchSummary, inventoryIntent),
+            suggestions: searchSummary.matches
+              .slice(0, 3)
+              .map(match => buildInventoryClarifySuggestions([{ internal_code: match.internal_code }], inventoryIntent)[0]),
+          });
+          return NextResponse.json(reply);
+        }
+      }
+
       const result = await getInventoryItemSnapshot(routeClient.supabase, componentRef);
 
       if (result.kind === 'snapshot') {
@@ -1086,8 +1670,24 @@ export async function POST(req: NextRequest) {
       if (result.kind === 'ambiguous') {
         reply = buildReply(pathname, {
           status: 'clarify',
-          message: `I found multiple possible components for "${result.component_ref}". Which one did you mean?`,
-          suggestions: result.candidates.map(candidate => `Show stock snapshot for ${candidate.internal_code}`),
+          message: buildAssistantComponentClarifyAnswer(result.component_ref, result.candidates),
+          card: buildAssistantComponentClarifyCard(result.component_ref, result.candidates, {
+            buildPrompt: internalCode =>
+              inventoryIntent === 'on_order'
+                ? `How much of ${internalCode} do we have on order?`
+                : inventoryIntent === 'reserved'
+                  ? `How much of ${internalCode} is reserved?`
+                  : `How much of ${internalCode} do we have in stock?`,
+            primaryActionLabel:
+              inventoryIntent === 'on_order'
+                ? 'Check on order'
+                : inventoryIntent === 'reserved'
+                  ? 'Check reserved'
+                  : 'Check stock',
+            description:
+              'I found multiple exact component matches for this inventory question. Pick one to continue.',
+          }),
+          suggestions: buildInventoryClarifySuggestions(result.candidates, inventoryIntent),
         });
         return NextResponse.json(reply);
       }

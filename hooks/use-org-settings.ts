@@ -4,6 +4,10 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/common/auth-provider';
 import { getOrgId } from '@/lib/utils';
+import type {
+  CupboardBaseConstruction,
+  CupboardTopConstruction,
+} from '@/lib/configurator/templates/types';
 
 /**
  * Org-level configurator defaults.
@@ -11,11 +15,15 @@ import { getOrgId } from '@/lib/utils';
  */
 export interface ConfiguratorDefaults {
   materialThickness?: number;
+  topConstruction?: CupboardTopConstruction;
+  baseConstruction?: CupboardBaseConstruction;
   backMaterialThickness?: number;
   adjusterHeight?: number;
   topOverhangSides?: number;
+  topOverhangFront?: number;
   topOverhangBack?: number;
   baseOverhangSides?: number;
+  baseOverhangFront?: number;
   baseOverhangBack?: number;
   backSlotDepth?: number;
   doorGap?: number;

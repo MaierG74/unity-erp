@@ -28,11 +28,15 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260306161654
-- Latest applied migration name: purchase_order_shared_drafts
-- Applied at (UTC): 2026-03-06 16:18:08 UTC
+- Latest applied migration version: 20260308102326
+- Latest applied migration name: organization_cutlist_defaults
+- Applied at (UTC): 2026-03-08 10:23:36 UTC
 - Applied by: Codex via Supabase MCP
 - Verification notes:
+  - Current batch (2026-03-08, Codex):
+    1. `organization_cutlist_defaults` (20260308102326): added `public.organizations.cutlist_defaults` as nullable `jsonb` for org-specific reusable offcut thresholds.
+    2. Verified with MCP `list_migrations`: production history now includes `20260308102326`.
+    3. Verified with MCP SQL: `public.organizations.cutlist_defaults` exists as nullable `jsonb`.
   - Current batch (2026-03-06, Codex):
     1. `purchase_order_shared_drafts` (20260306161654): added `purchase_order_drafts` and `purchase_order_draft_lines`, org-scoped RLS using `organization_members`, autosave/status RPCs, and updated `create_purchase_order_with_lines` to stamp `created_by = auth.uid()`.
     2. Verified with MCP `list_migrations`: production history now includes `20260306161654`.

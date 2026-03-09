@@ -70,6 +70,10 @@ export interface StaffAssignment {
   issuedAt?: string | null;
   startedAt?: string | null;
   assignmentDate?: string | null;
+  productId?: number | null;
+  // Order context fields (populated from parent PlanningOrder)
+  customerName?: string | null;
+  dueDate?: string | null;
 }
 
 export interface StaffOpenSlot {

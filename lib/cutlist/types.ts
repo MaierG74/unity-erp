@@ -228,6 +228,27 @@ export interface SheetLayout {
   stock_width_mm?: number;
   /** Material name label for this sheet (when multiple materials are used) */
   material_label?: string;
+  /** Optional offcut classification for this sheet */
+  offcut_summary?: SheetOffcutSummary;
+}
+
+export interface OffcutRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  area_mm2: number;
+}
+
+export interface SheetOffcutSummary {
+  fragments: number;
+  reusableCount: number;
+  scrapCount: number;
+  reusableArea_mm2: number;
+  scrapArea_mm2: number;
+  largestReusableArea_mm2: number;
+  reusableOffcuts: OffcutRect[];
+  scrapOffcuts: OffcutRect[];
 }
 
 /**

@@ -132,6 +132,35 @@ export function CupboardForm({ config, onChange }: CupboardFormProps) {
             </Select>
           </div>
         </div>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Top Build</Label>
+            <Select
+              value={config.topConstruction}
+              onValueChange={(v) => update({ topConstruction: v as CupboardConfig['topConstruction'] })}
+            >
+              <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="single">Single 16mm</SelectItem>
+                <SelectItem value="laminated">32mm Laminated</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Base Build</Label>
+            <Select
+              value={config.baseConstruction}
+              onValueChange={(v) => update({ baseConstruction: v as CupboardConfig['baseConstruction'] })}
+            >
+              <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="single">Single 16mm</SelectItem>
+                <SelectItem value="laminated">32mm Laminated</SelectItem>
+                <SelectItem value="cleated">32mm Cleated</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
       </div>
 
       {/* Back Panel — inline switch + thickness */}
@@ -184,13 +213,17 @@ export function CupboardForm({ config, onChange }: CupboardFormProps) {
             </div>
           </div>
 
-          {/* Overhangs — 4-col: top sides/back, base sides/back */}
+          {/* Overhangs */}
           <div>
             <h4 className="text-xs font-medium text-muted-foreground mb-1.5">Overhangs (mm)</h4>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               <div className="space-y-1">
                 <Label htmlFor="cfg-top-oh-sides" className="text-[10px] text-muted-foreground">Top Sides</Label>
                 <NumberInput id="cfg-top-oh-sides" value={config.topOverhangSides} min={0} max={30} onChange={(v) => update({ topOverhangSides: v })} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="cfg-top-oh-front" className="text-[10px] text-muted-foreground">Top Front</Label>
+                <NumberInput id="cfg-top-oh-front" value={config.topOverhangFront} min={0} max={30} onChange={(v) => update({ topOverhangFront: v })} />
               </div>
               <div className="space-y-1">
                 <Label htmlFor="cfg-top-oh-back" className="text-[10px] text-muted-foreground">Top Back</Label>
@@ -199,6 +232,10 @@ export function CupboardForm({ config, onChange }: CupboardFormProps) {
               <div className="space-y-1">
                 <Label htmlFor="cfg-base-oh-sides" className="text-[10px] text-muted-foreground">Base Sides</Label>
                 <NumberInput id="cfg-base-oh-sides" value={config.baseOverhangSides} min={0} max={30} onChange={(v) => update({ baseOverhangSides: v })} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="cfg-base-oh-front" className="text-[10px] text-muted-foreground">Base Front</Label>
+                <NumberInput id="cfg-base-oh-front" value={config.baseOverhangFront} min={0} max={30} onChange={(v) => update({ baseOverhangFront: v })} />
               </div>
               <div className="space-y-1">
                 <Label htmlFor="cfg-base-oh-back" className="text-[10px] text-muted-foreground">Base Back</Label>

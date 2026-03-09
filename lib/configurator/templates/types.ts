@@ -1,5 +1,8 @@
 import type { CutlistPart } from '@/lib/cutlist/types';
 
+export type CupboardTopConstruction = 'single' | 'laminated';
+export type CupboardBaseConstruction = 'single' | 'laminated' | 'cleated';
+
 /**
  * Configuration for a parametric cupboard.
  */
@@ -8,10 +11,14 @@ export interface CupboardConfig {
   width: number;
   /** Overall external height in mm (including adjusters) */
   height: number;
-  /** Overall external depth in mm (including top/base overhang at back) */
+  /** Overall external depth in mm (including top/base overhangs at front and back) */
   depth: number;
   /** Board thickness in mm (16, 18, or 25) */
   materialThickness: number;
+  /** Top construction mode */
+  topConstruction: CupboardTopConstruction;
+  /** Base construction mode */
+  baseConstruction: CupboardBaseConstruction;
   /** Number of fixed shelves (0-10) */
   shelfCount: number;
   /** Door configuration */
@@ -28,10 +35,14 @@ export interface CupboardConfig {
   adjusterHeight: number;
   /** Top overhang past sides (left + right) in mm. Set to 0 for side-by-side cupboards. */
   topOverhangSides: number;
+  /** Top overhang past front edge in mm */
+  topOverhangFront: number;
   /** Top overhang past back in mm */
   topOverhangBack: number;
   /** Base overhang past sides (left + right) in mm. Normally same as top. Set to 0 for side-by-side. */
   baseOverhangSides: number;
+  /** Base overhang past front edge in mm. Normally same as top. */
+  baseOverhangFront: number;
   /** Base overhang past back in mm. Normally same as top. */
   baseOverhangBack: number;
   /** Depth of routed slot in top for back panel in mm */
@@ -45,6 +56,8 @@ export const DEFAULT_CUPBOARD_CONFIG: CupboardConfig = {
   height: 1800,
   depth: 500,
   materialThickness: 16,
+  topConstruction: 'laminated',
+  baseConstruction: 'cleated',
   shelfCount: 3,
   doorStyle: 'double',
   hasBack: true,
@@ -53,8 +66,10 @@ export const DEFAULT_CUPBOARD_CONFIG: CupboardConfig = {
   shelfSetback: 2,
   adjusterHeight: 10,
   topOverhangSides: 10,
+  topOverhangFront: 0,
   topOverhangBack: 10,
   baseOverhangSides: 10,
+  baseOverhangFront: 0,
   baseOverhangBack: 10,
   backSlotDepth: 8,
   backRecess: 0,

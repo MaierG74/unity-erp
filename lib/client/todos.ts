@@ -19,7 +19,7 @@ async function authorizedFetch(input: RequestInfo | URL, init?: FetchOptions) {
   const token = await getAccessToken();
   const headers = new Headers(init?.headers ?? {});
   headers.set('Authorization', `Bearer ${token}`);
-  if (init?.body && !headers.has('Content-Type')) {
+  if (init?.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
   return fetch(input, { ...init, headers });
@@ -170,6 +170,23 @@ export async function addTodoComment(todoId: string, body: string) {
     comment: json?.comment ?? null,
     comments: Array.isArray(json?.comments) ? (json.comments as TodoComment[]) : [],
   };
+}
+
+export async function uploadTodoAttachment(todoId: string, file: File) {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await authorizedFetch(`/api/todos/${todoId}/attachments`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({ error: 'Failed to upload attachment' }));
+    throw new Error(errorData.error || 'Failed to upload attachment');
+  }
+
+  return res.json();
 }
 
 export async function acknowledgeTodo(todoId: string, note?: string) {

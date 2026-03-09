@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { SO_STATUS } from '@/types/purchasing';
@@ -58,14 +58,39 @@ export default function PurchasingPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const filterParam = searchParams.get('filter');
+  const focusParam = searchParams.get('focus');
+  const supplierParam = searchParams.get('supplier');
   const validFilters: FilterType[] = ['pending', 'approved', 'partialReceived'];
   const initialFilter: FilterType = validFilters.includes(filterParam as FilterType)
     ? (filterParam as FilterType)
     : 'all';
   const [activeFilter, setActiveFilter] = useState<FilterType>(initialFilter);
-  const [supplierFilter, setSupplierFilter] = useState<string | null>(null);
+  const [supplierFilter, setSupplierFilter] = useState<string | null>(
+    supplierParam?.trim() || null
+  );
   const [supplierPopoverOpen, setSupplierPopoverOpen] = useState(false);
   const [visibleItems, setVisibleItems] = useState(ITEMS_PER_PAGE);
+
+  useEffect(() => {
+    if (focusParam !== 'suppliers' && !supplierParam) return;
+
+    const widget = document.getElementById('awaiting-receipt');
+    widget?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (focusParam === 'suppliers') {
+      setSupplierPopoverOpen(true);
+    }
+  }, [focusParam, supplierParam]);
+
+  useEffect(() => {
+    const nextFilter: FilterType = validFilters.includes(filterParam as FilterType)
+      ? (filterParam as FilterType)
+      : 'all';
+    setActiveFilter(nextFilter);
+  }, [filterParam]);
+
+  useEffect(() => {
+    setSupplierFilter(supplierParam?.trim() || null);
+  }, [supplierParam]);
 
   // --- Metrics query ---
   const { data: metrics, isLoading: metricsLoading } = useQuery({
@@ -148,8 +173,7 @@ export default function PurchasingPage() {
           )
         `)
         .in('purchase_orders.status_id', [SO_STATUS.APPROVED, SO_STATUS.PARTIALLY_RECEIVED])
-        .order('purchase_order_id', { ascending: false })
-        .limit(50);
+        .order('purchase_order_id', { ascending: false });
 
       if (error) throw error;
 

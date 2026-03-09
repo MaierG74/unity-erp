@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm, Controller, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { Resolver } from 'react-hook-form';
@@ -494,6 +494,7 @@ function SplitAllocationEditor({
 
 export function NewPurchaseOrderForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
@@ -523,6 +524,7 @@ export function NewPurchaseOrderForm() {
   const [selectedComponentInfoMap, setSelectedComponentInfoMap] = useState<
     Map<number, SelectedComponentInfo>
   >(new Map());
+  const [draftBootstrapComplete, setDraftBootstrapComplete] = useState(false);
 
   // Form setup
   const {
@@ -531,6 +533,7 @@ export function NewPurchaseOrderForm() {
     handleSubmit,
     watch,
     setValue,
+    getValues,
     reset,
     formState: { errors },
   } = useForm<PurchaseOrderFormData>({
@@ -550,6 +553,23 @@ export function NewPurchaseOrderForm() {
   const lastSavedSignatureRef = useRef<string | null>(null);
   const currentDraftIdRef = useRef<number | null>(null);
   const draftVersionRef = useRef<number | null>(null);
+  const prefillAppliedRef = useRef<string | null>(null);
+
+  const prefillComponentId = useMemo(() => {
+    const rawValue = searchParams.get('componentId');
+    if (!rawValue) return null;
+
+    const parsed = Number.parseInt(rawValue, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }, [searchParams]);
+
+  const prefillSuggestedQuantity = useMemo(() => {
+    const rawValue = searchParams.get('suggestedQuantity');
+    if (!rawValue) return null;
+
+    const parsed = Number.parseFloat(rawValue);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }, [searchParams]);
 
   const { data: currentUserId, isLoading: currentUserLoading } = useQuery({
     queryKey: ['current-user-id'],
@@ -707,6 +727,7 @@ export function NewPurchaseOrderForm() {
     }
 
     applyDraftSelection(null);
+    setDraftBootstrapComplete(true);
   }, [
     applyDraftSelection,
     currentUserId,
@@ -714,6 +735,12 @@ export function NewPurchaseOrderForm() {
     draftsLoading,
     sharedDrafts,
   ]);
+
+  useEffect(() => {
+    if (!draftsLoading && !currentUserLoading && draftBootstrapRef.current) {
+      setDraftBootstrapComplete(true);
+    }
+  }, [currentUserLoading, draftsLoading]);
 
   const watchedItems = watch('items');
   const watchedNotes = watch('notes');
@@ -1160,6 +1187,153 @@ export function NewPurchaseOrderForm() {
       notes: '',
     });
   };
+
+  const addPrefilledComponent = useCallback(
+    async (componentId: number, suggestedQuantity?: number | null) => {
+      const { data, error } = await supabase
+        .from('components')
+        .select(
+          `component_id, internal_code, description,
+           category:component_categories(categoryname),
+           inventory(quantity_on_hand),
+           suppliercomponents(
+             supplier_component_id, supplier_id, price, lead_time, min_order_quantity,
+             supplier:suppliers(name, supplier_id)
+           )`
+        )
+        .eq('component_id', componentId)
+        .single();
+
+      if (error || !data) {
+        throw new Error('Failed to load the selected component for purchase ordering.');
+      }
+
+      const suppliers = data.suppliercomponents ?? [];
+      const defaultSupplierComponentId =
+        suppliers.length === 1 ? suppliers[0].supplier_component_id : 0;
+      const nextQuantity =
+        suggestedQuantity && suggestedQuantity > 0 ? suggestedQuantity : undefined;
+      const existingItems = getValues('items');
+      const existingIndex = existingItems.findIndex(
+        (item) => item.component_id === componentId
+      );
+
+      setSelectedComponentInfoMap((prev) => {
+        const next = new Map(prev);
+        next.set(componentId, {
+          internal_code: data.internal_code,
+          description: data.description,
+          category_name: data.category?.categoryname ?? null,
+          stock_on_hand: data.inventory?.[0]?.quantity_on_hand ?? null,
+          suppliers,
+        });
+        return next;
+      });
+
+      if (existingIndex >= 0) {
+        if (
+          defaultSupplierComponentId > 0 &&
+          (!existingItems[existingIndex]?.supplier_component_id ||
+            existingItems[existingIndex]?.supplier_component_id === 0)
+        ) {
+          setValue(
+            `items.${existingIndex}.supplier_component_id`,
+            defaultSupplierComponentId,
+            { shouldValidate: true, shouldDirty: true }
+          );
+        }
+
+        if (
+          nextQuantity &&
+          (!existingItems[existingIndex]?.quantity ||
+            existingItems[existingIndex]?.quantity <= 0)
+        ) {
+          setValue(`items.${existingIndex}.quantity`, nextQuantity, {
+            shouldValidate: true,
+            shouldDirty: true,
+          });
+        }
+
+        return {
+          added: false,
+          internalCode: data.internal_code,
+        };
+      }
+
+      const blankSingleRow =
+        existingItems.length === 1 &&
+        existingItems[0]?.component_id === 0 &&
+        (existingItems[0]?.supplier_component_id ?? 0) === 0 &&
+        !existingItems[0]?.quantity &&
+        !existingItems[0]?.customer_order_id &&
+        (!existingItems[0]?.allocations || existingItems[0].allocations.length === 0) &&
+        !existingItems[0]?.notes;
+
+      if (blankSingleRow) {
+        setValue('items.0.component_id', componentId, {
+          shouldValidate: true,
+          shouldDirty: true,
+        });
+        setValue('items.0.supplier_component_id', defaultSupplierComponentId, {
+          shouldValidate: defaultSupplierComponentId > 0,
+          shouldDirty: true,
+        });
+        if (nextQuantity) {
+          setValue('items.0.quantity', nextQuantity, {
+            shouldValidate: true,
+            shouldDirty: true,
+          });
+        }
+      } else {
+        append({
+          component_id: componentId,
+          supplier_component_id: defaultSupplierComponentId,
+          quantity: (nextQuantity ?? undefined) as unknown as number,
+          customer_order_id: null,
+          allocations: [],
+          notes: '',
+        });
+      }
+
+      return {
+        added: true,
+        internalCode: data.internal_code,
+      };
+    },
+    [append, getValues, setValue]
+  );
+
+  useEffect(() => {
+    if (!draftBootstrapComplete || !prefillComponentId) return;
+
+    const prefillSignature = `${prefillComponentId}:${prefillSuggestedQuantity ?? ''}`;
+    if (prefillAppliedRef.current === prefillSignature) return;
+    prefillAppliedRef.current = prefillSignature;
+
+    void addPrefilledComponent(prefillComponentId, prefillSuggestedQuantity)
+      .then((result) => {
+        if (result.added) {
+          toast.success(`Added ${result.internalCode} to the purchase-order draft`);
+        } else {
+          toast.info(`${result.internalCode} is already in the current draft`);
+        }
+
+        router.replace('/purchasing/purchase-orders/new', { scroll: false });
+      })
+      .catch((prefillError) => {
+        const message =
+          prefillError instanceof Error
+            ? prefillError.message
+            : 'Failed to prefill the purchase-order form';
+        toast.error(message);
+      });
+  }, [
+    addPrefilledComponent,
+    draftBootstrapComplete,
+    prefillComponentId,
+    prefillSuggestedQuantity,
+    router,
+  ]);
 
   // Open modal for a specific item index
   const openComponentModal = (index: number) => {

@@ -62,9 +62,11 @@ These map to current tables (from Supabase) like `components`, `inventory`, `inv
 ### Prototype Status (2026-03-06)
 - A first UI shell now exists as a floating assistant launcher rendered from the shared app layout.
 - The first structured assistant card is now live for production staffing answers, so the dock can render a compact table with metrics instead of only plain-text chat output.
-- Structured assistant table cards are now live for production staffing, unassigned production work, inventory snapshot answers, open-order answers, order-search answers, late-order answers, low-stock answers, due-this-week order answers, supplier follow-up answers, supplier-order-by-item answers, next-delivery answers, late-supplier-order answers, manufacturing-progress answers, manufacturing-status answers, and latest-customer-order answers, and the first structured chart card is now live for "orders last 7 days" trend questions, so the dock can render compact operational summaries instead of only plain-text chat output.
+- Structured assistant table cards are now live for production staffing, unassigned production work, inventory snapshot answers, inventory search/choice answers, open-order answers, order-search answers, late-order answers, low-stock answers, due-this-week order answers, supplier follow-up answers, supplier-order-by-item answers, next-delivery answers, late-supplier-order answers, manufacturing-progress answers, manufacturing-status answers, product-costing answers, latest-customer-order answers, and recent-customer-orders answers, and the first structured chart card is now live for "orders last 7 days" trend questions, so the dock can render compact operational summaries instead of only plain-text chat output.
 - The chat dock now gives these cards clearer visual hierarchy with domain-tinted headers, stronger metric tiles, status badges, and cleaner row treatment so operational answers read more like mini dashboards than raw tables.
-- Card actions can now expose clickable record links for high-value answers like recent customer orders, so the assistant can open the matching order directly instead of only naming it in chat text.
+- Order-focused table cards now keep row actions compact: the row itself still opens the primary preview, only the main quick actions stay visible inline, and extra actions collapse behind a small `+N more` control instead of overflowing the card.
+- Empty order statuses now render as `Not set` in the assistant instead of `No status set`, so the order summaries read more cleanly.
+- Order-focused assistant cards now behave like mini launchers: users can open the order itself, jump straight to the Documents tab to inspect client-order files/drawings, and open the linked quote when one exists.
 - Current prototype behavior is intentionally narrow:
   - Unity-only scope
   - no general web/world knowledge
@@ -73,20 +75,31 @@ These map to current tables (from Supabase) like `components`, `inventory`, `inv
   - request interpretation is now model-assisted with `gpt-5-mini`, but verified answers still come only from trusted Unity data tools
 - Live read-only tools now shipped:
   - inventory snapshot questions from the assistant chat dock
+  - inventory family-search questions now reuse the inventory components search behavior, so broad prompts like "How many gas spindles do we have in stock?" return a choice card with verified matches and inline `Show stock` / `Open inventory` actions instead of silently guessing one component
+  - ambiguous component matches in purchasing and demand questions now return the same kind of clickable choice card, so broad prompts like "Which supplier orders include black PVC?" can be refined by clicking a specific component instead of retyping it
+  - product customer-order questions now resolve against manufactured products instead of supplier components, so prompts like "Do we have any Apollo in order at the moment?" and "Which customer orders include Apollo Highback?" return open customer-order summaries for products with clickable product choice cards when the product family is ambiguous
   - operational summary questions for open customer orders, due-this-week orders, late orders, and below-reorder inventory
+- customer-scoped open-order questions now list the matching orders directly for prompts like "What orders are currently open for QButton?" and each order row exposes drill-down actions for products, production/job-card progress, and outstanding components
+- customer-scoped open-order cards now fall back to the real order list when none of the matching orders have due dates, so prompts phrased as "outstanding orders for QButton" still keep the rows and drill-down actions visible
+- order preview drill-downs now include a dedicated `Job cards` path that shows the actual job cards attached to the selected order, instead of bouncing back through a generic progress prompt
+- switching between order previews in the dock now keeps the current preview visible, adds a small loading overlay, and fades the next order in so preview changes feel less jarring
+  - short conversational follow-ups like "Can you list them, please?" now reuse the recent open-orders context instead of falling back to `I don't know`, and active order previews can anchor "this order" follow-ups like "What products are on this order?" or "What job cards are owing on this order?"
   - customer-scoped operational summaries and short order lists for prompts like "How many open orders for Office Group?", "Show open orders for Office Group", "Which orders are due this week for Typestar?", and "Which orders are late for Typestar?"
-  - per-order blocker summary using the existing component shortfall RPC where order component data exists
+  - order-product questions like "What products are on order TEST-LC-001?" now return the order's product lines with direct next-step actions into job-card progress and blocker summaries
+  - per-order blocker summary using the existing component shortfall RPC where order component data exists, now with a structured "Outstanding parts" card and launcher actions back into the order
   - product and order manufacturing status questions for prompts like "Has product TEST-002 been manufactured?", "Who manufactured TEST-002?", "When was TEST-002 completed?", "Has order TEST-LC-001 been manufactured?", and "Who completed order Test5566?"
   - production-list summaries for prompts like "Which orders are still in production?", "Which orders finished this week?", "Who is working on orders in production?", and "Which orders have unassigned work?"
   - a structured table card for production-staffing answers, with summary metrics and per-order staff assignment rows inside the chat dock
   - a structured table card for unassigned production work, showing which active orders still need staff assignment
   - a structured card for inventory snapshot answers, including on-hand, reserved, available, and on-order context from the same verified component snapshot
+  - a structured inventory choice card for broad component-family lookups, showing candidate code, description, on hand, reserved, and on order values plus direct "Show stock" and "Open inventory" actions
   - a structured table card for open customer orders, showing order, customer, due date, and status rows for either the next due sample or customer-scoped list requests
   - a structured table card for late orders, showing due date and days-late ranking
   - a structured table card for due-this-week orders, showing current-week delivery commitments
   - a structured chart card for order-creation trends over the last 7 days, showing daily counts, total orders, average per day, and busiest day
-  - a structured table card for latest-customer-order lookups, showing the newest matching order, recent order history, and direct open-order actions
-  - a structured table card for order-number searches, showing recent matching orders for prompts like "Which orders start with TEST?"
+  - a structured table card for latest-customer-order lookups, showing the newest matching order, recent order history, and inline quick actions for opening the order, client docs, and linked quote
+  - a structured table card for recent-customer-orders lookups, showing the latest few orders for prompts like "What were the last orders placed by OneLink?" and exposing the same inline order / documents / quote launcher actions
+  - a structured table card for order-number searches, showing recent matching orders for prompts like "Which orders start with TEST?" and exposing the same inline launcher actions
   - a structured table card for low-stock items, showing on-hand, reorder, and shortage values
   - a structured table card for supplier follow-up, showing which open supplier lines need chasing first
   - a structured table card for supplier orders by item, showing supplier, status, ordered date, and outstanding quantities for the requested component
@@ -94,6 +107,7 @@ These map to current tables (from Supabase) like `components`, `inventory`, `inv
   - a structured card for late supplier orders, including the explicit no-ETA and no-late-lines states
   - a structured card for manufacturing progress, showing completion percentages, quantities, open job cards, and recent verified completions for products or orders
   - a structured card for manufacturing status, showing latest completion, completed-by, and active/completed job-card state for products or orders
+  - a structured card for product-costing lookups, showing total unit cost, materials, labor, overhead, and the top current cost drivers from the same BOM/labor/overhead inputs used by the product costing screen, with clickable metric drilldowns for labor and overhead line items
   - order production-progress questions for prompts like "Show production progress for order TEST-LC-001" and "How far along is order Test5566?"
   - purchasing item lookups for open supplier orders and next-delivery checks
   - purchasing-wide follow-up summary for open supplier lines that are old or missing verified ETA data
@@ -103,9 +117,15 @@ These map to current tables (from Supabase) like `components`, `inventory`, `inv
     - "How much of 400mm Runner WHT do we have in stock?"
     - "How much of 400mm Runner WHT do we have on order?"
     - "How much of WID2 is reserved?"
+    - "How many gas spindles do we have in stock?"
+    - "How many gas vinyls do we have in stock?"
+    - "What is the cost of Apollo HB?"
+    - "What is the cost of Apollo Highback?"
+    - "What does Apollo Heavy Duty cost?"
     - "How many open customer orders do we have?"
     - "How many open orders for Office Group?"
     - "What was the last order from Office Group?"
+    - "What were the last orders placed by OneLink?"
     - "What orders start with TEST?"
     - "Show open orders for Office Group"
     - "Which orders are due this week for Typestar?"
@@ -140,6 +160,8 @@ These map to current tables (from Supabase) like `components`, `inventory`, `inv
     - reserved
     - available
     - on order
+    - candidate component lists for broad inventory-family lookups
+    - per-candidate on-hand / reserved / on-order values inside inventory choice cards
     - received on open supplier lines
     - open supplier order count
     - open purchase order count
@@ -169,6 +191,10 @@ These map to current tables (from Supabase) like `components`, `inventory`, `inv
     - order-level latest verified completion date
     - order-level latest completing staff member
     - order-level active vs completed job-card counts
+    - product unit cost rollups from current BOM, labor, and overhead inputs
+    - materials / labor / overhead totals for a product
+    - missing material price count in the current product rollup
+    - top current cost drivers for a product
     - list of orders with active manufacturing job cards
     - current staff assignments across active manufacturing job cards, including unassigned work
     - list of active orders with unassigned production job cards
@@ -182,6 +208,7 @@ These map to current tables (from Supabase) like `components`, `inventory`, `inv
   - current supplier follow-up data often has no explicit `expected_delivery_date`, so next-delivery questions intentionally return "I don't know" rather than guessing from PO dates
   - current supplier "late order" questions also intentionally return "I don't know" when no verified `expected_delivery_date` exists on the open supplier lines, even if some lines are very old
   - current component-demand answers only cover orders that have verifiable BOM / requirement data for that component; if no verified demand rows exist, the assistant answers conservatively instead of inferring
+  - current inventory family-search prompts can show verified options and let the user click through to an exact component, but the assistant does not yet carry that exact chosen component forward as durable conversation context across later prompts
   - current product manufacturing answers only work where `job_card_items.product_id` is populated on the linked manufacturing records; some older completed job-card rows still have `product_id = null`, so the assistant will refuse to infer completion history from partial data
   - order-level manufacturing answers are broader than product-level answers because `job_cards.order_id` is populated more consistently than `job_card_items.product_id`; however, per-product details inside older order history may still be incomplete
   - the model layer is limited to choosing from known Unity assistant actions and extracting refs like customer / component / order; it does not answer from model memory

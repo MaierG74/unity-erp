@@ -13,8 +13,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { minutesToClock } from '@/src/lib/laborScheduling';
-import { Circle, GripHorizontal, X, Calendar, Clock, User, Briefcase, CheckCircle2, ClipboardList, Loader2, Undo2, Play, PackageCheck, Pause } from 'lucide-react';
+import { minutesToClock, formatDuration } from '@/src/lib/laborScheduling';
+import { Circle, GripHorizontal, X, Calendar, Clock, User, Briefcase, CheckCircle2, ClipboardList, Loader2, Undo2, Play, PackageCheck, Pause, ExternalLink, ChevronDown, ChevronRight, Timer } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
@@ -22,6 +22,53 @@ import { toast } from 'sonner';
 import type { LaborDragPayload, StaffAssignment, StaffLane, TimeMarker } from './types';
 import { CompleteJobDialog } from './complete-job-dialog';
 import type { ScheduleBreak } from '@/types/work-schedule';
+
+import { format } from 'date-fns';
+
+/** Collapsible "More details" section for the job assignment dialog */
+function ExpandableDetails({
+  dueDate,
+  staffName,
+  staffRole,
+}: {
+  dueDate?: string | null;
+  staffName?: string;
+  staffRole?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-t">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-1.5 px-5 py-2 text-[12px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+      >
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        More details
+      </button>
+      {open && (
+        <div className="px-5 pb-3 space-y-1 text-[13px] text-muted-foreground">
+          {dueDate && (
+            <div className="flex justify-between">
+              <span>Delivery</span>
+              <span className="text-foreground">{(() => {
+                try {
+                  const d = new Date(dueDate.includes('T') ? dueDate : dueDate + 'T00:00:00');
+                  return Number.isNaN(d.getTime()) ? dueDate : format(d, 'MMM d, yyyy');
+                } catch { return dueDate; }
+              })()}</span>
+            </div>
+          )}
+          {staffName && (
+            <div className="flex justify-between">
+              <span>Staff</span>
+              <span className="text-foreground">{staffName}{staffRole ? ` · ${staffRole}` : ''}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Visual metadata for job status indicators on assignment bars */
 function getJobStatusInfo(status?: StaffAssignment['jobStatus']) {
@@ -844,153 +891,221 @@ export function StaffLaneList({
 
       {/* Job Details Modal */}
       <Dialog open={!!selectedAssignment} onOpenChange={(open) => !open && setSelectedAssignment(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Briefcase className="h-5 w-5" />
-              Job Assignment Details
-            </DialogTitle>
-            <DialogDescription>
-              {selectedAssignment?.label}
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
+          {selectedAssignment && (() => {
+            const durationMin = selectedAssignment.endMinutes - selectedAssignment.startMinutes;
+            const qty = selectedAssignment.quantity ?? 0;
+            const perItem = qty > 1 ? durationMin / qty : null;
+            return (
+              <>
+                {/* ── Header: Order identity ── */}
+                <div
+                  className="border-l-4 px-5 pt-5 pb-4"
+                  style={{ borderLeftColor: selectedAssignment.color }}
+                >
+                  <DialogHeader className="space-y-1.5">
+                    <DialogTitle className="flex items-center gap-2 text-base">
+                      {selectedAssignment.orderNumber ? (
+                        <a
+                          href={`/orders/${selectedAssignment.orderId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-primary hover:underline"
+                        >
+                          {selectedAssignment.orderNumber}
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      ) : (
+                        <span>Unlinked Job</span>
+                      )}
+                      {selectedAssignment.customerName && (
+                        <>
+                          <span className="text-muted-foreground font-normal">·</span>
+                          <span className="font-normal text-muted-foreground truncate">
+                            {selectedAssignment.customerName}
+                          </span>
+                        </>
+                      )}
+                    </DialogTitle>
+                    <DialogDescription className="text-sm text-foreground/80 flex items-center gap-1 flex-wrap">
+                      {selectedAssignment.jobName && (
+                        selectedAssignment.jobId ? (
+                          <a
+                            href={`/labor/jobs/${selectedAssignment.jobId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary hover:underline inline-flex items-center gap-1"
+                          >
+                            {selectedAssignment.jobName}
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        ) : (
+                          <span>{selectedAssignment.jobName}</span>
+                        )
+                      )}
+                      {selectedAssignment.jobName && selectedAssignment.productName && (
+                        <span className="text-muted-foreground">·</span>
+                      )}
+                      {selectedAssignment.productName && (
+                        selectedAssignment.productId ? (
+                          <a
+                            href={`/products/${selectedAssignment.productId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary hover:underline inline-flex items-center gap-1"
+                          >
+                            {selectedAssignment.productName}
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        ) : (
+                          <span>{selectedAssignment.productName}</span>
+                        )
+                      )}
+                      {!selectedAssignment.jobName && !selectedAssignment.productName && 'Job'}
+                    </DialogDescription>
+                  </DialogHeader>
 
-          {selectedAssignment && (
-            <div className="space-y-4">
-              {/* Time Info */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm">
-                  <Clock className="h-4 w-4 text-muted-foreground" />
-                  <span className="font-medium">Scheduled Time</span>
-                </div>
-                <div className="ml-6 space-y-1 text-sm text-muted-foreground">
-                  <div>Start: {minutesToClock(selectedAssignment.startMinutes)}</div>
-                  <div>End: {minutesToClock(selectedAssignment.endMinutes)}</div>
-                  <div>Duration: {Math.round((selectedAssignment.endMinutes - selectedAssignment.startMinutes) / 60 * 10) / 10}h</div>
-                </div>
-              </div>
-
-              {/* Order Info */}
-              {selectedAssignment.orderNumber && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-sm">
-                    <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <span className="font-medium">Order Details</span>
+                  {/* Metadata chips */}
+                  <div className="flex flex-wrap items-center gap-1.5 mt-3">
+                    {selectedAssignment.jobStatus && (
+                      <Badge variant="outline" className="text-[11px] capitalize">
+                        {selectedAssignment.jobStatus.replace('_', ' ')}
+                      </Badge>
+                    )}
+                    <Badge variant="secondary" className="text-[11px]">
+                      {selectedAssignment.payType === 'piece' ? 'Piecework' : 'Hourly'}
+                    </Badge>
+                    {qty > 0 && (
+                      <Badge variant="secondary" className="text-[11px]">
+                        Qty: {qty}
+                      </Badge>
+                    )}
                   </div>
-                  <div className="ml-6 space-y-1 text-sm text-muted-foreground">
-                    <div>Order #: {selectedAssignment.orderNumber}</div>
-                    {selectedAssignment.orderId && <div>ID: {selectedAssignment.orderId}</div>}
-                  </div>
                 </div>
-              )}
 
-              {/* Job Info */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm">
-                  <User className="h-4 w-4 text-muted-foreground" />
-                  <span className="font-medium">Job Information</span>
-                </div>
-                <div className="ml-6 space-y-1 text-sm text-muted-foreground">
-                  {selectedAssignment.jobName && <div>Job: {selectedAssignment.jobName}</div>}
-                  {selectedAssignment.productName && <div>Product: {selectedAssignment.productName}</div>}
-                  <div>Pay Type: {selectedAssignment.payType === 'piece' ? 'Piecework' : 'Hourly'}</div>
-                  <div>Status: <Badge variant="outline" className="ml-1">{selectedAssignment.status}</Badge></div>
-                </div>
-              </div>
-
-              {/* Issue quantity — only show when not yet issued */}
-              {availableQty != null && selectedAssignment.jobStatus !== 'issued' && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-sm">
-                    <ClipboardList className="h-4 w-4 text-muted-foreground" />
-                    <span className="font-medium">Issue Quantity</span>
-                  </div>
-                  <div className="ml-6 flex items-center gap-3">
-                    <Input
-                      type="number"
-                      min={1}
-                      max={availableQty}
-                      value={issueQty}
-                      onChange={(e) => setIssueQty(Math.max(1, Math.min(availableQty, parseInt(e.target.value) || 1)))}
-                      className="h-8 w-24 text-sm"
-                    />
-                    <span className="text-sm text-muted-foreground">
-                      of {availableQty} available
+                {/* ── Schedule time ── */}
+                <div className="px-5 py-3 border-t bg-muted/30">
+                  <div className="flex items-center gap-2">
+                    <Timer className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span className="text-sm font-medium">
+                      {minutesToClock(selectedAssignment.startMinutes)}
+                      <span className="mx-1.5 text-muted-foreground">→</span>
+                      {minutesToClock(selectedAssignment.endMinutes)}
                     </span>
                   </div>
+                  <div className="ml-6 mt-1 text-[13px] text-muted-foreground">
+                    {formatDuration(durationMin)} total
+                    {perItem != null && (
+                      <span>
+                        {'  ·  '}{formatDuration(perItem)}/item × {qty} items
+                      </span>
+                    )}
+                  </div>
                 </div>
-              )}
 
-              <div className="flex justify-end gap-2 pt-4 pb-1">
-                {selectedAssignment.jobStatus === 'issued' ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleUnissueJobCard}
-                    disabled={unissuing}
-                    className="text-amber-600 border-amber-300 hover:bg-amber-50"
-                  >
-                    {unissuing ? (
-                      <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                    ) : (
-                      <Undo2 className="h-4 w-4 mr-1.5" />
-                    )}
-                    {unissuing ? 'Un-issuing...' : 'Un-issue'}
-                  </Button>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleIssueJobCard}
-                    disabled={issuingJobCard}
-                  >
-                    {issuingJobCard ? (
-                      <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                    ) : (
-                      <ClipboardList className="h-4 w-4 mr-1.5" />
-                    )}
-                    {issuingJobCard ? 'Creating...' : `Issue${availableQty != null ? ` (${issueQty})` : ''}`}
-                  </Button>
+                {/* ── Expandable details ── */}
+                {(selectedAssignment.dueDate || selectedLane) && (
+                  <ExpandableDetails
+                    dueDate={selectedAssignment.dueDate}
+                    staffName={selectedLane?.name}
+                    staffRole={selectedLane?.role}
+                  />
                 )}
-                <Button
-                  variant="default"
-                  size="sm"
-                  className="bg-green-600 hover:bg-green-700"
-                  onClick={() => {
-                    if (!selectedAssignment || !selectedLane) return;
-                    setCompleteAssignment({
-                      assignment_id: parseInt(selectedAssignment.id, 10),
-                      job_instance_id: selectedAssignment.jobKey,
-                      order_id: typeof selectedAssignment.orderId === 'number' ? selectedAssignment.orderId : undefined,
-                      orderNumber: selectedAssignment.orderNumber ?? undefined,
-                      job_id: selectedAssignment.jobId ?? undefined,
-                      jobName: selectedAssignment.jobName ?? undefined,
-                      productName: selectedAssignment.productName ?? undefined,
-                      staffName: selectedLane.name,
-                      staff_id: parseInt(selectedLane.id, 10),
-                      assignment_date: selectedAssignment.assignmentDate ?? undefined,
-                      start_minutes: selectedAssignment.startMinutes,
-                      end_minutes: selectedAssignment.endMinutes,
-                      issued_at: selectedAssignment.issuedAt ?? undefined,
-                      started_at: selectedAssignment.startedAt ?? undefined,
-                      job_status: selectedAssignment.jobStatus,
-                    });
-                    setSelectedAssignment(null);
-                    setSelectedLane(null);
-                  }}
-                >
-                  <CheckCircle2 className="h-4 w-4 mr-1.5" />
-                  Complete Job
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => {
-                  setSelectedAssignment(null);
-                  setSelectedLane(null);
-                }}>
-                  Close
-                </Button>
-              </div>
-            </div>
-          )}
+
+                {/* ── Issue quantity ── */}
+                <div className="px-5 py-3 space-y-3 border-t">
+                  {availableQty != null && selectedAssignment.jobStatus !== 'issued' && (
+                    <div className="flex items-center gap-3">
+                      <ClipboardList className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <span className="text-sm font-medium">Issue</span>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={availableQty}
+                        value={issueQty}
+                        onChange={(e) => setIssueQty(Math.max(1, Math.min(availableQty, parseInt(e.target.value) || 1)))}
+                        className="h-7 w-20 text-sm"
+                      />
+                      <span className="text-[13px] text-muted-foreground">
+                        of {availableQty} available
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 pt-1 pb-1">
+                    {selectedAssignment.jobStatus === 'issued' ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleUnissueJobCard}
+                        disabled={unissuing}
+                        className="text-amber-600 border-amber-300 hover:bg-amber-50"
+                      >
+                        {unissuing ? (
+                          <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                        ) : (
+                          <Undo2 className="h-4 w-4 mr-1.5" />
+                        )}
+                        {unissuing ? 'Un-issuing...' : 'Un-issue'}
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleIssueJobCard}
+                        disabled={issuingJobCard}
+                      >
+                        {issuingJobCard ? (
+                          <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                        ) : (
+                          <ClipboardList className="h-4 w-4 mr-1.5" />
+                        )}
+                        {issuingJobCard ? 'Creating...' : `Issue${availableQty != null ? ` (${issueQty})` : ''}`}
+                      </Button>
+                    )}
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="bg-green-600 hover:bg-green-700"
+                      onClick={() => {
+                        if (!selectedAssignment || !selectedLane) return;
+                        setCompleteAssignment({
+                          assignment_id: parseInt(selectedAssignment.id, 10),
+                          job_instance_id: selectedAssignment.jobKey,
+                          order_id: typeof selectedAssignment.orderId === 'number' ? selectedAssignment.orderId : undefined,
+                          orderNumber: selectedAssignment.orderNumber ?? undefined,
+                          job_id: selectedAssignment.jobId ?? undefined,
+                          jobName: selectedAssignment.jobName ?? undefined,
+                          productName: selectedAssignment.productName ?? undefined,
+                          staffName: selectedLane.name,
+                          staff_id: parseInt(selectedLane.id, 10),
+                          assignment_date: selectedAssignment.assignmentDate ?? undefined,
+                          start_minutes: selectedAssignment.startMinutes,
+                          end_minutes: selectedAssignment.endMinutes,
+                          issued_at: selectedAssignment.issuedAt ?? undefined,
+                          started_at: selectedAssignment.startedAt ?? undefined,
+                          job_status: selectedAssignment.jobStatus,
+                        });
+                        setSelectedAssignment(null);
+                        setSelectedLane(null);
+                      }}
+                    >
+                      <CheckCircle2 className="h-4 w-4 mr-1.5" />
+                      Complete Job
+                    </Button>
+                    <div className="flex-1" />
+                    <Button variant="ghost" size="sm" onClick={() => {
+                      setSelectedAssignment(null);
+                      setSelectedLane(null);
+                    }}>
+                      Close
+                    </Button>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 

@@ -26,6 +26,7 @@
 - **Create PO (manual):** Multi-line form to select components, pick supplier per-line, and set quantities/notes.
   - Page: `app/purchasing/purchase-orders/new/page.tsx:1` (page wrapper)
   - Form: `components/features/purchasing/new-purchase-order-form.tsx:147` (fetch Draft status), `components/features/purchasing/new-purchase-order-form.tsx:180` (supplier component fetch), `components/features/purchasing/new-purchase-order-form.tsx:210` (createPurchaseOrder), `components/features/purchasing/new-purchase-order-form.tsx:284` (mutation, redirect).
+  - Deep-link prefill: `/purchasing/purchase-orders/new?componentId=<id>&suggestedQuantity=<qty>` injects the selected component into the active shared draft (or the blank first row), auto-selects the supplier when only one mapping exists, and removes the query string after the draft is hydrated. This is the canonical route used by the Dashboard low-stock `Order` action.
 - **Create POs from Sales Order:** Generates one PO per supplier containing selected components and links each SO to the customer order.
   - File: `app/orders/[orderId]/page.tsx:655` (createComponentPurchaseOrders), `app/orders/[orderId]/page.tsx:743` (link via junction table).
 

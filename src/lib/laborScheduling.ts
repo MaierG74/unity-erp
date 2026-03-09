@@ -216,6 +216,19 @@ export function minutesToClock(value: number): string {
   return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
 }
 
+/**
+ * Format minutes as a human-friendly duration string.
+ * Examples: "10 min", "1h 30min", "2h", "45 min"
+ */
+export function formatDuration(totalMinutes: number): string {
+  if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) return '0 min';
+  const hours = Math.floor(totalMinutes / 60);
+  const mins = Math.round(totalMinutes % 60);
+  if (hours === 0) return `${mins} min`;
+  if (mins === 0) return `${hours}h`;
+  return `${hours}h ${mins}min`;
+}
+
 function normalizeNumber(value: unknown): number | null {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
