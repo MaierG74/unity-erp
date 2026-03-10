@@ -1,11 +1,13 @@
 # Unity ERP Styling Guide
 
-This guide documents how we style the app: Tailwind CSS utilities + shadcn/ui primitives, with a light design system for consistency.
+This guide documents how we style the app: Tailwind CSS v4 utilities + shadcn/ui primitives, with a light design system for consistency.
 
-- Tech: Tailwind CSS, shadcn/ui, Next.js App Router
+- Tech: Tailwind CSS v4, shadcn/ui, Next.js App Router
 - Key files:
-  - Tailwind config: `tailwind.config.ts`
-  - Global CSS: `app/globals.css`
+  - Global CSS + Tailwind theme tokens: `app/globals.css`
+    - Tailwind source registration is explicit via `@source`; do not rely on repo-wide auto-detection.
+  - PostCSS config: `postcss.config.mjs`
+  - shadcn registry config: `components.json`
   - UI primitives: `components/ui/*` (e.g., `button.tsx`, `checkbox.tsx`, `label.tsx`)
   - Layout shell: `components/layout/*`
 
