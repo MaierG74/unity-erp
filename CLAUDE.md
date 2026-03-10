@@ -43,6 +43,13 @@ Two MCP servers are available. For setup/troubleshooting, see `docs/technical/mc
 - Dark theme is default; font is Inter
 - `@react-pdf/renderer` must be lazy/dynamically imported (causes build timeouts)
 
+## Frontend Stack (IMPORTANT — post-training-data versions)
+
+- **Tailwind CSS 4.2** — CSS-first config in `globals.css`, NO `tailwind.config.ts`. Use the `tailwind-v4` skill for any styling work — v4 has breaking syntax changes from v3 that training data gets wrong.
+- **shadcn 4.0** — Package renamed from `shadcn-ui`. CLI: `pnpm dlx shadcn@latest add <component>`.
+- **tw-animate-css** — Replaces `tailwindcss-animate`. Imported as CSS, not a plugin.
+- Key gotchas: `shadow`→`shadow-sm`, `rounded`→`rounded-sm`, `ring`→`ring-3`, no `bg-opacity-*` (use `/50` modifier), `bg-(--var)` not `bg-[--var]`.
+
 ## Verification
 
 IMPORTANT: Never consider a task complete without verifying it works.
