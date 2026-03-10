@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, CalendarClock, CheckCircle2, ChevronRight, ClipboardList, Clock3, Flame, GripVertical, Loader2, Pause, Play, Sparkles } from 'lucide-react';
+import { AlertTriangle, Archive, CalendarClock, CheckCircle2, ChevronRight, ClipboardList, Flame, GripVertical, Pause, Play } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { PlanningOrder, PlanningJob } from './types';
 
@@ -43,6 +43,70 @@ const formatDate = (input?: string | null) => {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(parsed);
 };
 
+/** Format duration as human-readable time. Returns empty string for 0/unknown. */
+function formatDuration(durationHours: number): string {
+  const totalMinutes = Math.round(durationHours * 60);
+  if (totalMinutes <= 0) return '';
+  if (totalMinutes < 60) return `${totalMinutes} min`;
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+/** Build a compact summary of job states for the order header */
+function orderJobSummary(jobs: PlanningJob[]): string {
+  let pool = 0;
+  let issued = 0;
+  let scheduled = 0;
+  let inProgress = 0;
+  let completed = 0;
+  for (const j of jobs) {
+    if (j.jobStatus === 'completed') completed++;
+    else if (j.jobStatus === 'in_progress') inProgress++;
+    else if (j.scheduleStatus === 'scheduled') scheduled++;
+    else if (j.jobStatus === 'issued') issued++;
+    else if (j.poolId != null && (j.remainingQty ?? 0) > 0) pool++;
+    else issued++; // legacy BOL jobs without pool
+  }
+  const parts: string[] = [];
+  if (pool > 0) parts.push(`${pool} pool`);
+  if (issued > 0) parts.push(`${issued} queued`);
+  if (scheduled > 0) parts.push(`${scheduled} sched`);
+  if (inProgress > 0) parts.push(`${inProgress} active`);
+  if (completed > 0) parts.push(`${completed} done`);
+  return parts.join(' · ');
+}
+
+/** Build the second-line description for a job card */
+function jobCardDetail(job: PlanningJob): { label: string; className: string; icon?: React.ComponentType<{ className?: string }> } {
+  const time = formatDuration(job.durationHours);
+  const timeSuffix = time ? ` · ${time}` : '';
+  const qtySuffix = job.quantity ? ` · qty ${job.quantity}` : '';
+
+  if (job.jobStatus === 'completed') {
+    return { label: `Done${qtySuffix}${timeSuffix}`, className: 'text-emerald-600 dark:text-emerald-400', icon: CheckCircle2 };
+  }
+  if (job.jobStatus === 'in_progress') {
+    return { label: `In Progress${qtySuffix}${timeSuffix}`, className: 'text-amber-600 dark:text-amber-400', icon: Play };
+  }
+  if (job.jobStatus === 'on_hold') {
+    return { label: `On Hold${qtySuffix}${timeSuffix}`, className: 'text-orange-600 dark:text-orange-400', icon: Pause };
+  }
+  if (job.scheduleStatus === 'scheduled') {
+    return { label: `Scheduled${qtySuffix}${timeSuffix}`, className: 'text-violet-600 dark:text-violet-400', icon: CalendarClock };
+  }
+  if (job.jobStatus === 'issued') {
+    return { label: `Issued · qty ${job.quantity ?? 1}${timeSuffix}`, className: 'text-blue-600 dark:text-blue-400', icon: ClipboardList };
+  }
+  // Pool demand — skip time (aggregate is misleading for multi-unit pool)
+  if (job.poolId != null && (job.remainingQty ?? 0) > 0) {
+    return { label: `Pool · ${job.remainingQty} remaining`, className: 'text-purple-600 dark:text-purple-400', icon: Archive };
+  }
+  // Fallback: legacy BOL job
+  const fallbackTime = time || 'Ready';
+  return { label: fallbackTime, className: 'text-muted-foreground' };
+}
+
 export function OrderTree({ orders, windowSize = 12, onJobDragStart, onJobClick, stalePoolOrderIds }: OrderTreeProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -79,7 +143,7 @@ export function OrderTree({ orders, windowSize = 12, onJobDragStart, onJobClick,
 
           return (
             <Collapsible key={order.id} open={isOpen} onOpenChange={() => toggleOrder(order.id)}>
-              <div className="rounded-md border bg-card shadow-sm transition hover:border-primary/40">
+              <div className="rounded-md border bg-card shadow-xs transition hover:border-primary/40">
                 <CollapsibleTrigger asChild>
                   <button
                     type="button"
@@ -120,6 +184,11 @@ export function OrderTree({ orders, windowSize = 12, onJobDragStart, onJobClick,
                       <p className="truncate text-[10px] text-muted-foreground">
                         {order.customer} • {order.jobs.length} jobs • {formatDate(order.dueDate)}
                       </p>
+                      {isOpen && (
+                        <p className="truncate text-[9px] text-muted-foreground/70 mt-0.5">
+                          {orderJobSummary(order.jobs)}
+                        </p>
+                      )}
                     </div>
                   </button>
                 </CollapsibleTrigger>
@@ -153,34 +222,22 @@ export function OrderTree({ orders, windowSize = 12, onJobDragStart, onJobClick,
                           style={{ background: job.categoryColor ?? '#0ea5e9' }}
                         />
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-[11px] font-medium">{job.name}</p>
-                          <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                            <span>{job.durationHours}h</span>
-                            <span>•</span>
-                            {job.jobStatus === 'completed' ? (
-                              <span className="inline-flex items-center gap-0.5 font-medium text-emerald-600 dark:text-emerald-400">
-                                <CheckCircle2 className="h-3 w-3" /> Completed
+                          <p className="truncate text-[11px] font-medium">
+                            {job.productName && job.productName !== job.name ? job.productName : job.name}
+                          </p>
+                          {job.productName && job.productName !== job.name && (
+                            <p className="truncate text-[10px] text-muted-foreground/70">{job.name}</p>
+                          )}
+                          {(() => {
+                            const detail = jobCardDetail(job);
+                            const Icon = detail.icon;
+                            return (
+                              <span className={cn('inline-flex items-center gap-0.5 text-[10px] font-medium', detail.className)}>
+                                {Icon && <Icon className="h-3 w-3" />}
+                                {detail.label}
                               </span>
-                            ) : job.jobStatus === 'in_progress' ? (
-                              <span className="inline-flex items-center gap-0.5 font-medium text-amber-600 dark:text-amber-400">
-                                <Play className="h-3 w-3" /> In Progress
-                              </span>
-                            ) : job.jobStatus === 'issued' ? (
-                              <span className="inline-flex items-center gap-0.5 font-medium text-blue-600 dark:text-blue-400">
-                                <ClipboardList className="h-3 w-3" /> Issued
-                              </span>
-                            ) : job.jobStatus === 'on_hold' ? (
-                              <span className="inline-flex items-center gap-0.5 font-medium text-orange-600 dark:text-orange-400">
-                                <Pause className="h-3 w-3" /> On Hold
-                              </span>
-                            ) : job.scheduleStatus === 'scheduled' ? (
-                              <span className="inline-flex items-center gap-0.5 font-medium text-violet-600 dark:text-violet-400">
-                                <CalendarClock className="h-3 w-3" /> Scheduled
-                              </span>
-                            ) : (
-                              <span>{job.status === 'ready' ? 'Ready' : job.status}</span>
-                            )}
-                          </div>
+                            );
+                          })()}
                         </div>
                       </div>
                     ))}

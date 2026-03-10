@@ -238,7 +238,7 @@ export async function fetchLaborPlanningPayload(options: { date?: string } = {})
       return {
         ...job,
         scheduleStatus: scheduled && scheduled.status !== 'unscheduled' ? 'scheduled' : 'unscheduled',
-        jobStatus: scheduled?.jobStatus ?? null,
+        jobStatus: scheduled?.jobStatus ?? job.jobStatus ?? null,
         status: job.status ?? 'ready',
       };
     }),
@@ -607,9 +607,9 @@ function normalizeAssignmentRow(row: any): LaborPlanAssignment {
     ? String(row.job_instance_id)
     : buildJobId(row?.order_id ?? 'unknown', row?.order_detail_id, row?.bol_id, row?.job_id);
 
-  // Parse job_status as a valid JobStatus or null
+  // Parse job_status as a lifecycle state or null. Scheduling is tracked separately via `status`.
   const rawJobStatus = row?.job_status;
-  const validJobStatuses = ['scheduled', 'issued', 'in_progress', 'completed', 'on_hold'];
+  const validJobStatuses = ['issued', 'in_progress', 'completed', 'on_hold'];
   const jobStatus = rawJobStatus && validJobStatuses.includes(rawJobStatus) ? rawJobStatus : null;
 
   return {
@@ -985,6 +985,7 @@ function normalizeCardItem(orderId: number, item: JobCardItemRow): PlanningJobWi
     hourlyRateId: null,
     pieceRateId: null,
     scheduleStatus: 'unscheduled',
+    jobStatus: 'issued',
   };
 }
 

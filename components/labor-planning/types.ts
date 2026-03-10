@@ -25,7 +25,7 @@ export interface PlanningJob {
   hourlyRateId?: number | null;
   pieceRateId?: number | null;
   scheduleStatus?: PlanningJobScheduleStatus;
-  jobStatus?: 'scheduled' | 'issued' | 'in_progress' | 'completed' | 'on_hold' | null;
+  jobStatus?: 'issued' | 'in_progress' | 'completed' | 'on_hold' | null;
   /** Set when this job originates from a work pool row (non-null = pool demand, null = legacy BOL) */
   poolId?: number | null;
   /** Remaining unissued quantity in the pool (only set for pool-sourced jobs) */
@@ -66,7 +66,7 @@ export interface StaffAssignment {
   quantity?: number | null;
   showHandles?: boolean;
   // Time tracking fields
-  jobStatus?: 'scheduled' | 'issued' | 'in_progress' | 'completed' | 'on_hold';
+  jobStatus?: 'issued' | 'in_progress' | 'completed' | 'on_hold';
   issuedAt?: string | null;
   startedAt?: string | null;
   assignmentDate?: string | null;
@@ -105,7 +105,7 @@ export interface TimeMarker {
   isMajor?: boolean;
 }
 
-export type JobStatus = 'scheduled' | 'issued' | 'in_progress' | 'completed' | 'on_hold';
+export type JobStatus = 'issued' | 'in_progress' | 'completed' | 'on_hold';
 
 export interface LaborPlanAssignment {
   assignmentId: string;
