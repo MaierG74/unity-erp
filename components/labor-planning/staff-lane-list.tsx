@@ -941,55 +941,59 @@ export function StaffLaneList({
             const durationMin = selectedAssignment.endMinutes - selectedAssignment.startMinutes;
             const qty = selectedAssignment.quantity ?? 0;
             const perItem = qty > 1 ? durationMin / qty : null;
+            const statusMeta = getJobStatusInfo(selectedAssignment.jobStatus);
             return (
               <>
-                {/* ── Header: Order identity ── */}
+                {/* ── Colour accent bar ── */}
                 <div
-                  className="border-l-4 px-5 pt-5 pb-4"
-                  style={{ borderLeftColor: selectedAssignment.color }}
-                >
-                  <DialogHeader className="space-y-1.5">
-                    <DialogTitle className="flex items-center gap-2 text-base">
+                  className="h-1.5 w-full"
+                  style={{ background: selectedAssignment.color ?? 'hsl(var(--primary))' }}
+                />
+
+                {/* ── Header ── */}
+                <div className="px-5 pt-4 pb-3">
+                  <DialogHeader className="space-y-1">
+                    <DialogTitle className="flex items-center gap-2 text-[15px] font-semibold leading-snug">
                       {selectedAssignment.orderNumber ? (
                         <a
                           href={`/orders/${selectedAssignment.orderId}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 text-primary hover:underline"
+                          className="inline-flex items-center gap-1 text-foreground hover:text-primary transition-colors"
                         >
                           {selectedAssignment.orderNumber}
-                          <ExternalLink className="h-3.5 w-3.5" />
+                          <ExternalLink className="h-3 w-3 text-muted-foreground" />
                         </a>
                       ) : (
                         <span>Unlinked Job</span>
                       )}
                       {selectedAssignment.customerName && (
                         <>
-                          <span className="text-muted-foreground font-normal">·</span>
-                          <span className="font-normal text-muted-foreground truncate">
+                          <span className="text-muted-foreground/60 font-normal">·</span>
+                          <span className="font-normal text-muted-foreground truncate text-sm">
                             {selectedAssignment.customerName}
                           </span>
                         </>
                       )}
                     </DialogTitle>
-                    <DialogDescription className="text-sm text-foreground/80 flex items-center gap-1 flex-wrap">
+                    <DialogDescription className="text-[13px] text-muted-foreground flex items-center gap-1.5 flex-wrap">
                       {selectedAssignment.jobName && (
                         selectedAssignment.jobId ? (
                           <a
                             href={`/labor/jobs/${selectedAssignment.jobId}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-primary hover:underline inline-flex items-center gap-1"
+                            className="text-foreground/80 hover:text-primary transition-colors inline-flex items-center gap-1"
                           >
                             {selectedAssignment.jobName}
-                            <ExternalLink className="h-3 w-3" />
+                            <ExternalLink className="h-3 w-3 text-muted-foreground" />
                           </a>
                         ) : (
-                          <span>{selectedAssignment.jobName}</span>
+                          <span className="text-foreground/80">{selectedAssignment.jobName}</span>
                         )
                       )}
                       {selectedAssignment.jobName && selectedAssignment.productName && (
-                        <span className="text-muted-foreground">·</span>
+                        <span className="text-muted-foreground/40">·</span>
                       )}
                       {selectedAssignment.productName && (
                         selectedAssignment.productId ? (
@@ -997,13 +1001,13 @@ export function StaffLaneList({
                             href={`/products/${selectedAssignment.productId}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-primary hover:underline inline-flex items-center gap-1"
+                            className="text-foreground/80 hover:text-primary transition-colors inline-flex items-center gap-1"
                           >
                             {selectedAssignment.productName}
-                            <ExternalLink className="h-3 w-3" />
+                            <ExternalLink className="h-3 w-3 text-muted-foreground" />
                           </a>
                         ) : (
-                          <span>{selectedAssignment.productName}</span>
+                          <span className="text-foreground/80">{selectedAssignment.productName}</span>
                         )
                       )}
                       {!selectedAssignment.jobName && !selectedAssignment.productName && 'Job'}
@@ -1011,142 +1015,169 @@ export function StaffLaneList({
                   </DialogHeader>
 
                   {/* Metadata chips */}
-                  <div className="flex flex-wrap items-center gap-1.5 mt-3">
+                  <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
                     {selectedAssignment.jobStatus && (
-                      <Badge variant="outline" className="text-[11px] capitalize">
+                      <Badge variant="outline" className="text-[11px] capitalize gap-1 font-medium">
+                        {statusMeta && <statusMeta.icon className="h-3 w-3" />}
                         {selectedAssignment.jobStatus.replace('_', ' ')}
                       </Badge>
                     )}
-                    <Badge variant="secondary" className="text-[11px]">
+                    <Badge variant="secondary" className="text-[11px] font-medium">
                       {selectedAssignment.payType === 'piece' ? 'Piecework' : 'Hourly'}
                     </Badge>
                     {qty > 0 && (
-                      <Badge variant="secondary" className="text-[11px]">
+                      <Badge variant="secondary" className="text-[11px] font-medium">
                         Qty: {qty}
                       </Badge>
                     )}
                   </div>
                 </div>
 
-                {/* ── Schedule time ── */}
-                <div className="px-5 py-3 border-t bg-muted/30">
-                  <div className="flex items-center gap-2">
-                    <Timer className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <span className="text-sm font-medium">
-                      {minutesToClock(selectedAssignment.startMinutes)}
-                      <span className="mx-1.5 text-muted-foreground">→</span>
-                      {minutesToClock(selectedAssignment.endMinutes)}
-                    </span>
+                {/* ── Schedule block ── */}
+                <div className="mx-5 rounded-lg border bg-muted/40 px-4 py-3 mb-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10">
+                        <Timer className="h-4 w-4 text-primary" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-semibold tabular-nums">
+                          {minutesToClock(selectedAssignment.startMinutes)}
+                          <span className="mx-1 text-muted-foreground font-normal">→</span>
+                          {minutesToClock(selectedAssignment.endMinutes)}
+                        </div>
+                        <div className="text-[12px] text-muted-foreground leading-tight">
+                          {formatDuration(durationMin)} total
+                          {perItem != null && (
+                            <span> · {formatDuration(perItem)}/item × {qty}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="ml-6 mt-1 text-[13px] text-muted-foreground">
-                    {formatDuration(durationMin)} total
-                    {perItem != null && (
-                      <span>
-                        {'  ·  '}{formatDuration(perItem)}/item × {qty} items
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* ── Expandable details ── */}
-                {(selectedAssignment.dueDate || selectedLane) && (
-                  <ExpandableDetails
-                    dueDate={selectedAssignment.dueDate}
-                    staffName={selectedLane?.name}
-                    staffRole={selectedLane?.role}
-                  />
-                )}
-
-                {/* ── Issue quantity ── */}
-                <div className="px-5 py-3 space-y-3 border-t">
-                  {availableQty != null && selectedAssignment.jobStatus !== 'issued' && (
-                    <div className="flex items-center gap-3">
-                      <ClipboardList className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="text-sm font-medium">Issue</span>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={availableQty}
-                        value={issueQty}
-                        onChange={(e) => setIssueQty(Math.max(1, Math.min(availableQty, parseInt(e.target.value) || 1)))}
-                        className="h-7 w-20 text-sm"
-                      />
-                      <span className="text-[13px] text-muted-foreground">
-                        of {availableQty} available
-                      </span>
+                  {/* Staff assignment */}
+                  {selectedLane && (
+                    <div className="flex items-center gap-2.5 mt-2.5 pt-2.5 border-t border-border/50">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted">
+                        <User className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium">{selectedLane.name}</div>
+                        {selectedLane.role && (
+                          <div className="text-[12px] text-muted-foreground leading-tight">{selectedLane.role}</div>
+                        )}
+                      </div>
                     </div>
                   )}
+                  {/* Due date */}
+                  {selectedAssignment.dueDate && (
+                    <div className="flex items-center gap-2.5 mt-2.5 pt-2.5 border-t border-border/50">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted">
+                        <Calendar className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium">
+                          {(() => {
+                            try {
+                              const d = new Date(selectedAssignment.dueDate!.includes('T') ? selectedAssignment.dueDate! : selectedAssignment.dueDate! + 'T00:00:00');
+                              return Number.isNaN(d.getTime()) ? selectedAssignment.dueDate : format(d, 'MMM d, yyyy');
+                            } catch { return selectedAssignment.dueDate; }
+                          })()}
+                        </div>
+                        <div className="text-[12px] text-muted-foreground leading-tight">Delivery date</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
 
-                  {/* Actions */}
-                  <div className="flex items-center gap-2 pt-1 pb-1">
-                    {selectedAssignment.jobStatus === 'issued' ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleUnissueJobCard}
-                        disabled={unissuing}
-                        className="text-amber-600 border-amber-300 hover:bg-amber-50"
-                      >
-                        {unissuing ? (
-                          <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                        ) : (
-                          <Undo2 className="h-4 w-4 mr-1.5" />
-                        )}
-                        {unissuing ? 'Un-issuing...' : 'Un-issue'}
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleIssueJobCard}
-                        disabled={issuingJobCard}
-                      >
-                        {issuingJobCard ? (
-                          <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                        ) : (
-                          <ClipboardList className="h-4 w-4 mr-1.5" />
-                        )}
-                        {issuingJobCard ? 'Creating...' : `Issue${availableQty != null ? ` (${issueQty})` : ''}`}
-                      </Button>
-                    )}
+                {/* ── Issue quantity ── */}
+                {availableQty != null && selectedAssignment.jobStatus !== 'issued' && (
+                  <div className="mx-5 mb-3 flex items-center gap-3 rounded-lg border px-4 py-2.5">
+                    <ClipboardList className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span className="text-sm font-medium">Issue</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={availableQty}
+                      value={issueQty}
+                      onChange={(e) => setIssueQty(Math.max(1, Math.min(availableQty, parseInt(e.target.value) || 1)))}
+                      className="h-7 w-20 text-sm"
+                    />
+                    <span className="text-[12px] text-muted-foreground">
+                      of {availableQty} available
+                    </span>
+                  </div>
+                )}
+
+                {/* ── Actions ── */}
+                <div className="flex items-center gap-2 px-5 py-3 border-t bg-muted/20">
+                  {selectedAssignment.jobStatus === 'issued' ? (
                     <Button
-                      variant="default"
+                      variant="outline"
                       size="sm"
-                      className="bg-green-600 hover:bg-green-700"
-                      onClick={() => {
-                        if (!selectedAssignment || !selectedLane) return;
-                        setCompleteAssignment({
-                          assignment_id: parseInt(selectedAssignment.id, 10),
-                          job_instance_id: selectedAssignment.jobKey,
-                          order_id: typeof selectedAssignment.orderId === 'number' ? selectedAssignment.orderId : undefined,
-                          orderNumber: selectedAssignment.orderNumber ?? undefined,
-                          job_id: selectedAssignment.jobId ?? undefined,
-                          jobName: selectedAssignment.jobName ?? undefined,
-                          productName: selectedAssignment.productName ?? undefined,
-                          staffName: selectedLane.name,
-                          staff_id: parseInt(selectedLane.id, 10),
-                          assignment_date: selectedAssignment.assignmentDate ?? undefined,
-                          start_minutes: selectedAssignment.startMinutes,
-                          end_minutes: selectedAssignment.endMinutes,
-                          issued_at: selectedAssignment.issuedAt ?? undefined,
-                          started_at: selectedAssignment.startedAt ?? undefined,
-                          job_status: selectedAssignment.jobStatus,
-                        });
-                        setSelectedAssignment(null);
-                        setSelectedLane(null);
-                      }}
+                      onClick={handleUnissueJobCard}
+                      disabled={unissuing}
+                      className="text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-600/50 hover:bg-amber-50 dark:hover:bg-amber-950/30"
                     >
-                      <CheckCircle2 className="h-4 w-4 mr-1.5" />
-                      Complete Job
+                      {unissuing ? (
+                        <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                      ) : (
+                        <Undo2 className="h-4 w-4 mr-1.5" />
+                      )}
+                      {unissuing ? 'Un-issuing...' : 'Un-issue'}
                     </Button>
-                    <div className="flex-1" />
-                    <Button variant="ghost" size="sm" onClick={() => {
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleIssueJobCard}
+                      disabled={issuingJobCard}
+                    >
+                      {issuingJobCard ? (
+                        <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                      ) : (
+                        <ClipboardList className="h-4 w-4 mr-1.5" />
+                      )}
+                      {issuingJobCard ? 'Creating...' : `Issue${availableQty != null ? ` (${issueQty})` : ''}`}
+                    </Button>
+                  )}
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+                    onClick={() => {
+                      if (!selectedAssignment || !selectedLane) return;
+                      setCompleteAssignment({
+                        assignment_id: parseInt(selectedAssignment.id, 10),
+                        job_instance_id: selectedAssignment.jobKey,
+                        order_id: typeof selectedAssignment.orderId === 'number' ? selectedAssignment.orderId : undefined,
+                        orderNumber: selectedAssignment.orderNumber ?? undefined,
+                        job_id: selectedAssignment.jobId ?? undefined,
+                        jobName: selectedAssignment.jobName ?? undefined,
+                        productName: selectedAssignment.productName ?? undefined,
+                        staffName: selectedLane.name,
+                        staff_id: parseInt(selectedLane.id, 10),
+                        assignment_date: selectedAssignment.assignmentDate ?? undefined,
+                        start_minutes: selectedAssignment.startMinutes,
+                        end_minutes: selectedAssignment.endMinutes,
+                        issued_at: selectedAssignment.issuedAt ?? undefined,
+                        started_at: selectedAssignment.startedAt ?? undefined,
+                        job_status: selectedAssignment.jobStatus,
+                      });
                       setSelectedAssignment(null);
                       setSelectedLane(null);
-                    }}>
-                      Close
-                    </Button>
-                  </div>
+                    }}
+                  >
+                    <CheckCircle2 className="h-4 w-4 mr-1.5" />
+                    Complete Job
+                  </Button>
+                  <div className="flex-1" />
+                  <Button variant="ghost" size="sm" onClick={() => {
+                    setSelectedAssignment(null);
+                    setSelectedLane(null);
+                  }}>
+                    Close
+                  </Button>
                 </div>
               </>
             );
