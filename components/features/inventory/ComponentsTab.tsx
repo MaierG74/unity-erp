@@ -533,7 +533,7 @@ export function ComponentsTab() {
     // CHANGED: Reduced space-y from 6 to 3 for tighter layout
     <div className="space-y-3">
       {/* CHANGED: Combined actions and filters into single compact toolbar */}
-      <div className="p-2 bg-card rounded-xl border shadow-sm">
+      <div className="p-2 bg-card rounded-xl border shadow-xs">
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
           {/* Search */}
           <div className="relative w-full md:w-[520px]">
@@ -581,7 +581,7 @@ export function ComponentsTab() {
                     placeholder="Search categories..."
                     value={categorySearch}
                     onChange={(e) => setCategorySearch(e.target.value)}
-                    className="mb-1 focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="mb-1 focus:outline-hidden focus:ring-2 focus:ring-ring"
                   />
                 </div>
                 {filteredCategories.length > 0 ? (
@@ -620,7 +620,7 @@ export function ComponentsTab() {
                     placeholder="Search suppliers..."
                     value={supplierSearch}
                     onChange={(e) => setSupplierSearch(e.target.value)}
-                    className="mb-1 focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="mb-1 focus:outline-hidden focus:ring-2 focus:ring-ring"
                   />
                 </div>
                 {filteredSuppliers.length > 0 ? (
@@ -657,7 +657,7 @@ export function ComponentsTab() {
       </div>
 
       {/* Component list - full width */}
-      <div className="rounded-xl border bg-card shadow-sm overflow-auto">
+      <div className="rounded-xl border bg-card shadow-xs overflow-auto">
         <DataTable
           columns={columns}
           data={filteredComponents}

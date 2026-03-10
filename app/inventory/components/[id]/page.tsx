@@ -188,7 +188,7 @@ export default function ComponentDetailPage() {
     <div className="max-w-7xl space-y-5 bg-muted/30 -mx-4 md:-mx-6 px-4 md:px-6 min-h-screen">
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         {/* Sticky Header */}
-        <div className="sticky top-0 z-10 -mx-4 md:-mx-6 px-4 md:px-6 pt-2 pb-3 space-y-3 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-b shadow-sm">
+        <div className="sticky top-0 z-10 -mx-4 md:-mx-6 px-4 md:px-6 pt-2 pb-3 space-y-3 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-b shadow-xs">
           <div className="flex justify-between items-center">
             <div className="flex items-center space-x-4">
               <Button variant="outline" size="icon" onClick={() => router.back()}>

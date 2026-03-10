@@ -453,7 +453,7 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
                     onClick={() => setEntryType(et)}
                     className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-md transition-colors ${
                       entryType === et
-                        ? 'bg-background text-foreground shadow-sm'
+                        ? 'bg-background text-foreground shadow-xs'
                         : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
                     }`}
                   >
@@ -496,7 +496,7 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         placeholder="Search by code or description..."
-                        className="w-full h-8 pl-7 pr-2 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                        className="w-full h-8 pl-7 pr-2 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring"
                       />
                     </div>
                   </div>
@@ -664,7 +664,7 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
                         value={browseCompQuery}
                         onChange={(e) => setBrowseCompQuery(e.target.value)}
                         placeholder="Filter components"
-                        className="w-full h-8 pl-7 pr-2 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                        className="w-full h-8 pl-7 pr-2 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring"
                       />
                     </div>
                   </div>
@@ -720,7 +720,7 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
                           value={browseSupplierQuery}
                           onChange={(e) => setBrowseSupplierQuery(e.target.value)}
                           placeholder="Search suppliers"
-                          className="w-full h-8 pl-7 pr-2 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                          className="w-full h-8 pl-7 pr-2 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring"
                         />
                       </div>
                     </div>
@@ -810,7 +810,7 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         placeholder="Search by code or name..."
-                        className="w-full h-8 pl-7 pr-2 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                        className="w-full h-8 pl-7 pr-2 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring"
                       />
                     </div>
                   </div>
@@ -929,7 +929,7 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
                     <Label htmlFor="bom-mode">Mode</Label>
                     <select
                       id="bom-mode"
-                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                       value={bomMode}
                       onChange={(e) => setBomMode(e.target.value as 'apply' | 'attach')}
                     >

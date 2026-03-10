@@ -171,7 +171,7 @@ export default function CustomersPage() {
           <span className="text-destructive text-lg">Error loading customers.</span>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
+        <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-xs">
           <table className="min-w-full divide-y divide-border bg-background dark:bg-card">
             <thead className="bg-muted dark:bg-muted/20">
               <tr>

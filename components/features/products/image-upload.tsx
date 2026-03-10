@@ -269,7 +269,7 @@ export function ImageUpload({ productCode, productId, onUploadComplete, onPendin
         tabIndex={0}
         title="Drag files here or paste from clipboard"
         className={cn(
-          'border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors duration-200 outline-none',
+          'border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors duration-200 outline-hidden',
           isDragActive
             ? 'border-primary bg-primary/10'
             : isFocused

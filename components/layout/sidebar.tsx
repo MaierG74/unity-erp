@@ -214,7 +214,7 @@ export function Sidebar() {
   return (
     <SidebarContext.Provider value={{ collapsed, setCollapsed: handleSetCollapsed }}>
       <aside
-        className="h-screen border-r bg-gradient-to-b from-background via-background to-muted/30 z-30 flex flex-shrink-0 flex-col transition-all duration-200 ease-in-out"
+        className="h-screen border-r bg-linear-to-b from-background via-background to-muted/30 z-30 flex flex-shrink-0 flex-col transition-all duration-200 ease-in-out"
         style={{
           width: collapsed ? '64px' : '256px'
         }}
@@ -247,10 +247,10 @@ export function Sidebar() {
                   <Link
                     href={item.href}
                     className={cn(
-                      'group relative flex h-10 items-center rounded-xl px-3 text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+                      'group relative flex h-10 items-center rounded-xl px-3 text-sm font-medium transition-all duration-200 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
                       isActive
-                        ? 'bg-gradient-to-r from-primary/90 to-primary text-primary-foreground shadow-lg shadow-primary/30'
-                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground hover:shadow-sm',
+                        ? 'bg-linear-to-r from-primary/90 to-primary text-primary-foreground shadow-lg shadow-primary/30'
+                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground hover:shadow-xs',
                       collapsed ? 'justify-center' : 'justify-start gap-3'
                     )}
                     aria-label={item.name}

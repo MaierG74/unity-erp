@@ -160,7 +160,7 @@ export function OrderHeaderStripe({
             <div className="flex items-center border-b px-3">
               <Search className="h-4 w-4 text-muted-foreground mr-2" />
               <input
-                className="flex h-10 w-full bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
+                className="flex h-10 w-full bg-transparent py-3 text-sm outline-hidden placeholder:text-muted-foreground"
                 placeholder="Search customers..."
                 value={customerSearchTerm}
                 onChange={(e) => setCustomerSearchTerm(e.target.value)}

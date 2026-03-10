@@ -139,7 +139,7 @@ export default function LoginPage() {
                   initial={{ y: 30, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   transition={{ delay: i * 0.05, type: "spring", stiffness: 150 }}
-                  className="inline-block text-transparent bg-clip-text bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-white/80"
+                  className="inline-block text-transparent bg-clip-text bg-linear-to-r from-slate-900 to-slate-700 dark:from-white dark:to-white/80"
                 >
                   {letter === " " ? "\u00A0" : letter}
                 </motion.span>
@@ -177,7 +177,7 @@ export default function LoginPage() {
           >
             {/* Mobile logo */}
             <div className="lg:hidden text-center mb-8">
-              <h1 className="text-2xl font-bold tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-white/80">
+              <h1 className="text-2xl font-bold tracking-tighter text-transparent bg-clip-text bg-linear-to-r from-slate-900 to-slate-700 dark:from-white dark:to-white/80">
                 UNITY ERP
               </h1>
             </div>

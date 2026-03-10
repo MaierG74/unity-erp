@@ -63,6 +63,7 @@ function buildRoutingInstructions() {
     'When using manufacturing_status, set manufacturing_focus to status, who, when, in_production, or progress based on the user question.',
     'Questions about job cards owing, outstanding job cards, remaining job cards, or production left on an order should use manufacturing_status with manufacturing_focus set to progress.',
     'Use order_job_cards for questions that ask to show, list, or inspect the job cards attached to a specific order.',
+    'Use order_job_cards for questions about whether the job cards on an order are assigned, unassigned, or still need issuing to staff.',
     'Use orders_in_production for list questions about which orders are still in production or currently being made.',
     'Use orders_completed_this_week for list questions about which orders finished or were completed this week.',
     'Use production_staffing for questions about who is working on orders in production, which staff are assigned to active production work, or who is currently making orders.',

@@ -17,7 +17,7 @@ export default function InventoryError({
 
   return (
     <div className="container mx-auto py-10">
-      <div className="flex flex-col items-center justify-center gap-4 p-8 border rounded-lg shadow-sm">
+      <div className="flex flex-col items-center justify-center gap-4 p-8 border rounded-lg shadow-xs">
         <h2 className="text-2xl font-bold">Error Loading Inventory</h2>
         <p className="text-muted-foreground">
           There was a problem loading the inventory data.

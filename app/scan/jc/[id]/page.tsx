@@ -486,7 +486,7 @@ export default function JobCardScanPage() {
               value={qtyInput}
               onChange={(e) => setQtyInput(e.target.value)}
               autoFocus
-              className="mt-4 h-16 w-full rounded-xl border bg-muted text-center text-3xl font-bold focus:outline-none focus:ring-2 focus:ring-primary"
+              className="mt-4 h-16 w-full rounded-xl border bg-muted text-center text-3xl font-bold focus:outline-hidden focus:ring-2 focus:ring-primary"
             />
             <div className="mt-3 flex gap-2">
               {[

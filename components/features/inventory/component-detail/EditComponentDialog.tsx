@@ -503,7 +503,7 @@ export function EditComponentDialog({ open, onOpenChange, component }: EditCompo
                 tabIndex={0}
                 title="Drag files here or paste from clipboard"
                 className={cn(
-                  "border-2 border-dashed rounded-lg p-6 text-center transition-colors focus:outline-none focus:ring-2 focus:ring-ring",
+                  "border-2 border-dashed rounded-lg p-6 text-center transition-colors focus:outline-hidden focus:ring-2 focus:ring-ring",
                   "cursor-text",
                   isDragActive ? "border-primary bg-muted/40" : "border-border hover:bg-muted/40",
                   isUploading && "opacity-50 cursor-not-allowed"

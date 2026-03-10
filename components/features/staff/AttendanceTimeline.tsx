@@ -370,7 +370,7 @@ export const AttendanceTimeline = memo(function AttendanceTimeline({
   return (
     <div className="space-y-4">
       {/* Staff info and timeline toggle */}
-      <div className="flex flex-col gap-4 rounded-xl border bg-card p-4 text-card-foreground shadow-sm sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 rounded-xl border bg-card p-4 text-card-foreground shadow-xs sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
           <div className="flex-shrink-0">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
@@ -607,7 +607,7 @@ export const AttendanceTimeline = memo(function AttendanceTimeline({
 
       {/* Add event form */}
       {isAddingEvent && (
-        <div className="mt-4 rounded-xl border bg-card p-4 shadow-sm">
+        <div className="mt-4 rounded-xl border bg-card p-4 shadow-xs">
           <div className="space-y-2">
             <div className="grid grid-cols-3 gap-4">
               <Select

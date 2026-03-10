@@ -442,7 +442,7 @@ function SplitAllocationEditor({
                   type="number"
                   className={`h-10 w-full rounded-md border ${
                     overAllocated ? 'border-destructive' : 'border-input'
-                  } bg-background px-2 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
+                  } bg-background px-2 py-2 text-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring`}
                   min="0.01"
                   step="any"
                   placeholder="Qty"
@@ -1937,7 +1937,7 @@ export function NewPurchaseOrderForm() {
                               errors.items?.[index]?.quantity
                                 ? 'border-destructive'
                                 : 'border-input'
-                            } bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
+                            } bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring`}
                             min="0.01"
                             step="any"
                             placeholder="Qty"

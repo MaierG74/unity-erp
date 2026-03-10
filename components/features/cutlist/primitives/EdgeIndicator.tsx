@@ -83,7 +83,7 @@ export const EdgeIndicator = memo(function EdgeIndicator({
           'transition-all duration-150',
           'hover:scale-110',
           'hover:opacity-80',
-          'focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1',
+          'focus:outline-hidden focus:ring-2 focus:ring-primary focus:ring-offset-1',
         ],
         className
       )}

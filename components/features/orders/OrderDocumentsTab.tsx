@@ -370,7 +370,7 @@ export function OrderDocumentsTab({ orderId }: OrderDocumentsTabProps) {
               onPaste={handlePaste}
               tabIndex={0}
               className={cn(
-                'flex-1 min-w-0 border-2 border-dashed rounded-lg py-2.5 px-4 transition-colors focus:outline-none focus:ring-2 focus:ring-ring',
+                'flex-1 min-w-0 border-2 border-dashed rounded-lg py-2.5 px-4 transition-colors focus:outline-hidden focus:ring-2 focus:ring-ring',
                 isDragActive
                   ? 'border-primary bg-primary/5'
                   : 'border-muted-foreground/25 hover:border-muted-foreground/50 hover:bg-muted/30',

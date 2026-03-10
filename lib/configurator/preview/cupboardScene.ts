@@ -503,7 +503,8 @@ export function buildCupboardPreviewScene(config: CupboardConfig): ConfiguratorP
     nodes.push({
       type: 'rect',
       x: sideCarcassX + carcassDepth - backRecess - Math.max(BT, 1),
-      y: sideY + topThickness,
+      // The back sits on the base top and extends upward into the top groove.
+      y: sideY + topThickness - backSlotDepth,
       width: Math.max(BT, 1),
       height: sideHeight + backSlotDepth,
       fill: TECHNICAL_PREVIEW_COLORS.backFill,

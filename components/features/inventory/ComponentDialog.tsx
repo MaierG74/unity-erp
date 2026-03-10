@@ -949,7 +949,7 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                                     menu: () => "z-[9999] mt-2 bg-popover text-popover-foreground rounded-md border shadow-md",
                                     menuList: () => "p-1",
                                     option: ({ isSelected, isFocused }) => cn(
-                                      "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors",
+                                      "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-hidden transition-colors",
                                       isSelected && "bg-primary text-primary-foreground",
                                       !isSelected && isFocused && "bg-accent text-accent-foreground",
                                       !isSelected && !isFocused && "text-popover-foreground hover:bg-accent hover:text-accent-foreground"

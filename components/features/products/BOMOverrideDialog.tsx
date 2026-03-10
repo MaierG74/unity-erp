@@ -849,7 +849,7 @@ useEffect(() => {
                   <button
                     type="button"
                     onClick={() => toggleGroup(group.id)}
-                    className="flex w-full items-center justify-between gap-3 rounded-lg bg-card px-4 py-4 shadow-sm"
+                    className="flex w-full items-center justify-between gap-3 rounded-lg bg-card px-4 py-4 shadow-xs"
                   >
                     <div>
                       <div className="flex items-center gap-2">

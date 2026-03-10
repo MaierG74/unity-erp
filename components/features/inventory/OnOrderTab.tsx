@@ -199,14 +199,14 @@ export function OnOrderTab() {
 
       {/* Summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="rounded-xl border bg-card p-4 shadow-sm">
+        <div className="rounded-xl border bg-card p-4 shadow-xs">
           <div className="flex items-center gap-2">
             <Package className="h-5 w-5 text-muted-foreground" />
             <p className="text-sm font-medium text-muted-foreground">Components on Order</p>
           </div>
           <p className="text-2xl font-bold mt-2">{componentsOnOrder.length}</p>
         </div>
-        <div className="rounded-xl border bg-card p-4 shadow-sm">
+        <div className="rounded-xl border bg-card p-4 shadow-xs">
           <div className="flex items-center gap-2">
             <Package className="h-5 w-5 text-blue-600" />
             <p className="text-sm font-medium text-muted-foreground">Total Pending Units</p>
@@ -215,7 +215,7 @@ export function OnOrderTab() {
             {componentsOnOrder.reduce((sum, c) => sum + c.on_order_quantity, 0)}
           </p>
         </div>
-        <div className="rounded-xl border bg-card p-4 shadow-sm">
+        <div className="rounded-xl border bg-card p-4 shadow-xs">
           <div className="flex items-center gap-2">
             <Package className="h-5 w-5 text-amber-600" />
             <p className="text-sm font-medium text-muted-foreground">Purchase Orders</p>
@@ -230,7 +230,7 @@ export function OnOrderTab() {
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border bg-card shadow-sm">
+      <div className="rounded-xl border bg-card shadow-xs">
         <Table>
           <TableHeader>
             <TableRow>

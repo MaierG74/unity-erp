@@ -24,6 +24,11 @@ Use this guide when scheduling jobs on the `/labor-planning` board. It outlines 
 - To hook into these events (e.g., forward to an external logger), register a listener via `onSchedulingEvent` in `src/lib/analytics/scheduling.ts`.
 
 ## Quick Tips for Schedulers
+- Queue labels reflect lifecycle and schedule separately:
+  - `Pool • X remaining` means demand exists but nothing has been issued yet.
+  - `Issued • qty X` means a job card already exists but is not on a lane.
+  - `Scheduled • qty X` means the issued card is currently placed on a lane.
+  - Unscheduling an issued card should return it to the queue as `Issued`, not `Ready`.
 - If you see an overlap toast, try dragging the bar into one of the dashed “Open slot” placeholders or shorten the duration via the resize handles.
 - Off-shift staff will not accept drops—pick a staff lane with a green “Accepting drops” indicator or adjust staffing for the date first.
 - Use Undo in the success toast immediately after a drop if you placed a job on the wrong lane/time.

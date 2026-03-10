@@ -339,7 +339,7 @@ export function SupplierList() {
         </label>
       </PageToolbar>
 
-      <div className="rounded-xl border bg-card shadow-sm">
+      <div className="rounded-xl border bg-card shadow-xs">
         <Table>
           <TableHeader>
             <TableRow>

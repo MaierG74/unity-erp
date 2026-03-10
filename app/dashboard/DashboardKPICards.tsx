@@ -187,7 +187,7 @@ export function DashboardKPICards() {
             </div>
           </div>
           {/* Subtle glow on hover */}
-          <div className="pointer-events-none absolute inset-0 rounded-xl opacity-0 transition-opacity duration-300 group-hover:opacity-100 bg-gradient-to-br from-primary/[0.03] to-transparent" />
+          <div className="pointer-events-none absolute inset-0 rounded-xl opacity-0 transition-opacity duration-300 group-hover:opacity-100 bg-linear-to-br from-primary/[0.03] to-transparent" />
         </div>
       ))}
     </div>

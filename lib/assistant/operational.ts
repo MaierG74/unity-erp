@@ -1462,9 +1462,20 @@ export function detectOperationalIntent(message: string): AssistantOperationalIn
   }
 
   if (
-    /\b(blocking order|what is blocking order|what's blocking order|blocked order|order blocker)\b/.test(normalized)
+    /\b(blocking order|what is blocking order|what's blocking order|blocked order|order blocker)\b/.test(normalized) ||
+    (/\b(order|orders)\b/.test(normalized) &&
+      /\b(still owing|outstanding parts?|supplier parts?|components?)\b/.test(normalized) &&
+      /\b(owing|outstanding|left|still|waiting|from suppliers?|deliver(?:ed|ies|y)?)\b/.test(normalized))
   ) {
     return 'order_blockers';
+  }
+
+  if (
+    /\b(open|outstanding)\b/.test(normalized) &&
+    /\borders?\b/.test(normalized) &&
+    /\b(how many|count|what|show|list|have|currently|can you)\b/.test(normalized)
+  ) {
+    return 'open_orders';
   }
 
   if (
@@ -1537,6 +1548,9 @@ export function extractOpenOrdersCustomerReference(message: string) {
     .trim();
 
   const patterns = [
+    /\b(?:what|which|show|list)\s+(?:open|outstanding)\s+(.+?)\s+orders(?:\s+do\s+we\s+have)?$/i,
+    /\b(?:how many\s+)?(?:open|outstanding)\s+(.+?)\s+orders(?:\s+do\s+we\s+have)?$/i,
+    /\b(?:can you\s+)?list\s+(?:the\s+)?(?:open|outstanding)\s+(.+?)\s+orders$/i,
     /\b(?:how many\s+)?(?:late orders|overdue orders)\s+(?:for|from)\s+(.+)$/i,
     /\b(?:how many\s+)?(?:late orders|overdue orders)\s+(?:placed|ordered)\s+(?:by|for)\s+(.+)$/i,
     /\b(?:which orders are due this week|orders due this week)\s+(?:for|from)\s+(.+)$/i,
@@ -1696,52 +1710,19 @@ export function buildOpenOrdersAnswer(
   summary: AssistantOpenOrdersSummary,
   options?: { detailed?: boolean }
 ) {
-  const lines = [
-    summary.customer_name
-      ? `Open customer orders for ${summary.customer_name}: ${formatNumber(summary.open_order_count)}`
-      : `Open customer orders: ${formatNumber(summary.open_order_count)}`,
-    `Due this week: ${formatNumber(summary.due_this_week_count)}`,
-    `Overdue: ${formatNumber(summary.overdue_order_count)}`,
-  ];
-
-  if (summary.status_breakdown.length > 0) {
-    lines.push(
-      `Status breakdown: ${summary.status_breakdown
-        .slice(0, 3)
-        .map(item => `${item.status_name} (${formatNumber(item.count)})`)
-        .join(', ')}`
-    );
+  if (summary.open_order_count === 0) {
+    return summary.customer_name
+      ? `There are no open customer orders for ${summary.customer_name} right now.`
+      : 'There are no open customer orders right now.';
   }
 
-  if (summary.next_due_orders.length > 0) {
-    lines.push('');
-    lines.push('Next due orders:');
-    for (const order of summary.next_due_orders.slice(0, 3)) {
-      lines.push(`- ${buildOrderLabel(order)}`);
-    }
-  }
-
-  if (summary.missing_status_count > 0) {
-    lines.push('');
-    lines.push(
-      `Note: ${formatNumber(summary.missing_status_count)} open orders currently have no explicit status set, so they are being treated as open.`
-    );
-  }
-
-  if (options?.detailed) {
-    if (summary.listed_orders.length > 0) {
-      lines.push('');
-      lines.push(summary.customer_name ? 'Open orders:' : 'Sample open orders:');
-      for (const order of summary.listed_orders.slice(0, 8)) {
-        lines.push(`- ${buildOrderLabel(order)}`);
-      }
-    } else {
-      lines.push('');
-      lines.push('No open customer orders matched that request.');
-    }
-  }
-
-  return lines.join('\n');
+  return summary.customer_name
+    ? options?.detailed
+      ? `Here are the current open orders for ${summary.customer_name}.`
+      : `Here is the current open-order summary for ${summary.customer_name}.`
+    : options?.detailed
+      ? 'Here are the current open customer orders.'
+      : 'Here is the current open-order summary.';
 }
 
 export function buildOpenOrdersCard(
@@ -2449,42 +2430,11 @@ export function buildOrderBlockerAnswer(summary: AssistantOrderBlockerSummary) {
   }
 
   const orderLabel = summary.order.order_number?.trim() || `Order ${summary.order.order_id}`;
-  const customerLabel = summary.order.customer_name?.trim() || 'Unknown customer';
-  const lines = [
-    `Order: ${orderLabel} (${customerLabel})`,
-    `Blocked components: ${formatNumber(summary.blocked_components)}`,
-    `Waiting on incoming deliveries: ${formatNumber(summary.waiting_on_deliveries_components)}`,
-    `Ready now: ${formatNumber(summary.ready_components)}`,
-  ];
-
-  if (summary.blocked_items.length > 0) {
-    lines.push('');
-    lines.push('Blocking components:');
-    for (const item of summary.blocked_items) {
-      const label = item.description ? `${item.internal_code} - ${item.description}` : item.internal_code;
-      lines.push(
-        `- ${label}: need ${formatNumber(item.required)}, in stock ${formatNumber(item.in_stock)}, short ${formatNumber(item.shortfall)}`
-      );
-    }
-  }
-
-  if (summary.waiting_items.length > 0) {
-    lines.push('');
-    lines.push('Covered by incoming supplier orders:');
-    for (const item of summary.waiting_items) {
-      const label = item.description ? `${item.internal_code} - ${item.description}` : item.internal_code;
-      lines.push(
-        `- ${label}: need ${formatNumber(item.required)}, in stock ${formatNumber(item.in_stock)}, on order ${formatNumber(item.on_order)}`
-      );
-    }
-  }
-
   if (summary.blocked_components === 0 && summary.waiting_on_deliveries_components === 0) {
-    lines.push('');
-    lines.push('Nothing is currently blocking this order from a component stock perspective.');
+    return `Here is the current supply status for ${orderLabel}. Nothing is currently blocking this order from a component stock perspective.`;
   }
 
-  return lines.join('\n');
+  return `Here is the current supply status for ${orderLabel}.`;
 }
 
 export function buildOrderBlockerCard(
@@ -2497,6 +2447,7 @@ export function buildOrderBlockerCard(
       required: formatNumber(item.required),
       in_stock: formatNumber(item.in_stock),
       on_order: formatNumber(item.on_order),
+      gap: formatNumber(item.shortfall),
       status: 'Blocked now',
     })),
     ...summary.waiting_items.map(item => ({
@@ -2504,21 +2455,22 @@ export function buildOrderBlockerCard(
       required: formatNumber(item.required),
       in_stock: formatNumber(item.in_stock),
       on_order: formatNumber(item.on_order),
+      gap: formatNumber(item.apparent_shortfall),
       status: 'Waiting on delivery',
     })),
   ];
 
   return {
     type: 'table',
-    title: `Outstanding parts for ${orderLabel}`,
-    description: 'Verified component coverage for this order, including incoming supplier deliveries.',
+    title: `Supply status for ${orderLabel}`,
+    description: 'Verified component coverage for this order, including shortages covered by incoming supplier deliveries.',
     metrics: [
       {
         label: 'Blocked',
         value: formatNumber(summary.blocked_components),
       },
       {
-        label: 'Waiting on delivery',
+        label: 'On supplier orders',
         value: formatNumber(summary.waiting_on_deliveries_components),
       },
       {
@@ -2531,6 +2483,7 @@ export function buildOrderBlockerCard(
       { key: 'required', label: 'Required', align: 'right' },
       { key: 'in_stock', label: 'In stock', align: 'right' },
       { key: 'on_order', label: 'On order', align: 'right' },
+      { key: 'gap', label: 'Gap', align: 'right' },
       { key: 'status', label: 'Status' },
     ],
     rows,
@@ -2546,9 +2499,9 @@ export function buildOrderBlockerCard(
         href: `/orders/${summary.order.order_id}`,
       },
       {
-        label: 'Products',
-        kind: 'ask',
-        prompt: `What products are on order ${orderLabel}?`,
+        label: 'Procurement',
+        kind: 'navigate',
+        href: `/orders/${summary.order.order_id}?tab=procurement`,
       },
       {
         label: 'Job cards',
@@ -2558,7 +2511,7 @@ export function buildOrderBlockerCard(
     ],
     footer:
       rows.length > 0
-        ? 'Blocked items are short right now. Waiting items are covered by incoming supplier orders.'
+        ? 'Blocked now means current stock is short. Waiting on delivery means incoming supplier orders should cover the gap.'
         : 'Nothing is currently blocking this order from a component stock perspective.',
   };
 }

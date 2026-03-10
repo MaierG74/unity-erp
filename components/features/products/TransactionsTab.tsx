@@ -193,22 +193,22 @@ export function ProductsTransactionsTab() {
 
       {/* Summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="rounded-xl border bg-card p-4 shadow-sm">
+        <div className="rounded-xl border bg-card p-4 shadow-xs">
           <p className="text-sm font-medium text-muted-foreground">Total Transactions</p>
           <p className="text-2xl font-bold mt-2">{filteredTransactions.length}</p>
         </div>
-        <div className="rounded-xl border bg-card p-4 shadow-sm">
+        <div className="rounded-xl border bg-card p-4 shadow-xs">
           <p className="text-sm font-medium text-muted-foreground">Stock Added</p>
           <p className="text-2xl font-bold mt-2 text-green-600">{additions}</p>
         </div>
-        <div className="rounded-xl border bg-card p-4 shadow-sm">
+        <div className="rounded-xl border bg-card p-4 shadow-xs">
           <p className="text-sm font-medium text-muted-foreground">Stock Removed</p>
           <p className="text-2xl font-bold mt-2 text-red-600">{removals}</p>
         </div>
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border bg-card shadow-sm">
+      <div className="rounded-xl border bg-card shadow-xs">
         <Table>
           <TableHeader>
             <TableRow>

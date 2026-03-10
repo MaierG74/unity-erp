@@ -64,7 +64,7 @@ export default function HomePage() {
                             stiffness: 150,
                             damping: 25,
                           }}
-                          className="inline-block text-transparent bg-clip-text bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-white/80"
+                          className="inline-block text-transparent bg-clip-text bg-linear-to-r from-slate-900 to-slate-700 dark:from-white dark:to-white/80"
                         >
                           {letter}
                         </motion.span>
@@ -94,7 +94,7 @@ export default function HomePage() {
                 {!loading && !user ? (
                   <>
                     {/* Primary CTA - Teal solid color with hover darkening */}
-                    <div className="inline-block group relative bg-gradient-to-b from-black/10 to-white/10 dark:from-white/10 dark:to-black/10 p-px rounded-xl backdrop-blur-lg overflow-hidden shadow-lg hover:shadow-xl transition-shadow duration-300">
+                    <div className="inline-block group relative bg-linear-to-b from-black/10 to-white/10 dark:from-white/10 dark:to-black/10 p-px rounded-xl backdrop-blur-lg overflow-hidden shadow-lg hover:shadow-xl transition-shadow duration-300">
                       <Button
                         variant="ghost"
                         size="lg"
@@ -120,7 +120,7 @@ export default function HomePage() {
                   </>
                 ) : !loading && user ? (
                   <Link href="/dashboard">
-                    <div className="inline-block group relative bg-gradient-to-b from-black/10 to-white/10 dark:from-white/10 dark:to-black/10 p-px rounded-xl backdrop-blur-lg overflow-hidden shadow-lg hover:shadow-xl transition-shadow duration-300">
+                    <div className="inline-block group relative bg-linear-to-b from-black/10 to-white/10 dark:from-white/10 dark:to-black/10 p-px rounded-xl backdrop-blur-lg overflow-hidden shadow-lg hover:shadow-xl transition-shadow duration-300">
                       <Button
                         variant="ghost"
                         size="lg"

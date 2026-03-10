@@ -65,7 +65,7 @@ export function OrderSidebar({ orderId, onTabChange }: OrderSidebarProps) {
   return (
     <div className="space-y-4">
       {/* Customer Order Documents */}
-      <Card className="shadow-sm">
+      <Card className="shadow-xs">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
             <FileText className="h-4 w-4 text-muted-foreground" />
@@ -108,7 +108,7 @@ export function OrderSidebar({ orderId, onTabChange }: OrderSidebarProps) {
       </Card>
 
       {/* Order Progress */}
-      <Card className="shadow-sm">
+      <Card className="shadow-xs">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-semibold">Order Progress</CardTitle>
         </CardHeader>
@@ -150,7 +150,7 @@ export function OrderSidebar({ orderId, onTabChange }: OrderSidebarProps) {
       </Card>
 
       {/* Quick Actions */}
-      <Card className="shadow-sm">
+      <Card className="shadow-xs">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-semibold">Quick Actions</CardTitle>
         </CardHeader>

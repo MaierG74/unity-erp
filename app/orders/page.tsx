@@ -456,7 +456,7 @@ function DeliveryDateCell({
           onClick={(event) => event.stopPropagation()}
           onKeyDown={(event) => event.stopPropagation()}
           disabled={isUpdating}
-          className="rounded-md p-1 -m-1 hover:bg-muted/60 transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 disabled:opacity-70"
+          className="rounded-md p-1 -m-1 hover:bg-muted/60 transition-colors focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-1 disabled:opacity-70"
         >
           <div className={`text-left ${order.delivery_date ? colorClass : 'text-muted-foreground'}`}>
             <div className="flex items-center gap-1.5">
@@ -860,7 +860,7 @@ function InlineStatusDropdown({
       <DropdownMenuTrigger asChild>
         <button
           onClick={(e) => e.stopPropagation()}
-          className="focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 rounded-full"
+          className="focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-1 rounded-full"
           disabled={isUpdating}
         >
           {isUpdating ? (
@@ -1104,7 +1104,7 @@ function UploadAttachmentDialog({ order, onSuccess }: { order: Order, onSuccess:
           value={displayName}
           onChange={(e) => setDisplayName(e.target.value)}
           onPaste={handlePaste}
-          className="flex-1 px-3 py-2 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring focus:border-input"
+          className="flex-1 px-3 py-2 rounded-md border border-input bg-background focus:outline-hidden focus:ring-2 focus:ring-ring focus:border-input"
         />
         <input
           type="file"
@@ -1220,7 +1220,7 @@ function AttachmentModalWithRefresh({
                               height={320}
                               className="w-full h-full"
                             />
-                            <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/50 to-transparent p-2">
+                            <div className="absolute bottom-0 left-0 w-full bg-linear-to-t from-black/50 to-transparent p-2">
                               <p className="text-xs text-white truncate">{attachment.file_name}</p>
                             </div>
                           </a>
@@ -1269,7 +1269,7 @@ function AttachmentModalWithRefresh({
                                 />
                               </div>
                             </div>
-                            <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/60 to-transparent p-2 z-20">
+                            <div className="absolute bottom-0 left-0 w-full bg-linear-to-t from-black/60 to-transparent p-2 z-20">
                               <p className="text-xs text-white truncate">{attachment.file_name}</p>
                             </div>
                           </a>
@@ -1285,7 +1285,7 @@ function AttachmentModalWithRefresh({
                               fileName={attachment.file_name}
                               size={48}
                             />
-                            <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/50 to-transparent p-2">
+                            <div className="absolute bottom-0 left-0 w-full bg-linear-to-t from-black/50 to-transparent p-2">
                               <p className="text-xs text-white truncate">{attachment.file_name}</p>
                             </div>
                           </a>
@@ -2150,7 +2150,7 @@ export default function OrdersPage() {
           variant="outline"
           size="sm"
           onClick={() => handleSectionFilter(null)}
-          className={`rounded-full shadow-sm hover:shadow transition-all duration-200 ${
+          className={`rounded-full shadow-xs hover:shadow transition-all duration-200 ${
             activeSection === null ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
           }`}
         >
@@ -2160,7 +2160,7 @@ export default function OrdersPage() {
           variant="outline"
           size="sm"
           onClick={() => handleSectionFilter('chair')}
-          className={`rounded-full shadow-sm hover:shadow transition-all duration-200 ${
+          className={`rounded-full shadow-xs hover:shadow transition-all duration-200 ${
             activeSection === 'chair' ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
           }`}
         >
@@ -2171,7 +2171,7 @@ export default function OrdersPage() {
           variant="outline"
           size="sm"
           onClick={() => handleSectionFilter('wood')}
-          className={`rounded-full shadow-sm hover:shadow transition-all duration-200 ${
+          className={`rounded-full shadow-xs hover:shadow transition-all duration-200 ${
             activeSection === 'wood' ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
           }`}
         >
@@ -2182,7 +2182,7 @@ export default function OrdersPage() {
           variant="outline"
           size="sm"
           onClick={() => handleSectionFilter('steel')}
-          className={`rounded-full shadow-sm hover:shadow transition-all duration-200 ${
+          className={`rounded-full shadow-xs hover:shadow transition-all duration-200 ${
             activeSection === 'steel' ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
           }`}
         >
@@ -2193,7 +2193,7 @@ export default function OrdersPage() {
           variant="outline"
           size="sm"
           onClick={() => handleSectionFilter('powdercoating')}
-          className={`rounded-full shadow-sm hover:shadow transition-all duration-200 ${
+          className={`rounded-full shadow-xs hover:shadow transition-all duration-200 ${
             activeSection === 'powdercoating' ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
           }`}
         >
@@ -2203,7 +2203,7 @@ export default function OrdersPage() {
       </div>
 
       {/* Filters bar */}
-      <div className="p-4 border rounded-xl bg-card/50 backdrop-blur-sm shadow-sm">
+      <div className="p-4 border rounded-xl bg-card/50 backdrop-blur-sm shadow-xs">
         <div className="flex flex-col md:flex-row md:items-end gap-4">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="status-filter" className="text-xs font-medium text-muted-foreground">
@@ -2322,7 +2322,7 @@ export default function OrdersPage() {
             <p className="text-sm text-muted-foreground mt-1">Please try again later</p>
           </div>
         ) : totalCount > 0 ? (
-          <div className="overflow-hidden border rounded-xl bg-card/50 backdrop-blur-sm shadow-sm">
+          <div className="overflow-hidden border rounded-xl bg-card/50 backdrop-blur-sm shadow-xs">
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>

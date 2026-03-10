@@ -404,7 +404,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
     return (
       <div className="space-y-6">
         {/* Current Stock Banner with Action Buttons - shown even with no transactions */}
-        <Card className="shadow-sm bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800">
+        <Card className="shadow-xs bg-linear-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800">
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
@@ -446,7 +446,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm">
+        <Card className="shadow-xs">
           <CardContent className="pt-6">
             <div className="text-center text-muted-foreground py-8">
               <Calendar className="h-12 w-12 mx-auto mb-4 opacity-50" />
@@ -484,7 +484,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
   return (
     <div className="space-y-6">
       {/* Current Stock Banner with Action Buttons */}
-      <Card className="shadow-sm bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800">
+      <Card className="shadow-xs bg-linear-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800">
         <CardContent className="pt-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -528,7 +528,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-        <Card className="shadow-sm">
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total</CardTitle>
             <Calendar className="h-4 w-4 text-muted-foreground" />
@@ -539,7 +539,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm">
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Purchased</CardTitle>
             <TrendingUp className="h-4 w-4 text-green-600" />
@@ -552,7 +552,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm">
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Issued</CardTitle>
             <PackageMinus className="h-4 w-4 text-purple-600" />
@@ -565,7 +565,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm">
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Returned</CardTitle>
             <RotateCcw className="h-4 w-4 text-orange-600" />
@@ -578,7 +578,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm">
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Net Change</CardTitle>
             <ArrowRightLeft className="h-4 w-4 text-muted-foreground" />
@@ -602,7 +602,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
       />
 
       {/* Transactions Table */}
-      <Card className="shadow-sm">
+      <Card className="shadow-xs">
         <CardHeader className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <CardTitle className="flex items-center gap-2">

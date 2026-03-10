@@ -114,7 +114,7 @@ export function TodoEntityLinkPicker({ open, onOpenChange, onSelect }: TodoEntit
                             onSelect(link);
                             onOpenChange(false);
                           }}
-                          className="flex w-full items-center gap-3 rounded-md px-2 py-3 text-left transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none"
+                          className="flex w-full items-center gap-3 rounded-md px-2 py-3 text-left transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-hidden"
                         >
                           <div className="flex flex-1 flex-col gap-1">
                             <span className="font-medium">{link.label}</span>

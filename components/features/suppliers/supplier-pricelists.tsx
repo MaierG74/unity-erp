@@ -113,7 +113,7 @@ export function SupplierPricelists({ supplier }: SupplierPricelistsProps) {
               placeholder="Display name"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              className="flex-1 px-3 py-2 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring focus:border-input"
+              className="flex-1 px-3 py-2 rounded-md border border-input bg-background focus:outline-hidden focus:ring-2 focus:ring-ring focus:border-input"
             />
             <input
               type="file"
@@ -189,7 +189,7 @@ export function SupplierPricelists({ supplier }: SupplierPricelistsProps) {
                 />
 
                 {/* Overlay with file name */}
-                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-3 pointer-events-none">
+                <div className="absolute bottom-0 left-0 right-0 bg-linear-to-t from-black/70 to-transparent p-3 pointer-events-none">
                   <p className="text-white text-sm font-medium truncate">
                     {pricelist.display_name}
                   </p>

@@ -888,7 +888,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   return (
     <div className="space-y-5 bg-muted/30 -mx-4 md:-mx-6 px-4 md:px-6 min-h-screen">
       {/* Sticky header: stripe + tab bar */}
-      <div className="sticky top-0 z-10 -mx-4 md:-mx-6 px-4 md:px-6 pb-0 pt-2 space-y-3 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-b shadow-sm">
+      <div className="sticky top-0 z-10 -mx-4 md:-mx-6 px-4 md:px-6 pb-0 pt-2 space-y-3 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-b shadow-xs">
         <OrderHeaderStripe
           orderId={orderId}
           order={order}
@@ -938,7 +938,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
               />
             </div>
 
-            <Card className="shadow-sm">
+            <Card className="shadow-xs">
               <CardContent className="p-0">
                 {order?.details && order.details.length > 0 ? (
                   <Table>
@@ -1013,7 +1013,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
 
           {/* Stock Reservations */}
           <Collapsible open={fgReservationsOpen} onOpenChange={setFgReservationsOpen}>
-            <Card className="shadow-sm border-l-3 border-l-primary/40">
+            <Card className="shadow-xs border-l-3 border-l-primary/40">
               <CollapsibleTrigger asChild>
                 <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between cursor-pointer hover:bg-muted/50 transition-colors">
                   <div className="flex items-center gap-2">
@@ -1138,7 +1138,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
           </Collapsible>
 
           {/* Component Reservations */}
-          <Card className="shadow-sm border-l-3 border-l-orange-500/40">
+          <Card className="shadow-xs border-l-3 border-l-orange-500/40">
             <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between py-3">
               <div>
                 <CardTitle className="text-lg">Component Reservations</CardTitle>
@@ -1181,7 +1181,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
           </Card>
 
           {/* Financial Summary */}
-          <Card className="shadow-sm">
+          <Card className="shadow-xs">
             <CardContent className="py-4">
               <div className="flex items-center justify-between gap-6 text-sm">
                 <div className="flex items-center gap-4">
@@ -1207,7 +1207,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
 
       {activeTab === 'components' && (
         <div ref={componentsRef} className="space-y-5">
-          <Card className="shadow-sm">
+          <Card className="shadow-xs">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">

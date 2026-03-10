@@ -361,6 +361,7 @@ function buildAssignmentPayload(job: PlanningJob, input: AssignJobInput) {
     rate_id: job.rateId ?? job.hourlyRateId ?? null,
     hourly_rate_id: job.hourlyRateId ?? job.rateId ?? null,
     piece_rate_id: job.pieceRateId ?? null,
+    job_status: normalizeLifecycleJobStatus(job.jobStatus),
     updated_at: new Date().toISOString(),
   };
 }
@@ -418,11 +419,23 @@ function normalizeAssignmentRow(row: any): LaborPlanAssignment {
     hourlyRateId: toNumber(row?.hourly_rate_id),
     pieceRateId: toNumber(row?.piece_rate_id),
     assignmentDate: row?.assignment_date ?? null,
-    jobStatus: row?.job_status ?? null,
+    jobStatus: normalizeLifecycleJobStatus(row?.job_status),
     issuedAt: row?.issued_at ?? null,
     startedAt: row?.started_at ?? null,
     completedAt: row?.completed_at ?? null,
   };
+}
+
+function normalizeLifecycleJobStatus(status: PlanningJob['jobStatus'] | LaborPlanAssignment['jobStatus'] | null | undefined) {
+  switch (status) {
+    case 'issued':
+    case 'in_progress':
+    case 'completed':
+    case 'on_hold':
+      return status;
+    default:
+      return null;
+  }
 }
 
 function toNumber(value: unknown): number | null {
@@ -474,7 +487,7 @@ function buildOptimisticAssignment(input: AssignJobInput): LaborPlanAssignment {
     hourlyRateId: input.job.hourlyRateId ?? input.job.rateId ?? null,
     pieceRateId: input.job.pieceRateId ?? null,
     assignmentDate: input.assignmentDate,
-    jobStatus: null,
+    jobStatus: normalizeLifecycleJobStatus(input.job.jobStatus),
     issuedAt: null,
     startedAt: null,
     completedAt: null,

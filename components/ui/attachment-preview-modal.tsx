@@ -703,7 +703,7 @@ export function AttachmentPreviewModal({
                   height={320}
                   className="w-full h-full" 
                 />
-                <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/50 to-transparent p-2">
+                <div className="absolute bottom-0 left-0 w-full bg-linear-to-t from-black/50 to-transparent p-2">
                   <p className="text-xs text-white truncate">{attachment.file_name}</p>
                 </div>
               </div>
@@ -762,7 +762,7 @@ export function AttachmentPreviewModal({
                 </div>
                 
                 {/* Image label */}
-                <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/60 to-transparent p-2 z-20">
+                <div className="absolute bottom-0 left-0 w-full bg-linear-to-t from-black/60 to-transparent p-2 z-20">
                   <p className="text-xs text-white truncate">{attachment.file_name}</p>
                 </div>
               </div>
@@ -772,7 +772,7 @@ export function AttachmentPreviewModal({
                   fileName={attachment.file_name}
                   size={48}
                 />
-                <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/50 to-transparent p-2">
+                <div className="absolute bottom-0 left-0 w-full bg-linear-to-t from-black/50 to-transparent p-2">
                   <p className="text-xs text-white truncate">{attachment.file_name}</p>
                 </div>
               </div>
@@ -864,7 +864,7 @@ export function AttachmentPreviewModal({
             {/* More prominent refresh button */}
             <button 
               onClick={handleRefresh}
-              className="bg-primary text-white px-3 py-1.5 rounded-md flex items-center gap-1.5 hover:bg-primary/90 transition-colors shadow-sm"
+              className="bg-primary text-white px-3 py-1.5 rounded-md flex items-center gap-1.5 hover:bg-primary/90 transition-colors shadow-xs"
               title="Refresh thumbnails"
               aria-label="Refresh thumbnails"
               disabled={isRefreshing}

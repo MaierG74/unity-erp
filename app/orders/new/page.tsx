@@ -216,7 +216,7 @@ export default function NewOrderPage() {
                           <div className="flex h-full w-full flex-col overflow-hidden rounded-md bg-popover text-popover-foreground">
                             <div className="flex items-center border-b px-3">
                               <input
-                                className="flex h-11 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                className="flex h-11 w-full rounded-md bg-transparent py-3 text-sm outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
                                 placeholder="Search customers..."
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -230,7 +230,7 @@ export default function NewOrderPage() {
                                   {filteredCustomers.map((c) => (
                                   <div
                                     key={c.id}
-                                    className="relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+                                    className="relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-hidden hover:bg-accent hover:text-accent-foreground"
                                     onClick={() => {
                                       setCustomerId(String(c.id));
                                       setCustomerOpen(false);

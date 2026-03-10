@@ -71,7 +71,7 @@ export function ComponentSidebar({ component, activeTab, onTabChange, onEdit }: 
     return (
       <div className="space-y-4">
         {/* Stock Summary */}
-        <Card className="shadow-sm">
+        <Card className="shadow-xs">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
               <Package className="h-4 w-4 text-muted-foreground" />
@@ -113,7 +113,7 @@ export function ComponentSidebar({ component, activeTab, onTabChange, onEdit }: 
 
         {/* Suppliers */}
         {component.supplierComponents.length > 0 && (
-          <Card className="shadow-sm">
+          <Card className="shadow-xs">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
                 <Truck className="h-4 w-4 text-muted-foreground" />
@@ -145,7 +145,7 @@ export function ComponentSidebar({ component, activeTab, onTabChange, onEdit }: 
         )}
 
         {/* Quick Actions */}
-        <Card className="shadow-sm">
+        <Card className="shadow-xs">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold">Quick Actions</CardTitle>
           </CardHeader>
@@ -187,7 +187,7 @@ export function ComponentSidebar({ component, activeTab, onTabChange, onEdit }: 
     return (
       <div className="space-y-4">
         {/* Stock Position */}
-        <Card className="shadow-sm">
+        <Card className="shadow-xs">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
               <Package className="h-4 w-4 text-muted-foreground" />
@@ -228,7 +228,7 @@ export function ComponentSidebar({ component, activeTab, onTabChange, onEdit }: 
         </Card>
 
         {/* Quick Actions */}
-        <Card className="shadow-sm">
+        <Card className="shadow-xs">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold">Quick Actions</CardTitle>
           </CardHeader>

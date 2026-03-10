@@ -670,9 +670,9 @@ export function WeeklySummary() {
       </CardHeader>
       <CardContent>
         <div className="rounded-md border print:border-none overflow-x-auto max-w-[calc(100vw-3rem)] relative">
-          <div className="sticky left-0 z-10 bg-background shadow-sm">
+          <div className="sticky left-0 z-10 bg-background shadow-xs">
             {/* Shadow indicator for horizontal scroll */}
-            <div className="absolute right-0 top-0 bottom-0 w-4 bg-gradient-to-r from-transparent to-black/5 pointer-events-none"></div>
+            <div className="absolute right-0 top-0 bottom-0 w-4 bg-linear-to-r from-transparent to-black/5 pointer-events-none"></div>
           </div>
           <Table className="w-full table-fixed">
             <TableHeader>

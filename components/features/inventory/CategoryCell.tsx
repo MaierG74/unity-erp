@@ -255,7 +255,7 @@ export function CategoryCell({
         ref={cellRef}
         className={cn(
           "group relative p-2 h-full w-full cursor-pointer rounded truncate flex items-center justify-between gap-2",
-          "hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-primary",
+          "hover:bg-muted/50 focus:outline-hidden focus:ring-2 focus:ring-primary",
           isStickyActive && "bg-primary/10 ring-2 ring-primary",
           canApplySticky && "bg-green-50 dark:bg-green-900/20"
         )}

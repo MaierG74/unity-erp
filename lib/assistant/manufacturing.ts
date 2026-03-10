@@ -124,6 +124,10 @@ export type AssistantOrderManufacturingSummary =
       total_job_cards: number;
       completed_job_cards: number;
       active_job_cards: number;
+      assigned_job_cards: number;
+      unassigned_job_cards: number;
+      active_assigned_job_cards: number;
+      active_unassigned_job_cards: number;
       total_completed_quantity: number;
       total_planned_quantity: number;
       latest_completion_date: string | null;
@@ -265,6 +269,11 @@ function formatJobCardStatus(status: string | null | undefined) {
   }
 }
 
+function isAssignableJobCardStatus(status: string | null | undefined) {
+  const normalized = status?.trim().toLowerCase();
+  return normalized !== 'completed' && normalized !== 'cancelled';
+}
+
 function getCurrentDateInZone(timeZone = 'Africa/Johannesburg') {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone,
@@ -336,6 +345,13 @@ export function detectManufacturingIntent(message: string) {
   const normalized = message.toLowerCase();
 
   if (
+    isOrderJobCardAssignmentQuestion(normalized) &&
+    (/\border\b/.test(normalized) || /\bthis\b/.test(normalized) || /\bthat\b/.test(normalized))
+  ) {
+    return 'order_job_cards' as const;
+  }
+
+  if (
     /\b(?:what|which|show|list)\s+job cards?\s+(?:are\s+)?(?:on|for|attached to)\s+(?:this\s+)?order\b/.test(
       normalized
     ) ||
@@ -401,6 +417,17 @@ export function detectManufacturingIntent(message: string) {
   }
 
   return null;
+}
+
+export function isOrderJobCardAssignmentQuestion(message: string) {
+  const normalized = message.toLowerCase();
+
+  return (
+    (/\b(job cards?|jobcard)\b/.test(normalized) &&
+      /\b(assign(?:ed|ment|ing)?|unassigned|issue(?:d|ing)?|issued|staff)\b/.test(normalized)) ||
+    /\bhave all (?:the )?job cards? been assigned\b/.test(normalized) ||
+    /\bhow many .*job cards?.*(?:issue|assign)\b/.test(normalized)
+  );
 }
 
 export function detectManufacturingFocus(message: string): AssistantManufacturingFocus | null {
@@ -654,14 +681,18 @@ export async function getOrderManufacturingSummary(
       total_job_cards: 0,
       completed_job_cards: 0,
       active_job_cards: 0,
+      assigned_job_cards: 0,
+      unassigned_job_cards: 0,
+      active_assigned_job_cards: 0,
+      active_unassigned_job_cards: 0,
       total_completed_quantity: 0,
-    total_planned_quantity: 0,
-    latest_completion_date: null,
-    latest_completed_by: null,
-    related_products: [],
-    job_cards: [],
-    recent_completions: [],
-  };
+      total_planned_quantity: 0,
+      latest_completion_date: null,
+      latest_completed_by: null,
+      related_products: [],
+      job_cards: [],
+      recent_completions: [],
+    };
   }
 
   const normalizedRows = rows.map(row => {
@@ -696,6 +727,14 @@ export async function getOrderManufacturingSummary(
   );
   const activeJobCards = normalizedRows.filter(
     row => row.status === 'pending' || row.status === 'in_progress'
+  );
+  const assignedJobCards = normalizedRows.filter(row => Boolean(row.completed_by));
+  const unassignedJobCards = normalizedRows.filter(row => !row.completed_by);
+  const activeAssignedJobCards = normalizedRows.filter(
+    row => isAssignableJobCardStatus(row.status) && Boolean(row.completed_by)
+  );
+  const activeUnassignedJobCards = normalizedRows.filter(
+    row => isAssignableJobCardStatus(row.status) && !row.completed_by
   );
   const totalPlannedQuantity = normalizedRows.reduce(
     (sum, row) => sum + row.items.reduce((itemSum, item) => itemSum + item.quantity, 0),
@@ -759,6 +798,10 @@ export async function getOrderManufacturingSummary(
     total_job_cards: totalJobCards,
     completed_job_cards: completedJobCards.length,
     active_job_cards: activeJobCards.length,
+    assigned_job_cards: assignedJobCards.length,
+    unassigned_job_cards: unassignedJobCards.length,
+    active_assigned_job_cards: activeAssignedJobCards.length,
+    active_unassigned_job_cards: activeUnassignedJobCards.length,
     total_completed_quantity: totalCompletedQuantity,
     total_planned_quantity: totalPlannedQuantity,
     latest_completion_date: latestCompletion?.completion_date ?? null,
@@ -1515,7 +1558,10 @@ export function buildManufacturingProgressCard(
   };
 }
 
-export function buildOrderJobCardsAnswer(summary: AssistantOrderManufacturingSummary) {
+export function buildOrderJobCardsAnswer(
+  summary: AssistantOrderManufacturingSummary,
+  options?: { assignmentFocus?: boolean }
+) {
   if (summary.kind === 'ambiguous') {
     return `I found multiple possible orders for "${summary.order_ref}". Which one did you mean?`;
   }
@@ -1529,62 +1575,114 @@ export function buildOrderJobCardsAnswer(summary: AssistantOrderManufacturingSum
     return `There are no job cards currently attached to ${label}.`;
   }
 
+  if (options?.assignmentFocus) {
+    if (summary.active_unassigned_job_cards === 0) {
+      return `Yes. All active job cards on ${label} are currently assigned to staff.`;
+    }
+
+    return `Not yet. ${formatNumber(summary.active_unassigned_job_cards)} active job card${summary.active_unassigned_job_cards === 1 ? '' : 's'} on ${label} still need to be assigned / issued to staff.`;
+  }
+
   return `Here are the job cards currently attached to ${label}.`;
 }
 
 export function buildOrderJobCardsCard(
-  summary: Extract<AssistantOrderManufacturingSummary, { kind: 'summary' }>
+  summary: Extract<AssistantOrderManufacturingSummary, { kind: 'summary' }>,
+  options?: { assignmentFocus?: boolean }
 ): AssistantCard {
   const orderLabel = summary.order.order_number?.trim() || `Order ${summary.order.order_id}`;
 
   return {
     type: 'table',
-    title: `Job cards for ${orderLabel}`,
-    description: 'All job cards currently linked to this customer order.',
-    metrics: [
-      {
-        label: 'Total cards',
-        value: formatNumber(summary.total_job_cards),
-      },
-      {
-        label: 'Open cards',
-        value: formatNumber(summary.active_job_cards),
-      },
-      {
-        label: 'Completed cards',
-        value: formatNumber(summary.completed_job_cards),
-      },
-      {
-        label: 'Products',
-        value: formatNumber(summary.related_products.length),
-      },
-    ],
-    columns: [
-      { key: 'job_card', label: 'Job card' },
-      { key: 'status', label: 'Status' },
-      { key: 'staff', label: 'Staff' },
-      { key: 'products', label: 'Products' },
-      { key: 'progress', label: 'Progress' },
-    ],
+    title: options?.assignmentFocus ? `Job card assignment for ${orderLabel}` : `Job cards for ${orderLabel}`,
+    description: options?.assignmentFocus
+      ? 'Assignment coverage for job cards linked to this customer order.'
+      : 'All job cards currently linked to this customer order.',
+    metrics: options?.assignmentFocus
+      ? [
+          {
+            label: 'Total cards',
+            value: formatNumber(summary.total_job_cards),
+          },
+          {
+            label: 'Assigned',
+            value: formatNumber(summary.assigned_job_cards),
+          },
+          {
+            label: 'Unassigned',
+            value: formatNumber(summary.unassigned_job_cards),
+          },
+          {
+            label: 'Still to issue',
+            value: formatNumber(summary.active_unassigned_job_cards),
+          },
+        ]
+      : [
+          {
+            label: 'Total cards',
+            value: formatNumber(summary.total_job_cards),
+          },
+          {
+            label: 'Open cards',
+            value: formatNumber(summary.active_job_cards),
+          },
+          {
+            label: 'Completed cards',
+            value: formatNumber(summary.completed_job_cards),
+          },
+          {
+            label: 'Products',
+            value: formatNumber(summary.related_products.length),
+          },
+        ],
+    columns: options?.assignmentFocus
+      ? [
+          { key: 'job_card', label: 'Job card' },
+          { key: 'status', label: 'Status' },
+          { key: 'staff', label: 'Staff' },
+          { key: 'issued', label: 'Issued' },
+          { key: 'assignment', label: 'Assignment' },
+        ]
+      : [
+          { key: 'job_card', label: 'Job card' },
+          { key: 'status', label: 'Status' },
+          { key: 'staff', label: 'Staff' },
+          { key: 'products', label: 'Products' },
+          { key: 'progress', label: 'Progress' },
+        ],
     rows:
       summary.job_cards.length > 0
         ? summary.job_cards.map(jobCard => ({
             job_card: `JC-${jobCard.job_card_id}`,
             status: formatJobCardStatus(jobCard.status),
             staff: jobCard.staff_name ?? 'Unassigned',
-            products:
-              jobCard.product_labels.length > 0
-                ? jobCard.product_labels.join(', ')
-                : 'No products linked',
-            progress: `${formatNumber(jobCard.completed_quantity)} / ${formatNumber(jobCard.planned_quantity)}`,
+            ...(options?.assignmentFocus
+              ? {
+                  issued: jobCard.issue_date ?? 'Not issued',
+                  assignment: jobCard.staff_name ? 'Assigned' : 'Needs assignment',
+                }
+              : {
+                  products:
+                    jobCard.product_labels.length > 0
+                      ? jobCard.product_labels.join(', ')
+                      : 'No products linked',
+                  progress: `${formatNumber(jobCard.completed_quantity)} / ${formatNumber(jobCard.planned_quantity)}`,
+                }),
           }))
         : [
             {
               job_card: 'No job cards',
               status: 'Not set',
               staff: '—',
-              products: '—',
-              progress: '0 / 0',
+              ...(options?.assignmentFocus
+                ? {
+                    issued: '—',
+                    assignment: '—',
+                  }
+                : {
+                    products: '—',
+                    progress: '0 / 0',
+                  }),
             },
           ],
     rowActions:
@@ -1621,7 +1719,11 @@ export function buildOrderJobCardsCard(
     ],
     footer:
       summary.job_cards.length > 0
-        ? 'Click a job-card row to open it, or use Outstanding parts to check supplier/component blockers.'
+        ? options?.assignmentFocus
+          ? summary.active_unassigned_job_cards > 0
+            ? `${formatNumber(summary.active_unassigned_job_cards)} active job card${summary.active_unassigned_job_cards === 1 ? '' : 's'} still need assigning / issuing to staff.`
+            : 'All active job cards are currently assigned to staff.'
+          : 'Click a job-card row to open it, or use Outstanding parts to check supplier/component blockers.'
         : 'No job cards are currently attached to this order.',
   };
 }

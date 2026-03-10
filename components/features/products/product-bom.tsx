@@ -2405,7 +2405,7 @@ const renderCutlistEditor = () => {
                     value={browseSupplierQuery}
                     onChange={(e) => setBrowseSupplierQuery(e.target.value)}
                     placeholder="Search suppliers"
-                    className="w-full h-9 pl-9 pr-3 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="w-full h-9 pl-9 pr-3 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring"
                   />
                 </div>
               </div>
@@ -2439,7 +2439,7 @@ const renderCutlistEditor = () => {
                       value={browseComponentQuery}
                       onChange={(e) => setBrowseComponentQuery(e.target.value)}
                       placeholder="Filter components"
-                      className="w-full h-9 pl-9 pr-3 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                      className="w-full h-9 pl-9 pr-3 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring"
                     />
                   </div>
                 )}

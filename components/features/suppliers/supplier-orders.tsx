@@ -244,11 +244,11 @@ export function SupplierOrders({ supplier }: SupplierOrdersProps) {
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <div className="flex flex-col gap-3 p-3 bg-card rounded-xl border shadow-sm md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-3 p-3 bg-card rounded-xl border shadow-xs md:flex-row md:items-center md:justify-between">
           <div className="h-9 w-full md:w-96 bg-muted animate-pulse rounded-lg" />
           <div className="h-9 w-32 bg-muted animate-pulse rounded-lg md:shrink-0" />
         </div>
-        <div className="rounded-xl border bg-card shadow-sm">
+        <div className="rounded-xl border bg-card shadow-xs">
           <div className="p-4 space-y-3">
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="flex items-center gap-4 animate-pulse">
@@ -267,7 +267,7 @@ export function SupplierOrders({ supplier }: SupplierOrdersProps) {
   return (
     <div className="space-y-4">
       {/* Toolbar with filters */}
-      <div className="flex flex-col gap-3 p-3 bg-card rounded-xl border shadow-sm">
+      <div className="flex flex-col gap-3 p-3 bg-card rounded-xl border shadow-xs">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:flex-wrap">
             {/* Date Type Selector */}
@@ -355,7 +355,7 @@ export function SupplierOrders({ supplier }: SupplierOrdersProps) {
                 value={qNumberSearch}
                 onChange={(e) => setQNumberSearch(e.target.value)}
                 placeholder="Search Q number"
-                className="w-full h-9 pl-9 pr-10 rounded-lg border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                className="w-full h-9 pl-9 pr-10 rounded-lg border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring"
               />
               {qNumberSearch && (
                 <button
@@ -382,7 +382,7 @@ export function SupplierOrders({ supplier }: SupplierOrdersProps) {
       </div>
 
       {/* Orders Table */}
-      <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+      <div className="rounded-xl border bg-card shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-muted/50">

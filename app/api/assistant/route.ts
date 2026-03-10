@@ -46,6 +46,7 @@ import {
   getOrdersInProductionSummary,
   getOrderManufacturingSummary,
   getManufacturingSummary,
+  isOrderJobCardAssignmentQuestion,
 } from '@/lib/assistant/manufacturing';
 import {
   buildLateOrdersAnswer,
@@ -303,8 +304,9 @@ function detectActiveOrderFollowUpIntent(
   }
 
   if (
-    /\b(job cards?|jobcard)\b/.test(normalized) &&
-    /\b(show|list|what|which|open|attached|owing|remaining|left|are)\b/.test(normalized)
+    isOrderJobCardAssignmentQuestion(normalized) ||
+    (/\b(job cards?|jobcard)\b/.test(normalized) &&
+      /\b(show|list|what|which|open|attached|owing|remaining|left|are)\b/.test(normalized))
   ) {
     return 'order_job_cards';
   }
@@ -319,7 +321,10 @@ function detectActiveOrderFollowUpIntent(
 
   if (
     /\bstill owing\b/.test(normalized) ||
+    /\bsupplier parts?\b/.test(normalized) ||
+    /\bfrom suppliers?\b/.test(normalized) ||
     /\boutstanding parts?\b/.test(normalized) ||
+    /\bdeliver(?:ed|ies|y)\b/.test(normalized) ||
     /\bwhat(?:'s| is) outstanding\b/.test(normalized) ||
     /\bwhat(?:'s| is) left\b/.test(normalized) ||
     /\bwhat(?:'s| is) blocking\b/.test(normalized) ||
@@ -498,6 +503,7 @@ export async function POST(req: NextRequest) {
   const normalized = message.trim();
   const openOrdersFollowUp = getOpenOrdersFollowUpContext(normalized, history);
   const detectedOperationalIntent = detectOperationalIntent(normalized);
+  const explicitOpenOrdersCustomerRef = extractOpenOrdersCustomerReference(normalized);
   const detectedManufacturingIntent = detectManufacturingIntent(normalized);
   const explicitManufacturingOrderRef =
     extractManufacturingOrderReference(normalized) ||
@@ -520,6 +526,8 @@ export async function POST(req: NextRequest) {
     modelRoute?.action === 'inventory_snapshot'
       ? modelRoute.inventory_intent ?? detectInventoryIntent(normalized)
       : detectInventoryIntent(normalized);
+  const shouldForceOpenOrdersIntent =
+    detectedOperationalIntent === 'open_orders' && Boolean(explicitOpenOrdersCustomerRef);
   const activeOrderOperationalIntent =
     activeOrderFollowUpIntent === 'order_products' || activeOrderFollowUpIntent === 'order_blockers'
       ? activeOrderFollowUpIntent
@@ -530,6 +538,8 @@ export async function POST(req: NextRequest) {
     ? 'open_orders'
     : explicitManufacturingOrderRef && detectedManufacturingIntent
       ? null
+      : shouldForceOpenOrdersIntent
+        ? 'open_orders'
       : getOperationalIntentFromModelAction(modelRoute?.action) ??
         detectedOperationalIntent ??
         activeOrderOperationalIntent;
@@ -955,7 +965,7 @@ export async function POST(req: NextRequest) {
   } else if (operationalIntent === 'open_orders') {
     const customerRef = openOrdersFollowUp
       ? openOrdersFollowUp.customerRef
-      : modelRoute?.customer_ref?.trim() || extractOpenOrdersCustomerReference(normalized);
+      : explicitOpenOrdersCustomerRef || modelRoute?.customer_ref?.trim() || extractOpenOrdersCustomerReference(normalized);
     const detailedOpenOrders =
       Boolean(openOrdersFollowUp?.detailed) ||
       shouldListOpenOrders(normalized) ||
@@ -1219,6 +1229,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(reply);
     }
   } else if (manufacturingIntent === 'order_job_cards') {
+    const assignmentFocus = isOrderJobCardAssignmentQuestion(normalized);
     const orderRef =
       modelRoute?.order_ref?.trim() ||
       extractManufacturingOrderReference(normalized) ||
@@ -1239,9 +1250,11 @@ export async function POST(req: NextRequest) {
       if (summary.kind === 'ambiguous') {
         reply = buildReply(pathname, {
           status: 'clarify',
-          message: buildOrderJobCardsAnswer(summary),
+          message: buildOrderJobCardsAnswer(summary, { assignmentFocus }),
           suggestions: summary.candidates.map(candidate =>
-            `What job cards are on order ${candidate.order_number?.trim() || candidate.order_id}?`
+            assignmentFocus
+              ? `Have all the job cards been assigned for order ${candidate.order_number?.trim() || candidate.order_id}?`
+              : `What job cards are on order ${candidate.order_number?.trim() || candidate.order_id}?`
           ),
         });
         return NextResponse.json(reply);
@@ -1250,7 +1263,7 @@ export async function POST(req: NextRequest) {
       if (summary.kind === 'not_found') {
         reply = buildReply(pathname, {
           status: 'unknown',
-          message: buildOrderJobCardsAnswer(summary),
+          message: buildOrderJobCardsAnswer(summary, { assignmentFocus }),
         });
         return NextResponse.json(reply);
       }
@@ -1258,13 +1271,19 @@ export async function POST(req: NextRequest) {
       const orderLabel = summary.order.order_number ?? String(summary.order.order_id);
       reply = buildReply(pathname, {
         status: 'answered',
-        message: buildOrderJobCardsAnswer(summary),
-        card: buildOrderJobCardsCard(summary),
-        suggestions: [
-          `What products are on order ${orderLabel}?`,
-          `What is blocking order ${orderLabel}?`,
-          `Show production progress for order ${orderLabel}`,
-        ],
+        message: buildOrderJobCardsAnswer(summary, { assignmentFocus }),
+        card: buildOrderJobCardsCard(summary, { assignmentFocus }),
+        suggestions: assignmentFocus
+          ? [
+              `What job cards are on order ${orderLabel}?`,
+              `What is blocking order ${orderLabel}?`,
+              `Show production progress for order ${orderLabel}`,
+            ]
+          : [
+              `What products are on order ${orderLabel}?`,
+              `What is blocking order ${orderLabel}?`,
+              `Show production progress for order ${orderLabel}`,
+            ],
       });
       return NextResponse.json(reply);
     } catch (error) {

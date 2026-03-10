@@ -571,7 +571,7 @@ export default function TodoDetailPage() {
         className={cn(
           "sticky top-0 flex flex-wrap items-center justify-between gap-3 border-b px-4 py-2 transition-shadow duration-200",
           "bg-white dark:bg-gray-950 isolate",
-          isScrolled ? "shadow-md" : "shadow-sm"
+          isScrolled ? "shadow-md" : "shadow-xs"
         )}
         style={{ zIndex: 9999 }}
       >
@@ -856,7 +856,7 @@ export default function TodoDetailPage() {
                               key={p.id}
                               className={cn(
                                 "flex items-center gap-2 px-3 py-1.5 rounded-full border transition-colors cursor-pointer select-none",
-                                checked ? "bg-background border-primary/50 shadow-sm" : "bg-transparent border-transparent hover:bg-background hover:border-border"
+                                checked ? "bg-background border-primary/50 shadow-xs" : "bg-transparent border-transparent hover:bg-background hover:border-border"
                               )}
                               onClick={() => {
                                 const next = checked
@@ -959,7 +959,7 @@ export default function TodoDetailPage() {
             {/* Right: Activity Timeline */}
             <div className="space-y-4 pl-0 lg:pl-6 lg:border-l">
               <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">Activity Log</h3>
-              <div className="relative space-y-6 before:absolute before:inset-0 before:ml-2.5 before:-translate-x-px before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-muted before:to-transparent">
+              <div className="relative space-y-6 before:absolute before:inset-0 before:ml-2.5 before:-translate-x-px before:h-full before:w-0.5 before:bg-linear-to-b before:from-transparent before:via-muted before:to-transparent">
                 {activities.map((activity) => (
                   <div key={activity.id} className="relative flex gap-3 items-start">
                     <span className="absolute left-2.5 -translate-x-1/2 top-2 h-2 w-2 rounded-full bg-muted ring-4 ring-background" />
@@ -1039,7 +1039,7 @@ export default function TodoDetailPage() {
                         <Button
                           size="icon"
                           variant="secondary"
-                          className="h-7 w-7 shadow-sm"
+                          className="h-7 w-7 shadow-xs"
                           onClick={(e) => {
                             e.stopPropagation();
                             downloadAttachment(attachment.id, attachment.fileName);
@@ -1050,7 +1050,7 @@ export default function TodoDetailPage() {
                         <Button
                           size="icon"
                           variant="destructive"
-                          className="h-7 w-7 shadow-sm"
+                          className="h-7 w-7 shadow-xs"
                           onClick={(e) => {
                             e.stopPropagation();
                             handleDeleteAttachment(attachment.id);

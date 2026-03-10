@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 function RequirementTooltip({ breakdown }: { breakdown: { order_id: number; quantity: number; order_date: string; status: string; }[] }) {
   return (
-    <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
+    <div className="p-3 max-w-sm bg-card rounded-md shadow-xs">
       <p className="font-semibold mb-2">Order Breakdown:</p>
       <ul className="space-y-1">
         {breakdown.map((order) => (
@@ -26,7 +26,7 @@ function RequirementTooltip({ breakdown }: { breakdown: { order_id: number; quan
 
 function OnOrderTooltip({ breakdown }: { breakdown: { supplier_order_id: number; supplier_name: string; quantity: number; received: number; status: string; order_date: string; }[] }) {
   return (
-    <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
+    <div className="p-3 max-w-sm bg-card rounded-md shadow-xs">
       <p className="font-semibold mb-2">Supplier Orders:</p>
       <ul className="space-y-2">
         {breakdown.map((order) => (
@@ -52,7 +52,7 @@ function OnOrderTooltip({ breakdown }: { breakdown: { supplier_order_id: number;
 
 function CoveredByOrdersTooltip() {
   return (
-    <div className="p-3 max-w-sm bg-card rounded-md shadow-sm">
+    <div className="p-3 max-w-sm bg-card rounded-md shadow-xs">
       <p className="text-sm">This apparent shortfall is covered by existing supplier orders.</p>
     </div>
   );
@@ -64,7 +64,7 @@ export function ComponentRequirementsTable({ requirements }: { requirements: Com
   const componentsWithShortfalls = requirements.filter(req => req.real_shortfall > 0).length;
 
   return (
-    <Card className="shadow-sm border border-muted/40 overflow-hidden">
+    <Card className="shadow-xs border border-muted/40 overflow-hidden">
       <CardHeader className="pb-2">
         <div className="flex justify-between items-center">
           <CardTitle>Component Requirements</CardTitle>
