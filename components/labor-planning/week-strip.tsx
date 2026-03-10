@@ -45,7 +45,7 @@ export function WeekStrip({ selectedDate, onDateSelect, staffCapacityMinutes }: 
   );
 
   const weekDates = useMemo(
-    () => Array.from({ length: 5 }, (_, i) => format(addDays(monday, i), 'yyyy-MM-dd')),
+    () => Array.from({ length: 7 }, (_, i) => format(addDays(monday, i), 'yyyy-MM-dd')),
     [monday],
   );
 
@@ -76,12 +76,12 @@ export function WeekStrip({ selectedDate, onDateSelect, staffCapacityMinutes }: 
         {collapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
         Week overview
         <span className="ml-auto text-[10px] font-normal">
-          {format(monday, 'MMM d')} – {format(addDays(monday, 4), 'MMM d')}
+          {format(monday, 'MMM d')} – {format(addDays(monday, 6), 'MMM d')}
         </span>
       </button>
 
       {!collapsed && (
-        <div className="grid grid-cols-5 gap-1 px-3 pb-2">
+        <div className="grid grid-cols-7 gap-1 px-3 pb-2">
           {weekDates.map((date, i) => {
             const summary = summaryMap.get(date);
             const isSelected = date === selectedDate;
