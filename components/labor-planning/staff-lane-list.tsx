@@ -725,17 +725,22 @@ export function StaffLaneList({
                       : '#34d399');
 
                 const durationMins = assignment.endMinutes - assignment.startMinutes;
-                const durationHours = Math.round(durationMins / 6) / 10;
                 const statusInfo = getJobStatusInfo(assignment.jobStatus);
                 const isCompleted = assignment.jobStatus === 'completed';
+                // Sliver mode: when the true pixel width is too small for text
+                const isSliver = useFixedWidth && width < 60;
+                const sliverWidth = useFixedWidth ? Math.max(width, 6) : Math.max(width, 1);
 
                 return (
-                  <Tooltip key={assignment.id} delayDuration={300}>
+                  <Tooltip key={assignment.id} delayDuration={isSliver ? 100 : 300}>
                   <TooltipTrigger asChild>
                   <div
                     data-job-key={assignment.jobKey}
                     className={cn(
-                      'absolute top-1 flex items-center rounded-xl cursor-pointer transition-all duration-150 hover:scale-[1.02] hover:shadow-lg active:scale-[0.99]',
+                      'absolute top-1 flex items-center cursor-pointer',
+                      isSliver
+                        ? 'group/sliver rounded-md z-[1] hover:z-10 transition-[width,box-shadow] duration-200 ease-out'
+                        : 'rounded-xl transition-all duration-150 hover:scale-[1.02] hover:shadow-lg active:scale-[0.99]',
                       compact ? 'h-12' : 'h-14',
                       isCompleted && 'opacity-60',
                     )}
@@ -752,81 +757,121 @@ export function StaffLaneList({
                     }}
                     style={{
                       left: useFixedWidth ? left : `${left}%`,
-                      width: useFixedWidth ? Math.max(width, 80) : `${Math.max(width, 8)}%`,
-                      minWidth: '80px',
+                      width: isSliver
+                        ? sliverWidth
+                        : (useFixedWidth ? Math.max(width, 60) : `${Math.max(width, 5)}%`),
+                      ...(isSliver ? {} : { minWidth: '60px' }),
                       background: `linear-gradient(145deg, ${baseColor}ee 0%, ${baseColor}bb 100%)`,
-                      boxShadow: `0 2px 8px ${baseColor}55, inset 0 1px 0 rgba(255,255,255,0.15)`,
+                      boxShadow: isSliver
+                        ? `0 1px 4px ${baseColor}66`
+                        : `0 2px 8px ${baseColor}55, inset 0 1px 0 rgba(255,255,255,0.15)`,
                     }}
                   >
                     {/* Left accent stripe — coloured by job status when present */}
                     <div
-                      className="absolute left-0 top-0 h-full w-1 rounded-l-xl"
-                      style={{ background: statusInfo?.stripe ?? 'rgba(255,255,255,0.35)' }}
+                      className={cn(
+                        'absolute left-0 top-0 h-full',
+                        isSliver ? 'w-full rounded-md' : 'w-1 rounded-l-xl',
+                      )}
+                      style={{ background: isSliver ? undefined : (statusInfo?.stripe ?? 'rgba(255,255,255,0.35)') }}
                     />
 
-                    {/* Resize handles */}
-                    {assignment.showHandles !== false && (
+                    {/* ─── Sliver mode: compact dot, expand on hover ─── */}
+                    {isSliver && (
                       <>
-                        <div
-                          className="absolute left-0 top-0 flex h-full w-3 cursor-ew-resize items-center justify-center rounded-l-xl bg-black/15 opacity-0 transition hover:opacity-100"
-                          draggable
-                          onDragStart={(event) => {
-                            event.stopPropagation();
-                            const payload: LaborDragPayload = { type: 'resize-start', assignment };
-                            event.dataTransfer.setData('application/json', JSON.stringify(payload));
-                            event.dataTransfer.effectAllowed = 'move';
-                          }}
-                        >
-                          <GripHorizontal className="h-3 w-3 rotate-90 text-white/80" />
+                        {/* Pulsing dot visible at rest */}
+                        <div className="absolute inset-0 flex items-center justify-center group-hover/sliver:opacity-0 transition-opacity duration-150">
+                          <div className="h-2 w-2 rounded-full bg-white/80 shadow-xs" />
                         </div>
+                        {/* Expanded card — appears on hover */}
                         <div
-                          className="absolute right-0 top-0 flex h-full w-3 cursor-ew-resize items-center justify-center rounded-r-xl bg-black/15 opacity-0 transition hover:opacity-100"
-                          draggable
-                          onDragStart={(event) => {
-                            event.stopPropagation();
-                            const payload: LaborDragPayload = { type: 'resize-end', assignment };
-                            event.dataTransfer.setData('application/json', JSON.stringify(payload));
-                            event.dataTransfer.effectAllowed = 'move';
+                          className="pointer-events-none absolute left-0 top-0 flex h-full items-center overflow-hidden rounded-xl opacity-0 group-hover/sliver:pointer-events-auto group-hover/sliver:opacity-100 transition-[opacity] duration-200"
+                          style={{
+                            width: '180px',
+                            background: `linear-gradient(145deg, ${baseColor} 0%, ${baseColor}dd 100%)`,
+                            boxShadow: `0 4px 16px ${baseColor}88, 0 0 0 1px rgba(255,255,255,0.1)`,
                           }}
                         >
-                          <GripHorizontal className="h-3 w-3 rotate-90 text-white/80" />
+                          <div className="flex min-w-0 flex-1 flex-col justify-center pl-3 pr-2">
+                            <span className="truncate text-[10px] font-semibold leading-tight text-white drop-shadow-xs">
+                              {assignment.productName || assignment.jobName || assignment.label}
+                            </span>
+                            <span className="truncate text-[8px] font-medium text-white/80 mt-px">
+                              #{assignment.orderNumber || 'N/A'} · {formatDuration(durationMins)}
+                            </span>
+                          </div>
+                          {statusInfo && (
+                            <div className={cn('mr-1.5 flex shrink-0 items-center justify-center rounded-full p-0.5', statusInfo.color)}>
+                              <statusInfo.icon className="h-3 w-3 drop-shadow-xs" />
+                            </div>
+                          )}
                         </div>
                       </>
                     )}
 
-                    <div className="flex min-w-0 flex-1 flex-col justify-center pl-3.5 pr-1.5">
-                      <span className="truncate text-[10px] font-semibold leading-tight text-white drop-shadow-xs">
-                        {assignment.productName || assignment.jobName || assignment.label}
-                      </span>
-                      <div className="mt-0.5 flex items-center gap-1">
-                        <span className="rounded bg-black/20 px-1 py-px text-[8px] font-bold tracking-wide text-white/90">
-                          #{assignment.orderNumber || 'N/A'}
-                        </span>
-                        <span className="text-[9px] font-medium text-white/75">
-                          {Math.round((assignment.endMinutes - assignment.startMinutes) / 60 * 10) / 10}h
-                        </span>
-                      </div>
-                    </div>
+                    {/* ─── Normal card content ─── */}
+                    {!isSliver && (
+                      <>
+                        {/* Resize handles */}
+                        {assignment.showHandles !== false && (
+                          <>
+                            <div
+                              className="absolute left-0 top-0 flex h-full w-3 cursor-ew-resize items-center justify-center rounded-l-xl bg-black/15 opacity-0 transition hover:opacity-100"
+                              draggable
+                              onDragStart={(event) => {
+                                event.stopPropagation();
+                                const payload: LaborDragPayload = { type: 'resize-start', assignment };
+                                event.dataTransfer.setData('application/json', JSON.stringify(payload));
+                                event.dataTransfer.effectAllowed = 'move';
+                              }}
+                            >
+                              <GripHorizontal className="h-3 w-3 rotate-90 text-white/80" />
+                            </div>
+                            <div
+                              className="absolute right-0 top-0 flex h-full w-3 cursor-ew-resize items-center justify-center rounded-r-xl bg-black/15 opacity-0 transition hover:opacity-100"
+                              draggable
+                              onDragStart={(event) => {
+                                event.stopPropagation();
+                                const payload: LaborDragPayload = { type: 'resize-end', assignment };
+                                event.dataTransfer.setData('application/json', JSON.stringify(payload));
+                                event.dataTransfer.effectAllowed = 'move';
+                              }}
+                            >
+                              <GripHorizontal className="h-3 w-3 rotate-90 text-white/80" />
+                            </div>
+                          </>
+                        )}
 
-                    {/* Job status indicator */}
-                    {statusInfo && (
-                      <div className={cn('mr-1 flex shrink-0 items-center justify-center rounded-full p-0.5', statusInfo.color)}>
-                        <statusInfo.icon className="h-3.5 w-3.5 drop-shadow-xs" />
-                      </div>
-                    )}
+                        <div className="flex min-w-0 flex-1 flex-col justify-center pl-3.5 pr-1.5">
+                          <span className="truncate text-[10px] font-semibold leading-tight text-white drop-shadow-xs">
+                            {assignment.productName || assignment.jobName || assignment.label}
+                          </span>
+                          <span className="truncate text-[8px] font-medium text-white/70 mt-px">
+                            #{assignment.orderNumber || 'N/A'} · {formatDuration(durationMins)}
+                          </span>
+                        </div>
 
-                    {onUnassign && (
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onUnassign(assignment);
-                        }}
-                        className="mr-1.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-white/20 text-white/90 transition hover:bg-white/35"
-                        aria-label="Unassign job"
-                      >
-                        <X className="h-2.5 w-2.5" />
-                      </button>
+                        {/* Job status indicator */}
+                        {statusInfo && (
+                          <div className={cn('mr-1 flex shrink-0 items-center justify-center rounded-full p-0.5', statusInfo.color)}>
+                            <statusInfo.icon className="h-3.5 w-3.5 drop-shadow-xs" />
+                          </div>
+                        )}
+
+                        {onUnassign && (
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onUnassign(assignment);
+                            }}
+                            className="mr-1.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-white/20 text-white/90 transition hover:bg-white/35"
+                            aria-label="Unassign job"
+                          >
+                            <X className="h-2.5 w-2.5" />
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
                   </TooltipTrigger>
@@ -846,7 +891,7 @@ export function StaffLaneList({
                       <div className="flex items-center gap-1.5 text-[10px] text-neutral-300">
                         <Clock className="h-3 w-3 shrink-0 text-neutral-500" />
                         <span>{minutesToClock(assignment.startMinutes)} – {minutesToClock(assignment.endMinutes)}</span>
-                        <span className="ml-auto text-neutral-500">{durationHours}h</span>
+                        <span className="ml-auto text-neutral-500">{formatDuration(durationMins)}</span>
                       </div>
                       {assignment.orderNumber && (
                         <div className="flex items-center gap-1.5 text-[10px] text-neutral-300">
