@@ -25,6 +25,15 @@ import type { ScheduleBreak } from '@/types/work-schedule';
 
 import { format } from 'date-fns';
 
+const PRINT_AFTER_ISSUE_STORAGE_KEY = 'labor-planning-print-after-issue';
+
+function getStoredPrintAfterIssue(): boolean {
+  if (typeof window === 'undefined') return true;
+  const stored = localStorage.getItem(PRINT_AFTER_ISSUE_STORAGE_KEY);
+  if (stored == null) return true;
+  return stored !== 'false';
+}
+
 /** Collapsible "More details" section for the job assignment dialog */
 function ExpandableDetails({
   dueDate,
@@ -84,6 +93,22 @@ function getJobStatusInfo(status?: StaffAssignment['jobStatus']) {
     default:
       return null;
   }
+}
+
+function extractCardIdFromJobKey(jobKey?: string): number | null {
+  if (!jobKey) return null;
+  const match = jobKey.match(/:card-(\d+)$/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function extractItemIdFromJobKey(jobKey?: string): number | null {
+  if (!jobKey) return null;
+  const match = jobKey.match(/:jci-(\d+)$/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 interface StaffLaneListProps {
@@ -236,6 +261,7 @@ export function StaffLaneList({
     if (!selectedAssignment || !selectedLane) return;
 
     setIssuingJobCard(true);
+    let printWindow: Window | null = null;
     try {
       // Look up BOL data if we have a bolId to get product_id and quantity
       let productId: number | null = null;
@@ -317,6 +343,11 @@ export function StaffLaneList({
           description: 'This job has already been issued with no remaining balance.',
         });
         return;
+      }
+
+      const shouldPrintAfterIssue = getStoredPrintAfterIssue();
+      if (shouldPrintAfterIssue) {
+        printWindow = window.open('about:blank', '_blank');
       }
 
       // Create the staff-assigned job card
@@ -403,15 +434,25 @@ export function StaffLaneList({
 
       const jobCardId = jobCardData.job_card_id;
       const issuedRemaining = remaining > 0 ? ` (${qtyToIssue} issued, ${remaining} remaining)` : '';
+      const reopenPrint = () => window.open(`/staff/job-cards/${jobCardId}?print=1`, '_blank');
 
-      toast.success(`Job card #${jobCardId} issued${issuedRemaining}`);
+      toast.success(`Job card #${jobCardId} issued${issuedRemaining}`, {
+        description: printWindow ? 'Print opened.' : undefined,
+        action: {
+          label: printWindow ? 'Reopen print' : 'Print now',
+          onClick: reopenPrint,
+        },
+      });
 
-      // Open job card in new tab so the user can print immediately
-      window.open(`/staff/job-cards/${jobCardId}`, '_blank');
+      // Open the print-ready job card immediately after issue
+      if (printWindow) {
+        printWindow.location.href = `/staff/job-cards/${jobCardId}?print=1`;
+      }
 
       setSelectedAssignment(null);
       setSelectedLane(null);
     } catch (err: any) {
+      printWindow?.close();
       console.error('Failed to create job card:', err);
       toast.error(err.message || 'Failed to create job card');
     } finally {
@@ -430,37 +471,78 @@ export function StaffLaneList({
       const jobId = selectedAssignment.jobId ?? null;
       const staffId = parseInt(selectedLane.id, 10);
       const isPoolSourced = selectedAssignment.jobKey?.startsWith('pool-');
+      const targetCardId = extractCardIdFromJobKey(selectedAssignment.jobKey);
+      const targetItemId = extractItemIdFromJobKey(selectedAssignment.jobKey);
 
       if (orderId && jobId) {
-        // Find the staff-assigned job card for this order + staff
-        const { data: staffCards } = await supabase
-          .from('job_cards')
-          .select('job_card_id')
-          .eq('order_id', orderId)
-          .eq('staff_id', staffId);
+        let cardIds: number[] = [];
+        let issuedItems: Array<{
+          item_id: number;
+          job_card_id: number;
+          quantity: number;
+          product_id: number | null;
+          piece_rate: number | null;
+          work_pool_id: number | null;
+        }> = [];
 
-        if (staffCards && staffCards.length > 0) {
-          const cardIds = staffCards.map(c => c.job_card_id);
-
-          // Find the issued items on this staff's card
-          const { data: issuedItems } = await supabase
+        if (targetItemId != null) {
+          const { data: exactItem, error: exactItemError } = await supabase
             .from('job_card_items')
             .select('item_id, job_card_id, quantity, product_id, piece_rate, work_pool_id')
-            .in('job_card_id', cardIds)
-            .eq('job_id', jobId);
+            .eq('item_id', targetItemId)
+            .maybeSingle();
 
+          if (exactItemError) throw exactItemError;
+          if (exactItem) {
+            issuedItems = [exactItem];
+            cardIds = [exactItem.job_card_id];
+          }
+        } else if (targetCardId != null) {
+          const { data: exactItems, error: exactItemsError } = await supabase
+            .from('job_card_items')
+            .select('item_id, job_card_id, quantity, product_id, piece_rate, work_pool_id')
+            .eq('job_card_id', targetCardId)
+            .eq('job_id', jobId)
+            .neq('status', 'completed');
+
+          if (exactItemsError) throw exactItemsError;
+          issuedItems = exactItems ?? [];
+          cardIds = [targetCardId];
+        } else {
+          // Fallback for legacy assignments without embedded card/item identity.
+          const { data: staffCards } = await supabase
+            .from('job_cards')
+            .select('job_card_id')
+            .eq('order_id', orderId)
+            .eq('staff_id', staffId);
+
+          if (staffCards && staffCards.length > 0) {
+            cardIds = staffCards.map(c => c.job_card_id);
+
+            const { data: fallbackItems, error: fallbackItemsError } = await supabase
+              .from('job_card_items')
+              .select('item_id, job_card_id, quantity, product_id, piece_rate, work_pool_id')
+              .in('job_card_id', cardIds)
+              .eq('job_id', jobId)
+              .neq('status', 'completed');
+
+            if (fallbackItemsError) throw fallbackItemsError;
+            issuedItems = fallbackItems ?? [];
+          }
+        }
+
+        if (issuedItems.length > 0) {
           if (isPoolSourced) {
-            // Pool-sourced: cancel the card items — remaining qty is computed,
-            // so cancelling automatically returns quantity to the pool.
-            for (const item of issuedItems ?? []) {
+            // Pool-sourced: cancel only the targeted card item(s).
+            for (const item of issuedItems) {
               await supabase
                 .from('job_card_items')
                 .update({ status: 'cancelled' })
                 .eq('item_id', item.item_id);
             }
           } else {
-            // Legacy (non-pool): merge quantities back to source cards
-            for (const item of issuedItems ?? []) {
+            // Legacy (non-pool): merge only the targeted card item(s) back to source cards.
+            for (const item of issuedItems) {
               const { data: sourceItems } = await supabase
                 .from('job_card_items')
                 .select('item_id, quantity, job_card_id')
@@ -484,26 +566,26 @@ export function StaffLaneList({
                   .limit(1)
                   .maybeSingle();
 
-                let targetCardId: number;
+                let targetUnassignedCardId: number;
                 if (unassignedCard) {
-                  targetCardId = unassignedCard.job_card_id;
+                  targetUnassignedCardId = unassignedCard.job_card_id;
                 } else {
                   const { data: newCard } = await supabase
                     .from('job_cards')
                     .insert({ order_id: orderId, staff_id: null, status: 'pending', issue_date: new Date().toISOString().split('T')[0] })
                     .select()
                     .single();
-                  targetCardId = newCard!.job_card_id;
+                  targetUnassignedCardId = newCard!.job_card_id;
                 }
                 await supabase
                   .from('job_card_items')
-                  .update({ job_card_id: targetCardId })
+                  .update({ job_card_id: targetUnassignedCardId })
                   .eq('item_id', item.item_id);
               }
             }
           }
 
-          // Clean up empty or all-cancelled staff cards
+          // Clean up only the targeted card(s).
           for (const cardId of cardIds) {
             const { data: activeItems } = await supabase
               .from('job_card_items')
@@ -519,6 +601,8 @@ export function StaffLaneList({
                 .eq('job_card_id', cardId);
             }
           }
+        } else if (targetCardId != null || targetItemId != null) {
+          throw new Error('Could not find the exact issued card for this scheduled job');
         }
       }
 

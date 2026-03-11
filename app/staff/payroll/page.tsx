@@ -135,7 +135,7 @@ export default function PayrollPage() {
         .from('job_card_items')
         .select(`
           *,
-          job_cards!inner(staff_id, completion_date)
+          job_cards!job_card_items_job_card_id_fkey(staff_id, completion_date)
         `)
         .gte('job_cards.completion_date', selectedWeekStart.toISOString().split('T')[0])
         .lte('job_cards.completion_date', weekEnd.toISOString().split('T')[0])

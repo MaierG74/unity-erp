@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useMemo } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -59,7 +59,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { JobCardPDFDownload } from '@/components/features/job-cards/JobCardPDFDownload';
+import { JobCardPDFDownload, openJobCardPrintWindow } from '@/components/features/job-cards/JobCardPDFDownload';
 
 type JobCardStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
 type ItemStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
@@ -127,8 +127,11 @@ const itemStatusConfig: Record<ItemStatus, { label: string; variant: 'default' |
 export default function JobCardDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const jobCardId = parseInt(params.id as string);
+  const autoPrintRequested = searchParams.get('print') === '1';
+  const autoPrintTriggeredRef = useRef(false);
 
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
   const [editingQuantity, setEditingQuantity] = useState<number>(0);
@@ -497,6 +500,51 @@ export default function JobCardDetailPage() {
     const rem = mins % 60;
     return rem > 0 ? `~${hrs}h ${rem}m remaining` : `~${hrs}h remaining`;
   };
+
+  useEffect(() => {
+    if (!autoPrintRequested || autoPrintTriggeredRef.current) return;
+    if (loadingJobCard || loadingItems || !jobCard) return;
+
+    if (items.length === 0) {
+      autoPrintTriggeredRef.current = true;
+      toast.error('This job card has no printable items yet.');
+      return;
+    }
+
+    autoPrintTriggeredRef.current = true;
+
+    void openJobCardPrintWindow(
+      {
+        jobCard: {
+          job_card_id: jobCard.job_card_id,
+          staff_name: jobCard.staff
+            ? `${jobCard.staff.first_name} ${jobCard.staff.last_name}`
+            : 'Unassigned',
+          order_number: jobCard.orders?.order_number || null,
+          customer_name: jobCard.orders?.customers?.name || null,
+          issue_date: jobCard.issue_date,
+          due_date: jobCard.due_date,
+          notes: jobCard.notes,
+          status: jobCard.status,
+        },
+        items: items.map((item) => ({
+          item_id: item.item_id,
+          product_name: item.products?.name || 'Unknown Product',
+          product_code: item.products?.internal_code || '',
+          job_name: item.jobs?.name || 'Unknown Job',
+          quantity: item.quantity,
+          completed_quantity: item.completed_quantity,
+          piece_rate: item.piece_rate,
+        })),
+        companyInfo,
+      },
+      '_self',
+    ).catch((error) => {
+      autoPrintTriggeredRef.current = false;
+      console.error('Auto-print failed:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to open print preview');
+    });
+  }, [autoPrintRequested, loadingJobCard, loadingItems, jobCard, items, companyInfo]);
 
   if (loadingJobCard || loadingItems) {
     return (

@@ -5,6 +5,7 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Card, CardContent } from '@/components/ui/card';
 import {
@@ -70,6 +71,7 @@ const ZOOM_LEVELS = [80, 120, 180, 240] as const;
 // + lane-row border (1) + staff column w-[120px] (120) + border-r (1)
 const LANE_TIMELINE_OFFSET = 143;
 const ZOOM_STORAGE_KEY = 'labor-planning-zoom';
+const PRINT_AFTER_ISSUE_STORAGE_KEY = 'labor-planning-print-after-issue';
 
 function getStoredZoom(): number {
   if (typeof window === 'undefined') return 1;
@@ -84,6 +86,19 @@ function getStoredZoom(): number {
 function storeZoom(index: number): void {
   if (typeof window !== 'undefined') {
     localStorage.setItem(ZOOM_STORAGE_KEY, String(index));
+  }
+}
+
+function getStoredPrintAfterIssue(): boolean {
+  if (typeof window === 'undefined') return true;
+  const stored = localStorage.getItem(PRINT_AFTER_ISSUE_STORAGE_KEY);
+  if (stored == null) return true;
+  return stored !== 'false';
+}
+
+function storePrintAfterIssue(enabled: boolean): void {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(PRINT_AFTER_ISSUE_STORAGE_KEY, String(enabled));
   }
 }
 
@@ -886,7 +901,12 @@ function IssueAndScheduleDialog({
   const remaining = job.remainingQty ?? job.quantity ?? 1;
   const [qty, setQty] = useState(1);
   const [overrideReason, setOverrideReason] = useState('');
+  const [printAfterIssue, setPrintAfterIssue] = useState(() => getStoredPrintAfterIssue());
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    storePrintAfterIssue(printAfterIssue);
+  }, [printAfterIssue]);
 
   const isOverIssue = qty > remaining;
   const timePerUnit = job.timePerUnit ?? job.durationMinutes ?? null;
@@ -928,6 +948,7 @@ function IssueAndScheduleDialog({
       return;
     }
 
+    const printWindow = printAfterIssue ? window.open('about:blank', '_blank') : null;
     setIsSubmitting(true);
 
     try {
@@ -942,11 +963,26 @@ function IssueAndScheduleDialog({
       if (error) throw error;
 
       const jobKey = `pool-${job.poolId}:card-${cardId}`;
+      const reopenPrint = () => window.open(`/staff/job-cards/${cardId}?print=1`, '_blank');
       toast.success('Job card issued & scheduled', {
-        description: `Card #${cardId} — ${qty} units of ${job.name} assigned to ${staffLane.name}`,
+        description: printAfterIssue
+          ? `Card #${cardId} — ${qty} units of ${job.name} assigned to ${staffLane.name}. Print opened.`
+          : `Card #${cardId} — ${qty} units of ${job.name} assigned to ${staffLane.name}.`,
+        action: {
+          label: printAfterIssue ? 'Reopen print' : 'Print now',
+          onClick: reopenPrint,
+        },
       });
+      if (printAfterIssue) {
+        if (printWindow) {
+          printWindow.location.href = `/staff/job-cards/${cardId}?print=1`;
+        } else {
+          reopenPrint();
+        }
+      }
       onIssued(cardId as number, qty, jobKey, computedEnd);
     } catch (err: any) {
+      printWindow?.close();
       toast.error('Failed to issue job card', { description: err.message });
     } finally {
       setIsSubmitting(false);
@@ -990,6 +1026,23 @@ function IssueAndScheduleDialog({
               onChange={(e) => setQty(parseInt(e.target.value) || 0)}
               onBlur={() => { if (!qty || qty < 1) setQty(1); }}
             />
+          </div>
+
+          <div className="flex items-start gap-3 rounded-md border bg-muted/30 p-3">
+            <Checkbox
+              id="issue-print-after"
+              checked={printAfterIssue}
+              onCheckedChange={(checked) => setPrintAfterIssue(Boolean(checked))}
+              disabled={isSubmitting}
+            />
+            <div className="space-y-0.5">
+              <Label htmlFor="issue-print-after" className="text-sm font-medium">
+                Print job card after issue
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Opens a print-ready job card in a new tab as soon as this card is issued.
+              </p>
+            </div>
           </div>
 
           {/* Schedule time preview — updates live as quantity changes */}

@@ -618,7 +618,7 @@ function PayrollDetailPanel({ staffId, staffName, weekStart, weekEnd, row, onClo
           item_id, completed_quantity, piece_rate, piece_rate_override,
           quantity, remainder_action, remainder_qty, remainder_reason,
           job:jobs(name),
-          job_card:job_cards!inner(job_card_id, order_id, completion_date, staff_id, completion_type,
+          job_card:job_cards!job_card_items_job_card_id_fkey(job_card_id, order_id, completion_date, staff_id, completion_type,
             order:orders(order_number, customer:customers(name))
           ),
           product:products(name)

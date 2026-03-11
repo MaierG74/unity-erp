@@ -66,7 +66,11 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
   const [notes, setNotes] = useState('');
   const [completions, setCompletions] = useState<Record<number, ItemCompletion>>({});
 
-  const { data: rawItems, isLoading: itemsLoading } = useQuery({
+  const {
+    data: rawItems,
+    isLoading: itemsLoading,
+    isError: itemsError,
+  } = useQuery({
     queryKey: ['job-card-items', job?.job_card_id],
     queryFn: () => fetchJobCardItems(job!.job_card_id!),
     enabled: open && !!job?.job_card_id,
@@ -201,11 +205,13 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
     return workResult.totalMinutes - job.estimated_minutes;
   }, [workResult.totalMinutes, job?.estimated_minutes]);
 
-  const itemsValid = items.length === 0 || isCompletionValid(items, completions);
+  const requiresLoadedItems = !!job?.job_card_id;
+  const itemsReadyForCompletion = !requiresLoadedItems || (!itemsLoading && !itemsError && items.length > 0);
+  const itemsValid = itemsReadyForCompletion && (!requiresLoadedItems || isCompletionValid(items, completions));
 
   const handleSubmit = () => {
-    if (!job) return;
-    const itemsPayload = items.length > 0 ? buildItemsPayload(items, completions) : [];
+    if (!job || !itemsReadyForCompletion) return;
+    const itemsPayload = buildItemsPayload(items, completions);
     onComplete({
       items: itemsPayload,
       actualStart: actualStart && startDate ? new Date(`${startDate}T${actualStart}:00`).toISOString() : undefined,
@@ -307,6 +313,10 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
           {/* Job card items with remainder handling */}
           {itemsLoading ? (
             <p className="text-sm text-muted-foreground">Loading items...</p>
+          ) : itemsError ? (
+            <p className="text-sm text-destructive">
+              Could not load job card items. Reload the dialog before completing this job.
+            </p>
           ) : items.length > 0 ? (
             <CompletionItemsList
               items={items}
@@ -315,7 +325,11 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
             />
           ) : !job.job_card_id ? (
             <p className="text-sm text-muted-foreground italic">No linked job card found. Assignment will be marked complete.</p>
-          ) : null}
+          ) : (
+            <p className="text-sm text-destructive">
+              No active job card items were found for this card. Completion is blocked until the card items load correctly.
+            </p>
+          )}
 
           {/* Notes */}
           <div className="space-y-2">

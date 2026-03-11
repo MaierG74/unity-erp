@@ -34,6 +34,10 @@ Use this guide when scheduling jobs on the `/labor-planning` board. It outlines 
 - Scheduler changes now invalidate the production queue and production summary as well, so staff/time changes should appear without a manual browser refresh.
 - Putting an issued card onto a lane for the first time, or moving it to a different lane before work starts, now updates the linked `job_cards.staff_id` as well, so piecework payroll follows the scheduler owner. Once work has started, the move is blocked and the card must go through the transfer flow instead.
 - Scheduler completion now writes through the remainder-aware completion RPC, which stamps the job card completion actor/date and applies payroll-lock checks before changing completed piecework.
+- Card-backed completions are now blocked if the dialog cannot load the active job card items. This prevents an empty payload from accidentally full-completing a card without remainder decisions.
+- Scheduler work-pool issuance now resolves job-card status through the original `job_card_id` link, so follow-up-card FKs no longer break pool counts or trigger stale-data warnings.
+- Un-issuing a scheduled job card now targets the exact card/item encoded in the assignment key, so cancelling one split-issued sibling card does not cancel other cards for the same order/job/staff.
+- Pool issuance from the scheduler now includes a `Print job card after issue` toggle. It defaults on, remembers the last choice on that browser, and opens a print-ready tab immediately so the operator can hand a physical card to the employee without leaving the board. The success toast also includes a `Reopen print` fallback.
 - If you see an overlap toast, try dragging the bar into one of the dashed “Open slot” placeholders or shorten the duration via the resize handles.
 - Off-shift staff will not accept drops—pick a staff lane with a green “Accepting drops” indicator or adjust staffing for the date first.
 - Use Undo in the success toast immediately after a drop if you placed a job on the wrong lane/time.

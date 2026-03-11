@@ -92,7 +92,11 @@ export function CompleteJobDialog({
   const jobCardId = extractCardId(assignment?.job_instance_id);
 
   // Fetch job card items — reuse shared query function and cache key
-  const { data: rawItems, isLoading: itemsLoading } = useQuery({
+  const {
+    data: rawItems,
+    isLoading: itemsLoading,
+    isError: itemsError,
+  } = useQuery({
     queryKey: ['job-card-items', jobCardId],
     queryFn: () => fetchJobCardItems(jobCardId!),
     enabled: open && jobCardId != null,
@@ -148,7 +152,9 @@ export function CompleteJobDialog({
     }));
   }, []);
 
-  const itemsValid = items.length === 0 || isCompletionValid(items, completions);
+  const requiresLoadedItems = jobCardId != null;
+  const itemsReadyForCompletion = !requiresLoadedItems || (!itemsLoading && !itemsError && items.length > 0);
+  const itemsValid = itemsReadyForCompletion && (!requiresLoadedItems || isCompletionValid(items, completions));
 
   // Complete job mutation
   const completeJob = useMutation({
@@ -161,7 +167,11 @@ export function CompleteJobDialog({
       const actualStartIso = `${assignmentDate}T${actualStartTime}:00`;
       const actualEndIso = `${assignmentDate}T${actualEndTime}:00`;
 
-      const itemsPayload = items.length > 0 ? buildItemsPayload(items, completions) : [];
+      if (!itemsReadyForCompletion) {
+        throw new Error('Job card items must load before completion can be submitted');
+      }
+
+      const itemsPayload = buildItemsPayload(items, completions);
 
       const { data, error } = await supabase.rpc('complete_assignment_with_card_v2', {
         p_assignment_id: assignment.assignment_id,
@@ -348,13 +358,21 @@ export function CompleteJobDialog({
               <Separator />
               {itemsLoading ? (
                 <p className="text-sm text-muted-foreground">Loading items...</p>
+              ) : itemsError ? (
+                <p className="text-sm text-destructive">
+                  Could not load job card items. Reload the dialog before completing this job.
+                </p>
               ) : items.length > 0 ? (
                 <CompletionItemsList
                   items={items}
                   completions={completions}
                   onUpdate={handleUpdateCompletion}
                 />
-              ) : null}
+              ) : (
+                <p className="text-sm text-destructive">
+                  No active job card items were found for this card. Completion is blocked until the card items load correctly.
+                </p>
+              )}
             </>
           )}
 

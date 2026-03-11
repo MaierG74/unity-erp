@@ -696,7 +696,7 @@ async function loadWorkPoolByOrder(): Promise<WorkPoolData> {
   const poolIds = rows.map((r: any) => r.pool_id);
   const { data: issuanceData, error: issuanceErr } = await supabase
     .from('job_card_items')
-    .select('work_pool_id, quantity, status, job_cards!inner(status)')
+    .select('work_pool_id, quantity, status, job_cards!job_card_items_job_card_id_fkey(status)')
     .in('work_pool_id', poolIds);
 
   if (issuanceErr) {

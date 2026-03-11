@@ -177,6 +177,7 @@
 - `Issued` = the sum of non-cancelled `job_card_items.quantity` linked to that pool row.
 - `Remaining` = `Required - Issued`. It is computed, not stored.
 - Pool rows are snapshots. If the order quantity or BOL changes later, the order page warns that the pool is stale and offers `Update Pool` reconciliation. After a successful reconcile, the warning should clear when the refreshed pool matches current demand.
+- Partial-completion follow-up cards do not change the issued math for the original pool row; work-pool issuance/counting always resolves through the item's original `job_card_id`.
 
 ```mermaid
 flowchart LR

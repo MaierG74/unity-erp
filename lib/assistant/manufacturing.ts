@@ -554,7 +554,7 @@ export async function getManufacturingSummary(
       status,
       completion_time,
       product:products!inner(product_id, internal_code, name, description),
-      job_card:job_cards!inner(
+      job_card:job_cards!job_card_items_job_card_id_fkey(
         job_card_id,
         status,
         issue_date,

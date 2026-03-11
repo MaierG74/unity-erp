@@ -337,7 +337,7 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
       const poolIds = poolRows.map((r) => r.pool_id);
       const { data: issuanceData, error: issuanceErr } = await supabase
         .from('job_card_items')
-        .select('work_pool_id, quantity, completed_quantity, status, job_cards!inner(status)')
+        .select('work_pool_id, quantity, completed_quantity, status, job_cards!job_card_items_job_card_id_fkey(status)')
         .in('work_pool_id', poolIds);
       if (issuanceErr) throw issuanceErr;
 
