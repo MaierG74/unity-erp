@@ -35,6 +35,13 @@ import styles from './page.module.css';
 import { fetchPOAttachments, POAttachment } from '@/lib/db/purchase-order-attachments';
 import POAttachmentManager from '@/components/features/purchasing/POAttachmentManager';
 import { ForOrderEditPopover } from '@/components/features/purchasing/ForOrderEditPopover';
+import {
+  formatQuantity,
+  getRemainingQuantity,
+  hasOutstandingQuantity,
+  isPositiveQuantity,
+  normalizeQuantity,
+} from '@/lib/purchasing-quantities';
 // import { sendPurchaseOrderEmail } from '@/lib/email'; // not used here; email is sent via API route
 
 // Status badge component
@@ -392,8 +399,8 @@ async function receiveStock(purchaseOrderId: string, receipts: ReceiptFormData) 
       }
 
       // 1a. Validate quantity does not exceed remaining
-      const remaining = Math.max((orderRow.order_quantity || 0) - (orderRow.total_received || 0), 0);
-      if (quantityReceived > remaining) {
+      const remaining = getRemainingQuantity(orderRow.order_quantity, orderRow.total_received);
+      if (normalizeQuantity(quantityReceived) > remaining) {
         throw new Error(`Quantity exceeds remaining to receive (remaining: ${remaining}) for order ${orderId}`);
       }
 
@@ -413,7 +420,7 @@ async function receiveStock(purchaseOrderId: string, receipts: ReceiptFormData) 
       // Try the transactional RPC first; fall back to manual inserts if it is unavailable
       const { error: rpcError } = await supabase.rpc('process_supplier_order_receipt', {
         p_order_id: parseInt(orderId),
-        p_quantity: quantityReceived,
+        p_quantity: normalizeQuantity(quantityReceived),
         p_receipt_date: receiptTimestamp,
       });
 
@@ -449,7 +456,7 @@ async function receiveStock(purchaseOrderId: string, receipts: ReceiptFormData) 
         .from('inventory_transactions')
         .insert({
           component_id: componentId,
-          quantity: quantityReceived,
+          quantity: normalizeQuantity(quantityReceived),
           transaction_type_id: purchaseTypeId,
           transaction_date: receiptTimestamp
         })
@@ -465,7 +472,7 @@ async function receiveStock(purchaseOrderId: string, receipts: ReceiptFormData) 
         .insert({
           order_id: parseInt(orderId),
           transaction_id: transactionData.transaction_id,
-          quantity_received: quantityReceived,
+          quantity_received: normalizeQuantity(quantityReceived),
           receipt_date: receiptTimestamp
         });
       if (receiptError) throw new Error(`Failed to create receipt record: ${receiptError.message}`);
@@ -480,7 +487,7 @@ async function receiveStock(purchaseOrderId: string, receipts: ReceiptFormData) 
         throw new Error(`Failed to check inventory: ${inventorySelectError.message}`);
       }
       if (existingInventory) {
-        const newQty = (existingInventory.quantity_on_hand || 0) + quantityReceived;
+        const newQty = normalizeQuantity((existingInventory.quantity_on_hand || 0) + quantityReceived);
         const { error: invUpdateError } = await supabase
           .from('inventory')
           .update({ quantity_on_hand: newQty })
@@ -489,7 +496,7 @@ async function receiveStock(purchaseOrderId: string, receipts: ReceiptFormData) 
       } else {
         const { error: invInsertError } = await supabase
           .from('inventory')
-          .insert({ component_id: componentId, quantity_on_hand: quantityReceived, location: null, reorder_level: 0 });
+          .insert({ component_id: componentId, quantity_on_hand: normalizeQuantity(quantityReceived), location: null, reorder_level: 0 });
         if (invInsertError) throw new Error(`Failed to create inventory record: ${invInsertError.message}`);
       }
 
@@ -502,7 +509,9 @@ async function receiveStock(purchaseOrderId: string, receipts: ReceiptFormData) 
           .select('quantity_received')
           .eq('order_id', parseInt(orderId));
         if (receiptsError) throw new Error(`Failed to fetch receipts: ${receiptsError.message}`);
-        const totalReceived = (receiptsData || []).reduce((sum: number, r: any) => sum + (r.quantity_received || 0), 0);
+        const totalReceived = normalizeQuantity(
+          (receiptsData || []).reduce((sum: number, r: any) => sum + (r.quantity_received || 0), 0)
+        );
 
         const { data: soData, error: soError } = await supabase
           .from('supplier_orders')
@@ -520,8 +529,8 @@ async function receiveStock(purchaseOrderId: string, receipts: ReceiptFormData) 
         }, {} as Record<string, number>);
 
         let newStatusId = soData.status_id;
-        if (totalReceived >= (soData.order_quantity || 0)) newStatusId = statusMap['Fully Received'] ?? newStatusId;
-        else if (totalReceived > 0) newStatusId = statusMap['Partially Received'] ?? newStatusId;
+        if (!hasOutstandingQuantity(soData.order_quantity, totalReceived)) newStatusId = statusMap['Fully Received'] ?? newStatusId;
+        else if (isPositiveQuantity(totalReceived)) newStatusId = statusMap['Partially Received'] ?? newStatusId;
 
         const { error: manualUpdateError } = await supabase
           .from('supplier_orders')
@@ -553,7 +562,7 @@ async function returnStock(purchaseOrderId: string, returns: ReturnFormData) {
       // Try the transactional RPC first
       const { error: rpcError } = await supabase.rpc('process_supplier_order_return', {
         p_supplier_order_id: parseInt(orderId),
-        p_quantity: returnData.quantity,
+        p_quantity: normalizeQuantity(returnData.quantity),
         p_reason: returnData.reason.trim(),
         p_return_type: returnData.return_type || 'later_return',
         p_return_date: new Date().toISOString(),
@@ -577,11 +586,11 @@ function getOrderStatus(order: PurchaseOrder) {
   if (!order.supplier_orders?.length) return order.status?.status_name || 'Unknown';
 
   const allReceived = order.supplier_orders.every(
-    so => so.order_quantity > 0 && so.total_received === so.order_quantity
+    so => !hasOutstandingQuantity(so.order_quantity, so.total_received)
   );
 
   const someReceived = order.supplier_orders.some(
-    so => (so.total_received || 0) > 0 && so.total_received !== so.order_quantity
+    so => isPositiveQuantity(so.total_received) && hasOutstandingQuantity(so.order_quantity, so.total_received)
   );
 
   if (order.status?.status_name === 'Approved') {
@@ -870,7 +879,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     if (!purchaseOrder?.supplier_orders) return;
     const validLineIds = new Set(
       purchaseOrder.supplier_orders
-        .filter((order) => order.status_id !== SO_STATUS.CANCELLED && (order.order_quantity - (order.total_received || 0)) > 0)
+        .filter((order) => order.status_id !== SO_STATUS.CANCELLED && hasOutstandingQuantity(order.order_quantity, order.total_received))
         .map((order) => order.order_id)
     );
     setSelectedLineItemIds((prev) => prev.filter((orderId) => validLineIds.has(orderId)));
@@ -1638,7 +1647,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
         const qtyChanges = data.lineUpdates.map(u => {
           const so = purchaseOrder?.supplier_orders?.find(o => o.order_id === u.orderId);
           const code = so?.supplier_component?.component?.internal_code || `#${u.orderId}`;
-          return `${code}: ${so?.order_quantity} → ${u.quantity}`;
+          return `${code}: ${formatQuantity(so?.order_quantity)} → ${formatQuantity(u.quantity)}`;
         });
         descriptions.push(`Changed quantities: ${qtyChanges.join(', ')}`);
       }
@@ -1876,9 +1885,9 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
 
     // Validate quantities don't exceed received
     for (const [orderId, returnData] of Object.entries(returnQuantities)) {
-      if (returnData.quantity <= 0) continue;
+      if (!isPositiveQuantity(returnData.quantity)) continue;
       const order = purchaseOrder?.supplier_orders?.find(o => o.order_id.toString() === orderId);
-      if (order && returnData.quantity > (order.total_received || 0)) {
+      if (order && normalizeQuantity(returnData.quantity) > normalizeQuantity(order.total_received || 0)) {
         setError(`Return quantity exceeds received quantity for ${order.supplier_component?.component?.internal_code || 'component'}`);
         return;
       }
@@ -1931,7 +1940,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   // Email status helpers
   const hasSentPO = emailHistory?.some(e => e.email_type === 'po_send' && e.status === 'sent');
   const hasEmailIssues = emailHistory?.some(e => e.delivery_status === 'bounced' || e.delivery_status === 'complained' || e.status === 'failed');
-  const hasOutstandingItems = purchaseOrder.supplier_orders?.some(o => (o.order_quantity - (o.total_received || 0)) > 0);
+  const hasOutstandingItems = purchaseOrder.supplier_orders?.some(o => hasOutstandingQuantity(o.order_quantity, o.total_received));
 
   // Calculate totals (exclude cancelled line items)
   const activeOrders = purchaseOrder.supplier_orders?.filter(o => o.status_id !== SO_STATUS.CANCELLED) || [];
@@ -2106,8 +2115,8 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
               )}
 
               {/* Email History & Follow-up - Collapsible */}
-              {isApproved && ((emailHistory && emailHistory.length > 0) || purchaseOrder.supplier_orders?.some(o => 
-                (o.order_quantity - (o.total_received || 0)) > 0
+              {isApproved && ((emailHistory && emailHistory.length > 0) || purchaseOrder.supplier_orders?.some(o =>
+                hasOutstandingQuantity(o.order_quantity, o.total_received)
               )) && (
                 <div className="pt-2 border-t">
                   <button
@@ -2419,7 +2428,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                   variant="outline"
                   size="sm"
                   onClick={() => setBulkReceiveModalOpen(true)}
-                  disabled={!purchaseOrder.supplier_orders?.some(o => (o.order_quantity - (o.total_received || 0)) > 0)}
+                  disabled={!purchaseOrder.supplier_orders?.some(o => hasOutstandingQuantity(o.order_quantity, o.total_received))}
                 >
                   Bulk Receive
                 </Button>
@@ -2462,7 +2471,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                       const price = order.supplier_component?.price || 0;
                       const lineTotal = price * order.order_quantity;
                       const isLineCancelled = order.status_id === SO_STATUS.CANCELLED;
-                      const remainingToReceive = Math.max(0, order.order_quantity - (order.total_received || 0));
+                      const remainingToReceive = getRemainingQuantity(order.order_quantity, order.total_received);
 
                       const editedQty = editedQuantities[order.order_id] ?? order.order_quantity;
                       const editedLineTotal = price * editedQty;
@@ -2487,7 +2496,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                               purchaseOrderId={id}
                               orderQuantity={order.order_quantity}
                               customerOrderLinks={customerOrderLinks}
-                              disabled={isLineCancelled || (order.total_received >= order.order_quantity) || isCancelled}
+                              disabled={isLineCancelled || !hasOutstandingQuantity(order.order_quantity, order.total_received) || isCancelled}
                             />
                           </TableCell>
                           <TableCell className="text-right">R{price.toFixed(2)}</TableCell>
@@ -2505,14 +2514,14 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                                 className="w-20 text-right ml-auto"
                               />
                             ) : (
-                              order.order_quantity
+                              formatQuantity(order.order_quantity)
                             )}
                           </TableCell>
-                          {!isEditMode && <TableCell className="text-right">{order.total_received || 0}</TableCell>}
+                          {!isEditMode && <TableCell className="text-right">{formatQuantity(order.total_received || 0)}</TableCell>}
                           {!isEditMode && (
                             <TableCell className="text-right">
-                              <span className={remainingToReceive > 0 ? 'font-medium text-orange-600' : 'text-muted-foreground'}>
-                                {remainingToReceive}
+                              <span className={isPositiveQuantity(remainingToReceive) ? 'font-medium text-orange-600' : 'text-muted-foreground'}>
+                                {formatQuantity(remainingToReceive)}
                               </span>
                             </TableCell>
                           )}
@@ -2523,7 +2532,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                                   variant="outline"
                                   size="sm"
                                   onClick={() => handleOpenReceiveModal(order)}
-                                  disabled={remainingToReceive <= 0}
+                                  disabled={!isPositiveQuantity(remainingToReceive)}
                                 >
                                   Receive
                                 </Button>
@@ -2548,7 +2557,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                           )}
                           {isApproved && !isEditMode && (
                             <TableCell className="text-right">
-                              {!isLineCancelled && remainingToReceive > 0 && (
+                              {!isLineCancelled && isPositiveQuantity(remainingToReceive) && (
                                 <div className="flex items-center justify-end gap-2">
                                   <Checkbox
                                     checked={selectedLineItemIds.includes(order.order_id)}
@@ -2584,15 +2593,15 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                       <TableCell colSpan={5} className="text-right text-sm font-medium text-muted-foreground">Totals</TableCell>
                       <TableCell className="text-right text-sm font-medium">
                         {isEditMode 
-                          ? Object.values(editedQuantities).reduce((sum, qty) => sum + qty, 0)
-                          : totalItems
+                          ? formatQuantity(Object.values(editedQuantities).reduce((sum, qty) => sum + qty, 0))
+                          : formatQuantity(totalItems)
                         }
                       </TableCell>
-                      {!isEditMode && <TableCell className="text-right text-sm font-medium">{totalReceived}</TableCell>}
+                      {!isEditMode && <TableCell className="text-right text-sm font-medium">{formatQuantity(totalReceived)}</TableCell>}
                       {!isEditMode && (
                         <TableCell className="text-right text-sm font-medium">
                           <span className="font-medium text-orange-600">
-                            {Math.max(0, totalItems - totalReceived)}
+                            {formatQuantity(getRemainingQuantity(totalItems, totalReceived))}
                           </span>
                         </TableCell>
                       )}
@@ -2664,7 +2673,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                         </div>
                         <div className="text-right">
                           <p className="text-sm font-medium">
-                            Total Received: {order.total_received} of {order.order_quantity}
+                            Total Received: {formatQuantity(order.total_received)} of {formatQuantity(order.order_quantity)}
                           </p>
                           <p className="text-sm text-muted-foreground">
                             From {order.supplier_component.supplier.name}
@@ -2690,7 +2699,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                             return (
                               <TableRow key={receipt.receipt_id}>
                                 <TableCell>#{receipt.receipt_id}</TableCell>
-                                <TableCell>{receipt.quantity_received}</TableCell>
+                                <TableCell>{formatQuantity(receipt.quantity_received)}</TableCell>
                                 <TableCell>
                                   {new Date(receipt.receipt_date).toLocaleString('en-ZA', {
                                     timeZone: 'Africa/Johannesburg',
@@ -2753,7 +2762,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                 {purchaseOrder.supplier_orders && purchaseOrder.supplier_orders.length > 0 ? (
                   <>
                     {purchaseOrder.supplier_orders
-                      .filter(order => (order.total_received || 0) > 0)
+                      .filter(order => isPositiveQuantity(order.total_received))
                       .map((order) => {
                         const component = order.supplier_component?.component;
                         const maxReturnable = order.total_received || 0;
@@ -2771,7 +2780,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                                 <h3 className="font-medium">{component?.internal_code || 'Unknown'}</h3>
                                 <p className="text-sm text-muted-foreground">{component?.description || 'No description'}</p>
                                 <p className="text-sm text-muted-foreground">
-                                  Received: {order.total_received} / Ordered: {order.order_quantity}
+                                  Received: {formatQuantity(order.total_received)} / Ordered: {formatQuantity(order.order_quantity)}
                                 </p>
                               </div>
                             </div>
@@ -2782,13 +2791,14 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                                   type="number"
                                   min="0"
                                   max={maxReturnable}
+                                  step="any"
                                   value={returnData.quantity || ''}
                                   onChange={(e) => handleReturnQuantityChange(order.order_id.toString(), e.target.value)}
                                   className="w-full px-3 py-2 border rounded-md"
                                   placeholder="0"
                                 />
                                 <p className="text-xs text-muted-foreground mt-1">
-                                  Max: {maxReturnable}
+                                  Max: {formatQuantity(maxReturnable)}
                                 </p>
                               </div>
                               <div>
@@ -2844,17 +2854,17 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                           </div>
                         );
                       })}
-                    {purchaseOrder.supplier_orders.filter(order => (order.total_received || 0) > 0).length === 0 && (
+                    {purchaseOrder.supplier_orders.filter(order => isPositiveQuantity(order.total_received)).length === 0 && (
                       <div className="text-center py-8 text-muted-foreground">
                         No items have been received yet. Receive stock before returning.
                       </div>
                     )}
-                    {purchaseOrder.supplier_orders.filter(order => (order.total_received || 0) > 0).length > 0 && (
+                    {purchaseOrder.supplier_orders.filter(order => isPositiveQuantity(order.total_received)).length > 0 && (
                       <div className="flex justify-end pt-4">
                         <Button
                           onClick={handleSubmitReturns}
                           disabled={returnMutation.isPending || Object.keys(returnQuantities).length === 0 ||
-                            !Object.values(returnQuantities).some(r => r.quantity > 0)}
+                            !Object.values(returnQuantities).some(r => isPositiveQuantity(r.quantity))}
                           variant="destructive"
                         >
                           {returnMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
@@ -2923,7 +2933,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                           {order.returns.map((returnItem) => (
                             <TableRow key={returnItem.return_id}>
                               <TableCell>#{returnItem.return_id}</TableCell>
-                              <TableCell>{returnItem.quantity_returned}</TableCell>
+                              <TableCell>{formatQuantity(returnItem.quantity_returned)}</TableCell>
                               <TableCell>
                                 <Badge variant={returnItem.return_type === 'rejection' ? 'destructive' : 'outline'}>
                                   {returnItem.return_type === 'rejection' ? 'Rejection' : 'Later Return'}

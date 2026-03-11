@@ -23,6 +23,13 @@ import DeliveryNoteUpload from '@/components/features/purchasing/DeliveryNoteUpl
 import { uploadPOAttachment } from '@/lib/db/purchase-order-attachments';
 import { useQuery } from '@tanstack/react-query';
 import { AllocationReceipt, SupplierOrderCustomerOrderLink } from '@/types/purchasing';
+import {
+  formatQuantity,
+  getRemainingQuantity,
+  isPositiveQuantity,
+  normalizeQuantity,
+  quantitiesEqual,
+} from '@/lib/purchasing-quantities';
 
 // Helper to format company info
 const getCompanyInfo = (settings: any) => {
@@ -138,7 +145,7 @@ export function ReceiveItemsModal({
   const componentDescription = component?.description ?? '';
   const supplierName = supplierOrder?.supplier_component?.supplier?.name ?? 'Supplier';
 
-  const remainingToReceive = Math.max(0, supplierOrder.order_quantity - (supplierOrder.total_received || 0));
+  const remainingToReceive = getRemainingQuantity(supplierOrder.order_quantity, supplierOrder.total_received);
   const allocationRows = supplierOrder.customer_order_links || [];
   const hasSplitAllocations = allocationRows.length > 1;
   const allocationTrackingStarted = allocationRows.some(
@@ -182,13 +189,16 @@ export function ReceiveItemsModal({
 
   const quantityReceived = watch('quantity_received') || 0;
   const quantityRejected = watch('quantity_rejected') || 0;
-  const totalQuantity = quantityReceived + quantityRejected;
-  const receiveTooHigh = quantityReceived > remainingToReceive;
-  const hasQuantity = totalQuantity > 0;
+  const totalQuantity = normalizeQuantity(quantityReceived + quantityRejected);
+  const receiveTooHigh = normalizeQuantity(quantityReceived) > remainingToReceive;
+  const hasQuantity = isPositiveQuantity(totalQuantity);
   const allocationReceivedNowTotal = hasSplitAllocations
-    ? allocationRows.reduce((sum, row) => sum + (allocationReceipts[row.id] || 0), 0)
+    ? normalizeQuantity(allocationRows.reduce((sum, row) => sum + (allocationReceipts[row.id] || 0), 0))
     : 0;
-  const allocationMismatch = hasSplitAllocations && quantityReceived > 0 && allocationReceivedNowTotal !== quantityReceived;
+  const allocationMismatch =
+    hasSplitAllocations &&
+    isPositiveQuantity(quantityReceived) &&
+    !quantitiesEqual(allocationReceivedNowTotal, quantityReceived);
   const allocationOverCap = hasSplitAllocations && allocationRows.some((row) => {
     const cap = row.order_id === null
       ? Number(row.quantity_for_stock || 0)
@@ -196,7 +206,8 @@ export function ReceiveItemsModal({
     const alreadyReceived = row.received_quantity !== null && row.received_quantity !== undefined
       ? Number(row.received_quantity)
       : 0;
-    return (allocationReceipts[row.id] || 0) > Math.max(0, cap - alreadyReceived);
+    const remainingCap = getRemainingQuantity(cap, alreadyReceived);
+    return normalizeQuantity(allocationReceipts[row.id] || 0) > remainingCap;
   });
 
   useEffect(() => {
@@ -238,12 +249,12 @@ export function ReceiveItemsModal({
         receivedQty: number;
         rejectedQty: number;
       } = {
-        receivedQty: data.quantity_received || 0,
-        rejectedQty: data.quantity_rejected || 0,
+        receivedQty: normalizeQuantity(data.quantity_received || 0),
+        rejectedQty: normalizeQuantity(data.quantity_rejected || 0),
       };
 
       // Call the RPC function to process receipt when quantity is provided
-      if ((data.quantity_received || 0) > 0) {
+      if (isPositiveQuantity(data.quantity_received)) {
         let allocationPayload: AllocationReceipt[] | null = null;
 
         if (hasSplitAllocations) {
@@ -254,8 +265,10 @@ export function ReceiveItemsModal({
             }))
             .filter((row) => row.quantity > 0);
 
-          const payloadTotal = allocationPayload.reduce((sum, row) => sum + row.quantity, 0);
-          if (payloadTotal !== (data.quantity_received || 0)) {
+          const payloadTotal = normalizeQuantity(
+            allocationPayload.reduce((sum, row) => sum + row.quantity, 0)
+          );
+          if (!quantitiesEqual(payloadTotal, data.quantity_received || 0)) {
             throw new Error('Allocation breakdown must equal Quantity Received');
           }
         }
@@ -267,7 +280,7 @@ export function ReceiveItemsModal({
           p_allocation_receipts?: AllocationReceipt[] | null;
         } = {
           p_order_id: supplierOrder.order_id,
-          p_quantity: data.quantity_received || 0,
+          p_quantity: normalizeQuantity(data.quantity_received || 0),
           p_receipt_date: receiptTimestamp,
         };
 
@@ -286,12 +299,12 @@ export function ReceiveItemsModal({
       }
 
       // If there are rejections, process them
-      if ((data.quantity_rejected || 0) > 0 && data.rejection_reason) {
+      if (isPositiveQuantity(data.quantity_rejected) && data.rejection_reason) {
         const { data: returnData, error: returnError } = await supabase.rpc(
           'process_supplier_order_return',
           {
             p_supplier_order_id: supplierOrder.order_id,
-            p_quantity: data.quantity_rejected,
+            p_quantity: normalizeQuantity(data.quantity_rejected),
             p_reason: data.rejection_reason,
             p_return_type: 'rejection',
             p_return_date: receiptTimestamp,
@@ -441,6 +454,7 @@ export function ReceiveItemsModal({
                     type="number"
                     min="0"
                     max={remainingToReceive}
+                    step="any"
                     {...register('quantity_received', { valueAsNumber: true })}
                     placeholder="0"
                   />
@@ -455,6 +469,7 @@ export function ReceiveItemsModal({
                     id="quantity_rejected"
                     type="number"
                     min="0"
+                    step="any"
                     {...register('quantity_rejected', { valueAsNumber: true })}
                     placeholder="0"
                   />
@@ -467,7 +482,7 @@ export function ReceiveItemsModal({
               {receiveTooHigh && (
                 <Alert variant="destructive">
                   <AlertDescription>
-                    Quantity received ({quantityReceived}) exceeds remaining to receive ({remainingToReceive})
+                    Quantity received ({formatQuantity(quantityReceived)}) exceeds remaining to receive ({formatQuantity(remainingToReceive)})
                   </AlertDescription>
                 </Alert>
               )}
@@ -493,20 +508,21 @@ export function ReceiveItemsModal({
                         const alreadyReceived = row.received_quantity !== null && row.received_quantity !== undefined
                           ? Number(row.received_quantity)
                           : 0;
-                        const remainingCap = Math.max(0, cap - alreadyReceived);
+                        const remainingCap = getRemainingQuantity(cap, alreadyReceived);
                         const rowLabel = row.customer_order?.order_number || 'Stock';
 
                         return (
                           <div key={row.id} className="grid grid-cols-4 gap-2 items-center text-sm">
                             <div className="font-medium truncate">{rowLabel}</div>
-                            <div className="text-muted-foreground">Allocated: {cap}</div>
+                            <div className="text-muted-foreground">Allocated: {formatQuantity(cap)}</div>
                             <div className="text-muted-foreground">
-                              Already: {row.received_quantity === null ? 'Not tracked' : alreadyReceived}
+                              Already: {row.received_quantity === null ? 'Not tracked' : formatQuantity(alreadyReceived)}
                             </div>
                             <Input
                               type="number"
                               min="0"
                               max={remainingCap}
+                              step="any"
                               value={allocationReceipts[row.id] || 0}
                               onChange={(event) => setAllocationQuantity(row.id, event.target.value)}
                               placeholder="0"
@@ -516,7 +532,7 @@ export function ReceiveItemsModal({
                       })}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      Allocation total: {allocationReceivedNowTotal} / {quantityReceived || 0}
+                      Allocation total: {formatQuantity(allocationReceivedNowTotal)} / {formatQuantity(quantityReceived || 0)}
                     </div>
                     {allocationMismatch && (
                       <p className="text-xs text-destructive">
@@ -593,13 +609,13 @@ export function ReceiveItemsModal({
             <div className="flex justify-between items-center pt-4 border-t">
               <div className="text-sm text-muted-foreground">
                 <div>
-                  Received: <span className="font-medium text-green-600">{quantityReceived}</span>
+                  Received: <span className="font-medium text-green-600">{formatQuantity(quantityReceived)}</span>
                 </div>
                 <div>
-                  Rejected: <span className="font-medium text-red-600">{quantityRejected}</span>
+                  Rejected: <span className="font-medium text-red-600">{formatQuantity(quantityRejected)}</span>
                 </div>
                 <div>
-                  Total: <span className="font-medium">{totalQuantity}</span> / {remainingToReceive} remaining
+                  Total: <span className="font-medium">{formatQuantity(totalQuantity)}</span> / {formatQuantity(remainingToReceive)} remaining
                 </div>
               </div>
               <div className="flex gap-2">
@@ -627,9 +643,9 @@ export function ReceiveItemsModal({
             <div className="p-4 bg-green-50 border border-green-200 rounded-md space-y-1">
               <div className="font-medium text-green-800">Receipt recorded successfully!</div>
               <div className="text-sm text-green-700 flex flex-col gap-0.5">
-                <span>Received: <strong>{successData.receivedQty}</strong></span>
+                <span>Received: <strong>{formatQuantity(successData.receivedQty)}</strong></span>
                 {successData.rejectedQty > 0 && (
-                  <span>Rejected: <strong>{successData.rejectedQty}</strong></span>
+                  <span>Rejected: <strong>{formatQuantity(successData.rejectedQty)}</strong></span>
                 )}
               </div>
               {successData.grn && (

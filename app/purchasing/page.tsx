@@ -31,6 +31,12 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
+import {
+  formatQuantity,
+  getRemainingQuantity,
+  hasOutstandingQuantity,
+  isPositiveQuantity,
+} from '@/lib/purchasing-quantities';
 
 // --- Types ---
 
@@ -100,13 +106,13 @@ export default function PurchasingPage() {
           const isFullyReceived =
             orders.length > 0 &&
             orders.every(
-              (so: any) => so.order_quantity > 0 && so.total_received === so.order_quantity
+              (so: any) => !hasOutstandingQuantity(so.order_quantity, so.total_received)
             );
 
           if (isFullyReceived) continue;
 
           const hasAnyReceived = orders.some(
-            (so: any) => (so.total_received || 0) > 0
+            (so: any) => isPositiveQuantity(so.total_received)
           );
 
           if (hasAnyReceived) {
@@ -156,8 +162,8 @@ export default function PurchasingPage() {
       // Transform and filter to only items with outstanding quantities
       const items: AwaitingReceiptItem[] = [];
       for (const row of data || []) {
-        const owing = (row.order_quantity || 0) - (row.total_received || 0);
-        if (owing <= 0) continue;
+        const owing = getRemainingQuantity(row.order_quantity, row.total_received);
+        if (!isPositiveQuantity(owing)) continue;
 
         items.push({
           order_id: row.order_id,
@@ -240,10 +246,10 @@ export default function PurchasingPage() {
       case 'pending':
         return [];
       case 'approved':
-        items = items.filter((item) => item.total_received === 0);
+        items = items.filter((item) => !isPositiveQuantity(item.total_received));
         break;
       case 'partialReceived':
-        items = items.filter((item) => item.total_received > 0);
+        items = items.filter((item) => isPositiveQuantity(item.total_received));
         break;
     }
 
@@ -254,6 +260,7 @@ export default function PurchasingPage() {
 
     return items;
   })();
+  const awaitingItemCount = awaitingItems?.length ?? 0;
 
   const hasAnyFilter = activeFilter !== 'all' || supplierFilter !== null;
 
@@ -449,7 +456,7 @@ export default function PurchasingPage() {
                   </>
                 ) : hasAnyFilter ? (
                   <>
-                    {filteredAwaitingItems.length} of {awaitingItems.length} item{awaitingItems.length !== 1 ? 's' : ''}
+                    {filteredAwaitingItems.length} of {awaitingItemCount} item{awaitingItemCount !== 1 ? 's' : ''}
                     {supplierFilter && (
                       <span className="text-foreground font-medium"> &mdash; {supplierFilter}</span>
                     )}
@@ -463,7 +470,7 @@ export default function PurchasingPage() {
                   </>
                 ) : (
                   <>
-                    {awaitingItems.length} item{awaitingItems.length !== 1 ? 's' : ''} across open orders
+                    {awaitingItemCount} item{awaitingItemCount !== 1 ? 's' : ''} across open orders
                   </>
                 )}
               </p>
@@ -684,9 +691,9 @@ export default function PurchasingPage() {
                             {formatQNumber(item.q_number)}
                           </Link>
                         </TableCell>
-                        <TableCell className="text-right">{item.order_quantity}</TableCell>
+                        <TableCell className="text-right">{formatQuantity(item.order_quantity)}</TableCell>
                         <TableCell className="text-right">
-                          <span className="text-destructive font-semibold">{item.owing}</span>
+                          <span className="text-destructive font-semibold">{formatQuantity(item.owing)}</span>
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
@@ -736,7 +743,7 @@ export default function PurchasingPage() {
                         </Link>
                         <span>|</span>
                         <span>
-                          Owing: <span className="text-destructive font-semibold">{item.owing}</span>
+                          Owing: <span className="text-destructive font-semibold">{formatQuantity(item.owing)}</span>
                         </span>
                       </div>
                     </div>
