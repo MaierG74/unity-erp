@@ -143,7 +143,8 @@ LEFT JOIN LATERAL (
 CREATE OR REPLACE FUNCTION public.complete_job_card_v2(
   p_job_card_id integer,
   p_items jsonb DEFAULT '[]'::jsonb,
-  p_completed_by_user_id uuid DEFAULT NULL
+  p_completed_by_user_id uuid DEFAULT NULL,
+  p_completion_date date DEFAULT NULL
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -152,6 +153,7 @@ AS $$
 DECLARE
   v_now timestamptz := now();
   v_actor uuid := COALESCE(p_completed_by_user_id, auth.uid());
+  v_completion_date date := COALESCE(p_completion_date, v_now::date);
   v_order_org_id uuid;
   v_order_id integer;
   v_staff_id integer;
@@ -171,7 +173,7 @@ BEGIN
   FROM public.job_cards jc
   LEFT JOIN public.orders o ON o.order_id = jc.order_id
   WHERE jc.job_card_id = p_job_card_id
-  FOR UPDATE;
+  FOR UPDATE OF jc;
 
   IF NOT COALESCE(v_card_exists, false) THEN
     RAISE EXCEPTION 'Job card % not found', p_job_card_id;
@@ -181,8 +183,8 @@ BEGIN
     RAISE EXCEPTION 'Access denied: not a member of this organisation';
   END IF;
 
-  IF public.is_job_card_payroll_locked(v_staff_id, v_now::date) THEN
-    RAISE EXCEPTION 'Payroll is locked for staff % on %', v_staff_id, v_now::date;
+  IF public.is_job_card_payroll_locked(v_staff_id, v_completion_date) THEN
+    RAISE EXCEPTION 'Payroll is locked for staff % on %', v_staff_id, v_completion_date;
   END IF;
 
   IF COALESCE(v_card_status, '') = 'completed' THEN
@@ -340,7 +342,7 @@ BEGIN
 
   UPDATE public.job_cards
   SET status = 'completed',
-      completion_date = v_now::date,
+      completion_date = v_completion_date,
       completed_by_user_id = v_actor,
       completion_type = v_completion_type,
       updated_at = v_now
@@ -350,13 +352,14 @@ BEGIN
     'job_card_id', p_job_card_id,
     'completion_type', v_completion_type,
     'follow_up_card_id', v_follow_up_card_id,
+    'completion_date', v_completion_date,
     'completed_at', v_now
   );
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.complete_job_card_v2(integer, jsonb, uuid) FROM anon, public;
-GRANT EXECUTE ON FUNCTION public.complete_job_card_v2(integer, jsonb, uuid) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.complete_job_card_v2(integer, jsonb, uuid, date) FROM anon, public;
+GRANT EXECUTE ON FUNCTION public.complete_job_card_v2(integer, jsonb, uuid, date) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.complete_job_card(p_job_card_id integer)
 RETURNS void
@@ -364,11 +367,7 @@ LANGUAGE plpgsql
 SECURITY INVOKER
 AS $$
 BEGIN
-  PERFORM public.complete_job_card_v2(
-    p_job_card_id := p_job_card_id,
-    p_items := '[]'::jsonb,
-    p_completed_by_user_id := auth.uid()
-  );
+  PERFORM public.complete_job_card_v2(p_job_card_id, '[]'::jsonb, auth.uid(), now()::date);
 END;
 $$;
 
@@ -421,7 +420,8 @@ BEGIN
     v_start_minutes
   FROM public.labor_plan_assignments lpa
   JOIN public.orders o ON o.order_id = lpa.order_id
-  WHERE lpa.assignment_id = p_assignment_id;
+  WHERE lpa.assignment_id = p_assignment_id
+  FOR UPDATE OF lpa;
 
   IF v_org_id IS NULL THEN
     RAISE EXCEPTION 'Assignment % not found or has no linked order', p_assignment_id;
@@ -464,9 +464,10 @@ BEGIN
 
   IF v_job_card_id IS NOT NULL THEN
     v_completion := public.complete_job_card_v2(
-      p_job_card_id := v_job_card_id,
-      p_items := p_items,
-      p_completed_by_user_id := COALESCE(p_completed_by_user_id, auth.uid())
+      v_job_card_id,
+      p_items,
+      COALESCE(p_completed_by_user_id, auth.uid()),
+      v_actual_end::date
     );
   END IF;
 
@@ -515,16 +516,20 @@ DECLARE
   v_org_id uuid;
   v_job_card_id integer;
 BEGIN
-  SELECT lpa.*, o.org_id
-  INTO v_assignment, v_org_id
+  SELECT lpa.*
+  INTO v_assignment
   FROM public.labor_plan_assignments lpa
-  JOIN public.orders o ON o.order_id = lpa.order_id
   WHERE lpa.assignment_id = p_assignment_id
-  FOR UPDATE;
+  FOR UPDATE OF lpa;
 
   IF v_assignment.assignment_id IS NULL THEN
     RAISE EXCEPTION 'Assignment % not found', p_assignment_id;
   END IF;
+
+  SELECT o.org_id
+  INTO v_org_id
+  FROM public.orders o
+  WHERE o.order_id = v_assignment.order_id;
 
   IF NOT public.is_org_member(v_org_id) THEN
     RAISE EXCEPTION 'Access denied: not a member of this organisation';

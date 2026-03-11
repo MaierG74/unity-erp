@@ -615,8 +615,9 @@ function PayrollDetailPanel({ staffId, staffName, weekStart, weekEnd, row, onClo
         .from('job_card_items')
         .select(`
           item_id, completed_quantity, piece_rate, piece_rate_override,
+          quantity, remainder_action, remainder_qty, remainder_reason,
           job:jobs(name),
-          job_card:job_cards!inner(job_card_id, order_id, completion_date, staff_id,
+          job_card:job_cards!inner(job_card_id, order_id, completion_date, staff_id, completion_type,
             order:orders(order_number, customer:customers(name))
           ),
           product:products(name)
@@ -635,9 +636,14 @@ function PayrollDetailPanel({ staffId, staffName, weekStart, weekEnd, row, onClo
         job_name: row.job?.name ?? null,
         product_name: row.product?.name ?? null,
         completed_quantity: row.completed_quantity,
+        quantity: row.quantity,
         piece_rate: row.piece_rate,
         piece_rate_override: row.piece_rate_override,
         earned_amount: row.completed_quantity * (row.piece_rate_override ?? row.piece_rate),
+        remainder_action: row.remainder_action,
+        remainder_qty: row.remainder_qty,
+        remainder_reason: row.remainder_reason,
+        completion_type: row.job_card?.completion_type,
       }));
     },
     enabled: !!staffId,
@@ -732,7 +738,7 @@ function PayrollDetailPanel({ staffId, staffName, weekStart, weekEnd, row, onClo
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Order / Product</TableHead>
+                  <TableHead>Order / Job / Product</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
                   <TableHead className="text-right">Rate</TableHead>
                   <TableHead className="text-right">Earned</TableHead>
@@ -743,18 +749,48 @@ function PayrollDetailPanel({ staffId, staffName, weekStart, weekEnd, row, onClo
                   <TableRow key={p.item_id}>
                     <TableCell>
                       <div className="text-sm font-medium">
-                        {p.order_number ?? `Order #${p.job_card_id}`}
+                        {p.order_number ?? `Card #${p.job_card_id}`}
                         {p.customer_name && (
                           <span className="text-muted-foreground font-normal"> — {p.customer_name}</span>
                         )}
                       </div>
-                      {(p.job_name || p.product_name) && (
+                      {p.job_name && (
+                        <div className="text-xs text-foreground/80 truncate max-w-[280px]">
+                          {p.job_name}
+                        </div>
+                      )}
+                      {p.product_name && (
                         <div className="text-xs text-muted-foreground truncate max-w-[280px]">
-                          {p.job_name ?? p.product_name}
+                          {p.product_name}
+                        </div>
+                      )}
+                      {p.remainder_action && (
+                        <div className="mt-0.5">
+                          <Badge variant="outline" className={
+                            p.remainder_action === 'scrap' || p.remainder_action === 'shortage'
+                              ? 'text-amber-400 border-amber-500/30 text-[10px] px-1.5 py-0'
+                              : 'text-blue-400 border-blue-500/30 text-[10px] px-1.5 py-0'
+                          }>
+                            {p.remainder_action === 'return_to_pool' ? 'Returned to pool' :
+                             p.remainder_action === 'follow_up_card' ? 'Follow-up card' :
+                             p.remainder_action === 'scrap' ? 'Scrap' :
+                             p.remainder_action === 'shortage' ? 'Shortage' : p.remainder_action}
+                            {p.remainder_qty ? ` (${p.remainder_qty})` : ''}
+                          </Badge>
+                          {p.remainder_reason && (
+                            <div className="text-[10px] text-muted-foreground mt-0.5 truncate max-w-[280px]">
+                              {p.remainder_reason}
+                            </div>
+                          )}
                         </div>
                       )}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">{p.completed_quantity}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      <div>{p.completed_quantity}</div>
+                      {p.remainder_action && p.quantity && p.completed_quantity < p.quantity && (
+                        <div className="text-[10px] text-muted-foreground">of {p.quantity}</div>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {formatRand(Number(p.piece_rate_override ?? p.piece_rate ?? 0))}
                     </TableCell>

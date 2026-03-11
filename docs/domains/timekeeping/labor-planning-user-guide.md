@@ -32,6 +32,8 @@ Use this guide when scheduling jobs on the `/labor-planning` board. It outlines 
 - The production queue now prefers the active scheduler assignment when showing staff ownership for a scheduled job card, and it shows the scheduled date/time under the status badge when available.
 - Completing a job from the scheduler now completes the linked job card as well, so it should move into the production queue's `Completed` filter without requiring a manual card-page action.
 - Scheduler changes now invalidate the production queue and production summary as well, so staff/time changes should appear without a manual browser refresh.
+- Putting an issued card onto a lane for the first time, or moving it to a different lane before work starts, now updates the linked `job_cards.staff_id` as well, so piecework payroll follows the scheduler owner. Once work has started, the move is blocked and the card must go through the transfer flow instead.
+- Scheduler completion now writes through the remainder-aware completion RPC, which stamps the job card completion actor/date and applies payroll-lock checks before changing completed piecework.
 - If you see an overlap toast, try dragging the bar into one of the dashed “Open slot” placeholders or shorten the duration via the resize handles.
 - Off-shift staff will not accept drops—pick a staff lane with a green “Accepting drops” indicator or adjust staffing for the date first.
 - Use Undo in the success toast immediately after a drop if you placed a job on the wrong lane/time.

@@ -1,7 +1,7 @@
 # Piecework Completion → Payroll Design
 
 **Date**: 2026-03-11
-**Status**: Draft — pending Codex review
+**Status**: Backend phase 1 applied — UI completion flow and payroll review refinements pending
 **Scope**: Production completion flow, partial completion, remainder handling, piecework payroll attribution
 **Decision owners**: Greg (product), Codex (backend review), Claude (UI implementation)
 
@@ -73,14 +73,14 @@ The `updateJobSchedule()` function in `src/lib/mutations/laborPlanning.ts` (line
 ### Job Card Item Lifecycle
 
 ```
-pending ──→ in_progress ──→ completed (full: completed_qty = qty)
-                │
-                ├──→ partial_complete (new status: completed_qty < qty)
-                │         │
-                │         ├──→ remainder: 'return_to_pool'
-                │         ├──→ remainder: 'follow_up_card'
-                │         ├──→ remainder: 'scrap'
-                │         └──→ remainder: 'shortage'
+pending ──→ in_progress ──→ completed
+                │                │
+                │                ├──→ full completion
+                │                └──→ partial completion metadata
+                │                       ├──→ remainder: 'return_to_pool'
+                │                       ├──→ remainder: 'follow_up_card'
+                │                       ├──→ remainder: 'scrap'
+                │                       └──→ remainder: 'shortage'
                 │
                 └──→ cancelled
 ```

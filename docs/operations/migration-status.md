@@ -28,11 +28,20 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260308102326
-- Latest applied migration name: organization_cutlist_defaults
-- Applied at (UTC): 2026-03-08 10:23:36 UTC
+- Latest applied migration version: 20260311073942
+- Latest applied migration name: piecework_completion_payroll_phase1b
+- Applied at (UTC): 2026-03-11 07:41:10 UTC
 - Applied by: Codex via Supabase MCP
 - Verification notes:
+  - Current batch (2026-03-11, Codex):
+    1. `piecework_completion_payroll_phase1b` (20260311073942): added `assign_scheduled_card` so first-time scheduling of an issued card updates `job_cards.staff_id` atomically with `labor_plan_assignments`, closing the initial scheduler/payroll ownership gap.
+    2. Verified with MCP `list_migrations`: production history now includes `20260311073942`.
+    3. Verified with MCP SQL: `public.assign_scheduled_card(...)` exists in `public`.
+  - Current batch (2026-03-11, Codex):
+    1. `reconcile_complete_assignment_with_card_rpc` (20260311072949): reconciled the live `complete_assignment_with_card` RPC into tracked migration history so repo state matches the production database.
+    2. `piecework_completion_payroll_phase1` (20260311073315): added payroll-safe completion metadata on `job_cards`, explicit remainder metadata on `job_card_items`, the `complete_job_card_v2`, `complete_assignment_with_card_v2`, `reassign_scheduled_card`, `extract_job_card_id_from_instance`, and `is_job_card_payroll_locked` RPC/functions, plus updated `job_work_pool_status` math for returned/follow-up remainders.
+    3. Verified with MCP `list_migrations`: production history now includes `20260311072949` and `20260311073315`.
+    4. Verified with MCP SQL: new `job_cards` columns (`completed_by_user_id`, `completion_type`), new `job_card_items` columns (`remainder_action`, `remainder_qty`, `remainder_reason`, `remainder_follow_up_card_id`, `issued_quantity_snapshot`), and the new completion/reassignment functions all exist in `public`.
   - Current batch (2026-03-08, Codex):
     1. `organization_cutlist_defaults` (20260308102326): added `public.organizations.cutlist_defaults` as nullable `jsonb` for org-specific reusable offcut thresholds.
     2. Verified with MCP `list_migrations`: production history now includes `20260308102326`.

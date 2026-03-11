@@ -20,13 +20,21 @@ import { formatDuration } from '@/lib/shift-utils';
 import { supabase } from '@/lib/supabase';
 import { calculateWorkingMinutes } from '@/lib/working-hours';
 import type { DaySchedule, PauseEvent, ShiftOverride } from '@/lib/working-hours';
+import {
+  CompletionItemsList,
+  isCompletionValid,
+  buildItemsPayload,
+  initCompletions,
+  type ItemCompletion,
+  type CompletionItem,
+} from '@/components/features/completion/completion-items';
 
 interface CompleteJobDialogProps {
   job: FloorStaffJob | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onComplete: (params: {
-    items: { item_id: number; completed_quantity: number }[];
+    items: { item_id: number; completed_quantity: number; remainder_action?: string | null; remainder_reason?: string | null }[];
     actualStart?: string;
     actualEnd?: string;
     notes?: string;
@@ -53,18 +61,31 @@ function toDateKey(d: Date): string {
 export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPending }: CompleteJobDialogProps) {
   const [actualStart, setActualStart] = useState('');
   const [actualEnd, setActualEnd] = useState('');
-  const [startDate, setStartDate] = useState(''); // YYYY-MM-DD
-  const [endDate, setEndDate] = useState('');     // YYYY-MM-DD
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [notes, setNotes] = useState('');
-  const [quantities, setQuantities] = useState<Record<number, number>>({});
+  const [completions, setCompletions] = useState<Record<number, ItemCompletion>>({});
 
-  const { data: items, isLoading: itemsLoading } = useQuery({
+  const { data: rawItems, isLoading: itemsLoading } = useQuery({
     queryKey: ['job-card-items', job?.job_card_id],
     queryFn: () => fetchJobCardItems(job!.job_card_id!),
     enabled: open && !!job?.job_card_id,
   });
 
-  // Reuse the same cache as useWorkSchedule (raw DB rows)
+  // Map to CompletionItem shape
+  const items: CompletionItem[] = useMemo(() => {
+    if (!rawItems) return [];
+    return rawItems.map((item) => ({
+      item_id: item.item_id,
+      job_name: item.job_name,
+      product_name: item.product_name,
+      quantity: item.quantity,
+      completed_quantity: item.completed_quantity,
+      piece_rate: item.piece_rate,
+      status: item.status,
+    }));
+  }, [rawItems]);
+
   const { data: rawSchedules } = useQuery({
     queryKey: ['work-schedules', 'active'],
     queryFn: async () => {
@@ -136,20 +157,23 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
       setEndDate(toDateKey(now));
       setActualEnd(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`);
       setNotes('');
-      setQuantities({});
+      setCompletions({});
     }
   }, [open, job?.assignment_id]);
 
-  // Initialize quantities from fetched items
+  // Initialize completions from fetched items
   useEffect(() => {
-    if (items && Object.keys(quantities).length === 0) {
-      const initial: Record<number, number> = {};
-      for (const item of items) {
-        initial[item.item_id] = item.completed_quantity > 0 ? item.completed_quantity : item.quantity;
-      }
-      setQuantities(initial);
+    if (items.length > 0 && Object.keys(completions).length === 0) {
+      setCompletions(initCompletions(items));
     }
   }, [items]);
+
+  const handleUpdateCompletion = (itemId: number, update: Partial<ItemCompletion>) => {
+    setCompletions((prev) => ({
+      ...prev,
+      [itemId]: { ...prev[itemId], ...update },
+    }));
+  };
 
   const workResult = useMemo(() => {
     if (!actualStart || !actualEnd || !startDate || !endDate) {
@@ -175,20 +199,11 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
     return workResult.totalMinutes - job.estimated_minutes;
   }, [workResult.totalMinutes, job?.estimated_minutes]);
 
-  const totalEarnings = useMemo(() => {
-    if (!items) return 0;
-    return items.reduce((sum, item) => {
-      const qty = quantities[item.item_id] ?? item.quantity;
-      return sum + qty * (item.piece_rate ?? 0);
-    }, 0);
-  }, [items, quantities]);
+  const itemsValid = items.length === 0 || isCompletionValid(items, completions);
 
   const handleSubmit = () => {
     if (!job) return;
-    const itemsPayload = (items ?? []).map((item) => ({
-      item_id: item.item_id,
-      completed_quantity: quantities[item.item_id] ?? item.quantity,
-    }));
+    const itemsPayload = items.length > 0 ? buildItemsPayload(items, completions) : [];
     onComplete({
       items: itemsPayload,
       actualStart: actualStart && startDate ? new Date(`${startDate}T${actualStart}:00`).toISOString() : undefined,
@@ -208,7 +223,7 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
             Record completion details and finalize the job assignment.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-5 py-2">
+        <div className="space-y-4 py-2">
           <p className="text-sm text-muted-foreground">
             Completing <span className="font-medium text-foreground">{job.job_name}</span> for{' '}
             <span className="font-medium text-foreground">{job.staff_name}</span>.
@@ -287,49 +302,15 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
             )}
           </div>
 
-          {/* Job card items */}
+          {/* Job card items with remainder handling */}
           {itemsLoading ? (
             <p className="text-sm text-muted-foreground">Loading items...</p>
-          ) : items && items.length > 0 ? (
-            <div className="space-y-3">
-              <Label>Items</Label>
-              <div className="space-y-2">
-                {items.map((item) => (
-                  <div key={item.item_id} className="flex items-center gap-3 p-3 rounded-md border bg-card">
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate">{item.job_name ?? item.product_name ?? 'Item'}</div>
-                      {item.product_name && item.job_name && (
-                        <div className="text-xs text-muted-foreground truncate">{item.product_name}</div>
-                      )}
-                      {item.piece_rate != null && item.piece_rate > 0 && (
-                        <div className="text-xs text-muted-foreground">
-                          R{item.piece_rate}/pc = R{((quantities[item.item_id] ?? item.quantity) * item.piece_rate).toFixed(2)}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Input
-                        type="number"
-                        min={0}
-                        max={item.quantity}
-                        value={quantities[item.item_id] ?? item.quantity}
-                        onChange={(e) => setQuantities((prev) => ({
-                          ...prev,
-                          [item.item_id]: Math.min(item.quantity, Math.max(0, parseInt(e.target.value) || 0)),
-                        }))}
-                        className="w-20 text-center"
-                      />
-                      <span className="text-sm text-muted-foreground">/ {item.quantity}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {totalEarnings > 0 && (
-                <div className="text-sm font-medium text-right">
-                  Total Earnings: R{totalEarnings.toFixed(2)}
-                </div>
-              )}
-            </div>
+          ) : items.length > 0 ? (
+            <CompletionItemsList
+              items={items}
+              completions={completions}
+              onUpdate={handleUpdateCompletion}
+            />
           ) : !job.job_card_id ? (
             <p className="text-sm text-muted-foreground italic">No linked job card found. Assignment will be marked complete.</p>
           ) : null}
@@ -351,7 +332,7 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={isPending || workResult.totalMinutes <= 0}
+            disabled={isPending || workResult.totalMinutes <= 0 || !itemsValid}
             className="bg-emerald-600 hover:bg-emerald-700"
           >
             {isPending ? 'Completing...' : 'Complete Job'}

@@ -5,9 +5,16 @@ import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import type { PauseReason, EarningsSplitItem } from '@/components/factory-floor/types';
 
+interface CompletionItemPayload {
+  item_id: number;
+  completed_quantity: number;
+  remainder_action?: string | null;
+  remainder_reason?: string | null;
+}
+
 interface CompleteParams {
   assignmentId: number;
-  items: { item_id: number; completed_quantity: number }[];
+  items: CompletionItemPayload[];
   actualStart?: string;
   actualEnd?: string;
   notes?: string;
@@ -46,7 +53,7 @@ export function useJobActions() {
 
   const completeJob = useMutation({
     mutationFn: async ({ assignmentId, items, actualStart, actualEnd, notes }: CompleteParams) => {
-      const { data, error } = await supabase.rpc('complete_assignment_with_card', {
+      const { data, error } = await supabase.rpc('complete_assignment_with_card_v2', {
         p_assignment_id: assignmentId,
         p_items: items,
         p_actual_start: actualStart ?? null,
