@@ -1,9 +1,12 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
+import { minutesToClock, clockToMinutes } from '@/src/lib/laborScheduling';
+import { formatDuration } from '@/lib/shift-utils';
+import { fetchJobCardItems } from '@/lib/queries/factoryFloor';
 
 import {
   Dialog,
@@ -64,29 +67,12 @@ interface CompleteJobDialogProps {
   onComplete?: () => void;
 }
 
-function minutesToTimeString(minutes: number): string {
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
-}
-
-function timeStringToMinutes(timeStr: string): number {
-  const [hours, mins] = timeStr.split(':').map(Number);
-  return hours * 60 + mins;
-}
-
-function formatDuration(minutes: number): string {
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  if (hours === 0) return `${mins}m`;
-  if (mins === 0) return `${hours}h`;
-  return `${hours}h ${mins}m`;
-}
-
 function extractCardId(jobInstanceId?: string): number | null {
   if (!jobInstanceId) return null;
   const match = jobInstanceId.match(/:card-(\d+)$/);
-  return match ? Number(match[1]) : null;
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export function CompleteJobDialog({
@@ -105,46 +91,21 @@ export function CompleteJobDialog({
 
   const jobCardId = extractCardId(assignment?.job_instance_id);
 
-  // Fetch job card items when card exists
-  const { data: items = [], isLoading: itemsLoading } = useQuery({
-    queryKey: ['job-card-items-scheduler', jobCardId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('job_card_items')
-        .select(`
-          item_id,
-          job_id,
-          jobs:job_id (name),
-          product_id,
-          products:product_id (name),
-          quantity,
-          completed_quantity,
-          piece_rate,
-          status
-        `)
-        .eq('job_card_id', jobCardId!)
-        .neq('status', 'cancelled')
-        .order('item_id');
-      if (error) throw error;
-      return (data ?? []).map((item: any) => ({
-        item_id: item.item_id,
-        job_name: item.jobs?.name ?? null,
-        product_name: item.products?.name ?? null,
-        quantity: item.quantity,
-        completed_quantity: item.completed_quantity,
-        piece_rate: item.piece_rate,
-        status: item.status,
-      })) as CompletionItem[];
-    },
+  // Fetch job card items — reuse shared query function and cache key
+  const { data: rawItems, isLoading: itemsLoading } = useQuery({
+    queryKey: ['job-card-items', jobCardId],
+    queryFn: () => fetchJobCardItems(jobCardId!),
     enabled: open && jobCardId != null,
   });
+
+  const items: CompletionItem[] = rawItems ?? [];
 
   const scheduledDuration = assignment
     ? assignment.end_minutes - assignment.start_minutes
     : 0;
 
-  const actualStartMinutes = actualStartTime ? timeStringToMinutes(actualStartTime) : null;
-  const actualEndMinutes = actualEndTime ? timeStringToMinutes(actualEndTime) : null;
+  const actualStartMinutes = actualStartTime ? clockToMinutes(actualStartTime) : null;
+  const actualEndMinutes = actualEndTime ? clockToMinutes(actualEndTime) : null;
   const actualDuration =
     actualStartMinutes !== null && actualEndMinutes !== null
       ? actualEndMinutes - actualStartMinutes
@@ -152,37 +113,40 @@ export function CompleteJobDialog({
 
   const variance = actualDuration !== null ? actualDuration - scheduledDuration : null;
 
-  // Initialize form when dialog opens
+  // Initialize form + completions when dialog opens or items load
   useEffect(() => {
     if (open && assignment) {
-      setActualStartTime(minutesToTimeString(assignment.start_minutes));
+      setActualStartTime(minutesToClock(assignment.start_minutes));
 
       const now = new Date();
       const currentMinutes = now.getHours() * 60 + now.getMinutes();
       if (currentMinutes > assignment.start_minutes) {
-        setActualEndTime(minutesToTimeString(currentMinutes));
+        setActualEndTime(minutesToClock(currentMinutes));
       } else {
-        setActualEndTime(minutesToTimeString(assignment.end_minutes));
+        setActualEndTime(minutesToClock(assignment.end_minutes));
       }
 
       setNotes('');
+      // Reset completions — will be re-initialized when items load
       setCompletions({});
     }
   }, [open, assignment]);
 
-  // Initialize completions from fetched items
+  // Initialize completions from items — uses functional updater to avoid stale closure
   useEffect(() => {
-    if (items.length > 0 && Object.keys(completions).length === 0) {
-      setCompletions(initCompletions(items));
+    if (items.length > 0) {
+      setCompletions((prev) =>
+        Object.keys(prev).length === 0 ? initCompletions(items) : prev
+      );
     }
   }, [items]);
 
-  const handleUpdateCompletion = (itemId: number, update: Partial<ItemCompletion>) => {
+  const handleUpdateCompletion = useCallback((itemId: number, update: Partial<ItemCompletion>) => {
     setCompletions((prev) => ({
       ...prev,
       [itemId]: { ...prev[itemId], ...update },
     }));
-  };
+  }, []);
 
   const itemsValid = items.length === 0 || isCompletionValid(items, completions);
 
@@ -296,8 +260,8 @@ export function CompleteJobDialog({
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Clock className="h-4 w-4" />
               <span>
-                Scheduled: {minutesToTimeString(assignment.start_minutes)} –{' '}
-                {minutesToTimeString(assignment.end_minutes)} ({formatDuration(scheduledDuration)})
+                Scheduled: {minutesToClock(assignment.start_minutes)} –{' '}
+                {minutesToClock(assignment.end_minutes)} ({formatDuration(scheduledDuration)})
               </span>
             </div>
 

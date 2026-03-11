@@ -40,6 +40,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { supabase } from '@/lib/supabase';
 import { formatTimeToSAST } from '@/lib/utils/timezone';
+import { getRemainderLabel, isLossAction } from '@/components/features/completion/completion-items';
 
 function formatRand(amount: number): string {
   return `R${amount.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -767,14 +768,11 @@ function PayrollDetailPanel({ staffId, staffName, weekStart, weekEnd, row, onClo
                       {p.remainder_action && (
                         <div className="mt-0.5">
                           <Badge variant="outline" className={
-                            p.remainder_action === 'scrap' || p.remainder_action === 'shortage'
+                            isLossAction(p.remainder_action)
                               ? 'text-amber-400 border-amber-500/30 text-[10px] px-1.5 py-0'
                               : 'text-blue-400 border-blue-500/30 text-[10px] px-1.5 py-0'
                           }>
-                            {p.remainder_action === 'return_to_pool' ? 'Returned to pool' :
-                             p.remainder_action === 'follow_up_card' ? 'Follow-up card' :
-                             p.remainder_action === 'scrap' ? 'Scrap' :
-                             p.remainder_action === 'shortage' ? 'Shortage' : p.remainder_action}
+                            {getRemainderLabel(p.remainder_action)}
                             {p.remainder_qty ? ` (${p.remainder_qty})` : ''}
                           </Badge>
                           {p.remainder_reason && (

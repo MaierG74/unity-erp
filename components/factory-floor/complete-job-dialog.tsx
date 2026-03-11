@@ -161,10 +161,12 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
     }
   }, [open, job?.assignment_id]);
 
-  // Initialize completions from fetched items
+  // Initialize completions from items — uses functional updater to avoid stale closure
   useEffect(() => {
-    if (items.length > 0 && Object.keys(completions).length === 0) {
-      setCompletions(initCompletions(items));
+    if (items.length > 0) {
+      setCompletions((prev) =>
+        Object.keys(prev).length === 0 ? initCompletions(items) : prev
+      );
     }
   }, [items]);
 

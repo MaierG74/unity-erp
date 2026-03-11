@@ -144,6 +144,7 @@ export async function fetchJobCardItems(jobCardId: number): Promise<JobCardItemF
       status
     `)
     .eq('job_card_id', jobCardId)
+    .neq('status', 'cancelled')
     .order('item_id');
 
   if (error) throw error;

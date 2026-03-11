@@ -4,7 +4,6 @@ import { useMemo } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, Undo2, FileText, Trash2, PackageMinus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -195,6 +194,17 @@ export function buildItemsPayload(items: CompletionItem[], completions: Record<n
         : null,
     };
   });
+}
+
+/** Get display label for a remainder action */
+export function getRemainderLabel(action: string | null): string {
+  if (!action) return '';
+  return remainderOptions.find((o) => o.value === action)?.label ?? action;
+}
+
+/** Whether a remainder action is a loss type (needs visual warning) */
+export function isLossAction(action: string | null): boolean {
+  return action === 'scrap' || action === 'shortage';
 }
 
 /** Initialize completions from fetched items */
