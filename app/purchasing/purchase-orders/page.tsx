@@ -40,6 +40,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { hasOutstandingQuantity, isPositiveQuantity } from '@/lib/purchasing-quantities';
 
 interface SupplierOrder {
   order_id: number;
@@ -114,11 +115,11 @@ function getOrderStatus(order: PurchaseOrder) {
   if (!order.supplier_orders?.length) return order.status?.status_name || 'Unknown';
 
   const allReceived = order.supplier_orders.every(
-    so => so.order_quantity > 0 && so.total_received === so.order_quantity
+    so => !hasOutstandingQuantity(so.order_quantity, so.total_received)
   );
   
   const someReceived = order.supplier_orders.some(
-    so => (so.total_received || 0) > 0 && so.total_received !== so.order_quantity
+    so => isPositiveQuantity(so.total_received) && hasOutstandingQuantity(so.order_quantity, so.total_received)
   );
 
   if (order.status?.status_name === 'Approved') {

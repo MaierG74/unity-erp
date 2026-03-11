@@ -41,13 +41,13 @@
 - `supplier_order_statuses`
   - Canonical status names for both supplier orders and POs. See `schema.txt:192` and seed scripts below.
 - `supplier_orders`
-  - SO line with `supplier_component_id`, `order_quantity`, `total_received`, `status_id`, `order_date`, and `purchase_order_id` FK. See `schema.txt:199`. Column `purchase_order_id` added in `scripts/setup-database-functions.sql`.
+  - SO line with `supplier_component_id`, decimal-safe `order_quantity` / `total_received`, `status_id`, `order_date`, and `purchase_order_id` FK. See `schema.txt:199`. Column `purchase_order_id` added in `scripts/setup-database-functions.sql`.
 - `purchase_orders`
   - PO header: `purchase_order_id`, `q_number` (unique), `status_id`, `order_date`, `notes`, `created_by/approved_by/at`, and `supplier_id`. See `schema.txt:248` and `migrations/add_supplier_id_to_purchase_orders.sql`.
 - `supplier_order_receipts`
-  - Receipts with `order_id`, `transaction_id`, `quantity_received`, `receipt_date`. See `schema.txt:181`.
+  - Receipts with `order_id`, `transaction_id`, decimal-safe `quantity_received`, and `receipt_date`. See `schema.txt:181`.
 - `inventory_transactions`
-  - Records stock movements with `transaction_type_id` and optional `order_id`. See `schema.txt:108`.
+  - Records stock movements with decimal-safe `quantity`, `transaction_type_id`, and optional `order_id`. See `schema.txt:108`.
 - `supplier_order_customer_orders`
   - Junction table linking SO lines back to a customer order. See `sql/create_junction_table.sql:1`.
 
@@ -115,10 +115,10 @@
 
 **Receiving Flow**
 
-- **Enhanced Receive Modal (January 2025):** 🚧 IN PROGRESS - Purchase order detail page now uses a comprehensive modal dialog for receiving items with inspection and rejection capabilities. The "Receive" button opens a modal where operators can record both received quantities AND rejected quantities (gate inspection failures) in a single form. See `app/purchasing/purchase-orders/[id]/ReceiveItemsModal.tsx` and changelog [`purchase-order-receive-modal-20250115.md`](../../changelogs/purchase-order-receive-modal-20250115.md).
-- **Current Status:** Modal component created and integrated, but not yet appearing in browser (cache/build issue being investigated).
+- **Enhanced Receive Modal:** Purchase order detail page uses a modal dialog for receiving items with inspection and rejection capabilities. The "Receive" button opens a form where operators can record accepted quantities, rejected quantities, notes, and delivery-note attachments. See `app/purchasing/purchase-orders/[id]/ReceiveItemsModal.tsx` and changelog [`purchase-order-receive-modal-20250115.md`](../../changelogs/purchase-order-receive-modal-20250115.md).
 - UI: Receive inputs are enabled when PO is "Approved". See `app/purchasing/purchase-orders/[id]/page.tsx:528` and table inputs at `app/purchasing/purchase-orders/[id]/page.tsx:1231`.
 - Order Items table displays: Component, Description, Supplier, Unit Price, **Ordered**, **Received**, **Owing** (highlighted in orange when > 0), Receive Now (button that opens modal), and Total. The "Owing" column shows `order_quantity - total_received` to clearly indicate remaining stock to receive.
+- Fractional quantities: the receive modal, bulk receive modal, return inputs, dashboard owing badges, and PO status derivation now use decimal-safe comparisons/formatting so lines such as `41.90 ordered / 41.00 received / 0.90 owing` do not degrade into browser validation errors or floating-point display noise.
 - On submit (via modal):
   - Call the transactional RPC `process_supplier_order_receipt` to insert the inventory transaction, create the receipt record, update `inventory`, and recompute `supplier_orders.total_received`/status in one transaction.
   - If items are rejected, also call `process_supplier_order_return` with type='rejection' to record gate rejections (no inventory impact).
@@ -127,12 +127,12 @@
 - **Auto-refresh:** After receiving stock, the page automatically updates without manual refresh. The mutation invalidates and refetches queries with `refetchOnMount: true` and `staleTime: 0` configured on the purchase order query. Both inline per-row receipts (`receiveOneMutation`) and bulk receipts (`receiptMutation`) trigger immediate refetch of active queries.
 - Receipt history renders under the PO with all receipts per line: `app/purchasing/purchase-orders/[id]/page.tsx:760`. Detail page implementation lives in `components/features/purchasing/order-detail.tsx`.
 - Receiving guardrails: the PO detail page and bulk receive modal now detect allocation/data mismatches before calling the receipt RPC. If a line has allocation rows whose totals do not equal the supplier-order quantity, the UI shows a plain-English warning and blocks receiving for that line until the `For Order` allocation is corrected.
-- Deployment: apply `supabase/migrations/20251107_process_supplier_receipt.sql` via the Supabase CLI (`supabase db push` after linking the project) or run the script directly in SQL to enable the RPC before deploying updated UI.
+- Deployment: apply `supabase/migrations/20260311143000_fractional_purchase_receipts.sql` before deploying the updated purchasing UI. That migration converts `supplier_order_receipts.quantity_received`, `inventory_transactions.quantity`, and `inventory.quantity_on_hand` to `numeric` and replaces `process_supplier_order_receipt` with a decimal-safe version that matches the live org-aware signature.
 - Component picker: `components/features/purchasing/new-purchase-order-form.tsx` now uses an async-friendly search box powered by `react-select`. Typing filters by component code or description, selecting a result resets the supplier dropdown to avoid stale matches, and the input supports clearing selections.
 
 **DB Functions & Views**
 
-- `process_supplier_order_receipt(order_id int, quantity int, receipt_date timestamptz default now())` — transactional RPC defined in `supabase/migrations/20251107_process_supplier_receipt.sql`. Handles receipt insertion, inventory updates, and status recompute atomically. Granted to `authenticated` and `service_role`.
+- `process_supplier_order_receipt(p_order_id int, p_quantity numeric, p_receipt_date timestamptz default now(), p_notes text default null, p_allocation_receipts jsonb default null, p_rejected_quantity numeric default 0, p_rejection_reason text default null, p_attachment_path text default null, p_attachment_name text default null)` — transactional RPC used by the PO receive modal and bulk receive modal. The 2026-03-11 hotfix migration `supabase/migrations/20260311143000_fractional_purchase_receipts.sql` keeps the live org-aware function shape, but changes receipt/inventory math to `numeric` so fractional balances can be received safely.
 - `process_supplier_order_return(p_supplier_order_id int, p_quantity numeric, p_reason text, p_return_type text, p_return_timestamp timestamptz, p_returned_by bigint, p_notes text, p_goods_return_number text, p_batch_id bigint, p_signature_status text)` — transactional RPC for supplier returns (both immediate rejections and later returns from stock). Fixed in migration `20250113_fix_rpc_overload_conflict_v6.sql` to resolve function overload conflicts and schema mismatches. Handles inventory OUT transactions, GRN generation, and return tracking. See [`../../changelogs/supplier-returns-rpc-overload-fix-20250113.md`](../../changelogs/supplier-returns-rpc-overload-fix-20250113.md).
 - `create_update_order_received_quantity_function` RPC installer creates `update_order_received_quantity(order_id int)` to recompute `total_received` and set status based on sums. See `scripts/create-rpc-function.sql:2`.
 - Creation RPCs:
@@ -159,6 +159,7 @@
 
 - Status seeds: Ensure `Approved`, `Partially Received`, and `Fully Received` exist in `supplier_order_statuses`. The setup script now seeds these alongside legacy names (Open/In Progress/Partially Delivered/Completed/Cancelled) for parity with UI logic.
 - Deploy `process_supplier_order_receipt` everywhere so we can eventually remove the manual fallback logic from the UI.
+- Resolved — Fractional receipt hotfix (2026-03-11): the receiving path now supports decimal balances end-to-end. UI inputs use `step="any"` plus rounded remaining-quantity helpers, and the migration `20260311143000_fractional_purchase_receipts.sql` converts receipt/inventory persistence plus `process_supplier_order_receipt` from integer-only math to `numeric`.
 - `schema.txt` may be out of sync with `supplier_orders.purchase_order_id` addition; the script adds it, but `schema.txt` does not show it in the first definition block. Align schema snapshot.
 - Validation: Prevent receiving quantities > remaining; UI enforces `max` but add server-side checks in RPCs.
 - Historical allocation repair: pre-`2026-02-24` supplier orders can exist with allocation rows whose totals do not match the supplier-order quantity. Production migration `20260303145040_backfill_open_underallocated_supplier_order_stock_rows.sql` backfills the missing remainder to a stock allocation row for still-open lines so receiving does not fail with `receipt exceeds allocation cap`.
