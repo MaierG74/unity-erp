@@ -3,6 +3,12 @@
 -- but the receipt path still persisted integers, which blocked receiving the
 -- final fractional balance on approved purchase orders such as Q26-337.
 
+drop view if exists public.v_inventory_shortages;
+
+drop view if exists public.v_inventory_with_components;
+
+drop materialized view if exists public.component_status_mv;
+
 alter table public.supplier_order_receipts
   alter column quantity_received type numeric using quantity_received::numeric;
 
@@ -11,6 +17,43 @@ alter table public.inventory_transactions
 
 alter table public.inventory
   alter column quantity_on_hand type numeric using quantity_on_hand::numeric;
+
+create materialized view public.component_status_mv as
+select
+  c.component_id,
+  c.internal_code,
+  c.description,
+  coalesce(i.quantity_on_hand, 0::numeric) as in_stock,
+  coalesce(ca.allocated_to_orders, 0::numeric) as allocated_to_orders
+from public.components c
+left join public.inventory i on c.component_id = i.component_id
+left join public.component_allocation_mv ca on c.component_id = ca.component_id;
+
+create or replace view public.v_inventory_with_components as
+select
+  i.inventory_id,
+  i.component_id,
+  c.internal_code,
+  c.description,
+  i.location,
+  i.quantity_on_hand,
+  i.reorder_level
+from public.inventory i
+join public.components c on c.component_id = i.component_id;
+
+create or replace view public.v_inventory_shortages as
+select
+  c.component_id,
+  c.internal_code,
+  c.description,
+  i.location,
+  i.quantity_on_hand,
+  i.reorder_level,
+  greatest(i.reorder_level - i.quantity_on_hand, 0::numeric) as shortage_qty
+from public.inventory i
+join public.components c on c.component_id = i.component_id
+where i.reorder_level is not null
+  and i.quantity_on_hand < i.reorder_level;
 
 drop function if exists public.process_supplier_order_receipt(
   integer,
