@@ -818,7 +818,7 @@ export default function OptionSetLibraryPage() {
   return (
     <div className="min-h-screen bg-background py-8">
       <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 space-y-6">
-        <div className="flex flex-col gap-4 rounded-lg border bg-card p-6 shadow-xs">
+        <div className="flex flex-col gap-4 rounded-lg border bg-card p-6 shadow-sm">
           <div className="flex flex-col gap-1">
             <h1 className="text-xl font-semibold">Option Set Library</h1>
             <p className="text-sm text-muted-foreground">
