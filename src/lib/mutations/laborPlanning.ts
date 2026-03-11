@@ -86,6 +86,8 @@ export function useLaborPlanningMutations(queryKey: QueryKey) {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey });
       queryClient.invalidateQueries({ queryKey: ['labor-planning-week-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['jobCards'] });
+      queryClient.invalidateQueries({ queryKey: ['production-summary'] });
     },
   });
 
@@ -163,6 +165,8 @@ export function useLaborPlanningMutations(queryKey: QueryKey) {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey });
       queryClient.invalidateQueries({ queryKey: ['labor-planning-week-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['jobCards'] });
+      queryClient.invalidateQueries({ queryKey: ['production-summary'] });
     },
   });
 
@@ -254,6 +258,8 @@ export function useLaborPlanningMutations(queryKey: QueryKey) {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey });
       queryClient.invalidateQueries({ queryKey: ['labor-planning-week-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['jobCards'] });
+      queryClient.invalidateQueries({ queryKey: ['production-summary'] });
     },
   });
 

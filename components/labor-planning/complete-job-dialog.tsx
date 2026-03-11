@@ -78,6 +78,14 @@ function formatDuration(minutes: number): string {
   return `${hours}h ${mins}m`;
 }
 
+function extractJobCardId(jobInstanceId: string | null | undefined): number | null {
+  if (!jobInstanceId) return null;
+  const match = jobInstanceId.match(/:card-(\d+)$/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export function CompleteJobDialog({
   open,
   onOpenChange,
@@ -134,6 +142,15 @@ export function CompleteJobDialog({
       }
 
       const duration = actualEndMinutes - actualStartMinutes;
+      const jobCardId = extractJobCardId(assignment.job_instance_id);
+
+      if (jobCardId !== null) {
+        const { error: cardError } = await supabase.rpc('complete_job_card', {
+          p_job_card_id: jobCardId,
+        });
+
+        if (cardError) throw cardError;
+      }
 
       const { error } = await supabase
         .from('labor_plan_assignments')
@@ -153,6 +170,9 @@ export function CompleteJobDialog({
       queryClient.invalidateQueries({ queryKey: ['laborAssignments'] });
       queryClient.invalidateQueries({ queryKey: ['laborPlanningPayload'] });
       queryClient.invalidateQueries({ queryKey: ['jobs-in-factory'] });
+      queryClient.invalidateQueries({ queryKey: ['jobCards'] });
+      queryClient.invalidateQueries({ queryKey: ['production-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['factory-floor'] });
 
       toast({
         title: 'Job completed',

@@ -1548,6 +1548,9 @@ export function extractOpenOrdersCustomerReference(message: string) {
     .trim();
 
   const patterns = [
+    /\b(?:what|which)\s+(?:open|outstanding)\s+orders(?:\s+do\s+we\s+have)?\s+(?:for|from)\s+(.+)$/i,
+    /\b(?:can you\s+)?(?:list|show)\s+(?:the\s+)?(?:open|outstanding)\s+orders(?:\s+do\s+we\s+have)?\s+(?:for|from)\s+(.+)$/i,
+    /\b(?:what|which)\s+orders?\s+(?:are\s+)?(?:open|outstanding)\s+(?:for|from)\s+(.+)$/i,
     /\b(?:what|which|show|list)\s+(?:open|outstanding)\s+(.+?)\s+orders(?:\s+do\s+we\s+have)?$/i,
     /\b(?:how many\s+)?(?:open|outstanding)\s+(.+?)\s+orders(?:\s+do\s+we\s+have)?$/i,
     /\b(?:can you\s+)?list\s+(?:the\s+)?(?:open|outstanding)\s+(.+?)\s+orders$/i,

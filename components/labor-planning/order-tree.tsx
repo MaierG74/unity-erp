@@ -107,6 +107,109 @@ function jobCardDetail(job: PlanningJob): { label: string; className: string; ic
   return { label: fallbackTime, className: 'text-muted-foreground' };
 }
 
+/** Categorise a job into pool / active / completed */
+function jobTier(job: PlanningJob): 'pool' | 'active' | 'completed' {
+  if (job.jobStatus === 'completed') return 'completed';
+  if (job.poolId != null && (job.remainingQty ?? 0) > 0) return 'pool';
+  return 'active';
+}
+
+/** Render a single job row */
+function JobRow({
+  job,
+  order,
+  onJobClick,
+  onJobDragStart,
+}: {
+  job: PlanningJob;
+  order: PlanningOrder;
+  onJobClick?: (job: PlanningJob, order: PlanningOrder) => void;
+  onJobDragStart?: (event: React.DragEvent<HTMLDivElement>, job: PlanningJob, order: PlanningOrder) => void;
+}) {
+  const detail = jobCardDetail(job);
+  const Icon = detail.icon;
+  return (
+    <div
+      key={job.id}
+      className="group flex items-center gap-1.5 rounded border border-dashed border-muted-foreground/30 bg-muted/50 px-1.5 py-1 cursor-grab active:cursor-grabbing hover:border-primary/50 hover:bg-muted"
+      draggable
+      onClick={() => onJobClick?.(job, order)}
+      onDragStart={(event) => {
+        const payload = {
+          type: 'job',
+          job,
+          order: {
+            id: order.orderId ?? order.id,
+            orderNumber: order.orderNumber ?? order.id,
+            customer: order.customer,
+          },
+        };
+        event.dataTransfer.setData('application/json', JSON.stringify(payload));
+        event.dataTransfer.effectAllowed = 'move';
+        onJobDragStart?.(event, job, order);
+      }}
+    >
+      <GripVertical className="h-3 w-3 shrink-0 text-muted-foreground/70 group-hover:text-foreground" />
+      <div
+        className="h-5 w-1 shrink-0 rounded-full"
+        style={{ background: job.categoryColor ?? '#0ea5e9' }}
+      />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[11px] font-medium">
+          {job.productName && job.productName !== job.name ? job.productName : job.name}
+        </p>
+        {job.productName && job.productName !== job.name && (
+          <p className="truncate text-[10px] text-muted-foreground/70">{job.name}</p>
+        )}
+        <span className={cn('inline-flex items-center gap-0.5 text-[10px] font-medium', detail.className)}>
+          {Icon && <Icon className="h-3 w-3" />}
+          {detail.label}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** Collapsible section divider for pool / completed tiers */
+function SectionDivider({
+  label,
+  count,
+  colorClass,
+  defaultOpen,
+  children,
+}: {
+  label: string;
+  count: string;
+  colorClass: string;
+  defaultOpen: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div>
+      <button
+        type="button"
+        className="flex w-full items-center gap-1.5 px-1 py-0.5 group/section"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <ChevronRight
+          className={cn(
+            'h-2.5 w-2.5 shrink-0 transition-transform',
+            colorClass,
+            open ? 'rotate-90' : 'rotate-0',
+          )}
+        />
+        <span className={cn('text-[9px] font-semibold uppercase tracking-wide', colorClass)}>
+          {label}
+        </span>
+        <div className={cn('flex-1 h-px', `bg-current opacity-20`, colorClass)} />
+        <span className={cn('text-[9px]', colorClass, 'opacity-70')}>{count}</span>
+      </button>
+      {open && <div className="space-y-1 mt-1">{children}</div>}
+    </div>
+  );
+}
+
 export function OrderTree({ orders, windowSize = 12, onJobDragStart, onJobClick, stalePoolOrderIds }: OrderTreeProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -140,6 +243,19 @@ export function OrderTree({ orders, windowSize = 12, onJobDragStart, onJobClick,
       <div style={{ paddingTop, paddingBottom }} className="space-y-1">
         {visibleOrders.map((order) => {
           const isOpen = openOrders.has(order.id);
+
+          // Split jobs into three tiers
+          const poolJobs: PlanningJob[] = [];
+          const activeJobs: PlanningJob[] = [];
+          const completedJobs: PlanningJob[] = [];
+          for (const job of order.jobs) {
+            const tier = jobTier(job);
+            if (tier === 'pool') poolJobs.push(job);
+            else if (tier === 'completed') completedJobs.push(job);
+            else activeJobs.push(job);
+          }
+
+          const totalRemaining = poolJobs.reduce((sum, j) => sum + (j.remainingQty ?? 0), 0);
 
           return (
             <Collapsible key={order.id} open={isOpen} onOpenChange={() => toggleOrder(order.id)}>
@@ -194,53 +310,54 @@ export function OrderTree({ orders, windowSize = 12, onJobDragStart, onJobClick,
                 </CollapsibleTrigger>
 
                 <CollapsibleContent>
-                  <div className="space-y-1 px-2 pb-2">
-                    {order.jobs.map((job) => (
-                      <div
-                        key={job.id}
-                        className="group flex items-center gap-1.5 rounded border border-dashed border-muted-foreground/30 bg-muted/50 px-1.5 py-1 cursor-grab active:cursor-grabbing hover:border-primary/50 hover:bg-muted"
-                        draggable
-                        onClick={() => onJobClick?.(job, order)}
-                        onDragStart={(event) => {
-                          const payload = {
-                            type: 'job',
-                            job,
-                            order: {
-                              id: order.orderId ?? order.id,
-                              orderNumber: order.orderNumber ?? order.id,
-                              customer: order.customer,
-                            },
-                          };
-                          event.dataTransfer.setData('application/json', JSON.stringify(payload));
-                          event.dataTransfer.effectAllowed = 'move';
-                          onJobDragStart?.(event, job, order);
-                        }}
+                  <div className="space-y-2 px-2 pb-2">
+                    {/* Pool section — collapsible, default collapsed */}
+                    {poolJobs.length > 0 && (
+                      <SectionDivider
+                        label="Pool"
+                        count={`${poolJobs.length} · ${totalRemaining} remaining`}
+                        colorClass="text-purple-600 dark:text-purple-400"
+                        defaultOpen={false}
                       >
-                        <GripVertical className="h-3 w-3 shrink-0 text-muted-foreground/70 group-hover:text-foreground" />
-                        <div
-                          className="h-5 w-1 shrink-0 rounded-full"
-                          style={{ background: job.categoryColor ?? '#0ea5e9' }}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-[11px] font-medium">
-                            {job.productName && job.productName !== job.name ? job.productName : job.name}
-                          </p>
-                          {job.productName && job.productName !== job.name && (
-                            <p className="truncate text-[10px] text-muted-foreground/70">{job.name}</p>
-                          )}
-                          {(() => {
-                            const detail = jobCardDetail(job);
-                            const Icon = detail.icon;
-                            return (
-                              <span className={cn('inline-flex items-center gap-0.5 text-[10px] font-medium', detail.className)}>
-                                {Icon && <Icon className="h-3 w-3" />}
-                                {detail.label}
-                              </span>
-                            );
-                          })()}
+                        {poolJobs.map((job) => (
+                          <JobRow key={job.id} job={job} order={order} onJobClick={onJobClick} onJobDragStart={onJobDragStart} />
+                        ))}
+                      </SectionDivider>
+                    )}
+
+                    {/* Issued / Active section — always visible, inline divider */}
+                    {activeJobs.length > 0 && (
+                      <div>
+                        <div className="flex items-center gap-1.5 px-1 py-0.5">
+                          <span className="text-[9px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
+                            Issued
+                          </span>
+                          <div className="flex-1 h-px bg-blue-600/20 dark:bg-blue-400/20" />
+                          <span className="text-[9px] text-blue-600/70 dark:text-blue-400/70">
+                            {activeJobs.length} {activeJobs.length === 1 ? 'card' : 'cards'}
+                          </span>
+                        </div>
+                        <div className="space-y-1 mt-1">
+                          {activeJobs.map((job) => (
+                            <JobRow key={job.id} job={job} order={order} onJobClick={onJobClick} onJobDragStart={onJobDragStart} />
+                          ))}
                         </div>
                       </div>
-                    ))}
+                    )}
+
+                    {/* Completed section — collapsible, default closed */}
+                    {completedJobs.length > 0 && (
+                      <SectionDivider
+                        label="Done"
+                        count={`${completedJobs.length} ${completedJobs.length === 1 ? 'job' : 'jobs'}`}
+                        colorClass="text-emerald-600 dark:text-emerald-400"
+                        defaultOpen={false}
+                      >
+                        {completedJobs.map((job) => (
+                          <JobRow key={job.id} job={job} order={order} onJobClick={onJobClick} onJobDragStart={onJobDragStart} />
+                        ))}
+                      </SectionDivider>
+                    )}
                   </div>
                 </CollapsibleContent>
               </div>

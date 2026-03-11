@@ -17,6 +17,7 @@ import { JobQueueTable } from '@/components/production/job-queue-table';
 import { ProductionHeader } from '@/components/production/production-header';
 import { ExceptionsTab } from '@/components/production/exceptions-tab';
 import { useProductionSummary } from '@/hooks/use-production-summary';
+import { useLaborRealtime } from '@/hooks/use-labor-realtime';
 
 const LaborPlanningBoard = dynamic(
   () =>
@@ -66,6 +67,7 @@ function ProductionContent() {
   const router = useRouter();
   const pathname = usePathname();
   const summary = useProductionSummary();
+  useLaborRealtime();
 
   const rawView = searchParams?.get('view') ?? 'queue';
   const view: ProductionView = VALID_VIEWS.includes(rawView as ProductionView)

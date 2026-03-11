@@ -26,7 +26,7 @@
 |---------|--------|
 | `complete_job_card` RPC auto-fills untouched items to full quantity | No true partial completion — remaining qty silently marked complete |
 | Scheduler drag-drop updates `labor_plan_assignments.staff_id` only, NOT `job_cards.staff_id` | Payroll attribution diverges from schedule after casual reassignment |
-| No `completed_by` on job cards | Can't audit who actually completed the work vs who gets paid |
+| No explicit completion actor on job cards | Can't audit who actually completed the work vs who gets paid |
 | No remainder disposition model | Short completions vanish — no return-to-pool, no follow-up card, no scrap tracking |
 | `complete_assignment_with_card` RPC exists in Supabase but has NO migration file in repo | DB reality vs repo history is out of sync |
 | No payroll lock mechanism | Completed cards can be reopened/modified after payroll is approved |
@@ -36,6 +36,7 @@
 1. **Worker self-completes, supervisor reviews/corrects in payroll** — no approval bottleneck on the floor
 2. **Remainder disposition is mandatory at completion time** — nothing silently vanishes
 3. **`job_cards.staff_id` remains the single source of truth for piecework pay** — no new earnings table
+4. **Scheduler reassignment must update card ownership atomically** — no split-brain between scheduler and payroll
 
 ---
 
@@ -47,7 +48,7 @@
 |---------|----------------|----------------|
 | Schedule ownership | `labor_plan_assignments.staff_id` | Scheduler UI drag-drop |
 | Payroll ownership | `job_cards.staff_id` | Synced from assignment on pre-start reassign; transfer RPC on mid-work move |
-| Completion actor | `job_cards.completed_by` (**new column**) | Set at completion time |
+| Completion actor | `job_cards.completed_by_user_id` (**new column**) | Set to the logged-in user who completed the card |
 | Remainder disposition | `job_card_items.remainder_action` + `job_card_items.remainder_reason` (**new columns**) | Forced at completion time for short items |
 
 ### Rule: Scheduler reassignment must sync to job card
@@ -57,15 +58,13 @@ When a card is dragged to a different staff lane on the scheduler:
 - **If `job_status` is `issued` or `scheduled` (work not started)**: Update both `labor_plan_assignments.staff_id` AND `job_cards.staff_id` in the same mutation. Simple reassignment.
 - **If `job_status` is `in_progress`**: Block the drag-drop. Force the user through the transfer flow (which correctly handles splits via the existing `transfer_assignment` RPC).
 
-This is the **only structural change** needed to close the payroll-schedule divergence gap.
+This is the **highest-value structural change** needed to close the payroll-schedule divergence gap.
 
 ### Implementation note
 
-The `updateJobSchedule()` function in `src/lib/mutations/laborPlanning.ts` (line 274) currently only updates `labor_plan_assignments`. It needs to also update `job_cards.staff_id` when the linked card exists and work hasn't started. This can be done either:
-- As a Postgres trigger on `labor_plan_assignments` (backend preference), or
-- As a second Supabase call in the mutation function (simpler, less hidden magic)
+The `updateJobSchedule()` function in `src/lib/mutations/laborPlanning.ts` (line 274) currently only updates `labor_plan_assignments`. It needs to also update `job_cards.staff_id` when the linked card exists and work hasn't started.
 
-**Recommendation**: Second Supabase call in the mutation. Explicit > implicit.
+**Recommendation**: use an atomic RPC (`reassign_scheduled_card`) that updates both `labor_plan_assignments` and `job_cards` in one transaction. This is payroll-affecting state, so atomicity matters more than keeping the mutation purely client-driven.
 
 ---
 
@@ -86,15 +85,19 @@ pending ──→ in_progress ──→ completed (full: completed_qty = qty)
                 └──→ cancelled
 ```
 
-### New Item Statuses
+### Item status strategy
 
-Add `partial_complete` to the `job_card_items.status` CHECK constraint:
+Do **not** introduce a new `partial_complete` item status in Phase 1.
+
+Use the existing terminal `completed` status together with explicit remainder metadata:
 
 ```
-'pending' | 'in_progress' | 'completed' | 'partial_complete' | 'cancelled'
+status = 'completed'
+completed_quantity < quantity
+remainder_action IS NOT NULL
 ```
 
-**`partial_complete`** means: this item has been through the completion flow, the worker recorded what they actually did, and a remainder disposition has been chosen. It is **terminally resolved** — it won't be worked on further (unlike `in_progress` which means work is ongoing).
+That keeps existing queue/payroll/reporting filters stable while still making partial completion explicit.
 
 ### New Columns on `job_card_items`
 
@@ -104,12 +107,13 @@ Add `partial_complete` to the `job_card_items.status` CHECK constraint:
 | `remainder_qty` | INTEGER | Explicit: `quantity - completed_quantity` at completion time |
 | `remainder_reason` | TEXT | Free-text reason (e.g., "board shortage", "machine breakdown") |
 | `remainder_follow_up_card_id` | INTEGER FK → job_cards | If `follow_up_card`, links to the new card created for remainder |
+| `issued_quantity_snapshot` | INTEGER | Preserves the original issued qty when pool math needs to subtract a returned remainder |
 
 ### New Columns on `job_cards`
 
 | Column | Type | Purpose |
 |--------|------|---------|
-| `completed_by` | INTEGER FK → staff | The person who physically completed the card (audit trail) |
+| `completed_by_user_id` | UUID FK → auth.users | The logged-in actor who completed the card (audit trail) |
 | `completion_type` | TEXT CHECK (`'full'`, `'partial'`, `'cancelled'`) | Quick filter for payroll review |
 
 ### Job Card Lifecycle
@@ -120,7 +124,7 @@ pending ──→ in_progress ──→ completed (all items full or partial_com
                 └──→ cancelled (cascade: all pending/in_progress items → cancelled)
 ```
 
-**No new card-level statuses needed.** A card with some `partial_complete` items is still `completed` at card level — it went through the completion flow and everything is accounted for.
+**No new card-level statuses needed.** A card with some short items is still `completed` at card level — it went through the completion flow and everything is accounted for.
 
 ---
 
@@ -149,7 +153,7 @@ Currently there are 3 completion paths (job card detail, scheduler, factory floo
 - Shows `job_cards.staff_id` name as default
 - Checkbox to override (rare — for when someone else actually did the work)
 - If overridden, updates `job_cards.staff_id` before completion
-- `completed_by` always records the logged-in user
+- `completed_by_user_id` always records the logged-in user
 
 **Step 2: Confirm Quantities + Handle Remainders**
 
@@ -202,9 +206,9 @@ Currently there are 3 completion paths (job card detail, scheduler, factory floo
 
 | Action | Backend Effect |
 |--------|---------------|
-| **Return to pool** | Item marked `partial_complete`. Remainder qty effectively re-enters the pool (pool remaining is computed from `required - issued`, and the original issuance stays, but pool `required_qty` can be reconciled to reflect available demand). **Simpler**: create a new pool-aware mechanism — see Section 4. |
-| **Follow-up card** | Item marked `partial_complete`. New job card created immediately with `quantity = remainder_qty`, linked via `remainder_follow_up_card_id`. New card is `pending`, unassigned — appears in pool/queue for scheduling. |
-| **Scrap** | Item marked `partial_complete`. Remainder recorded but no reissuance. `remainder_action = 'scrap'`. Visible in reporting. |
+| **Return to pool** | Item stays `completed`. Remainder metadata is recorded and the pool `issued_qty` calculation subtracts the returned remainder instead of mutating away issuance history. |
+| **Follow-up card** | Item stays `completed`. New job card created immediately with `quantity = remainder_qty`, linked via `remainder_follow_up_card_id`. New card is `pending`, unassigned — appears in pool/queue for scheduling. |
+| **Scrap** | Item stays `completed`. Remainder recorded but no reissuance. `remainder_action = 'scrap'`. Visible in reporting. |
 | **Shortage** | Same as scrap mechanically, but different category. `remainder_action = 'shortage'`. Signals upstream/material issue vs worker waste. |
 
 ---
@@ -227,17 +231,20 @@ Currently there are 3 completion paths (job card detail, scheduler, factory floo
 
 **Implementation for return-to-pool:**
 
-Don't literally reverse the issuance (that would break the pool's issued-qty accounting). Instead:
-1. Mark the item as `partial_complete` with `remainder_action = 'return_to_pool'`
-2. Reduce the original item's `quantity` to match `completed_quantity` (so the item is now "fully complete" at the reduced quantity)
-3. The pool's `issued_qty` (computed from `SUM(jci.quantity) WHERE NOT cancelled`) drops by the remainder amount
-4. The pool's `remaining_qty` increases accordingly — remainder is now available for re-issuance
+Do **not** mutate away the original issued quantity just to make the pool math work. Preserve issuance history.
 
-This is clean because it doesn't create phantom cards or undo history. The original card is complete at the actual quantity. The pool math adjusts naturally.
+Instead:
+1. Mark the item `completed` with `completed_quantity < quantity`
+2. Record `remainder_action = 'return_to_pool'` and `remainder_qty = quantity - completed_quantity`
+3. Preserve the original issued amount in `issued_quantity_snapshot`
+4. Update the work-pool status view so `issued_qty` subtracts returned-to-pool remainder for those items
+5. The pool's `remaining_qty` increases accordingly — remainder is now available for re-issuance
+
+This keeps the audit trail intact while still making the pool reusable.
 
 **What about scrap/shortage?**
 
-These are terminal dispositions — the units are gone. The item stays at its original `quantity` but `completed_quantity` reflects reality. The `remainder_qty` is explicitly recorded as lost. This affects:
+These are terminal dispositions — the units are gone. The item stays at its original `quantity`, `completed_quantity` reflects reality, and the `remainder_qty` is explicitly recorded as lost. This affects:
 - Yield reporting (future)
 - Order fulfillment tracking (can the order still ship?)
 - No payroll impact (you don't get paid for scrapped units)
@@ -348,7 +355,7 @@ The payroll review page (`app/payroll-review/page.tsx`) should show:
 - Parameters:
   ```
   p_job_card_id INTEGER,
-  p_completed_by INTEGER,
+  p_completed_by_user_id UUID,
   p_items JSONB — array of {
     item_id: INTEGER,
     completed_quantity: INTEGER,
@@ -363,15 +370,15 @@ The payroll review page (`app/payroll-review/page.tsx`) should show:
      - Set `completed_quantity` to provided value
      - If `completed_quantity = quantity`: set `status = 'completed'`
      - If `completed_quantity < quantity` AND `remainder_action` provided:
-       - Set `status = 'partial_complete'`
+       - Keep `status = 'completed'`
        - Set `remainder_action`, `remainder_qty = quantity - completed_quantity`, `remainder_reason`
-       - If `remainder_action = 'return_to_pool'`: reduce item `quantity` to `completed_quantity`
+       - Set `issued_quantity_snapshot = quantity`
        - If `remainder_action = 'follow_up_card'`: call sub-function to create follow-up card
      - If `completed_quantity < quantity` AND no `remainder_action`: RAISE EXCEPTION (enforce the rule)
-  4. Set `job_cards.completed_by = p_completed_by`
-  5. Set `job_cards.completion_type` based on whether any items are `partial_complete`
+  4. Set `job_cards.completed_by_user_id = p_completed_by_user_id`
+  5. Set `job_cards.completion_type` based on whether any items have remainder metadata
   6. Set `job_cards.status = 'completed'`, `completion_date = CURRENT_DATE`
-  7. Set `completion_time` on all completed/partial_complete items
+  7. Set `completion_time` on all completed items
 - **Risk**: Medium. New RPC, but old one stays until UI is migrated. No breaking change.
 
 **1d. Follow-up card creation (sub-function of 1c)**
@@ -387,13 +394,11 @@ The payroll review page (`app/payroll-review/page.tsx`) should show:
   - The assignment has a linked job card (parse `job_instance_id` for `:card-{id}`)
   - The card's `job_status` is NOT `in_progress`
 - If `job_status = 'in_progress'`, reject the reassignment with an error message directing user to use the transfer flow
-- **Implementation choice**: This can be done as:
-  - A new lightweight RPC `reassign_scheduled_card(p_assignment_id, p_new_staff_id)` that updates both tables atomically (recommended)
-  - OR a second Supabase call in the TypeScript mutation
+- **Implementation choice**: use a new RPC `reassign_scheduled_card(...)` that updates both tables atomically and returns the updated assignment row. Do not rely on two client-side writes for payroll-affecting ownership.
 - **Risk**: Medium. Changes existing reassignment behavior. Must test that existing drag-drop still works for non-card assignments.
 
 **1f. Payroll lock check**
-- Add a guard function: `is_payroll_locked(p_staff_id, p_completion_date)` → BOOLEAN
+- Add a guard function: `is_job_card_payroll_locked(p_staff_id, p_completion_date)` → BOOLEAN
 - Returns TRUE if `staff_weekly_payroll` has status `'approved'` or `'paid'` for the week containing that date
 - Call this at the top of `complete_job_card_v2` (prevent re-completion into locked period)
 - Call this before any card reopen/edit operation
@@ -429,9 +434,9 @@ The payroll review page (`app/payroll-review/page.tsx`) should show:
 
 **3a. Partial completion indicators**
 - In payroll review page, when expanding a staff member's piecework details:
-  - Show icon/badge for `partial_complete` items
+  - Show icon/badge for cards/items with remainder metadata
   - Show `remainder_action` label (returned, follow-up, scrap, shortage)
-  - Show `completed_by` if different from `staff_id`
+  - Show `completed_by_user_id` if different from the worker being paid
 
 **3b. Staff override in payroll review**
 - Add ability to reassign a completed card's `staff_id` during payroll review (before approval)
@@ -492,7 +497,7 @@ The payroll review page (`app/payroll-review/page.tsx`) should show:
 - Issue card to John, 30 units from pool (pool required = 30)
 - Complete: `completed_qty = 20`, remainder action = `return_to_pool`, reason = "board shortage"
 - **Expected**:
-  - Item `quantity` adjusted to 20, `status = 'partial_complete'`
+  - Item `status = 'completed'`, `completed_quantity = 20`
   - `remainder_qty = 10`, `remainder_action = 'return_to_pool'`
   - Pool `remaining_qty` now shows 10 available
   - Payroll: John earns R250.00 (20 × R12.50)
@@ -501,7 +506,7 @@ The payroll review page (`app/payroll-review/page.tsx`) should show:
 - Issue card to John, 30 units
 - Complete: `completed_qty = 20`, remainder action = `follow_up_card`
 - **Expected**:
-  - Original item: `status = 'partial_complete'`, `remainder_follow_up_card_id` points to new card
+  - Original item: `status = 'completed'`, `remainder_follow_up_card_id` points to new card
   - New card: `staff_id = NULL`, `status = 'pending'`, item `quantity = 10`
   - New card appears in production queue as pending/unassigned
   - Payroll: John earns R250.00. No duplicate when follow-up card is later completed.
@@ -510,7 +515,7 @@ The payroll review page (`app/payroll-review/page.tsx`) should show:
 - Issue card to John, 30 units
 - Complete: `completed_qty = 20`, remainder action = `scrap`, reason = "defective material"
 - **Expected**:
-  - Item `status = 'partial_complete'`, `remainder_action = 'scrap'`
+  - Item `status = 'completed'`, `remainder_action = 'scrap'`
   - 10 units are gone — not reissuable, not in pool
   - Payroll: John earns R250.00
   - Remainder reporting shows 10 scrapped units with reason
@@ -531,7 +536,7 @@ The payroll review page (`app/payroll-review/page.tsx`) should show:
 
 ### Scenario 10: Completion by different person than payee
 - Card assigned to John. Supervisor Mary clicks Complete.
-- **Expected**: `job_cards.staff_id = John` (payee), `job_cards.completed_by = Mary` (actor). Payroll goes to John.
+- **Expected**: `job_cards.staff_id = John` (payee), `job_cards.completed_by_user_id = Mary's auth user id` (actor). Payroll goes to John.
 
 ---
 
@@ -541,7 +546,7 @@ The payroll review page (`app/payroll-review/page.tsx`) should show:
 | Risk | Mitigation |
 |------|-----------|
 | Existing `complete_assignment_with_card` RPC is undocumented — changing completion behavior could break factory floor | Phase 1a: reconcile to repo first. Phase 2: replace callers before modifying. |
-| Partial completion + return-to-pool adjusts `quantity` on existing rows | Only adjust downward, never upward. Original quantity preserved in `remainder_qty`. Audit trail intact. |
+| Partial completion + return-to-pool can distort pool math | Preserve original issuance on the item and teach the pool view to subtract returned remainder instead of rewriting history. |
 | Multiple follow-up cards from same original (re-partial) | Follow-up cards are independent. Each tracks its own `remainder_follow_up_card_id` back to its source. Chain is walkable. |
 
 ### Medium risk
@@ -562,7 +567,7 @@ The payroll review page (`app/payroll-review/page.tsx`) should show:
 
 1. **Worker completes 0 of 30**: All items get `remainder_action`. Card status = `completed`, `completion_type = 'partial'`. Valid — e.g., machine broke, nothing was produced but the card is resolved.
 
-2. **Multiple items on one card, mixed completion**: Item A = full, Item B = partial (return to pool), Item C = partial (scrap). Each item handles its own remainder independently. Card = `completed`, `completion_type = 'partial'`.
+2. **Multiple items on one card, mixed completion**: Item A = full, Item B = short (return to pool), Item C = short (scrap). Each item handles its own remainder independently. Card = `completed`, `completion_type = 'partial'`.
 
 3. **Follow-up card is itself partially completed**: Creates another follow-up card. Chain continues. Each link is independent with its own `staff_id` and payroll attribution.
 
@@ -576,7 +581,7 @@ The payroll review page (`app/payroll-review/page.tsx`) should show:
 
 **Build this incrementally on the existing system.** The current architecture is 80% correct — `job_cards.staff_id` as payroll source of truth, `staff_piecework_earnings` view, transfer RPC with splits. The gaps are specific and fixable:
 
-1. **Close the reassignment sync gap** (Phase 1e) — this is the highest-value fix per line of code. It eliminates the most common source of wrong-worker pay.
+1. **Close the reassignment sync gap** (Phase 1e) — via an atomic RPC. This is the highest-value fix per line of code. It eliminates the most common source of wrong-worker pay.
 
 2. **Replace `complete_job_card` with `complete_job_card_v2`** (Phase 1c) — this is the core behavioral change. It forces remainder disposition and records actual quantities. Everything else flows from this.
 

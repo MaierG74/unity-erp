@@ -429,9 +429,10 @@ export function StaffLaneList({
       const orderId = typeof selectedAssignment.orderId === 'number' ? selectedAssignment.orderId : null;
       const jobId = selectedAssignment.jobId ?? null;
       const staffId = parseInt(selectedLane.id, 10);
+      const isPoolSourced = selectedAssignment.jobKey?.startsWith('pool-');
 
-      // Find the staff-assigned job card for this order + staff
       if (orderId && jobId) {
+        // Find the staff-assigned job card for this order + staff
         const { data: staffCards } = await supabase
           .from('job_cards')
           .select('job_card_id')
@@ -441,90 +442,96 @@ export function StaffLaneList({
         if (staffCards && staffCards.length > 0) {
           const cardIds = staffCards.map(c => c.job_card_id);
 
-          // Find the issued item on this staff's card
+          // Find the issued items on this staff's card
           const { data: issuedItems } = await supabase
             .from('job_card_items')
-            .select('item_id, job_card_id, quantity, product_id, piece_rate')
+            .select('item_id, job_card_id, quantity, product_id, piece_rate, work_pool_id')
             .in('job_card_id', cardIds)
             .eq('job_id', jobId);
 
-          for (const item of issuedItems ?? []) {
-            // Find the source item (on any other card for this order+job) to merge qty back
-            const { data: sourceItems } = await supabase
-              .from('job_card_items')
-              .select('item_id, quantity, job_card_id')
-              .eq('job_id', jobId)
-              .not('job_card_id', 'in', `(${cardIds.join(',')})`)
-              .limit(1);
-
-            if (sourceItems && sourceItems.length > 0) {
-              // Merge quantity back into source
+          if (isPoolSourced) {
+            // Pool-sourced: cancel the card items — remaining qty is computed,
+            // so cancelling automatically returns quantity to the pool.
+            for (const item of issuedItems ?? []) {
               await supabase
                 .from('job_card_items')
-                .update({ quantity: sourceItems[0].quantity + item.quantity })
-                .eq('item_id', sourceItems[0].item_id);
-            } else {
-              // No source item to merge into — find or create an unassigned card
-              const { data: unassignedCard } = await supabase
-                .from('job_cards')
-                .select('job_card_id')
-                .eq('order_id', orderId)
-                .is('staff_id', null)
-                .limit(1)
-                .maybeSingle();
-
-              let targetCardId: number;
-              if (unassignedCard) {
-                targetCardId = unassignedCard.job_card_id;
-              } else {
-                const { data: newCard } = await supabase
-                  .from('job_cards')
-                  .insert({ order_id: orderId, staff_id: null, status: 'pending', issue_date: new Date().toISOString().split('T')[0] })
-                  .select()
-                  .single();
-                targetCardId = newCard!.job_card_id;
-              }
-
-              // Move the item back to the unassigned card
-              await supabase
-                .from('job_card_items')
-                .update({ job_card_id: targetCardId })
+                .update({ status: 'cancelled' })
                 .eq('item_id', item.item_id);
             }
+          } else {
+            // Legacy (non-pool): merge quantities back to source cards
+            for (const item of issuedItems ?? []) {
+              const { data: sourceItems } = await supabase
+                .from('job_card_items')
+                .select('item_id, quantity, job_card_id')
+                .eq('job_id', jobId)
+                .not('job_card_id', 'in', `(${cardIds.join(',')})`)
+                .limit(1);
 
-            // Delete the issued item (if it was merged back) or clean up card
-            if (sourceItems && sourceItems.length > 0) {
-              await supabase.from('job_card_items').delete().eq('item_id', item.item_id);
+              if (sourceItems && sourceItems.length > 0) {
+                await supabase
+                  .from('job_card_items')
+                  .update({ quantity: sourceItems[0].quantity + item.quantity })
+                  .eq('item_id', sourceItems[0].item_id);
+                await supabase.from('job_card_items').delete().eq('item_id', item.item_id);
+              } else {
+                // No source — find or create an unassigned card
+                const { data: unassignedCard } = await supabase
+                  .from('job_cards')
+                  .select('job_card_id')
+                  .eq('order_id', orderId)
+                  .is('staff_id', null)
+                  .limit(1)
+                  .maybeSingle();
+
+                let targetCardId: number;
+                if (unassignedCard) {
+                  targetCardId = unassignedCard.job_card_id;
+                } else {
+                  const { data: newCard } = await supabase
+                    .from('job_cards')
+                    .insert({ order_id: orderId, staff_id: null, status: 'pending', issue_date: new Date().toISOString().split('T')[0] })
+                    .select()
+                    .single();
+                  targetCardId = newCard!.job_card_id;
+                }
+                await supabase
+                  .from('job_card_items')
+                  .update({ job_card_id: targetCardId })
+                  .eq('item_id', item.item_id);
+              }
             }
           }
 
-          // Clean up empty staff cards
+          // Clean up empty or all-cancelled staff cards
           for (const cardId of cardIds) {
-            const { data: remaining } = await supabase
+            const { data: activeItems } = await supabase
               .from('job_card_items')
               .select('item_id')
               .eq('job_card_id', cardId)
+              .not('status', 'eq', 'cancelled')
               .limit(1);
-            if (!remaining || remaining.length === 0) {
-              await supabase.from('job_cards').delete().eq('job_card_id', cardId);
+            if (!activeItems || activeItems.length === 0) {
+              // Cancel the card itself (don't delete — preserves audit trail for pool)
+              await supabase
+                .from('job_cards')
+                .update({ status: 'cancelled' })
+                .eq('job_card_id', cardId);
             }
           }
         }
       }
 
-      // Clear the issued lifecycle state; scheduling remains on the assignment `status` field.
+      // Delete the swim lane assignment entirely so it disappears from the timeline
       if (selectedAssignment.id) {
         await supabase
           .from('labor_plan_assignments')
-          .update({
-            job_status: null,
-            issued_at: null,
-          })
+          .delete()
           .eq('assignment_id', parseInt(selectedAssignment.id, 10));
       }
 
       toast.success('Job card un-issued', {
-        description: 'Quantity returned. You can re-issue to a different staff member.',
+        description: 'Quantity returned to pool. You can re-issue from the sidebar.',
       });
 
       setSelectedAssignment(null);
@@ -797,7 +804,9 @@ export function StaffLaneList({
                               {assignment.productName || assignment.jobName || assignment.label}
                             </span>
                             <span className="truncate text-[8px] font-medium text-white/80 mt-px">
-                              #{assignment.orderNumber || 'N/A'} · {formatDuration(durationMins)}
+                              #{assignment.orderNumber || 'N/A'}
+                              {assignment.jobName && assignment.jobName !== (assignment.productName || assignment.label) && ` · ${assignment.jobName}`}
+                              {' · '}{formatDuration(durationMins)}
                             </span>
                           </div>
                           {statusInfo && (
@@ -847,7 +856,9 @@ export function StaffLaneList({
                             {assignment.productName || assignment.jobName || assignment.label}
                           </span>
                           <span className="truncate text-[8px] font-medium text-white/70 mt-px">
-                            #{assignment.orderNumber || 'N/A'} · {formatDuration(durationMins)}
+                            #{assignment.orderNumber || 'N/A'}
+                            {assignment.jobName && assignment.jobName !== (assignment.productName || assignment.label) && ` · ${assignment.jobName}`}
+                            {' · '}{formatDuration(durationMins)}
                           </span>
                         </div>
 

@@ -31,6 +31,8 @@ const INVALIDATE_KEYS = [
   ['laborAssignments'],
   ['laborPlanningPayload'],
   ['jobs-in-factory'],
+  ['jobCards'],
+  ['production-summary'],
 ];
 
 export function useJobActions() {

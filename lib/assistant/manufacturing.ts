@@ -345,7 +345,7 @@ export function detectManufacturingIntent(message: string) {
   const normalized = message.toLowerCase();
 
   if (
-    isOrderJobCardAssignmentQuestion(normalized) &&
+    (isOrderJobCardAssignmentQuestion(normalized) || isOutstandingOrderJobCardsQuestion(normalized)) &&
     (/\border\b/.test(normalized) || /\bthis\b/.test(normalized) || /\bthat\b/.test(normalized))
   ) {
     return 'order_job_cards' as const;
@@ -427,6 +427,18 @@ export function isOrderJobCardAssignmentQuestion(message: string) {
       /\b(assign(?:ed|ment|ing)?|unassigned|issue(?:d|ing)?|issued|staff)\b/.test(normalized)) ||
     /\bhave all (?:the )?job cards? been assigned\b/.test(normalized) ||
     /\bhow many .*job cards?.*(?:issue|assign)\b/.test(normalized)
+  );
+}
+
+export function isOutstandingOrderJobCardsQuestion(message: string) {
+  const normalized = message.toLowerCase();
+
+  return (
+    /\boutstanding\s+job cards?\b/.test(normalized) ||
+    /\bopen\s+job cards?\b/.test(normalized) ||
+    /\bremaining\s+job cards?\b/.test(normalized) ||
+    /\bowing\s+job cards?\b/.test(normalized) ||
+    /\bjob cards?\s+(?:are\s+)?(?:owing|remaining|outstanding|open)\b/.test(normalized)
   );
 }
 
@@ -1560,7 +1572,7 @@ export function buildManufacturingProgressCard(
 
 export function buildOrderJobCardsAnswer(
   summary: AssistantOrderManufacturingSummary,
-  options?: { assignmentFocus?: boolean }
+  options?: { assignmentFocus?: boolean; openOnlyFocus?: boolean }
 ) {
   if (summary.kind === 'ambiguous') {
     return `I found multiple possible orders for "${summary.order_ref}". Which one did you mean?`;
@@ -1583,20 +1595,37 @@ export function buildOrderJobCardsAnswer(
     return `Not yet. ${formatNumber(summary.active_unassigned_job_cards)} active job card${summary.active_unassigned_job_cards === 1 ? '' : 's'} on ${label} still need to be assigned / issued to staff.`;
   }
 
+  if (options?.openOnlyFocus) {
+    if (summary.active_job_cards === 0) {
+      return `No job cards on ${label} are still outstanding.`;
+    }
+
+    return `There are ${formatNumber(summary.active_job_cards)} outstanding job card${summary.active_job_cards === 1 ? '' : 's'} on ${label}.`;
+  }
+
   return `Here are the job cards currently attached to ${label}.`;
 }
 
 export function buildOrderJobCardsCard(
   summary: Extract<AssistantOrderManufacturingSummary, { kind: 'summary' }>,
-  options?: { assignmentFocus?: boolean }
+  options?: { assignmentFocus?: boolean; openOnlyFocus?: boolean }
 ): AssistantCard {
   const orderLabel = summary.order.order_number?.trim() || `Order ${summary.order.order_id}`;
+  const visibleJobCards = options?.openOnlyFocus
+    ? summary.job_cards.filter(jobCard => isAssignableJobCardStatus(jobCard.status))
+    : summary.job_cards;
 
   return {
     type: 'table',
-    title: options?.assignmentFocus ? `Job card assignment for ${orderLabel}` : `Job cards for ${orderLabel}`,
+    title: options?.assignmentFocus
+      ? `Job card assignment for ${orderLabel}`
+      : options?.openOnlyFocus
+        ? `Outstanding job cards for ${orderLabel}`
+        : `Job cards for ${orderLabel}`,
     description: options?.assignmentFocus
       ? 'Assignment coverage for job cards linked to this customer order.'
+      : options?.openOnlyFocus
+        ? 'Open / incomplete job cards still linked to this customer order.'
       : 'All job cards currently linked to this customer order.',
     metrics: options?.assignmentFocus
       ? [
@@ -1617,6 +1646,25 @@ export function buildOrderJobCardsCard(
             value: formatNumber(summary.active_unassigned_job_cards),
           },
         ]
+      : options?.openOnlyFocus
+        ? [
+            {
+              label: 'Outstanding',
+              value: formatNumber(summary.active_job_cards),
+            },
+            {
+              label: 'Assigned',
+              value: formatNumber(summary.active_assigned_job_cards),
+            },
+            {
+              label: 'Still to issue',
+              value: formatNumber(summary.active_unassigned_job_cards),
+            },
+            {
+              label: 'Completed',
+              value: formatNumber(summary.completed_job_cards),
+            },
+          ]
       : [
           {
             label: 'Total cards',
@@ -1651,8 +1699,8 @@ export function buildOrderJobCardsCard(
           { key: 'progress', label: 'Progress' },
         ],
     rows:
-      summary.job_cards.length > 0
-        ? summary.job_cards.map(jobCard => ({
+      visibleJobCards.length > 0
+        ? visibleJobCards.map(jobCard => ({
             job_card: `JC-${jobCard.job_card_id}`,
             status: formatJobCardStatus(jobCard.status),
             staff: jobCard.staff_name ?? 'Unassigned',
@@ -1682,12 +1730,12 @@ export function buildOrderJobCardsCard(
                 : {
                     products: '—',
                     progress: '0 / 0',
-                  }),
+                }),
             },
           ],
     rowActions:
-      summary.job_cards.length > 0
-        ? summary.job_cards.map(jobCard => [
+      visibleJobCards.length > 0
+        ? visibleJobCards.map(jobCard => [
             {
               label: 'Open job card',
               kind: 'navigate',
@@ -1718,13 +1766,19 @@ export function buildOrderJobCardsCard(
       },
     ],
     footer:
-      summary.job_cards.length > 0
+      visibleJobCards.length > 0
         ? options?.assignmentFocus
           ? summary.active_unassigned_job_cards > 0
             ? `${formatNumber(summary.active_unassigned_job_cards)} active job card${summary.active_unassigned_job_cards === 1 ? '' : 's'} still need assigning / issuing to staff.`
             : 'All active job cards are currently assigned to staff.'
+          : options?.openOnlyFocus
+            ? summary.active_unassigned_job_cards > 0
+              ? `${formatNumber(summary.active_unassigned_job_cards)} outstanding job card${summary.active_unassigned_job_cards === 1 ? '' : 's'} still need assigning / issuing to staff.`
+              : 'All outstanding job cards are already assigned to staff.'
           : 'Click a job-card row to open it, or use Outstanding parts to check supplier/component blockers.'
-        : 'No job cards are currently attached to this order.',
+        : options?.openOnlyFocus
+          ? 'No outstanding job cards remain on this order.'
+          : 'No job cards are currently attached to this order.',
   };
 }
 

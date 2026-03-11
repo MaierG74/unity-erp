@@ -29,19 +29,14 @@ export function CupboardPreview({ config }: CupboardPreviewProps) {
 
   return (
     <Tabs defaultValue="technical" className="w-full">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <TabsList className="h-8 bg-muted/40">
-          <TabsTrigger value="technical" className="h-7 px-3 text-xs">
-            Technical
-          </TabsTrigger>
-          <TabsTrigger value="isometric" className="h-7 px-3 text-xs">
-            3D
-          </TabsTrigger>
-        </TabsList>
-        <p className="hidden max-w-[260px] text-right text-xs text-muted-foreground md:block">
-          Technical views stay manufacturing-first. 3D is now a real model for inspection.
-        </p>
-      </div>
+      <TabsList className="mb-3 h-8 bg-muted/40">
+        <TabsTrigger value="technical" className="h-7 px-3 text-xs">
+          Technical
+        </TabsTrigger>
+        <TabsTrigger value="isometric" className="h-7 px-3 text-xs">
+          3D
+        </TabsTrigger>
+      </TabsList>
       <TabsContent value="technical" className="mt-0">
         <TechnicalSvgPreview scene={technicalScene} height={420} />
       </TabsContent>

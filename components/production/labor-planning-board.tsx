@@ -41,7 +41,6 @@ import { useWorkSchedule } from '@/hooks/use-work-schedule';
 import type { ScheduleBreak } from '@/types/work-schedule';
 import { logSchedulingEvent } from '@/src/lib/analytics/scheduling';
 import { useLaborPlanningMutations } from '@/src/lib/mutations/laborPlanning';
-import { useLaborRealtime } from '@/hooks/use-labor-realtime';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -52,7 +51,16 @@ import { cn } from '@/lib/utils';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
-const MIN_DURATION = 30;
+const MIN_DURATION = 15;
+
+/** Format minutes-from-midnight as 12-hour time (e.g. 810 → "1:30 PM") */
+function formatMinutesAsTime(minutes: number): string {
+  const h24 = Math.floor(minutes / 60);
+  const m = Math.round(minutes % 60);
+  const h12 = h24 % 12 || 12;
+  const ampm = h24 < 12 ? 'AM' : 'PM';
+  return `${h12}:${m.toString().padStart(2, '0')} ${ampm}`;
+}
 
 // Zoom levels: pixels per hour
 const ZOOM_LEVELS = [80, 120, 180, 240] as const;
@@ -193,9 +201,6 @@ export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardPro
   });
 
   const { assignMutation, updateMutation, unassignMutation } = useLaborPlanningMutations(queryKey);
-
-  // Live-sync: invalidate queries when other clients change labor tables
-  useLaborRealtime();
 
   // Warn if work pool queries failed (pool orders may show stale BOL data)
   const poolErrorShown = useRef(false);
@@ -879,7 +884,7 @@ function IssueAndScheduleDialog({
   onIssued: (cardId: number, qty: number, jobKey: string, computedEnd: number) => void;
 }) {
   const remaining = job.remainingQty ?? job.quantity ?? 1;
-  const [qty, setQty] = useState(remaining);
+  const [qty, setQty] = useState(1);
   const [overrideReason, setOverrideReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -987,12 +992,39 @@ function IssueAndScheduleDialog({
             />
           </div>
 
-          {estMinutes != null && (
-            <div className="text-sm text-muted-foreground">
-              Est. ~{estHours != null && estHours > 0 ? `${estHours}h ` : ''}{estMins}min
-              {timePerUnit != null && <span className="ml-1">({timePerUnit} min/unit × {qty})</span>}
+          {/* Schedule time preview — updates live as quantity changes */}
+          <div className="rounded-md border bg-muted/50 p-3 space-y-1.5">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Start</span>
+              <span className="font-medium tabular-nums">{formatMinutesAsTime(snappedStart)}</span>
             </div>
-          )}
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Finish</span>
+              <span className="font-medium tabular-nums">{formatMinutesAsTime(computedEnd)}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm border-t pt-1.5">
+              <span className="text-muted-foreground">Block</span>
+              <span className="font-medium tabular-nums">{computedEnd - snappedStart} min</span>
+            </div>
+            {estMinutes != null && (
+              <>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Actual work</span>
+                  <span className="font-medium tabular-nums">
+                    {estHours != null && estHours > 0 ? `${estHours}h ` : ''}{estMins} min
+                    {timePerUnit != null && (
+                      <span className="ml-1 text-muted-foreground font-normal">({timePerUnit} min × {qty})</span>
+                    )}
+                  </span>
+                </div>
+                {estMinutes < MIN_DURATION && (
+                  <p className="text-[11px] text-muted-foreground/70">
+                    Scheduled as {MIN_DURATION} min — minimum block size for the timeline grid.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
 
           {isOverIssue && (
             <div className="space-y-2 rounded-md border border-destructive/50 bg-destructive/10 p-3">
@@ -1013,7 +1045,7 @@ function IssueAndScheduleDialog({
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="pt-2">
           <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
             Cancel
           </Button>

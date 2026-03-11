@@ -22,6 +22,8 @@ export function useLaborRealtime() {
         () => {
           queryClient.invalidateQueries({ queryKey: ['labor-planning'] });
           queryClient.invalidateQueries({ queryKey: ['labor-planning-week-summary'] });
+          queryClient.invalidateQueries({ queryKey: ['jobCards'] });
+          queryClient.invalidateQueries({ queryKey: ['production-summary'] });
         },
       )
       .on(
@@ -29,6 +31,8 @@ export function useLaborRealtime() {
         { event: '*', schema: 'public', table: 'job_cards' },
         () => {
           queryClient.invalidateQueries({ queryKey: ['labor-planning'] });
+          queryClient.invalidateQueries({ queryKey: ['jobCards'] });
+          queryClient.invalidateQueries({ queryKey: ['production-summary'] });
         },
       )
       .on(
@@ -36,6 +40,8 @@ export function useLaborRealtime() {
         { event: '*', schema: 'public', table: 'job_card_items' },
         () => {
           queryClient.invalidateQueries({ queryKey: ['labor-planning'] });
+          queryClient.invalidateQueries({ queryKey: ['jobCards'] });
+          queryClient.invalidateQueries({ queryKey: ['production-summary'] });
         },
       )
       .subscribe();

@@ -3,7 +3,7 @@
 Use this guide when scheduling jobs on the `/labor-planning` board. It outlines what happens on drops, how conflicts are surfaced, and where to look for quick troubleshooting signals.
 
 ## What Happens on Drop
-- The board snaps jobs to sensible increments based on estimated duration (minimum 30m).
+- The board snaps jobs to sensible increments based on estimated duration (minimum 15m scheduled block, placed on a 15-minute grid).
 - Before saving, it checks lane conflicts:
   - **Overlap**: blocked with a toast naming the conflicting assignment and its time window.
   - **Off-shift/out of window**: blocked with a toast reminding you of the allowed window (07:00–19:00).
@@ -29,6 +29,9 @@ Use this guide when scheduling jobs on the `/labor-planning` board. It outlines 
   - `Issued • qty X` means a job card already exists but is not on a lane.
   - `Scheduled • qty X` means the issued card is currently placed on a lane.
   - Unscheduling an issued card should return it to the queue as `Issued`, not `Ready`.
+- The production queue now prefers the active scheduler assignment when showing staff ownership for a scheduled job card, and it shows the scheduled date/time under the status badge when available.
+- Completing a job from the scheduler now completes the linked job card as well, so it should move into the production queue's `Completed` filter without requiring a manual card-page action.
+- Scheduler changes now invalidate the production queue and production summary as well, so staff/time changes should appear without a manual browser refresh.
 - If you see an overlap toast, try dragging the bar into one of the dashed “Open slot” placeholders or shorten the duration via the resize handles.
 - Off-shift staff will not accept drops—pick a staff lane with a green “Accepting drops” indicator or adjust staffing for the date first.
 - Use Undo in the success toast immediately after a drop if you placed a job on the wrong lane/time.

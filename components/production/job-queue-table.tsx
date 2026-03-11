@@ -25,13 +25,21 @@ import { Badge } from '@/components/ui/badge';
 import { format } from 'date-fns';
 import { Plus, Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import { PageToolbar } from '@/components/ui/page-toolbar';
+import { minutesToClock } from '@/src/lib/laborScheduling';
 
 export type JobCardStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
+
+interface JobCardItem {
+  item_id: number;
+  quantity: number;
+  jobs: { name: string } | null;
+  products: { name: string } | null;
+}
 
 interface JobCard {
   job_card_id: number;
   order_id: number | null;
-  staff_id: number;
+  staff_id: number | null;
   issue_date: string;
   due_date: string | null;
   completion_date: string | null;
@@ -48,7 +56,22 @@ interface JobCard {
       name: string;
     } | null;
   } | null;
-  job_card_items: { count: number }[];
+  job_card_items: JobCardItem[];
+  scheduledAssignment?: ScheduledAssignment | null;
+}
+
+interface ScheduledAssignment {
+  assignment_id: number;
+  job_instance_id: string;
+  order_id: number | null;
+  staff_id: number | null;
+  assignment_date: string | null;
+  start_minutes: number | null;
+  end_minutes: number | null;
+  staff?: {
+    first_name: string;
+    last_name: string;
+  } | null;
 }
 
 const statusConfig: Record<JobCardStatus, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; icon: React.ReactNode }> = {
@@ -87,6 +110,20 @@ export function JobQueueTable({
     }
   };
 
+  const getDisplayStaff = (jobCard: JobCard) => {
+    const scheduledStaff = jobCard.scheduledAssignment?.staff;
+    if (scheduledStaff) {
+      return `${scheduledStaff.first_name} ${scheduledStaff.last_name}`.trim();
+    }
+    if (jobCard.staff) {
+      return `${jobCard.staff.first_name} ${jobCard.staff.last_name}`.trim();
+    }
+    return '-';
+  };
+
+  const getDisplayStaffId = (jobCard: JobCard) =>
+    jobCard.scheduledAssignment?.staff_id ?? jobCard.staff_id ?? null;
+
   // Fetch job cards
   const { data: jobCards = [], isLoading } = useQuery({
     queryKey: ['jobCards', search, statusFilter, staffFilter],
@@ -97,7 +134,7 @@ export function JobQueueTable({
           *,
           staff:staff_id(first_name, last_name),
           orders:order_id(order_number, customers(name)),
-          job_card_items(count)
+          job_card_items(item_id, quantity, jobs:job_id(name), products:product_id(name))
         `)
         .order('issue_date', { ascending: false });
 
@@ -107,19 +144,83 @@ export function JobQueueTable({
         query = query.eq('status', statusFilter);
       }
 
-      if (staffFilter !== 'all') {
-        query = query.eq('staff_id', parseInt(staffFilter));
-      }
-
       const { data, error } = await query;
       if (error) throw error;
 
+      let results = (data || []) as JobCard[];
+      const cardIds = new Set(results.map((jc) => jc.job_card_id));
+      const orderIds = [...new Set(results.map((jc) => jc.order_id).filter((id): id is number => typeof id === 'number'))];
+
+      const scheduledByCard = new Map<number, ScheduledAssignment>();
+      if (cardIds.size > 0 && orderIds.length > 0) {
+        const { data: assignmentRows, error: assignmentError } = await supabase
+          .from('labor_plan_assignments')
+          .select(`
+            assignment_id,
+            job_instance_id,
+            order_id,
+            staff_id,
+            assignment_date,
+            start_minutes,
+            end_minutes,
+            status
+          `)
+          .in('order_id', orderIds)
+          .neq('status', 'unscheduled')
+          .order('assignment_date', { ascending: true })
+          .order('start_minutes', { ascending: true });
+
+        if (assignmentError) {
+          console.warn('[job-queue] Failed to load scheduler assignments for queue enrichment', assignmentError);
+        } else {
+          const assignmentList = (assignmentRows || []) as Array<ScheduledAssignment & { status: string }>;
+          const staffIds = [...new Set(assignmentList.map((row) => row.staff_id).filter((id): id is number => typeof id === 'number'))];
+          const staffMap = new Map<number, { first_name: string; last_name: string }>();
+
+          if (staffIds.length > 0) {
+            const { data: scheduledStaffRows, error: scheduledStaffError } = await supabase
+              .from('staff')
+              .select('staff_id, first_name, last_name')
+              .in('staff_id', staffIds);
+
+            if (scheduledStaffError) {
+              console.warn('[job-queue] Failed to load scheduled staff names for queue enrichment', scheduledStaffError);
+            } else {
+              for (const staffRow of scheduledStaffRows || []) {
+                staffMap.set(staffRow.staff_id, {
+                  first_name: staffRow.first_name,
+                  last_name: staffRow.last_name,
+                });
+              }
+            }
+          }
+
+          for (const row of assignmentList) {
+            const cardId = extractJobCardId(row.job_instance_id);
+            if (cardId == null || !cardIds.has(cardId) || scheduledByCard.has(cardId)) continue;
+            scheduledByCard.set(cardId, {
+              ...row,
+              staff: row.staff_id != null ? staffMap.get(row.staff_id) ?? null : null,
+            });
+          }
+        }
+      }
+
+      results = results.map((jc) => ({
+        ...jc,
+        scheduledAssignment: scheduledByCard.get(jc.job_card_id) ?? null,
+      }));
+
+      if (staffFilter !== 'all') {
+        const selectedStaffId = parseInt(staffFilter, 10);
+        results = results.filter((jc) => getDisplayStaffId(jc) === selectedStaffId);
+      }
+
       // Client-side search filter
-      let results = data || [];
       if (search) {
         const searchLower = search.toLowerCase();
-        results = results.filter((jc: JobCard) => {
-          const staffName = jc.staff ? `${jc.staff.first_name} ${jc.staff.last_name}`.toLowerCase() : '';
+        results = results.filter((jc) => {
+          const staffName = getDisplayStaff(jc).toLowerCase();
           const orderNum = jc.orders?.order_number?.toLowerCase() || '';
           const customerName = jc.orders?.customers?.name?.toLowerCase() || '';
           return staffName.includes(searchLower) ||
@@ -148,10 +249,17 @@ export function JobQueueTable({
   });
 
   const getItemsCount = (jobCard: JobCard) => {
-    if (jobCard.job_card_items && jobCard.job_card_items.length > 0) {
-      return jobCard.job_card_items[0].count;
-    }
-    return 0;
+    return jobCard.job_card_items?.length ?? 0;
+  };
+
+  const getJobSummary = (jobCard: JobCard) => {
+    const items = jobCard.job_card_items ?? [];
+    if (items.length === 0) return null;
+    // Show first item's job + product, with "+N more" if multiple
+    const first = items[0];
+    const jobName = (first.jobs as any)?.name ?? null;
+    const productName = (first.products as any)?.name ?? null;
+    return { jobName, productName, qty: first.quantity, extra: items.length - 1 };
   };
 
   return (
@@ -213,6 +321,7 @@ export function JobQueueTable({
               <TableHead className="w-20">ID</TableHead>
               <TableHead>Staff Member</TableHead>
               <TableHead>Order</TableHead>
+              <TableHead>Job / Product</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Issue Date</TableHead>
               <TableHead>Due Date</TableHead>
@@ -223,14 +332,14 @@ export function JobQueueTable({
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8">
+                <TableCell colSpan={9} className="text-center py-8">
                   <Loader2 className="h-6 w-6 animate-spin mx-auto" />
                   <p className="text-muted-foreground mt-2">Loading job cards...</p>
                 </TableCell>
               </TableRow>
             ) : jobCards.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                   {statusFilter === 'open' || statusFilter === 'pending'
                     ? 'All caught up — no open job cards'
                     : 'No job cards found'}
@@ -249,9 +358,14 @@ export function JobQueueTable({
                       #{jobCard.job_card_id}
                     </TableCell>
                     <TableCell>
-                      {jobCard.staff
-                        ? `${jobCard.staff.first_name} ${jobCard.staff.last_name}`
-                        : '-'}
+                      <div>
+                        <div>{getDisplayStaff(jobCard)}</div>
+                        {jobCard.scheduledAssignment && (
+                          <div className="text-xs text-muted-foreground">
+                            From schedule
+                          </div>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       {jobCard.orders ? (
@@ -268,10 +382,39 @@ export function JobQueueTable({
                       )}
                     </TableCell>
                     <TableCell>
-                      <Badge variant={status.variant} className="gap-1">
-                        {status.icon}
-                        {status.label}
-                      </Badge>
+                      {(() => {
+                        const summary = getJobSummary(jobCard);
+                        if (!summary) return <span className="text-muted-foreground">-</span>;
+                        return (
+                          <div>
+                            <div className="font-medium">{summary.jobName || 'Unknown job'}</div>
+                            {summary.productName && (
+                              <div className="text-sm text-muted-foreground">{summary.productName}{summary.qty > 1 ? ` × ${summary.qty}` : ''}</div>
+                            )}
+                            {!summary.productName && summary.qty > 1 && (
+                              <div className="text-sm text-muted-foreground">× {summary.qty}</div>
+                            )}
+                            {summary.extra > 0 && (
+                              <div className="text-xs text-muted-foreground">+{summary.extra} more</div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </TableCell>
+                    <TableCell>
+                      <div className="space-y-1">
+                        <Badge variant={status.variant} className="gap-1">
+                          {status.icon}
+                          {status.label}
+                        </Badge>
+                        {jobCard.scheduledAssignment?.assignment_date &&
+                          jobCard.scheduledAssignment.start_minutes != null &&
+                          jobCard.scheduledAssignment.end_minutes != null && (
+                            <div className="text-xs text-muted-foreground">
+                              Scheduled {format(new Date(jobCard.scheduledAssignment.assignment_date), 'MMM d, yyyy')} · {minutesToClock(jobCard.scheduledAssignment.start_minutes)}-{minutesToClock(jobCard.scheduledAssignment.end_minutes)}
+                            </div>
+                          )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       {format(new Date(jobCard.issue_date), 'MMM d, yyyy')}
@@ -312,4 +455,12 @@ export function JobQueueTable({
       )}
     </div>
   );
+}
+
+function extractJobCardId(jobInstanceId: string | null | undefined): number | null {
+  if (!jobInstanceId) return null;
+  const match = jobInstanceId.match(/:card-(\d+)$/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
 }

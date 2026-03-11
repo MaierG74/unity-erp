@@ -249,10 +249,12 @@ export async function fetchLaborPlanningPayload(options: { date?: string } = {})
   const orderJobKeys = new Set(annotatedOrders.flatMap((o) => o.jobs.map((j) => j.id)));
   const orphanedAssignments = assignments.filter((a) => {
     if (orderJobKeys.has(a.jobKey)) return false; // not orphaned
+    // Completed assignments always need enrichment so the card shows job/product metadata
+    const isCompleted = a.jobStatus === 'completed';
     // If this order has a work pool, pool-based filtering already handled visibility — skip orphans
-    if (a.orderId && workPoolData.ordersWithPool.has(a.orderId)) return false;
+    if (!isCompleted && a.orderId && workPoolData.ordersWithPool.has(a.orderId)) return false;
     // If this order has job cards but no active items, all cards are cancelled/completed — skip
-    if (a.orderId && jobCardData.ordersWithCards.has(a.orderId) && !(jobCardData.itemsByOrder.get(a.orderId)?.length)) {
+    if (!isCompleted && a.orderId && jobCardData.ordersWithCards.has(a.orderId) && !(jobCardData.itemsByOrder.get(a.orderId)?.length)) {
       return false;
     }
     return true;
