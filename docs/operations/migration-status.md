@@ -28,11 +28,16 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260306161654
-- Latest applied migration name: purchase_order_shared_drafts
-- Applied at (UTC): 2026-03-06 16:18:08 UTC
-- Applied by: Codex via Supabase MCP
+- Latest applied migration version: 20260311141133
+- Latest applied migration name: fractional_purchase_receipts
+- Applied at (UTC): 2026-03-11 14:11:59 UTC
+- Applied by: greg@apexza.net via Supabase MCP
 - Verification notes:
+  - Current batch (2026-03-11, Codex):
+    1. `fractional_purchase_receipts` (20260311141133): converted `supplier_order_receipts.quantity_received`, `inventory_transactions.quantity`, and `inventory.quantity_on_hand` to `numeric`; recreated dependent inventory views/materialized view; and replaced `process_supplier_order_receipt` with the decimal-safe org-aware signature.
+    2. Verified with MCP `list_migrations`: production history now includes `20260311141133`.
+    3. Verified with MCP SQL: the three quantity columns now report `numeric` in `information_schema.columns`.
+    4. Verified with MCP SQL: only the numeric `process_supplier_order_receipt` signature remains in `public`.
   - Current batch (2026-03-06, Codex):
     1. `purchase_order_shared_drafts` (20260306161654): added `purchase_order_drafts` and `purchase_order_draft_lines`, org-scoped RLS using `organization_members`, autosave/status RPCs, and updated `create_purchase_order_with_lines` to stamp `created_by = auth.uid()`.
     2. Verified with MCP `list_migrations`: production history now includes `20260306161654`.
@@ -82,8 +87,8 @@ Source of truth for what is actually applied is still Supabase migration history
   - Phase B enforcement (`per_allocation_receipt_phase_b`) is staged locally but NOT yet applied — will be applied after UI deploy and production verification of split receipts.
 
 ## Pre-Deploy Migration Checklist
-- [ ] Repo checked: latest file in `supabase/migrations`
-- [ ] Target env checked: latest applied from MCP `list_migrations`
-- [ ] Any pending migrations applied in target env
-- [ ] Post-apply verification completed
-- [ ] This document updated
+- [x] Repo checked: latest file in `supabase/migrations`
+- [x] Target env checked: latest applied from MCP `list_migrations`
+- [x] Any pending migrations applied in target env
+- [x] Post-apply verification completed
+- [x] This document updated
