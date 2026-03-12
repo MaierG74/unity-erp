@@ -4,7 +4,7 @@
 
 **Goal:** Build a weekly all-staff payroll review page with configurable work week, OT threshold, piecework comparison, support deductions, and bulk approval.
 
-**Architecture:** Org-level settings (week_start_day, ot_threshold_minutes) stored on the organizations table and consumed via a useOrgSettings() hook. The payroll review page at /payroll-review aggregates hours from time_daily_summary, piecework from staff_piecework_earnings, and support costs from staff_support_links. A drill-down panel shows per-staff daily hours and piecework job breakdowns.
+**Architecture:** Org-level settings (`week_start_day`, `payroll_standard_week_hours`, `ot_threshold_minutes`) stored on the organizations table and consumed via a `useOrgSettings()` hook. The payroll review page at `/payroll-review` aggregates hours from `time_daily_summary`, piecework from `staff_piecework_earnings`, and support costs from `staff_support_links`. A drill-down panel shows per-staff daily hours and piecework job breakdowns.
 
 **Tech Stack:** Next.js 14 App Router, Supabase (PostgreSQL + RLS), TanStack Query, shadcn/ui, date-fns, sonner
 
@@ -14,7 +14,7 @@
 
 ### Key Tables
 
-- `organizations` — will get `week_start_day` (int 0-6, default 5=Friday) and `ot_threshold_minutes` (int, default 30)
+- `organizations` — payroll settings include `week_start_day` (int 0-6, default 5=Friday), `payroll_standard_week_hours` (numeric, default 44.00), and `ot_threshold_minutes` (int, default 30)
 - `time_daily_summary` — authoritative daily hours. Key columns: `staff_id`, `date_worked`, `regular_minutes`, `ot_minutes`, `dt_minutes`, `first_clock_in`, `last_clock_out`
 - `staff_piecework_earnings` — SQL view. Key columns: `staff_id`, `completion_date`, `completed_quantity`, `piece_rate`, `piece_rate_override`, `earned_amount`
 - `staff_support_links` — active links where `effective_until IS NULL`. Key columns: `primary_staff_id`, `support_staff_id`, `cost_share_pct`
@@ -35,7 +35,7 @@ Full design at `docs/plans/2026-03-01-payroll-review-design.md`
 
 ---
 
-### Task 1: Add week_start_day and ot_threshold_minutes to organizations table
+### Task 1: Add payroll settings to organizations table
 
 **Files:**
 - Migration via Supabase MCP `apply_migration`
@@ -46,11 +46,13 @@ Full design at `docs/plans/2026-03-01-payroll-review-design.md`
 -- Add payroll settings to organizations
 ALTER TABLE organizations
   ADD COLUMN IF NOT EXISTS week_start_day INTEGER NOT NULL DEFAULT 5,
+  ADD COLUMN IF NOT EXISTS payroll_standard_week_hours NUMERIC(6,2) NOT NULL DEFAULT 44.00,
   ADD COLUMN IF NOT EXISTS ot_threshold_minutes INTEGER NOT NULL DEFAULT 30;
 
 -- Add CHECK constraints
 ALTER TABLE organizations
   ADD CONSTRAINT chk_week_start_day CHECK (week_start_day >= 0 AND week_start_day <= 6),
+  ADD CONSTRAINT chk_payroll_standard_week_hours CHECK (payroll_standard_week_hours > 0 AND payroll_standard_week_hours <= 168.00),
   ADD CONSTRAINT chk_ot_threshold CHECK (ot_threshold_minutes >= 0 AND ot_threshold_minutes <= 600);
 
 -- Allow org members to read their own org row (needed for useOrgSettings hook)
@@ -60,15 +62,15 @@ CREATE POLICY orgs_select_member ON organizations
 
 **Step 2: Verify**
 
-Run SQL: `SELECT id, name, week_start_day, ot_threshold_minutes FROM organizations LIMIT 5;`
-Expected: All orgs show `week_start_day = 5`, `ot_threshold_minutes = 30`.
+Run SQL: `SELECT id, name, week_start_day, payroll_standard_week_hours, ot_threshold_minutes FROM organizations LIMIT 5;`
+Expected: All orgs show `week_start_day = 5`, `payroll_standard_week_hours = 44.00`, `ot_threshold_minutes = 30`.
 
 Run: `mcp__supabase__get_advisors` (security) to check for RLS issues.
 
 **Step 3: Commit**
 
 ```
-feat: add week_start_day and ot_threshold_minutes to organizations
+feat: add payroll settings to organizations
 ```
 
 ---
@@ -90,11 +92,13 @@ import { getOrgId } from '@/lib/utils';
 
 export interface OrgSettings {
   weekStartDay: number; // 0=Sun, 1=Mon, ..., 5=Fri, 6=Sat
+  standardWeekHours: number;
   otThresholdMinutes: number;
 }
 
 const DEFAULTS: OrgSettings = {
   weekStartDay: 5,
+  standardWeekHours: 44,
   otThresholdMinutes: 30,
 };
 
@@ -108,12 +112,13 @@ export function useOrgSettings(): OrgSettings & { isLoading: boolean } {
       if (!orgId) return DEFAULTS;
       const { data, error } = await supabase
         .from('organizations')
-        .select('week_start_day, ot_threshold_minutes')
+        .select('week_start_day, payroll_standard_week_hours, ot_threshold_minutes')
         .eq('id', orgId)
         .single();
       if (error || !data) return DEFAULTS;
       return {
         weekStartDay: data.week_start_day ?? DEFAULTS.weekStartDay,
+        standardWeekHours: Number(data.payroll_standard_week_hours ?? DEFAULTS.standardWeekHours),
         otThresholdMinutes: data.ot_threshold_minutes ?? DEFAULTS.otThresholdMinutes,
       };
     },
@@ -127,7 +132,7 @@ export function useOrgSettings(): OrgSettings & { isLoading: boolean } {
 
 **Step 2: Verify**
 
-Add a temporary `console.log(useOrgSettings())` in any existing page and confirm it returns `{ weekStartDay: 5, otThresholdMinutes: 30 }`.
+Add a temporary `console.log(useOrgSettings())` in any existing page and confirm it returns `{ weekStartDay: 5, standardWeekHours: 44, otThresholdMinutes: 30 }`.
 
 **Step 3: Commit**
 
@@ -144,8 +149,9 @@ feat: add useOrgSettings hook for work week and OT threshold
 
 **Step 1: Add the Payroll Settings card**
 
-Add state for `weekStartDay` and `otThresholdMinutes`, fetch current values with `useOrgSettings()`, and render a card with:
+Add state for `weekStartDay`, `standardWeekHours`, and `otThresholdMinutes`, fetch current values with `useOrgSettings()`, and render a card with:
 - A `<Select>` dropdown for work week start day (Sunday through Saturday, default Friday)
+- A number `<Input>` for standard hours per week (default 44.00)
 - A number `<Input>` for OT threshold in minutes (default 30)
 - A "Save" button that updates the `organizations` row
 
@@ -159,6 +165,7 @@ const handleSavePayroll = async () => {
     .from('organizations')
     .update({
       week_start_day: weekStartDay,
+      payroll_standard_week_hours: standardWeekHours,
       ot_threshold_minutes: otThreshold,
     })
     .eq('id', orgId);
@@ -175,7 +182,7 @@ Day options: `[{ value: 0, label: 'Sunday' }, { value: 1, label: 'Monday' }, ...
 
 **Step 2: Verify**
 
-Open `/settings` in the browser. Confirm the Payroll Settings card appears with the correct defaults (Friday, 30 min). Change to Monday, save, reload — confirm it persists.
+Open `/settings/payroll` in the browser. Confirm the Payroll Settings card appears with the correct defaults (Friday, 44.00 hours, 30 min). Change the standard hours value, save, reload — confirm it persists.
 
 **Step 3: Commit**
 
@@ -675,6 +682,9 @@ Query `staff_piecework_earnings` for this staff + week. Show a table:
 Show totals: gross piecework, support deduction (if any), net piecework.
 
 For the product name, join through `job_card_items.product_id → products.name`. Or include it in the piecework earnings view if feasible.
+
+Guardrail:
+- If the drill-down implementation reads from `job_card_items` with an embedded `job_cards` relation instead of querying the `staff_piecework_earnings` view directly, the `job_cards` embed must be `!inner` and filtered to the selected staff/week/status. Otherwise unrelated piecework items can leak into the panel as `Card #undefined`, and the row detail will stop matching the summary `pieceworkGross`.
 
 **Step 2: Wire up to the page**
 

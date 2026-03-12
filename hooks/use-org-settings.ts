@@ -42,6 +42,7 @@ export interface CutlistDefaults {
 
 export interface OrgSettings {
   weekStartDay: number; // 0=Sun, 1=Mon, ..., 5=Fri, 6=Sat
+  standardWeekHours: number;
   otThresholdMinutes: number;
   configuratorDefaults: ConfiguratorDefaults;
   cutlistDefaults: CutlistDefaults;
@@ -49,6 +50,7 @@ export interface OrgSettings {
 
 const DEFAULTS: OrgSettings = {
   weekStartDay: 5,
+  standardWeekHours: 44,
   otThresholdMinutes: 30,
   configuratorDefaults: {},
   cutlistDefaults: {
@@ -68,13 +70,15 @@ export function useOrgSettings(): OrgSettings & { isLoading: boolean } {
       if (!orgId) return DEFAULTS;
       const { data, error } = await supabase
         .from('organizations')
-        .select('week_start_day, ot_threshold_minutes, configurator_defaults, cutlist_defaults')
+        .select('week_start_day, payroll_standard_week_hours, ot_threshold_minutes, configurator_defaults, cutlist_defaults')
         .eq('id', orgId)
         .single();
       if (error || !data) return DEFAULTS;
       const cutlistDefaults = (data.cutlist_defaults as CutlistDefaults | null) ?? {};
+      const standardWeekHours = Number(data.payroll_standard_week_hours);
       return {
         weekStartDay: data.week_start_day ?? DEFAULTS.weekStartDay,
+        standardWeekHours: Number.isFinite(standardWeekHours) ? standardWeekHours : DEFAULTS.standardWeekHours,
         otThresholdMinutes: data.ot_threshold_minutes ?? DEFAULTS.otThresholdMinutes,
         configuratorDefaults: (data.configurator_defaults as ConfiguratorDefaults) ?? {},
         cutlistDefaults: {

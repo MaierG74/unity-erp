@@ -30,6 +30,7 @@ Use this guide when scheduling jobs on the `/labor-planning` board. It outlines 
   - `Scheduled • qty X` means the issued card is currently placed on a lane.
   - Unscheduling an issued card should return it to the queue as `Issued`, not `Ready`.
 - The production queue now prefers the active scheduler assignment when showing staff ownership for a scheduled job card, and it shows the scheduled date/time under the status badge when available.
+- The production queue now caches the open-card list briefly, renders base job-card rows first, and fills schedule owner/time metadata immediately after. That keeps the same queue data while making Queue tab loads and search/filter changes feel noticeably quicker.
 - Completing a job from the scheduler now completes the linked job card as well, so it should move into the production queue's `Completed` filter without requiring a manual card-page action.
 - Scheduler changes now invalidate the production queue and production summary as well, so staff/time changes should appear without a manual browser refresh.
 - Putting an issued card onto a lane for the first time, or moving it to a different lane before work starts, now updates the linked `job_cards.staff_id` as well, so piecework payroll follows the scheduler owner. Once work has started, the move is blocked and the card must go through the transfer flow instead.

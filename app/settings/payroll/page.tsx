@@ -19,6 +19,7 @@ export default function PayrollSettingsPage() {
   const orgSettings = useOrgSettings();
 
   const [weekStartDay, setWeekStartDay] = useState(5);
+  const [standardWeekHours, setStandardWeekHours] = useState(44);
   const [otThreshold, setOtThreshold] = useState(30);
   const [saving, setSaving] = useState(false);
   const initialized = useRef(false);
@@ -27,10 +28,11 @@ export default function PayrollSettingsPage() {
   useEffect(() => {
     if (!orgSettings.isLoading && !initialized.current) {
       setWeekStartDay(orgSettings.weekStartDay);
+      setStandardWeekHours(orgSettings.standardWeekHours);
       setOtThreshold(orgSettings.otThresholdMinutes);
       initialized.current = true;
     }
-  }, [orgSettings.isLoading, orgSettings.weekStartDay, orgSettings.otThresholdMinutes]);
+  }, [orgSettings.isLoading, orgSettings.weekStartDay, orgSettings.standardWeekHours, orgSettings.otThresholdMinutes]);
 
   const handleSave = async () => {
     if (!orgId) {
@@ -43,6 +45,7 @@ export default function PayrollSettingsPage() {
         .from('organizations')
         .update({
           week_start_day: weekStartDay,
+          payroll_standard_week_hours: standardWeekHours,
           ot_threshold_minutes: otThreshold,
         })
         .eq('id', orgId);
@@ -69,11 +72,11 @@ export default function PayrollSettingsPage() {
         <div className="px-6 py-4 border-b">
           <h1 className="text-lg font-semibold">Payroll Settings</h1>
           <p className="text-sm text-muted-foreground">
-            Work week boundaries and overtime threshold
+            Work week boundaries, standard hours, and overtime review threshold
           </p>
         </div>
         <div className="p-6 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Work Week Start Day */}
             <div>
               <label className="block text-sm font-medium mb-1">Work Week Starts On</label>
@@ -93,9 +96,25 @@ export default function PayrollSettingsPage() {
               </p>
             </div>
 
+            {/* Standard Week Hours */}
+            <div>
+              <label className="block text-sm font-medium mb-1">Standard Hours / Week</label>
+              <Input
+                type="number"
+                value={standardWeekHours}
+                onChange={(e) => setStandardWeekHours(Number(e.target.value))}
+                min={0.25}
+                max={168}
+                step={0.25}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Hours paid at the regular rate before weekly overtime begins
+              </p>
+            </div>
+
             {/* OT Threshold */}
             <div>
-              <label className="block text-sm font-medium mb-1">OT Threshold (minutes)</label>
+              <label className="block text-sm font-medium mb-1">OT Review Threshold (minutes)</label>
               <Input
                 type="number"
                 value={otThreshold}
@@ -104,7 +123,7 @@ export default function PayrollSettingsPage() {
                 max={600}
               />
               <p className="text-xs text-muted-foreground mt-1">
-                Minutes of overtime required before overtime pay applies
+                Small overtime amounts below this are treated as scan drift and auto-zeroed
               </p>
             </div>
           </div>

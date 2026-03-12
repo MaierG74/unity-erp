@@ -28,11 +28,15 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260311073942
-- Latest applied migration name: piecework_completion_payroll_phase1b
-- Applied at (UTC): 2026-03-11 07:41:10 UTC
+- Latest applied migration version: 20260312154218
+- Latest applied migration name: add_payroll_standard_week_hours
+- Applied at (UTC): 2026-03-12 15:42:25 UTC
 - Applied by: Codex via Supabase MCP
 - Verification notes:
+  - Current batch (2026-03-12, Codex):
+    1. `add_payroll_standard_week_hours` (20260312154218): added `public.organizations.payroll_standard_week_hours` as org-scoped payroll configuration for the weekly regular-hours cutoff, defaulting existing organizations to `44.00`.
+    2. Verified with MCP `list_migrations`: production history now includes `20260312154218`.
+    3. Verified with MCP SQL: `public.organizations.payroll_standard_week_hours` exists and `QButton` currently reads `44.00`.
   - Current batch (2026-03-11, Codex):
     1. `piecework_completion_payroll_phase1b` (20260311073942): added `assign_scheduled_card` so first-time scheduling of an issued card updates `job_cards.staff_id` atomically with `labor_plan_assignments`, closing the initial scheduler/payroll ownership gap.
     2. Verified with MCP `list_migrations`: production history now includes `20260311073942`.

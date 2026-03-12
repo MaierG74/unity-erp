@@ -41,6 +41,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { supabase } from '@/lib/supabase';
 import { formatTimeToSAST } from '@/lib/utils/timezone';
 import { getRemainderLabel, isLossAction } from '@/components/features/completion/completion-items';
+import { allocateWeeklyPayrollByDay, standardWeekHoursToMinutes } from '@/lib/payroll-hours';
 
 function formatRand(amount: number): string {
   return `R${amount.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -64,7 +65,7 @@ function StatusBadge({ status }: { status: string }) {
 export default function PayrollReviewPage() {
   const { user } = useAuth();
   const orgId = getOrgId(user);
-  const { weekStartDay, otThresholdMinutes } = useOrgSettings();
+  const { weekStartDay, standardWeekHours, otThresholdMinutes } = useOrgSettings();
 
   // Week navigation
   const [selectedWeekStart, setSelectedWeekStart] = useState<Date>(() =>
@@ -151,7 +152,7 @@ export default function PayrollReviewPage() {
         piecework,
         supportLinks,
         existing,
-        { otThresholdMinutes },
+        { standardWeekHours, otThresholdMinutes },
       );
 
       setPayrollRows(rows);
@@ -572,6 +573,7 @@ export default function PayrollReviewPage() {
         staffName={selectedRow?.name ?? ''}
         weekStart={startStr}
         weekEnd={endStr}
+        standardWeekHours={standardWeekHours}
         row={selectedRow ?? null}
         onClose={() => setSelectedStaffId(null)}
         onOtToggle={handleOtToggle}
@@ -587,12 +589,13 @@ interface PayrollDetailPanelProps {
   staffName: string;
   weekStart: string;
   weekEnd: string;
+  standardWeekHours: number;
   row: PayrollRow | null;
   onClose: () => void;
   onOtToggle: (staffId: number, override: boolean) => void;
 }
 
-function PayrollDetailPanel({ staffId, staffName, weekStart, weekEnd, row, onClose, onOtToggle }: PayrollDetailPanelProps) {
+function PayrollDetailPanel({ staffId, staffName, weekStart, weekEnd, standardWeekHours, row, onClose, onOtToggle }: PayrollDetailPanelProps) {
   const { data: hoursData } = useQuery({
     queryKey: ['payroll-detail-hours', staffId, weekStart],
     queryFn: async () => {
@@ -609,6 +612,11 @@ function PayrollDetailPanel({ staffId, staffName, weekStart, weekEnd, row, onClo
     enabled: !!staffId,
   });
 
+  const payrollHoursData = useMemo(
+    () => allocateWeeklyPayrollByDay(hoursData ?? [], standardWeekHoursToMinutes(standardWeekHours)),
+    [hoursData, standardWeekHours]
+  );
+
   const { data: pieceworkData } = useQuery({
     queryKey: ['payroll-detail-piecework', staffId, weekStart],
     queryFn: async () => {
@@ -618,7 +626,7 @@ function PayrollDetailPanel({ staffId, staffName, weekStart, weekEnd, row, onClo
           item_id, completed_quantity, piece_rate, piece_rate_override,
           quantity, remainder_action, remainder_qty, remainder_reason,
           job:jobs(name),
-          job_card:job_cards!job_card_items_job_card_id_fkey(job_card_id, order_id, completion_date, staff_id, completion_type,
+          job_card:job_cards!job_card_items_job_card_id_fkey!inner(job_card_id, order_id, completion_date, staff_id, completion_type,
             order:orders(order_number, customer:customers(name))
           ),
           product:products(name)
@@ -626,8 +634,12 @@ function PayrollDetailPanel({ staffId, staffName, weekStart, weekEnd, row, onClo
         .eq('job_card.staff_id', staffId!)
         .eq('job_card.status', 'completed')
         .gt('piece_rate', 0)
+        .gt('completed_quantity', 0)
         .gte('job_card.completion_date', weekStart)
-        .lte('job_card.completion_date', weekEnd);
+        .lte('job_card.completion_date', weekEnd)
+        .order('completion_date', { ascending: false, referencedTable: 'job_card' })
+        .order('job_card_id', { ascending: false, referencedTable: 'job_card' })
+        .order('item_id', { ascending: false });
       if (error) throw error;
       return (data ?? []).map((row: any) => ({
         item_id: row.item_id,
@@ -684,6 +696,9 @@ function PayrollDetailPanel({ staffId, staffName, weekStart, weekEnd, row, onClo
                 OT hours excluded — all time counted as regular hours
               </p>
             )}
+            <p className="text-xs text-muted-foreground px-1">
+              Weekly payroll OT starts after {formatHours(standardWeekHours)} standard hours, so overtime is allocated to the later days in the week.
+            </p>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -696,35 +711,35 @@ function PayrollDetailPanel({ staffId, staffName, weekStart, weekEnd, row, onClo
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {hoursData?.map((h) => (
+                {payrollHoursData.map((h) => (
                   <TableRow key={h.date_worked}>
                     <TableCell className="text-sm">
                       {format(new Date(h.date_worked + 'T00:00:00'), 'EEE d MMM')}
                     </TableCell>
                     <TableCell className="tabular-nums">{formatTimeToSAST(h.first_clock_in)}</TableCell>
                     <TableCell className="tabular-nums">{formatTimeToSAST(h.last_clock_out)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{((h.regular_minutes ?? 0) / 60).toFixed(1)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{(h.payroll_regular_minutes / 60).toFixed(1)}</TableCell>
                     <TableCell className={`text-right tabular-nums ${row?.otOverride ? 'line-through text-muted-foreground/50' : ''}`}>
-                      {((h.ot_minutes ?? 0) / 60).toFixed(1)}
+                      {(h.payroll_ot_minutes / 60).toFixed(1)}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">{((h.dt_minutes ?? 0) / 60).toFixed(1)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{(h.payroll_dt_minutes / 60).toFixed(1)}</TableCell>
                   </TableRow>
                 ))}
-                {hoursData && hoursData.length > 0 && (
+                {payrollHoursData.length > 0 && (
                   <TableRow className="font-bold border-t-2">
                     <TableCell colSpan={3}>Total</TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {(hoursData.reduce((s, h) => s + (h.regular_minutes ?? 0), 0) / 60).toFixed(1)}
+                      {(payrollHoursData.reduce((s, h) => s + h.payroll_regular_minutes, 0) / 60).toFixed(1)}
                     </TableCell>
                     <TableCell className={`text-right tabular-nums ${row?.otOverride ? 'line-through text-muted-foreground/50' : ''}`}>
-                      {(hoursData.reduce((s, h) => s + (h.ot_minutes ?? 0), 0) / 60).toFixed(1)}
+                      {(payrollHoursData.reduce((s, h) => s + h.payroll_ot_minutes, 0) / 60).toFixed(1)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {(hoursData.reduce((s, h) => s + (h.dt_minutes ?? 0), 0) / 60).toFixed(1)}
+                      {(payrollHoursData.reduce((s, h) => s + h.payroll_dt_minutes, 0) / 60).toFixed(1)}
                     </TableCell>
                   </TableRow>
                 )}
-                {(!hoursData || hoursData.length === 0) && (
+                {payrollHoursData.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                       No hours recorded for this week

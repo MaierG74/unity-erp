@@ -253,5 +253,6 @@ flowchart LR
 1. Confirm the order lines and BOL are correct.
 2. Run `Generate from BOL` so the work pool reflects current demand.
 3. Use the **Labor Planning Board** to drag pool demand to employees and issue by quantity.
-4. Let staff start/complete work from the job-card page or scan page.
+4. Let staff complete work from the job-card page or scan page.
+   On the mobile scan page, newly issued cards are presented to workers as `Issued` (even though the underlying card status is still `pending`) and the primary action is `Complete Job`.
 5. If order quantities change after issuance, reconcile the stale pool warning and then deal with any resulting exception rows.

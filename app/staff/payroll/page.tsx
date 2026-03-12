@@ -25,7 +25,7 @@ import {
 
 export default function PayrollPage() {
   const router = useRouter();
-  const { weekStartDay } = useOrgSettings();
+  const { weekStartDay, standardWeekHours } = useOrgSettings();
   const [error, setError] = useState<string | null>(null);
   const [staff, setStaff] = useState<any[]>([]);
   const [payrollData, setPayrollData] = useState<any[]>([]);
@@ -148,7 +148,7 @@ export default function PayrollPage() {
       const totalHours = hoursData?.reduce((sum, hour) => sum + parseFloat(hour.hours_worked), 0) || 0;
       
       // Separate regular, overtime, and doubletime hours
-      const weeklyHours = staffData.weekly_hours || 40;
+      const weeklyHours = standardWeekHours;
       
       // Extract regular, overtime, and doubletime hours from the data
       let regularHours = 0;

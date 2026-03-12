@@ -1,6 +1,7 @@
 import type { OrgSettings } from '@/hooks/use-org-settings';
+import { calculateWeeklyPayrollMinutes, standardWeekHoursToMinutes, type WeeklyPayrollSourceRow } from './payroll-hours';
 
-type PayrollSettings = Pick<OrgSettings, 'otThresholdMinutes'>;
+type PayrollSettings = Pick<OrgSettings, 'standardWeekHours' | 'otThresholdMinutes'>;
 
 export interface PayrollStaff {
   staff_id: number;
@@ -34,11 +35,8 @@ export interface PayrollRow {
   status: 'pending' | 'approved' | 'paid' | 'new';
 }
 
-interface HoursRow {
+interface HoursRow extends WeeklyPayrollSourceRow {
   staff_id: number;
-  regular_minutes: number;
-  ot_minutes: number;
-  dt_minutes: number;
 }
 
 interface PieceworkRow {
@@ -96,15 +94,24 @@ export function calculatePayrollRows(
   existingPayroll: ExistingPayroll[],
   settings: PayrollSettings,
 ): PayrollRow[] {
-  // Aggregate hours per staff
+  // Aggregate hours per staff using the weekly payroll rule:
+  // first 44h regular, remaining non-double-time hours as OT.
   const hoursByStaff = new Map<number, { reg: number; ot: number; dt: number }>();
+  const sourceRowsByStaff = new Map<number, HoursRow[]>();
   for (const h of hours) {
-    const existing = hoursByStaff.get(h.staff_id) ?? { reg: 0, ot: 0, dt: 0 };
-    existing.reg += h.regular_minutes ?? 0;
-    existing.ot += h.ot_minutes ?? 0;
-    existing.dt += h.dt_minutes ?? 0;
-    hoursByStaff.set(h.staff_id, existing);
+    const rows = sourceRowsByStaff.get(h.staff_id) ?? [];
+    rows.push(h);
+    sourceRowsByStaff.set(h.staff_id, rows);
   }
+
+  sourceRowsByStaff.forEach((rows, staffId) => {
+    const weeklyMinutes = calculateWeeklyPayrollMinutes(rows, standardWeekHoursToMinutes(settings.standardWeekHours));
+    hoursByStaff.set(staffId, {
+      reg: weeklyMinutes.regularMinutes,
+      ot: weeklyMinutes.otMinutes,
+      dt: weeklyMinutes.dtMinutes,
+    });
+  });
 
   // Aggregate piecework per staff
   const pieceworkByStaff = new Map<number, number>();

@@ -10,6 +10,7 @@ Replace the broken single-staff payroll page with a weekly all-staff payroll rev
 
 Add to `organizations` table:
 - `week_start_day INTEGER DEFAULT 5` — day the work week starts (0=Sun … 5=Fri … 6=Sat)
+- `payroll_standard_week_hours NUMERIC(6,2) DEFAULT 44.00` — regular weekly hours before non-double-time overtime begins
 - `ot_threshold_minutes INTEGER DEFAULT 30` — weekly OT below this threshold is treated as scan drift and auto-zeroed
 
 A `useOrgSettings()` hook fetches and caches these values. A settings card on `/settings` lets admins change both.
@@ -48,8 +49,8 @@ All active staff for the selected week. Columns:
 | ☐ | Checkbox for bulk selection |
 | Staff | Name |
 | Job | Job description |
-| Reg Hours | From `time_daily_summary.regular_minutes` summed for week |
-| OT Hours | From `time_daily_summary.ot_minutes` summed for week |
+| Reg Hours | From weekly payroll rollup over `time_daily_summary` day totals, capped at the org's configured standard week hours |
+| OT Hours | Weekly non-double-time hours above the org's configured standard week hours, derived from the same rollup |
 | DT Hours | From `time_daily_summary.dt_minutes` summed for week |
 | Hourly Total | `(reg × rate) + (ot × rate × 1.5) + (dt × rate × 2.0)` |
 | Piecework (gross) | From `staff_piecework_earnings` summed for week |
@@ -114,7 +115,7 @@ When "Calculate Week" is clicked:
 
 1. **Determine week range** from selected date + `org.week_start_day`
 
-2. **Hours:** Query `time_daily_summary` for all staff in the date range. Sum `regular_minutes`, `ot_minutes`, `dt_minutes` per staff. Convert to hours (÷ 60).
+2. **Hours:** Query `time_daily_summary` for all staff in the date range. Sum each day's worked minutes, exclude `dt_minutes` from the weekly standard-hours pool, classify the first `org.payroll_standard_week_hours` weekly non-double-time hours as regular, and treat the balance as OT. Keep `dt_minutes` as double-time.
 
 3. **Hourly wages:** Per staff: `(reg_hours × hourly_rate) + (ot_hours × hourly_rate × 1.5) + (dt_hours × hourly_rate × 2.0)`. Rate from `staff.hourly_rate`.
 
@@ -145,7 +146,7 @@ When "Calculate Week" is clicked:
 | Data | Old Page (broken) | New Page (correct) |
 |------|-------------------|-------------------|
 | Hours | `staff_hours` table (legacy) | `time_daily_summary` (authoritative) |
-| OT threshold | Weekly 40h (wrong) | Daily 9h (pre-computed in `ot_minutes`) |
+| OT threshold | Weekly 40h (wrong) | Org-configured standard week hours over `time_daily_summary` day totals |
 | Piecework | Ad-hoc job_card_items query | `staff_piecework_earnings` view |
 | Week boundaries | Hardcoded Monday | `org.week_start_day` setting |
 | Support deductions | Not supported | `staff_support_links` table |

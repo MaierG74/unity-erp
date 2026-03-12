@@ -13,7 +13,6 @@ import {
   CheckCircle2,
   Clock,
   Loader2,
-  Play,
   Hash,
   FileImage,
   AlertTriangle,
@@ -162,34 +161,6 @@ export default function JobCardScanPage() {
   };
 
   // ── Actions ────────────────────────────────────────────────────
-  const handleStartJob = async () => {
-    if (!jobCard || jobCard.status !== 'pending') return;
-    setActionLoading('start');
-    try {
-      const now = new Date().toISOString();
-      const { error: err } = await supabase
-        .from('job_cards')
-        .update({ status: 'in_progress' })
-        .eq('job_card_id', jobCardId);
-      if (err) throw err;
-      // Parallel: update items + sync factory floor assignment
-      await Promise.all([
-        supabase
-          .from('job_card_items')
-          .update({ status: 'in_progress', start_time: now })
-          .eq('job_card_id', jobCardId)
-          .eq('status', 'pending'),
-        syncAssignmentStatus('in_progress'),
-      ]);
-      setJobCard((prev) => prev ? { ...prev, status: 'in_progress' } : prev);
-      toast.success('Job started');
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to start job');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
   const handleCompleteJob = async () => {
     if (!jobCard) return;
     setActionLoading('complete');
@@ -287,6 +258,10 @@ export default function JobCardScanPage() {
   }
 
   const isActive = jobCard.status === 'pending' || jobCard.status === 'in_progress';
+  const displayStatusLabel =
+    jobCard.status === 'pending'
+      ? 'Issued'
+      : jobCard.status.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   const statusColor =
     jobCard.status === 'completed'
       ? 'bg-emerald-500'
@@ -325,7 +300,7 @@ export default function JobCardScanPage() {
             ) : (
               <Clock className="h-3.5 w-3.5" />
             )}
-            {jobCard.status.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+            {displayStatusLabel}
           </span>
         </div>
       </div>
@@ -418,36 +393,19 @@ export default function JobCardScanPage() {
         {/* ── Action Buttons ─────────────────────── */}
         {isActive && (
           <div className="space-y-3 pt-2">
-            {jobCard.status === 'pending' && (
-              <button
-                type="button"
-                onClick={handleStartJob}
-                disabled={!!actionLoading}
-                className="flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 text-lg font-semibold text-white active:scale-[0.98] disabled:opacity-50"
-              >
-                {actionLoading === 'start' ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <Play className="h-5 w-5" />
-                )}
-                Start Job
-              </button>
-            )}
-            {jobCard.status === 'in_progress' && (
-              <button
-                type="button"
-                onClick={handleCompleteJob}
-                disabled={!!actionLoading}
-                className="flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 text-lg font-semibold text-white active:scale-[0.98] disabled:opacity-50"
-              >
-                {actionLoading === 'complete' ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <CheckCircle2 className="h-5 w-5" />
-                )}
-                Complete Job
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={handleCompleteJob}
+              disabled={!!actionLoading}
+              className="flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 text-lg font-semibold text-white active:scale-[0.98] disabled:opacity-50"
+            >
+              {actionLoading === 'complete' ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-5 w-5" />
+              )}
+              Complete Job
+            </button>
           </div>
         )}
 

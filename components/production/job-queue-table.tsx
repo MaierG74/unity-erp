@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useQuery } from '@tanstack/react-query';
@@ -124,14 +124,21 @@ export function JobQueueTable({
   const getDisplayStaffId = (jobCard: JobCard) =>
     jobCard.scheduledAssignment?.staff_id ?? jobCard.staff_id ?? null;
 
-  // Fetch job cards
-  const { data: jobCards = [], isLoading } = useQuery({
-    queryKey: ['jobCards', search, statusFilter, staffFilter],
+  const { data: baseJobCards = [], isLoading } = useQuery({
+    queryKey: ['jobCards', 'base', statusFilter],
     queryFn: async () => {
       let query = supabase
         .from('job_cards')
         .select(`
-          *,
+          job_card_id,
+          order_id,
+          staff_id,
+          issue_date,
+          due_date,
+          completion_date,
+          status,
+          notes,
+          created_at,
           staff:staff_id(first_name, last_name),
           orders:order_id(order_number, customers(name)),
           job_card_items(item_id, quantity, jobs:job_id(name), products:product_id(name))
@@ -146,92 +153,65 @@ export function JobQueueTable({
 
       const { data, error } = await query;
       if (error) throw error;
+      return (data || []) as JobCard[];
+    },
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+  });
 
-      let results = (data || []) as JobCard[];
-      const cardIds = new Set(results.map((jc) => jc.job_card_id));
-      const orderIds = [...new Set(results.map((jc) => jc.order_id).filter((id): id is number => typeof id === 'number'))];
+  const queueCardIds = useMemo(
+    () => new Set(baseJobCards.map((jc) => jc.job_card_id)),
+    [baseJobCards],
+  );
+  const queueOrderIds = useMemo(
+    () =>
+      [...new Set(baseJobCards
+        .map((jc) => jc.order_id)
+        .filter((id): id is number => typeof id === 'number'))],
+    [baseJobCards],
+  );
 
-      const scheduledByCard = new Map<number, ScheduledAssignment>();
-      if (cardIds.size > 0 && orderIds.length > 0) {
-        const { data: assignmentRows, error: assignmentError } = await supabase
-          .from('labor_plan_assignments')
-          .select(`
-            assignment_id,
-            job_instance_id,
-            order_id,
-            staff_id,
-            assignment_date,
-            start_minutes,
-            end_minutes,
-            status
-          `)
-          .in('order_id', orderIds)
-          .neq('status', 'unscheduled')
-          .order('assignment_date', { ascending: true })
-          .order('start_minutes', { ascending: true });
+  const { data: scheduledByCard = new Map<number, ScheduledAssignment>() } = useQuery({
+    queryKey: ['jobCards', 'schedule-enrichment', statusFilter, queueOrderIds],
+    enabled: queueCardIds.size > 0 && queueOrderIds.length > 0,
+    queryFn: async () => {
+      const { data: assignmentRows, error: assignmentError } = await supabase
+        .from('labor_plan_assignments')
+        .select(`
+          assignment_id,
+          job_instance_id,
+          order_id,
+          staff_id,
+          assignment_date,
+          start_minutes,
+          end_minutes,
+          status,
+          staff:staff_id(first_name, last_name)
+        `)
+        .in('order_id', queueOrderIds)
+        .neq('status', 'unscheduled')
+        .order('assignment_date', { ascending: true })
+        .order('start_minutes', { ascending: true });
 
-        if (assignmentError) {
-          console.warn('[job-queue] Failed to load scheduler assignments for queue enrichment', assignmentError);
-        } else {
-          const assignmentList = (assignmentRows || []) as Array<ScheduledAssignment & { status: string }>;
-          const staffIds = [...new Set(assignmentList.map((row) => row.staff_id).filter((id): id is number => typeof id === 'number'))];
-          const staffMap = new Map<number, { first_name: string; last_name: string }>();
-
-          if (staffIds.length > 0) {
-            const { data: scheduledStaffRows, error: scheduledStaffError } = await supabase
-              .from('staff')
-              .select('staff_id, first_name, last_name')
-              .in('staff_id', staffIds);
-
-            if (scheduledStaffError) {
-              console.warn('[job-queue] Failed to load scheduled staff names for queue enrichment', scheduledStaffError);
-            } else {
-              for (const staffRow of scheduledStaffRows || []) {
-                staffMap.set(staffRow.staff_id, {
-                  first_name: staffRow.first_name,
-                  last_name: staffRow.last_name,
-                });
-              }
-            }
-          }
-
-          for (const row of assignmentList) {
-            const cardId = extractJobCardId(row.job_instance_id);
-            if (cardId == null || !cardIds.has(cardId) || scheduledByCard.has(cardId)) continue;
-            scheduledByCard.set(cardId, {
-              ...row,
-              staff: row.staff_id != null ? staffMap.get(row.staff_id) ?? null : null,
-            });
-          }
-        }
+      if (assignmentError) {
+        console.warn('[job-queue] Failed to load scheduler assignments for queue enrichment', assignmentError);
+        return new Map<number, ScheduledAssignment>();
       }
 
-      results = results.map((jc) => ({
-        ...jc,
-        scheduledAssignment: scheduledByCard.get(jc.job_card_id) ?? null,
-      }));
-
-      if (staffFilter !== 'all') {
-        const selectedStaffId = parseInt(staffFilter, 10);
-        results = results.filter((jc) => getDisplayStaffId(jc) === selectedStaffId);
-      }
-
-      // Client-side search filter
-      if (search) {
-        const searchLower = search.toLowerCase();
-        results = results.filter((jc) => {
-          const staffName = getDisplayStaff(jc).toLowerCase();
-          const orderNum = jc.orders?.order_number?.toLowerCase() || '';
-          const customerName = jc.orders?.customers?.name?.toLowerCase() || '';
-          return staffName.includes(searchLower) ||
-                 orderNum.includes(searchLower) ||
-                 customerName.includes(searchLower) ||
-                 jc.job_card_id.toString().includes(searchLower);
+      const scheduledMap = new Map<number, ScheduledAssignment>();
+      for (const row of ((assignmentRows || []) as Array<ScheduledAssignment & { status: string }>)) {
+        const cardId = extractJobCardId(row.job_instance_id);
+        if (cardId == null || !queueCardIds.has(cardId) || scheduledMap.has(cardId)) continue;
+        scheduledMap.set(cardId, {
+          ...row,
+          staff: row.staff ?? null,
         });
       }
 
-      return results as JobCard[];
+      return scheduledMap;
     },
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
   });
 
   // Fetch staff for filter dropdown
@@ -246,7 +226,41 @@ export function JobQueueTable({
       if (error) throw error;
       return data || [];
     },
+    staleTime: 5 * 60_000,
   });
+
+  const jobCards = useMemo(
+    () =>
+      baseJobCards.map((jc) => ({
+        ...jc,
+        scheduledAssignment: scheduledByCard.get(jc.job_card_id) ?? null,
+      })),
+    [baseJobCards, scheduledByCard],
+  );
+
+  const filteredJobCards = useMemo(() => {
+    let results = [...jobCards];
+
+    if (staffFilter !== 'all') {
+      const selectedStaffId = parseInt(staffFilter, 10);
+      results = results.filter((jc) => getDisplayStaffId(jc) === selectedStaffId);
+    }
+
+    if (search) {
+      const searchLower = search.toLowerCase();
+      results = results.filter((jc) => {
+        const staffName = getDisplayStaff(jc).toLowerCase();
+        const orderNum = jc.orders?.order_number?.toLowerCase() || '';
+        const customerName = jc.orders?.customers?.name?.toLowerCase() || '';
+        return staffName.includes(searchLower) ||
+               orderNum.includes(searchLower) ||
+               customerName.includes(searchLower) ||
+               jc.job_card_id.toString().includes(searchLower);
+      });
+    }
+
+    return results;
+  }, [jobCards, search, staffFilter]);
 
   const getItemsCount = (jobCard: JobCard) => {
     return jobCard.job_card_items?.length ?? 0;
@@ -337,7 +351,7 @@ export function JobQueueTable({
                   <p className="text-muted-foreground mt-2">Loading job cards...</p>
                 </TableCell>
               </TableRow>
-            ) : jobCards.length === 0 ? (
+            ) : filteredJobCards.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                   {statusFilter === 'open' || statusFilter === 'pending'
@@ -346,7 +360,7 @@ export function JobQueueTable({
                 </TableCell>
               </TableRow>
             ) : (
-              jobCards.map((jobCard) => {
+              filteredJobCards.map((jobCard) => {
                 const status = statusConfig[jobCard.status] || statusConfig.pending;
                 return (
                   <TableRow
@@ -448,9 +462,9 @@ export function JobQueueTable({
       </div>
 
       {/* Summary */}
-      {!isLoading && jobCards.length > 0 && (
+      {!isLoading && filteredJobCards.length > 0 && (
         <div className="text-sm text-muted-foreground">
-          Showing {jobCards.length} job card{jobCards.length !== 1 ? 's' : ''}
+          Showing {filteredJobCards.length} job card{filteredJobCards.length !== 1 ? 's' : ''}
         </div>
       )}
     </div>

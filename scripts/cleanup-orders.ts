@@ -72,6 +72,18 @@ async function main() {
   const { count: jobCardItemCount } = jobCardIds.length
     ? await supabase.from('job_card_items').select('*', { count: 'exact', head: true }).in('job_card_id', jobCardIds)
     : { count: 0 };
+  const { data: workPoolRows, error: workPoolErr } = await supabase
+    .from('job_work_pool')
+    .select('pool_id, order_id, order_detail_id')
+    .in('order_id', targetOrderIds);
+  if (workPoolErr) throw workPoolErr;
+  const workPoolIds = (workPoolRows ?? []).map((row) => row.pool_id);
+  const { count: workPoolExceptionCount } = workPoolIds.length
+    ? await supabase
+        .from('job_work_pool_exceptions')
+        .select('*', { count: 'exact', head: true })
+        .in('work_pool_id', workPoolIds)
+    : { count: 0 };
 
   // Labor assignments are optional cleanup because they feed the factory-floor planner.
   const { count: laborAssignmentCount, error: laborAssignmentErr } = await supabase
@@ -91,6 +103,7 @@ async function main() {
   console.log(
     `Details=${detailCount ?? 0} Attachments=${attachCount ?? 0} Junctions=${junctionCount ?? 0} ` +
     `JobCards=${jobCards?.length ?? 0} JobCardItems=${jobCardItemCount ?? 0} ` +
+    `WorkPool=${workPoolRows?.length ?? 0} WorkPoolExceptions=${workPoolExceptionCount ?? 0} ` +
     `LaborAssignments=${laborAssignmentCount ?? 0} StockIssuances=${issuances?.length ?? 0}`
   );
 
@@ -113,6 +126,8 @@ async function main() {
       junctions: junctionCount ?? 0,
       jobCards: jobCards?.length ?? 0,
       jobCardItems: jobCardItemCount ?? 0,
+      workPoolRows: workPoolRows?.length ?? 0,
+      workPoolExceptions: workPoolExceptionCount ?? 0,
       laborAssignments: laborAssignmentCount ?? 0,
       includeLaborAssignments,
       stockIssuances: issuances?.length ?? 0,
@@ -205,6 +220,16 @@ async function main() {
     }
   }
 
+  // 8) Delete work-pool rows after issued job-card items are gone. Exception rows cascade.
+  if (workPoolIds.length) {
+    for (let i = 0; i < workPoolIds.length; i += 1000) {
+      const chunk = workPoolIds.slice(i, i + 1000);
+      const { error: delPoolErr } = await supabase.from('job_work_pool').delete().in('pool_id', chunk);
+      if (delPoolErr) throw delPoolErr;
+    }
+  }
+
+  // 9) Delete labor assignments when requested.
   if ((laborAssignmentCount ?? 0) > 0) {
     if (includeLaborAssignments) {
       for (let i = 0; i < targetOrderIds.length; i += 1000) {
@@ -223,7 +248,7 @@ async function main() {
     }
   }
 
-  // 8) Delete junction links
+  // 10) Delete junction links
   if ((junctionCount ?? 0) > 0) {
     for (let i = 0; i < targetOrderIds.length; i += 1000) {
       const chunk = targetOrderIds.slice(i, i + 1000);
@@ -232,7 +257,7 @@ async function main() {
     }
   }
 
-  // 9) Delete attachment rows
+  // 11) Delete attachment rows
   if ((attachCount ?? 0) > 0) {
     for (let i = 0; i < targetOrderIds.length; i += 1000) {
       const chunk = targetOrderIds.slice(i, i + 1000);
@@ -241,7 +266,7 @@ async function main() {
     }
   }
 
-  // 10) Delete order details
+  // 12) Delete order details
   if ((detailCount ?? 0) > 0) {
     for (let i = 0; i < targetOrderIds.length; i += 1000) {
       const chunk = targetOrderIds.slice(i, i + 1000);
@@ -250,14 +275,14 @@ async function main() {
     }
   }
 
-  // 11) Delete orders
+  // 13) Delete orders
   for (let i = 0; i < targetOrderIds.length; i += 1000) {
     const chunk = targetOrderIds.slice(i, i + 1000);
     const { error: delOErr } = await supabase.from('orders').delete().in('order_id', chunk);
     if (delOErr) throw delOErr;
   }
 
-  // 12) Remove storage files under each customer folder (best effort)
+  // 14) Remove storage files under each customer folder (best effort)
   for (const cid of targetCustomerIds) {
     const prefix = `Orders/Customer/${cid}`;
     // List all files in the folder; paginate by fixed chunk
