@@ -37,6 +37,7 @@ Use this guide when scheduling jobs on the `/labor-planning` board. It outlines 
 - Card-backed completions are now blocked if the dialog cannot load the active job card items. This prevents an empty payload from accidentally full-completing a card without remainder decisions.
 - Scheduler work-pool issuance now resolves job-card status through the original `job_card_id` link, so follow-up-card FKs no longer break pool counts or trigger stale-data warnings.
 - Un-issuing a scheduled job card now targets the exact card/item encoded in the assignment key, so cancelling one split-issued sibling card does not cancel other cards for the same order/job/staff.
+- The older lane-level `Issue job card` flow now rewrites the assignment key to the exact issued card/item as well, so later un-issue actions still target the same split-issued card instead of falling back to a broad order/job match.
 - Pool issuance from the scheduler now includes a `Print job card after issue` toggle. It defaults on, remembers the last choice on that browser, and opens a print-ready tab immediately so the operator can hand a physical card to the employee without leaving the board. The success toast also includes a `Reopen print` fallback.
 - If you see an overlap toast, try dragging the bar into one of the dashed “Open slot” placeholders or shorten the duration via the resize handles.
 - Off-shift staff will not accept drops—pick a staff lane with a green “Accepting drops” indicator or adjust staffing for the date first.

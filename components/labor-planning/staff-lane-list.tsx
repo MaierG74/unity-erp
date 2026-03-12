@@ -111,6 +111,14 @@ function extractItemIdFromJobKey(jobKey?: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function extractPoolIdFromJobKey(jobKey?: string): number | null {
+  if (!jobKey) return null;
+  const match = jobKey.match(/^pool-(\d+)/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 interface StaffLaneListProps {
   staff: StaffLane[];
   markers: TimeMarker[];
@@ -306,6 +314,7 @@ export function StaffLaneList({
         card_staff_id: number | null;
       };
       let sourceItem: SourceItem | null = null;
+      let issuedItemId: number | null = null;
 
       if (orderId && jobId) {
         const { data: allCards } = await supabase
@@ -375,7 +384,7 @@ export function StaffLaneList({
           .update({ quantity: remaining })
           .eq('item_id', sourceItem.item_id);
 
-        await supabase
+        const { data: insertedItem, error: insertError } = await supabase
           .from('job_card_items')
           .insert({
             job_card_id: jobCardData.job_card_id,
@@ -384,13 +393,18 @@ export function StaffLaneList({
             quantity: qtyToIssue,
             piece_rate: sourceItem.piece_rate ?? pieceRate,
             status: 'pending',
-          });
+          })
+          .select('item_id')
+          .single();
+        if (insertError) throw insertError;
+        issuedItemId = insertedItem?.item_id ?? null;
       } else if (sourceItem && remaining <= 0) {
         // Issuing full balance — move the item to the new staff card
         await supabase
           .from('job_card_items')
           .update({ job_card_id: jobCardData.job_card_id })
           .eq('item_id', sourceItem.item_id);
+        issuedItemId = sourceItem.item_id;
 
         // Clean up empty source card if no items remain
         const { data: leftover } = await supabase
@@ -407,7 +421,7 @@ export function StaffLaneList({
         }
       } else if (jobId || productId) {
         // No existing item found at all — create fresh
-        const { error: itemError } = await supabase
+        const { data: insertedItem, error: itemError } = await supabase
           .from('job_card_items')
           .insert({
             job_card_id: jobCardData.job_card_id,
@@ -416,16 +430,28 @@ export function StaffLaneList({
             quantity: qtyToIssue || bolQuantity,
             piece_rate: pieceRate,
             status: 'pending',
-          });
+          })
+          .select('item_id')
+          .single();
 
         if (itemError) throw itemError;
+        issuedItemId = insertedItem?.item_id ?? null;
       }
 
       // Update labor_plan_assignments to mark as issued
       if (selectedAssignment.id) {
+        const poolId = extractPoolIdFromJobKey(selectedAssignment.jobKey);
+        const nextJobKey =
+          poolId != null
+            ? `pool-${poolId}:card-${jobCardData.job_card_id}`
+            : orderId != null && issuedItemId != null
+              ? `order-${orderId}:jci-${issuedItemId}`
+              : selectedAssignment.jobKey;
+
         await supabase
           .from('labor_plan_assignments')
           .update({
+            job_instance_id: nextJobKey,
             job_status: 'issued',
             issued_at: new Date().toISOString(),
           })
@@ -451,6 +477,7 @@ export function StaffLaneList({
 
       setSelectedAssignment(null);
       setSelectedLane(null);
+      window.dispatchEvent(new Event('focus'));
     } catch (err: any) {
       printWindow?.close();
       console.error('Failed to create job card:', err);
