@@ -52,7 +52,7 @@ interface ItemReportData {
   revenue: number           // qty × unit_price
   costBreakdown: CostBreakdown  // per-unit costs × qty
   perUnitCost: number       // raw cluster subtotal (before qty multiplication)
-  markupPercent: number     // cluster markup_percent (weighted avg if multiple clusters)
+  markupPercent: number     // derived: (markupAmount / perUnitCost) * 100; NaN if perUnitCost is 0
   markupAmount: number      // per-unit: sell price - per-unit cost
   sellPrice: number         // unit_price
   marginPercent: number     // (revenue - total cost) / revenue × 100
@@ -77,9 +77,9 @@ interface QuoteReportData {
   totalItems: number        // count of priced items
   costedItems: number       // items with hasCosting = true
   uncostedItems: number     // items without costing
-  avgMargin: number         // average margin across costed items
+  avgMargin: number         // revenue-weighted: totalProfit / totalRevenue * 100 (reuses existing marginPercent)
   lowestMarginItem: { description: string; marginPercent: number } | null
-  highestValueItem: { description: string; sellPrice: number } | null
+  highestValueItem: { description: string; sellPrice: number } | null  // only from costed items
 }
 ```
 
@@ -97,8 +97,10 @@ For each priced `QuoteItem`:
 5. Multiply each category by `item.qty` to get the item's total `CostBreakdown`
 6. `perUnitCost` = sum of per-unit category costs (before qty multiplication)
 7. `markupAmount` = `item.unit_price - perUnitCost`
-8. `markupPercent`: if item has one cluster, use its `markup_percent`; if multiple, compute weighted average by cluster cost subtotal; if no clusters, `NaN`
+8. `markupPercent` = `(markupAmount / perUnitCost) * 100` — always derived from price-minus-cost, never from the stored `markup_percent` column (which can represent either a percentage or fixed amount with no way to distinguish)
 9. Null `unit_cost` values treated as 0; a line with null `unit_cost` does not count toward `hasCosting`
+10. All lines contribute to cost totals regardless of `include_in_markup`; that flag only affects the cluster-level markup in the editor
+11. Null-guard all nested relations: `item.quote_item_clusters ?? []` and `cluster.quote_cluster_lines ?? []` (RLS can null these)
 
 ### Edge Cases
 
@@ -223,8 +225,8 @@ Use existing `formatCurrency()` from `lib/format-utils.ts` for all currency valu
 
 | File | Change |
 |------|--------|
-| `components/quotes/EnhancedQuoteEditor.tsx` | Add "Reports" tab to TabsList; add TabsContent rendering `QuoteReportsTab`; modify profitability card click to switch tab |
-| `components/features/quotes/QuoteProfitabilityCard.tsx` | Remove expanded content; clicking teaser calls `onNavigateToReports` callback instead of expanding |
+| `components/quotes/EnhancedQuoteEditor.tsx` | Add "Reports" tab to TabsList; update `grid-cols-3` to `grid-cols-4` on TabsList; add TabsContent rendering `QuoteReportsTab`; pass `onNavigateToReports={() => setActiveTab('reports')}` to profitability card |
+| `components/features/quotes/QuoteProfitabilityCard.tsx` | Remove expanded content and `isExpanded` state entirely; clicking teaser calls `onNavigateToReports` callback |
 
 ### Props Flow
 
