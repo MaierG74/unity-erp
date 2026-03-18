@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { format } from 'date-fns';
+import { formatDateShort } from '@/lib/date-utils';
 import { CalendarIcon, Link2, Paperclip, X, Loader2, FileIcon } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -258,7 +258,7 @@ export function TaskQuickCreate({ open, onOpenChange }: TaskQuickCreateProps) {
               <PopoverTrigger asChild>
                 <button className={chipBase}>
                   <CalendarIcon className="h-3 w-3" />
-                  {dueDate ? format(dueDate, 'MMM d') : 'No date'}
+                  {dueDate ? formatDateShort(dueDate) : 'No date'}
                 </button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">

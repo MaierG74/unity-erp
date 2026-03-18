@@ -4,17 +4,16 @@
  * Purchase Orders Page
  *
  * URL-based filter persistence for navigating back from detail pages.
- * Filters stored: tab, status, q (Q number search), supplier, startDate, endDate
+ * Filters stored: tab, status, communication, q (Q number search), supplier, startDate, endDate
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useDebounce } from '@/hooks/use-debounce';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
-import { PurchaseOrdersList } from '@/components/features/purchasing/purchase-orders-list';
-import { PlusCircle, ArrowLeft, Search, CalendarIcon, X, ExternalLink, FilterX, Trash2, Loader2 } from 'lucide-react';
+import { PlusCircle, ArrowLeft, Search, CalendarIcon, ExternalLink, FilterX, Trash2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   AlertDialog,
@@ -32,11 +31,13 @@ import { Table, TableHeader, TableBody, TableCell, TableHead, TableRow } from '@
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { format, isAfter, isBefore, isValid, parseISO } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -67,6 +68,32 @@ interface PurchaseOrder {
 }
 
 type OrderTab = 'inProgress' | 'completed';
+type CommunicationFilter =
+  | 'all'
+  | 'needsAttention'
+  | 'notSent'
+  | 'sent'
+  | 'delivered'
+  | 'partial'
+  | 'issue';
+
+interface PurchaseOrderEmailLog {
+  purchase_order_id: number;
+  supplier_id: number | null;
+  recipient_email: string | null;
+  email_type: 'po_send' | 'po_cancel' | 'po_line_cancel' | 'po_follow_up' | null;
+  status: 'sent' | 'failed' | null;
+  delivery_status: string | null;
+  sent_at: string;
+}
+
+interface CommunicationStatusSummary {
+  key: Exclude<CommunicationFilter, 'all' | 'needsAttention'>;
+  label: string;
+  detail: string;
+  latestSentAt: string | null;
+  needsAttention: boolean;
+}
 
 // Fetch purchase orders
 async function fetchPurchaseOrders() {
@@ -109,6 +136,196 @@ async function fetchPurchaseOrders() {
         .filter(Boolean)
     ))
   })) as PurchaseOrder[];
+}
+
+async function fetchPurchaseOrderEmailLogs(orderIds: number[]) {
+  if (orderIds.length === 0) {
+    return [] as PurchaseOrderEmailLog[];
+  }
+
+  const { data, error } = await supabase
+    .from('purchase_order_emails')
+    .select(`
+      purchase_order_id,
+      supplier_id,
+      recipient_email,
+      email_type,
+      status,
+      delivery_status,
+      sent_at
+    `)
+    .in('purchase_order_id', orderIds)
+    .or('email_type.eq.po_send,email_type.is.null')
+    .order('sent_at', { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as PurchaseOrderEmailLog[];
+}
+
+function isCommunicationIssue(email: Pick<PurchaseOrderEmailLog, 'status' | 'delivery_status'>) {
+  return (
+    email.status === 'failed' ||
+    email.delivery_status === 'bounced' ||
+    email.delivery_status === 'complained'
+  );
+}
+
+function isCommunicationDelivered(email: Pick<PurchaseOrderEmailLog, 'delivery_status'>) {
+  return (
+    email.delivery_status === 'delivered' ||
+    email.delivery_status === 'opened' ||
+    email.delivery_status === 'clicked'
+  );
+}
+
+function shouldOrderHaveCommunication(orderStatus: string) {
+  const normalized = orderStatus.toLowerCase();
+  return (
+    normalized === 'approved' ||
+    normalized === 'partially received' ||
+    normalized === 'fully received'
+  );
+}
+
+function formatSupplierCountLabel(count: number, noun: 'supplier' | 'issue') {
+  if (noun === 'supplier') {
+    return `${count} supplier${count === 1 ? '' : 's'}`;
+  }
+
+  return `${count} issue${count === 1 ? '' : 's'}`;
+}
+
+function getCommunicationStatus(
+  order: PurchaseOrder,
+  emailLogs: PurchaseOrderEmailLog[]
+): CommunicationStatusSummary {
+  const orderStatus = getOrderStatus(order);
+  const shouldHaveCommunication = shouldOrderHaveCommunication(orderStatus);
+  const expectedSupplierCount = Math.max(order.suppliers.filter(Boolean).length, 1);
+
+  if (emailLogs.length === 0) {
+    return {
+      key: 'notSent',
+      label: 'Not Emailed',
+      detail: shouldHaveCommunication ? 'Approved but no supplier email logged yet' : 'Supplier email sends after approval',
+      latestSentAt: null,
+      needsAttention: shouldHaveCommunication,
+    };
+  }
+
+  const latestByRecipient = new Map<string, PurchaseOrderEmailLog>();
+  const sortedLogs = [...emailLogs].sort(
+    (a, b) => new Date(b.sent_at).getTime() - new Date(a.sent_at).getTime()
+  );
+
+  for (const email of sortedLogs) {
+    const recipientKey = email.supplier_id
+      ? `supplier:${email.supplier_id}`
+      : `recipient:${email.recipient_email?.trim().toLowerCase() || email.sent_at}`;
+
+    if (!latestByRecipient.has(recipientKey)) {
+      latestByRecipient.set(recipientKey, email);
+    }
+  }
+
+  const latestEmails = Array.from(latestByRecipient.values());
+  const latestSentAt = sortedLogs[0]?.sent_at ?? null;
+  const sentSupplierCount = latestEmails.length;
+  const missingSupplierCount = Math.max(expectedSupplierCount - sentSupplierCount, 0);
+  const deliveredCount = latestEmails.filter(isCommunicationDelivered).length;
+  const issueCount = latestEmails.filter(isCommunicationIssue).length;
+  const pendingCount = latestEmails.filter(
+    (email) => !isCommunicationDelivered(email) && !isCommunicationIssue(email)
+  ).length;
+  const fullyDelivered = deliveredCount === expectedSupplierCount && missingSupplierCount === 0 && issueCount === 0;
+
+  if (issueCount > 0) {
+    const detail =
+      deliveredCount > 0
+        ? `${deliveredCount}/${expectedSupplierCount} delivered, ${formatSupplierCountLabel(issueCount, 'issue')}`
+        : `${formatSupplierCountLabel(issueCount, 'issue')} on the latest send`;
+
+    return {
+      key: 'issue',
+      label: 'Email Issue',
+      detail,
+      latestSentAt,
+      needsAttention: true,
+    };
+  }
+
+  if (fullyDelivered) {
+    return {
+      key: 'delivered',
+      label: 'Email Delivered',
+      detail:
+        expectedSupplierCount > 1
+          ? `All ${formatSupplierCountLabel(expectedSupplierCount, 'supplier')} email deliveries confirmed`
+          : 'Supplier email delivery confirmed',
+      latestSentAt,
+      needsAttention: false,
+    };
+  }
+
+  if (deliveredCount > 0 || missingSupplierCount > 0) {
+    const detail =
+      deliveredCount > 0
+        ? `${deliveredCount}/${expectedSupplierCount} delivered`
+        : `${sentSupplierCount}/${expectedSupplierCount} sent`;
+
+    return {
+      key: 'partial',
+      label: 'Email Partial',
+      detail: deliveredCount > 0 ? `${deliveredCount}/${expectedSupplierCount} supplier emails delivered` : detail,
+      latestSentAt,
+      needsAttention: shouldHaveCommunication,
+    };
+  }
+
+  if (pendingCount > 0) {
+    return {
+      key: 'sent',
+      label: 'Email Sent',
+      detail:
+        expectedSupplierCount > 1
+          ? `Awaiting delivery confirmation for ${formatSupplierCountLabel(pendingCount, 'supplier')}`
+          : 'Awaiting supplier email delivery confirmation',
+      latestSentAt,
+      needsAttention: shouldHaveCommunication,
+    };
+  }
+
+  return {
+    key: 'notSent',
+    label: 'Not Emailed',
+    detail: shouldHaveCommunication ? 'Approved but no supplier email logged yet' : 'Supplier email sends after approval',
+    latestSentAt,
+    needsAttention: shouldHaveCommunication,
+  };
+}
+
+function CommunicationBadge({ summary }: { summary: CommunicationStatusSummary }) {
+  const className = (() => {
+    switch (summary.key) {
+      case 'delivered':
+        return 'border-green-200 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-950/40 dark:text-green-300';
+      case 'sent':
+        return 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-300';
+      case 'partial':
+        return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300';
+      case 'issue':
+        return 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300';
+      case 'notSent':
+      default:
+        return 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300';
+    }
+  })();
+
+  return (
+    <Badge variant="outline" className={cn('justify-center text-xs font-medium cursor-help', className)}>
+      {summary.label}
+    </Badge>
+  );
 }
 
 function getOrderStatus(order: PurchaseOrder) {
@@ -202,6 +419,9 @@ export default function PurchaseOrdersPage() {
     return tab === 'completed' ? 'completed' : 'inProgress';
   });
   const [statusFilter, setStatusFilter] = useState<string>(() => searchParams?.get('status') || 'all');
+  const [communicationFilter, setCommunicationFilter] = useState<CommunicationFilter>(
+    () => (searchParams?.get('communication') as CommunicationFilter) || 'all'
+  );
   const [qNumberSearch, setQNumberSearch] = useState<string>(() => searchParams?.get('q') || '');
   const [supplierSearch, setSupplierSearch] = useState<string>(() => searchParams?.get('supplier') || 'all');
   const [startDate, setStartDate] = useState<Date | undefined>(() => {
@@ -234,6 +454,7 @@ export default function PurchaseOrdersPage() {
   useEffect(() => {
     const urlTab = searchParams?.get('tab');
     const urlStatus = searchParams?.get('status') || 'all';
+    const urlCommunication = (searchParams?.get('communication') as CommunicationFilter) || 'all';
     const urlQ = searchParams?.get('q') || '';
     const urlSupplier = searchParams?.get('supplier') || 'all';
     const urlStartDate = searchParams?.get('startDate');
@@ -249,6 +470,7 @@ export default function PurchaseOrdersPage() {
 
     if (newTab !== activeTab) setActiveTab(newTab);
     if (urlStatus !== statusFilter) setStatusFilter(urlStatus);
+    if (urlCommunication !== communicationFilter) setCommunicationFilter(urlCommunication);
     if (urlQ !== qNumberSearch) setQNumberSearch(urlQ);
     if (urlSupplier !== supplierSearch) setSupplierSearch(urlSupplier);
     if (urlStartDate !== (startDate ? startDate.toISOString().split('T')[0] : undefined)) setStartDate(newStartDate);
@@ -261,6 +483,7 @@ export default function PurchaseOrdersPage() {
   useEffect(() => {
     const currentUrlTab = searchParams?.get('tab');
     const currentUrlStatus = searchParams?.get('status') || 'all';
+    const currentUrlCommunication = (searchParams?.get('communication') as CommunicationFilter) || 'all';
     const currentUrlQ = searchParams?.get('q') || '';
     const currentUrlSupplier = searchParams?.get('supplier') || 'all';
     const currentUrlStartDate = searchParams?.get('startDate') || '';
@@ -273,6 +496,8 @@ export default function PurchaseOrdersPage() {
     const currentTabNormalized = currentUrlTab === 'completed' ? 'completed' : '';
     const statusToSet = statusFilter === 'all' ? '' : statusFilter;
     const currentStatusNormalized = currentUrlStatus === 'all' ? '' : currentUrlStatus;
+    const communicationToSet = communicationFilter === 'all' ? '' : communicationFilter;
+    const currentCommunicationNormalized = currentUrlCommunication === 'all' ? '' : currentUrlCommunication;
     const supplierToSet = supplierSearch === 'all' ? '' : supplierSearch;
     const currentSupplierNormalized = currentUrlSupplier === 'all' ? '' : currentUrlSupplier;
     const startDateToSet = startDate ? startDate.toISOString().split('T')[0] : '';
@@ -284,6 +509,7 @@ export default function PurchaseOrdersPage() {
     if (
       tabToSet === currentTabNormalized &&
       statusToSet === currentStatusNormalized &&
+      communicationToSet === currentCommunicationNormalized &&
       debouncedQNumberSearch === currentUrlQ &&
       supplierToSet === currentSupplierNormalized &&
       startDateToSet === currentUrlStartDate &&
@@ -299,6 +525,7 @@ export default function PurchaseOrdersPage() {
     // Only add non-default values to keep URL clean
     if (activeTab === 'completed') params.set('tab', 'completed');
     if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter);
+    if (communicationFilter && communicationFilter !== 'all') params.set('communication', communicationFilter);
     if (debouncedQNumberSearch) params.set('q', debouncedQNumberSearch);
     if (supplierSearch && supplierSearch !== 'all') params.set('supplier', supplierSearch);
     if (startDate) params.set('startDate', startDate.toISOString().split('T')[0]);
@@ -311,12 +538,46 @@ export default function PurchaseOrdersPage() {
     const query = params.toString();
     const url = query ? `/purchasing/purchase-orders?${query}` : '/purchasing/purchase-orders';
     router.replace(url, { scroll: false });
-  }, [activeTab, statusFilter, debouncedQNumberSearch, supplierSearch, startDate, endDate, currentPage, pageSize, router, searchParams]);
+  }, [activeTab, statusFilter, communicationFilter, debouncedQNumberSearch, supplierSearch, startDate, endDate, currentPage, pageSize, router, searchParams]);
 
   const { data: purchaseOrders, isLoading, error, refetch } = useQuery({
     queryKey: ['purchaseOrders'],
     queryFn: fetchPurchaseOrders,
   });
+
+  const orderIds = useMemo(
+    () => purchaseOrders?.map((order) => order.purchase_order_id) ?? [],
+    [purchaseOrders]
+  );
+
+  const {
+    data: purchaseOrderEmailLogs = [],
+    isLoading: isCommunicationLoading,
+    error: communicationError,
+  } = useQuery({
+    queryKey: ['purchaseOrderEmailLogs', orderIds],
+    queryFn: () => fetchPurchaseOrderEmailLogs(orderIds),
+    enabled: orderIds.length > 0,
+  });
+
+  const communicationByOrder = useMemo(() => {
+    const emailsByOrder = new Map<number, PurchaseOrderEmailLog[]>();
+
+    for (const email of purchaseOrderEmailLogs) {
+      const current = emailsByOrder.get(email.purchase_order_id) ?? [];
+      current.push(email);
+      emailsByOrder.set(email.purchase_order_id, current);
+    }
+
+    return Object.fromEntries(
+      (purchaseOrders ?? []).map((order) => [
+        order.purchase_order_id,
+        getCommunicationStatus(order, emailsByOrder.get(order.purchase_order_id) ?? []),
+      ])
+    ) as Record<number, CommunicationStatusSummary>;
+  }, [purchaseOrderEmailLogs, purchaseOrders]);
+
+  const isPageLoading = isLoading || (!!purchaseOrders?.length && isCommunicationLoading);
 
   // Delete mutation
   const deletePOMutation = useMutation({
@@ -381,6 +642,7 @@ export default function PurchaseOrdersPage() {
   // Reset filters function
   const resetFilters = () => {
     setStatusFilter('all');
+    setCommunicationFilter('all');
     setQNumberSearch('');
     setSupplierSearch('all');
     setStartDate(undefined);
@@ -391,6 +653,7 @@ export default function PurchaseOrdersPage() {
   // Filter orders based on all filters
   const filteredOrders = purchaseOrders?.filter(order => {
     const orderStatus = getOrderStatus(order);
+    const communication = communicationByOrder[order.purchase_order_id] ?? getCommunicationStatus(order, []);
     
     // First filter by tab
     if (activeTab === 'inProgress' && !isOrderInProgress(orderStatus)) {
@@ -404,19 +667,46 @@ export default function PurchaseOrdersPage() {
     if (statusFilter !== 'all') {
       switch (statusFilter) {
         case 'draft':
-          return orderStatus.toLowerCase() === 'draft';
+          if (orderStatus.toLowerCase() !== 'draft') return false;
+          break;
         case 'pending':
-          return orderStatus.toLowerCase() === 'pending approval';
+          if (orderStatus.toLowerCase() !== 'pending approval') return false;
+          break;
         case 'approved':
-          return orderStatus.toLowerCase() === 'approved';
+          if (orderStatus.toLowerCase() !== 'approved') return false;
+          break;
         case 'partial':
-          return orderStatus.toLowerCase() === 'partially received';
+          if (orderStatus.toLowerCase() !== 'partially received') return false;
+          break;
         case 'complete':
-          return orderStatus.toLowerCase() === 'fully received';
+          if (orderStatus.toLowerCase() !== 'fully received') return false;
+          break;
         case 'cancelled':
-          return orderStatus.toLowerCase() === 'cancelled';
+          if (orderStatus.toLowerCase() !== 'cancelled') return false;
+          break;
         default:
-          return true;
+          break;
+      }
+    }
+
+    if (communicationFilter !== 'all') {
+      switch (communicationFilter) {
+        case 'needsAttention':
+          if (!communication.needsAttention) {
+            return false;
+          }
+          break;
+        case 'notSent':
+        case 'sent':
+        case 'delivered':
+        case 'partial':
+        case 'issue':
+          if (communication.key !== communicationFilter) {
+            return false;
+          }
+          break;
+        default:
+          break;
       }
     }
     
@@ -514,7 +804,7 @@ export default function PurchaseOrdersPage() {
   // Render filters for both tabs
   const renderFilters = () => (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Status Filter */}
         <div>
           <Label>Status</Label>
@@ -524,9 +814,9 @@ export default function PurchaseOrdersPage() {
               setStatusFilter(value);
               setCurrentPage(0);
             }}
-            disabled={isLoading}
+            disabled={isPageLoading}
           >
-            <SelectTrigger disabled={isLoading}>
+            <SelectTrigger disabled={isPageLoading}>
               <SelectValue placeholder={`All ${activeTab === 'inProgress' ? 'In-Progress' : 'Completed'} Statuses`} />
             </SelectTrigger>
             <SelectContent>
@@ -535,6 +825,31 @@ export default function PurchaseOrdersPage() {
           </Select>
         </div>
         
+        <div>
+          <Label>Communication</Label>
+          <Select
+            value={communicationFilter}
+            onValueChange={(value) => {
+              setCommunicationFilter(value as CommunicationFilter);
+              setCurrentPage(0);
+            }}
+            disabled={isPageLoading}
+          >
+            <SelectTrigger disabled={isPageLoading}>
+              <SelectValue placeholder="All Communication" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Communication</SelectItem>
+              <SelectItem value="needsAttention">Needs Email Attention</SelectItem>
+              <SelectItem value="delivered">Email Delivered</SelectItem>
+              <SelectItem value="sent">Email Sent</SelectItem>
+              <SelectItem value="partial">Email Partial</SelectItem>
+              <SelectItem value="issue">Email Issue</SelectItem>
+              <SelectItem value="notSent">Not Emailed</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
         {/* Q Number Search */}
         <div>
           <Label>Q Number</Label>
@@ -549,7 +864,7 @@ export default function PurchaseOrdersPage() {
                 setCurrentPage(0);
               }}
               className="pl-8"
-              disabled={isLoading}
+              disabled={isPageLoading}
             />
           </div>
         </div>
@@ -563,9 +878,9 @@ export default function PurchaseOrdersPage() {
               setSupplierSearch(value);
               setCurrentPage(0);
             }}
-            disabled={isLoading}
+            disabled={isPageLoading}
           >
-            <SelectTrigger disabled={isLoading}>
+            <SelectTrigger disabled={isPageLoading}>
               <SelectValue placeholder="All Suppliers" />
             </SelectTrigger>
             <SelectContent>
@@ -589,10 +904,10 @@ export default function PurchaseOrdersPage() {
               <Button
                 variant="outline"
                 className="w-full justify-start text-left font-normal"
-                disabled={isLoading}
+                disabled={isPageLoading}
               >
                 <CalendarIcon className="mr-2 h-4 w-4" />
-                {startDate ? format(startDate, 'PPP') : <span>Pick a date</span>}
+                {startDate ? formatDate(startDate) : <span>Pick a date</span>}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0">
@@ -616,10 +931,10 @@ export default function PurchaseOrdersPage() {
               <Button
                 variant="outline"
                 className="w-full justify-start text-left font-normal"
-                disabled={isLoading}
+                disabled={isPageLoading}
               >
                 <CalendarIcon className="mr-2 h-4 w-4" />
-                {endDate ? format(endDate, 'PPP') : <span>Pick a date</span>}
+                {endDate ? formatDate(endDate) : <span>Pick a date</span>}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0">
@@ -638,14 +953,14 @@ export default function PurchaseOrdersPage() {
       </div>
       
       {/* Reset Filters Button */}
-      {(statusFilter !== 'all' || qNumberSearch || supplierSearch || startDate || endDate) && (
+      {(statusFilter !== 'all' || communicationFilter !== 'all' || qNumberSearch || supplierSearch || startDate || endDate) && (
         <div className="flex justify-end">
           <Button 
             variant="outline" 
             size="sm" 
             onClick={resetFilters}
             className="flex items-center gap-1"
-            disabled={isLoading}
+            disabled={isPageLoading}
           >
             <FilterX className="h-4 w-4" />
             Reset Filters
@@ -658,23 +973,25 @@ export default function PurchaseOrdersPage() {
   const renderLoadingTable = () => (
     <Table>
       <TableHeader>
-        <TableRow>
-          <TableHead>Q Number</TableHead>
-          <TableHead>Items</TableHead>
-          <TableHead>Suppliers</TableHead>
-          <TableHead>Created</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead className="text-right">Actions</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {Array.from({ length: 5 }).map((_, i) => (
+          <TableRow>
+            <TableHead>Q Number</TableHead>
+            <TableHead>Items</TableHead>
+            <TableHead>Suppliers</TableHead>
+            <TableHead>Created</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Communication</TableHead>
+            <TableHead className="text-right">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {Array.from({ length: 5 }).map((_, i) => (
           <TableRow key={`sk-${i}`}>
             <TableCell><Skeleton className="h-4 w-24" /></TableCell>
             <TableCell><Skeleton className="h-4 w-16" /></TableCell>
             <TableCell><Skeleton className="h-6 w-48" /></TableCell>
             <TableCell><Skeleton className="h-4 w-28" /></TableCell>
             <TableCell><Skeleton className="h-6 w-20 rounded-full" /></TableCell>
+            <TableCell><Skeleton className="h-10 w-32" /></TableCell>
             <TableCell className="text-right"><Skeleton className="h-8 w-24 ml-auto" /></TableCell>
           </TableRow>
         ))}
@@ -686,9 +1003,16 @@ export default function PurchaseOrdersPage() {
     <Alert variant="destructive">
       <AlertTitle>Failed to load purchase orders</AlertTitle>
       <AlertDescription>
-        There was an error fetching purchase orders. Please try again.
+        There was an error fetching purchase orders or communication status. Please try again.
         <div className="mt-3">
-          <Button variant="outline" size="sm" onClick={() => refetch?.()}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              queryClient.invalidateQueries({ queryKey: ['purchaseOrderEmailLogs'] });
+              refetch?.();
+            }}
+          >
             Retry
           </Button>
         </div>
@@ -707,66 +1031,91 @@ export default function PurchaseOrdersPage() {
             <TableHead>Suppliers</TableHead>
             <TableHead>Created</TableHead>
             <TableHead>Status</TableHead>
+            <TableHead>Communication</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {paginatedOrders?.length ? (
-            paginatedOrders.map((order) => (
-            <TableRow 
-              key={order.purchase_order_id}
-              onClick={() => handleRowClick(order.purchase_order_id)}
-              className="cursor-pointer hover:bg-muted"
-            >
-              <TableCell>{formatQNumber(order.q_number)}</TableCell>
-              <TableCell>{order.supplier_orders?.length || 0} item{(order.supplier_orders?.length || 0) !== 1 ? 's' : ''}</TableCell>
-              <TableCell>
-                <div className="flex flex-wrap gap-1">
-                  {order.suppliers?.map((supplier, index) => (
-                    <Badge key={index} variant="outline" className="text-xs">
-                      {supplier}
-                    </Badge>
-                  ))}
-                </div>
-              </TableCell>
-              <TableCell>{format(new Date(order.created_at), 'MMM d, yyyy')}</TableCell>
-              <TableCell>
-                <StatusBadge status={getOrderStatus(order)} />
-              </TableCell>
-              <TableCell className="text-right">
-                <div className="flex items-center justify-end gap-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    asChild
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <Link href={`/purchasing/purchase-orders/${order.purchase_order_id}`}>
-                      View Details
-                      <ExternalLink className="w-4 h-4 ml-2" />
-                    </Link>
-                  </Button>
-                  {getOrderStatus(order).toLowerCase() === 'draft' && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPoToDelete(order);
-                        setDeleteDialogOpen(true);
-                      }}
-                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  )}
-                </div>
-              </TableCell>
-            </TableRow>
-          ))
+            paginatedOrders.map((order) => {
+              const communication =
+                communicationByOrder[order.purchase_order_id] ?? getCommunicationStatus(order, []);
+
+              return (
+                <TableRow 
+                  key={order.purchase_order_id}
+                  onClick={() => handleRowClick(order.purchase_order_id)}
+                  className="cursor-pointer hover:bg-muted"
+                >
+                  <TableCell>{formatQNumber(order.q_number)}</TableCell>
+                  <TableCell>{order.supplier_orders?.length || 0} item{(order.supplier_orders?.length || 0) !== 1 ? 's' : ''}</TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {order.suppliers?.map((supplier, index) => (
+                        <Badge key={index} variant="outline" className="text-xs">
+                          {supplier}
+                        </Badge>
+                      ))}
+                    </div>
+                  </TableCell>
+                  <TableCell>{formatDate(order.created_at)}</TableCell>
+                  <TableCell>
+                    <StatusBadge status={getOrderStatus(order)} />
+                  </TableCell>
+                  <TableCell>
+                    <TooltipProvider delayDuration={200}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="inline-flex">
+                            <CommunicationBadge summary={communication} />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs text-xs">
+                          <div>{communication.detail}</div>
+                          {communication.latestSentAt && (
+                            <div className="mt-1 text-muted-foreground">
+                              Latest send {format(parseISO(communication.latestSentAt), 'MMM d, p')}
+                            </div>
+                          )}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        asChild
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Link href={`/purchasing/purchase-orders/${order.purchase_order_id}`}>
+                          View Details
+                          <ExternalLink className="w-4 h-4 ml-2" />
+                        </Link>
+                      </Button>
+                      {getOrderStatus(order).toLowerCase() === 'draft' && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPoToDelete(order);
+                            setDeleteDialogOpen(true);
+                          }}
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })
         ) : (
           <TableRow>
-            <TableCell colSpan={6} className="text-center py-6 text-muted-foreground">
+            <TableCell colSpan={7} className="text-center py-6 text-muted-foreground">
               No {activeTab === 'inProgress' ? 'in-progress' : 'completed'} orders found matching the current filters.
             </TableCell>
           </TableRow>
@@ -858,7 +1207,7 @@ export default function PurchaseOrdersPage() {
             <CardContent className="pt-6">
               {renderFilters()}
               <div className="mt-6">
-                {isLoading ? renderLoadingTable() : error ? renderErrorAlert() : renderTable()}
+                {isPageLoading ? renderLoadingTable() : (error || communicationError) ? renderErrorAlert() : renderTable()}
               </div>
             </CardContent>
           </Card>
@@ -869,7 +1218,7 @@ export default function PurchaseOrdersPage() {
             <CardContent className="pt-6">
               {renderFilters()}
               <div className="mt-6">
-                {isLoading ? renderLoadingTable() : error ? renderErrorAlert() : renderTable()}
+                {isPageLoading ? renderLoadingTable() : (error || communicationError) ? renderErrorAlert() : renderTable()}
               </div>
             </CardContent>
           </Card>

@@ -15,6 +15,7 @@ import { useDebounce } from '@/hooks/use-debounce';
 import { useOrgSettings } from '@/hooks/use-org-settings';
 import { useToast } from '@/components/ui/use-toast';
 import { format, parseISO, isValid, isBefore, isAfter, differenceInDays, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import { Order, OrderStatus } from '@/types/orders';
@@ -419,7 +420,7 @@ function DeliveryDateCell({
 
   const statusName = order.status?.status_name || 'Unknown';
   const { colorClass, relativeText, isOverdue } = getDeliveryDateInfo(order.delivery_date, statusName);
-  const dateLabel = selectedDate ? format(selectedDate, 'MMM d, yyyy') : 'Set date';
+  const dateLabel = selectedDate ? formatDate(selectedDate) : 'Set date';
 
   const handleSelect = async (date: Date | undefined) => {
     if (!date) return;
@@ -803,7 +804,7 @@ function ExpandedOrderPanel({ order, onViewFull }: { order: Order; onViewFull: (
                     ? 'Due Today'
                     : `Due ${deliveryInfo.relativeText}`}
               </div>
-              <div className="text-xs opacity-75">{format(new Date(order.delivery_date), 'EEEE, MMM d, yyyy')}</div>
+              <div className="text-xs opacity-75">{format(new Date(order.delivery_date), 'EEEE, dd/MM/yyyy')}</div>
             </div>
           )}
 
@@ -2238,7 +2239,7 @@ export default function OrdersPage() {
                   className="w-full sm:w-[160px] h-9 justify-start text-left font-normal"
                 >
                   <CalendarIcon className="mr-2 h-3.5 w-3.5" />
-                  {startDate ? format(startDate, 'MMM d, yyyy') : <span className="text-muted-foreground">Pick date</span>}
+                  {startDate ? formatDate(startDate) : <span className="text-muted-foreground">Pick date</span>}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
@@ -2263,7 +2264,7 @@ export default function OrdersPage() {
                   className="w-full sm:w-[160px] h-9 justify-start text-left font-normal"
                 >
                   <CalendarIcon className="mr-2 h-3.5 w-3.5" />
-                  {endDate ? format(endDate, 'MMM d, yyyy') : <span className="text-muted-foreground">Pick date</span>}
+                  {endDate ? formatDate(endDate) : <span className="text-muted-foreground">Pick date</span>}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
@@ -2393,7 +2394,7 @@ export default function OrdersPage() {
                             {order.customer?.name || 'N/A'}
                           </TableCell>
                           <TableCell className="align-middle text-sm text-muted-foreground py-2">
-                            {order.created_at ? format(new Date(order.created_at), 'MMM d, yyyy') : 'N/A'}
+                            {order.created_at ? formatDate(order.created_at) : 'N/A'}
                           </TableCell>
                           {/* Delivery Date with colour coding */}
                           <TableCell className="align-middle text-sm py-2">

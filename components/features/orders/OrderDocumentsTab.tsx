@@ -3,7 +3,7 @@
 import React, { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useDropzone } from 'react-dropzone';
-import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import {
   fetchOrderAttachments,
   uploadOrderAttachment,
@@ -728,7 +728,7 @@ function AttachmentCard({
         </p>
         <div className="flex items-center justify-between">
           <span className="text-[10px] text-muted-foreground">
-            {format(new Date(attachment.uploaded_at), 'MMM d, yyyy')}
+            {formatDate(attachment.uploaded_at)}
           </span>
           <div className="flex items-center gap-0.5">
             {/* Re-categorize */}

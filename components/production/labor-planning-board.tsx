@@ -48,6 +48,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { AlertTriangle, ChevronLeft, ChevronRight, Filter, Loader2, Minus, Plus, Search, ZoomIn } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { format, addDays, subDays } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import { cn } from '@/lib/utils';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -328,7 +329,7 @@ export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardPro
     // Not on this day — check if it's scheduled on another date
     const scheduledDate = await findScheduledDate(job.id);
     if (scheduledDate && scheduledDate !== selectedDate) {
-      const formatted = format(new Date(scheduledDate + 'T00:00:00'), 'EEE, MMM d');
+      const formatted = format(new Date(scheduledDate + 'T00:00:00'), 'EEE, d MMM');
       toast.info(`Jumping to ${formatted}`, { description: `${job.name} is scheduled there.` });
       handleDateChange(scheduledDate);
       return;
@@ -410,7 +411,7 @@ export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardPro
         // Guard: prevent scheduling the same job on multiple dates
         const existingDate = await findScheduledDate(payload.job.id, selectedDate);
         if (existingDate) {
-          const formatted = format(new Date(existingDate + 'T00:00:00'), 'EEE, MMM d');
+          const formatted = format(new Date(existingDate + 'T00:00:00'), 'EEE, d MMM');
           toast.error('Job already scheduled', {
             description: `This job is already on ${formatted}. Unassign it there first.`,
           });
@@ -593,7 +594,7 @@ export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardPro
           <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
             <PopoverTrigger asChild>
               <Button variant="outline" size="sm" className="h-7 px-2 text-xs font-medium">
-                {format(new Date(selectedDate + 'T00:00:00'), 'MMM d, yyyy')}
+                {formatDate(selectedDate)}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="start">

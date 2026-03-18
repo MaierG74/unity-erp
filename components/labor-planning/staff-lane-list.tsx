@@ -23,7 +23,7 @@ import type { LaborDragPayload, StaffAssignment, StaffLane, TimeMarker } from '.
 import { CompleteJobDialog } from './complete-job-dialog';
 import type { ScheduleBreak } from '@/types/work-schedule';
 
-import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 
 const PRINT_AFTER_ISSUE_STORAGE_KEY = 'labor-planning-print-after-issue';
 
@@ -62,7 +62,7 @@ function ExpandableDetails({
               <span className="text-foreground">{(() => {
                 try {
                   const d = new Date(dueDate.includes('T') ? dueDate : dueDate + 'T00:00:00');
-                  return Number.isNaN(d.getTime()) ? dueDate : format(d, 'MMM d, yyyy');
+                  return Number.isNaN(d.getTime()) ? dueDate : formatDate(d);
                 } catch { return dueDate; }
               })()}</span>
             </div>
@@ -1202,7 +1202,7 @@ export function StaffLaneList({
                           {(() => {
                             try {
                               const d = new Date(selectedAssignment.dueDate!.includes('T') ? selectedAssignment.dueDate! : selectedAssignment.dueDate! + 'T00:00:00');
-                              return Number.isNaN(d.getTime()) ? selectedAssignment.dueDate : format(d, 'MMM d, yyyy');
+                              return Number.isNaN(d.getTime()) ? selectedAssignment.dueDate : formatDate(d);
                             } catch { return selectedAssignment.dueDate; }
                           })()}
                         </div>

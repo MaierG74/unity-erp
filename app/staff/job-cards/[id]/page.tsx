@@ -43,6 +43,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import {
   ArrowLeft,
   Clock,
@@ -591,7 +592,7 @@ export default function JobCardDetailPage() {
           <div>
             <h1 className="text-2xl font-bold">Job Card #{jobCard.job_card_id}</h1>
             <p className="text-muted-foreground">
-              Issued {format(new Date(jobCard.issue_date), 'MMMM d, yyyy')}
+              Issued {formatDate(jobCard.issue_date)}
             </p>
           </div>
         </div>
@@ -736,7 +737,7 @@ export default function JobCardDetailPage() {
           <CardContent>
             <p className="text-lg font-medium">
               {jobCard.due_date
-                ? format(new Date(jobCard.due_date), 'MMM d, yyyy')
+                ? formatDate(jobCard.due_date)
                 : 'No due date'}
             </p>
           </CardContent>
@@ -955,7 +956,7 @@ export default function JobCardDetailPage() {
             <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
               <CheckCircle className="h-5 w-5" />
               <span className="font-medium">
-                Completed on {format(new Date(jobCard.completion_date), 'MMMM d, yyyy')}
+                Completed on {formatDate(jobCard.completion_date)}
               </span>
             </div>
           </CardContent>

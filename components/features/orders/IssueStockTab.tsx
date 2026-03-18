@@ -15,7 +15,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Warehouse, CheckCircle, Printer, RotateCcw, Info, Plus, X, Search, User, ChevronRight, ChevronDown } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { format } from 'date-fns';
+import { formatDateTime } from '@/lib/date-utils';
 import { cn } from '@/lib/utils';
 import { formatQuantity } from '@/lib/format-utils';
 import type { Order } from '@/types/orders';
@@ -1105,7 +1105,7 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                           onClick={() => toggleIssuanceExpanded(group.groupKey)}
                         >
                           <TableCell>
-                            {format(new Date(group.issuance_date), 'MMM d, yyyy HH:mm')}
+                            {formatDateTime(group.issuance_date)}
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">

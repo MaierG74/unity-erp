@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import Image from 'next/image';
 import { ExternalLink } from 'lucide-react';
 
@@ -91,7 +91,7 @@ export function StaffViewModal({ staff, open, onOpenChange }: StaffViewModalProp
               </div>
               <div>
                 <h3 className="text-sm font-medium text-muted-foreground">Date of Birth</h3>
-                <p>{staff.date_of_birth ? format(new Date(staff.date_of_birth), 'PPP') : 'Not provided'}</p>
+                <p>{staff.date_of_birth ? formatDate(staff.date_of_birth) : 'Not provided'}</p>
               </div>
               <div>
                 <h3 className="text-sm font-medium text-muted-foreground">Tax Number</h3>
@@ -115,7 +115,7 @@ export function StaffViewModal({ staff, open, onOpenChange }: StaffViewModalProp
               </div>
               <div>
                 <h3 className="text-sm font-medium text-muted-foreground">Hire Date</h3>
-                <p>{staff.hire_date ? format(new Date(staff.hire_date), 'PPP') : 'Not provided'}</p>
+                <p>{staff.hire_date ? formatDate(staff.hire_date) : 'Not provided'}</p>
               </div>
               <div>
                 <h3 className="text-sm font-medium text-muted-foreground">Hourly Rate</h3>

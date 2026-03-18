@@ -6,6 +6,7 @@ import { Download, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
+import { formatDate, formatDateTime } from '@/lib/date-utils';
 import type { Order } from '@/types/orders';
 
 // PDF Styles
@@ -248,7 +249,7 @@ export const StockIssuancePDFDocument: React.FC<StockIssuancePDFProps> = ({
             <Text style={styles.documentTitle}>STOCK ISSUANCE</Text>
             <Text style={styles.documentNumber}>Order #: {order.order_number || order.order_id}</Text>
             <Text style={styles.documentDate}>
-              Issuance Date: {format(new Date(issuanceDate), 'MMM d, yyyy HH:mm')}
+              Issuance Date: {formatDateTime(issuanceDate)}
             </Text>
           </View>
         </View>
@@ -266,7 +267,7 @@ export const StockIssuancePDFDocument: React.FC<StockIssuancePDFProps> = ({
           )}
           {order.order_date && (
             <Text style={styles.sectionContent}>
-              Order Date: {format(new Date(order.order_date), 'MMM d, yyyy')}
+              Order Date: {formatDate(order.order_date)}
             </Text>
           )}
         </View>

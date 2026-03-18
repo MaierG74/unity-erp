@@ -52,6 +52,20 @@ export function formatDateTimeWithSeconds(date: string | Date | number): string 
 }
 
 /**
+ * Format a date to short South African format without year (d MMM)
+ * @param date - ISO string, Date object, or timestamp
+ * @returns Formatted date string (e.g., "18 Mar")
+ */
+export function formatDateShort(date: string | Date | number): string {
+  try {
+    const dateObj = typeof date === 'string' ? parseISO(date) : new Date(date);
+    return dateFnsFormat(dateObj, 'd MMM');
+  } catch {
+    return String(date);
+  }
+}
+
+/**
  * Format a date as relative time (e.g., "2 hours ago", "in 3 days")
  * Use this for activity feeds and recent updates
  * @param date - ISO string, Date object, or timestamp

@@ -113,12 +113,12 @@ function getMonthlyPurchaseData(orders: CustomerOrder[]) {
   const now = new Date();
   for (let i = 11; i >= 0; i--) {
     const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const key = date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+    const key = date.toLocaleDateString('en-ZA', { month: 'short', year: '2-digit' });
     monthlyData[key] = 0;
   }
   orders.forEach(order => {
     const date = new Date(order.order_date);
-    const key = date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+    const key = date.toLocaleDateString('en-ZA', { month: 'short', year: '2-digit' });
     if (key in monthlyData) {
       monthlyData[key] += parseFloat(order.total_amount || '0');
     }

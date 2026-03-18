@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { format, startOfWeek, addDays } from 'date-fns';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { formatDateShort } from '@/lib/date-utils';
 import { useOrgSettings } from '@/hooks/use-org-settings';
 import { fetchWeekSummary, type DaySummary } from '@/lib/queries/laborPlanning';
 
@@ -76,7 +77,7 @@ export function WeekStrip({ selectedDate, onDateSelect, staffCapacityMinutes }: 
         {collapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
         Week overview
         <span className="ml-auto text-[10px] font-normal">
-          {format(monday, 'MMM d')} – {format(addDays(monday, 6), 'MMM d')}
+          {formatDateShort(monday)} – {formatDateShort(addDays(monday, 6))}
         </span>
       </button>
 
@@ -116,7 +117,7 @@ export function WeekStrip({ selectedDate, onDateSelect, staffCapacityMinutes }: 
                   'text-[10px]',
                   isSelected ? 'text-foreground font-medium' : 'text-muted-foreground',
                 )}>
-                  {format(new Date(date + 'T00:00:00'), 'MMM d')}
+                  {formatDateShort(new Date(date + 'T00:00:00'))}
                 </span>
 
                 {/* Utilization bar */}

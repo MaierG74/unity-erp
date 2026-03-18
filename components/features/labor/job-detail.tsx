@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import Link from 'next/link';
 
 // UI Components
@@ -940,7 +940,7 @@ export function JobDetail({ jobId }: JobDetailProps) {
                     R{currentHourlyRate.hourly_rate.toFixed(2)}/hr
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Since {format(new Date(currentHourlyRate.effective_date), 'MMM d, yyyy')}
+                    Since {formatDate(currentHourlyRate.effective_date)}
                   </p>
                 </div>
               ) : (
@@ -970,9 +970,9 @@ export function JobDetail({ jobId }: JobDetailProps) {
                           <TableCell className="font-medium">
                             R{rate.hourly_rate.toFixed(2)}/hr
                           </TableCell>
-                          <TableCell>{format(new Date(rate.effective_date), 'MMM d, yyyy')}</TableCell>
+                          <TableCell>{formatDate(rate.effective_date)}</TableCell>
                           <TableCell>
-                            {rate.end_date ? format(new Date(rate.end_date), 'MMM d, yyyy') : (
+                            {rate.end_date ? formatDate(rate.end_date) : (
                               <Badge variant="secondary">Current</Badge>
                             )}
                           </TableCell>
@@ -1019,7 +1019,7 @@ export function JobDetail({ jobId }: JobDetailProps) {
                     R{currentPieceworkRate.rate.toFixed(2)}/piece
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Since {format(new Date(currentPieceworkRate.effective_date), 'MMM d, yyyy')}
+                    Since {formatDate(currentPieceworkRate.effective_date)}
                   </p>
                 </div>
               ) : (
@@ -1077,9 +1077,9 @@ export function JobDetail({ jobId }: JobDetailProps) {
                         <TableRow key={rate.rate_id}>
                           <TableCell>{rate.product?.name || 'Default'}</TableCell>
                           <TableCell className="font-medium">R{rate.rate.toFixed(2)}/pc</TableCell>
-                          <TableCell>{format(new Date(rate.effective_date), 'MMM d, yyyy')}</TableCell>
+                          <TableCell>{formatDate(rate.effective_date)}</TableCell>
                           <TableCell>
-                            {rate.end_date ? format(new Date(rate.end_date), 'MMM d, yyyy') : (
+                            {rate.end_date ? formatDate(rate.end_date) : (
                               <Badge variant="secondary">Current</Badge>
                             )}
                           </TableCell>
@@ -1187,7 +1187,7 @@ export function JobDetail({ jobId }: JobDetailProps) {
                               !field.value && 'text-muted-foreground'
                             )}
                           >
-                            {field.value ? format(field.value, 'PPP') : 'Pick a date'}
+                            {field.value ? formatDate(field.value) : 'Pick a date'}
                             <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                           </Button>
                         </FormControl>
@@ -1288,7 +1288,7 @@ export function JobDetail({ jobId }: JobDetailProps) {
                               !field.value && 'text-muted-foreground'
                             )}
                           >
-                            {field.value ? format(field.value, 'PPP') : 'Pick a date'}
+                            {field.value ? formatDate(field.value) : 'Pick a date'}
                             <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                           </Button>
                         </FormControl>

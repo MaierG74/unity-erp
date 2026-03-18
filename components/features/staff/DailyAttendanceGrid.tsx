@@ -7,6 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { processClockEventsIntoSegments, processAttendanceBatch } from '@/lib/utils/attendance';
 import { useToast } from '@/components/ui/use-toast';
 import { format, parseISO, isToday, isSunday } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import { formatTimeToSAST, getSASTDayBoundaries } from '@/lib/utils/timezone';
 import { 
   Table, 
@@ -1588,7 +1589,7 @@ export function DailyAttendanceGrid() {
                   )}
                 >
                   <CalendarIcon className="mr-2 h-4 w-4" />
-                  {selectedDate ? format(selectedDate, 'PPP') : <span>Pick a date</span>}
+                  {selectedDate ? formatDate(selectedDate) : <span>Pick a date</span>}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="center">

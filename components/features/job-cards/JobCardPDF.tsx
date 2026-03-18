@@ -5,6 +5,7 @@ import { Document, Page, Text, View, StyleSheet, pdf } from '@react-pdf/renderer
 import { Download, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 
 // PDF Styles
 const styles = StyleSheet.create({
@@ -288,7 +289,7 @@ export const JobCardPDFDocument: React.FC<JobCardPDFProps> = ({
             <Text style={styles.documentTitle}>JOB CARD</Text>
             <Text style={styles.documentNumber}>#{jobCard.job_card_id}</Text>
             <Text style={styles.documentDate}>
-              Issued: {format(new Date(jobCard.issue_date), 'MMM d, yyyy')}
+              Issued: {formatDate(jobCard.issue_date)}
             </Text>
           </View>
         </View>
@@ -304,7 +305,7 @@ export const JobCardPDFDocument: React.FC<JobCardPDFProps> = ({
               <Text style={styles.infoLabel}>Due Date</Text>
               <Text style={styles.infoValue}>
                 {jobCard.due_date
-                  ? format(new Date(jobCard.due_date), 'MMM d, yyyy')
+                  ? formatDate(jobCard.due_date)
                   : 'No due date'}
               </Text>
             </View>

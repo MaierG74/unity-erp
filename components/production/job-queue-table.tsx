@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import { Plus, Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import { PageToolbar } from '@/components/ui/page-toolbar';
 import { minutesToClock } from '@/src/lib/laborScheduling';
@@ -425,17 +425,17 @@ export function JobQueueTable({
                           jobCard.scheduledAssignment.start_minutes != null &&
                           jobCard.scheduledAssignment.end_minutes != null && (
                             <div className="text-xs text-muted-foreground">
-                              Scheduled {format(new Date(jobCard.scheduledAssignment.assignment_date), 'MMM d, yyyy')} · {minutesToClock(jobCard.scheduledAssignment.start_minutes)}-{minutesToClock(jobCard.scheduledAssignment.end_minutes)}
+                              Scheduled {formatDate(jobCard.scheduledAssignment.assignment_date)} · {minutesToClock(jobCard.scheduledAssignment.start_minutes)}-{minutesToClock(jobCard.scheduledAssignment.end_minutes)}
                             </div>
                           )}
                       </div>
                     </TableCell>
                     <TableCell>
-                      {format(new Date(jobCard.issue_date), 'MMM d, yyyy')}
+                      {formatDate(jobCard.issue_date)}
                     </TableCell>
                     <TableCell>
                       {jobCard.due_date
-                        ? format(new Date(jobCard.due_date), 'MMM d, yyyy')
+                        ? formatDate(jobCard.due_date)
                         : '-'}
                     </TableCell>
                     <TableCell className="text-center">

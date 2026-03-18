@@ -41,6 +41,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
+import { formatDateTime } from '@/lib/date-utils';
 import { cn } from '@/lib/utils';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 
@@ -1026,7 +1027,7 @@ export function ManualStockIssueTab() {
                               {ISSUE_CATEGORIES.find(c => c.value === pending.issue_category)?.label || pending.issue_category}
                             </Badge>
                             <span>•</span>
-                            <span>{format(new Date(pending.created_at), 'MMM d, yyyy HH:mm')}</span>
+                            <span>{formatDateTime(pending.created_at)}</span>
                             {pending.staff && (
                               <>
                                 <span>•</span>
@@ -1151,7 +1152,7 @@ export function ManualStockIssueTab() {
                       {groupedIssuanceHistory.map((group) => (
                         <TableRow key={group.groupKey}>
                           <TableCell className="text-sm align-top">
-                            {format(new Date(group.issuance_date), 'MMM d, yyyy HH:mm')}
+                            {formatDateTime(group.issuance_date)}
                           </TableCell>
                           <TableCell className="align-top">
                             <div className="font-medium">{group.external_reference || '-'}</div>

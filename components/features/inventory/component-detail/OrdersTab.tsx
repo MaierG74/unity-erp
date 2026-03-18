@@ -30,6 +30,7 @@ import {
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import { cn } from '@/lib/utils';
 
 type ComponentData = {
@@ -392,7 +393,7 @@ export function OrdersTab({ component }: OrdersTabProps) {
                                   <div className="text-xs">
                                     <p className="font-medium">Follow-up sent</p>
                                     <p className="text-muted-foreground">
-                                      {format(new Date(followUp.sent_at), 'PP')} - Awaiting response
+                                      {formatDate(followUp.sent_at)} - Awaiting response
                                     </p>
                                   </div>
                                 </TooltipContent>
@@ -564,7 +565,7 @@ export function OrdersTab({ component }: OrdersTabProps) {
                 <span className="text-muted-foreground">Expected Delivery</span>
                 {selectedResponse.response?.expected_delivery_date ? (
                   <span className="font-medium">
-                    {format(new Date(selectedResponse.response.expected_delivery_date), 'PPP')}
+                    {formatDate(selectedResponse.response.expected_delivery_date)}
                   </span>
                 ) : (
                   <span className="text-muted-foreground italic">Not provided</span>

@@ -8,7 +8,8 @@ import { ArrowLeft, DollarSign, Calculator, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { format, startOfWeek, endOfWeek, addDays, addWeeks, subWeeks, parseISO, isSunday } from 'date-fns';
+import { startOfWeek, endOfWeek, addDays, addWeeks, subWeeks, parseISO, isSunday } from 'date-fns';
+import { formatDate, formatDateShort } from '@/lib/date-utils';
 import { useOrgSettings } from '@/hooks/use-org-settings';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -360,7 +361,7 @@ export default function PayrollPage() {
               Previous Week
             </Button>
             <span className="font-medium">
-              {format(selectedWeekStart, 'MMM d')} - {format(addDays(selectedWeekStart, 6), 'MMM d, yyyy')}
+              {formatDateShort(selectedWeekStart)} - {formatDate(addDays(selectedWeekStart, 6))}
             </span>
             <Button variant="outline" size="sm" onClick={() => navigateWeek('next')}>
               Next Week
@@ -417,7 +418,7 @@ export default function PayrollPage() {
                 {payrollData.map((payroll) => (
                   <TableRow key={payroll.payroll_id}>
                     <TableCell className="font-medium">
-                      {format(new Date(payroll.week_start_date), 'MMM d')} - {format(new Date(payroll.week_end_date), 'MMM d, yyyy')}
+                      {formatDateShort(payroll.week_start_date)} - {formatDate(payroll.week_end_date)}
                     </TableCell>
                     <TableCell>{payroll.regular_hours}</TableCell>
                     <TableCell>{payroll.overtime_hours}</TableCell>
@@ -479,7 +480,7 @@ export default function PayrollPage() {
             <DialogDescription>
               {payrollDetails && (
                 <span>
-                  Week of {format(new Date(payrollDetails.week_start_date), 'MMM d')} - {format(new Date(payrollDetails.week_end_date), 'MMM d, yyyy')} for {payrollDetails.staff_name}
+                  Week of {formatDateShort(payrollDetails.week_start_date)} - {formatDate(payrollDetails.week_end_date)} for {payrollDetails.staff_name}
                 </span>
               )}
             </DialogDescription>
@@ -529,7 +530,7 @@ export default function PayrollPage() {
                   {getStatusBadge(payrollDetails.status)}
                   {payrollDetails.payment_date && (
                     <span className="text-sm text-muted-foreground">
-                      Paid on {format(new Date(payrollDetails.payment_date), 'MMM d, yyyy')}
+                      Paid on {formatDate(payrollDetails.payment_date)}
                     </span>
                   )}
                 </div>

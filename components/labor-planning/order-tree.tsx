@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { AlertTriangle, Archive, CalendarClock, CheckCircle2, ChevronRight, ClipboardList, Flame, GripVertical, Pause, Play } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { PlanningOrder, PlanningJob } from './types';
+import { formatDateShort } from '@/lib/date-utils';
 
 const ESTIMATED_ROW_HEIGHT = 48;
 
@@ -36,11 +37,11 @@ const jobStatusLabel: Record<PlanningJob['status'], string> = {
   blocked: 'Blocked',
 };
 
-const formatDate = (input?: string | null) => {
+const formatDueDate = (input?: string | null) => {
   if (!input) return 'No due date';
   const parsed = new Date(input);
   if (Number.isNaN(parsed.getTime())) return 'No due date';
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(parsed);
+  return formatDateShort(parsed);
 };
 
 /** Format duration as human-readable time. Returns empty string for 0/unknown. */
@@ -298,7 +299,7 @@ export function OrderTree({ orders, windowSize = 12, onJobDragStart, onJobClick,
                         </Badge>
                       </div>
                       <p className="truncate text-[10px] text-muted-foreground">
-                        {order.customer} • {order.jobs.length} jobs • {formatDate(order.dueDate)}
+                        {order.customer} • {order.jobs.length} jobs • {formatDueDate(order.dueDate)}
                       </p>
                       {isOpen && (
                         <p className="truncate text-[9px] text-muted-foreground/70 mt-0.5">

@@ -1,7 +1,8 @@
 // components/features/todos/TaskRow.tsx
 'use client';
 
-import { isBefore, parseISO, format, isToday } from 'date-fns';
+import { isBefore, parseISO, isToday } from 'date-fns';
+import { formatDateShort } from '@/lib/date-utils';
 import { Link2 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -35,7 +36,7 @@ export function TaskRow({ todo, isActive, isFocused, onSelect }: TaskRowProps) {
   };
 
   const dueLabel = todo.dueAt
-    ? format(parseISO(todo.dueAt), 'MMM d')
+    ? formatDateShort(todo.dueAt)
     : null;
 
   const contextLabel = getContextLabel(todo);

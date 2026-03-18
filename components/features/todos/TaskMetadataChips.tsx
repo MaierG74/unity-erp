@@ -2,7 +2,8 @@
 'use client';
 
 import { useState } from 'react';
-import { parseISO, format } from 'date-fns';
+import { parseISO } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import { CalendarIcon, Circle, Link2, Loader2, X, Plus, User } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
@@ -151,7 +152,7 @@ export function TaskMetadataChips({
         <PopoverTrigger asChild>
           <button className={cn(chipBase, 'border-border')}>
             <CalendarIcon className="h-3 w-3" />
-            {todo.dueAt ? format(parseISO(todo.dueAt), 'MMM d, yyyy') : 'No date'}
+            {todo.dueAt ? formatDate(todo.dueAt) : 'No date'}
           </button>
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="start">

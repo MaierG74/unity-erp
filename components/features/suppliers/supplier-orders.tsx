@@ -5,7 +5,8 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import type { SupplierWithDetails, SupplierPurchaseOrder } from '@/types/suppliers';
 import { formatCurrency } from '@/lib/quotes';
-import { format, parseISO, isValid, isBefore, isAfter } from 'date-fns';
+import { parseISO, isValid, isBefore, isAfter } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import { Calendar, Search, X, ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
@@ -293,7 +294,7 @@ export function SupplierOrders({ supplier }: SupplierOrdersProps) {
                   )}
                 >
                   <Calendar className="mr-2 h-4 w-4" />
-                  {startDate ? format(startDate, "MMM d, yyyy") : "From Date"}
+                  {startDate ? formatDate(startDate) : "From Date"}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
@@ -317,7 +318,7 @@ export function SupplierOrders({ supplier }: SupplierOrdersProps) {
                   )}
                 >
                   <Calendar className="mr-2 h-4 w-4" />
-                  {endDate ? format(endDate, "MMM d, yyyy") : "To Date"}
+                  {endDate ? formatDate(endDate) : "To Date"}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
@@ -440,8 +441,8 @@ export function SupplierOrders({ supplier }: SupplierOrdersProps) {
                         </td>
                         <td className="p-4">
                           {order.order_date
-                            ? format(parseISO(order.order_date), 'MMM d, yyyy')
-                            : format(parseISO(order.created_at), 'MMM d, yyyy')}
+                            ? formatDate(order.order_date)
+                            : formatDate(order.created_at)}
                         </td>
                         <td className="p-4">
                           <StatusBadge status={order.status?.status_name || 'Unknown'} />

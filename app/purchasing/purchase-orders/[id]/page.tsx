@@ -27,6 +27,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle, ArrowLeft, Loader2, CheckCircle2, Mail, Pencil, Save, X, Trash2, ChevronDown, ChevronRight, Paperclip, Ban, XCircle, ClipboardList } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -1763,8 +1764,36 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   const isCancelled = purchaseOrder.status?.status_name === 'Cancelled';
 
   // Email status helpers
-  const hasSentPO = emailHistory?.some(e => e.email_type === 'po_send' && e.status === 'sent');
-  const hasEmailIssues = emailHistory?.some(e => e.delivery_status === 'bounced' || e.delivery_status === 'complained' || e.status === 'failed');
+  const poSendEmails = (emailHistory || [])
+    .filter((email) => email.email_type === 'po_send' || email.email_type === null)
+    .sort((a, b) => new Date(b.sent_at).getTime() - new Date(a.sent_at).getTime());
+  const latestPOEmailsByRecipient = new Map<string, (typeof poSendEmails)[number]>();
+  for (const email of poSendEmails) {
+    const recipientKey = email.supplier_id
+      ? `supplier:${email.supplier_id}`
+      : `recipient:${email.recipient_email?.trim().toLowerCase() || email.sent_at}`;
+    if (!latestPOEmailsByRecipient.has(recipientKey)) {
+      latestPOEmailsByRecipient.set(recipientKey, email);
+    }
+  }
+  const latestPOEmails = Array.from(latestPOEmailsByRecipient.values());
+  const deliveredPOEmailCount = latestPOEmails.filter(
+    (email) => email.delivery_status === 'delivered' || email.delivery_status === 'opened' || email.delivery_status === 'clicked'
+  ).length;
+  const expectedPOEmailCount = Math.max(
+    Array.from(
+      new Set(
+        purchaseOrder.supplier_orders?.map((order) => order.supplier_component?.supplier?.name).filter(Boolean) || []
+      )
+    ).length,
+    1
+  );
+  const hasSentPO = latestPOEmails.some((email) => email.status === 'sent');
+  const hasEmailIssues = latestPOEmails.some(
+    (email) => email.delivery_status === 'bounced' || email.delivery_status === 'complained' || email.status === 'failed'
+  );
+  const hasDeliveredPO = deliveredPOEmailCount > 0 && deliveredPOEmailCount === expectedPOEmailCount && !hasEmailIssues;
+  const hasPartialEmailDelivery = deliveredPOEmailCount > 0 && !hasDeliveredPO && !hasEmailIssues;
   const hasOutstandingItems = purchaseOrder.supplier_orders?.some(o => (o.order_quantity - (o.total_received || 0)) > 0);
 
   // Calculate totals (exclude cancelled line items)
@@ -1823,9 +1852,19 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                 </Badge>
               )}
               {isApproved && hasSentPO && !hasEmailIssues && (
-                <Badge variant="secondary" className="text-[10px] h-5 gap-1 bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300">
+                <Badge
+                  variant="secondary"
+                  className={cn(
+                    "text-[10px] h-5 gap-1",
+                    hasDeliveredPO
+                      ? "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300"
+                      : hasPartialEmailDelivery
+                        ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                        : "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300"
+                  )}
+                >
                   <Mail className="h-3 w-3" />
-                  Emailed
+                  {hasDeliveredPO ? 'Email Delivered' : hasPartialEmailDelivery ? 'Email Partial' : 'Email Sent'}
                 </Badge>
               )}
               <span className="text-muted-foreground">•</span>
@@ -1833,7 +1872,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                 {supplierNames.join(', ') || 'Supplier'}
               </span>
             </div>
-            <p className="text-muted-foreground text-sm">Created {format(new Date(purchaseOrder.created_at), 'PPP')}</p>
+            <p className="text-muted-foreground text-sm">Created {formatDate(purchaseOrder.created_at)}</p>
           </div>
         </div>
         {/* Actions are shown in the bottom action bar */}
@@ -2255,7 +2294,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
             </div>
             {isApproved && (
               <div className="text-sm text-muted-foreground">
-                Approved on {purchaseOrder.approved_at ? format(new Date(purchaseOrder.approved_at), 'PPP') : 'Unknown'}
+                Approved on {purchaseOrder.approved_at ? formatDate(purchaseOrder.approved_at) : 'Unknown'}
               </div>
             )}
 
@@ -2335,7 +2374,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                               </div>
                               {resp?.expected_delivery_date && (
                                 <div className="mt-1 text-muted-foreground">
-                                  Expected: {format(new Date(resp.expected_delivery_date), 'PP')}
+                                  Expected: {formatDate(resp.expected_delivery_date)}
                                 </div>
                               )}
                               {resp?.notes && (
@@ -2368,7 +2407,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                                             )}
                                             {item.item_expected_date && (
                                               <span className="text-[10px] text-muted-foreground">
-                                                ETA: {format(new Date(item.item_expected_date), 'PP')}
+                                                ETA: {formatDate(item.item_expected_date)}
                                               </span>
                                             )}
                                           </div>
@@ -2396,7 +2435,10 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                         <div className="max-h-32 space-y-2 overflow-y-auto">
                           {emailHistory.map((email) => {
                             const isBounced = email.delivery_status === 'bounced';
-                            const isDelivered = email.delivery_status === 'delivered';
+                            const isDelivered =
+                              email.delivery_status === 'delivered' ||
+                              email.delivery_status === 'opened' ||
+                              email.delivery_status === 'clicked';
                             const isComplained = email.delivery_status === 'complained';
                             const hasIssue = isBounced || isComplained;
                             const emailTypeLabel = (() => {
@@ -2427,27 +2469,27 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                                     </Badge>
                                     {isBounced && (
                                       <Badge variant="destructive" className="text-[10px]">
-                                        Bounced
+                                        Email Issue
                                       </Badge>
                                     )}
                                     {isComplained && (
                                       <Badge variant="destructive" className="text-[10px]">
-                                        Spam
+                                        Email Issue
                                       </Badge>
                                     )}
                                     {isDelivered && (
                                       <Badge className="bg-green-600 text-[10px]">
-                                        Delivered
+                                        Email Delivered
                                       </Badge>
                                     )}
                                     {!hasIssue && !isDelivered && email.status === 'sent' && (
                                       <Badge variant="secondary" className="text-[10px]">
-                                        Sent
+                                        Email Sent
                                       </Badge>
                                     )}
                                     {email.status === 'failed' && (
                                       <Badge variant="destructive" className="text-[10px]">
-                                        Failed
+                                        Email Issue
                                       </Badge>
                                     )}
                                   </div>
@@ -2543,7 +2585,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
               <div>
                 <p className="mb-1 text-sm font-medium">Order Date</p>
                 <p>{purchaseOrder.order_date
-                  ? format(new Date(purchaseOrder.order_date), 'PPP')
+                  ? formatDate(purchaseOrder.order_date)
                   : 'Not specified'}</p>
               </div>
               <div>
