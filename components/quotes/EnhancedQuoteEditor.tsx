@@ -18,6 +18,7 @@ import QuoteAttachmentManager from './QuoteAttachmentManager';
 import { QuotePDFDownload } from './QuotePDF';
 import QuoteItemsTable from '@/components/features/quotes/QuoteItemsTable';
 import QuoteProfitabilityCard from '@/components/features/quotes/QuoteProfitabilityCard';
+import QuoteReportsTab from '@/components/features/quotes/QuoteReportsTab';
 import EmailQuoteDialog from '@/components/features/quotes/EmailQuoteDialog';
 import { EmailActivityCard } from '@/components/features/emails/EmailActivityCard';
 import { useToast } from '@/components/ui/use-toast';
@@ -374,10 +375,11 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
 
       {/* Main Content */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="details">Quote Details</TabsTrigger>
           <TabsTrigger value="items">Line Items</TabsTrigger>
           <TabsTrigger value="attachments">Attachments</TabsTrigger>
+          <TabsTrigger value="reports">Reports</TabsTrigger>
         </TabsList>
 
         {/* Quote Details Tab */}
@@ -445,7 +447,10 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
                 <p>{attachments.length} attachment{attachments.length !== 1 ? 's' : ''}</p>
               </div>
             </section>
-            <QuoteProfitabilityCard items={items} />
+            <QuoteProfitabilityCard
+              items={items}
+              onNavigateToReports={() => setActiveTab('reports')}
+            />
           </div>
 
           {/* Notes */}
@@ -611,6 +616,11 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        {/* Reports Tab */}
+        <TabsContent value="reports" className="space-y-4">
+          <QuoteReportsTab items={items} />
         </TabsContent>
 
       </Tabs>
