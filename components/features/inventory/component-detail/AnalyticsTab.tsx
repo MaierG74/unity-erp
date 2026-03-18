@@ -291,7 +291,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
   return (
     <div className="space-y-6">
       {/* Stock Health */}
-      <Card className={cn('shadow-sm border-2', currentHealth.cardClass)}>
+      <Card className={cn('shadow-xs border-2', currentHealth.cardClass)}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Activity className={cn('h-5 w-5', currentHealth.color)} />
@@ -321,7 +321,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
 
       {/* Key Metrics Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="shadow-sm">
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Stock Value</CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
@@ -342,7 +342,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm">
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Transactions</CardTitle>
             <BarChart3 className="h-4 w-4 text-muted-foreground" />
@@ -355,7 +355,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm">
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Added</CardTitle>
             <TrendingUp className="h-4 w-4 text-green-600" />
@@ -368,7 +368,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm">
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Removed</CardTitle>
             <TrendingDown className="h-4 w-4 text-red-600" />
@@ -381,7 +381,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm">
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Avg Daily Usage</CardTitle>
             <TrendingDown className="h-4 w-4 text-muted-foreground" />
@@ -394,7 +394,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
           </CardContent>
         </Card>
 
-        <Card className={cn('shadow-sm', criticalWindow && 'border-red-500 bg-red-50')}>
+        <Card className={cn('shadow-xs', criticalWindow && 'border-red-500 bg-red-50')}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Days Until Stockout</CardTitle>
             <Clock className="h-4 w-4 text-muted-foreground" />
@@ -407,7 +407,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm">
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Shortfall Value</CardTitle>
             <DollarSign className="h-4 w-4 text-red-600" />
@@ -426,7 +426,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm">
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Daily Consumption Value</CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
@@ -445,7 +445,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
       </div>
 
       {/* Stock Visual Gauge */}
-      <Card className="shadow-sm">
+      <Card className="shadow-xs">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Activity className="h-5 w-5" />
@@ -527,7 +527,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
       {/* Stock Projection */}
       <Card
         className={cn(
-          'shadow-sm border-2',
+          'shadow-xs border-2',
           isInsufficientForOrders && 'border-red-500 bg-red-50',
           !isInsufficientForOrders && isProjectedLow && 'border-amber-500 bg-amber-50'
         )}
@@ -665,7 +665,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
 
       {/* Order Breakdown */}
       {orderBreakdown && orderBreakdown.length > 0 && (
-        <Card className="shadow-sm">
+        <Card className="shadow-xs">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5" />
@@ -735,7 +735,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
       )}
 
       {/* Activity Summary */}
-      <Card className="shadow-sm">
+      <Card className="shadow-xs">
         <CardHeader>
           <CardTitle>Activity Summary</CardTitle>
         </CardHeader>

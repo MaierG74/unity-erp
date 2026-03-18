@@ -200,7 +200,7 @@ export function PigeonholeForm({ config, onChange }: PigeonholeFormProps) {
               type="button"
               onClick={() => handleModeChange('overall')}
               className={`px-2 py-0.5 text-xs rounded transition-colors ${
-                !isCellMode ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                !isCellMode ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               Overall
@@ -209,7 +209,7 @@ export function PigeonholeForm({ config, onChange }: PigeonholeFormProps) {
               type="button"
               onClick={() => handleModeChange('cell')}
               className={`px-2 py-0.5 text-xs rounded transition-colors ${
-                isCellMode ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                isCellMode ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               Cell Size

@@ -79,7 +79,7 @@ export function OrderTree({ orders, windowSize = 12, onJobDragStart, onJobClick,
 
           return (
             <Collapsible key={order.id} open={isOpen} onOpenChange={() => toggleOrder(order.id)}>
-              <div className="rounded-md border bg-card shadow-sm transition hover:border-primary/40">
+              <div className="rounded-md border bg-card shadow-xs transition hover:border-primary/40">
                 <CollapsibleTrigger asChild>
                   <button
                     type="button"

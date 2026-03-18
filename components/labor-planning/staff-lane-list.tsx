@@ -513,7 +513,7 @@ export function StaffLaneList({
 
         return (
           <div key={lane.id} className={cn(
-            "flex rounded-lg border bg-card shadow-sm transition-all",
+            "flex rounded-lg border bg-card shadow-xs transition-all",
             dragIndicator?.laneId === lane.id ? "overflow-visible" : "overflow-hidden",
             isDragOver && laneAvailable && "ring-2 ring-primary ring-offset-1 border-primary/50"
           )}>
@@ -748,7 +748,7 @@ export function StaffLaneList({
                     )}
 
                     <div className="flex min-w-0 flex-1 flex-col justify-center pl-3.5 pr-1.5">
-                      <span className="truncate text-[10px] font-semibold leading-tight text-white drop-shadow-sm">
+                      <span className="truncate text-[10px] font-semibold leading-tight text-white drop-shadow-xs">
                         {assignment.productName || assignment.jobName || assignment.label}
                       </span>
                       <div className="mt-0.5 flex items-center gap-1">
@@ -764,7 +764,7 @@ export function StaffLaneList({
                     {/* Job status indicator */}
                     {statusInfo && (
                       <div className={cn('mr-1 flex shrink-0 items-center justify-center rounded-full p-0.5', statusInfo.color)}>
-                        <statusInfo.icon className="h-3.5 w-3.5 drop-shadow-sm" />
+                        <statusInfo.icon className="h-3.5 w-3.5 drop-shadow-xs" />
                       </div>
                     )}
 

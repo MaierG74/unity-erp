@@ -94,7 +94,7 @@ export function PartsInputTable({
           {parts.map((p, idx) => {
             const material = p.material_id ? materials.find((m) => m.id === p.material_id) : null;
             return (
-              <div key={idx} className="rounded-xl border bg-card/40 shadow-sm">
+              <div key={idx} className="rounded-xl border bg-card/40 shadow-xs">
                 <div className="flex flex-col gap-4 border-b px-4 py-4 md:flex-row md:items-start md:justify-between">
                   <div
                     className={`grid w-full gap-4 md:w-auto ${

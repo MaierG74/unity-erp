@@ -87,7 +87,7 @@ export function OverviewTab({ component }: OverviewTabProps) {
   return (
     <div className="space-y-6">
       {/* Main Info Card with Image */}
-      <Card className="shadow-sm">
+      <Card className="shadow-xs">
         <CardContent className="pt-6">
           <div className="flex flex-col md:flex-row gap-6">
             {/* Image */}
@@ -175,7 +175,7 @@ export function OverviewTab({ component }: OverviewTabProps) {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Current Stock */}
         <Card className={cn(
-          'shadow-sm',
+          'shadow-xs',
           isOutOfStock && 'bg-gradient-to-br from-red-50 to-red-100/50 dark:from-red-950/30 dark:to-red-900/20 border-red-200 dark:border-red-800',
           isLowStock && 'bg-gradient-to-br from-amber-50 to-amber-100/50 dark:from-amber-950/30 dark:to-amber-900/20 border-amber-200 dark:border-amber-800',
           isInStock && 'bg-gradient-to-br from-green-50 to-green-100/50 dark:from-green-950/30 dark:to-green-900/20 border-green-200 dark:border-green-800'
@@ -208,7 +208,7 @@ export function OverviewTab({ component }: OverviewTabProps) {
         </Card>
 
         {/* Reorder Level */}
-        <Card className="shadow-sm bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-950/30 dark:to-slate-900/20">
+        <Card className="shadow-xs bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-950/30 dark:to-slate-900/20">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Reorder Level</CardTitle>
             <AlertTriangle className="h-4 w-4 text-slate-500" />
@@ -226,7 +226,7 @@ export function OverviewTab({ component }: OverviewTabProps) {
         </Card>
 
         {/* On Order */}
-        <Card className="shadow-sm bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-950/30 dark:to-blue-900/20 border-blue-200 dark:border-blue-800">
+        <Card className="shadow-xs bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-950/30 dark:to-blue-900/20 border-blue-200 dark:border-blue-800">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">On Order</CardTitle>
             <ShoppingCart className="h-4 w-4 text-blue-600" />
@@ -240,7 +240,7 @@ export function OverviewTab({ component }: OverviewTabProps) {
         </Card>
 
         {/* Required for Orders */}
-        <Card className="shadow-sm bg-gradient-to-br from-purple-50 to-purple-100/50 dark:from-purple-950/30 dark:to-purple-900/20 border-purple-200 dark:border-purple-800">
+        <Card className="shadow-xs bg-gradient-to-br from-purple-50 to-purple-100/50 dark:from-purple-950/30 dark:to-purple-900/20 border-purple-200 dark:border-purple-800">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Required</CardTitle>
             <TrendingUp className="h-4 w-4 text-purple-600" />
@@ -258,7 +258,7 @@ export function OverviewTab({ component }: OverviewTabProps) {
 
       {/* Suppliers List */}
       {component.supplierComponents.length > 0 && (
-        <Card className="shadow-sm">
+        <Card className="shadow-xs">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Users className="h-5 w-5" />
@@ -295,7 +295,7 @@ export function OverviewTab({ component }: OverviewTabProps) {
       {(isOutOfStock || isLowStock || quantityOnHand + onOrder < requiredForOrders) && (
         <Card
           className={cn(
-            'shadow-sm border-2',
+            'shadow-xs border-2',
             quantityOnHand + onOrder < requiredForOrders
               ? 'border-red-500 bg-red-50'
               : 'border-amber-200 bg-amber-50'

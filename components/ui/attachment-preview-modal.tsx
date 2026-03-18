@@ -864,7 +864,7 @@ export function AttachmentPreviewModal({
             {/* More prominent refresh button */}
             <button 
               onClick={handleRefresh}
-              className="bg-primary text-white px-3 py-1.5 rounded-md flex items-center gap-1.5 hover:bg-primary/90 transition-colors shadow-sm"
+              className="bg-primary text-white px-3 py-1.5 rounded-md flex items-center gap-1.5 hover:bg-primary/90 transition-colors shadow-xs"
               title="Refresh thumbnails"
               aria-label="Refresh thumbnails"
               disabled={isRefreshing}

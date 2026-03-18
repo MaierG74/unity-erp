@@ -244,7 +244,7 @@ export function TodoDashboard() {
           <Button
             onClick={() => setCreateOpen(true)}
             size="lg"
-            className="shadow-sm"
+            className="shadow-xs"
           >
             <Plus className="mr-2 h-4 w-4" />
             New Task
@@ -252,7 +252,7 @@ export function TodoDashboard() {
         </div>
 
         {/* Quick Add Bar */}
-        <Card className="shadow-sm">
+        <Card className="shadow-xs">
           <CardContent className="p-3">
             <div className="flex flex-wrap items-center gap-2">
               <Input

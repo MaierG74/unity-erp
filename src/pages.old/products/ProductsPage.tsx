@@ -266,7 +266,7 @@ export function ProductsPage() {
     // CHANGED: Reduced space-y from 6 to 2
     <div className="space-y-2">
       {/* CHANGED: Compact inline toolbar - search/filter grouped on the left, action on the right */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 p-2 bg-card rounded-xl border shadow-sm">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 p-2 bg-card rounded-xl border shadow-xs">
         {/* Left: Title/count plus search and filter for faster primary flow */}
         <div className="flex w-full flex-col md:flex-row md:items-center gap-3">
           <div className="flex items-center gap-3 shrink-0">
@@ -306,7 +306,7 @@ export function ProductsPage() {
       </div>
 
       {/* Table card */}
-      <Card className="border border-border shadow-sm">
+      <Card className="border border-border shadow-xs">
         <CardContent className="p-2">
           <div className="relative">
             <AnimatePresence mode="wait">

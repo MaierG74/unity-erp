@@ -289,7 +289,7 @@ export function OrdersTab({ component }: OrdersTabProps) {
 
       {/* Purchase Orders */}
       {purchaseOrders.length > 0 && (
-        <Card className="shadow-sm border-l-3 border-l-blue-500/40">
+        <Card className="shadow-xs border-l-3 border-l-blue-500/40">
           <CardHeader>
             <CardTitle>Purchase Orders</CardTitle>
           </CardHeader>
@@ -412,7 +412,7 @@ export function OrdersTab({ component }: OrdersTabProps) {
 
       {/* Products Using This Component */}
       {products.length > 0 && (
-        <Card className="shadow-sm border-l-3 border-l-emerald-500/40">
+        <Card className="shadow-xs border-l-3 border-l-emerald-500/40">
           <CardHeader>
             <CardTitle>Bill of Materials</CardTitle>
           </CardHeader>
@@ -445,7 +445,7 @@ export function OrdersTab({ component }: OrdersTabProps) {
 
       {/* Active Orders Requiring This Component */}
       {activeOrders.length > 0 && (
-        <Card className="shadow-sm border-l-3 border-l-purple-500/40">
+        <Card className="shadow-xs border-l-3 border-l-purple-500/40">
           <CardHeader>
             <CardTitle>Active Orders</CardTitle>
           </CardHeader>
@@ -501,7 +501,7 @@ export function OrdersTab({ component }: OrdersTabProps) {
       {purchaseOrders.length === 0 &&
         products.length === 0 &&
         activeOrders.length === 0 && (
-          <Card className="shadow-sm">
+          <Card className="shadow-xs">
             <CardContent className="pt-6">
               <div className="text-center text-muted-foreground py-8">
                 <Package className="h-12 w-12 mx-auto mb-4 opacity-50" />

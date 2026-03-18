@@ -662,7 +662,7 @@ export default function PurchasingPage() {
                           <Badge
                             variant="outline"
                             className={cn(
-                              'cursor-pointer transition-all hover:shadow-sm hover:scale-105',
+                              'cursor-pointer transition-all hover:shadow-xs hover:scale-105',
                               supplierFilter === item.supplier_name &&
                                 'ring-2 ring-primary/30 bg-primary/5'
                             )}

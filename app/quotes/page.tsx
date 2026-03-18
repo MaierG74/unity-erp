@@ -257,7 +257,7 @@ export default function QuotesPage() {
   return (
     <div className="min-h-screen bg-background py-8">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <Card className="rounded-2xl border bg-card shadow-sm">
+        <Card className="rounded-2xl border bg-card shadow-xs">
           <CardHeader className="gap-4 border-b bg-card md:flex md:flex-row md:items-center md:justify-between">
             <div className="space-y-1">
               <CardTitle className="text-2xl text-foreground">Quotes Management</CardTitle>
@@ -282,7 +282,7 @@ export default function QuotesPage() {
             )}
 
             {/* Toolbar */}
-            <div className="flex flex-col gap-3 rounded-xl border bg-card/60 p-4 shadow-sm md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-col gap-3 rounded-xl border bg-card/60 p-4 shadow-xs md:flex-row md:items-center md:justify-between">
               <div className="relative w-full md:max-w-md">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -334,7 +334,7 @@ export default function QuotesPage() {
             <div className="grid grid-cols-1 gap-4 mb-6 md:grid-cols-4">
               <Card
                 className={cn(
-                  "rounded-xl border bg-background/80 shadow-sm cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
+                  "rounded-xl border bg-background/80 shadow-xs cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
                   status === 'all' && "ring-2 ring-primary"
                 )}
                 onClick={() => { setStatus('all'); setPage(1); }}
@@ -346,7 +346,7 @@ export default function QuotesPage() {
               </Card>
               <Card
                 className={cn(
-                  "rounded-xl border bg-background/80 shadow-sm cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
+                  "rounded-xl border bg-background/80 shadow-xs cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
                   status === 'ordered' && "ring-2 ring-primary"
                 )}
                 onClick={() => { setStatus('ordered'); setPage(1); }}
@@ -363,7 +363,7 @@ export default function QuotesPage() {
               </Card>
               <Card
                 className={cn(
-                  "rounded-xl border bg-background/80 shadow-sm cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
+                  "rounded-xl border bg-background/80 shadow-xs cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
                   status === 'sent' && "ring-2 ring-primary"
                 )}
                 onClick={() => { setStatus('sent'); setPage(1); }}
@@ -380,7 +380,7 @@ export default function QuotesPage() {
               </Card>
               <Card
                 className={cn(
-                  "rounded-xl border bg-background/80 shadow-sm cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
+                  "rounded-xl border bg-background/80 shadow-xs cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
                   status === 'draft' && "ring-2 ring-primary"
                 )}
                 onClick={() => { setStatus('draft'); setPage(1); }}
@@ -398,7 +398,7 @@ export default function QuotesPage() {
             <div
               ref={tableContainerRef}
               className={cn(
-                "rounded-xl border bg-card shadow-sm transition-shadow",
+                "rounded-xl border bg-card shadow-xs transition-shadow",
                 tableFlash && "ring-2 ring-ring"
               )}
             >
@@ -452,7 +452,7 @@ export default function QuotesPage() {
                   {!loading && paged.map((quote) => (
                     <TableRow
                       key={quote.id}
-                      className="cursor-pointer transition-all duration-150 hover:bg-muted/60 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group"
+                      className="cursor-pointer transition-all duration-150 hover:bg-muted/60 hover:shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group"
                       onClick={() => routerNav.push(`/quotes/${quote.id}`)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {

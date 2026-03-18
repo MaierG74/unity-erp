@@ -1802,7 +1802,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     <div className="space-y-6">
       {/* Sticky header - sticks right below navbar with no gap */}
       <div className={cn(
-        "sticky top-16 z-40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b shadow-sm py-3 px-4 md:px-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4",
+        "sticky top-16 z-40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b shadow-xs py-3 px-4 md:px-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4",
         styles.stickyHeader
       )} ref={headerRef}>
         <div className="flex items-center">
@@ -2853,7 +2853,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           </SectionCard>
         )}
         {/* Bottom action bar */}
-        <div className="sticky bottom-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-t shadow-sm px-4 py-3 flex items-center justify-end gap-3">
+        <div className="sticky bottom-0 z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-t shadow-xs px-4 py-3 flex items-center justify-end gap-3">
           {isDraft && !isEditMode && (
             <>
               <Button

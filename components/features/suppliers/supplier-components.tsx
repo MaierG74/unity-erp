@@ -455,11 +455,11 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
   if (componentsLoading) {
     return (
       <div className="space-y-4">
-        <div className="flex flex-col gap-3 p-3 bg-card rounded-xl border shadow-sm md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-3 p-3 bg-card rounded-xl border shadow-xs md:flex-row md:items-center md:justify-between">
           <div className="h-9 w-full md:w-96 bg-muted animate-pulse rounded-lg" />
           <div className="h-9 w-32 bg-muted animate-pulse rounded-lg md:shrink-0" />
         </div>
-        <div className="rounded-xl border bg-card shadow-sm">
+        <div className="rounded-xl border bg-card shadow-xs">
           <div className="p-4 space-y-3">
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="flex items-center gap-4 animate-pulse">
@@ -477,7 +477,7 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 p-3 bg-card rounded-xl border shadow-sm md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-3 p-3 bg-card rounded-xl border shadow-xs md:flex-row md:items-center md:justify-between">
         <div className="flex w-full items-center gap-3 md:max-w-2xl">
           <div className="relative w-full md:w-96">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -519,7 +519,7 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
           {!isAdding && (
             <button
               onClick={startAdd}
-              className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring"
+              className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-primary text-primary-foreground shadow-xs hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring"
             >
               <Plus className="h-4 w-4" />
               Add Component
@@ -528,7 +528,7 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
         </div>
       </div>
 
-      <div className="rounded-xl border bg-card shadow-sm max-h-[65vh] overflow-auto" data-table-container>
+      <div className="rounded-xl border bg-card shadow-xs max-h-[65vh] overflow-auto" data-table-container>
         <table className="w-full">
           <thead className="text-muted-foreground">
             <tr className="border-b">

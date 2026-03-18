@@ -712,7 +712,7 @@ export function AssistantDock({ enabled }: { enabled: boolean }) {
                 key={message.id}
                 ref={index === messages.length - 1 && message.role === 'assistant' ? lastAssistantMessageRef : null}
                 className={cn(
-                  'rounded-lg border px-2.5 py-2 text-xs shadow-sm',
+                  'rounded-lg border px-2.5 py-2 text-xs shadow-xs',
                   message.role === 'user'
                     ? 'ml-6 border-primary/20 bg-primary/15 text-foreground'
                     : cn('mr-2', getStatusTone(message.status))

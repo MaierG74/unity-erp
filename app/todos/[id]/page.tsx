@@ -571,7 +571,7 @@ export default function TodoDetailPage() {
         className={cn(
           "sticky top-0 flex flex-wrap items-center justify-between gap-3 border-b px-4 py-2 transition-shadow duration-200",
           "bg-white dark:bg-gray-950 isolate",
-          isScrolled ? "shadow-md" : "shadow-sm"
+          isScrolled ? "shadow-md" : "shadow-xs"
         )}
         style={{ zIndex: 9999 }}
       >
@@ -856,7 +856,7 @@ export default function TodoDetailPage() {
                               key={p.id}
                               className={cn(
                                 "flex items-center gap-2 px-3 py-1.5 rounded-full border transition-colors cursor-pointer select-none",
-                                checked ? "bg-background border-primary/50 shadow-sm" : "bg-transparent border-transparent hover:bg-background hover:border-border"
+                                checked ? "bg-background border-primary/50 shadow-xs" : "bg-transparent border-transparent hover:bg-background hover:border-border"
                               )}
                               onClick={() => {
                                 const next = checked
@@ -1039,7 +1039,7 @@ export default function TodoDetailPage() {
                         <Button
                           size="icon"
                           variant="secondary"
-                          className="h-7 w-7 shadow-sm"
+                          className="h-7 w-7 shadow-xs"
                           onClick={(e) => {
                             e.stopPropagation();
                             downloadAttachment(attachment.id, attachment.fileName);
@@ -1050,7 +1050,7 @@ export default function TodoDetailPage() {
                         <Button
                           size="icon"
                           variant="destructive"
-                          className="h-7 w-7 shadow-sm"
+                          className="h-7 w-7 shadow-xs"
                           onClick={(e) => {
                             e.stopPropagation();
                             handleDeleteAttachment(attachment.id);

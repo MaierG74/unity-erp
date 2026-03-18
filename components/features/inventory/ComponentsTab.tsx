@@ -497,7 +497,7 @@ export function ComponentsTab() {
     // CHANGED: Reduced space-y from 6 to 3 for tighter layout
     <div className="space-y-3">
       {/* CHANGED: Combined actions and filters into single compact toolbar */}
-      <div className="p-2 bg-card rounded-xl border shadow-sm">
+      <div className="p-2 bg-card rounded-xl border shadow-xs">
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
           {/* Search */}
           <div className="relative w-full md:w-[520px]">
@@ -621,7 +621,7 @@ export function ComponentsTab() {
       </div>
 
       {/* Component list - full width */}
-      <div className="rounded-xl border bg-card shadow-sm overflow-auto">
+      <div className="rounded-xl border bg-card shadow-xs overflow-auto">
         <DataTable
           columns={columns}
           data={filteredComponents}

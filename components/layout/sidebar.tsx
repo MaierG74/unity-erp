@@ -244,7 +244,7 @@ export function Sidebar() {
                       'group relative flex h-10 items-center rounded-xl px-3 text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
                       isActive
                         ? 'bg-gradient-to-r from-primary/90 to-primary text-primary-foreground shadow-lg shadow-primary/30'
-                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground hover:shadow-sm',
+                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground hover:shadow-xs',
                       collapsed ? 'justify-center' : 'justify-start gap-3'
                     )}
                     aria-label={item.name}

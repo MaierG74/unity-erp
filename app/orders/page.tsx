@@ -2150,7 +2150,7 @@ export default function OrdersPage() {
           variant="outline"
           size="sm"
           onClick={() => handleSectionFilter(null)}
-          className={`rounded-full shadow-sm hover:shadow transition-all duration-200 ${
+          className={`rounded-full shadow-xs hover:shadow transition-all duration-200 ${
             activeSection === null ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
           }`}
         >
@@ -2160,7 +2160,7 @@ export default function OrdersPage() {
           variant="outline"
           size="sm"
           onClick={() => handleSectionFilter('chair')}
-          className={`rounded-full shadow-sm hover:shadow transition-all duration-200 ${
+          className={`rounded-full shadow-xs hover:shadow transition-all duration-200 ${
             activeSection === 'chair' ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
           }`}
         >
@@ -2171,7 +2171,7 @@ export default function OrdersPage() {
           variant="outline"
           size="sm"
           onClick={() => handleSectionFilter('wood')}
-          className={`rounded-full shadow-sm hover:shadow transition-all duration-200 ${
+          className={`rounded-full shadow-xs hover:shadow transition-all duration-200 ${
             activeSection === 'wood' ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
           }`}
         >
@@ -2182,7 +2182,7 @@ export default function OrdersPage() {
           variant="outline"
           size="sm"
           onClick={() => handleSectionFilter('steel')}
-          className={`rounded-full shadow-sm hover:shadow transition-all duration-200 ${
+          className={`rounded-full shadow-xs hover:shadow transition-all duration-200 ${
             activeSection === 'steel' ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
           }`}
         >
@@ -2193,7 +2193,7 @@ export default function OrdersPage() {
           variant="outline"
           size="sm"
           onClick={() => handleSectionFilter('powdercoating')}
-          className={`rounded-full shadow-sm hover:shadow transition-all duration-200 ${
+          className={`rounded-full shadow-xs hover:shadow transition-all duration-200 ${
             activeSection === 'powdercoating' ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
           }`}
         >
@@ -2203,7 +2203,7 @@ export default function OrdersPage() {
       </div>
 
       {/* Filters bar */}
-      <div className="p-4 border rounded-xl bg-card/50 backdrop-blur-sm shadow-sm">
+      <div className="p-4 border rounded-xl bg-card/50 backdrop-blur-sm shadow-xs">
         <div className="flex flex-col md:flex-row md:items-end gap-4">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="status-filter" className="text-xs font-medium text-muted-foreground">
@@ -2322,7 +2322,7 @@ export default function OrdersPage() {
             <p className="text-sm text-muted-foreground mt-1">Please try again later</p>
           </div>
         ) : totalCount > 0 ? (
-          <div className="overflow-hidden border rounded-xl bg-card/50 backdrop-blur-sm shadow-sm">
+          <div className="overflow-hidden border rounded-xl bg-card/50 backdrop-blur-sm shadow-xs">
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>

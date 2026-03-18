@@ -535,8 +535,8 @@ export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardPro
       <div className="container mx-auto space-y-6 py-6">
         <div className="h-10 w-64 animate-pulse rounded-md bg-muted" />
         <div className="grid min-h-[70vh] gap-4 lg:grid-cols-[360px_1fr]">
-          <div className="h-full rounded-lg border bg-card shadow-sm" />
-          <div className="h-full rounded-lg border bg-card shadow-sm" />
+          <div className="h-full rounded-lg border bg-card shadow-xs" />
+          <div className="h-full rounded-lg border bg-card shadow-xs" />
         </div>
       </div>
     );
@@ -558,7 +558,7 @@ export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardPro
 
   return (
     <div className="w-full space-y-0 px-2 py-1">
-      <div className="flex flex-wrap items-center gap-1.5 rounded-md border bg-card px-2 py-1 text-sm shadow-sm mb-2">
+      <div className="flex flex-wrap items-center gap-1.5 rounded-md border bg-card px-2 py-1 text-sm shadow-xs mb-2">
         <div className="flex items-center gap-1 mr-2 border-r pr-2">
           <Button
             size="sm"
@@ -768,7 +768,7 @@ export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardPro
                     .map((group) => {
                       const collapsed = collapsedRoles.has(group.key);
                       return (
-                        <div key={group.key} className="rounded-lg border bg-card shadow-sm">
+                        <div key={group.key} className="rounded-lg border bg-card shadow-xs">
                           <div className="flex items-center justify-between border-b px-3 py-1.5">
                             <div className="flex items-center gap-2">
                               <span className="text-xs font-semibold">{group.label}</span>
