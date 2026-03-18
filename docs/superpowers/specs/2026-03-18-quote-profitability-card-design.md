@@ -18,21 +18,26 @@ All data is already loaded client-side. `fetchQuote()` returns items with nested
 
 ### Cost Calculation Per Item
 
+Filter to `item.item_type === 'priced'` only — headings and notes are excluded from all calculations.
+
 For each priced `QuoteItem`:
 
 1. Iterate its `quote_item_clusters[]`
-2. For each cluster, sum `cluster_line.qty × cluster_line.unit_cost` across all `quote_cluster_lines[]`
+2. For each cluster, sum `cluster_line.qty × (cluster_line.unit_cost ?? 0)` across all `quote_cluster_lines[]`. Note: `unit_cost` is nullable — treat `null` as `0`.
 3. That sum is the **cluster cost subtotal**
 4. The cluster's sell contribution uses the existing markup: `cost_subtotal + (cost_subtotal × markup_percent / 100)` — but for margin purposes we only care about the raw cost
 5. **Item total cost** = sum of all cluster cost subtotals
 6. **Item revenue** = `item.qty × item.unit_price`
 7. **Item margin** = `(revenue - cost) / revenue × 100`
+8. **Zero-revenue edge case**: if revenue is 0 (qty or unit_price is 0), show margin as "N/A" and exclude from aggregate margin calculation
 
-Quote-level totals are the sum across all priced items.
+Note: `include_in_markup` on cluster lines affects markup calculation but not raw cost — all lines contribute to cost regardless. Overhead lines with `overhead_cost_type: 'percentage'` have pre-computed `unit_cost` values, so `qty × unit_cost` works uniformly for all line types.
+
+Quote-level totals are the sum across all costed priced items. Use the project's existing `formatCurrency()` helper for all currency display.
 
 ### Items Without Costing Data
 
-Items with no clusters or no cluster lines are shown in the per-item breakdown **greyed out** with a ⚠ warning icon and "No cost data" in place of margin. They are excluded from the aggregate margin calculation to avoid inflating the percentage.
+An item "has costing" if it has at least one cluster with at least one cluster line where `unit_cost` is not null. Items without costing data are shown in the per-item breakdown **greyed out** with a ⚠ warning icon and "No cost data" in place of margin. They are excluded from the aggregate margin calculation to avoid inflating the percentage.
 
 ## UI Design
 
@@ -146,7 +151,7 @@ interface QuoteProfitability {
 
 ### Integration Point
 
-In `EnhancedQuoteEditor.tsx`, render `<QuoteProfitabilityCard items={items} />` immediately after the Quote Summary `</section>` tag (line 446), inside the same right-column grid cell.
+In `EnhancedQuoteEditor.tsx`, render `<QuoteProfitabilityCard items={items} />` inside the right-column wrapper `<div>`, between the Quote Summary `</section>` closing tag and the wrapper `</div>` closing tag. This keeps the profitability card in the same column as the quote summary.
 
 ## Scope Exclusions
 
