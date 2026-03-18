@@ -71,7 +71,7 @@ export interface QuoteClusterLine {
   hours?: number | null;
   rate?: number | null;
   sort_order: number;
-  cutlist_slot?: 'primary' | 'backer' | 'band16' | 'band32' | null;
+  cutlist_slot?: string | null;
   overhead_element_id?: number | null;
   overhead_cost_type?: 'fixed' | 'percentage' | null;
   overhead_percentage_basis?: 'materials' | 'labor' | 'total' | null;
@@ -176,7 +176,8 @@ export async function fetchQuote(
 export async function fetchQuoteItemCutlistSnapshot(quoteItemId: string): Promise<QuoteItemCutlist | null> {
   if (!quoteItemId) return null;
   try {
-    const res = await fetch(`/api/quote-items/${quoteItemId}/cutlist`, {
+    const { authorizedFetch } = await import('@/lib/client/auth-fetch');
+    const res = await authorizedFetch(`/api/quote-items/${quoteItemId}/cutlist`, {
       method: 'GET',
       cache: 'no-store',
     });
@@ -206,7 +207,8 @@ export async function saveQuoteItemCutlistSnapshot(
   if (!quoteItemId) throw new Error('quoteItemId is required');
 
   try {
-    const res = await fetch(`/api/quote-items/${quoteItemId}/cutlist`, {
+    const { authorizedFetch } = await import('@/lib/client/auth-fetch');
+    const res = await authorizedFetch(`/api/quote-items/${quoteItemId}/cutlist`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

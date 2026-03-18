@@ -18,6 +18,7 @@ import {
   deleteQuoteClusterLine,
   fetchQuoteItemClusters,
   fetchQuoteItemAttachments,
+  fetchQuoteItemCutlistSnapshot,
   formatCurrency,
   Component,
   fetchComponents,
@@ -27,6 +28,7 @@ import {
   fetchEffectiveBOM,
   fetchComponentsByIds,
   reorderQuoteItems,
+  saveQuoteItemCutlistSnapshot,
   type ProductOverheadItem,
 } from '@/lib/db/quotes';
 import QuoteItemClusterGrid from './QuoteItemClusterGrid';
@@ -41,6 +43,7 @@ import InlineAttachmentsCell from './InlineAttachmentsCell';
 import AddQuoteItemDialog from './AddQuoteItemDialog';
 import { createQuoteAttachmentFromUrl, fetchPrimaryProductImage } from '@/lib/db/quotes';
 import type { ProductOptionSelection } from '@/lib/db/products';
+import { buildCutlistLineRefsFromLines, cloneCutlistLayoutWithLineRefs, cloneJsonValue } from '@/lib/cutlist/quoteSnapshotCopy';
 import Link from 'next/link';
 
 interface Props {
@@ -781,6 +784,19 @@ export default function QuoteItemsTable({
         }
       }
 
+      let duplicatedCutlistSnapshot = null;
+      const originalCutlistSnapshot = await fetchQuoteItemCutlistSnapshot(id);
+      if (originalCutlistSnapshot) {
+        const duplicatedLineRefs = buildCutlistLineRefsFromLines(
+          newClusters.flatMap((cluster) => cluster.quote_cluster_lines || [])
+        );
+        duplicatedCutlistSnapshot = await saveQuoteItemCutlistSnapshot(newItem.id, {
+          optionsHash: originalCutlistSnapshot.options_hash ?? undefined,
+          billingOverrides: cloneJsonValue(originalCutlistSnapshot.billing_overrides) ?? undefined,
+          layout: cloneCutlistLayoutWithLineRefs(originalCutlistSnapshot.layout_json, duplicatedLineRefs),
+        });
+      }
+
       // Duplicate attachments
       try {
         const attachmentsToCreate = await fetchQuoteItemAttachments(quoteId, id);
@@ -812,6 +828,7 @@ export default function QuoteItemsTable({
         // Fallback: add the new item to the list with its clusters
         const newItemWithClusters: QuoteItem = {
           ...newItem,
+          cutlist_snapshot: duplicatedCutlistSnapshot,
           quote_item_clusters: newClusters,
         };
         onItemsChange([...items, newItemWithClusters]);

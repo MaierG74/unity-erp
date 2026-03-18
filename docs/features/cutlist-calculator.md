@@ -24,6 +24,7 @@ Product cutlist builder behavior:
 - The product Cutlist tab's **Generate Cutlist** action routes into the builder page instead of opening the legacy product-specific calculator dialog.
 - The quote cutlist API routes now follow the quoting module/org access pattern before reading or mutating quote cutlist snapshots and costing lines.
 - Quote cutlist client requests now send the signed-in session token, and the calculator falls back cleanly when no saved cutlist material defaults row exists yet.
+- Duplicating a quote line or an entire quote now copies saved `quote_item_cutlists` snapshots and rewires embedded `lineRefs` to the duplicated costing lines, so copied quote items open with the same cutlist state instead of an empty builder.
 - Reusable offcut thresholds are organization-level defaults, so each tenant can decide what counts as a usable leftover piece.
 - Both active embedded flows now use explicit persistence bridges:
   - quote cutlists use `useQuoteCutlistAdapterV2`
@@ -186,7 +187,7 @@ The `/cutlist` page uses `packPartsSmartOptimized()` in `components/features/cut
   1. Packs each band into horizontal strips (FFD by width).
   2. Stacks strips top-to-bottom (FFD by height).
   3. Tries three layouts (horizontal strips, nested complementary widths, vertical-first).
-  4. Chooses the best layout by **fewest sheets**, then **fewest remaining parts**, then **fewest cuts**.
+  4. Chooses the best layout by **fewest sheets**, then **fewest remaining parts**, then **fewest merged saw cuts**; when cut counts tie it prefers **fewer vertical rip lines** so same-width parts stay in one strip when possible.
 - Optional alignment step nudges vertical cut lines to reduce total saw cuts.
 - Kerf is applied between adjacent parts/strips using the **Blade Kerf** setting from Materials.
 
@@ -200,6 +201,8 @@ The `/cutlist` page uses `packPartsSmartOptimized()` in `components/features/cut
   - Deterministic shuffles for additional diversity
   - Corner-priority and height-band groupings
 - **Split selection**: Evaluates both horizontal and vertical splits at each placement, choosing the one that best consolidates remaining free space.
+- **Exact-fit strip continuation**: When a part exactly matches the current strip width/height, the scorer treats the leftover end-trim as cheap terminal waste instead of a hard sliver penalty, which helps preserve full-height/full-width reusable offcuts on jobs like repeated `600 mm` rips.
+- **Exact cut stats**: Guillotine and Deep (SA) now track the actual split segments generated during packing, then merge collinear segments per sheet so `cuts` and `cut length` reflect the modeled guillotine sequence instead of a rough `2 cuts per part` estimate.
 - **Result metrics**: Tracks `offcutConcentration` (1.0 = all waste in one piece) and `fragmentCount`.
 
 **Deep algorithm:** `simulated annealing` (iterative optimization)
