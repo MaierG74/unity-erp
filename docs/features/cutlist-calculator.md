@@ -2,13 +2,15 @@
 
 > **Status**: Active development
 > **Location**: `/app/cutlist/page.tsx`
-> **Last Updated**: 2026-01-26
+> **Last Updated**: 2026-03-18
 
 ---
 
 ## Overview
 
 The Cutlist Calculator is a tool for planning sheet material cuts. Users enter parts with dimensions, and the calculator optimizes how to cut them from stock boards with minimal waste.
+
+Saved cutlist snapshots are now duplicated with both quote-item duplication and whole-quote copying. When a copied item has a saved cutlist, the new quote item keeps the same cutlist state and rewires embedded `lineRefs` to the duplicated costing lines.
 
 ---
 

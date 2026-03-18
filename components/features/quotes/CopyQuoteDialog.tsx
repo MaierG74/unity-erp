@@ -138,7 +138,7 @@ export function CopyQuoteDialog({
         <DialogHeader>
           <DialogTitle>Copy Quote</DialogTitle>
           <DialogDescription>
-            Create a copy of &quot;{sourceQuote.quote_number}&quot; with a new name. All items, pricing, and attachments will be duplicated.
+            Create a copy of &quot;{sourceQuote.quote_number}&quot; with a new name. All items, pricing, attachments, and cutlists will be duplicated.
           </DialogDescription>
         </DialogHeader>
 
