@@ -65,7 +65,7 @@ test('basic margin calculation', () => {
   assert.equal(result.items[0].hasCosting, true)
 })
 
-test('multiple cluster lines sum correctly', () => {
+test('multiple cluster lines sum correctly and scale by item qty', () => {
   const items = [
     makeItem({
       qty: 2, unit_price: 200,
@@ -76,11 +76,12 @@ test('multiple cluster lines sum correctly', () => {
     }),
   ]
   const result = computeQuoteProfitability(items)
-  // cost = (3*20 + 1*50) + (2*10) = 60 + 50 + 20 = 130
+  // per-unit cost = (3*20 + 1*50) + (2*10) = 60 + 50 + 20 = 130
+  // total cost = 130 * qty(2) = 260
   // revenue = 2*200 = 400
   assert.equal(result.totalRevenue, 400)
-  assert.equal(result.totalCost, 130)
-  assert.equal(result.totalProfit, 270)
+  assert.equal(result.totalCost, 260)
+  assert.equal(result.totalProfit, 140)
 })
 
 test('null unit_cost treated as 0', () => {
@@ -139,7 +140,7 @@ test('zero revenue item shows NaN margin (handled as N/A)', () => {
   ]
   const result = computeQuoteProfitability(items)
   assert.equal(result.items[0].revenue, 0)
-  assert.equal(result.items[0].cost, 50)
+  assert.equal(result.items[0].cost, 0)  // perUnitCost(50) * qty(0) = 0
   assert.ok(Number.isNaN(result.items[0].marginPercent))
 })
 
@@ -192,9 +193,11 @@ test('multiple costed items aggregate correctly', () => {
     }),
   ]
   const result = computeQuoteProfitability(items)
+  // item a: revenue=200, perUnitCost=80, cost=80*1=80
+  // item b: revenue=300, perUnitCost=150, cost=150*2=300
   assert.equal(result.totalRevenue, 500)
-  assert.equal(result.totalCost, 230)
-  assert.equal(result.totalProfit, 270)
+  assert.equal(result.totalCost, 380)
+  assert.equal(result.totalProfit, 120)
   assert.equal(result.items.length, 2)
 })
 

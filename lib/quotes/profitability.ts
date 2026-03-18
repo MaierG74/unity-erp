@@ -28,14 +28,17 @@ export function computeQuoteProfitability(items: QuoteItem[]): QuoteProfitabilit
     let cost = 0
     let hasAnyCostLine = false
 
+    // Cluster costs are per-unit — sum line costs then multiply by item qty
+    let perUnitCost = 0
     for (const cluster of item.quote_item_clusters ?? []) {
       for (const line of cluster.quote_cluster_lines ?? []) {
         if (line.unit_cost != null) {
           hasAnyCostLine = true
-          cost += line.qty * line.unit_cost
+          perUnitCost += line.qty * line.unit_cost
         }
       }
     }
+    cost = perUnitCost * item.qty
 
     const profit = revenue - cost
     const marginPercent = revenue !== 0 ? (profit / revenue) * 100 : NaN
