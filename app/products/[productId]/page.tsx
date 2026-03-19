@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, use } from 'react';
+import { useState, useMemo, use, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import {
@@ -14,9 +14,19 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Package, Edit, Plus, Trash2, Save, X } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -28,9 +38,11 @@ import { ProductOptionsTab } from '@/components/features/products/ProductOptions
 import { ProductCutlistTab } from '@/components/features/products/ProductCutlistTab';
 import { useToast } from '@/components/ui/use-toast';
 import { ProductTransactionsTab } from '@/components/features/products/ProductTransactionsTab';
+import ProductReportsTab from '@/components/features/products/ProductReportsTab';
 import { useModuleAccess } from '@/lib/hooks/use-module-access';
 import { MODULE_KEYS } from '@/lib/modules/keys';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
+import type { CropParams } from '@/types/image-editor';
 
 interface ProductDetailPageProps {
   params: Promise<{
@@ -53,12 +65,22 @@ interface ProductImage {
   product_id: string | number;
   image_url: string;
   is_primary: boolean;
+  crop_params?: CropParams | null;
 }
 
 interface ProductCategory {
   product_cat_id: number;
   categoryname: string;
 }
+
+const PRODUCT_DETAIL_TABS = ['details', 'images', 'categories', 'costing', 'cutlist', 'options', 'transactions', 'reports'] as const;
+type ProductDetailTab = typeof PRODUCT_DETAIL_TABS[number];
+type PendingNavigation =
+  | { type: 'back' }
+  | { type: 'browser-back' }
+  | { type: 'tab'; tab: ProductDetailTab }
+  | { type: 'link'; href: string }
+  | null;
 
 // Fetch a single product by ID
 async function fetchProduct(productId: number): Promise<Product | null> {
@@ -129,7 +151,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
   const { productId: productIdParam } = use(params);
   const productId = parseInt(productIdParam, 10);
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState('details');
+  const searchParams = useSearchParams();
   const { toast } = useToast();
   const [editOpen, setEditOpen] = useState(false);
   const [editCode, setEditCode] = useState('');
@@ -140,8 +162,30 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
   const [addFgLocation, setAddFgLocation] = useState('');
   const [addingFg, setAddingFg] = useState(false);
   const [reservationsOpen, setReservationsOpen] = useState(false);
+  const [hasPendingImageUploads, setHasPendingImageUploads] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation>(null);
+  const bypassPopstateRef = useRef(false);
 
   console.log('ProductDetailPage mounted, productId:', productId);
+
+  const activeTabParam = searchParams?.get('tab');
+  const activeTab: ProductDetailTab = PRODUCT_DETAIL_TABS.includes(activeTabParam as ProductDetailTab)
+    ? (activeTabParam as ProductDetailTab)
+    : 'details';
+
+  const updateTabInUrl = (nextTab: ProductDetailTab) => {
+    const params = new URLSearchParams(searchParams?.toString() || '');
+
+    if (nextTab === 'details') {
+      params.delete('tab');
+    } else {
+      params.set('tab', nextTab);
+    }
+
+    const query = params.toString();
+    const url = query ? `/products/${productId}?${query}` : `/products/${productId}`;
+    router.replace(url, { scroll: false });
+  };
 
   // Fetch product
   const { data: product, isLoading, error, refetch } = useQuery({
@@ -230,9 +274,90 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
     return map;
   }, [orderAttachments]);
 
+  const requestNavigation = (nextNavigation: Exclude<PendingNavigation, null>) => {
+    if (hasPendingImageUploads) {
+      setPendingNavigation(nextNavigation);
+      return;
+    }
+
+    if (nextNavigation.type === 'back' || nextNavigation.type === 'browser-back') {
+      bypassPopstateRef.current = true;
+      router.back();
+      return;
+    }
+
+    if (nextNavigation.type === 'tab') {
+      updateTabInUrl(nextNavigation.tab);
+      return;
+    }
+
+    router.push(nextNavigation.href);
+  };
+
   // Handle back button - use router.back() to preserve URL params (filters)
   const handleBack = () => {
-    router.back();
+    requestNavigation({ type: 'back' });
+  };
+
+  const handleTabChange = (nextTab: string) => {
+    requestNavigation({ type: 'tab', tab: nextTab as ProductDetailTab });
+  };
+
+  useEffect(() => {
+    if (!hasPendingImageUploads || activeTab !== 'images') return;
+
+    const handlePopState = () => {
+      if (bypassPopstateRef.current) {
+        bypassPopstateRef.current = false;
+        return;
+      }
+
+      window.history.go(1);
+      setPendingNavigation({ type: 'browser-back' });
+    };
+
+    const handleDocumentClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      const link = target?.closest('a[href]') as HTMLAnchorElement | null;
+      if (!link) return;
+      if (link.target === '_blank' || link.hasAttribute('download')) return;
+      if (!link.href.startsWith(window.location.origin)) return;
+      if (link.href === window.location.href) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const href = `${link.pathname}${link.search}${link.hash}`;
+      setPendingNavigation({ type: 'link', href });
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    document.addEventListener('click', handleDocumentClick, true);
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      document.removeEventListener('click', handleDocumentClick, true);
+    };
+  }, [activeTab, hasPendingImageUploads]);
+
+  const handleConfirmPendingNavigation = () => {
+    if (!pendingNavigation) return;
+
+    if (pendingNavigation.type === 'back' || pendingNavigation.type === 'browser-back') {
+      setPendingNavigation(null);
+      bypassPopstateRef.current = true;
+      router.back();
+      return;
+    }
+
+    if (pendingNavigation.type === 'tab') {
+      updateTabInUrl(pendingNavigation.tab);
+      setPendingNavigation(null);
+      return;
+    }
+
+    router.push(pendingNavigation.href);
+    setPendingNavigation(null);
   };
 
   const openEdit = () => {
@@ -358,7 +483,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
         </Dialog>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
         <TabsList>
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="images">Images</TabsTrigger>
@@ -367,131 +492,117 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
           <TabsTrigger value="cutlist">Cutlist</TabsTrigger>
           <TabsTrigger value="options">Options</TabsTrigger>
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
+          <TabsTrigger value="reports">Reports</TabsTrigger>
         </TabsList>
         
         <TabsContent value="details" className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Product image */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Product Image</CardTitle>
-              </CardHeader>
-              <CardContent className="flex justify-center">
-                {product.primary_image ? (
-                  <div className="relative h-60 w-60 rounded-md overflow-hidden bg-card ring-0 dark:bg-white/5 dark:ring-1 dark:ring-white/10">
-                    <Image 
-                      src={product.primary_image}
-                      alt={product.name}
-                      fill
-                      className="object-contain dark:brightness-110 dark:drop-shadow-[0_8px_24px_rgba(0,0,0,0.85)]"
-                    />
-                  </div>
-                ) : (
-                  <div className="h-60 w-60 bg-muted rounded-md flex items-center justify-center">
-                    <Package className="h-24 w-24 text-muted-foreground/50" />
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            <div className="rounded-lg border border-border/50 bg-muted/30 p-4 flex flex-col items-center gap-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground self-start">Product Image</p>
+              {product.primary_image ? (
+                <div className="relative h-52 w-52 rounded-md overflow-hidden bg-card ring-0 dark:bg-white/5 dark:ring-1 dark:ring-white/10">
+                  <Image
+                    src={product.primary_image}
+                    alt={product.name}
+                    fill
+                    className="object-contain dark:brightness-110 dark:drop-shadow-[0_8px_24px_rgba(0,0,0,0.85)]"
+                  />
+                </div>
+              ) : (
+                <div className="h-52 w-52 bg-muted rounded-md flex items-center justify-center">
+                  <Package className="h-20 w-20 text-muted-foreground/50" />
+                </div>
+              )}
+            </div>
 
             {/* Product details */}
-            <Card className="md:col-span-2">
-              <CardHeader>
-                <CardTitle className="text-lg">Product Details</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <h3 className="font-medium text-sm text-muted-foreground">
-                    Product Code
-                  </h3>
-                  <p className="mt-1">{product.internal_code}</p>
+            <div className="md:col-span-2 rounded-lg border border-border/50 bg-muted/30 p-4 space-y-4">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Product Details</p>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground">Product Code</span>
+                  <p className="text-sm font-medium">{product.internal_code}</p>
                 </div>
-                <div>
-                  <h3 className="font-medium text-sm text-muted-foreground">
-                    Name
-                  </h3>
-                  <p className="mt-1">{product.name}</p>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground">Name</span>
+                  <p className="text-sm font-medium">{product.name}</p>
                 </div>
-                <div>
-                  <h3 className="font-medium text-sm text-muted-foreground">
-                    Description
-                  </h3>
-                  <p className="mt-1 whitespace-pre-line">
-                    {product.description || 'No description provided'}
+                <div className="col-span-2 space-y-1">
+                  <span className="text-xs text-muted-foreground">Description</span>
+                  <p className="text-sm whitespace-pre-line">
+                    {product.description || <span className="text-muted-foreground">No description provided</span>}
                   </p>
                 </div>
-
-                {/* Categories */}
-                <div>
-                  <h3 className="font-medium text-sm text-muted-foreground">
-                    Categories
-                  </h3>
-                  <div className="mt-1 flex flex-wrap gap-2">
+                <div className="col-span-2 space-y-1">
+                  <span className="text-xs text-muted-foreground">Categories</span>
+                  <div className="flex flex-wrap gap-1.5">
                     {product.categories && product.categories.length > 0 ? (
                       product.categories.map(category => (
-                        <div 
+                        <div
                           key={category.product_cat_id}
-                          className="px-2 py-1 text-xs rounded-full bg-muted"
+                          className="px-2 py-0.5 text-xs rounded-full bg-muted border border-border/50"
                         >
                           {category.categoryname}
                         </div>
                       ))
                     ) : (
-                      <p className="text-sm text-muted-foreground">No categories assigned</p>
+                      <p className="text-xs text-muted-foreground">No categories assigned</p>
                     )}
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           </div>
 
           {/* Finished-Goods Inventory Summary */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Finished-Goods Inventory</CardTitle>
-              <CardDescription>On-hand, reserved, and available quantities for this product.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="rounded-md border p-4">
-                  <div className="text-sm text-muted-foreground">On Hand</div>
-                  <div className="text-2xl font-semibold mt-1">{onHandTotal}</div>
-                </div>
-                <div className="rounded-md border p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm text-muted-foreground">Reserved (all orders)</div>
-                    {reservationsListSorted.length > 0 && (
-                      <button type="button" className="text-xs text-primary hover:underline" onClick={() => setReservationsOpen(true)}>
-                        View
-                      </button>
-                    )}
-                  </div>
-                  <div className="text-2xl font-semibold mt-1">{reservedTotal}</div>
-                </div>
-                <div className="rounded-md border p-4">
-                  <div className="text-sm text-muted-foreground">Available</div>
-                  <div className="text-2xl font-semibold mt-1">{availableTotal}</div>
-                </div>
+          <div className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Finished-Goods Inventory</p>
+              <p className="text-xs text-muted-foreground mt-0.5">On-hand, reserved, and available quantities for this product.</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="rounded-md border border-border/50 bg-background/50 p-3">
+                <div className="text-xs text-muted-foreground">On Hand</div>
+                <div className="text-xl font-semibold mt-1">{onHandTotal}</div>
               </div>
-              {Array.isArray(inventoryRows) && inventoryRows.length > 0 && (
-                <div className="mt-4 text-sm text-muted-foreground">
-                  Locations tracked: {inventoryRows.filter((r: any) => r.location).length} / {inventoryRows.length}
+              <div className="rounded-md border border-border/50 bg-background/50 p-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs text-muted-foreground">Reserved (all orders)</div>
+                  {reservationsListSorted.length > 0 && (
+                    <button type="button" className="text-xs text-primary hover:underline" onClick={() => setReservationsOpen(true)}>
+                      View
+                    </button>
+                  )}
                 </div>
-              )}
-              {Array.isArray(reservationRows) && reservationRows.length > 0 && (
-                <div className="mt-2 text-sm text-muted-foreground">
-                  Active reservations across {new Set(reservationRows.map((r: any) => r.order_id)).size} order(s).
-                </div>
-              )}
+                <div className="text-xl font-semibold mt-1">{reservedTotal}</div>
+              </div>
+              <div className="rounded-md border border-border/50 bg-background/50 p-3">
+                <div className="text-xs text-muted-foreground">Available</div>
+                <div className="text-xl font-semibold mt-1">{availableTotal}</div>
+              </div>
+            </div>
+            {Array.isArray(inventoryRows) && inventoryRows.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Locations tracked: {inventoryRows.filter((r: any) => r.location).length} / {inventoryRows.length}
+              </p>
+            )}
+            {Array.isArray(reservationRows) && reservationRows.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Active reservations across {new Set(reservationRows.map((r: any) => r.order_id)).size} order(s).
+              </p>
+            )}
 
-              {/* Add Finished Goods */}
-              <form onSubmit={handleAddFg} className="mt-6 grid grid-cols-1 sm:grid-cols-6 gap-3">
-                <div className="sm:col-span-2">
-                  <Label htmlFor="fg-qty">Add Quantity</Label>
+            {/* Add Finished Goods */}
+            <div className="border-t border-border/50 pt-4">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Add Stock</p>
+              <form onSubmit={handleAddFg} className="grid grid-cols-1 sm:grid-cols-6 gap-x-4 gap-y-3">
+                <div className="sm:col-span-2 space-y-1.5">
+                  <Label htmlFor="fg-qty" className="text-xs text-muted-foreground">Quantity</Label>
                   <Input id="fg-qty" type="number" min="0" step="1" value={addFgQty} onChange={(e) => setAddFgQty(e.target.value)} placeholder="e.g. 5" />
                 </div>
-                <div className="sm:col-span-3">
-                  <Label htmlFor="fg-loc">Location (optional)</Label>
+                <div className="sm:col-span-3 space-y-1.5">
+                  <Label htmlFor="fg-loc" className="text-xs text-muted-foreground">Location (optional)</Label>
                   <Input id="fg-loc" value={addFgLocation} onChange={(e) => setAddFgLocation(e.target.value)} placeholder="Leave blank for primary" />
                 </div>
                 <div className="sm:col-span-1 flex items-end">
@@ -500,8 +611,8 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
                   </Button>
                 </div>
               </form>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
           {/* Reservations dialog */}
           <Dialog open={reservationsOpen} onOpenChange={setReservationsOpen}>
@@ -550,6 +661,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
                 productCode={product.internal_code}
                 images={product.images || []}
                 onImagesChange={() => refetch()}
+                onPendingUploadsChange={setHasPendingImageUploads}
               />
             </CardContent>
           </Card>
@@ -670,7 +782,34 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="reports" className="space-y-4">
+          {activeTab === 'reports' && <ProductReportsTab productId={product.product_id} />}
+        </TabsContent>
       </Tabs>
+
+      <AlertDialog open={pendingNavigation !== null} onOpenChange={(open) => (!open ? setPendingNavigation(null) : undefined)}>
+        <AlertDialogContent className="max-w-md border-border/60 bg-background/95 backdrop-blur">
+          <AlertDialogHeader className="space-y-3 text-left">
+            <AlertDialogTitle className="text-xl">Upload Not Finished</AlertDialogTitle>
+            <AlertDialogDescription className="text-sm leading-6 text-muted-foreground">
+              You have an image staged on the Images tab, but it has not been uploaded yet. If you leave now, that pasted or cropped image will be lost.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            Click <span className="font-semibold text-foreground">Upload Image</span> first if you want to keep it attached to this product.
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingNavigation(null)}>Stay On Images</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmPendingNavigation}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Leave Without Uploading
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

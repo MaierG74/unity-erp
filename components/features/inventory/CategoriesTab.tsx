@@ -128,7 +128,7 @@ export function CategoriesTab() {
     <div className="space-y-6">
       {/* Actions */}
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-        <div className="inline-flex gap-2 p-3 bg-card rounded-xl border shadow-sm">
+        <div className="inline-flex gap-2 p-3 bg-card rounded-xl border shadow-xs">
           <Button onClick={refreshData} className="h-9" variant="outline">
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
@@ -163,7 +163,7 @@ export function CategoriesTab() {
       </div>
 
       {/* Categories Table */}
-      <div className="rounded-xl border bg-card shadow-sm">
+      <div className="rounded-xl border bg-card shadow-xs">
         <Table>
           <TableHeader>
             <TableRow>

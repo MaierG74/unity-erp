@@ -5,6 +5,18 @@ Status: **Implemented** (2026-02-04)
 ## Summary
 Add a line-item type that can be used as a heading or descriptive block inside a quote. These items are not priced (no qty/unit/total) but can still carry text and attachments (e.g., floor plans or reference images). The default remains a priced quote item.
 
+## Quote Status Lifecycle
+- `draft`: Quote is still being prepared internally.
+- `sent`: Quote has been emailed to the customer and is awaiting follow-up.
+- `ordered`: Quote has been converted into a customer order.
+
+Current behavior:
+- Users can edit the quote status from the quote detail screen.
+- Sending a quote email automatically moves the quote to `sent` unless it is already `ordered`.
+- Creating an order from a quote automatically moves the quote to `ordered`.
+
+Legacy statuses such as `in_progress`, `won`, `lost`, `accepted`, `rejected`, and `expired` are no longer part of the supported quote workflow.
+
 ## Goals
 - Keep the default item behavior as a priced line item.
 - Allow switching an item to a non-priced type (heading or note).
@@ -81,6 +93,12 @@ Notes:
 ## Email / Preview / Download Consistency
 - All three actions use the same `QuotePDFDocument`, so layout changes apply everywhere.
 
+## Pricing Behavior
+- Costing cluster lines remain the internal cost basis for a priced quote item.
+- `Update Price` copies the currently displayed cluster total into the line item's `unit_price`; it does not zero the cluster markup.
+- If an estimator manually edits `unit_price`, the quote keeps that selling price and recalculates the primary costing cluster's effective `markup_percent` from the current cost subtotal.
+- No automatic whole-Rand rounding is applied during price sync; the estimator remains in control of any manual rounding decisions.
+
 ## Implementation Steps (Detailed)
 1. Schema + triggers
    - Create migration to add `quote_item_type` enum and `item_type` column.
@@ -136,6 +154,8 @@ Notes:
   - Cutlist button hidden for non-priced items
   - Headings render with bold description text
   - Rows with item_type=heading have subtle background highlight
+  - Manual `unit_price` edits now keep the entered sell price and recalculate the displayed cluster markup from the current costing subtotal
+  - `Update Price` keeps the existing markup logic intact while syncing the cluster total into `unit_price`
 
 ### PDF Changes
 - **QuotePDFDocument**:
@@ -143,4 +163,3 @@ Notes:
   - Note items render as normal text spanning full width
   - Both types can include images/attachments below
   - Only priced items contribute to subtotal/VAT/total
-

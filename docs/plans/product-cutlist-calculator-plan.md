@@ -1,20 +1,24 @@
 # Product Cutlist Calculator
 
+> Historical note (2026-03-07): the canonical in-app product cutlist flow now routes through `/products/[productId]/cutlist-builder`, which uses the shared `CutlistCalculator` component and auto-seeds from the effective BOM when no saved product cutlist groups exist. The older `ProductCutlistCalculator.tsx` dialog path has been retired.
+
 ## Overview
 
 The Product Cutlist Calculator enables users to generate optimized sheet layouts directly from a product's Bill of Materials. This is Phase 1 of the order-level cutlist aggregation feature.
 
 ## Current Implementation (Phase 1)
 
+This section is historical context only. The active implementation now uses the shared `CutlistCalculator` page at `/products/[productId]/cutlist-builder`.
+
 ### Components Created
 
 1. **`ProductCutlistCalculator.tsx`** - Dialog component for calculating cutlists
-   - Located at: `components/features/products/ProductCutlistCalculator.tsx`
-   - Triggered from the "Generate Cutlist" button on the Cutlist tab
+   - Retired
+   - Formerly triggered from the "Generate Cutlist" button on the Cutlist tab
 
 2. **Integration into ProductCutlistTab**
-   - Added "Generate Cutlist" button to the overview card
-   - Passes cutlist rows to the calculator dialog
+   - Historical behavior opened a dedicated calculator dialog
+   - Current behavior routes into the shared builder page
 
 ### Features
 
@@ -68,6 +72,8 @@ ProductCutlistTab
 
 ## Cutlist Builder (Phase 1.5)
 
+This section is also historical. The current product builder uses the shared `CutlistCalculator` component rather than a separate `CutlistBuilder.tsx`.
+
 ### Overview
 
 The Cutlist Builder provides drag-and-drop grouping for CSV-imported parts with support for laminated board types. This addresses the workflow where SketchUp designs are exported and parts need to be grouped for 32mm lamination.
@@ -75,8 +81,8 @@ The Cutlist Builder provides drag-and-drop grouping for CSV-imported parts with 
 ### Components Created
 
 1. **`CutlistBuilder.tsx`** - Main builder component
-   - Located at: `components/features/cutlist/CutlistBuilder.tsx`
-   - Triggered from the "Cutlist Builder" button on the Cutlist tab
+   - Historical concept
+   - Replaced in practice by `/products/[productId]/cutlist-builder`
 
 2. **`PartCard.tsx`** - Draggable part card
    - Located at: `components/features/cutlist/PartCard.tsx`
@@ -180,19 +186,19 @@ CSV Import (SketchUp)
 
 ## Architecture Decisions
 
-### Why Separate from CutlistTool?
+### Why Separate from CutlistTool? (Historical)
 
-The existing `CutlistTool` component is designed for quote-level cutlists with:
+The former `CutlistTool` component was designed for quote-level cutlists with:
 - Manual part entry
 - Export to quote costing lines
 - Persistence to `quote_item_cutlists` table
 
-The `ProductCutlistCalculator` is designed for:
+The former `ProductCutlistCalculator` was designed for:
 - Automatic part extraction from BOM
 - Preview/estimation use case (no persistence yet)
 - Foundation for order-level aggregation
 
-Future consideration: Merge common logic into shared utilities while keeping UI components separate for their specific use cases.
+That separation has since been retired in favor of the shared `CutlistCalculator` flow.
 
 ### Packing Algorithm Reuse
 
@@ -215,9 +221,9 @@ The `CutlistRow` interface in ProductCutlistTab matches the expected structure f
 
 | File | Purpose |
 |------|---------|
-| `components/features/products/ProductCutlistCalculator.tsx` | Calculator dialog component |
-| `components/features/products/ProductCutlistTab.tsx` | Tab with "Generate Cutlist" and "Cutlist Builder" buttons |
-| `components/features/cutlist/CutlistBuilder.tsx` | Drag-and-drop cutlist builder |
+| `components/features/products/ProductCutlistCalculator.tsx` | Retired calculator dialog |
+| `components/features/products/ProductCutlistTab.tsx` | Product cutlist overview; now routes into the shared builder page |
+| `components/features/cutlist/CutlistBuilder.tsx` | Historical builder concept |
 | `components/features/cutlist/PartCard.tsx` | Draggable part card |
 | `components/features/cutlist/GroupCard.tsx` | Group container with drop zone |
 | `components/features/cutlist/packing.ts` | Packing algorithm (shared) |

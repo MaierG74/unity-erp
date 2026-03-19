@@ -68,6 +68,8 @@ export interface ComponentRequirement {
   order_count: number;
   global_apparent_shortfall: number;
   global_real_shortfall: number;
+  reserved_this_order: number;
+  reserved_by_others: number;
   supplier_options: SupplierOption[];
   selected_supplier: SupplierOption | null;
   draft_po_quantity: number;
@@ -86,4 +88,13 @@ export interface ProductRequirement {
 export interface OrderComponentsDialogProps {
   orderId: number;
   onSuccess?: () => void;
+}
+
+export interface ComponentReservation {
+  id: number;
+  order_id: number;
+  component_id: number;
+  qty_reserved: number;
+  internal_code?: string;
+  description?: string;
 }

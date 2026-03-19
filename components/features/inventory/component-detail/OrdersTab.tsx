@@ -30,6 +30,7 @@ import {
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import { cn } from '@/lib/utils';
 
 type ComponentData = {
@@ -245,7 +246,7 @@ export function OrdersTab({ component }: OrdersTabProps) {
     <div className="space-y-6">
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
+        <Card className="bg-linear-to-br from-blue-50 to-blue-100/50 dark:from-blue-950/30 dark:to-blue-900/20 border-blue-200 dark:border-blue-800">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">On Order</CardTitle>
             <ShoppingCart className="h-4 w-4 text-blue-600" />
@@ -260,7 +261,7 @@ export function OrdersTab({ component }: OrdersTabProps) {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="bg-linear-to-br from-purple-50 to-purple-100/50 dark:from-purple-950/30 dark:to-purple-900/20 border-purple-200 dark:border-purple-800">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Required</CardTitle>
             <AlertCircle className="h-4 w-4 text-purple-600" />
@@ -275,13 +276,13 @@ export function OrdersTab({ component }: OrdersTabProps) {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="bg-linear-to-br from-slate-50 to-slate-100/50 dark:from-slate-800/30 dark:to-slate-700/20 border-slate-200 dark:border-slate-700">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Used In</CardTitle>
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{products.length}</div>
+            <div className="text-2xl font-bold text-slate-700 dark:text-slate-300">{products.length}</div>
             <p className="text-xs text-muted-foreground mt-1">Product(s)</p>
           </CardContent>
         </Card>
@@ -289,7 +290,7 @@ export function OrdersTab({ component }: OrdersTabProps) {
 
       {/* Purchase Orders */}
       {purchaseOrders.length > 0 && (
-        <Card>
+        <Card className="shadow-xs border-l-3 border-l-blue-500/40">
           <CardHeader>
             <CardTitle>Purchase Orders</CardTitle>
           </CardHeader>
@@ -392,7 +393,7 @@ export function OrdersTab({ component }: OrdersTabProps) {
                                   <div className="text-xs">
                                     <p className="font-medium">Follow-up sent</p>
                                     <p className="text-muted-foreground">
-                                      {format(new Date(followUp.sent_at), 'PP')} - Awaiting response
+                                      {formatDate(followUp.sent_at)} - Awaiting response
                                     </p>
                                   </div>
                                 </TooltipContent>
@@ -412,7 +413,7 @@ export function OrdersTab({ component }: OrdersTabProps) {
 
       {/* Products Using This Component */}
       {products.length > 0 && (
-        <Card>
+        <Card className="shadow-xs border-l-3 border-l-emerald-500/40">
           <CardHeader>
             <CardTitle>Bill of Materials</CardTitle>
           </CardHeader>
@@ -445,7 +446,7 @@ export function OrdersTab({ component }: OrdersTabProps) {
 
       {/* Active Orders Requiring This Component */}
       {activeOrders.length > 0 && (
-        <Card>
+        <Card className="shadow-xs border-l-3 border-l-purple-500/40">
           <CardHeader>
             <CardTitle>Active Orders</CardTitle>
           </CardHeader>
@@ -501,7 +502,7 @@ export function OrdersTab({ component }: OrdersTabProps) {
       {purchaseOrders.length === 0 &&
         products.length === 0 &&
         activeOrders.length === 0 && (
-          <Card>
+          <Card className="shadow-xs">
             <CardContent className="pt-6">
               <div className="text-center text-muted-foreground py-8">
                 <Package className="h-12 w-12 mx-auto mb-4 opacity-50" />
@@ -564,7 +565,7 @@ export function OrdersTab({ component }: OrdersTabProps) {
                 <span className="text-muted-foreground">Expected Delivery</span>
                 {selectedResponse.response?.expected_delivery_date ? (
                   <span className="font-medium">
-                    {format(new Date(selectedResponse.response.expected_delivery_date), 'PPP')}
+                    {formatDate(selectedResponse.response.expected_delivery_date)}
                   </span>
                 ) : (
                   <span className="text-muted-foreground italic">Not provided</span>

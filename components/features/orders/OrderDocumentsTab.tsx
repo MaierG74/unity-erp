@@ -3,7 +3,7 @@
 import React, { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useDropzone } from 'react-dropzone';
-import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import {
   fetchOrderAttachments,
   uploadOrderAttachment,
@@ -16,7 +16,7 @@ import {
 import type { OrderAttachment, OrderDocumentType, OrderDocumentCategory } from '@/types/orders';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -340,68 +340,37 @@ export function OrderDocumentsTab({ orderId }: OrderDocumentsTabProps) {
   return (
     <div className="space-y-4">
       <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Upload className="h-5 w-5" />
-                Order Documents
-              </CardTitle>
-              <CardDescription>
-                Upload and manage documents related to this order. Choose a category before uploading.
-              </CardDescription>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-muted-foreground"
-              onClick={() => setManageCategoriesOpen(true)}
-              title="Manage document categories"
+        <CardContent className="pt-4 space-y-4">
+          {/* Compact upload row: category + drop zone + settings inline */}
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              value={uploadCategory}
+              onValueChange={(v) => setUploadCategory(v as OrderDocumentType)}
             >
-              <Settings className="h-4 w-4 mr-1.5" />
-              Categories
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {/* Category selector + Upload Area */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-3">
-              <label className="text-sm font-medium text-muted-foreground shrink-0">
-                Upload as:
-              </label>
-              <Select
-                value={uploadCategory}
-                onValueChange={(v) => setUploadCategory(v as OrderDocumentType)}
-              >
-                <SelectTrigger className="w-[220px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {categories.map((cat) => {
-                    const Icon = cat.icon;
-                    return (
-                      <SelectItem key={cat.key} value={cat.key}>
-                        <span className="flex items-center gap-2">
-                          <Icon className="h-4 w-4 text-muted-foreground" />
-                          {cat.label}
-                        </span>
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
-              <span className="text-xs text-muted-foreground hidden sm:inline">
-                {categoryMap[uploadCategory]?.description}
-              </span>
-            </div>
+              <SelectTrigger className="w-[180px] h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {categories.map((cat) => {
+                  const Icon = cat.icon;
+                  return (
+                    <SelectItem key={cat.key} value={cat.key}>
+                      <span className="flex items-center gap-2">
+                        <Icon className="h-4 w-4 text-muted-foreground" />
+                        {cat.label}
+                      </span>
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
 
             <div
               {...getRootProps()}
               onPaste={handlePaste}
               tabIndex={0}
               className={cn(
-                'border-2 border-dashed rounded-lg p-6 text-center transition-colors focus:outline-none focus:ring-2 focus:ring-ring',
+                'flex-1 min-w-0 border-2 border-dashed rounded-lg py-2.5 px-4 transition-colors focus:outline-hidden focus:ring-2 focus:ring-ring',
                 isDragActive
                   ? 'border-primary bg-primary/5'
                   : 'border-muted-foreground/25 hover:border-muted-foreground/50 hover:bg-muted/30',
@@ -409,26 +378,38 @@ export function OrderDocumentsTab({ orderId }: OrderDocumentsTabProps) {
               )}
             >
               <input {...getInputProps()} disabled={uploading} />
-              <Upload className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
-              {uploading ? (
-                <div className="flex items-center justify-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <p className="text-sm text-muted-foreground">Uploading files...</p>
-                </div>
-              ) : isDragActive ? (
-                <p className="text-sm font-medium text-primary">Drop files here...</p>
-              ) : (
-                <div className="space-y-1">
-                  <p className="text-sm text-muted-foreground">
-                    Drag & drop files here, or paste with{' '}
-                    <kbd className="px-1.5 py-0.5 text-xs bg-muted rounded border">Ctrl/Cmd+V</kbd>
-                  </p>
-                  <Button variant="outline" size="sm" type="button" onClick={open} disabled={uploading}>
-                    Browse Files
-                  </Button>
-                </div>
-              )}
+              <div className="flex items-center justify-center gap-2">
+                {uploading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">Uploading…</span>
+                  </>
+                ) : isDragActive ? (
+                  <span className="text-sm font-medium text-primary">Drop files here…</span>
+                ) : (
+                  <>
+                    <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span className="text-sm text-muted-foreground">
+                      Drop files, paste{' '}
+                      <kbd className="px-1 py-0.5 text-[10px] bg-muted rounded border">Ctrl+V</kbd>
+                      {' '}or
+                    </span>
+                    <Button variant="outline" size="sm" className="h-7 text-xs" type="button" onClick={open} disabled={uploading}>
+                      Browse
+                    </Button>
+                  </>
+                )}
+              </div>
             </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-9 text-muted-foreground shrink-0"
+              onClick={() => setManageCategoriesOpen(true)}
+              title="Manage document categories"
+            >
+              <Settings className="h-4 w-4" />
+            </Button>
           </div>
 
           {/* Documents grouped by category */}
@@ -747,7 +728,7 @@ function AttachmentCard({
         </p>
         <div className="flex items-center justify-between">
           <span className="text-[10px] text-muted-foreground">
-            {format(new Date(attachment.uploaded_at), 'MMM d, yyyy')}
+            {formatDate(attachment.uploaded_at)}
           </span>
           <div className="flex items-center gap-0.5">
             {/* Re-categorize */}

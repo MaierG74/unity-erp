@@ -279,7 +279,7 @@ export function ReportsTab() {
 
       {/* Stock Status Summary */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="rounded-xl border bg-card p-4 shadow-sm">
+        <div className="rounded-xl border bg-card p-4 shadow-xs">
           <div className="flex items-center gap-2">
             <Package className="h-5 w-5 text-muted-foreground" />
             <p className="text-sm font-medium text-muted-foreground">Total Components</p>
@@ -287,7 +287,7 @@ export function ReportsTab() {
           <p className="text-2xl font-bold mt-2">{totalComponents}</p>
         </div>
 
-        <div className="rounded-xl border bg-card p-4 shadow-sm">
+        <div className="rounded-xl border bg-card p-4 shadow-xs">
           <div className="flex items-center gap-2">
             <Package className="h-5 w-5 text-green-600" />
             <p className="text-sm font-medium text-muted-foreground">In Stock</p>
@@ -297,7 +297,7 @@ export function ReportsTab() {
           </p>
         </div>
 
-        <div className="rounded-xl border bg-card p-4 shadow-sm">
+        <div className="rounded-xl border bg-card p-4 shadow-xs">
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-5 w-5 text-amber-600" />
             <p className="text-sm font-medium text-muted-foreground">Low Stock</p>
@@ -308,7 +308,7 @@ export function ReportsTab() {
           <p className="text-xs text-muted-foreground mt-1">{lowStockPercentage}%</p>
         </div>
 
-        <div className="rounded-xl border bg-card p-4 shadow-sm">
+        <div className="rounded-xl border bg-card p-4 shadow-xs">
           <div className="flex items-center gap-2">
             <TrendingDown className="h-5 w-5 text-destructive" />
             <p className="text-sm font-medium text-muted-foreground">Out of Stock</p>

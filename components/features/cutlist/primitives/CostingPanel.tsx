@@ -38,10 +38,10 @@ export function CostingSectionCard({
   children,
 }: CostingSectionCardProps) {
   return (
-    <section className={cn('rounded-xl border shadow-sm backdrop-blur-sm transition-colors', accent)}>
+    <section className={cn('rounded-xl border shadow-xs backdrop-blur-sm transition-colors', accent)}>
       <button
         type="button"
-        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/30 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
         onClick={() => onToggle(section)}
       >
         <div>

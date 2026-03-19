@@ -27,6 +27,7 @@ import type {
   UnplacedPart,
   GrainOrientation,
   BandEdges,
+  SheetOffcutSummary,
 } from './types';
 
 // =============================================================================
@@ -45,6 +46,8 @@ export interface PackingConfig {
   minUsableArea: number;
   /** Penalty score for creating unusable slivers. Default: 10,000 */
   sliverPenalty: number;
+  /** Penalty for a small terminal trim when the other dimension is an exact fit. Default: 500 */
+  exactFitTrimPenalty: number;
   /** Penalty for sub-optimal but usable strips. Default: 2,000 */
   subOptimalPenalty: number;
   /** Bonus for placements touching sheet edges. Default: 500 */
@@ -65,6 +68,7 @@ export const DEFAULT_PACKING_CONFIG: PackingConfig = {
   preferredMinDimension: 300,
   minUsableArea: 100_000,
   sliverPenalty: 10_000,
+  exactFitTrimPenalty: 500,
   subOptimalPenalty: 2_000,
   touchingBonus: 500,
   perfectFitBonus: 1_000,
@@ -84,6 +88,22 @@ interface FreeRect {
   y: number;
   w: number;
   h: number;
+  /** Kerf padding already consumed on the right edge of this free rectangle. */
+  padRight?: number;
+  /** Kerf padding already consumed on the bottom edge of this free rectangle. */
+  padBottom?: number;
+}
+
+interface VerticalSegment {
+  x: number;
+  y1: number;
+  y2: number;
+}
+
+interface HorizontalSegment {
+  y: number;
+  x1: number;
+  x2: number;
 }
 
 /**
@@ -137,6 +157,8 @@ export type SortStrategy =
 export interface SheetOffcutInfo {
   sheetIndex: number;
   freeRects: FreeRect[];
+  usableRects: FreeRect[];
+  scrapRects: FreeRect[];
   largestOffcutArea: number;
   totalOffcutArea: number;
   concentration: number;
@@ -325,20 +347,23 @@ function calculatePlacementScore(
     score -= config.perfectFitBonus;
   }
 
+  const exactWidthFit = remW === 0;
+  const exactHeightFit = remH === 0;
+
   // Sliver penalty: heavily penalize creating unusable strips
   if (remW > 0 && remW < config.minUsableDimension) {
-    score += config.sliverPenalty;
+    score += exactHeightFit ? config.exactFitTrimPenalty : config.sliverPenalty;
   }
   if (remH > 0 && remH < config.minUsableDimension) {
-    score += config.sliverPenalty;
+    score += exactWidthFit ? config.exactFitTrimPenalty : config.sliverPenalty;
   }
 
   // Sub-optimal penalty: moderate penalty for usable but small strips
   if (remW >= config.minUsableDimension && remW < config.preferredMinDimension) {
-    score += config.subOptimalPenalty;
+    score += exactHeightFit ? config.exactFitTrimPenalty : config.subOptimalPenalty;
   }
   if (remH >= config.minUsableDimension && remH < config.preferredMinDimension) {
-    score += config.subOptimalPenalty;
+    score += exactWidthFit ? config.exactFitTrimPenalty : config.subOptimalPenalty;
   }
 
   // Touching perimeter bonus: prefer corner/edge placements
@@ -378,12 +403,62 @@ function splitFreeRect(
   freeRect: FreeRect,
   partW: number,
   partH: number,
-  _kerf: number, // kerf already included in partW/partH
+  kerf: number,
   minDimension: number
 ): FreeRect[] {
   // Use the offcut-aware split selection
-  const { simulation } = getBestSplit(freeRect, partW, partH, minDimension);
-  return simulation.rects;
+  const { horizontal } = getBestSplit(freeRect, partW, partH, minDimension);
+  const remRightW = freeRect.w - partW;
+  const remTopH = freeRect.h - partH;
+  const rects: FreeRect[] = [];
+  const inheritedPadRight = freeRect.padRight ?? 0;
+  const inheritedPadBottom = freeRect.padBottom ?? 0;
+
+  if (horizontal) {
+    if (remRightW > minDimension) {
+      rects.push({
+        x: freeRect.x + partW,
+        y: freeRect.y,
+        w: remRightW,
+        h: partH,
+        padRight: inheritedPadRight,
+        padBottom: kerf,
+      });
+    }
+    if (remTopH > minDimension) {
+      rects.push({
+        x: freeRect.x,
+        y: freeRect.y + partH,
+        w: freeRect.w,
+        h: remTopH,
+        padRight: inheritedPadRight,
+        padBottom: inheritedPadBottom,
+      });
+    }
+  } else {
+    if (remTopH > minDimension) {
+      rects.push({
+        x: freeRect.x,
+        y: freeRect.y + partH,
+        w: partW,
+        h: remTopH,
+        padRight: kerf,
+        padBottom: inheritedPadBottom,
+      });
+    }
+    if (remRightW > minDimension) {
+      rects.push({
+        x: freeRect.x + partW,
+        y: freeRect.y,
+        w: remRightW,
+        h: freeRect.h,
+        padRight: inheritedPadRight,
+        padBottom: inheritedPadBottom,
+      });
+    }
+  }
+
+  return rects;
 }
 
 /**
@@ -400,14 +475,28 @@ function mergeFreeRects(freeRects: FreeRect[]): void {
         const b = freeRects[j];
 
         // Horizontal merge (same y and height, adjacent in x)
-        if (a.y === b.y && a.h === b.h) {
+        if (a.y === b.y && a.h === b.h && (a.padBottom ?? 0) === (b.padBottom ?? 0)) {
           if (Math.abs(a.x + a.w - b.x) < 1) {
-            freeRects[i] = { x: a.x, y: a.y, w: a.w + b.w, h: a.h };
+            freeRects[i] = {
+              x: a.x,
+              y: a.y,
+              w: a.w + b.w,
+              h: a.h,
+              padRight: b.padRight ?? 0,
+              padBottom: a.padBottom ?? 0,
+            };
             freeRects.splice(j, 1);
             merged = true;
             break outer;
           } else if (Math.abs(b.x + b.w - a.x) < 1) {
-            freeRects[i] = { x: b.x, y: a.y, w: a.w + b.w, h: a.h };
+            freeRects[i] = {
+              x: b.x,
+              y: a.y,
+              w: a.w + b.w,
+              h: a.h,
+              padRight: a.padRight ?? 0,
+              padBottom: a.padBottom ?? 0,
+            };
             freeRects.splice(j, 1);
             merged = true;
             break outer;
@@ -415,14 +504,28 @@ function mergeFreeRects(freeRects: FreeRect[]): void {
         }
 
         // Vertical merge (same x and width, adjacent in y)
-        if (a.x === b.x && a.w === b.w) {
+        if (a.x === b.x && a.w === b.w && (a.padRight ?? 0) === (b.padRight ?? 0)) {
           if (Math.abs(a.y + a.h - b.y) < 1) {
-            freeRects[i] = { x: a.x, y: a.y, w: a.w, h: a.h + b.h };
+            freeRects[i] = {
+              x: a.x,
+              y: a.y,
+              w: a.w,
+              h: a.h + b.h,
+              padRight: a.padRight ?? 0,
+              padBottom: b.padBottom ?? 0,
+            };
             freeRects.splice(j, 1);
             merged = true;
             break outer;
           } else if (Math.abs(b.y + b.h - a.y) < 1) {
-            freeRects[i] = { x: a.x, y: b.y, w: a.w, h: a.h + b.h };
+            freeRects[i] = {
+              x: a.x,
+              y: b.y,
+              w: a.w,
+              h: a.h + b.h,
+              padRight: a.padRight ?? 0,
+              padBottom: a.padBottom ?? 0,
+            };
             freeRects.splice(j, 1);
             merged = true;
             break outer;
@@ -449,6 +552,103 @@ function pruneContainedRects(freeRects: FreeRect[]): void {
       }
     }
   }
+}
+
+function classifyOffcuts(freeRects: FreeRect[], config: PackingConfig): {
+  usableRects: FreeRect[];
+  scrapRects: FreeRect[];
+} {
+  const usableRects: FreeRect[] = [];
+  const scrapRects: FreeRect[] = [];
+
+  for (const rect of freeRects) {
+    const isUsable =
+      Math.min(rect.w, rect.h) >= config.minUsableDimension &&
+      rect.w * rect.h >= config.minUsableArea;
+    if (isUsable) {
+      usableRects.push(rect);
+    } else {
+      scrapRects.push(rect);
+    }
+  }
+
+  return { usableRects, scrapRects };
+}
+
+function mergeAndMeasureVertical(segments: VerticalSegment[]): { mergedLength: number; count: number } {
+  const byX = new Map<number, Array<{ y1: number; y2: number }>>();
+  for (const s of segments) {
+    if (s.y2 <= s.y1) continue;
+    const arr = byX.get(s.x) || [];
+    arr.push({ y1: s.y1, y2: s.y2 });
+    byX.set(s.x, arr);
+  }
+
+  let length = 0;
+  let count = 0;
+  for (const [, arr] of byX) {
+    arr.sort((a, b) => a.y1 - b.y1 || a.y2 - b.y2);
+    let current: { y1: number; y2: number } | null = null;
+
+    for (const seg of arr) {
+      if (!current) {
+        current = { ...seg };
+        continue;
+      }
+      if (seg.y1 <= current.y2) {
+        current.y2 = Math.max(current.y2, seg.y2);
+      } else {
+        length += current.y2 - current.y1;
+        count++;
+        current = { ...seg };
+      }
+    }
+
+    if (current) {
+      length += current.y2 - current.y1;
+      count++;
+    }
+  }
+
+  return { mergedLength: length, count };
+}
+
+function mergeAndMeasureHorizontal(segments: HorizontalSegment[]): { mergedLength: number; count: number } {
+  const byY = new Map<number, Array<{ x1: number; x2: number }>>();
+  for (const s of segments) {
+    if (s.x2 <= s.x1) continue;
+    const arr = byY.get(s.y) || [];
+    arr.push({ x1: s.x1, x2: s.x2 });
+    byY.set(s.y, arr);
+  }
+
+  let length = 0;
+  let count = 0;
+  for (const [, arr] of byY) {
+    arr.sort((a, b) => a.x1 - b.x1 || a.x2 - b.x2);
+    let current: { x1: number; x2: number } | null = null;
+
+    for (const seg of arr) {
+      if (!current) {
+        current = { ...seg };
+        continue;
+      }
+      if (seg.x1 <= current.x2) {
+        current.x2 = Math.max(current.x2, seg.x2);
+      } else {
+        length += current.x2 - current.x1;
+        count++;
+        current = { ...seg };
+      }
+    }
+
+    if (current) {
+      length += current.x2 - current.x1;
+      count++;
+    }
+  }
+
+  return { mergedLength: length, count };
 }
 
 // =============================================================================
@@ -546,6 +746,8 @@ export function sortByStrategy(
 export class GuillotinePacker {
   private freeRects: FreeRect[] = [];
   private placements: Placement[] = [];
+  private verticalSegments: VerticalSegment[] = [];
+  private horizontalSegments: HorizontalSegment[] = [];
   private sheetW: number;
   private sheetH: number;
   private kerf: number;
@@ -568,8 +770,10 @@ export class GuillotinePacker {
    * Reset the packer for a new sheet.
    */
   reset(): void {
-    this.freeRects = [{ x: 0, y: 0, w: this.sheetW, h: this.sheetH }];
+    this.freeRects = [{ x: 0, y: 0, w: this.sheetW, h: this.sheetH, padRight: 0, padBottom: 0 }];
     this.placements = [];
+    this.verticalSegments = [];
+    this.horizontalSegments = [];
   }
 
   /**
@@ -584,6 +788,23 @@ export class GuillotinePacker {
    */
   getPlacements(): Placement[] {
     return [...this.placements];
+  }
+
+  getCutMetrics(): {
+    count: number;
+    cutLength: number;
+    verticalCount: number;
+    horizontalCount: number;
+  } {
+    const { mergedLength: verticalLength, count: verticalCount } = mergeAndMeasureVertical(this.verticalSegments);
+    const { mergedLength: horizontalLength, count: horizontalCount } = mergeAndMeasureHorizontal(this.horizontalSegments);
+
+    return {
+      count: verticalCount + horizontalCount,
+      cutLength: verticalLength + horizontalLength,
+      verticalCount,
+      horizontalCount,
+    };
   }
 
   /**
@@ -625,6 +846,16 @@ export class GuillotinePacker {
     // Place the part
     const { freeRectIndex, orientation, x, y } = bestCandidate;
     const freeRect = this.freeRects[freeRectIndex];
+    const actualPartW = orientation.w - this.kerf;
+    const actualPartH = orientation.h - this.kerf;
+    const actualFreeW = freeRect.w - (freeRect.padRight ?? 0);
+    const actualFreeH = freeRect.h - (freeRect.padBottom ?? 0);
+    const { horizontal } = getBestSplit(
+      freeRect,
+      orientation.w,
+      orientation.h,
+      this.config.minUsableDimension
+    );
 
     // Record placement (store actual part dimensions, not inflated)
     this.placements.push({
@@ -632,8 +863,8 @@ export class GuillotinePacker {
       label: part.label,
       x,
       y,
-      w: orientation.w - this.kerf,
-      h: orientation.h - this.kerf,
+      w: actualPartW,
+      h: actualPartH,
       rot: orientation.rotated ? 90 : 0,
       grain: part.grain,
       band_edges: part.band_edges
@@ -650,6 +881,15 @@ export class GuillotinePacker {
       original_length_mm: part.length_mm,
       original_width_mm: part.width_mm,
     });
+
+    this.recordCutSegments(
+      freeRect,
+      actualPartW,
+      actualPartH,
+      actualFreeW,
+      actualFreeH,
+      horizontal
+    );
 
     // Split the free rectangle
     const newFreeRects = splitFreeRect(
@@ -668,6 +908,53 @@ export class GuillotinePacker {
     pruneContainedRects(this.freeRects);
 
     return true;
+  }
+
+  private recordCutSegments(
+    freeRect: FreeRect,
+    actualPartW: number,
+    actualPartH: number,
+    actualFreeW: number,
+    actualFreeH: number,
+    splitHorizontal: boolean
+  ): void {
+    const needsVerticalCut = actualPartW < actualFreeW;
+    const needsHorizontalCut = actualPartH < actualFreeH;
+    const cutX = freeRect.x + actualPartW;
+    const cutY = freeRect.y + actualPartH;
+
+    if (splitHorizontal) {
+      if (needsHorizontalCut) {
+        this.horizontalSegments.push({
+          y: cutY,
+          x1: freeRect.x,
+          x2: freeRect.x + actualFreeW,
+        });
+      }
+      if (needsVerticalCut) {
+        this.verticalSegments.push({
+          x: cutX,
+          y1: freeRect.y,
+          y2: freeRect.y + actualPartH,
+        });
+      }
+      return;
+    }
+
+    if (needsVerticalCut) {
+      this.verticalSegments.push({
+        x: cutX,
+        y1: freeRect.y,
+        y2: freeRect.y + actualFreeH,
+      });
+    }
+    if (needsHorizontalCut) {
+      this.horizontalSegments.push({
+        y: cutY,
+        x1: freeRect.x,
+        x2: freeRect.x + actualPartW,
+      });
+    }
   }
 
   /**
@@ -746,6 +1033,9 @@ export function packWithStrategy(
   let remaining = [...sorted];
   let sheetIndex = 0;
   const maxSheets = stock.qty || 100;
+  let totalCuts = 0;
+  let totalCutLength = 0;
+  let lastSheetFreeRects: FreeRect[] = [];
 
   while (remaining.length > 0 && sheetIndex < maxSheets) {
     const packer = new GuillotinePacker(stock.width_mm, stock.length_mm, kerf, fullConfig);
@@ -769,6 +1059,11 @@ export function packWithStrategy(
       used_area_mm2: packer.getUsedArea(),
     });
 
+    const cutMetrics = packer.getCutMetrics();
+    totalCuts += cutMetrics.count;
+    totalCutLength += cutMetrics.cutLength;
+    lastSheetFreeRects = packer.getFreeRects();
+
     remaining = stillUnplaced;
     sheetIndex++;
   }
@@ -779,24 +1074,7 @@ export function packWithStrategy(
   const usedArea = sheets.reduce((sum, s) => sum + (s.used_area_mm2 ?? 0), 0);
   const wasteArea = Math.max(0, totalSheetArea - usedArea);
 
-  // Get final free rects from last sheet for visualization
-  const lastPacker = new GuillotinePacker(stock.width_mm, stock.length_mm, kerf, fullConfig);
-  if (sheets.length > 0) {
-    // Replay last sheet to get free rects
-    const lastSheet = sheets[sheets.length - 1];
-    for (const placement of lastSheet.placements) {
-      const part: PartSpec = {
-        id: placement.part_id,
-        length_mm: placement.rot === 90 ? placement.w : placement.h,
-        width_mm: placement.rot === 90 ? placement.h : placement.w,
-        qty: 1,
-        grain: 'any', // Doesn't matter for replay
-      };
-      lastPacker.tryPlace(part);
-    }
-  }
-
-  const freeRects = sheets.length > 0 ? lastPacker.getFreeRects() : [];
+  const freeRects = lastSheetFreeRects;
   const usableOffcuts = freeRects.filter(
     (r) =>
       Math.min(r.w, r.h) >= fullConfig.minUsableDimension &&
@@ -849,22 +1127,11 @@ export function packWithStrategy(
     });
   }
 
-  // Calculate cuts (simplified - count unique cut lines)
-  let cuts = 0;
-  let cutLength = 0;
-  for (const sheet of sheets) {
-    // Each placement adds at most 2 cuts (right edge and bottom edge)
-    cuts += sheet.placements.length * 2;
-    for (const p of sheet.placements) {
-      cutLength += p.w + p.h;
-    }
-  }
-
   const stats: LayoutStats = {
     used_area_mm2: usedArea,
     waste_area_mm2: wasteArea,
-    cuts,
-    cut_length_mm: cutLength,
+    cuts: totalCuts,
+    cut_length_mm: totalCutLength,
     edgebanding_length_mm: edgebandingLength,
   };
 
@@ -902,6 +1169,8 @@ export function packWithExpandedParts(
   const maxSheets = stock.qty || 100;
 
   const perSheetOffcuts: SheetOffcutInfo[] = [];
+  let totalCuts = 0;
+  let totalCutLength = 0;
 
   while (remaining.length > 0 && sheetIndex < maxSheets) {
     const packer = new GuillotinePacker(stock.width_mm, stock.length_mm, kerf, fullConfig);
@@ -920,12 +1189,15 @@ export function packWithExpandedParts(
 
     // Capture per-sheet offcut info directly from packer state
     const sheetFreeRects = packer.getFreeRects();
+    const { usableRects, scrapRects } = classifyOffcuts(sheetFreeRects, fullConfig);
     const sheetOffcutAreas = sheetFreeRects.map((r) => r.w * r.h);
     const sheetLargestOffcut = sheetOffcutAreas.length > 0 ? Math.max(...sheetOffcutAreas) : 0;
     const sheetTotalOffcut = sheetOffcutAreas.reduce((sum, a) => sum + a, 0);
     perSheetOffcuts.push({
       sheetIndex,
       freeRects: sheetFreeRects,
+      usableRects,
+      scrapRects,
       largestOffcutArea: sheetLargestOffcut,
       totalOffcutArea: sheetTotalOffcut,
       concentration: sheetTotalOffcut > 0 ? sheetLargestOffcut / sheetTotalOffcut : 1,
@@ -937,6 +1209,10 @@ export function packWithExpandedParts(
       placements,
       used_area_mm2: packer.getUsedArea(),
     });
+
+    const cutMetrics = packer.getCutMetrics();
+    totalCuts += cutMetrics.count;
+    totalCutLength += cutMetrics.cutLength;
 
     remaining = stillUnplaced;
     sheetIndex++;
@@ -1002,21 +1278,11 @@ export function packWithExpandedParts(
     });
   }
 
-  // Calculate cuts
-  let cuts = 0;
-  let cutLength = 0;
-  for (const sheet of sheets) {
-    cuts += sheet.placements.length * 2;
-    for (const p of sheet.placements) {
-      cutLength += p.w + p.h;
-    }
-  }
-
   const stats: LayoutStats = {
     used_area_mm2: usedArea,
     waste_area_mm2: wasteArea,
-    cuts,
-    cut_length_mm: cutLength,
+    cuts: totalCuts,
+    cut_length_mm: totalCutLength,
     edgebanding_length_mm: edgebandingLength,
   };
 
@@ -1301,7 +1567,41 @@ export async function packPartsGuillotineDeep(
  */
 export function toLayoutResult(result: GuillotinePackResult): LayoutResult {
   return {
-    sheets: result.sheets,
+    sheets: result.sheets.map((sheet, index) => {
+      const offcutInfo = result.perSheetOffcuts?.find((entry) => entry.sheetIndex === index);
+      const offcutSummary: SheetOffcutSummary | undefined = offcutInfo
+        ? {
+            fragments: offcutInfo.fragmentCount,
+            reusableCount: offcutInfo.usableRects.length,
+            scrapCount: offcutInfo.scrapRects.length,
+            reusableArea_mm2: offcutInfo.usableRects.reduce((sum, rect) => sum + rect.w * rect.h, 0),
+            scrapArea_mm2: offcutInfo.scrapRects.reduce((sum, rect) => sum + rect.w * rect.h, 0),
+            largestReusableArea_mm2: offcutInfo.usableRects.reduce(
+              (max, rect) => Math.max(max, rect.w * rect.h),
+              0
+            ),
+            reusableOffcuts: offcutInfo.usableRects.map((rect) => ({
+              x: rect.x,
+              y: rect.y,
+              w: rect.w,
+              h: rect.h,
+              area_mm2: rect.w * rect.h,
+            })),
+            scrapOffcuts: offcutInfo.scrapRects.map((rect) => ({
+              x: rect.x,
+              y: rect.y,
+              w: rect.w,
+              h: rect.h,
+              area_mm2: rect.w * rect.h,
+            })),
+          }
+        : undefined;
+
+      return {
+        ...sheet,
+        offcut_summary: offcutSummary,
+      };
+    }),
     stats: result.stats,
     unplaced: result.unplaced,
   };

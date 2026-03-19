@@ -1,9 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState, useEffect, useCallback } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
+import { minutesToClock, clockToMinutes } from '@/src/lib/laborScheduling';
+import { formatDuration } from '@/lib/shift-utils';
+import { fetchJobCardItems } from '@/lib/queries/factoryFloor';
 
 import {
   Dialog,
@@ -32,6 +35,14 @@ import {
   TrendingDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import {
+  CompletionItemsList,
+  isCompletionValid,
+  buildItemsPayload,
+  initCompletions,
+  type ItemCompletion,
+  type CompletionItem,
+} from '@/components/features/completion/completion-items';
 
 interface CompleteJobDialogProps {
   open: boolean;
@@ -56,26 +67,12 @@ interface CompleteJobDialogProps {
   onComplete?: () => void;
 }
 
-// Convert minutes from midnight to time string (HH:MM)
-function minutesToTimeString(minutes: number): string {
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
-}
-
-// Convert time string (HH:MM) to minutes from midnight
-function timeStringToMinutes(timeStr: string): number {
-  const [hours, mins] = timeStr.split(':').map(Number);
-  return hours * 60 + mins;
-}
-
-// Format minutes as duration string
-function formatDuration(minutes: number): string {
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  if (hours === 0) return `${mins}m`;
-  if (mins === 0) return `${hours}h`;
-  return `${hours}h ${mins}m`;
+function extractCardId(jobInstanceId?: string): number | null {
+  if (!jobInstanceId) return null;
+  const match = jobInstanceId.match(/:card-(\d+)$/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export function CompleteJobDialog({
@@ -87,18 +84,32 @@ export function CompleteJobDialog({
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // Form state
   const [actualStartTime, setActualStartTime] = useState('');
   const [actualEndTime, setActualEndTime] = useState('');
   const [notes, setNotes] = useState('');
+  const [completions, setCompletions] = useState<Record<number, ItemCompletion>>({});
 
-  // Calculate durations
+  const jobCardId = extractCardId(assignment?.job_instance_id);
+
+  // Fetch job card items — reuse shared query function and cache key
+  const {
+    data: rawItems,
+    isLoading: itemsLoading,
+    isError: itemsError,
+  } = useQuery({
+    queryKey: ['job-card-items', jobCardId],
+    queryFn: () => fetchJobCardItems(jobCardId!),
+    enabled: open && jobCardId != null,
+  });
+
+  const items: CompletionItem[] = rawItems ?? [];
+
   const scheduledDuration = assignment
     ? assignment.end_minutes - assignment.start_minutes
     : 0;
 
-  const actualStartMinutes = actualStartTime ? timeStringToMinutes(actualStartTime) : null;
-  const actualEndMinutes = actualEndTime ? timeStringToMinutes(actualEndTime) : null;
+  const actualStartMinutes = actualStartTime ? clockToMinutes(actualStartTime) : null;
+  const actualEndMinutes = actualEndTime ? clockToMinutes(actualEndTime) : null;
   const actualDuration =
     actualStartMinutes !== null && actualEndMinutes !== null
       ? actualEndMinutes - actualStartMinutes
@@ -106,25 +117,44 @@ export function CompleteJobDialog({
 
   const variance = actualDuration !== null ? actualDuration - scheduledDuration : null;
 
-  // Initialize form when dialog opens
+  // Initialize form + completions when dialog opens or items load
   useEffect(() => {
     if (open && assignment) {
-      // Default actual start to scheduled start
-      setActualStartTime(minutesToTimeString(assignment.start_minutes));
+      setActualStartTime(minutesToClock(assignment.start_minutes));
 
-      // Default actual end to current time or scheduled end
       const now = new Date();
       const currentMinutes = now.getHours() * 60 + now.getMinutes();
-      // Use current time if it's after scheduled start, otherwise use scheduled end
       if (currentMinutes > assignment.start_minutes) {
-        setActualEndTime(minutesToTimeString(currentMinutes));
+        setActualEndTime(minutesToClock(currentMinutes));
       } else {
-        setActualEndTime(minutesToTimeString(assignment.end_minutes));
+        setActualEndTime(minutesToClock(assignment.end_minutes));
       }
 
       setNotes('');
+      // Reset completions — will be re-initialized when items load
+      setCompletions({});
     }
   }, [open, assignment]);
+
+  // Initialize completions from items — uses functional updater to avoid stale closure
+  useEffect(() => {
+    if (items.length > 0) {
+      setCompletions((prev) =>
+        Object.keys(prev).length === 0 ? initCompletions(items) : prev
+      );
+    }
+  }, [items]);
+
+  const handleUpdateCompletion = useCallback((itemId: number, update: Partial<ItemCompletion>) => {
+    setCompletions((prev) => ({
+      ...prev,
+      [itemId]: { ...prev[itemId], ...update },
+    }));
+  }, []);
+
+  const requiresLoadedItems = jobCardId != null;
+  const itemsReadyForCompletion = !requiresLoadedItems || (!itemsLoading && !itemsError && items.length > 0);
+  const itemsValid = itemsReadyForCompletion && (!requiresLoadedItems || isCompletionValid(items, completions));
 
   // Complete job mutation
   const completeJob = useMutation({
@@ -133,31 +163,47 @@ export function CompleteJobDialog({
         throw new Error('Missing required data');
       }
 
-      const duration = actualEndMinutes - actualStartMinutes;
+      const assignmentDate = assignment.assignment_date ?? new Date().toISOString().slice(0, 10);
+      const actualStartIso = `${assignmentDate}T${actualStartTime}:00`;
+      const actualEndIso = `${assignmentDate}T${actualEndTime}:00`;
 
-      const { error } = await supabase
-        .from('labor_plan_assignments')
-        .update({
-          job_status: 'completed',
-          completed_at: new Date().toISOString(),
-          actual_start_minutes: actualStartMinutes,
-          actual_end_minutes: actualEndMinutes,
-          actual_duration_minutes: duration,
-          completion_notes: notes || null,
-        })
-        .eq('assignment_id', assignment.assignment_id);
+      if (!itemsReadyForCompletion) {
+        throw new Error('Job card items must load before completion can be submitted');
+      }
+
+      const itemsPayload = buildItemsPayload(items, completions);
+
+      const { data, error } = await supabase.rpc('complete_assignment_with_card_v2', {
+        p_assignment_id: assignment.assignment_id,
+        p_items: itemsPayload,
+        p_actual_start: new Date(actualStartIso).toISOString(),
+        p_actual_end: new Date(actualEndIso).toISOString(),
+        p_notes: notes || null,
+      });
 
       if (error) throw error;
+      return data as { job_card_completion?: { completion_type?: string; follow_up_card_id?: number } } | null;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['laborAssignments'] });
       queryClient.invalidateQueries({ queryKey: ['laborPlanningPayload'] });
       queryClient.invalidateQueries({ queryKey: ['jobs-in-factory'] });
+      queryClient.invalidateQueries({ queryKey: ['jobCards'] });
+      queryClient.invalidateQueries({ queryKey: ['production-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['factory-floor'] });
 
-      toast({
-        title: 'Job completed',
-        description: `${assignment?.jobName || 'Job'} has been marked as complete`,
-      });
+      const completionInfo = data?.job_card_completion;
+      const followUpId = completionInfo?.follow_up_card_id;
+      const isPartial = completionInfo?.completion_type === 'partial';
+
+      let description = `${assignment?.jobName || 'Job'} has been marked as complete`;
+      if (isPartial && followUpId) {
+        description += `. Follow-up card #${followUpId} created for remainder.`;
+      } else if (isPartial) {
+        description += ` (partial completion — remainder recorded).`;
+      }
+
+      toast({ title: 'Job completed', description });
 
       onOpenChange(false);
       onComplete?.();
@@ -166,7 +212,7 @@ export function CompleteJobDialog({
       console.error('Error completing job:', error);
       toast({
         title: 'Error',
-        description: 'Failed to complete job. Please try again.',
+        description: (error as Error).message || 'Failed to complete job. Please try again.',
         variant: 'destructive',
       });
     },
@@ -174,18 +220,23 @@ export function CompleteJobDialog({
 
   if (!assignment) return null;
 
-  const isValid = actualStartMinutes !== null && actualEndMinutes !== null && actualDuration !== null && actualDuration > 0;
+  const isValid =
+    actualStartMinutes !== null &&
+    actualEndMinutes !== null &&
+    actualDuration !== null &&
+    actualDuration > 0 &&
+    itemsValid;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <CheckCircle2 className="h-5 w-5 text-green-600" />
             Complete Job
           </DialogTitle>
           <DialogDescription>
-            Record the actual times for this job
+            Record the actual times and confirm completion
           </DialogDescription>
         </DialogHeader>
 
@@ -219,8 +270,8 @@ export function CompleteJobDialog({
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Clock className="h-4 w-4" />
               <span>
-                Scheduled: {minutesToTimeString(assignment.start_minutes)} –{' '}
-                {minutesToTimeString(assignment.end_minutes)} ({formatDuration(scheduledDuration)})
+                Scheduled: {minutesToClock(assignment.start_minutes)} –{' '}
+                {minutesToClock(assignment.end_minutes)} ({formatDuration(scheduledDuration)})
               </span>
             </div>
 
@@ -265,8 +316,7 @@ export function CompleteJobDialog({
               </div>
             </div>
 
-            {/* Duration & Variance */}
-            {actualDuration !== null && (
+            {actualDuration !== null && actualDuration > 0 && (
               <div className="flex items-center justify-between rounded-lg border p-3">
                 <div>
                   <p className="text-sm font-medium">Actual Duration</p>
@@ -301,6 +351,30 @@ export function CompleteJobDialog({
               </div>
             )}
           </div>
+
+          {/* Job card items with remainder handling */}
+          {jobCardId != null && (
+            <>
+              <Separator />
+              {itemsLoading ? (
+                <p className="text-sm text-muted-foreground">Loading items...</p>
+              ) : itemsError ? (
+                <p className="text-sm text-destructive">
+                  Could not load job card items. Reload the dialog before completing this job.
+                </p>
+              ) : items.length > 0 ? (
+                <CompletionItemsList
+                  items={items}
+                  completions={completions}
+                  onUpdate={handleUpdateCompletion}
+                />
+              ) : (
+                <p className="text-sm text-destructive">
+                  No active job card items were found for this card. Completion is blocked until the card items load correctly.
+                </p>
+              )}
+            </>
+          )}
 
           {/* Notes */}
           <div className="space-y-1.5">

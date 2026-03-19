@@ -55,10 +55,21 @@ export interface LaborPlanningPayload {
   staff: StaffRosterEntry[];
   unscheduledJobs: PlanningJobWithMeta[];
   assignments: LaborPlanAssignment[];
+  /** True if work pool queries failed — pool orders may show stale BOL data */
+  workPoolError?: boolean;
+  /** Order IDs where pool required_qty differs from current BOL demand */
+  stalePoolOrderIds?: Set<number>;
 }
 
 const CLOSED_STATUS_NAMES = ['completed', 'cancelled', 'closed', 'delivered'];
-export async function fetchOpenOrdersWithLabor(): Promise<PlanningOrderWithMeta[]> {
+interface OpenOrdersResult {
+  orders: PlanningOrderWithMeta[];
+  jobCardData: JobCardData;
+  workPoolData: WorkPoolData;
+  stalePoolOrderIds: Set<number>;
+}
+
+export async function fetchOpenOrdersWithLabor(): Promise<OpenOrdersResult> {
   const closedStatusIds = await loadClosedStatusIds();
 
   let ordersQuery = supabase
@@ -116,12 +127,20 @@ export async function fetchOpenOrdersWithLabor(): Promise<PlanningOrderWithMeta[
 
   const rows = Array.isArray(data) ? data : [];
 
-  // Also fetch job_card_items linked to orders (manually added jobs)
-  const jobCardItemsByOrder = await loadJobCardItemsByOrder();
+  // Load job card items and work pool in parallel
+  const [jobCardData, workPoolData] = await Promise.all([
+    loadJobCardItemsByOrder(),
+    loadWorkPoolByOrder(),
+  ]);
 
-  return rows
-    .map((row: any) => normalizeOrderRow(row, jobCardItemsByOrder))
+  const orders = rows
+    .map((row: any) => normalizeOrderRow(row, jobCardData, workPoolData))
     .filter(Boolean) as PlanningOrderWithMeta[];
+
+  // Compute stale pool detection using already-fetched order detail data
+  const stalePoolOrderIds = computeStalePoolOrders(rows, workPoolData);
+
+  return { orders, jobCardData, workPoolData, stalePoolOrderIds };
 }
 
 export async function fetchStaffRoster(options: StaffRosterOptions = {}): Promise<StaffRosterEntry[]> {
@@ -204,11 +223,12 @@ export async function fetchLaborAssignments(options: { date?: string } = {}): Pr
 }
 
 export async function fetchLaborPlanningPayload(options: { date?: string } = {}): Promise<LaborPlanningPayload> {
-  const [orders, staff, assignments] = await Promise.all([
+  const [openOrdersResult, staff, assignments] = await Promise.all([
     fetchOpenOrdersWithLabor(),
     fetchStaffRoster({ date: options.date }),
     fetchLaborAssignments({ date: options.date }),
   ]);
+  const { orders, jobCardData, workPoolData, stalePoolOrderIds } = openOrdersResult;
 
   const assignmentsByJob = new Map(assignments.map((assignment) => [assignment.jobKey, assignment]));
   const annotatedOrders: PlanningOrderWithMeta[] = orders.map((order) => ({
@@ -218,15 +238,27 @@ export async function fetchLaborPlanningPayload(options: { date?: string } = {})
       return {
         ...job,
         scheduleStatus: scheduled && scheduled.status !== 'unscheduled' ? 'scheduled' : 'unscheduled',
-        jobStatus: scheduled?.jobStatus ?? null,
+        jobStatus: scheduled?.jobStatus ?? job.jobStatus ?? null,
         status: job.status ?? 'ready',
       };
     }),
   }));
 
   // Enrich assignments whose jobs aren't in the open-orders list (e.g. completed/closed orders)
+  // But exclude orphans for orders where all job cards are cancelled — those jobs were intentionally removed
   const orderJobKeys = new Set(annotatedOrders.flatMap((o) => o.jobs.map((j) => j.id)));
-  const orphanedAssignments = assignments.filter((a) => !orderJobKeys.has(a.jobKey));
+  const orphanedAssignments = assignments.filter((a) => {
+    if (orderJobKeys.has(a.jobKey)) return false; // not orphaned
+    // Completed assignments always need enrichment so the card shows job/product metadata
+    const isCompleted = a.jobStatus === 'completed';
+    // If this order has a work pool, pool-based filtering already handled visibility — skip orphans
+    if (!isCompleted && a.orderId && workPoolData.ordersWithPool.has(a.orderId)) return false;
+    // If this order has job cards but no active items, all cards are cancelled/completed — skip
+    if (!isCompleted && a.orderId && jobCardData.ordersWithCards.has(a.orderId) && !(jobCardData.itemsByOrder.get(a.orderId)?.length)) {
+      return false;
+    }
+    return true;
+  });
   if (orphanedAssignments.length > 0) {
     const orphanOrderIds = [...new Set(orphanedAssignments.map((a) => a.orderId).filter(Boolean))] as number[];
     const orphanJobIds = [...new Set(orphanedAssignments.map((a) => a.jobId).filter(Boolean))] as number[];
@@ -255,6 +287,12 @@ export async function fetchLaborPlanningPayload(options: { date?: string } = {})
       const group = orphanOrderGroups.get(a.orderId) ?? [];
       group.push(a);
       orphanOrderGroups.set(a.orderId, group);
+    }
+
+    // Build a lookup from orderId → existing annotated order so orphans can merge
+    const existingOrderByOrderId = new Map<number, PlanningOrderWithMeta>();
+    for (const ao of annotatedOrders) {
+      if (ao.orderId != null) existingOrderByOrderId.set(ao.orderId, ao);
     }
 
     for (const [orderId, groupAssignments] of orphanOrderGroups) {
@@ -288,16 +326,27 @@ export async function fetchLaborPlanningPayload(options: { date?: string } = {})
         };
       });
 
-      annotatedOrders.push({
-        id: `order-${orderId}`,
-        customer: (orderRow?.customers as any)?.name ?? 'Unknown',
-        priority: 'medium',
-        dueDate: null,
-        orderId,
-        orderNumber: orderRow?.order_number ?? String(orderId),
-        statusName: null,
-        jobs: syntheticJobs,
-      });
+      // If the order already exists in annotatedOrders, merge orphan jobs into it
+      const existingOrder = existingOrderByOrderId.get(orderId);
+      if (existingOrder) {
+        const existingJobIds = new Set(existingOrder.jobs.map((j) => j.id));
+        for (const sj of syntheticJobs) {
+          if (!existingJobIds.has(sj.id)) {
+            existingOrder.jobs.push(sj);
+          }
+        }
+      } else {
+        annotatedOrders.push({
+          id: `order-${orderId}`,
+          customer: (orderRow?.customers as any)?.name ?? 'Unknown',
+          priority: 'medium',
+          dueDate: null,
+          orderId,
+          orderNumber: orderRow?.order_number ?? String(orderId),
+          statusName: null,
+          jobs: syntheticJobs,
+        });
+      }
     }
   }
 
@@ -308,7 +357,14 @@ export async function fetchLaborPlanningPayload(options: { date?: string } = {})
       scheduleStatus: 'unscheduled' as const,
     }));
 
-  return { orders: annotatedOrders, staff, unscheduledJobs, assignments };
+  return {
+    orders: annotatedOrders,
+    staff,
+    unscheduledJobs,
+    assignments,
+    workPoolError: workPoolData.hasError,
+    stalePoolOrderIds,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -419,28 +475,64 @@ async function loadSummariesForDate(date?: string): Promise<Set<number>> {
 
 function normalizeOrderRow(
   row: any,
-  jobCardItemsByOrder?: Map<number, JobCardItemRow[]>,
+  jobCardData?: JobCardData,
+  workPoolData?: WorkPoolData,
 ): PlanningOrderWithMeta | null {
   if (!row) return null;
 
   const orderId = Number(row.order_id);
   const statusRow = extractSingle(row.order_statuses);
   const customer = extractSingle(row.customers);
-  const details = Array.isArray(row.order_details) ? row.order_details : [];
-  const bolJobs = details.flatMap((detail: any) => normalizeDetailJobs(row, detail));
 
-  // Merge in job_card_items that were manually added (not from BOL)
-  const cardItems = jobCardItemsByOrder?.get(orderId) ?? [];
-  const manualJobs = cardItems
-    .filter((item) => {
-      // Skip items that duplicate a BOL job (same job_id + product_id)
-      return !bolJobs.some(
-        (bj) => bj.jobId === item.job_id && bj.productId === item.product_id,
-      );
-    })
-    .map((item) => normalizeJobCardItem(orderId, item));
+  // Check if this order has work pool rows (new model)
+  const poolRows = workPoolData?.poolByOrder.get(orderId) ?? [];
+  const hasPool = poolRows.length > 0;
 
-  const jobs = [...bolJobs, ...manualJobs];
+  let jobs: PlanningJobWithMeta[];
+
+  if (hasPool) {
+    // New model: pool demand (remaining > 0) + issued-but-active card items
+    const poolDemandJobs = poolRows
+      .filter((p) => p.remaining_qty > 0)
+      .map((p) => normalizePoolRow(orderId, p));
+
+    // Include issued card items linked to pool rows so they can be scheduled
+    const cardItems = jobCardData?.itemsByOrder.get(orderId) ?? [];
+    const issuedPoolJobs = cardItems
+      .filter((ci) => ci.work_pool_id != null)
+      .map((ci) => normalizeCardItem(orderId, ci));
+
+    jobs = [...poolDemandJobs, ...issuedPoolJobs];
+  } else {
+    // Legacy fallback: no pool, use raw BOL + job card items
+    const details = Array.isArray(row.order_details) ? row.order_details : [];
+    const allBolJobs = details.flatMap((detail: any) => normalizeDetailJobs(row, detail));
+
+    // Active (non-cancelled, non-completed) job card items for this order
+    const cardItems = jobCardData?.itemsByOrder.get(orderId) ?? [];
+    const hasAnyCards = jobCardData?.ordersWithCards.has(orderId) ?? false;
+
+    // If job cards have ever been generated for this order, only show BOL jobs that have
+    // an active card item — cancelled/completed cards should remove jobs from the scheduler.
+    // If no cards exist yet, show all BOL jobs so they can be scheduled pre-generation.
+    const bolJobs = hasAnyCards
+      ? allBolJobs.filter((bj) =>
+          cardItems.some((ci) => ci.job_id === bj.jobId && ci.product_id === bj.productId),
+        )
+      : allBolJobs;
+
+    // Merge in job_card_items that were manually added (not from BOL)
+    const manualJobs = cardItems
+      .filter((item) => {
+        // Skip items that duplicate a BOL job (same job_id + product_id)
+        return !allBolJobs.some(
+          (bj) => bj.jobId === item.job_id && bj.productId === item.product_id,
+        );
+      })
+      .map((item) => normalizeCardItem(orderId, item));
+
+    jobs = [...bolJobs, ...manualJobs];
+  }
 
   return {
     id: row.order_number ? String(row.order_number) : `SO-${orderId}`,
@@ -517,9 +609,9 @@ function normalizeAssignmentRow(row: any): LaborPlanAssignment {
     ? String(row.job_instance_id)
     : buildJobId(row?.order_id ?? 'unknown', row?.order_detail_id, row?.bol_id, row?.job_id);
 
-  // Parse job_status as a valid JobStatus or null
+  // Parse job_status as a lifecycle state or null. Scheduling is tracked separately via `status`.
   const rawJobStatus = row?.job_status;
-  const validJobStatuses = ['scheduled', 'issued', 'in_progress', 'completed', 'on_hold'];
+  const validJobStatuses = ['issued', 'in_progress', 'completed', 'on_hold'];
   const jobStatus = rawJobStatus && validJobStatuses.includes(rawJobStatus) ? rawJobStatus : null;
 
   return {
@@ -545,6 +637,216 @@ function normalizeAssignmentRow(row: any): LaborPlanAssignment {
   };
 }
 
+/* ------------------------------------------------------------------ */
+/*  Work Pool demand source                                            */
+/* ------------------------------------------------------------------ */
+
+interface SchedulerPoolRow {
+  pool_id: number;
+  order_id: number;
+  product_id: number | null;
+  job_id: number | null;
+  bol_id: number | null;
+  order_detail_id: number | null;
+  required_qty: number;
+  issued_qty: number;
+  remaining_qty: number;
+  pay_type: string;
+  piece_rate: number | null;
+  piece_rate_id: number | null;
+  hourly_rate_id: number | null;
+  time_per_unit: number | null;
+  source: string;
+  job_name: string | null;
+  product_name: string | null;
+  category_id: number | null;
+  category_name: string | null;
+}
+
+interface WorkPoolData {
+  poolByOrder: Map<number, SchedulerPoolRow[]>;
+  /** Order IDs that have at least one active pool row */
+  ordersWithPool: Set<number>;
+  /** True if the pool query failed — prevents silent BOL fallback */
+  hasError?: boolean;
+}
+
+async function loadWorkPoolByOrder(): Promise<WorkPoolData> {
+  // Query base table (not view) because PostgREST FK joins on views are unreliable
+  const { data: poolRows, error: poolErr } = await supabase
+    .from('job_work_pool')
+    .select(`
+      pool_id, order_id, product_id, job_id, bol_id, order_detail_id,
+      required_qty, pay_type, piece_rate, piece_rate_id, hourly_rate_id,
+      time_per_unit, source, status,
+      jobs:job_id(job_id, name, estimated_minutes, time_unit, job_categories:category_id(category_id, name)),
+      products:product_id(product_id, name)
+    `)
+    .eq('status', 'active');
+
+  if (poolErr) {
+    console.error('[laborPlanning] Failed to load work pool', poolErr);
+    return { poolByOrder: new Map(), ordersWithPool: new Set(), hasError: true };
+  }
+
+  const rows = poolRows ?? [];
+  if (rows.length === 0) return { poolByOrder: new Map(), ordersWithPool: new Set() };
+
+  // Compute issuance from job_card_items (same pattern as JobCardsTab)
+  const poolIds = rows.map((r: any) => r.pool_id);
+  const { data: issuanceData, error: issuanceErr } = await supabase
+    .from('job_card_items')
+    .select('work_pool_id, quantity, status, job_cards!job_card_items_job_card_id_fkey(status)')
+    .in('work_pool_id', poolIds);
+
+  if (issuanceErr) {
+    console.error('[laborPlanning] Failed to load pool issuance data', issuanceErr);
+    return { poolByOrder: new Map(), ordersWithPool: new Set(), hasError: true };
+  }
+
+  // Aggregate issued qty per pool_id (exclude cancelled cards/items)
+  const issuedByPool = new Map<number, number>();
+  for (const item of issuanceData ?? []) {
+    const cardStatus = (item as any).job_cards?.status;
+    if (cardStatus === 'cancelled' || item.status === 'cancelled') continue;
+    const poolId = item.work_pool_id as number;
+    issuedByPool.set(poolId, (issuedByPool.get(poolId) ?? 0) + (item.quantity ?? 0));
+  }
+
+  const poolByOrder = new Map<number, SchedulerPoolRow[]>();
+  const ordersWithPool = new Set<number>();
+
+  for (const row of rows as any[]) {
+    const job = extractSingle(row.jobs);
+    const product = extractSingle(row.products);
+    const category = extractSingle(job?.job_categories);
+    const issuedQty = issuedByPool.get(row.pool_id) ?? 0;
+
+    const mapped: SchedulerPoolRow = {
+      pool_id: row.pool_id,
+      order_id: row.order_id,
+      product_id: row.product_id,
+      job_id: row.job_id,
+      bol_id: row.bol_id,
+      order_detail_id: row.order_detail_id,
+      required_qty: row.required_qty,
+      issued_qty: issuedQty,
+      remaining_qty: row.required_qty - issuedQty,
+      pay_type: row.pay_type,
+      piece_rate: row.piece_rate ? Number(row.piece_rate) : null,
+      piece_rate_id: row.piece_rate_id,
+      hourly_rate_id: row.hourly_rate_id,
+      time_per_unit: resolvePoolTimePerUnitMinutes(
+        row.time_per_unit,
+        job?.estimated_minutes,
+        job?.time_unit,
+      ),
+      source: row.source,
+      job_name: job?.name ?? null,
+      product_name: product?.name ?? null,
+      category_id: category?.category_id ?? null,
+      category_name: category?.name ?? null,
+    };
+
+    ordersWithPool.add(row.order_id);
+    if (!poolByOrder.has(row.order_id)) poolByOrder.set(row.order_id, []);
+    poolByOrder.get(row.order_id)!.push(mapped);
+  }
+
+  return { poolByOrder, ordersWithPool };
+}
+
+/**
+ * Compare pool required_qty against current BOL-derived demand using
+ * already-fetched order data (no extra queries).
+ */
+function computeStalePoolOrders(orderRows: any[], workPoolData: WorkPoolData): Set<number> {
+  const stale = new Set<number>();
+  if (workPoolData.hasError) return stale;
+
+  // Pre-build lookup to avoid O(N*M) linear scan
+  const orderRowById = new Map<number, any>();
+  for (const r of orderRows) orderRowById.set(r.order_id, r);
+
+  for (const [orderId, poolRows] of workPoolData.poolByOrder) {
+    // Only check BOL-sourced rows
+    const bolPoolRows = poolRows.filter((p) => p.source === 'bol' && p.bol_id != null);
+    if (bolPoolRows.length === 0) continue;
+
+    const orderRow = orderRowById.get(orderId);
+    if (!orderRow) continue;
+
+    // Build bol_id → current total qty from order data
+    const currentQtyByBol = new Map<number, number>();
+    const details = Array.isArray(orderRow.order_details) ? orderRow.order_details : [];
+    for (const detail of details) {
+      const product = detail.products as any;
+      const bols = Array.isArray(product?.billoflabour) ? product.billoflabour : [];
+      for (const bol of bols) {
+        currentQtyByBol.set(bol.bol_id, (detail.quantity || 1) * (bol.quantity || 1));
+      }
+    }
+
+    for (const poolRow of bolPoolRows) {
+      const currentReq = currentQtyByBol.get(poolRow.bol_id!) ?? 0;
+      if (currentReq !== poolRow.required_qty) {
+        stale.add(orderId);
+        break;
+      }
+    }
+  }
+
+  return stale;
+}
+
+function normalizePoolRow(orderId: number, pool: SchedulerPoolRow): PlanningJobWithMeta {
+  const categoryName = pool.category_name ?? null;
+  const categoryColor = getCategoryColor(pool.category_id ?? categoryName);
+  const payType = (pool.pay_type ?? 'hourly').toLowerCase() as PayType;
+
+  // time_per_unit is stored in minutes
+  const perUnitMinutes = pool.time_per_unit != null ? Number(pool.time_per_unit) : null;
+  const totalMinutes = perUnitMinutes != null ? perUnitMinutes * pool.remaining_qty : null;
+
+  // Use pool_id-based key so scheduler can distinguish pool demand from issued cards
+  const jobKey = pool.bol_id != null
+    ? buildJobId(orderId, pool.order_detail_id, pool.bol_id, pool.job_id)
+    : `order-${orderId}:pool-${pool.pool_id}`;
+
+  return {
+    id: jobKey,
+    name: pool.job_name ?? `Pool #${pool.pool_id}`,
+    status: 'ready',
+    durationHours: totalMinutes != null ? Number((totalMinutes / 60).toFixed(2)) : 0,
+    durationMinutes: perUnitMinutes,
+    owner: categoryName ?? pool.product_name ?? 'Unassigned',
+    start: undefined,
+    end: undefined,
+    orderId,
+    orderDetailId: pool.order_detail_id,
+    productId: pool.product_id ? Number(pool.product_id) : null,
+    productName: pool.product_name,
+    bolId: pool.bol_id,
+    jobId: pool.job_id,
+    categoryName,
+    categoryColor,
+    payType,
+    quantity: pool.remaining_qty,
+    timeUnit: 'minutes' as TimeUnit,
+    rateId: null,
+    hourlyRateId: pool.hourly_rate_id,
+    pieceRateId: pool.piece_rate_id,
+    scheduleStatus: 'unscheduled',
+    poolId: pool.pool_id,
+    remainingQty: pool.remaining_qty,
+    timePerUnit: perUnitMinutes,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Job card items for scheduler                                       */
+/* ------------------------------------------------------------------ */
+
 interface JobCardItemRow {
   item_id: number;
   job_card_id: number;
@@ -560,27 +862,38 @@ interface JobCardItemRow {
   product_name: string | null;
   estimated_minutes: number | null;
   job_time_unit: string | null;
+  work_pool_id: number | null;
 }
 
-async function loadJobCardItemsByOrder(): Promise<Map<number, JobCardItemRow[]>> {
-  // Step 1: Get all non-cancelled job cards linked to orders
-  const { data: cards, error: cardsErr } = await supabase
+interface JobCardData {
+  itemsByOrder: Map<number, JobCardItemRow[]>;
+  /** Order IDs that have at least one job card (any status, including cancelled) */
+  ordersWithCards: Set<number>;
+}
+
+async function loadJobCardItemsByOrder(): Promise<JobCardData> {
+  // Step 1: Get ALL job cards linked to orders (any status) to know which orders have cards
+  const { data: allCards, error: allCardsErr } = await supabase
     .from('job_cards')
     .select('job_card_id, order_id, status')
-    .not('order_id', 'is', null)
-    .neq('status', 'cancelled');
+    .not('order_id', 'is', null);
 
-  if (cardsErr) {
-    console.warn('[laborPlanning] Failed to load job cards for planning', cardsErr);
-    return new Map();
+  if (allCardsErr) {
+    console.warn('[laborPlanning] Failed to load job cards for planning', allCardsErr);
+    return { itemsByOrder: new Map(), ordersWithCards: new Set() };
   }
 
-  if (!cards || cards.length === 0) return new Map();
+  const ordersWithCards = new Set<number>((allCards ?? []).map((c) => Number(c.order_id)));
+
+  // Step 2: Filter to non-cancelled cards for fetching active items
+  const cards = (allCards ?? []).filter((c) => c.status !== 'cancelled');
+
+  if (cards.length === 0) return { itemsByOrder: new Map(), ordersWithCards };
 
   const cardIds = cards.map((c) => c.job_card_id);
   const cardOrderMap = new Map(cards.map((c) => [c.job_card_id, Number(c.order_id)]));
 
-  // Step 2: Fetch non-completed items for those cards
+  // Step 3: Fetch active items for non-cancelled cards
   const { data, error } = await supabase
     .from('job_card_items')
     .select(`
@@ -591,15 +904,16 @@ async function loadJobCardItemsByOrder(): Promise<Map<number, JobCardItemRow[]>>
       quantity,
       piece_rate,
       status,
+      work_pool_id,
       jobs:job_id(job_id, name, estimated_minutes, time_unit, job_categories:category_id(category_id, name)),
       products:product_id(product_id, name)
     `)
     .in('job_card_id', cardIds)
-    .neq('status', 'completed');
+    .not('status', 'in', '("completed","cancelled")');
 
   if (error) {
     console.warn('[laborPlanning] Failed to load job card items', error);
-    return new Map();
+    return { itemsByOrder: new Map(), ordersWithCards };
   }
 
   const result = new Map<number, JobCardItemRow[]>();
@@ -627,36 +941,38 @@ async function loadJobCardItemsByOrder(): Promise<Map<number, JobCardItemRow[]>>
       product_name: product?.name ?? null,
       estimated_minutes: job?.estimated_minutes ? Number(job.estimated_minutes) : null,
       job_time_unit: job?.time_unit ?? null,
+      work_pool_id: row.work_pool_id ?? null,
     };
 
     if (!result.has(orderId)) result.set(orderId, []);
     result.get(orderId)!.push(item);
   }
 
-  return result;
+  return { itemsByOrder: result, ordersWithCards };
 }
 
-function normalizeJobCardItem(orderId: number, item: JobCardItemRow): PlanningJobWithMeta {
+/** Converts a job card item into a PlanningJobWithMeta.
+ *  Pool-linked items use `pool-X:card-Y` key; legacy items use `order-X:jci-Y`. */
+function normalizeCardItem(orderId: number, item: JobCardItemRow): PlanningJobWithMeta {
   const categoryName = item.job_category_name ?? null;
   const categoryColor = getCategoryColor(item.job_category_id ?? categoryName);
-
-  // Estimate duration from job's estimated_minutes, converting from job_time_unit to minutes
   const rawEstimatedTime = item.estimated_minutes ?? null;
   const estimatedMinutesPerUnit = rawEstimatedTime != null
     ? convertToMinutes(rawEstimatedTime, item.job_time_unit)
     : null;
   const totalMinutes = estimatedMinutesPerUnit != null ? estimatedMinutesPerUnit * item.quantity : null;
-  // durationMinutes stores per-unit value for calculateDurationMinutes (which multiplies by quantity)
-  const perUnitMinutes = estimatedMinutesPerUnit;
-
   const payType: PayType = item.piece_rate != null ? 'piece' : 'hourly';
 
+  const id = item.work_pool_id != null
+    ? `pool-${item.work_pool_id}:card-${item.job_card_id}`
+    : `order-${orderId}:jci-${item.item_id}`;
+
   return {
-    id: `order-${orderId}:jci-${item.item_id}`,
+    id,
     name: item.job_name ?? `Job Card Item ${item.item_id}`,
     status: 'ready',
     durationHours: totalMinutes != null ? Number((totalMinutes / 60).toFixed(2)) : 0,
-    durationMinutes: perUnitMinutes,
+    durationMinutes: estimatedMinutesPerUnit,
     owner: categoryName ?? item.product_name ?? 'Unassigned',
     start: undefined,
     end: undefined,
@@ -675,6 +991,7 @@ function normalizeJobCardItem(orderId: number, item: JobCardItemRow): PlanningJo
     hourlyRateId: null,
     pieceRateId: null,
     scheduleStatus: 'unscheduled',
+    jobStatus: 'issued',
   };
 }
 
@@ -694,7 +1011,17 @@ function convertToMinutes(time: unknown, unit?: string | null): number | null {
   return numeric * 60;
 }
 
+function resolvePoolTimePerUnitMinutes(
+  poolTimePerUnit: unknown,
+  fallbackTime: unknown,
+  fallbackUnit?: string | null,
+): number | null {
+  const explicitMinutes = toNumber(poolTimePerUnit);
+  return explicitMinutes ?? convertToMinutes(fallbackTime, fallbackUnit);
+}
+
 function toNumber(value: unknown): number | null {
+  if (value == null || value === '') return null;
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
 }

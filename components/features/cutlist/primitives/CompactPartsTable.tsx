@@ -706,7 +706,7 @@ const PartRow = memo(function PartRow({
                   'border-transparent bg-transparent',
                   'hover:bg-muted/50',
                   'transition-colors',
-                  'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1',
+                  'focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-1',
                   'text-base font-medium',
                   part.grain === 'any' && 'text-muted-foreground',
                   part.grain === 'length' && 'text-primary',
@@ -779,7 +779,7 @@ const PartRow = memo(function PartRow({
                         'border-transparent bg-transparent',
                         'hover:bg-muted/50',
                         'transition-colors',
-                        'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1'
+                        'focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-1'
                       )}
                     >
                       <EdgeIndicator

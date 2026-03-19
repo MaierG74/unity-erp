@@ -5,6 +5,7 @@ import { Document, Page, Text, View, StyleSheet, pdf } from '@react-pdf/renderer
 import { Download, FileText, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
+import { formatDate, formatDateTime } from '@/lib/date-utils';
 import type { Order } from '@/types/orders';
 
 // PDF Styles
@@ -294,9 +295,9 @@ export const StockPickingListPDFDocument: React.FC<StockPickingListPDFProps> = (
           </View>
           <View>
             <Text style={styles.documentTitle}>STOCK PICKING LIST</Text>
-            <Text style={styles.documentNumber}>Order #: {order.order_id}</Text>
+            <Text style={styles.documentNumber}>Order #: {order.order_number || order.order_id}</Text>
             <Text style={styles.documentDate}>
-              Date: {format(new Date(), 'MMM d, yyyy')}
+              Date: {formatDate(new Date())}
             </Text>
             <Text style={styles.documentDate}>
               Time: {format(new Date(), 'HH:mm')}
@@ -308,15 +309,9 @@ export const StockPickingListPDFDocument: React.FC<StockPickingListPDFProps> = (
         <View style={styles.orderSection}>
           <Text style={styles.sectionTitle}>Order Details</Text>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Order ID:</Text>
-            <Text style={styles.infoValue}>{order.order_id}</Text>
+            <Text style={styles.infoLabel}>Order Number:</Text>
+            <Text style={styles.infoValue}>{order.order_number || order.order_id}</Text>
           </View>
-          {order.order_number && (
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Order Number:</Text>
-              <Text style={styles.infoValue}>{order.order_number}</Text>
-            </View>
-          )}
           {order.customer && (
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Customer:</Text>
@@ -326,7 +321,7 @@ export const StockPickingListPDFDocument: React.FC<StockPickingListPDFProps> = (
           {order.delivery_date && (
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Delivery Date:</Text>
-              <Text style={styles.infoValue}>{format(new Date(order.delivery_date), 'MMM d, yyyy')}</Text>
+              <Text style={styles.infoValue}>{formatDate(order.delivery_date)}</Text>
             </View>
           )}
           {issuedTo && (
@@ -423,7 +418,7 @@ export const StockPickingListPDFDocument: React.FC<StockPickingListPDFProps> = (
 
         {/* Footer */}
         <View style={styles.footer}>
-          <Text>Generated: {format(new Date(), 'MMM d, yyyy HH:mm')}</Text>
+          <Text>Generated: {formatDateTime(new Date())}</Text>
         </View>
       </Page>
     </Document>

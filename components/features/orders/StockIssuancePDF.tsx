@@ -6,6 +6,7 @@ import { Download, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
+import { formatDate, formatDateTime } from '@/lib/date-utils';
 import type { Order } from '@/types/orders';
 
 // PDF Styles
@@ -246,9 +247,9 @@ export const StockIssuancePDFDocument: React.FC<StockIssuancePDFProps> = ({
           </View>
           <View>
             <Text style={styles.documentTitle}>STOCK ISSUANCE</Text>
-            <Text style={styles.documentNumber}>Order #: {order.order_id}</Text>
+            <Text style={styles.documentNumber}>Order #: {order.order_number || order.order_id}</Text>
             <Text style={styles.documentDate}>
-              Issuance Date: {format(new Date(issuanceDate), 'MMM d, yyyy HH:mm')}
+              Issuance Date: {formatDateTime(issuanceDate)}
             </Text>
           </View>
         </View>
@@ -257,7 +258,7 @@ export const StockIssuancePDFDocument: React.FC<StockIssuancePDFProps> = ({
         <View style={styles.orderSection}>
           <Text style={styles.sectionTitle}>Order Information</Text>
           <Text style={styles.sectionContent}>
-            Order Number: {order.order_id}
+            Order Number: {order.order_number || order.order_id}
           </Text>
           {order.customer && (
             <Text style={styles.sectionContent}>
@@ -266,7 +267,7 @@ export const StockIssuancePDFDocument: React.FC<StockIssuancePDFProps> = ({
           )}
           {order.order_date && (
             <Text style={styles.sectionContent}>
-              Order Date: {format(new Date(order.order_date), 'MMM d, yyyy')}
+              Order Date: {formatDate(order.order_date)}
             </Text>
           )}
         </View>
@@ -393,7 +394,7 @@ export const StockIssuancePDFDownload: React.FC<StockIssuancePDFDownloadProps> =
       ).toBlob();
       
       const pdfBlob = new Blob([blob], { type: 'application/pdf' });
-      const filename = `stock_issuance_order_${order.order_id}_${format(new Date(issuanceDate), 'yyyy-MM-dd')}.pdf`;
+      const filename = `stock_issuance_${order.order_number || order.order_id}_${format(new Date(issuanceDate), 'yyyy-MM-dd')}.pdf`;
 
       // Prefer native Save dialog when supported
       const anyWindow = window as any;

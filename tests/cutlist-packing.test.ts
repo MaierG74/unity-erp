@@ -67,6 +67,16 @@ interface LayoutResult {
   unplaced?: Array<{ part: PartSpec; count: number; reason: string }>;
 }
 
+interface StripPackResult extends LayoutResult {
+  cutCount: number;
+  cutLines: Array<{
+    type: 'horizontal' | 'vertical';
+    position: number;
+    start: number;
+    end: number;
+  }>;
+}
+
 // Standard sheet size: 2750mm × 1830mm (common MDF/chipboard size)
 const STANDARD_SHEET: StockSheetSpec = {
   id: 'standard',
@@ -184,6 +194,50 @@ test('respects grain orientation - length', async () => {
   const placement = result.sheets[0].placements[0];
   // With grain='length', rotation should be 0° (length along sheet length)
   assert.equal(placement.rot, 0, 'Grain length should result in 0° rotation');
+});
+
+test('strip packer keeps same-width parts in one ripped column when they fit top-to-bottom', async () => {
+  const { packWithStrips } = await importPacking();
+
+  const stock: StockSheetSpec = {
+    id: 'rip-first-sheet',
+    length_mm: 2730,
+    width_mm: 1830,
+    qty: 1,
+    kerf_mm: 3,
+  };
+
+  const parts: PartSpec[] = [
+    { id: 'top', length_mm: 1200, width_mm: 600, qty: 1, grain: 'length' },
+    { id: 'side', length_mm: 700, width_mm: 600, qty: 2, grain: 'length' },
+  ];
+
+  const result = packWithStrips(parts, stock) as StripPackResult;
+
+  assert.equal(result.sheets.length, 1, 'Should fit on a single sheet');
+  assert.equal(result.cutCount, 3, 'A single rip plus two crosscuts should be counted as 3 merged cuts');
+
+  const placements = [...result.sheets[0].placements].sort((a, b) => a.y - b.y);
+  assert.deepEqual(
+    placements.map((placement) => ({
+      x: placement.x,
+      y: placement.y,
+      w: placement.w,
+      h: placement.h,
+    })),
+    [
+      { x: 0, y: 0, w: 600, h: 1200 },
+      { x: 0, y: 1203, w: 600, h: 700 },
+      { x: 0, y: 1906, w: 600, h: 700 },
+    ],
+    'All three parts should stay in one 600 mm rip column'
+  );
+
+  assert.equal(
+    result.cutLines.filter((line) => line.type === 'vertical').length,
+    1,
+    'The chosen layout should use one vertical rip line'
+  );
 });
 
 // ============================================================================
@@ -595,6 +649,96 @@ test('guillotine packer achieves better waste consolidation', async () => {
 
   assert.equal(legacyPlacements, 6, 'Legacy should place all 6 parts');
   assert.equal(guillotinePlacements, 6, 'Guillotine should place all 6 parts');
+});
+
+test('guillotine best-offcut mode preserves the full-height offcut in the 600mm rip case', async () => {
+  const { packPartsGuillotine } = await importPacking();
+
+  const stock: StockSheetSpec = {
+    id: 'offcut-sheet',
+    length_mm: 2730,
+    width_mm: 1830,
+    qty: 1,
+    kerf_mm: 3,
+  };
+
+  const parts: PartSpec[] = [
+    { id: 'top', length_mm: 1200, width_mm: 600, qty: 1, grain: 'length' },
+    { id: 'side', length_mm: 700, width_mm: 600, qty: 2, grain: 'length' },
+  ];
+
+  const result = packPartsGuillotine(parts, [stock]) as LayoutResult & {
+    largestOffcutArea: number;
+    strategyUsed: string;
+  };
+
+  assert.equal(result.sheets.length, 1, 'Should fit on one sheet');
+  assert.equal(result.stats.cuts, 4, 'Best offcut should count the rip plus all three crosscuts');
+  assert.equal(result.stats.cut_length_mm, 4530, 'Cut length should match 2730 + 600 + 600 + 600 mm');
+
+  const placements = [...result.sheets[0].placements].sort((a, b) => a.y - b.y);
+  assert.deepEqual(
+    placements.map((placement) => ({
+      x: placement.x,
+      y: placement.y,
+      w: placement.w,
+      h: placement.h,
+    })),
+    [
+      { x: 0, y: 0, w: 600, h: 1200 },
+      { x: 0, y: 1203, w: 600, h: 700 },
+      { x: 0, y: 1906, w: 600, h: 700 },
+    ],
+    'Best offcut should keep all three parts inside one 600 mm rip column'
+  );
+
+  assert.ok(
+    result.largestOffcutArea >= 1227 * 2730,
+    'Largest offcut should preserve the full-height right-hand remnant'
+  );
+});
+
+test('deep SA mode keeps the 600mm rip-column layout when the guillotine baseline is already optimal', async () => {
+  const { packPartsSmartOptimized } = await importPacking();
+
+  const stock: StockSheetSpec = {
+    id: 'deep-sheet',
+    length_mm: 2730,
+    width_mm: 1830,
+    qty: 1,
+    kerf_mm: 3,
+  };
+
+  const parts: PartSpec[] = [
+    { id: 'top', length_mm: 1200, width_mm: 600, qty: 1, grain: 'length' },
+    { id: 'side', length_mm: 700, width_mm: 600, qty: 2, grain: 'length' },
+  ];
+
+  const result = await packPartsSmartOptimized(parts, [stock], {
+    algorithm: 'deep',
+    timeBudgetMs: 250,
+  }) as LayoutResult & { algorithm: string; strategyUsed: string };
+
+  assert.equal(result.algorithm, 'deep', 'Should run the deep optimizer path');
+  assert.equal(result.sheets.length, 1, 'Should fit on one sheet');
+  assert.equal(result.stats.cuts, 4, 'Deep SA should report the exact cut count for the final trim-inclusive sequence');
+  assert.equal(result.stats.cut_length_mm, 4530, 'Deep SA should report the exact cut length');
+
+  const placements = [...result.sheets[0].placements].sort((a, b) => a.y - b.y);
+  assert.deepEqual(
+    placements.map((placement) => ({
+      x: placement.x,
+      y: placement.y,
+      w: placement.w,
+      h: placement.h,
+    })),
+    [
+      { x: 0, y: 0, w: 600, h: 1200 },
+      { x: 0, y: 1203, w: 600, h: 700 },
+      { x: 0, y: 1906, w: 600, h: 700 },
+    ],
+    'Deep SA should keep the same 600 mm rip-column layout'
+  );
 });
 
 test('guillotine packer respects grain constraints', async () => {

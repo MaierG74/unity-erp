@@ -16,7 +16,7 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { Calendar as CalendarIcon, Trash2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
-import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import { cn } from '@/lib/utils';
 
 type Job = { job_id: number; name: string };
@@ -194,8 +194,8 @@ export function JobHourlyRatesManager() {
                     <TableRow key={r.rate_id}>
                       <TableCell>{jobs.find(j => j.job_id === r.job_id)?.name || r.job_id}</TableCell>
                       <TableCell>R{r.hourly_rate.toFixed(2)}/hr</TableCell>
-                      <TableCell>{format(new Date(r.effective_date), 'PPP')}</TableCell>
-                      <TableCell>{r.end_date ? format(new Date(r.end_date), 'PPP') : 'Current'}</TableCell>
+                      <TableCell>{formatDate(r.effective_date)}</TableCell>
+                      <TableCell>{r.end_date ? formatDate(r.end_date) : 'Current'}</TableCell>
                       <TableCell>
                         <Button variant="ghost" size="icon" onClick={() => { if (confirm('Delete this rate version?')) deleteRate.mutate(r.rate_id); }}>
                           <Trash2 className="h-4 w-4" />
@@ -237,7 +237,7 @@ export function JobHourlyRatesManager() {
                           <PopoverTrigger asChild>
                             <FormControl>
                               <Button variant={'outline'} className={cn('w-full pl-3 text-left font-normal', !field.value && 'text-muted-foreground')}>
-                                {field.value ? format(field.value, 'PPP') : <span>Pick a date</span>}
+                                {field.value ? formatDate(field.value) : <span>Pick a date</span>}
                                 <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                               </Button>
                             </FormControl>

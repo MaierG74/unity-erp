@@ -91,6 +91,41 @@ export type PurchaseOrderAllocation = {
   quantity: number;
 };
 
+export type PurchaseOrderDraftStatus =
+  | 'draft'
+  | 'converting'
+  | 'converted'
+  | 'archived';
+
+export type PurchaseOrderDraftLine = {
+  draft_line_id?: number;
+  sort_order: number;
+  component_id: number | null;
+  supplier_component_id: number | null;
+  quantity: number | null;
+  customer_order_id: number | null;
+  allocations: PurchaseOrderAllocation[];
+  notes: string;
+};
+
+export type PurchaseOrderDraft = {
+  draft_id: number;
+  title: string | null;
+  order_date: string | null;
+  notes: string;
+  status: PurchaseOrderDraftStatus;
+  version: number;
+  created_by: string;
+  updated_by: string;
+  locked_by: string | null;
+  locked_at: string | null;
+  converted_at: string | null;
+  converted_purchase_order_ids: number[] | null;
+  created_at: string;
+  updated_at: string;
+  lines: PurchaseOrderDraftLine[];
+};
+
 export type SupplierOrderCustomerOrderLink = {
   id: number;
   supplier_order_id?: number;

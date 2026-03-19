@@ -13,8 +13,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { minutesToClock } from '@/src/lib/laborScheduling';
-import { Circle, GripHorizontal, X, Calendar, Clock, User, Briefcase, CheckCircle2, ClipboardList, Loader2, Undo2, Play, PackageCheck, Pause } from 'lucide-react';
+import { minutesToClock, formatDuration } from '@/src/lib/laborScheduling';
+import { Circle, GripHorizontal, X, Calendar, Clock, User, Briefcase, CheckCircle2, ClipboardList, Loader2, Undo2, Play, PackageCheck, Pause, ExternalLink, ChevronDown, ChevronRight, Timer } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
@@ -22,21 +22,86 @@ import { toast } from 'sonner';
 import type { LaborDragPayload, StaffAssignment, StaffLane, TimeMarker } from './types';
 import { CompleteJobDialog } from './complete-job-dialog';
 import type { ScheduleBreak } from '@/types/work-schedule';
+import { getExecutionStatusMeta } from '@/components/production/execution-status';
 
-/** Visual metadata for job status indicators on assignment bars */
-function getJobStatusInfo(status?: StaffAssignment['jobStatus']) {
-  switch (status) {
-    case 'issued':
-      return { label: 'Issued', icon: ClipboardList, color: 'text-blue-300', dotColor: 'bg-blue-400', stripe: 'rgba(96,165,250,0.5)' };
-    case 'in_progress':
-      return { label: 'In Progress', icon: Play, color: 'text-amber-300', dotColor: 'bg-amber-400', stripe: 'rgba(251,191,36,0.5)' };
-    case 'completed':
-      return { label: 'Completed', icon: CheckCircle2, color: 'text-emerald-300', dotColor: 'bg-emerald-400', stripe: 'rgba(52,211,153,0.5)' };
-    case 'on_hold':
-      return { label: 'On Hold', icon: Pause, color: 'text-orange-300', dotColor: 'bg-orange-400', stripe: 'rgba(251,146,60,0.5)' };
-    default:
-      return null;
-  }
+import { formatDate } from '@/lib/date-utils';
+
+const PRINT_AFTER_ISSUE_STORAGE_KEY = 'labor-planning-print-after-issue';
+
+function getStoredPrintAfterIssue(): boolean {
+  if (typeof window === 'undefined') return true;
+  const stored = localStorage.getItem(PRINT_AFTER_ISSUE_STORAGE_KEY);
+  if (stored == null) return true;
+  return stored !== 'false';
+}
+
+/** Collapsible "More details" section for the job assignment dialog */
+function ExpandableDetails({
+  dueDate,
+  staffName,
+  staffRole,
+}: {
+  dueDate?: string | null;
+  staffName?: string;
+  staffRole?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-t">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-1.5 px-5 py-2 text-[12px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+      >
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        More details
+      </button>
+      {open && (
+        <div className="px-5 pb-3 space-y-1 text-[13px] text-muted-foreground">
+          {dueDate && (
+            <div className="flex justify-between">
+              <span>Delivery</span>
+              <span className="text-foreground">{(() => {
+                try {
+                  const d = new Date(dueDate.includes('T') ? dueDate : dueDate + 'T00:00:00');
+                  return Number.isNaN(d.getTime()) ? dueDate : formatDate(d);
+                } catch { return dueDate; }
+              })()}</span>
+            </div>
+          )}
+          {staffName && (
+            <div className="flex justify-between">
+              <span>Staff</span>
+              <span className="text-foreground">{staffName}{staffRole ? ` · ${staffRole}` : ''}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function extractCardIdFromJobKey(jobKey?: string): number | null {
+  if (!jobKey) return null;
+  const match = jobKey.match(/:card-(\d+)$/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function extractItemIdFromJobKey(jobKey?: string): number | null {
+  if (!jobKey) return null;
+  const match = jobKey.match(/:jci-(\d+)$/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function extractPoolIdFromJobKey(jobKey?: string): number | null {
+  if (!jobKey) return null;
+  const match = jobKey.match(/^pool-(\d+)/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 interface StaffLaneListProps {
@@ -189,6 +254,7 @@ export function StaffLaneList({
     if (!selectedAssignment || !selectedLane) return;
 
     setIssuingJobCard(true);
+    let printWindow: Window | null = null;
     try {
       // Look up BOL data if we have a bolId to get product_id and quantity
       let productId: number | null = null;
@@ -233,6 +299,7 @@ export function StaffLaneList({
         card_staff_id: number | null;
       };
       let sourceItem: SourceItem | null = null;
+      let issuedItemId: number | null = null;
 
       if (orderId && jobId) {
         const { data: allCards } = await supabase
@@ -272,6 +339,11 @@ export function StaffLaneList({
         return;
       }
 
+      const shouldPrintAfterIssue = getStoredPrintAfterIssue();
+      if (shouldPrintAfterIssue) {
+        printWindow = window.open('about:blank', '_blank');
+      }
+
       // Create the staff-assigned job card
       const { data: jobCardData, error: jobCardError } = await supabase
         .from('job_cards')
@@ -297,7 +369,7 @@ export function StaffLaneList({
           .update({ quantity: remaining })
           .eq('item_id', sourceItem.item_id);
 
-        await supabase
+        const { data: insertedItem, error: insertError } = await supabase
           .from('job_card_items')
           .insert({
             job_card_id: jobCardData.job_card_id,
@@ -306,13 +378,18 @@ export function StaffLaneList({
             quantity: qtyToIssue,
             piece_rate: sourceItem.piece_rate ?? pieceRate,
             status: 'pending',
-          });
+          })
+          .select('item_id')
+          .single();
+        if (insertError) throw insertError;
+        issuedItemId = insertedItem?.item_id ?? null;
       } else if (sourceItem && remaining <= 0) {
         // Issuing full balance — move the item to the new staff card
         await supabase
           .from('job_card_items')
           .update({ job_card_id: jobCardData.job_card_id })
           .eq('item_id', sourceItem.item_id);
+        issuedItemId = sourceItem.item_id;
 
         // Clean up empty source card if no items remain
         const { data: leftover } = await supabase
@@ -329,7 +406,7 @@ export function StaffLaneList({
         }
       } else if (jobId || productId) {
         // No existing item found at all — create fresh
-        const { error: itemError } = await supabase
+        const { data: insertedItem, error: itemError } = await supabase
           .from('job_card_items')
           .insert({
             job_card_id: jobCardData.job_card_id,
@@ -338,16 +415,28 @@ export function StaffLaneList({
             quantity: qtyToIssue || bolQuantity,
             piece_rate: pieceRate,
             status: 'pending',
-          });
+          })
+          .select('item_id')
+          .single();
 
         if (itemError) throw itemError;
+        issuedItemId = insertedItem?.item_id ?? null;
       }
 
       // Update labor_plan_assignments to mark as issued
       if (selectedAssignment.id) {
+        const poolId = extractPoolIdFromJobKey(selectedAssignment.jobKey);
+        const nextJobKey =
+          poolId != null
+            ? `pool-${poolId}:card-${jobCardData.job_card_id}`
+            : orderId != null && issuedItemId != null
+              ? `order-${orderId}:jci-${issuedItemId}`
+              : selectedAssignment.jobKey;
+
         await supabase
           .from('labor_plan_assignments')
           .update({
+            job_instance_id: nextJobKey,
             job_status: 'issued',
             issued_at: new Date().toISOString(),
           })
@@ -356,15 +445,26 @@ export function StaffLaneList({
 
       const jobCardId = jobCardData.job_card_id;
       const issuedRemaining = remaining > 0 ? ` (${qtyToIssue} issued, ${remaining} remaining)` : '';
+      const reopenPrint = () => window.open(`/staff/job-cards/${jobCardId}?print=1`, '_blank');
 
-      toast.success(`Job card #${jobCardId} issued${issuedRemaining}`);
+      toast.success(`Job card #${jobCardId} issued${issuedRemaining}`, {
+        description: printWindow ? 'Print opened.' : undefined,
+        action: {
+          label: printWindow ? 'Reopen print' : 'Print now',
+          onClick: reopenPrint,
+        },
+      });
 
-      // Open job card in new tab so the user can print immediately
-      window.open(`/staff/job-cards/${jobCardId}`, '_blank');
+      // Open the print-ready job card immediately after issue
+      if (printWindow) {
+        printWindow.location.href = `/staff/job-cards/${jobCardId}?print=1`;
+      }
 
       setSelectedAssignment(null);
       setSelectedLane(null);
+      window.dispatchEvent(new Event('focus'));
     } catch (err: any) {
+      printWindow?.close();
       console.error('Failed to create job card:', err);
       toast.error(err.message || 'Failed to create job card');
     } finally {
@@ -382,102 +482,152 @@ export function StaffLaneList({
       const orderId = typeof selectedAssignment.orderId === 'number' ? selectedAssignment.orderId : null;
       const jobId = selectedAssignment.jobId ?? null;
       const staffId = parseInt(selectedLane.id, 10);
+      const isPoolSourced = selectedAssignment.jobKey?.startsWith('pool-');
+      const targetCardId = extractCardIdFromJobKey(selectedAssignment.jobKey);
+      const targetItemId = extractItemIdFromJobKey(selectedAssignment.jobKey);
 
-      // Find the staff-assigned job card for this order + staff
       if (orderId && jobId) {
-        const { data: staffCards } = await supabase
-          .from('job_cards')
-          .select('job_card_id')
-          .eq('order_id', orderId)
-          .eq('staff_id', staffId);
+        let cardIds: number[] = [];
+        let issuedItems: Array<{
+          item_id: number;
+          job_card_id: number;
+          quantity: number;
+          product_id: number | null;
+          piece_rate: number | null;
+          work_pool_id: number | null;
+        }> = [];
 
-        if (staffCards && staffCards.length > 0) {
-          const cardIds = staffCards.map(c => c.job_card_id);
-
-          // Find the issued item on this staff's card
-          const { data: issuedItems } = await supabase
+        if (targetItemId != null) {
+          const { data: exactItem, error: exactItemError } = await supabase
             .from('job_card_items')
-            .select('item_id, job_card_id, quantity, product_id, piece_rate')
-            .in('job_card_id', cardIds)
-            .eq('job_id', jobId);
+            .select('item_id, job_card_id, quantity, product_id, piece_rate, work_pool_id')
+            .eq('item_id', targetItemId)
+            .maybeSingle();
 
-          for (const item of issuedItems ?? []) {
-            // Find the source item (on any other card for this order+job) to merge qty back
-            const { data: sourceItems } = await supabase
+          if (exactItemError) throw exactItemError;
+          if (exactItem) {
+            issuedItems = [exactItem];
+            cardIds = [exactItem.job_card_id];
+          }
+        } else if (targetCardId != null) {
+          const { data: exactItems, error: exactItemsError } = await supabase
+            .from('job_card_items')
+            .select('item_id, job_card_id, quantity, product_id, piece_rate, work_pool_id')
+            .eq('job_card_id', targetCardId)
+            .eq('job_id', jobId)
+            .neq('status', 'completed');
+
+          if (exactItemsError) throw exactItemsError;
+          issuedItems = exactItems ?? [];
+          cardIds = [targetCardId];
+        } else {
+          // Fallback for legacy assignments without embedded card/item identity.
+          const { data: staffCards } = await supabase
+            .from('job_cards')
+            .select('job_card_id')
+            .eq('order_id', orderId)
+            .eq('staff_id', staffId);
+
+          if (staffCards && staffCards.length > 0) {
+            cardIds = staffCards.map(c => c.job_card_id);
+
+            const { data: fallbackItems, error: fallbackItemsError } = await supabase
               .from('job_card_items')
-              .select('item_id, quantity, job_card_id')
+              .select('item_id, job_card_id, quantity, product_id, piece_rate, work_pool_id')
+              .in('job_card_id', cardIds)
               .eq('job_id', jobId)
-              .not('job_card_id', 'in', `(${cardIds.join(',')})`)
-              .limit(1);
+              .neq('status', 'completed');
 
-            if (sourceItems && sourceItems.length > 0) {
-              // Merge quantity back into source
+            if (fallbackItemsError) throw fallbackItemsError;
+            issuedItems = fallbackItems ?? [];
+          }
+        }
+
+        if (issuedItems.length > 0) {
+          if (isPoolSourced) {
+            // Pool-sourced: cancel only the targeted card item(s).
+            for (const item of issuedItems) {
               await supabase
                 .from('job_card_items')
-                .update({ quantity: sourceItems[0].quantity + item.quantity })
-                .eq('item_id', sourceItems[0].item_id);
-            } else {
-              // No source item to merge into — find or create an unassigned card
-              const { data: unassignedCard } = await supabase
-                .from('job_cards')
-                .select('job_card_id')
-                .eq('order_id', orderId)
-                .is('staff_id', null)
-                .limit(1)
-                .maybeSingle();
-
-              let targetCardId: number;
-              if (unassignedCard) {
-                targetCardId = unassignedCard.job_card_id;
-              } else {
-                const { data: newCard } = await supabase
-                  .from('job_cards')
-                  .insert({ order_id: orderId, staff_id: null, status: 'pending', issue_date: new Date().toISOString().split('T')[0] })
-                  .select()
-                  .single();
-                targetCardId = newCard!.job_card_id;
-              }
-
-              // Move the item back to the unassigned card
-              await supabase
-                .from('job_card_items')
-                .update({ job_card_id: targetCardId })
+                .update({ status: 'cancelled' })
                 .eq('item_id', item.item_id);
             }
+          } else {
+            // Legacy (non-pool): merge only the targeted card item(s) back to source cards.
+            for (const item of issuedItems) {
+              const { data: sourceItems } = await supabase
+                .from('job_card_items')
+                .select('item_id, quantity, job_card_id')
+                .eq('job_id', jobId)
+                .not('job_card_id', 'in', `(${cardIds.join(',')})`)
+                .limit(1);
 
-            // Delete the issued item (if it was merged back) or clean up card
-            if (sourceItems && sourceItems.length > 0) {
-              await supabase.from('job_card_items').delete().eq('item_id', item.item_id);
+              if (sourceItems && sourceItems.length > 0) {
+                await supabase
+                  .from('job_card_items')
+                  .update({ quantity: sourceItems[0].quantity + item.quantity })
+                  .eq('item_id', sourceItems[0].item_id);
+                await supabase.from('job_card_items').delete().eq('item_id', item.item_id);
+              } else {
+                // No source — find or create an unassigned card
+                const { data: unassignedCard } = await supabase
+                  .from('job_cards')
+                  .select('job_card_id')
+                  .eq('order_id', orderId)
+                  .is('staff_id', null)
+                  .limit(1)
+                  .maybeSingle();
+
+                let targetUnassignedCardId: number;
+                if (unassignedCard) {
+                  targetUnassignedCardId = unassignedCard.job_card_id;
+                } else {
+                  const { data: newCard } = await supabase
+                    .from('job_cards')
+                    .insert({ order_id: orderId, staff_id: null, status: 'pending', issue_date: new Date().toISOString().split('T')[0] })
+                    .select()
+                    .single();
+                  targetUnassignedCardId = newCard!.job_card_id;
+                }
+                await supabase
+                  .from('job_card_items')
+                  .update({ job_card_id: targetUnassignedCardId })
+                  .eq('item_id', item.item_id);
+              }
             }
           }
 
-          // Clean up empty staff cards
+          // Clean up only the targeted card(s).
           for (const cardId of cardIds) {
-            const { data: remaining } = await supabase
+            const { data: activeItems } = await supabase
               .from('job_card_items')
               .select('item_id')
               .eq('job_card_id', cardId)
+              .not('status', 'eq', 'cancelled')
               .limit(1);
-            if (!remaining || remaining.length === 0) {
-              await supabase.from('job_cards').delete().eq('job_card_id', cardId);
+            if (!activeItems || activeItems.length === 0) {
+              // Cancel the card itself (don't delete — preserves audit trail for pool)
+              await supabase
+                .from('job_cards')
+                .update({ status: 'cancelled' })
+                .eq('job_card_id', cardId);
             }
           }
+        } else if (targetCardId != null || targetItemId != null) {
+          throw new Error('Could not find the exact issued card for this scheduled job');
         }
       }
 
-      // Reset the assignment status back to scheduled
+      // Delete the swim lane assignment entirely so it disappears from the timeline
       if (selectedAssignment.id) {
         await supabase
           .from('labor_plan_assignments')
-          .update({
-            job_status: 'scheduled',
-            issued_at: null,
-          })
+          .delete()
           .eq('assignment_id', parseInt(selectedAssignment.id, 10));
       }
 
       toast.success('Job card un-issued', {
-        description: 'Quantity returned. You can re-issue to a different staff member.',
+        description: 'Quantity returned to pool. You can re-issue from the sidebar.',
       });
 
       setSelectedAssignment(null);
@@ -513,7 +663,7 @@ export function StaffLaneList({
 
         return (
           <div key={lane.id} className={cn(
-            "flex rounded-lg border bg-card shadow-sm transition-all",
+            "flex rounded-lg border bg-card shadow-xs transition-all",
             dragIndicator?.laneId === lane.id ? "overflow-visible" : "overflow-hidden",
             isDragOver && laneAvailable && "ring-2 ring-primary ring-offset-1 border-primary/50"
           )}>
@@ -589,7 +739,11 @@ export function StaffLaneList({
                 setDragIndicator(null);
                 const payload = parsePayload(event);
                 if (!payload) return;
-                const dropMinutes = computeMinutesFromEvent(event);
+                const rawMinutes = computeMinutesFromEvent(event);
+                // Snap to the same grid the visual indicator uses so what
+                // the user sees matches what gets saved.
+                const snappedMinutes = Math.round(rawMinutes / dragSnapIncrement) * dragSnapIncrement;
+                const dropMinutes = Math.min(Math.max(snappedMinutes, startMinutes), endMinutes);
                 onDrop({ staff: lane, startMinutes: dropMinutes, payload });
               }}
             >
@@ -674,17 +828,22 @@ export function StaffLaneList({
                       : '#34d399');
 
                 const durationMins = assignment.endMinutes - assignment.startMinutes;
-                const durationHours = Math.round(durationMins / 6) / 10;
-                const statusInfo = getJobStatusInfo(assignment.jobStatus);
+                const statusInfo = getExecutionStatusMeta(assignment.jobStatus);
                 const isCompleted = assignment.jobStatus === 'completed';
+                // Sliver mode: when the true pixel width is too small for text
+                const isSliver = useFixedWidth && width < 60;
+                const sliverWidth = useFixedWidth ? Math.max(width, 6) : Math.max(width, 1);
 
                 return (
-                  <Tooltip key={assignment.id} delayDuration={300}>
+                  <Tooltip key={assignment.id} delayDuration={isSliver ? 100 : 300}>
                   <TooltipTrigger asChild>
                   <div
                     data-job-key={assignment.jobKey}
                     className={cn(
-                      'absolute top-1 flex items-center rounded-xl cursor-pointer transition-all duration-150 hover:scale-[1.02] hover:shadow-lg active:scale-[0.99]',
+                      'absolute top-1 flex items-center cursor-pointer',
+                      isSliver
+                        ? 'group/sliver rounded-md z-[1] hover:z-10 transition-[width,box-shadow] duration-200 ease-out'
+                        : 'rounded-xl transition-all duration-150 hover:scale-[1.02] hover:shadow-lg active:scale-[0.99]',
                       compact ? 'h-12' : 'h-14',
                       isCompleted && 'opacity-60',
                     )}
@@ -701,81 +860,125 @@ export function StaffLaneList({
                     }}
                     style={{
                       left: useFixedWidth ? left : `${left}%`,
-                      width: useFixedWidth ? Math.max(width, 80) : `${Math.max(width, 8)}%`,
-                      minWidth: '80px',
+                      width: isSliver
+                        ? sliverWidth
+                        : (useFixedWidth ? Math.max(width, 60) : `${Math.max(width, 5)}%`),
+                      ...(isSliver ? {} : { minWidth: '60px' }),
                       background: `linear-gradient(145deg, ${baseColor}ee 0%, ${baseColor}bb 100%)`,
-                      boxShadow: `0 2px 8px ${baseColor}55, inset 0 1px 0 rgba(255,255,255,0.15)`,
+                      boxShadow: isSliver
+                        ? `0 1px 4px ${baseColor}66`
+                        : `0 2px 8px ${baseColor}55, inset 0 1px 0 rgba(255,255,255,0.15)`,
                     }}
                   >
                     {/* Left accent stripe — coloured by job status when present */}
                     <div
-                      className="absolute left-0 top-0 h-full w-1 rounded-l-xl"
-                      style={{ background: statusInfo?.stripe ?? 'rgba(255,255,255,0.35)' }}
+                      className={cn(
+                        'absolute left-0 top-0 h-full',
+                        isSliver ? 'w-full rounded-md' : 'w-1 rounded-l-xl',
+                      )}
+                      style={{ background: isSliver ? undefined : (statusInfo?.stripeColor ?? 'rgba(255,255,255,0.35)') }}
                     />
 
-                    {/* Resize handles */}
-                    {assignment.showHandles !== false && (
+                    {/* ─── Sliver mode: compact dot, expand on hover ─── */}
+                    {isSliver && (
                       <>
-                        <div
-                          className="absolute left-0 top-0 flex h-full w-3 cursor-ew-resize items-center justify-center rounded-l-xl bg-black/15 opacity-0 transition hover:opacity-100"
-                          draggable
-                          onDragStart={(event) => {
-                            event.stopPropagation();
-                            const payload: LaborDragPayload = { type: 'resize-start', assignment };
-                            event.dataTransfer.setData('application/json', JSON.stringify(payload));
-                            event.dataTransfer.effectAllowed = 'move';
-                          }}
-                        >
-                          <GripHorizontal className="h-3 w-3 rotate-90 text-white/80" />
+                        {/* Pulsing dot visible at rest */}
+                        <div className="absolute inset-0 flex items-center justify-center group-hover/sliver:opacity-0 transition-opacity duration-150">
+                          <div className="h-2 w-2 rounded-full bg-white/80 shadow-xs" />
                         </div>
+                        {/* Expanded card — appears on hover */}
                         <div
-                          className="absolute right-0 top-0 flex h-full w-3 cursor-ew-resize items-center justify-center rounded-r-xl bg-black/15 opacity-0 transition hover:opacity-100"
-                          draggable
-                          onDragStart={(event) => {
-                            event.stopPropagation();
-                            const payload: LaborDragPayload = { type: 'resize-end', assignment };
-                            event.dataTransfer.setData('application/json', JSON.stringify(payload));
-                            event.dataTransfer.effectAllowed = 'move';
+                          className="pointer-events-none absolute left-0 top-0 flex h-full items-center overflow-hidden rounded-xl opacity-0 group-hover/sliver:pointer-events-auto group-hover/sliver:opacity-100 transition-[opacity] duration-200"
+                          style={{
+                            width: '180px',
+                            background: `linear-gradient(145deg, ${baseColor} 0%, ${baseColor}dd 100%)`,
+                            boxShadow: `0 4px 16px ${baseColor}88, 0 0 0 1px rgba(255,255,255,0.1)`,
                           }}
                         >
-                          <GripHorizontal className="h-3 w-3 rotate-90 text-white/80" />
+                          <div className="flex min-w-0 flex-1 flex-col justify-center pl-3 pr-2">
+                            <span className="truncate text-[10px] font-semibold leading-tight text-white drop-shadow-xs">
+                              {assignment.productName || assignment.jobName || assignment.label}
+                            </span>
+                            <span className="truncate text-[8px] font-medium text-white/80 mt-px">
+                              #{assignment.orderNumber || 'N/A'}
+                              {assignment.jobName && assignment.jobName !== (assignment.productName || assignment.label) && ` · ${assignment.jobName}`}
+                              {' · '}{formatDuration(durationMins)}
+                            </span>
+                          </div>
+                          {statusInfo && (
+                            <div className={cn('mr-1.5 flex shrink-0 items-center justify-center rounded-full p-0.5', statusInfo.textClassName)}>
+                              <statusInfo.icon className="h-3 w-3 drop-shadow-xs" />
+                            </div>
+                          )}
                         </div>
                       </>
                     )}
 
-                    <div className="flex min-w-0 flex-1 flex-col justify-center pl-3.5 pr-1.5">
-                      <span className="truncate text-[10px] font-semibold leading-tight text-white drop-shadow-sm">
-                        {assignment.productName || assignment.jobName || assignment.label}
-                      </span>
-                      <div className="mt-0.5 flex items-center gap-1">
-                        <span className="rounded bg-black/20 px-1 py-px text-[8px] font-bold tracking-wide text-white/90">
-                          #{assignment.orderNumber || 'N/A'}
-                        </span>
-                        <span className="text-[9px] font-medium text-white/75">
-                          {Math.round((assignment.endMinutes - assignment.startMinutes) / 60 * 10) / 10}h
-                        </span>
-                      </div>
-                    </div>
+                    {/* ─── Normal card content ─── */}
+                    {!isSliver && (
+                      <>
+                        {/* Resize handles */}
+                        {assignment.showHandles !== false && (
+                          <>
+                            <div
+                              className="absolute left-0 top-0 flex h-full w-3 cursor-ew-resize items-center justify-center rounded-l-xl bg-black/15 opacity-0 transition hover:opacity-100"
+                              draggable
+                              onDragStart={(event) => {
+                                event.stopPropagation();
+                                const payload: LaborDragPayload = { type: 'resize-start', assignment };
+                                event.dataTransfer.setData('application/json', JSON.stringify(payload));
+                                event.dataTransfer.effectAllowed = 'move';
+                              }}
+                            >
+                              <GripHorizontal className="h-3 w-3 rotate-90 text-white/80" />
+                            </div>
+                            <div
+                              className="absolute right-0 top-0 flex h-full w-3 cursor-ew-resize items-center justify-center rounded-r-xl bg-black/15 opacity-0 transition hover:opacity-100"
+                              draggable
+                              onDragStart={(event) => {
+                                event.stopPropagation();
+                                const payload: LaborDragPayload = { type: 'resize-end', assignment };
+                                event.dataTransfer.setData('application/json', JSON.stringify(payload));
+                                event.dataTransfer.effectAllowed = 'move';
+                              }}
+                            >
+                              <GripHorizontal className="h-3 w-3 rotate-90 text-white/80" />
+                            </div>
+                          </>
+                        )}
 
-                    {/* Job status indicator */}
-                    {statusInfo && (
-                      <div className={cn('mr-1 flex shrink-0 items-center justify-center rounded-full p-0.5', statusInfo.color)}>
-                        <statusInfo.icon className="h-3.5 w-3.5 drop-shadow-sm" />
-                      </div>
-                    )}
+                        <div className="flex min-w-0 flex-1 flex-col justify-center pl-3.5 pr-1.5">
+                          <span className="truncate text-[10px] font-semibold leading-tight text-white drop-shadow-xs">
+                            {assignment.productName || assignment.jobName || assignment.label}
+                          </span>
+                          <span className="truncate text-[8px] font-medium text-white/70 mt-px">
+                            #{assignment.orderNumber || 'N/A'}
+                            {assignment.jobName && assignment.jobName !== (assignment.productName || assignment.label) && ` · ${assignment.jobName}`}
+                            {' · '}{formatDuration(durationMins)}
+                          </span>
+                        </div>
 
-                    {onUnassign && (
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onUnassign(assignment);
-                        }}
-                        className="mr-1.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-white/20 text-white/90 transition hover:bg-white/35"
-                        aria-label="Unassign job"
-                      >
-                        <X className="h-2.5 w-2.5" />
-                      </button>
+                        {/* Job status indicator */}
+                        {statusInfo && (
+                          <div className={cn('mr-1 flex shrink-0 items-center justify-center rounded-full p-0.5', statusInfo.textClassName)}>
+                            <statusInfo.icon className="h-3.5 w-3.5 drop-shadow-xs" />
+                          </div>
+                        )}
+
+                        {onUnassign && (
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onUnassign(assignment);
+                            }}
+                            className="mr-1.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-white/20 text-white/90 transition hover:bg-white/35"
+                            aria-label="Unassign job"
+                          >
+                            <X className="h-2.5 w-2.5" />
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
                   </TooltipTrigger>
@@ -795,7 +998,7 @@ export function StaffLaneList({
                       <div className="flex items-center gap-1.5 text-[10px] text-neutral-300">
                         <Clock className="h-3 w-3 shrink-0 text-neutral-500" />
                         <span>{minutesToClock(assignment.startMinutes)} – {minutesToClock(assignment.endMinutes)}</span>
-                        <span className="ml-auto text-neutral-500">{durationHours}h</span>
+                        <span className="ml-auto text-neutral-500">{formatDuration(durationMins)}</span>
                       </div>
                       {assignment.orderNumber && (
                         <div className="flex items-center gap-1.5 text-[10px] text-neutral-300">
@@ -822,7 +1025,7 @@ export function StaffLaneList({
                         </div>
                       )}
                       {statusInfo && (
-                        <div className={cn('flex items-center gap-1.5 text-[10px]', statusInfo.color)}>
+                        <div className={cn('flex items-center gap-1.5 text-[10px]', statusInfo.textClassName)}>
                           <statusInfo.icon className="h-3 w-3 shrink-0" />
                           <span>{statusInfo.label}</span>
                         </div>
@@ -840,153 +1043,258 @@ export function StaffLaneList({
 
       {/* Job Details Modal */}
       <Dialog open={!!selectedAssignment} onOpenChange={(open) => !open && setSelectedAssignment(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Briefcase className="h-5 w-5" />
-              Job Assignment Details
-            </DialogTitle>
-            <DialogDescription>
-              {selectedAssignment?.label}
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
+          {selectedAssignment && (() => {
+            const durationMin = selectedAssignment.endMinutes - selectedAssignment.startMinutes;
+            const qty = selectedAssignment.quantity ?? 0;
+            const perItem = qty > 1 ? durationMin / qty : null;
+            const statusMeta = getExecutionStatusMeta(selectedAssignment.jobStatus);
+            return (
+              <>
+                {/* ── Colour accent bar ── */}
+                <div
+                  className="h-1.5 w-full"
+                  style={{ background: selectedAssignment.color ?? 'hsl(var(--primary))' }}
+                />
 
-          {selectedAssignment && (
-            <div className="space-y-4">
-              {/* Time Info */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm">
-                  <Clock className="h-4 w-4 text-muted-foreground" />
-                  <span className="font-medium">Scheduled Time</span>
-                </div>
-                <div className="ml-6 space-y-1 text-sm text-muted-foreground">
-                  <div>Start: {minutesToClock(selectedAssignment.startMinutes)}</div>
-                  <div>End: {minutesToClock(selectedAssignment.endMinutes)}</div>
-                  <div>Duration: {Math.round((selectedAssignment.endMinutes - selectedAssignment.startMinutes) / 60 * 10) / 10}h</div>
-                </div>
-              </div>
+                {/* ── Header ── */}
+                <div className="px-5 pt-4 pb-3">
+                  <DialogHeader className="space-y-1">
+                    <DialogTitle className="flex items-center gap-2 text-[15px] font-semibold leading-snug">
+                      {selectedAssignment.orderNumber ? (
+                        <a
+                          href={`/orders/${selectedAssignment.orderId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-foreground hover:text-primary transition-colors"
+                        >
+                          {selectedAssignment.orderNumber}
+                          <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                        </a>
+                      ) : (
+                        <span>Unlinked Job</span>
+                      )}
+                      {selectedAssignment.customerName && (
+                        <>
+                          <span className="text-muted-foreground/60 font-normal">·</span>
+                          <span className="font-normal text-muted-foreground truncate text-sm">
+                            {selectedAssignment.customerName}
+                          </span>
+                        </>
+                      )}
+                    </DialogTitle>
+                    <DialogDescription className="text-[13px] text-muted-foreground flex items-center gap-1.5 flex-wrap">
+                      {selectedAssignment.jobName && (
+                        selectedAssignment.jobId ? (
+                          <a
+                            href={`/labor/jobs/${selectedAssignment.jobId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-foreground/80 hover:text-primary transition-colors inline-flex items-center gap-1"
+                          >
+                            {selectedAssignment.jobName}
+                            <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                          </a>
+                        ) : (
+                          <span className="text-foreground/80">{selectedAssignment.jobName}</span>
+                        )
+                      )}
+                      {selectedAssignment.jobName && selectedAssignment.productName && (
+                        <span className="text-muted-foreground/40">·</span>
+                      )}
+                      {selectedAssignment.productName && (
+                        selectedAssignment.productId ? (
+                          <a
+                            href={`/products/${selectedAssignment.productId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-foreground/80 hover:text-primary transition-colors inline-flex items-center gap-1"
+                          >
+                            {selectedAssignment.productName}
+                            <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                          </a>
+                        ) : (
+                          <span className="text-foreground/80">{selectedAssignment.productName}</span>
+                        )
+                      )}
+                      {!selectedAssignment.jobName && !selectedAssignment.productName && 'Job'}
+                    </DialogDescription>
+                  </DialogHeader>
 
-              {/* Order Info */}
-              {selectedAssignment.orderNumber && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-sm">
-                    <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <span className="font-medium">Order Details</span>
+                  {/* Metadata chips */}
+                  <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
+                    {selectedAssignment.jobStatus && (
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          'text-[11px] capitalize gap-1 font-medium',
+                          statusMeta?.badgeClassName,
+                        )}
+                      >
+                        {statusMeta && <statusMeta.icon className="h-3 w-3" />}
+                        {statusMeta?.label ?? selectedAssignment.jobStatus.replace('_', ' ')}
+                      </Badge>
+                    )}
+                    <Badge variant="secondary" className="text-[11px] font-medium">
+                      {selectedAssignment.payType === 'piece' ? 'Piecework' : 'Hourly'}
+                    </Badge>
+                    {qty > 0 && (
+                      <Badge variant="secondary" className="text-[11px] font-medium">
+                        Qty: {qty}
+                      </Badge>
+                    )}
                   </div>
-                  <div className="ml-6 space-y-1 text-sm text-muted-foreground">
-                    <div>Order #: {selectedAssignment.orderNumber}</div>
-                    {selectedAssignment.orderId && <div>ID: {selectedAssignment.orderId}</div>}
-                  </div>
                 </div>
-              )}
 
-              {/* Job Info */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm">
-                  <User className="h-4 w-4 text-muted-foreground" />
-                  <span className="font-medium">Job Information</span>
-                </div>
-                <div className="ml-6 space-y-1 text-sm text-muted-foreground">
-                  {selectedAssignment.jobName && <div>Job: {selectedAssignment.jobName}</div>}
-                  {selectedAssignment.productName && <div>Product: {selectedAssignment.productName}</div>}
-                  <div>Pay Type: {selectedAssignment.payType === 'piece' ? 'Piecework' : 'Hourly'}</div>
-                  <div>Status: <Badge variant="outline" className="ml-1">{selectedAssignment.status}</Badge></div>
-                </div>
-              </div>
-
-              {/* Issue quantity — only show when not yet issued */}
-              {availableQty != null && selectedAssignment.jobStatus !== 'issued' && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-sm">
-                    <ClipboardList className="h-4 w-4 text-muted-foreground" />
-                    <span className="font-medium">Issue Quantity</span>
+                {/* ── Schedule block ── */}
+                <div className="mx-5 rounded-lg border bg-muted/40 px-4 py-3 mb-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10">
+                        <Timer className="h-4 w-4 text-primary" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-semibold tabular-nums">
+                          {minutesToClock(selectedAssignment.startMinutes)}
+                          <span className="mx-1 text-muted-foreground font-normal">→</span>
+                          {minutesToClock(selectedAssignment.endMinutes)}
+                        </div>
+                        <div className="text-[12px] text-muted-foreground leading-tight">
+                          {formatDuration(durationMin)} total
+                          {perItem != null && (
+                            <span> · {formatDuration(perItem)}/item × {qty}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="ml-6 flex items-center gap-3">
+                  {/* Staff assignment */}
+                  {selectedLane && (
+                    <div className="flex items-center gap-2.5 mt-2.5 pt-2.5 border-t border-border/50">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted">
+                        <User className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium">{selectedLane.name}</div>
+                        {selectedLane.role && (
+                          <div className="text-[12px] text-muted-foreground leading-tight">{selectedLane.role}</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {/* Due date */}
+                  {selectedAssignment.dueDate && (
+                    <div className="flex items-center gap-2.5 mt-2.5 pt-2.5 border-t border-border/50">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted">
+                        <Calendar className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium">
+                          {(() => {
+                            try {
+                              const d = new Date(selectedAssignment.dueDate!.includes('T') ? selectedAssignment.dueDate! : selectedAssignment.dueDate! + 'T00:00:00');
+                              return Number.isNaN(d.getTime()) ? selectedAssignment.dueDate : formatDate(d);
+                            } catch { return selectedAssignment.dueDate; }
+                          })()}
+                        </div>
+                        <div className="text-[12px] text-muted-foreground leading-tight">Delivery date</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Issue quantity ── */}
+                {availableQty != null && selectedAssignment.jobStatus !== 'issued' && (
+                  <div className="mx-5 mb-3 flex items-center gap-3 rounded-lg border px-4 py-2.5">
+                    <ClipboardList className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span className="text-sm font-medium">Issue</span>
                     <Input
                       type="number"
                       min={1}
                       max={availableQty}
                       value={issueQty}
                       onChange={(e) => setIssueQty(Math.max(1, Math.min(availableQty, parseInt(e.target.value) || 1)))}
-                      className="h-8 w-24 text-sm"
+                      className="h-7 w-20 text-sm"
                     />
-                    <span className="text-sm text-muted-foreground">
+                    <span className="text-[12px] text-muted-foreground">
                       of {availableQty} available
                     </span>
                   </div>
-                </div>
-              )}
-
-              <div className="flex justify-end gap-2 pt-4 pb-1">
-                {selectedAssignment.jobStatus === 'issued' ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleUnissueJobCard}
-                    disabled={unissuing}
-                    className="text-amber-600 border-amber-300 hover:bg-amber-50"
-                  >
-                    {unissuing ? (
-                      <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                    ) : (
-                      <Undo2 className="h-4 w-4 mr-1.5" />
-                    )}
-                    {unissuing ? 'Un-issuing...' : 'Un-issue'}
-                  </Button>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleIssueJobCard}
-                    disabled={issuingJobCard}
-                  >
-                    {issuingJobCard ? (
-                      <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                    ) : (
-                      <ClipboardList className="h-4 w-4 mr-1.5" />
-                    )}
-                    {issuingJobCard ? 'Creating...' : `Issue${availableQty != null ? ` (${issueQty})` : ''}`}
-                  </Button>
                 )}
-                <Button
-                  variant="default"
-                  size="sm"
-                  className="bg-green-600 hover:bg-green-700"
-                  onClick={() => {
-                    if (!selectedAssignment || !selectedLane) return;
-                    setCompleteAssignment({
-                      assignment_id: parseInt(selectedAssignment.id, 10),
-                      job_instance_id: selectedAssignment.jobKey,
-                      order_id: typeof selectedAssignment.orderId === 'number' ? selectedAssignment.orderId : undefined,
-                      orderNumber: selectedAssignment.orderNumber ?? undefined,
-                      job_id: selectedAssignment.jobId ?? undefined,
-                      jobName: selectedAssignment.jobName ?? undefined,
-                      productName: selectedAssignment.productName ?? undefined,
-                      staffName: selectedLane.name,
-                      staff_id: parseInt(selectedLane.id, 10),
-                      assignment_date: selectedAssignment.assignmentDate ?? undefined,
-                      start_minutes: selectedAssignment.startMinutes,
-                      end_minutes: selectedAssignment.endMinutes,
-                      issued_at: selectedAssignment.issuedAt ?? undefined,
-                      started_at: selectedAssignment.startedAt ?? undefined,
-                      job_status: selectedAssignment.jobStatus,
-                    });
+
+                {/* ── Actions ── */}
+                <div className="flex items-center gap-2 px-5 py-3 border-t bg-muted/20">
+                  {selectedAssignment.jobStatus === 'issued' ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleUnissueJobCard}
+                      disabled={unissuing}
+                      className="text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-600/50 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+                    >
+                      {unissuing ? (
+                        <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                      ) : (
+                        <Undo2 className="h-4 w-4 mr-1.5" />
+                      )}
+                      {unissuing ? 'Un-issuing...' : 'Un-issue'}
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleIssueJobCard}
+                      disabled={issuingJobCard}
+                    >
+                      {issuingJobCard ? (
+                        <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                      ) : (
+                        <ClipboardList className="h-4 w-4 mr-1.5" />
+                      )}
+                      {issuingJobCard ? 'Creating...' : `Issue${availableQty != null ? ` (${issueQty})` : ''}`}
+                    </Button>
+                  )}
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+                    onClick={() => {
+                      if (!selectedAssignment || !selectedLane) return;
+                      setCompleteAssignment({
+                        assignment_id: parseInt(selectedAssignment.id, 10),
+                        job_instance_id: selectedAssignment.jobKey,
+                        order_id: typeof selectedAssignment.orderId === 'number' ? selectedAssignment.orderId : undefined,
+                        orderNumber: selectedAssignment.orderNumber ?? undefined,
+                        job_id: selectedAssignment.jobId ?? undefined,
+                        jobName: selectedAssignment.jobName ?? undefined,
+                        productName: selectedAssignment.productName ?? undefined,
+                        staffName: selectedLane.name,
+                        staff_id: parseInt(selectedLane.id, 10),
+                        assignment_date: selectedAssignment.assignmentDate ?? undefined,
+                        start_minutes: selectedAssignment.startMinutes,
+                        end_minutes: selectedAssignment.endMinutes,
+                        issued_at: selectedAssignment.issuedAt ?? undefined,
+                        started_at: selectedAssignment.startedAt ?? undefined,
+                        job_status: selectedAssignment.jobStatus,
+                      });
+                      setSelectedAssignment(null);
+                      setSelectedLane(null);
+                    }}
+                  >
+                    <CheckCircle2 className="h-4 w-4 mr-1.5" />
+                    Complete Job
+                  </Button>
+                  <div className="flex-1" />
+                  <Button variant="ghost" size="sm" onClick={() => {
                     setSelectedAssignment(null);
                     setSelectedLane(null);
-                  }}
-                >
-                  <CheckCircle2 className="h-4 w-4 mr-1.5" />
-                  Complete Job
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => {
-                  setSelectedAssignment(null);
-                  setSelectedLane(null);
-                }}>
-                  Close
-                </Button>
-              </div>
-            </div>
-          )}
+                  }}>
+                    Close
+                  </Button>
+                </div>
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 

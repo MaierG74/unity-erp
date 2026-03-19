@@ -46,3 +46,5 @@ supabase/.temp/
 
 # local tooling worktrees
 .claude/
+.worktrees/
+.superpowers/

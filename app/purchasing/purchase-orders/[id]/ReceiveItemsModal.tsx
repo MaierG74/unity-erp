@@ -278,6 +278,8 @@ export function ReceiveItemsModal({
           p_quantity: number;
           p_receipt_date: string;
           p_allocation_receipts?: AllocationReceipt[] | null;
+          p_rejected_quantity?: number;
+          p_rejection_reason?: string;
         } = {
           p_order_id: supplierOrder.order_id,
           p_quantity: normalizeQuantity(data.quantity_received || 0),
@@ -288,7 +290,13 @@ export function ReceiveItemsModal({
           rpcPayload.p_allocation_receipts = allocationPayload;
         }
 
-        const { error: receiptError } = await supabase.rpc(
+        // Include rejection in the same atomic call
+        if ((data.quantity_rejected || 0) > 0) {
+          rpcPayload.p_rejected_quantity = data.quantity_rejected;
+          rpcPayload.p_rejection_reason = data.rejection_reason;
+        }
+
+        const { data: receiptResult, error: receiptError } = await supabase.rpc(
           'process_supplier_order_receipt',
           rpcPayload
         );
@@ -296,10 +304,21 @@ export function ReceiveItemsModal({
         if (receiptError) {
           throw new Error(`Failed to process receipt: ${receiptError.message}`);
         }
+
+        if (receiptResult && Array.isArray(receiptResult) && receiptResult.length > 0) {
+          const result = receiptResult[0];
+          if (result.return_id) {
+            nextSuccessState = {
+              ...nextSuccessState,
+              grn: result.goods_return_number,
+              returnId: result.return_id,
+            };
+          }
+        }
       }
 
-      // If there are rejections, process them
-      if (isPositiveQuantity(data.quantity_rejected) && data.rejection_reason) {
+      // Handle reject-only case (no items received, only rejected)
+      if ((data.quantity_received || 0) === 0 && (data.quantity_rejected || 0) > 0 && data.rejection_reason) {
         const { data: returnData, error: returnError } = await supabase.rpc(
           'process_supplier_order_return',
           {
@@ -316,7 +335,6 @@ export function ReceiveItemsModal({
           throw new Error(`Failed to process rejection: ${returnError.message}`);
         }
 
-        // Extract GRN from return data
         if (returnData && Array.isArray(returnData) && returnData.length > 0) {
           nextSuccessState = {
             ...nextSuccessState,
@@ -525,6 +543,11 @@ export function ReceiveItemsModal({
                               step="any"
                               value={allocationReceipts[row.id] || 0}
                               onChange={(event) => setAllocationQuantity(row.id, event.target.value)}
+                              onBlur={(event) => {
+                                if (event.target.value === '') {
+                                  setAllocationQuantity(row.id, '0');
+                                }
+                              }}
                               placeholder="0"
                             />
                           </div>
@@ -536,7 +559,7 @@ export function ReceiveItemsModal({
                     </div>
                     {allocationMismatch && (
                       <p className="text-xs text-destructive">
-                        Allocation total must exactly match Quantity Received.
+                        Allocation total must match Quantity Received.
                       </p>
                     )}
                     {allocationOverCap && (
@@ -548,30 +571,29 @@ export function ReceiveItemsModal({
                 </div>
               )}
 
-              {quantityRejected > 0 && (
-                <div>
-                  <Label htmlFor="rejection_reason">
-                    Rejection Reason <span className="text-red-500">*</span>
-                  </Label>
-                  <select
-                    id="rejection_reason"
-                    {...register('rejection_reason')}
-                    className="w-full border border-gray-300 rounded-md p-2"
-                  >
-                    <option value="">Select reason...</option>
-                    <option value="Damaged">Damaged</option>
-                    <option value="Wrong item">Wrong item</option>
-                    <option value="Defective">Defective</option>
-                    <option value="Quality issue">Quality issue</option>
-                    <option value="Incomplete delivery">Incomplete delivery</option>
-                    <option value="Not as described">Not as described</option>
-                    <option value="Other">Other</option>
-                  </select>
-                  {errors.rejection_reason && (
-                    <p className="text-sm text-destructive mt-1">{errors.rejection_reason.message}</p>
-                  )}
-                </div>
-              )}
+              <div>
+                <Label htmlFor="rejection_reason" className={quantityRejected > 0 ? '' : 'text-muted-foreground'}>
+                  Rejection Reason {quantityRejected > 0 && <span className="text-red-500">*</span>}
+                </Label>
+                <select
+                  id="rejection_reason"
+                  {...register('rejection_reason')}
+                  disabled={quantityRejected <= 0}
+                  className={`w-full border rounded-md p-2 bg-background ${quantityRejected > 0 ? 'border-border' : 'border-muted bg-muted/50 text-muted-foreground cursor-not-allowed'}`}
+                >
+                  <option value="">Select reason...</option>
+                  <option value="Damaged">Damaged</option>
+                  <option value="Wrong item">Wrong item</option>
+                  <option value="Defective">Defective</option>
+                  <option value="Quality issue">Quality issue</option>
+                  <option value="Incomplete delivery">Incomplete delivery</option>
+                  <option value="Not as described">Not as described</option>
+                  <option value="Other">Other</option>
+                </select>
+                {errors.rejection_reason && (
+                  <p className="text-sm text-destructive mt-1">{errors.rejection_reason.message}</p>
+                )}
+              </div>
 
               <div>
                 <Label htmlFor="receipt_date">Receipt Date</Label>
@@ -590,7 +612,7 @@ export function ReceiveItemsModal({
                 <textarea
                   id="notes"
                   {...register('notes')}
-                  className="w-full border border-gray-300 rounded-md p-2"
+                  className="w-full border border-border rounded-md p-2 bg-background"
                   rows={3}
                   placeholder="Additional notes about this delivery..."
                 />
@@ -640,21 +662,21 @@ export function ReceiveItemsModal({
           </form>
         ) : (
           <div className="space-y-6">
-            <div className="p-4 bg-green-50 border border-green-200 rounded-md space-y-1">
-              <div className="font-medium text-green-800">Receipt recorded successfully!</div>
-              <div className="text-sm text-green-700 flex flex-col gap-0.5">
+            <div className="p-4 bg-emerald-950/40 border border-emerald-800/50 rounded-md space-y-1">
+              <div className="font-medium text-emerald-300">Receipt recorded successfully!</div>
+              <div className="text-sm text-emerald-400/80 flex flex-col gap-0.5">
                 <span>Received: <strong>{formatQuantity(successData.receivedQty)}</strong></span>
                 {successData.rejectedQty > 0 && (
                   <span>Rejected: <strong>{formatQuantity(successData.rejectedQty)}</strong></span>
                 )}
               </div>
               {successData.grn && (
-                <div className="text-sm text-green-700">
+                <div className="text-sm text-emerald-400/80">
                   Goods Return Number: <span className="font-mono font-bold">{successData.grn}</span>
                 </div>
               )}
               {noteUploaded && (
-                <div className="text-sm text-green-700 flex items-center gap-1">
+                <div className="text-sm text-emerald-400/80 flex items-center gap-1">
                   <CheckCircle2 className="h-3.5 w-3.5" />
                   Delivery note attached
                 </div>
@@ -710,13 +732,13 @@ export function ReceiveItemsModal({
                   )}
 
                   {emailStatus === 'sent' && (
-                    <div className="p-3 bg-green-50 border border-green-200 text-green-700 rounded-md text-sm">
+                    <div className="p-3 bg-emerald-950/40 border border-emerald-800/50 text-emerald-400/80 rounded-md text-sm">
                       Email notification sent successfully to supplier
                     </div>
                   )}
 
                   {emailStatus === 'skipped' && (
-                    <div className="p-3 bg-gray-50 border border-gray-200 text-gray-700 rounded-md text-sm">
+                    <div className="p-3 bg-muted/30 border border-border text-muted-foreground rounded-md text-sm">
                       Email notification skipped
                     </div>
                   )}

@@ -12,10 +12,11 @@
 
 import { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { PlusCircle, Users, ClipboardList, Clock, DollarSign } from 'lucide-react';
+import { PlusCircle, Users, ClipboardList, Clock, DollarSign, Link2 } from 'lucide-react';
 import { useAuth } from '@/components/common/auth-provider';
 import { useRouter } from 'next/navigation';
 import { StaffTable } from '@/components/features/staff/StaffTable';
+import { SupportAssignmentsTab } from '@/components/features/staff/SupportAssignmentsTab';
 import { Suspense } from 'react';
 import { PageToolbar } from '@/components/ui/page-toolbar';
 
@@ -60,9 +61,13 @@ export default function StaffPage() {
             <Clock className="mr-2 h-4 w-4" />
             Hours Tracking
           </TabsTrigger>
-          <TabsTrigger value="payroll" onClick={() => router.push('/staff/payroll')}>
+          <TabsTrigger value="payroll" onClick={() => router.push('/payroll-review')}>
             <DollarSign className="mr-2 h-4 w-4" />
             Payroll
+          </TabsTrigger>
+          <TabsTrigger value="support">
+            <Link2 className="mr-2 h-4 w-4" />
+            Support
           </TabsTrigger>
         </TabsList>
 
@@ -98,6 +103,14 @@ export default function StaffPage() {
           <div className="rounded-md border">
             <div className="p-4">
               <p className="text-muted-foreground">Loading payroll data...</p>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="support" className="space-y-2">
+          <div className="rounded-md border">
+            <div className="p-4">
+              <SupportAssignmentsTab />
             </div>
           </div>
         </TabsContent>

@@ -44,11 +44,14 @@ export type CutlistBandEdges = BandEdges;
 
 /**
  * Board type for grouped cutlist parts.
- * - '16mm': Standard single board, 16mm edging
- * - '32mm-both': 2× same board laminated, both sides visible (e.g., desk legs)
- * - '32mm-backer': 1× primary + 1× backer board, only top visible (e.g., desk tops)
+ *
+ * Convention: '{thickness}mm' for single sheets (e.g., '16mm', '22mm'),
+ * '{thickness}mm-both' for same-board lamination,
+ * '{thickness}mm-backer' for primary + backer lamination.
+ *
+ * Legacy values '16mm', '32mm-both', '32mm-backer' are still supported.
  */
-export type BoardType = '16mm' | '32mm-both' | '32mm-backer';
+export type BoardType = string;
 
 /**
  * Finish side configuration for cutlist dimensions.
@@ -61,10 +64,10 @@ export type CutlistFinishSide = 'single' | 'double' | 'none';
 
 /**
  * Lamination type for individual parts.
- * - 'none': Single 16mm board, 16mm edging
- * - 'with-backer': 32mm (1× primary + 1× backer), 32mm edging
- * - 'same-board': 32mm (2× primary board), 32mm edging
- * - 'custom': 48mm+ (multiple layers via CustomLaminationModal)
+ * - 'none': Single board, edging = material thickness
+ * - 'with-backer': Primary + backer, edging = 2× material thickness
+ * - 'same-board': 2× same board, edging = 2× material thickness
+ * - 'custom': Multiple layers via CustomLaminationModal
  */
 export type LaminationType = 'none' | 'with-backer' | 'same-board' | 'custom';
 
@@ -118,6 +121,8 @@ export interface PartSpec {
   material_id?: string | null;
   /** Optional label for display */
   label?: string;
+  /** Material thickness in mm (e.g., 16, 18, 22). Used for edging calculation. */
+  material_thickness?: number;
   /** Lamination group ID - parts with same group are laminated together */
   lamination_group?: string;
 }
@@ -145,6 +150,8 @@ export interface CutlistPart {
   lamination_group?: string;
   /** Edging material ID override — when set, this part uses a specific edging material instead of the default for its thickness */
   edging_material_id?: string;
+  /** Material thickness in mm (e.g., 16, 18, 22). Used for edging calculation. */
+  material_thickness?: number;
 }
 
 // =============================================================================
@@ -221,6 +228,27 @@ export interface SheetLayout {
   stock_width_mm?: number;
   /** Material name label for this sheet (when multiple materials are used) */
   material_label?: string;
+  /** Optional offcut classification for this sheet */
+  offcut_summary?: SheetOffcutSummary;
+}
+
+export interface OffcutRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  area_mm2: number;
+}
+
+export interface SheetOffcutSummary {
+  fragments: number;
+  reusableCount: number;
+  scrapCount: number;
+  reusableArea_mm2: number;
+  scrapArea_mm2: number;
+  largestReusableArea_mm2: number;
+  reusableOffcuts: OffcutRect[];
+  scrapOffcuts: OffcutRect[];
 }
 
 /**
@@ -376,6 +404,8 @@ export interface BoardCalculation {
   edging16mm: number;
   /** Total 32mm edging in mm */
   edging32mm: number;
+  /** Edging requirements by thickness (for dynamic board sizes beyond 16/32) */
+  edgingByThickness?: Map<number, number>;
   /** Summary for display */
   summary: {
     totalPrimaryParts: number;
@@ -437,7 +467,7 @@ export interface ValidateCutlistDimensionsResult {
 }
 
 // =============================================================================
-// Costing Types (for CutlistTool)
+// Costing Types (for the cutlist calculator)
 // =============================================================================
 
 /**
@@ -490,6 +520,10 @@ export interface CutlistSummary {
   edgebanding32mm: number;
   edgebandingTotal: number;
   laminationOn: boolean;
+  primaryCostTotal: number;
+  edgingCostTotal: number;
+  backerCostTotal: number;
+  totalCost: number;
   materials?: CutlistMaterialSummary[];
   /** Per-edging-material breakdown for export (one entry per unique edging material used) */
   edgingByMaterial?: EdgingSummaryEntry[];

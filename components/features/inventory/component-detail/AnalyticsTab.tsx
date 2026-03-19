@@ -219,38 +219,38 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
   const healthConfig = {
     critical: {
       label: 'Critical',
-      color: 'text-red-600',
-      bgColor: 'bg-red-100',
+      color: 'text-red-700 dark:text-red-300',
+      cardClass: 'bg-linear-to-br from-red-50 to-red-100/80 dark:from-red-950/40 dark:to-red-900/30 border-red-200 dark:border-red-800',
       description: 'Out of stock - immediate action required',
     },
     insufficient: {
       label: 'Insufficient',
-      color: 'text-red-600',
-      bgColor: 'bg-red-100',
+      color: 'text-red-700 dark:text-red-300',
+      cardClass: 'bg-linear-to-br from-red-50 to-red-100/80 dark:from-red-950/40 dark:to-red-900/30 border-red-200 dark:border-red-800',
       description: 'Stock + incoming orders insufficient to meet demand',
     },
     low: {
       label: 'Low Stock',
-      color: 'text-amber-600',
-      bgColor: 'bg-amber-100',
+      color: 'text-amber-700 dark:text-amber-300',
+      cardClass: 'bg-linear-to-br from-amber-50 to-amber-100/80 dark:from-amber-950/40 dark:to-amber-900/30 border-amber-200 dark:border-amber-800',
       description: 'Below reorder level - replenish soon',
     },
     highButNeeded: {
       label: 'High but Needed',
-      color: 'text-blue-600',
-      bgColor: 'bg-blue-100',
+      color: 'text-blue-700 dark:text-blue-300',
+      cardClass: 'bg-linear-to-br from-blue-50 to-blue-100/80 dark:from-blue-950/40 dark:to-blue-900/30 border-blue-200 dark:border-blue-800',
       description: 'Stock is high but required for active orders',
     },
     healthy: {
       label: 'Healthy',
-      color: 'text-green-600',
-      bgColor: 'bg-green-100',
+      color: 'text-green-700 dark:text-green-300',
+      cardClass: 'bg-linear-to-br from-green-50 to-green-100/80 dark:from-green-950/40 dark:to-green-900/30 border-green-200 dark:border-green-800',
       description: 'Stock levels are optimal',
     },
     excess: {
       label: 'Overstocked',
-      color: 'text-blue-600',
-      bgColor: 'bg-blue-100',
+      color: 'text-blue-700 dark:text-blue-300',
+      cardClass: 'bg-linear-to-br from-blue-50 to-blue-100/80 dark:from-blue-950/40 dark:to-blue-900/30 border-blue-200 dark:border-blue-800',
       description: 'Stock levels are high - consider adjusting orders',
     },
   };
@@ -291,7 +291,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
   return (
     <div className="space-y-6">
       {/* Stock Health */}
-      <Card className={cn('border-2', currentHealth.bgColor)}>
+      <Card className={cn('shadow-xs border-2', currentHealth.cardClass)}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Activity className={cn('h-5 w-5', currentHealth.color)} />
@@ -321,7 +321,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
 
       {/* Key Metrics Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Stock Value</CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
@@ -342,7 +342,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Transactions</CardTitle>
             <BarChart3 className="h-4 w-4 text-muted-foreground" />
@@ -355,7 +355,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Added</CardTitle>
             <TrendingUp className="h-4 w-4 text-green-600" />
@@ -368,7 +368,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Removed</CardTitle>
             <TrendingDown className="h-4 w-4 text-red-600" />
@@ -381,7 +381,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Avg Daily Usage</CardTitle>
             <TrendingDown className="h-4 w-4 text-muted-foreground" />
@@ -394,7 +394,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
           </CardContent>
         </Card>
 
-        <Card className={cn(criticalWindow && 'border-red-500 bg-red-50')}>
+        <Card className={cn('shadow-xs', criticalWindow && 'border-red-500 bg-red-50')}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Days Until Stockout</CardTitle>
             <Clock className="h-4 w-4 text-muted-foreground" />
@@ -407,7 +407,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Shortfall Value</CardTitle>
             <DollarSign className="h-4 w-4 text-red-600" />
@@ -426,7 +426,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Daily Consumption Value</CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
@@ -445,7 +445,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
       </div>
 
       {/* Stock Visual Gauge */}
-      <Card>
+      <Card className="shadow-xs">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Activity className="h-5 w-5" />
@@ -527,7 +527,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
       {/* Stock Projection */}
       <Card
         className={cn(
-          'border-2',
+          'shadow-xs border-2',
           isInsufficientForOrders && 'border-red-500 bg-red-50',
           !isInsufficientForOrders && isProjectedLow && 'border-amber-500 bg-amber-50'
         )}
@@ -665,7 +665,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
 
       {/* Order Breakdown */}
       {orderBreakdown && orderBreakdown.length > 0 && (
-        <Card>
+        <Card className="shadow-xs">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5" />
@@ -735,7 +735,7 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
       )}
 
       {/* Activity Summary */}
-      <Card>
+      <Card className="shadow-xs">
         <CardHeader>
           <CardTitle>Activity Summary</CardTitle>
         </CardHeader>
@@ -766,4 +766,3 @@ export function AnalyticsTab({ component }: AnalyticsTabProps) {
     </div>
   );
 }
-

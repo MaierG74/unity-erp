@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 //  tsx scripts/cleanup-orders.ts --dry-run
 //  tsx scripts/cleanup-orders.ts --after=2025-01-01
 //  tsx scripts/cleanup-orders.ts --orderIds=23955,23950
+//  tsx scripts/cleanup-orders.ts --orderIds=23955 --include-labor-assignments
 
 dotenv.config({ path: './.env.local' });
 
@@ -20,15 +21,17 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey, { auth: { persist
 
 type Args = {
   dryRun: boolean;
+  includeLaborAssignments: boolean;
   after?: string;
   orderIds?: number[];
 };
 
 function parseArgs(): Args {
   const args = process.argv.slice(2);
-  const out: Args = { dryRun: false } as Args;
+  const out: Args = { dryRun: false, includeLaborAssignments: false } as Args;
   for (const a of args) {
     if (a === '--dry-run' || a === '--dryrun') out.dryRun = true;
+    else if (a === '--include-labor-assignments') out.includeLaborAssignments = true;
     else if (a.startsWith('--after=')) out.after = a.split('=')[1];
     else if (a.startsWith('--orderIds=')) out.orderIds = a.split('=')[1].split(',').map((s) => parseInt(s.trim(), 10)).filter(Boolean);
   }
@@ -36,8 +39,11 @@ function parseArgs(): Args {
 }
 
 async function main() {
-  const { dryRun, after, orderIds } = parseArgs();
-  console.log(`Cleanup Orders starting. dryRun=${dryRun} after=${after ?? 'n/a'} orderIds=${orderIds?.join(',') ?? 'all'}`);
+  const { dryRun, after, orderIds, includeLaborAssignments } = parseArgs();
+  console.log(
+    `Cleanup Orders starting. dryRun=${dryRun} includeLaborAssignments=${includeLaborAssignments} ` +
+    `after=${after ?? 'n/a'} orderIds=${orderIds?.join(',') ?? 'all'}`
+  );
 
   // 1) Load target orders
   let ordQuery = supabase.from('orders').select('order_id, customer_id, created_at').order('created_at', { ascending: false });
@@ -57,7 +63,35 @@ async function main() {
   const { count: detailCount } = await supabase.from('order_details').select('*', { count: 'exact', head: true }).in('order_id', targetOrderIds);
   const { count: attachCount } = await supabase.from('order_attachments').select('*', { count: 'exact', head: true }).in('order_id', targetOrderIds);
   const { count: junctionCount } = await supabase.from('supplier_order_customer_orders').select('*', { count: 'exact', head: true }).in('order_id', targetOrderIds);
-  
+  const { data: jobCards, error: jobCardsErr } = await supabase
+    .from('job_cards')
+    .select('job_card_id, order_id, status, staff_id')
+    .in('order_id', targetOrderIds);
+  if (jobCardsErr) throw jobCardsErr;
+  const jobCardIds = (jobCards ?? []).map((card) => card.job_card_id);
+  const { count: jobCardItemCount } = jobCardIds.length
+    ? await supabase.from('job_card_items').select('*', { count: 'exact', head: true }).in('job_card_id', jobCardIds)
+    : { count: 0 };
+  const { data: workPoolRows, error: workPoolErr } = await supabase
+    .from('job_work_pool')
+    .select('pool_id, order_id, order_detail_id')
+    .in('order_id', targetOrderIds);
+  if (workPoolErr) throw workPoolErr;
+  const workPoolIds = (workPoolRows ?? []).map((row) => row.pool_id);
+  const { count: workPoolExceptionCount } = workPoolIds.length
+    ? await supabase
+        .from('job_work_pool_exceptions')
+        .select('*', { count: 'exact', head: true })
+        .in('work_pool_id', workPoolIds)
+    : { count: 0 };
+
+  // Labor assignments are optional cleanup because they feed the factory-floor planner.
+  const { count: laborAssignmentCount, error: laborAssignmentErr } = await supabase
+    .from('labor_plan_assignments')
+    .select('*', { count: 'exact', head: true })
+    .in('order_id', targetOrderIds);
+  if (laborAssignmentErr) throw laborAssignmentErr;
+
   // 2b) Load stock issuances linked to these orders
   const { data: issuances, error: issuErr } = await supabase
     .from('stock_issuances')
@@ -65,8 +99,13 @@ async function main() {
     .in('order_id', targetOrderIds);
   if (issuErr) throw issuErr;
   const issuanceTxIds = (issuances ?? []).map((i) => i.transaction_id).filter(Boolean) as number[];
-  
-  console.log(`Details=${detailCount ?? 0} Attachments=${attachCount ?? 0} Junctions=${junctionCount ?? 0} StockIssuances=${issuances?.length ?? 0}`);
+
+  console.log(
+    `Details=${detailCount ?? 0} Attachments=${attachCount ?? 0} Junctions=${junctionCount ?? 0} ` +
+    `JobCards=${jobCards?.length ?? 0} JobCardItems=${jobCardItemCount ?? 0} ` +
+    `WorkPool=${workPoolRows?.length ?? 0} WorkPoolExceptions=${workPoolExceptionCount ?? 0} ` +
+    `LaborAssignments=${laborAssignmentCount ?? 0} StockIssuances=${issuances?.length ?? 0}`
+  );
 
   // 2c) Compute inventory reversal deltas for stock issuances
   // Stock issuances subtracted from inventory (negative transactions), so we need to ADD back
@@ -85,6 +124,12 @@ async function main() {
       details: detailCount ?? 0,
       attachments: attachCount ?? 0,
       junctions: junctionCount ?? 0,
+      jobCards: jobCards?.length ?? 0,
+      jobCardItems: jobCardItemCount ?? 0,
+      workPoolRows: workPoolRows?.length ?? 0,
+      workPoolExceptions: workPoolExceptionCount ?? 0,
+      laborAssignments: laborAssignmentCount ?? 0,
+      includeLaborAssignments,
       stockIssuances: issuances?.length ?? 0,
       issuanceTransactions: issuanceTxIds.length,
       componentsToReverse: issuanceDeltas.size,
@@ -104,6 +149,19 @@ async function main() {
       }
       console.log(`${prefix}: ${files?.length ?? 0} files (first 5 shown)`);
       files?.slice(0, 5).forEach((f) => console.log(` - ${f.name}`));
+    }
+    if ((laborAssignmentCount ?? 0) > 0) {
+      if (includeLaborAssignments) {
+        console.warn(
+          `NOTICE: ${laborAssignmentCount} labor_plan_assignments row(s) reference the target order(s) ` +
+          'and will be deleted when you run without --dry-run.'
+        );
+      } else {
+        console.warn(
+          `WARNING: ${laborAssignmentCount} labor_plan_assignments row(s) reference the target order(s). ` +
+          'Re-run with --include-labor-assignments to delete them.'
+        );
+      }
     }
     return;
   }
@@ -147,7 +205,50 @@ async function main() {
     }
   }
 
-  // 7) Delete junction links
+  // 7) Delete job card items and job cards for the targeted order(s)
+  if (jobCardIds.length) {
+    for (let i = 0; i < jobCardIds.length; i += 1000) {
+      const chunk = jobCardIds.slice(i, i + 1000);
+      const { error: delItemsErr } = await supabase.from('job_card_items').delete().in('job_card_id', chunk);
+      if (delItemsErr) throw delItemsErr;
+    }
+
+    for (let i = 0; i < jobCardIds.length; i += 1000) {
+      const chunk = jobCardIds.slice(i, i + 1000);
+      const { error: delCardsErr } = await supabase.from('job_cards').delete().in('job_card_id', chunk);
+      if (delCardsErr) throw delCardsErr;
+    }
+  }
+
+  // 8) Delete work-pool rows after issued job-card items are gone. Exception rows cascade.
+  if (workPoolIds.length) {
+    for (let i = 0; i < workPoolIds.length; i += 1000) {
+      const chunk = workPoolIds.slice(i, i + 1000);
+      const { error: delPoolErr } = await supabase.from('job_work_pool').delete().in('pool_id', chunk);
+      if (delPoolErr) throw delPoolErr;
+    }
+  }
+
+  // 9) Delete labor assignments when requested.
+  if ((laborAssignmentCount ?? 0) > 0) {
+    if (includeLaborAssignments) {
+      for (let i = 0; i < targetOrderIds.length; i += 1000) {
+        const chunk = targetOrderIds.slice(i, i + 1000);
+        const { error: delAssignmentsErr } = await supabase
+          .from('labor_plan_assignments')
+          .delete()
+          .in('order_id', chunk);
+        if (delAssignmentsErr) throw delAssignmentsErr;
+      }
+    } else {
+      console.warn(
+        `Skipped ${laborAssignmentCount} labor_plan_assignments row(s) for the target order(s). ` +
+        'Re-run with --include-labor-assignments if this test used labor planning/factory-floor issuance.'
+      );
+    }
+  }
+
+  // 10) Delete junction links
   if ((junctionCount ?? 0) > 0) {
     for (let i = 0; i < targetOrderIds.length; i += 1000) {
       const chunk = targetOrderIds.slice(i, i + 1000);
@@ -156,7 +257,7 @@ async function main() {
     }
   }
 
-  // 8) Delete attachment rows
+  // 11) Delete attachment rows
   if ((attachCount ?? 0) > 0) {
     for (let i = 0; i < targetOrderIds.length; i += 1000) {
       const chunk = targetOrderIds.slice(i, i + 1000);
@@ -165,7 +266,7 @@ async function main() {
     }
   }
 
-  // 9) Delete order details
+  // 12) Delete order details
   if ((detailCount ?? 0) > 0) {
     for (let i = 0; i < targetOrderIds.length; i += 1000) {
       const chunk = targetOrderIds.slice(i, i + 1000);
@@ -174,14 +275,14 @@ async function main() {
     }
   }
 
-  // 10) Delete orders
+  // 13) Delete orders
   for (let i = 0; i < targetOrderIds.length; i += 1000) {
     const chunk = targetOrderIds.slice(i, i + 1000);
     const { error: delOErr } = await supabase.from('orders').delete().in('order_id', chunk);
     if (delOErr) throw delOErr;
   }
 
-  // 11) Remove storage files under each customer folder (best effort)
+  // 14) Remove storage files under each customer folder (best effort)
   for (const cid of targetCustomerIds) {
     const prefix = `Orders/Customer/${cid}`;
     // List all files in the folder; paginate by fixed chunk
@@ -207,7 +308,7 @@ async function main() {
     }
   }
 
-  // 12) Refresh views if present
+  // 13) Refresh views if present
   try {
     await supabase.rpc('refresh_component_views');
   } catch (e) {
@@ -221,4 +322,3 @@ main().catch((e) => {
   console.error('Cleanup failed:', e);
   process.exit(1);
 });
-

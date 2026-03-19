@@ -15,6 +15,8 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { ChevronsUpDown, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { QUOTE_STATUSES, getQuoteStatusLabel } from '@/lib/quotes/status';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 
 export default function NewQuotePage() {
   const router = useRouter();
@@ -62,9 +64,8 @@ export default function NewQuotePage() {
   const handleCreate = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/quotes', {
+      const res = await authorizedFetch('/api/quotes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           quote_number: quoteNumber,
           customer_id: Number(customerId),
@@ -119,7 +120,7 @@ export default function NewQuotePage() {
               <div className="flex h-full w-full flex-col overflow-hidden rounded-md bg-popover text-popover-foreground">
                 <div className="flex items-center border-b px-3">
                   <input
-                    className="flex h-11 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex h-11 w-full rounded-md bg-transparent py-3 text-sm outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
                     placeholder="Search customers..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
@@ -133,7 +134,7 @@ export default function NewQuotePage() {
                       {filteredCustomers.map((c) => (
                       <div
                         key={c.id}
-                        className="relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+                        className="relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-hidden hover:bg-accent hover:text-accent-foreground"
                         onClick={() => {
                           console.debug('[NewQuote] customer clicked', { name: c.name, id: c.id });
                           setCustomerId(String(c.id));
@@ -182,11 +183,11 @@ export default function NewQuotePage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="draft">Draft</SelectItem>
-              <SelectItem value="in_progress">In Progress</SelectItem>
-              <SelectItem value="sent">Sent</SelectItem>
-              <SelectItem value="won">Won</SelectItem>
-              <SelectItem value="lost">Lost</SelectItem>
+              {QUOTE_STATUSES.map((quoteStatus) => (
+                <SelectItem key={quoteStatus} value={quoteStatus}>
+                  {getQuoteStatusLabel(quoteStatus)}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>

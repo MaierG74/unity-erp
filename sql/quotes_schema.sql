@@ -9,7 +9,7 @@ CREATE TABLE public.quotes (
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   valid_until date NULL,
-  status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'sent', 'accepted', 'rejected', 'expired')),
+  status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'sent', 'ordered')),
   subtotal numeric(10,2) NULL DEFAULT 0,
   vat_rate numeric(5,2) NULL DEFAULT 15.00,
   vat_amount numeric(10,2) NULL DEFAULT 0,

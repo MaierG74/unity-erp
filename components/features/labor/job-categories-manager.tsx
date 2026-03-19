@@ -49,7 +49,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Plus, Trash2, Edit, Calendar, Loader2, ChevronDown, ChevronRight, Search, DollarSign, Briefcase, CornerDownRight } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
-import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
@@ -759,9 +759,9 @@ export function JobCategoriesManager() {
                     <div>
                       <div className="font-medium">R{rate.hourly_rate.toFixed(2)}/hr</div>
                       <div className="text-xs text-muted-foreground mt-0.5">
-                        {format(new Date(rate.effective_date), 'PPP')}
+                        {formatDate(rate.effective_date)}
                         {' → '}
-                        {rate.end_date ? format(new Date(rate.end_date), 'PPP') : 'Current'}
+                        {rate.end_date ? formatDate(rate.end_date) : 'Current'}
                       </div>
                     </div>
                     {!rate.end_date && (
@@ -820,7 +820,7 @@ export function JobCategoriesManager() {
                                     )}
                                   >
                                     {field.value ? (
-                                      format(field.value, "PPP")
+                                      formatDate(field.value)
                                     ) : (
                                       <span>Pick a date</span>
                                     )}

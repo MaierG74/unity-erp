@@ -4,6 +4,12 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  experimental: {
+    // Next 16 production builds were spawning enough workers to exhaust memory on
+    // local machines. Keep build parallelism conservative and favor stability.
+    cpus: 2,
+    staticGenerationMaxConcurrency: 1,
+  },
   // Ensure server bundling of ESM packages like tailwind-merge to avoid missing vendor-chunk errors
   transpilePackages: [
     'tailwind-merge',

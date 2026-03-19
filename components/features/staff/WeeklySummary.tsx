@@ -3,8 +3,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { pdf } from '@react-pdf/renderer';
 import { supabase } from '@/lib/supabase';
+import { formatDate } from '@/lib/date-utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
+import { useOrgSettings } from '@/hooks/use-org-settings';
 import { useSearchParams, useRouter } from 'next/navigation';
 import {
   format,
@@ -66,6 +68,7 @@ import {
 import { DailyHoursDetailDialog } from '@/components/features/staff/DailyHoursDetailDialog';
 import React from 'react';
 import { WeeklySummaryPDF, WeeklySummaryDay } from '@/components/features/staff/WeeklySummaryPDF';
+import { calculateWeeklyPayrollMinutes, getWorkedMinutes, standardWeekHoursToMinutes } from '@/lib/payroll-hours';
 
 // Types
 type Staff = {
@@ -127,7 +130,14 @@ type SortDirection = 'asc' | 'desc';
 
 // Stable empty arrays to prevent infinite useEffect loops
 const EMPTY_STAFF_ARRAY: Staff[] = [];
-const EMPTY_SUMMARIES_ARRAY: { staff_id: number; date_worked: string; total_hours_worked: number; dt_minutes: number }[] = [];
+const EMPTY_SUMMARIES_ARRAY: {
+  staff_id: number;
+  date_worked: string;
+  total_hours_worked: number;
+  regular_minutes: number | null;
+  ot_minutes: number | null;
+  dt_minutes: number | null;
+}[] = [];
 const EMPTY_HOLIDAYS_ARRAY: PublicHoliday[] = [];
 const EMPTY_EVENTS_ARRAY: { staff_id: number; event_time: string; event_type: string }[] = [];
 
@@ -135,6 +145,7 @@ export function WeeklySummary() {
   const queryClient = useQueryClient();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { weekStartDay, standardWeekHours } = useOrgSettings();
 
   // Get week from URL or default to current week
   const weekParam = searchParams.get('week');
@@ -156,8 +167,8 @@ export function WeeklySummary() {
   const { toast } = useToast();
 
   // Calculate week range (start on Friday)
-  const weekStart = useMemo(() => startOfWeek(selectedWeek, { weekStartsOn: 5 }), [selectedWeek]); // Start on Friday
-  const weekEnd = useMemo(() => endOfWeek(selectedWeek, { weekStartsOn: 5 }), [selectedWeek]); // End on Thursday
+  const weekStart = useMemo(() => startOfWeek(selectedWeek, { weekStartsOn: weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6 }), [selectedWeek, weekStartDay]);
+  const weekEnd = useMemo(() => endOfWeek(selectedWeek, { weekStartsOn: weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6 }), [selectedWeek, weekStartDay]);
 
   // Memoize the days of week calculation to prevent infinite updates
   const daysOfWeek = useMemo(() => {
@@ -201,7 +212,7 @@ export function WeeklySummary() {
       const endDateStr = format(weekEnd, 'yyyy-MM-dd');
       const { data, error } = await supabase
         .from('time_daily_summary')
-        .select('staff_id, date_worked, total_hours_worked, dt_minutes')
+        .select('staff_id, date_worked, total_hours_worked, regular_minutes, ot_minutes, dt_minutes')
         .gte('date_worked', startDateStr)
         .lte('date_worked', endDateStr);
       if (error) throw error;
@@ -261,12 +272,10 @@ export function WeeklySummary() {
     const processed = activeStaff.map(staff => {
       const staffSummaries = weeklySummaries.filter(s => s.staff_id === staff.staff_id);
       const dailyHours: Record<string, { hours: number; isHoliday: boolean; isWeekend: boolean; isSunday: boolean; hasMultipleClockIns?: boolean; hasMultipleClockOuts?: boolean; missingClockIn?: boolean; missingClockOut?: boolean }> = {};
-      let weekWorkMin = 0, weekDoubleMin = 0;
       daysOfWeek.forEach(day => {
         const dateStr = format(day, 'yyyy-MM-dd');
         const summary = staffSummaries.find(s => s.date_worked === dateStr);
-        const workMin = summary ? Math.round((summary.total_hours_worked || 0) * 60) : 0;
-        const dtMin = summary?.dt_minutes || 0;
+        const workMin = getWorkedMinutes(summary ?? {});
         const isSat = isSaturday(day);
         const isSun = isSunday(day);
         const isHoliday = !!publicHolidays.find(h => h.holiday_date === dateStr);
@@ -293,19 +302,15 @@ export function WeeklySummary() {
           missingClockIn,
           missingClockOut,
         };
-        if (isSun) {
-          weekDoubleMin += workMin;
-        } else {
-          weekWorkMin += workMin;
-        }
       });
-      const thresholdMin = 44 * 60;
-      const regMin = Math.min(weekWorkMin, thresholdMin);
-      const otMin = Math.max(weekWorkMin - thresholdMin, 0);
-      const regH = Math.round((regMin / 60) * 100) / 100;
-      const otH = Math.round((otMin / 60) * 100) / 100;
-      const dtH = Math.round((weekDoubleMin / 60) * 100) / 100;
-      const totalH = Math.round(((weekWorkMin + weekDoubleMin) / 60) * 100) / 100;
+      const weeklyMinutes = calculateWeeklyPayrollMinutes(
+        staffSummaries,
+        standardWeekHoursToMinutes(standardWeekHours)
+      );
+      const regH = Math.round((weeklyMinutes.regularMinutes / 60) * 100) / 100;
+      const otH = Math.round((weeklyMinutes.otMinutes / 60) * 100) / 100;
+      const dtH = Math.round((weeklyMinutes.dtMinutes / 60) * 100) / 100;
+      const totalH = Math.round((weeklyMinutes.totalMinutes / 60) * 100) / 100;
       return {
         staff_id: staff.staff_id,
         staff_name: `${staff.first_name} ${staff.last_name}`,
@@ -319,7 +324,7 @@ export function WeeklySummary() {
     });
     setSummaryData(processed);
 
-  }, [activeStaff, weeklySummaries, publicHolidays, daysOfWeek, duplicateEventsMap]);
+  }, [activeStaff, weeklySummaries, publicHolidays, daysOfWeek, duplicateEventsMap, standardWeekHours]);
 
   // Sort and filter data
   useEffect(() => {
@@ -422,21 +427,17 @@ export function WeeklySummary() {
 
   // Navigate to previous week
   const goToPreviousWeek = useCallback(() => {
-    setSelectedWeek(prev => {
-      const newWeek = subWeeks(prev, 1);
-      updateWeekUrl(newWeek);
-      return newWeek;
-    });
-  }, [updateWeekUrl]);
+    const newWeek = subWeeks(selectedWeek, 1);
+    setSelectedWeek(newWeek);
+    updateWeekUrl(newWeek);
+  }, [selectedWeek, updateWeekUrl]);
 
   // Navigate to next week
   const goToNextWeek = useCallback(() => {
-    setSelectedWeek(prev => {
-      const newWeek = addWeeks(prev, 1);
-      updateWeekUrl(newWeek);
-      return newWeek;
-    });
-  }, [updateWeekUrl]);
+    const newWeek = addWeeks(selectedWeek, 1);
+    setSelectedWeek(newWeek);
+    updateWeekUrl(newWeek);
+  }, [selectedWeek, updateWeekUrl]);
 
   // Navigate to current week
   const goToCurrentWeek = useCallback(() => {
@@ -603,7 +604,7 @@ export function WeeklySummary() {
           <div>
             <CardTitle>Weekly Hours Summary</CardTitle>
             <CardDescription>
-              Week of {format(weekStart, 'MMMM d, yyyy')} to {format(weekEnd, 'MMMM d, yyyy')}
+              Week of {formatDate(weekStart)} to {formatDate(weekEnd)}
             </CardDescription>
           </div>
           <div className="flex items-center space-x-2">
@@ -668,9 +669,9 @@ export function WeeklySummary() {
       </CardHeader>
       <CardContent>
         <div className="rounded-md border print:border-none overflow-x-auto max-w-[calc(100vw-3rem)] relative">
-          <div className="sticky left-0 z-10 bg-background shadow-sm">
+          <div className="sticky left-0 z-10 bg-background shadow-xs">
             {/* Shadow indicator for horizontal scroll */}
-            <div className="absolute right-0 top-0 bottom-0 w-4 bg-gradient-to-r from-transparent to-black/5 pointer-events-none"></div>
+            <div className="absolute right-0 top-0 bottom-0 w-4 bg-linear-to-r from-transparent to-black/5 pointer-events-none"></div>
           </div>
           <Table className="w-full table-fixed">
             <TableHeader>

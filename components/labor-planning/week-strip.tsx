@@ -5,10 +5,12 @@ import { useQuery } from '@tanstack/react-query';
 import { format, startOfWeek, addDays } from 'date-fns';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { formatDateShort } from '@/lib/date-utils';
+import { useOrgSettings } from '@/hooks/use-org-settings';
 import { fetchWeekSummary, type DaySummary } from '@/lib/queries/laborPlanning';
 
 const WEEK_STRIP_STORAGE_KEY = 'labor-planning-week-strip';
-const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] as const;
+const DAY_FORMAT = 'EEE' as const;
 
 function getStoredCollapsed(): boolean {
   if (typeof window === 'undefined') return false;
@@ -23,6 +25,7 @@ interface WeekStripProps {
 }
 
 export function WeekStrip({ selectedDate, onDateSelect, staffCapacityMinutes }: WeekStripProps) {
+  const { weekStartDay } = useOrgSettings();
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -38,12 +41,12 @@ export function WeekStrip({ selectedDate, onDateSelect, staffCapacityMinutes }: 
   };
 
   const monday = useMemo(
-    () => startOfWeek(new Date(selectedDate + 'T00:00:00'), { weekStartsOn: 1 }),
-    [selectedDate],
+    () => startOfWeek(new Date(selectedDate + 'T00:00:00'), { weekStartsOn: weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6 }),
+    [selectedDate, weekStartDay],
   );
 
   const weekDates = useMemo(
-    () => Array.from({ length: 5 }, (_, i) => format(addDays(monday, i), 'yyyy-MM-dd')),
+    () => Array.from({ length: 7 }, (_, i) => format(addDays(monday, i), 'yyyy-MM-dd')),
     [monday],
   );
 
@@ -74,12 +77,12 @@ export function WeekStrip({ selectedDate, onDateSelect, staffCapacityMinutes }: 
         {collapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
         Week overview
         <span className="ml-auto text-[10px] font-normal">
-          {format(monday, 'MMM d')} – {format(addDays(monday, 4), 'MMM d')}
+          {formatDateShort(monday)} – {formatDateShort(addDays(monday, 6))}
         </span>
       </button>
 
       {!collapsed && (
-        <div className="grid grid-cols-5 gap-1 px-3 pb-2">
+        <div className="grid grid-cols-7 gap-1 px-3 pb-2">
           {weekDates.map((date, i) => {
             const summary = summaryMap.get(date);
             const isSelected = date === selectedDate;
@@ -104,7 +107,7 @@ export function WeekStrip({ selectedDate, onDateSelect, staffCapacityMinutes }: 
                     'text-[10px] font-semibold',
                     isSelected ? 'text-primary' : 'text-muted-foreground',
                   )}>
-                    {DAY_LABELS[i]}
+                    {format(new Date(date + 'T00:00:00'), DAY_FORMAT)}
                   </span>
                   {isToday && (
                     <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
@@ -114,7 +117,7 @@ export function WeekStrip({ selectedDate, onDateSelect, staffCapacityMinutes }: 
                   'text-[10px]',
                   isSelected ? 'text-foreground font-medium' : 'text-muted-foreground',
                 )}>
-                  {format(new Date(date + 'T00:00:00'), 'MMM d')}
+                  {formatDateShort(new Date(date + 'T00:00:00'))}
                 </span>
 
                 {/* Utilization bar */}

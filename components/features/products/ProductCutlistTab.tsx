@@ -44,7 +44,7 @@ import {
   CutlistDimensions,
 } from '@/lib/cutlist/cutlistDimensions';
 import { cn } from '@/lib/utils';
-import { Calculator, Loader2, Palette, RefreshCw, Trash2, Wrench } from 'lucide-react';
+import { Calculator, Loader2, Palette, RefreshCw, Trash2 } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -55,10 +55,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import dynamic from 'next/dynamic';
-
-// Dynamically import the calculator to avoid SSR issues
-const ProductCutlistCalculator = dynamic(() => import('./ProductCutlistCalculator'), { ssr: false });
 
 interface ProductCutlistTabProps {
   productId: number;
@@ -113,7 +109,6 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
   const [showLinked, setShowLinked] = useState(false);
   const [activePickerKey, setActivePickerKey] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [calculatorOpen, setCalculatorOpen] = useState(false);
   const [deleteDialogRow, setDeleteDialogRow] = useState<CutlistRow | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -407,15 +402,7 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
                 </Label>
               </div>
               <Button
-                variant="outline"
                 onClick={() => router.push(`/products/${productId}/cutlist-builder`)}
-                disabled={isBusy}
-              >
-                <Wrench className="h-4 w-4 mr-2" />
-                Cutlist Builder
-              </Button>
-              <Button
-                onClick={() => setCalculatorOpen(true)}
                 disabled={allCutlistRows.length === 0 || isBusy}
               >
                 <Calculator className="h-4 w-4 mr-2" />
@@ -718,14 +705,6 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
           </CardContent>
         ) : null}
       </Card>
-
-      {/* Cutlist Calculator Dialog */}
-      <ProductCutlistCalculator
-        open={calculatorOpen}
-        onOpenChange={setCalculatorOpen}
-        cutlistRows={displayRows}
-      />
-
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={!!deleteDialogRow} onOpenChange={(open) => !open && setDeleteDialogRow(null)}>
         <AlertDialogContent>

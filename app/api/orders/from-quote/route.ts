@@ -58,8 +58,9 @@ export async function POST(req: NextRequest) {
 
     const { data: quote, error: qErr } = await supabaseAdmin
       .from('quotes')
-      .select('id, quote_number, customer_id, grand_total')
+      .select('id, quote_number, customer_id, grand_total, status, org_id')
       .eq('id', quoteId)
+      .eq('org_id', auth.orgId)
       .single();
     if (qErr || !quote) {
       return NextResponse.json({ error: 'Quote not found' }, { status: 404 });
@@ -114,6 +115,16 @@ export async function POST(req: NextRequest) {
       .single();
     if (insErr || !order) {
       return NextResponse.json({ error: insErr?.message ?? 'Failed to create order' }, { status: 500 });
+    }
+
+    const { error: quoteStatusError } = await supabaseAdmin
+      .from('quotes')
+      .update({ status: 'ordered' })
+      .eq('id', quoteId)
+      .eq('org_id', auth.orgId);
+
+    if (quoteStatusError) {
+      console.warn('[from-quote] failed to update quote status:', quoteStatusError);
     }
 
     try {

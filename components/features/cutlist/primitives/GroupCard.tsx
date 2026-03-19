@@ -89,7 +89,7 @@ export const GroupCard = memo(function GroupCard({
     }
   };
 
-  const showBackerMaterial = group.boardType === '32mm-backer';
+  const showBackerMaterial = group.boardType.endsWith('-backer');
 
   const selectedPrimaryMaterial = materials.find((m) => m.id === group.primaryMaterialId);
   const selectedBackerMaterial = materials.find((m) => m.id === group.backerMaterialId);
@@ -134,7 +134,11 @@ export const GroupCard = memo(function GroupCard({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {(['16mm', '32mm-both', '32mm-backer'] as BoardType[]).map((type) => (
+            {([
+              '16mm', '18mm', '22mm', '25mm',
+              '32mm-both', '36mm-both', '44mm-both', '50mm-both',
+              '32mm-backer', '36mm-backer', '44mm-backer',
+            ] as BoardType[]).map((type) => (
               <SelectItem key={type} value={type}>
                 <div className="flex flex-col">
                   <span>{getBoardTypeLabel(type)}</span>

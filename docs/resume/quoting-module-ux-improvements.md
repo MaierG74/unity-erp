@@ -21,6 +21,7 @@ Comprehensive UI/UX redesign of the quote detail page and Add Component modal. F
   - Product → blue (bg-blue-100 text-blue-700)
   - Cluster → purple (bg-purple-100 text-purple-700)
 - ✅ Zero Unit Cost warning: changed from red (border-red-300 bg-red-50) → amber (border-amber-400 bg-amber-50)
+- ✅ Dark-mode follow-up: missing unit-cost inputs now use a translucent amber warning state instead of a light fill so typed values remain readable in dark theme
 
 ### 3. Quote Header & PDF Preview Tab Removal
 **Files**: `components/quotes/EnhancedQuoteEditor.tsx`, `components/quotes/QuotePDF.tsx`

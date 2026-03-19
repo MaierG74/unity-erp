@@ -32,7 +32,7 @@ export default function RichTextEditor({ content, onUpdate, placeholder }: RichT
     editorProps: {
       attributes: {
         class:
-          'min-h-[80px] px-3 py-2 text-sm focus:outline-none prose prose-sm dark:prose-invert max-w-none',
+          'min-h-[80px] px-3 py-2 text-sm focus:outline-hidden prose prose-sm dark:prose-invert max-w-none',
       },
     },
     onUpdate: ({ editor }) => {

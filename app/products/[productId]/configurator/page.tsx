@@ -57,22 +57,15 @@ export default function ConfiguratorPage({ params }: ConfiguratorPageProps) {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col gap-3">
+    <div className="p-6 space-y-4">
+      <div className="flex items-center gap-3">
         <button
           onClick={() => router.back()}
-          className="inline-flex w-fit items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back to Product
         </button>
-        <div>
-          <h1 className="text-3xl font-semibold text-foreground">Furniture Configurator</h1>
-          <p className="mt-2 text-sm text-muted-foreground max-w-3xl">
-            Design furniture panels parametrically. Select dimensions, shelves, and doors to auto-generate
-            a complete parts list for the cutlist optimizer.
-          </p>
-        </div>
+        <h1 className="text-xl font-semibold text-foreground">Furniture Configurator</h1>
       </div>
 
       <FurnitureConfigurator productId={productId} />

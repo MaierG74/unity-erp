@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Loader2, RotateCcw, AlertCircle } from 'lucide-react';
-import { format } from 'date-fns';
+import { formatDateTime } from '@/lib/date-utils';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 interface StockIssuance {
@@ -141,7 +141,7 @@ export function ReverseIssuanceDialog({ open, onOpenChange, issuance, onReversed
                 <div>
                   <span className="text-sm font-medium text-muted-foreground">Issuance Date:</span>
                   <div className="text-base font-semibold">
-                    {format(new Date(issuance.issuance_date), 'MMM d, yyyy HH:mm')}
+                    {formatDateTime(issuance.issuance_date)}
                   </div>
                 </div>
               </div>

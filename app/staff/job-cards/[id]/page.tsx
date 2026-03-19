@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,13 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
+import { Progress } from '@/components/ui/progress';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,7 +34,16 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import {
   ArrowLeft,
   Clock,
@@ -40,13 +56,14 @@ import {
   Download,
   FileText,
   ExternalLink,
+  Undo2,
 } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { JobCardPDFDownload } from '@/components/features/job-cards/JobCardPDFDownload';
+import { JobCardPDFDownload, openJobCardPrintWindow } from '@/components/features/job-cards/JobCardPDFDownload';
 
 type JobCardStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
-type ItemStatus = 'pending' | 'in_progress' | 'completed';
+type ItemStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
 
 interface JobCardItem {
   item_id: number;
@@ -60,12 +77,14 @@ interface JobCardItem {
   start_time: string | null;
   completion_time: string | null;
   notes: string | null;
+  work_pool_id: number | null;
   products: {
     name: string;
     internal_code: string;
   } | null;
   jobs: {
     name: string;
+    estimated_minutes: number | null;
   } | null;
 }
 
@@ -99,20 +118,48 @@ const statusConfig: Record<JobCardStatus, { label: string; variant: 'default' | 
   cancelled: { label: 'Cancelled', variant: 'destructive', icon: <XCircle className="h-3 w-3" /> },
 };
 
-const itemStatusConfig: Record<ItemStatus, { label: string; variant: 'default' | 'secondary' | 'outline' }> = {
+const itemStatusConfig: Record<ItemStatus, { label: string; variant: 'default' | 'secondary' | 'outline' | 'destructive' }> = {
   pending: { label: 'Pending', variant: 'secondary' },
   in_progress: { label: 'In Progress', variant: 'default' },
   completed: { label: 'Completed', variant: 'outline' },
+  cancelled: { label: 'Cancelled', variant: 'destructive' },
 };
+
+function cardAssignmentInstancePattern(jobCardId: number): string {
+  return `%:card-${jobCardId}`;
+}
 
 export default function JobCardDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const jobCardId = parseInt(params.id as string);
+  const autoPrintRequested = searchParams.get('print') === '1';
+  const autoPrintTriggeredRef = useRef(false);
 
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
   const [editingQuantity, setEditingQuantity] = useState<number>(0);
+  const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
+  const [completeQuantities, setCompleteQuantities] = useState<Record<number, number>>({});
+  const [isConfirming, setIsConfirming] = useState(false);
+
+  const syncExactCardAssignment = async (
+    updates: Record<string, any>,
+    options?: { onlyCurrentStatus?: JobCardStatus }
+  ) => {
+    let query = supabase
+      .from('labor_plan_assignments')
+      .update(updates)
+      .like('job_instance_id', cardAssignmentInstancePattern(jobCardId));
+
+    if (options?.onlyCurrentStatus) {
+      query = query.eq('job_status', options.onlyCurrentStatus);
+    }
+
+    const { error } = await query;
+    if (error) throw error;
+  };
 
   // Fetch job card details
   const { data: jobCard, isLoading: loadingJobCard, error: jobCardError, refetch: refetchJobCard } = useQuery({
@@ -143,7 +190,7 @@ export default function JobCardDetailPage() {
         .select(`
           *,
           products:product_id(name, internal_code),
-          jobs:job_id(name)
+          jobs:job_id(name, estimated_minutes)
         `)
         .eq('job_card_id', jobCardId)
         .order('item_id');
@@ -177,6 +224,7 @@ export default function JobCardDetailPage() {
   // Status transition mutation
   const statusMutation = useMutation({
     mutationFn: async ({ newStatus, completionDate }: { newStatus: JobCardStatus; completionDate?: string }) => {
+      const now = new Date().toISOString();
       const updates: Record<string, any> = { status: newStatus };
       if (completionDate) {
         updates.completion_date = completionDate;
@@ -186,9 +234,62 @@ export default function JobCardDetailPage() {
         .update(updates)
         .eq('job_card_id', jobCardId);
       if (error) throw error;
+
+      // Parallel side-effects: update items + sync factory floor assignment
+      const sideEffects: Promise<any>[] = [];
+
+      if (newStatus === 'in_progress') {
+        sideEffects.push(
+          supabase
+            .from('job_card_items')
+            .update({ status: 'in_progress', start_time: now })
+            .eq('job_card_id', jobCardId)
+            .eq('status', 'pending')
+        );
+      }
+
+      if (newStatus === 'cancelled') {
+        // Cancel items first — must complete before auto-resolution reads issued qty
+        await supabase
+          .from('job_card_items')
+          .update({ status: 'cancelled' })
+          .eq('job_card_id', jobCardId)
+          .in('status', ['pending', 'in_progress']);
+
+        // Auto-resolve pool exceptions (best-effort — card is already cancelled)
+        const poolIds = [...new Set(items.map((i) => i.work_pool_id).filter((id): id is number => id != null))];
+        if (poolIds.length > 0) {
+          try {
+            await Promise.all(
+              poolIds.flatMap((poolId) => [
+                supabase.rpc('resolve_job_work_pool_exception_if_cleared', {
+                  p_work_pool_id: poolId,
+                  p_exception_type: 'over_issued_override',
+                }),
+                supabase.rpc('resolve_job_work_pool_exception_if_cleared', {
+                  p_work_pool_id: poolId,
+                  p_exception_type: 'over_issued_after_reconcile',
+                }),
+              ])
+            );
+          } catch {
+            console.error('[job-card] Auto-resolution failed for pools', poolIds);
+          }
+        }
+      }
+
+      if (newStatus === 'in_progress' || newStatus === 'completed') {
+        const assignmentUpdates: Record<string, any> = { job_status: newStatus };
+        if (newStatus === 'in_progress') assignmentUpdates.started_at = now;
+        if (newStatus === 'completed') assignmentUpdates.completed_at = now;
+        sideEffects.push(syncExactCardAssignment(assignmentUpdates));
+      }
+
+      await Promise.all(sideEffects);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobCard', jobCardId] });
+      queryClient.invalidateQueries({ queryKey: ['jobCardItems', jobCardId] });
       queryClient.invalidateQueries({ queryKey: ['jobCards'] });
       toast.success('Job card status updated');
     },
@@ -232,13 +333,47 @@ export default function JobCardDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobCardItems', jobCardId] });
       setEditingItemId(null);
-      toast.success('Item updated');
-
-      // Check if all items are completed to auto-complete job card
-      checkAutoComplete();
+      if (!completeDialogOpen) {
+        toast.success('Item updated');
+        checkAutoComplete();
+      }
     },
     onError: (error: any) => {
       toast.error(error.message || 'Failed to update item');
+    },
+  });
+
+  const reopenMutation = useMutation({
+    mutationFn: async () => {
+      // 1. Reopen the job card
+      const { error: cardErr } = await supabase
+        .from('job_cards')
+        .update({ status: 'in_progress', completion_date: null })
+        .eq('job_card_id', jobCardId);
+      if (cardErr) throw cardErr;
+
+      // 2. Revert completed items to in_progress (keep completed_quantity)
+      const { error: itemsErr } = await supabase
+        .from('job_card_items')
+        .update({ status: 'in_progress', completion_time: null })
+        .eq('job_card_id', jobCardId)
+        .eq('status', 'completed');
+      if (itemsErr) throw itemsErr;
+
+      // 3. Revert linked assignments
+      await syncExactCardAssignment(
+        { job_status: 'in_progress', completed_at: null },
+        { onlyCurrentStatus: 'completed' }
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobCard', jobCardId] });
+      queryClient.invalidateQueries({ queryKey: ['jobCardItems', jobCardId] });
+      queryClient.invalidateQueries({ queryKey: ['jobCards'] });
+      toast.success('Job card reopened');
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to reopen job card');
     },
   });
 
@@ -265,10 +400,36 @@ export default function JobCardDetailPage() {
   };
 
   const handleMarkComplete = () => {
-    statusMutation.mutate({
-      newStatus: 'completed',
-      completionDate: new Date().toISOString().split('T')[0],
-    });
+    const initial: Record<number, number> = {};
+    for (const item of items) {
+      initial[item.item_id] = item.completed_quantity > 0 ? item.completed_quantity : item.quantity;
+    }
+    setCompleteQuantities(initial);
+    setCompleteDialogOpen(true);
+  };
+
+  const handleConfirmComplete = async () => {
+    setIsConfirming(true);
+    try {
+      await Promise.all(
+        items.map((item) =>
+          itemMutation.mutateAsync({
+            itemId: item.item_id,
+            completedQuantity: completeQuantities[item.item_id] ?? item.quantity,
+          }),
+        ),
+      );
+    } catch {
+      // itemMutation.onError already shows a toast
+      setIsConfirming(false);
+      return;
+    }
+    setIsConfirming(false);
+
+    statusMutation.mutate(
+      { newStatus: 'completed', completionDate: new Date().toISOString().split('T')[0] },
+      { onSuccess: () => { setCompleteDialogOpen(false); setCompleteQuantities({}); } },
+    );
   };
 
   const handleCancel = () => {
@@ -289,11 +450,109 @@ export default function JobCardDetailPage() {
     setEditingQuantity(0);
   };
 
-  // Calculate totals
-  const totalValue = items.reduce((sum, item) => sum + item.quantity * item.piece_rate, 0);
-  const completedValue = items.reduce((sum, item) => sum + item.completed_quantity * item.piece_rate, 0);
-  const totalItems = items.length;
-  const completedItems = items.filter((item) => item.status === 'completed').length;
+  // Calculate totals in a single pass
+  const { totalValue, completedValue, totalItems, completedItems, totalQty, completedQty, overallPct, overallEta } = useMemo(() => {
+    let tv = 0, cv = 0, ci = 0, tq = 0, cq = 0;
+    let latestEta: Date | null = null;
+
+    for (const item of items) {
+      tv += item.quantity * item.piece_rate;
+      cv += item.completed_quantity * item.piece_rate;
+      tq += item.quantity;
+      cq += item.completed_quantity;
+      if (item.status === 'completed') ci++;
+
+      // Calculate ETA per item
+      if (item.jobs?.estimated_minutes && item.start_time && item.status !== 'completed') {
+        const totalMinutes = item.jobs.estimated_minutes * item.quantity;
+        const etaMs = new Date(item.start_time).getTime() + totalMinutes * 60_000;
+        const eta = new Date(etaMs);
+        if (!latestEta || eta > latestEta) latestEta = eta;
+      }
+    }
+
+    return {
+      totalValue: tv,
+      completedValue: cv,
+      totalItems: items.length,
+      completedItems: ci,
+      totalQty: tq,
+      completedQty: cq,
+      overallPct: tq > 0 ? Math.round((cq / tq) * 100) : 0,
+      overallEta: latestEta,
+    };
+  }, [items]);
+
+  const dialogEarnings = useMemo(() => {
+    return items.reduce((sum, item) => {
+      const qty = completeQuantities[item.item_id] ?? item.quantity;
+      return sum + qty * item.piece_rate;
+    }, 0);
+  }, [items, completeQuantities]);
+
+  const getItemEta = (item: JobCardItem) => {
+    if (!item.jobs?.estimated_minutes || !item.start_time || item.status === 'completed') return null;
+    const totalMinutes = item.jobs.estimated_minutes * item.quantity;
+    const startMs = new Date(item.start_time).getTime();
+    const etaMs = startMs + totalMinutes * 60_000;
+    return new Date(etaMs);
+  };
+
+  const formatEta = (eta: Date) => {
+    const now = Date.now();
+    const diffMs = eta.getTime() - now;
+    if (diffMs <= 0) return 'Overdue';
+    const mins = Math.round(diffMs / 60_000);
+    if (mins < 60) return `~${mins}m remaining`;
+    const hrs = Math.floor(mins / 60);
+    const rem = mins % 60;
+    return rem > 0 ? `~${hrs}h ${rem}m remaining` : `~${hrs}h remaining`;
+  };
+
+  useEffect(() => {
+    if (!autoPrintRequested || autoPrintTriggeredRef.current) return;
+    if (loadingJobCard || loadingItems || !jobCard) return;
+
+    if (items.length === 0) {
+      autoPrintTriggeredRef.current = true;
+      toast.error('This job card has no printable items yet.');
+      return;
+    }
+
+    autoPrintTriggeredRef.current = true;
+
+    void openJobCardPrintWindow(
+      {
+        jobCard: {
+          job_card_id: jobCard.job_card_id,
+          staff_name: jobCard.staff
+            ? `${jobCard.staff.first_name} ${jobCard.staff.last_name}`
+            : 'Unassigned',
+          order_number: jobCard.orders?.order_number || null,
+          customer_name: jobCard.orders?.customers?.name || null,
+          issue_date: jobCard.issue_date,
+          due_date: jobCard.due_date,
+          notes: jobCard.notes,
+          status: jobCard.status,
+        },
+        items: items.map((item) => ({
+          item_id: item.item_id,
+          product_name: item.products?.name || 'Unknown Product',
+          product_code: item.products?.internal_code || '',
+          job_name: item.jobs?.name || 'Unknown Job',
+          quantity: item.quantity,
+          completed_quantity: item.completed_quantity,
+          piece_rate: item.piece_rate,
+        })),
+        companyInfo,
+      },
+      '_self',
+    ).catch((error) => {
+      autoPrintTriggeredRef.current = false;
+      console.error('Auto-print failed:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to open print preview');
+    });
+  }, [autoPrintRequested, loadingJobCard, loadingItems, jobCard, items, companyInfo]);
 
   if (loadingJobCard || loadingItems) {
     return (
@@ -328,20 +587,19 @@ export default function JobCardDetailPage() {
   const isEditable = jobCard.status !== 'completed' && jobCard.status !== 'cancelled';
 
   return (
+    <TooltipProvider>
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" asChild>
-            <Link href="/staff/job-cards">
+          <Button variant="ghost" size="sm" onClick={() => router.back()}>
               <ArrowLeft className="h-4 w-4 mr-2" />
               Back
-            </Link>
           </Button>
           <div>
             <h1 className="text-2xl font-bold">Job Card #{jobCard.job_card_id}</h1>
             <p className="text-muted-foreground">
-              Issued {format(new Date(jobCard.issue_date), 'MMMM d, yyyy')}
+              Issued {formatDate(jobCard.issue_date)}
             </p>
           </div>
         </div>
@@ -350,6 +608,30 @@ export default function JobCardDetailPage() {
             {status.icon}
             {status.label}
           </Badge>
+          {jobCard.status === 'completed' && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm" disabled={reopenMutation.isPending}>
+                  <Undo2 className="h-3.5 w-3.5 mr-1.5" />
+                  Reopen
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Reopen Job Card?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will return the job card to In Progress status. Completed quantities will be preserved.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Keep Completed</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => reopenMutation.mutate()}>
+                    Reopen Job Card
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
         </div>
       </div>
 
@@ -417,99 +699,109 @@ export default function JobCardDetailPage() {
       </div>
 
       {/* Details Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Assigned To</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-lg font-medium">
+      <div className="rounded-lg border border-border/50 bg-muted/30 p-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="space-y-1">
+            <span className="text-xs text-muted-foreground">Assigned To</span>
+            <p className="text-sm font-medium">
               {jobCard.staff
                 ? `${jobCard.staff.first_name} ${jobCard.staff.last_name}`
                 : 'Unassigned'}
             </p>
-          </CardContent>
-        </Card>
+          </div>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Related Order</CardDescription>
-          </CardHeader>
-          <CardContent>
+          <div className="space-y-1">
+            <span className="text-xs text-muted-foreground">Related Order</span>
             {jobCard.orders ? (
-              <Link
-                href={`/orders/${jobCard.orders.order_id}`}
-                className="text-lg font-medium text-primary hover:underline inline-flex items-center gap-1"
-              >
-                {jobCard.orders.order_number}
-                <ExternalLink className="h-3 w-3" />
-              </Link>
+              <div>
+                <Link
+                  href={`/orders/${jobCard.orders.order_id}`}
+                  className="text-sm font-medium text-primary hover:underline inline-flex items-center gap-1"
+                >
+                  {jobCard.orders.order_number}
+                  <ExternalLink className="h-3 w-3" />
+                </Link>
+                {jobCard.orders.customers && (
+                  <p className="text-xs text-muted-foreground">
+                    {jobCard.orders.customers.name}
+                  </p>
+                )}
+              </div>
             ) : (
-              <p className="text-muted-foreground">No order linked</p>
+              <p className="text-sm text-muted-foreground">No order linked</p>
             )}
-            {jobCard.orders?.customers && (
-              <p className="text-sm text-muted-foreground">
-                {jobCard.orders.customers.name}
-              </p>
-            )}
-          </CardContent>
-        </Card>
+          </div>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Due Date</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-lg font-medium">
+          <div className="space-y-1">
+            <span className="text-xs text-muted-foreground">Due Date</span>
+            <p className="text-sm font-medium">
               {jobCard.due_date
-                ? format(new Date(jobCard.due_date), 'MMM d, yyyy')
+                ? formatDate(jobCard.due_date)
                 : 'No due date'}
             </p>
-          </CardContent>
-        </Card>
+          </div>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Progress</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-lg font-medium">
+          <div className="space-y-1">
+            <span className="text-xs text-muted-foreground">Progress</span>
+            <p className="text-sm font-medium">
               {completedItems} / {totalItems} items
             </p>
-            <p className="text-sm text-muted-foreground">
+            <div className="mt-1">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div>
+                      <Progress value={overallPct} className="h-2" />
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>{completedQty} / {totalQty} units completed ({overallPct}%)</p>
+                    <p className="text-[10px] text-muted-foreground">Based on completed quantity</p>
+                    {overallEta && jobCard.status === 'in_progress' && (
+                      <p className="text-xs text-muted-foreground">{formatEta(overallEta)}</p>
+                    )}
+                  </TooltipContent>
+                </Tooltip>
+            </div>
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                {overallPct}%
+              </p>
+              {overallEta && jobCard.status === 'in_progress' && (
+                <p className="text-xs text-muted-foreground">
+                  ETA {format(overallEta, 'h:mm a')}
+                </p>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
               R {completedValue.toFixed(2)} / R {totalValue.toFixed(2)}
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
 
       {/* Notes */}
       {jobCard.notes && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2">
-              <FileText className="h-4 w-4" />
-              Notes
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="whitespace-pre-wrap">{jobCard.notes}</p>
-          </CardContent>
-        </Card>
+        <div className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <FileText className="h-3.5 w-3.5" />
+            Notes
+          </p>
+          <p className="text-sm whitespace-pre-wrap">{jobCard.notes}</p>
+        </div>
       )}
 
       {/* Items Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Job Card Items</CardTitle>
-          <CardDescription>
+      <div className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Job Card Items</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
             Track completion for each item on this job card
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+          </p>
+        </div>
+        <div className="rounded-md border border-border/50 overflow-hidden">
           <Table>
             <TableHeader>
-              <TableRow>
+              <TableRow className="bg-muted/40 hover:bg-muted/40">
                 <TableHead>Product</TableHead>
                 <TableHead>Job</TableHead>
                 <TableHead className="text-right">Qty</TableHead>
@@ -525,6 +817,8 @@ export default function JobCardDetailPage() {
                 const itemStatus = itemStatusConfig[item.status] || itemStatusConfig.pending;
                 const isEditing = editingItemId === item.item_id;
                 const itemTotal = item.completed_quantity * item.piece_rate;
+                const itemPct = item.quantity > 0 ? Math.round((item.completed_quantity / item.quantity) * 100) : 0;
+                const itemEta = getItemEta(item);
 
                 return (
                   <TableRow key={item.item_id}>
@@ -562,7 +856,40 @@ export default function JobCardDetailPage() {
                       R {itemTotal.toFixed(2)}
                     </TableCell>
                     <TableCell>
-                      <Badge variant={itemStatus.variant}>{itemStatus.label}</Badge>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div className="space-y-1 min-w-[90px]">
+                              <Badge variant={itemStatus.variant}>{itemStatus.label}</Badge>
+                              {item.status !== 'pending' && (
+                                <div className="flex items-center gap-1.5">
+                                  <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden">
+                                    <div
+                                      className={`h-full rounded-full transition-all ${
+                                        item.status === 'completed' ? 'bg-emerald-500' : 'bg-blue-500'
+                                      }`}
+                                      style={{ width: `${itemPct}%` }}
+                                    />
+                                  </div>
+                                  <span className="text-[10px] text-muted-foreground tabular-nums">{itemPct}%</span>
+                                </div>
+                              )}
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>{item.completed_quantity} / {item.quantity} units completed</p>
+                            <p className="text-[10px] text-muted-foreground">Based on completed quantity</p>
+                            {itemEta && (
+                              <p className="text-xs text-muted-foreground">
+                                ETA {format(itemEta, 'h:mm a')} ({formatEta(itemEta)})
+                              </p>
+                            )}
+                            {item.status === 'completed' && item.completion_time && (
+                              <p className="text-xs text-muted-foreground">
+                                Done {format(new Date(item.completion_time), 'h:mm a')}
+                              </p>
+                            )}
+                          </TooltipContent>
+                        </Tooltip>
                     </TableCell>
                     <TableCell className="text-right">
                       {isEditable && (
@@ -600,32 +927,94 @@ export default function JobCardDetailPage() {
             </TableBody>
           </Table>
 
-          {/* Totals */}
-          <div className="mt-4 pt-4 border-t flex justify-end">
-            <div className="text-right">
-              <div className="text-sm text-muted-foreground">Total Value</div>
-              <div className="text-2xl font-bold">R {totalValue.toFixed(2)}</div>
-              <div className="text-sm text-muted-foreground">
-                Earned: <span className="text-green-500 font-medium">R {completedValue.toFixed(2)}</span>
-              </div>
+        </div>
+
+        {/* Totals */}
+        <div className="border-t border-border/50 pt-4 flex justify-end">
+          <div className="text-right">
+            <div className="text-xs text-muted-foreground">Total Value</div>
+            <div className="text-xl font-bold">R {totalValue.toFixed(2)}</div>
+            <div className="text-xs text-muted-foreground">
+              Earned: <span className="text-green-500 dark:text-green-400 font-medium">R {completedValue.toFixed(2)}</span>
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Completion Info */}
       {jobCard.status === 'completed' && jobCard.completion_date && (
-        <Card className="border-green-200 bg-green-50/50 dark:bg-green-950/20">
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
-              <CheckCircle className="h-5 w-5" />
-              <span className="font-medium">
-                Completed on {format(new Date(jobCard.completion_date), 'MMMM d, yyyy')}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="rounded-lg border border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-950/30 p-4">
+          <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
+            <CheckCircle className="h-5 w-5" />
+            <span className="font-medium text-sm">
+              Completed on {formatDate(jobCard.completion_date)}
+            </span>
+          </div>
+        </div>
       )}
     </div>
+    <Dialog open={completeDialogOpen} onOpenChange={setCompleteDialogOpen}>
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Complete Job Card #{jobCard.job_card_id}</DialogTitle>
+          <DialogDescription>
+            Review and confirm completed quantities for each item.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          {items.map((item) => (
+            <div key={item.item_id} className="flex items-center gap-3 p-3 rounded-md border bg-card">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">{item.products?.name ?? 'Unknown Product'}</div>
+                <div className="text-xs text-muted-foreground truncate">{item.jobs?.name ?? 'Unknown Job'}</div>
+                {item.piece_rate > 0 && (
+                  <div className="text-xs text-muted-foreground">
+                    R{item.piece_rate.toFixed(2)}/pc = R{((completeQuantities[item.item_id] ?? item.quantity) * item.piece_rate).toFixed(2)}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={0}
+                  max={item.quantity}
+                  value={completeQuantities[item.item_id] === 0 ? '' : (completeQuantities[item.item_id] ?? item.quantity)}
+                  placeholder="0"
+                  onChange={(e) => setCompleteQuantities((prev) => ({
+                    ...prev,
+                    [item.item_id]: Math.min(item.quantity, Math.max(0, Number(e.target.value) || 0)),
+                  }))}
+                  onBlur={(e) => {
+                    if (e.target.value === '') {
+                      setCompleteQuantities((prev) => ({ ...prev, [item.item_id]: 0 }));
+                    }
+                  }}
+                  className="w-20 text-center"
+                />
+                <span className="text-sm text-muted-foreground">/ {item.quantity}</span>
+              </div>
+            </div>
+          ))}
+          {dialogEarnings > 0 && (
+            <div className="text-sm font-medium text-right">
+              Total Earnings: R{dialogEarnings.toFixed(2)}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => { setCompleteDialogOpen(false); setCompleteQuantities({}); }} disabled={isConfirming || statusMutation.isPending}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleConfirmComplete}
+            disabled={isConfirming || statusMutation.isPending}
+            className="bg-emerald-600 hover:bg-emerald-700"
+          >
+            {isConfirming || statusMutation.isPending ? 'Completing...' : 'Complete Job Card'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </TooltipProvider>
   );
 }

@@ -112,40 +112,40 @@ interface HorizontalSegment {
 // ============================================================================
 
 /**
- * Get the edge thickness for a part based on its lamination type.
+ * Get the edge thickness for a part based on its lamination type and material thickness.
  */
 function getPartEdgeThickness(part: PartSpec): number {
+  const mt = part.material_thickness || 16;
+
   // New lamination_type takes precedence
   if (part.lamination_type) {
     switch (part.lamination_type) {
       case 'none':
-        return 16;
+        return mt;
       case 'with-backer':
       case 'same-board':
-        return 32;
+        return mt * 2;
       case 'custom':
-        return part.lamination_config?.edgeThickness || 48;
+        return part.lamination_config?.edgeThickness || mt * 3;
     }
   }
 
   // Legacy: fall back to laminate boolean
   if (part.laminate) {
-    return 32;
+    return mt * 2;
   }
 
-  return 16;
+  return mt;
 }
 
 /**
- * Check if a part should use 32mm edging (legacy compatibility).
+ * Check if a part is laminated (edge thickness > sheet thickness).
+ * Used for legacy 16mm/32mm stats tracking.
  */
-function shouldUse32mmEdging(part: PartSpec): boolean {
-  // New lamination_type takes precedence
+function isLaminated(part: PartSpec): boolean {
   if (part.lamination_type) {
-    return part.lamination_type === 'with-backer' || part.lamination_type === 'same-board';
+    return part.lamination_type === 'with-backer' || part.lamination_type === 'same-board' || part.lamination_type === 'custom';
   }
-
-  // Legacy: fall back to laminate boolean
   return !!part.laminate;
 }
 
@@ -303,7 +303,7 @@ export function packPartsIntoSheets(
           edgingByThickness.set(edgeThickness, currentThicknessTotal + pieceBand);
 
           // Legacy 16mm/32mm tracking
-          if (shouldUse32mmEdging(part)) {
+          if (isLaminated(part)) {
             result.stats.edgebanding_32mm_mm! += pieceBand;
           } else {
             result.stats.edgebanding_16mm_mm! += pieceBand;

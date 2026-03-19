@@ -28,6 +28,14 @@ import { useRef, useState as useReactState } from 'react';
 import { cn } from '@/lib/utils';
 import { formatCurrency } from '@/lib/quotes';
 import { CopyQuoteDialog } from '@/components/features/quotes/CopyQuoteDialog';
+import {
+  QUOTE_STATUSES,
+  type QuoteStatus,
+  getQuoteStatusBadgeVariant,
+  getQuoteStatusLabel,
+  isQuoteStatus,
+} from '@/lib/quotes/status';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 
 interface Quote {
   id: string;
@@ -45,7 +53,7 @@ export default function QuotesPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
-  const [status, setStatus] = useState<'all' | 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired'>('all');
+  const [status, setStatus] = useState<'all' | QuoteStatus>('all');
   const [sort, setSort] = useState<'created_desc' | 'created_asc' | 'total_desc' | 'total_asc'>('created_desc');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -64,7 +72,7 @@ export default function QuotesPage() {
     const fetchQuotes = async () => {
       try {
         setError(null);
-        const res = await fetch('/api/quotes', { headers: { 'Accept': 'application/json' } });
+        const res = await authorizedFetch('/api/quotes', { headers: { 'Accept': 'application/json' } });
         if (!res.ok) {
           const text = await res.text();
           throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
@@ -96,13 +104,13 @@ export default function QuotesPage() {
   useEffect(() => {
     const p = new URLSearchParams(searchParamsString);
     const s = p.get('q') || '';
-    const st = (p.get('status') || 'all') as any;
+    const st = p.get('status') || 'all';
     const sortQ = (p.get('sort') || 'created_desc') as any;
     const pg = parseInt(p.get('page') || '1', 10);
     const ps = parseInt(p.get('pageSize') || '10', 10);
     setSearch(s);
     setSearchInput(s);
-    setStatus(['all','draft','sent','accepted','rejected','expired'].includes(st) ? st : 'all');
+    setStatus(st === 'all' || isQuoteStatus(st) ? st : 'all');
     setSort(['created_desc','created_asc','total_desc','total_asc'].includes(sortQ) ? sortQ : 'created_desc');
     setPage(Number.isFinite(pg) && pg > 0 ? pg : 1);
     setPageSize([10,20,50].includes(ps) ? ps : 10);
@@ -130,11 +138,7 @@ export default function QuotesPage() {
   }, [searchInput]);
 
   const renderStatusBadge = (status: string) => {
-    const key = status?.toLowerCase?.() || 'draft';
-    if (key === 'accepted') return <Badge variant="success" className="capitalize">{status}</Badge>;
-    if (key === 'rejected') return <Badge variant="destructive" className="capitalize">{status}</Badge>;
-    if (key === 'sent') return <Badge variant="warning" className="capitalize">Pending</Badge>;
-    return <Badge variant="outline" className="capitalize">{status || 'draft'}</Badge>;
+    return <Badge variant={getQuoteStatusBadgeVariant(status)}>{getQuoteStatusLabel(status)}</Badge>;
   };
 
   // Derived list (filters + sort + pagination)
@@ -188,7 +192,7 @@ export default function QuotesPage() {
     // Refresh quotes list to show the new copy
     const fetchQuotes = async () => {
       try {
-        const res = await fetch('/api/quotes', { headers: { 'Accept': 'application/json' } });
+        const res = await authorizedFetch('/api/quotes', { headers: { 'Accept': 'application/json' } });
         if (res.ok) {
           const json = await res.json();
           const list: Quote[] = (json?.quotes || []).map((q: any) => ({
@@ -212,7 +216,7 @@ export default function QuotesPage() {
   const performDelete = async () => {
     if (!deleteId) return;
     try {
-      const res = await fetch(`/api/quotes/${deleteId}`, { method: 'DELETE' });
+      const res = await authorizedFetch(`/api/quotes/${deleteId}`, { method: 'DELETE' });
       const responseText = await res.text();
       if (!res.ok) {
         let errorMessage = 'Failed to delete quote';
@@ -253,7 +257,7 @@ export default function QuotesPage() {
   return (
     <div className="min-h-screen bg-background py-8">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <Card className="rounded-2xl border bg-card shadow-sm">
+        <Card className="rounded-2xl border bg-card shadow-xs">
           <CardHeader className="gap-4 border-b bg-card md:flex md:flex-row md:items-center md:justify-between">
             <div className="space-y-1">
               <CardTitle className="text-2xl text-foreground">Quotes Management</CardTitle>
@@ -278,7 +282,7 @@ export default function QuotesPage() {
             )}
 
             {/* Toolbar */}
-            <div className="flex flex-col gap-3 rounded-xl border bg-card/60 p-4 shadow-sm md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-col gap-3 rounded-xl border bg-card/60 p-4 shadow-xs md:flex-row md:items-center md:justify-between">
               <div className="relative w-full md:max-w-md">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -305,11 +309,11 @@ export default function QuotesPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All statuses</SelectItem>
-                    <SelectItem value="draft">Draft</SelectItem>
-                    <SelectItem value="sent">Pending</SelectItem>
-                    <SelectItem value="accepted">Accepted</SelectItem>
-                    <SelectItem value="rejected">Rejected</SelectItem>
-                    <SelectItem value="expired">Expired</SelectItem>
+                    {QUOTE_STATUSES.map((quoteStatus) => (
+                      <SelectItem key={quoteStatus} value={quoteStatus}>
+                        {getQuoteStatusLabel(quoteStatus)}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <Select value={sort} onValueChange={(v) => setSort(v as any)}>
@@ -330,7 +334,7 @@ export default function QuotesPage() {
             <div className="grid grid-cols-1 gap-4 mb-6 md:grid-cols-4">
               <Card
                 className={cn(
-                  "rounded-xl border bg-background/80 shadow-sm cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
+                  "rounded-xl border bg-background/80 shadow-xs cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
                   status === 'all' && "ring-2 ring-primary"
                 )}
                 onClick={() => { setStatus('all'); setPage(1); }}
@@ -342,31 +346,31 @@ export default function QuotesPage() {
               </Card>
               <Card
                 className={cn(
-                  "rounded-xl border bg-background/80 shadow-sm cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
-                  status === 'accepted' && "ring-2 ring-primary"
+                  "rounded-xl border bg-background/80 shadow-xs cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
+                  status === 'ordered' && "ring-2 ring-primary"
                 )}
-                onClick={() => { setStatus('accepted'); setPage(1); }}
+                onClick={() => { setStatus('ordered'); setPage(1); }}
               >
                 <CardContent className="space-y-2 p-4">
                   <div className="flex items-center justify-between">
-                    <div className="text-sm text-muted-foreground">Accepted</div>
+                    <div className="text-sm text-muted-foreground">Converted to Order</div>
                     <Badge variant="success">OK</Badge>
                   </div>
                   <div className="text-2xl font-semibold text-foreground">
-                    {quotes.filter(q => q.status === 'accepted').length}
+                    {quotes.filter(q => q.status === 'ordered').length}
                   </div>
                 </CardContent>
               </Card>
               <Card
                 className={cn(
-                  "rounded-xl border bg-background/80 shadow-sm cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
+                  "rounded-xl border bg-background/80 shadow-xs cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
                   status === 'sent' && "ring-2 ring-primary"
                 )}
                 onClick={() => { setStatus('sent'); setPage(1); }}
               >
                 <CardContent className="space-y-2 p-4">
                   <div className="flex items-center justify-between">
-                    <div className="text-sm text-muted-foreground">Pending</div>
+                    <div className="text-sm text-muted-foreground">Quote Sent</div>
                     <Badge variant="warning">Awaiting</Badge>
                   </div>
                   <div className="text-2xl font-semibold text-foreground">
@@ -376,7 +380,7 @@ export default function QuotesPage() {
               </Card>
               <Card
                 className={cn(
-                  "rounded-xl border bg-background/80 shadow-sm cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
+                  "rounded-xl border bg-background/80 shadow-xs cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
                   status === 'draft' && "ring-2 ring-primary"
                 )}
                 onClick={() => { setStatus('draft'); setPage(1); }}
@@ -394,7 +398,7 @@ export default function QuotesPage() {
             <div
               ref={tableContainerRef}
               className={cn(
-                "rounded-xl border bg-card shadow-sm transition-shadow",
+                "rounded-xl border bg-card shadow-xs transition-shadow",
                 tableFlash && "ring-2 ring-ring"
               )}
             >
@@ -448,7 +452,7 @@ export default function QuotesPage() {
                   {!loading && paged.map((quote) => (
                     <TableRow
                       key={quote.id}
-                      className="cursor-pointer transition-all duration-150 hover:bg-muted/60 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group"
+                      className="cursor-pointer transition-all duration-150 hover:bg-muted/60 hover:shadow-xs focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring group"
                       onClick={() => routerNav.push(`/quotes/${quote.id}`)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {

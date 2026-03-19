@@ -35,6 +35,7 @@ Purpose: Provide a single place to see a product’s full unit cost combining ma
 - Real‑time: When BOM/BOL rows change, the Costing tab recomputes via queries.
 - Missing prices: Show warnings and subtotal excluding missing items.
 - “As of” rates: reads the current effective hourly or piecework rate (later: date selector to recalc historically).
+- Effective BOL fallback: when linked sub-products are enabled but the effective-BOL API returns no rows, the labor summary must fall back to the product's direct `billoflabour` rows so the costing header stays aligned with the Bill of Labor table.
 
 ## Implementation Sketch
 - Component: `components/features/products/product-costing.tsx` (client) using React Query.

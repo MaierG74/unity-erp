@@ -149,7 +149,7 @@ export function ProductsTable({
                     router.push(`/products/${row.original.product_id}`);
                   }
                 }}
-                className="group cursor-pointer bg-background transition-colors hover:bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                className="group cursor-pointer bg-background transition-colors hover:bg-muted/40 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/60"
               >
                 {row.getVisibleCells().map((cell) => (
                   <TableCell

@@ -8,7 +8,9 @@ import { ArrowLeft, DollarSign, Calculator, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { format, startOfWeek, endOfWeek, addDays, addWeeks, subWeeks, parseISO, isSunday } from 'date-fns';
+import { startOfWeek, endOfWeek, addDays, addWeeks, subWeeks, parseISO, isSunday } from 'date-fns';
+import { formatDate, formatDateShort } from '@/lib/date-utils';
+import { useOrgSettings } from '@/hooks/use-org-settings';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -24,13 +26,14 @@ import {
 
 export default function PayrollPage() {
   const router = useRouter();
+  const { weekStartDay, standardWeekHours } = useOrgSettings();
   const [error, setError] = useState<string | null>(null);
   const [staff, setStaff] = useState<any[]>([]);
   const [payrollData, setPayrollData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedStaff, setSelectedStaff] = useState<string | null>(null);
   const [selectedWeekStart, setSelectedWeekStart] = useState<Date>(
-    startOfWeek(new Date(), { weekStartsOn: 1 })
+    startOfWeek(new Date(), { weekStartsOn: weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6 })
   );
   const [calculatingPayroll, setCalculatingPayroll] = useState(false);
   const [payrollDetails, setPayrollDetails] = useState<any | null>(null);
@@ -106,7 +109,7 @@ export default function PayrollPage() {
     setError(null);
     
     try {
-      const weekEnd = endOfWeek(selectedWeekStart, { weekStartsOn: 1 });
+      const weekEnd = endOfWeek(selectedWeekStart, { weekStartsOn: weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6 });
       const staffMember = staff.find(s => s.staff_id.toString() === selectedStaff);
       
       // Fetch staff details
@@ -133,7 +136,7 @@ export default function PayrollPage() {
         .from('job_card_items')
         .select(`
           *,
-          job_cards!inner(staff_id, completion_date)
+          job_cards!job_card_items_job_card_id_fkey(staff_id, completion_date)
         `)
         .gte('job_cards.completion_date', selectedWeekStart.toISOString().split('T')[0])
         .lte('job_cards.completion_date', weekEnd.toISOString().split('T')[0])
@@ -146,7 +149,7 @@ export default function PayrollPage() {
       const totalHours = hoursData?.reduce((sum, hour) => sum + parseFloat(hour.hours_worked), 0) || 0;
       
       // Separate regular, overtime, and doubletime hours
-      const weeklyHours = staffData.weekly_hours || 40;
+      const weeklyHours = standardWeekHours;
       
       // Extract regular, overtime, and doubletime hours from the data
       let regularHours = 0;
@@ -358,7 +361,7 @@ export default function PayrollPage() {
               Previous Week
             </Button>
             <span className="font-medium">
-              {format(selectedWeekStart, 'MMM d')} - {format(addDays(selectedWeekStart, 6), 'MMM d, yyyy')}
+              {formatDateShort(selectedWeekStart)} - {formatDate(addDays(selectedWeekStart, 6))}
             </span>
             <Button variant="outline" size="sm" onClick={() => navigateWeek('next')}>
               Next Week
@@ -415,7 +418,7 @@ export default function PayrollPage() {
                 {payrollData.map((payroll) => (
                   <TableRow key={payroll.payroll_id}>
                     <TableCell className="font-medium">
-                      {format(new Date(payroll.week_start_date), 'MMM d')} - {format(new Date(payroll.week_end_date), 'MMM d, yyyy')}
+                      {formatDateShort(payroll.week_start_date)} - {formatDate(payroll.week_end_date)}
                     </TableCell>
                     <TableCell>{payroll.regular_hours}</TableCell>
                     <TableCell>{payroll.overtime_hours}</TableCell>
@@ -477,7 +480,7 @@ export default function PayrollPage() {
             <DialogDescription>
               {payrollDetails && (
                 <span>
-                  Week of {format(new Date(payrollDetails.week_start_date), 'MMM d')} - {format(new Date(payrollDetails.week_end_date), 'MMM d, yyyy')} for {payrollDetails.staff_name}
+                  Week of {formatDateShort(payrollDetails.week_start_date)} - {formatDate(payrollDetails.week_end_date)} for {payrollDetails.staff_name}
                 </span>
               )}
             </DialogDescription>
@@ -527,7 +530,7 @@ export default function PayrollPage() {
                   {getStatusBadge(payrollDetails.status)}
                   {payrollDetails.payment_date && (
                     <span className="text-sm text-muted-foreground">
-                      Paid on {format(new Date(payrollDetails.payment_date), 'MMM d, yyyy')}
+                      Paid on {formatDate(payrollDetails.payment_date)}
                     </span>
                   )}
                 </div>

@@ -316,7 +316,7 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
                       value={productQuery}
                       onChange={(e) => setProductQuery(e.target.value)}
                       placeholder="Search by code or name..."
-                      className="w-full h-8 pl-7 pr-2 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                      className="w-full h-8 pl-7 pr-2 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring"
                     />
                   </div>
                 </div>

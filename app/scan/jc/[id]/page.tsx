@@ -13,7 +13,6 @@ import {
   CheckCircle2,
   Clock,
   Loader2,
-  Play,
   Hash,
   FileImage,
   AlertTriangle,
@@ -52,6 +51,10 @@ interface JobCardItem {
   status: string;
   jobs: { name: string } | null;
   products: { name: string } | null;
+}
+
+function cardAssignmentInstancePattern(jobCardId: number): string {
+  return `%:card-${jobCardId}`;
 }
 
 // ── Page ───────────────────────────────────────────────────────────
@@ -146,41 +149,20 @@ export default function JobCardScanPage() {
     return { totalQty, completedQty, totalValue, earnedValue };
   }, [items]);
 
-  /** Sync job_status back to labor_plan_assignments when a job card changes state */
-  const syncAssignmentStatus = async (newStatus: 'in_progress' | 'completed') => {
+  /** Sync completion back to the exact linked scheduled assignment for this card. */
+  const syncAssignmentCompletion = async () => {
     if (!jobCard) return;
-    const jobIds = items.map((i) => i.job_id).filter(Boolean);
-    if (jobIds.length === 0 || !jobCard.staff_id) return;
-    const updates: Record<string, any> = { job_status: newStatus };
-    if (newStatus === 'in_progress') updates.started_at = new Date().toISOString();
-    if (newStatus === 'completed') updates.completed_at = new Date().toISOString();
+    const completionTime = new Date().toISOString();
     await supabase
       .from('labor_plan_assignments')
-      .update(updates)
-      .in('job_id', jobIds)
-      .eq('staff_id', jobCard.staff_id);
+      .update({
+        job_status: 'completed',
+        completed_at: completionTime,
+      })
+      .like('job_instance_id', cardAssignmentInstancePattern(jobCardId));
   };
 
   // ── Actions ────────────────────────────────────────────────────
-  const handleStartJob = async () => {
-    if (!jobCard || jobCard.status !== 'pending') return;
-    setActionLoading('start');
-    try {
-      const { error: err } = await supabase
-        .from('job_cards')
-        .update({ status: 'in_progress' })
-        .eq('job_card_id', jobCardId);
-      if (err) throw err;
-      await syncAssignmentStatus('in_progress');
-      setJobCard((prev) => prev ? { ...prev, status: 'in_progress' } : prev);
-      toast.success('Job started');
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to start job');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
   const handleCompleteJob = async () => {
     if (!jobCard) return;
     setActionLoading('complete');
@@ -191,7 +173,7 @@ export default function JobCardScanPage() {
       });
       if (rpcErr) throw rpcErr;
 
-      await syncAssignmentStatus('completed');
+      await syncAssignmentCompletion();
       setJobCard((prev) => prev ? { ...prev, status: 'completed' } : prev);
       setItems((prev) => prev.map((i) => ({
         ...i,
@@ -277,7 +259,11 @@ export default function JobCardScanPage() {
     );
   }
 
-  const isActive = jobCard.status === 'pending' || jobCard.status === 'in_progress';
+  const canCompleteFromScan = jobCard.status === 'pending' || jobCard.status === 'in_progress';
+  const displayStatusLabel =
+    jobCard.status === 'pending'
+      ? 'Issued'
+      : jobCard.status.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   const statusColor =
     jobCard.status === 'completed'
       ? 'bg-emerald-500'
@@ -316,7 +302,7 @@ export default function JobCardScanPage() {
             ) : (
               <Clock className="h-3.5 w-3.5" />
             )}
-            {jobCard.status.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+            {displayStatusLabel}
           </span>
         </div>
       </div>
@@ -380,7 +366,7 @@ export default function JobCardScanPage() {
                     {item.piece_rate ? ` · R ${item.piece_rate}` : ''}
                   </p>
                 </div>
-                {isActive && !done && (
+                {canCompleteFromScan && !done && (
                   <button
                     type="button"
                     onClick={() => {
@@ -407,38 +393,21 @@ export default function JobCardScanPage() {
         )}
 
         {/* ── Action Buttons ─────────────────────── */}
-        {isActive && (
+        {canCompleteFromScan && (
           <div className="space-y-3 pt-2">
-            {jobCard.status === 'pending' && (
-              <button
-                type="button"
-                onClick={handleStartJob}
-                disabled={!!actionLoading}
-                className="flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 text-lg font-semibold text-white active:scale-[0.98] disabled:opacity-50"
-              >
-                {actionLoading === 'start' ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <Play className="h-5 w-5" />
-                )}
-                Start Job
-              </button>
-            )}
-            {jobCard.status === 'in_progress' && (
-              <button
-                type="button"
-                onClick={handleCompleteJob}
-                disabled={!!actionLoading}
-                className="flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 text-lg font-semibold text-white active:scale-[0.98] disabled:opacity-50"
-              >
-                {actionLoading === 'complete' ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <CheckCircle2 className="h-5 w-5" />
-                )}
-                Complete Job
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={handleCompleteJob}
+              disabled={!!actionLoading}
+              className="flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 text-lg font-semibold text-white active:scale-[0.98] disabled:opacity-50"
+            >
+              {actionLoading === 'complete' ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-5 w-5" />
+              )}
+              Complete Job
+            </button>
           </div>
         )}
 
@@ -477,7 +446,7 @@ export default function JobCardScanPage() {
               value={qtyInput}
               onChange={(e) => setQtyInput(e.target.value)}
               autoFocus
-              className="mt-4 h-16 w-full rounded-xl border bg-muted text-center text-3xl font-bold focus:outline-none focus:ring-2 focus:ring-primary"
+              className="mt-4 h-16 w-full rounded-xl border bg-muted text-center text-3xl font-bold focus:outline-hidden focus:ring-2 focus:ring-primary"
             />
             <div className="mt-3 flex gap-2">
               {[

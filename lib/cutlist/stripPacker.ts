@@ -473,13 +473,85 @@ function extractCutLines(
 }
 
 /**
- * Count total guillotine cuts needed for a sheet.
+ * Merge collinear cut segments and summarize the resulting saw operations.
  */
-function countCuts(cutLines: CutLine[]): number {
-  // Each unique cut line is one cut
-  // Note: In practice, some cuts might be able to be combined
-  // but this gives a conservative count
-  return cutLines.length;
+interface CutLineSummary {
+  mergedLines: CutLine[];
+  count: number;
+  verticalCount: number;
+  horizontalCount: number;
+  totalLength: number;
+}
+
+function summarizeCutLines(cutLines: CutLine[]): CutLineSummary {
+  if (cutLines.length === 0) {
+    return {
+      mergedLines: [],
+      count: 0,
+      verticalCount: 0,
+      horizontalCount: 0,
+      totalLength: 0,
+    };
+  }
+
+  const mergedLines: CutLine[] = [];
+  const groups = new Map<string, CutLine[]>();
+
+  for (const line of cutLines) {
+    const key = `${line.type}:${line.position}`;
+    const group = groups.get(key);
+    if (group) {
+      group.push(line);
+    } else {
+      groups.set(key, [line]);
+    }
+  }
+
+  for (const group of groups.values()) {
+    const sorted = [...group].sort((a, b) => {
+      if (a.start !== b.start) return a.start - b.start;
+      return a.end - b.end;
+    });
+
+    let current: CutLine | null = null;
+
+    for (const line of sorted) {
+      if (!current) {
+        current = { ...line };
+        continue;
+      }
+
+      if (line.start <= current.end) {
+        current.end = Math.max(current.end, line.end);
+        continue;
+      }
+
+      mergedLines.push(current);
+      current = { ...line };
+    }
+
+    if (current) {
+      mergedLines.push(current);
+    }
+  }
+
+  mergedLines.sort((a, b) => {
+    if (a.type !== b.type) return a.type.localeCompare(b.type);
+    if (a.position !== b.position) return a.position - b.position;
+    return a.start - b.start;
+  });
+
+  const verticalCount = mergedLines.filter((line) => line.type === 'vertical').length;
+  const horizontalCount = mergedLines.length - verticalCount;
+  const totalLength = mergedLines.reduce((sum, line) => sum + (line.end - line.start), 0);
+
+  return {
+    mergedLines,
+    count: mergedLines.length,
+    verticalCount,
+    horizontalCount,
+    totalLength,
+  };
 }
 
 // =============================================================================
@@ -868,25 +940,38 @@ export function packWithStrips(
     remaining: ExpandedPart[];
     name: string;
     cutCount: number;
+    verticalCutCount: number;
   }
 
-  // Calculate cut count for each approach
-  const calcCutCount = (sheets: Strip[][]): number => {
+  // Calculate merged cut metrics for each approach.
+  // Shared rip lines across stacked sections count once, which better matches
+  // how operators read a "rip strip first, then crosscut" sequence.
+  const calcCutMetrics = (sheets: Strip[][]): Pick<ApproachResult, 'cutCount' | 'verticalCutCount'> => {
     let cuts = 0;
+    let verticalCuts = 0;
     for (const sheet of sheets) {
-      const cutLines = extractCutLines(sheet, sheetWidth, sheetHeight, kerf);
-      cuts += cutLines.length;
+      const summary = summarizeCutLines(extractCutLines(sheet, sheetWidth, sheetHeight, kerf));
+      cuts += summary.count;
+      verticalCuts += summary.verticalCount;
     }
-    return cuts;
+    return {
+      cutCount: cuts,
+      verticalCutCount: verticalCuts,
+    };
   };
 
+  const standardMetrics = calcCutMetrics(standardSheets);
+  const nestedMetrics = calcCutMetrics(nestedSheets);
+  const verticalMetrics = calcCutMetrics(verticalSheets);
+
   const approaches: ApproachResult[] = [
-    { sheets: standardSheets, remaining: [], name: 'horizontal', cutCount: calcCutCount(standardSheets) },
-    { sheets: nestedSheets, remaining: nestedRemaining, name: 'nested', cutCount: calcCutCount(nestedSheets) },
-    { sheets: verticalSheets, remaining: verticalRemaining, name: 'vertical', cutCount: calcCutCount(verticalSheets) },
+    { sheets: standardSheets, remaining: [], name: 'horizontal', ...standardMetrics },
+    { sheets: nestedSheets, remaining: nestedRemaining, name: 'nested', ...nestedMetrics },
+    { sheets: verticalSheets, remaining: verticalRemaining, name: 'vertical', ...verticalMetrics },
   ];
 
-  // Sort by: sheets count, then remaining count, then cut count
+  // Sort by: sheets count, then remaining count, then merged cut count,
+  // then fewer vertical rip lines when the cut count is otherwise equivalent.
   approaches.sort((a, b) => {
     // Primary: fewer sheets
     if (a.sheets.length !== b.sheets.length) {
@@ -896,8 +981,13 @@ export function packWithStrips(
     if (a.remaining.length !== b.remaining.length) {
       return a.remaining.length - b.remaining.length;
     }
-    // Tertiary: fewer cuts
-    return a.cutCount - b.cutCount;
+    // Tertiary: fewer merged cuts
+    if (a.cutCount !== b.cutCount) {
+      return a.cutCount - b.cutCount;
+    }
+    // Quaternary: prefer fewer rip lines so repeated same-width parts stay
+    // in one strip when a single rip can feed multiple crosscuts.
+    return a.verticalCutCount - b.verticalCutCount;
   });
 
   // Pick the best approach
@@ -932,7 +1022,7 @@ export function packWithStrips(
     const sheetStrips = sheets[i];
     const placements = stripsToPlacement(sheetStrips);
     const usedArea = placements.reduce((sum, p) => sum + p.w * p.h, 0);
-    const cutLines = extractCutLines(sheetStrips, sheetWidth, sheetHeight, kerf);
+    const cutSummary = summarizeCutLines(extractCutLines(sheetStrips, sheetWidth, sheetHeight, kerf));
 
     sheetLayouts.push({
       sheet_id: `${stock.id}:${i + 1}`,
@@ -940,8 +1030,8 @@ export function packWithStrips(
       used_area_mm2: usedArea,
     });
 
-    totalCutCount += countCuts(cutLines);
-    allCutLines.push(...cutLines);
+    totalCutCount += cutSummary.count;
+    allCutLines.push(...cutSummary.mergedLines);
   }
 
   // Calculate stats
@@ -952,7 +1042,7 @@ export function packWithStrips(
 
   // Calculate cut length
   const cutLength = allCutLines.reduce((sum, cut) => {
-    return sum + (cut.type === 'horizontal' ? sheetWidth : cut.end - cut.start);
+    return sum + (cut.end - cut.start);
   }, 0);
 
   // Calculate edgebanding (simplified)

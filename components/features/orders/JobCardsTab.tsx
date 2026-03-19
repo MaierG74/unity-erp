@@ -17,6 +17,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog,
   DialogContent,
@@ -43,7 +44,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Plus,
   Wand2,
@@ -53,6 +55,10 @@ import {
   CheckCircle,
   Clock,
   PlayCircle,
+  AlertTriangle,
+  Send,
+  RefreshCw,
+  Info,
 } from 'lucide-react';
 
 // ── Types ───────────────────────────────────────────────────────────────────────
@@ -87,10 +93,53 @@ interface BOLPreviewItem {
   quantity: number;
   pay_type: string;
   piece_rate: number | null;
+  order_detail_id: number;
+  bol_id: number;
+  piece_rate_id: number | null;
+  hourly_rate_id: number | null;
+  time_per_unit: number | null;
+}
+
+interface WorkPoolRow {
+  pool_id: number;
+  order_id: number;
+  product_id: number | null;
+  job_id: number | null;
+  bol_id: number | null;
+  order_detail_id: number | null;
+  required_qty: number;
+  issued_qty: number;
+  completed_qty: number;
+  remaining_qty: number;
+  pay_type: string;
+  piece_rate: number | null;
+  piece_rate_id: number | null;
+  hourly_rate_id: number | null;
+  time_per_unit: number | null;
+  source: string;
+  status: string;
+  jobs: { name: string } | null;
+  products: { name: string } | null;
+}
+
+interface StaffOption {
+  staff_id: number;
+  first_name: string;
+  last_name: string;
 }
 
 interface JobCardsTabProps {
   orderId: number;
+}
+
+interface StalePoolRow {
+  pool_id: number;
+  job_name: string | null;
+  product_name: string | null;
+  pool_required: number;
+  current_required: number;
+  issued_qty: number;
+  diff: number;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
@@ -101,36 +150,124 @@ const statusConfig: Record<string, { label: string; variant: 'default' | 'second
   completed: { label: 'Completed', variant: 'outline', icon: <CheckCircle className="h-3 w-3 text-green-500" /> },
 };
 
-async function getOrCreateUnassignedJobCard(orderId: number): Promise<number> {
-  // Look for an existing unassigned job card for this order
-  const { data: existing, error: fetchErr } = await supabase
-    .from('job_cards')
-    .select('job_card_id')
-    .eq('order_id', orderId)
-    .is('staff_id', null)
-    .eq('status', 'pending')
-    .limit(1);
+function normalizeOptionalNumber(value: number | null | undefined): number | null {
+  return value == null ? null : Number(value);
+}
 
-  if (fetchErr) throw fetchErr;
+function optionalNumbersEqual(a: number | null | undefined, b: number | null | undefined): boolean {
+  return normalizeOptionalNumber(a) === normalizeOptionalNumber(b);
+}
 
-  if (existing && existing.length > 0) {
-    return existing[0].job_card_id;
+function convertTimeToMinutes(value: number | string | null | undefined, unit?: string | null): number | null {
+  if (value == null) return null;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+
+  const normalizedUnit = (unit ?? 'hours').toLowerCase();
+  if (normalizedUnit === 'minutes') return numeric;
+  if (normalizedUnit === 'seconds') return numeric / 60;
+  return numeric * 60;
+}
+
+function resolveTimePerUnitMinutes(
+  explicitTime: number | string | null | undefined,
+  explicitUnit: string | null | undefined,
+  fallbackTime: number | string | null | undefined,
+  fallbackUnit: string | null | undefined,
+): number | null {
+  return convertTimeToMinutes(explicitTime, explicitUnit) ?? convertTimeToMinutes(fallbackTime, fallbackUnit);
+}
+
+function resolvePoolTimePerUnitMinutes(
+  poolTimePerUnit: number | string | null | undefined,
+  fallbackTime: number | string | null | undefined,
+  fallbackUnit: string | null | undefined,
+): number | null {
+  const explicitMinutes = normalizeOptionalNumber(poolTimePerUnit);
+  return explicitMinutes ?? convertTimeToMinutes(fallbackTime, fallbackUnit);
+}
+
+async function fetchOrderBOLPreview(orderId: number): Promise<BOLPreviewItem[]> {
+  const { data: orderDetails, error: odErr } = await supabase
+    .from('order_details')
+    .select(`
+      order_detail_id,
+      product_id,
+      quantity,
+      products:product_id(
+        product_id,
+        name,
+        billoflabour(
+          bol_id,
+          job_id,
+          quantity,
+          pay_type,
+          piece_rate_id,
+          hourly_rate_id,
+          time_required,
+          time_unit,
+          jobs:job_id(job_id, name, estimated_minutes, time_unit)
+        )
+      )
+    `)
+    .eq('order_id', orderId);
+
+  if (odErr) throw odErr;
+  if (!orderDetails || orderDetails.length === 0) return [];
+
+  const preview: BOLPreviewItem[] = [];
+
+  for (const detail of orderDetails) {
+    const product = detail.products as any;
+    if (!product) continue;
+
+    const bolEntries = Array.isArray(product.billoflabour)
+      ? product.billoflabour
+      : [];
+
+    for (const bol of bolEntries) {
+      const job = bol.jobs as any;
+      if (!job) continue;
+
+      const orderQty = detail.quantity || 1;
+      const bolQty = bol.quantity || 1;
+      const totalQty = orderQty * bolQty;
+
+      let pieceRate: number | null = null;
+      if (bol.piece_rate_id) {
+        const { data: rateData } = await supabase
+          .from('piece_work_rates')
+          .select('rate')
+          .eq('rate_id', bol.piece_rate_id)
+          .single();
+        pieceRate = rateData?.rate ? Number(rateData.rate) : null;
+      }
+
+      const timePerUnit = resolveTimePerUnitMinutes(
+        bol.time_required,
+        bol.time_unit,
+        job.estimated_minutes,
+        job.time_unit,
+      );
+
+      preview.push({
+        job_id: job.job_id,
+        job_name: job.name,
+        product_id: product.product_id,
+        product_name: product.name,
+        quantity: totalQty,
+        pay_type: bol.pay_type || 'hourly',
+        piece_rate: pieceRate,
+        order_detail_id: detail.order_detail_id,
+        bol_id: bol.bol_id,
+        piece_rate_id: bol.piece_rate_id ?? null,
+        hourly_rate_id: bol.hourly_rate_id ?? null,
+        time_per_unit: timePerUnit,
+      });
+    }
   }
 
-  // Create a new unassigned job card
-  const { data: newCard, error: createErr } = await supabase
-    .from('job_cards')
-    .insert({
-      order_id: orderId,
-      staff_id: null,
-      issue_date: new Date().toISOString().split('T')[0],
-      status: 'pending',
-    })
-    .select('job_card_id')
-    .single();
-
-  if (createErr) throw createErr;
-  return newCard.job_card_id;
+  return preview;
 }
 
 // ── Main Component ──────────────────────────────────────────────────────────────
@@ -139,6 +276,7 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
   const queryClient = useQueryClient();
   const [addJobOpen, setAddJobOpen] = useState(false);
   const [generateBOLOpen, setGenerateBOLOpen] = useState(false);
+  const [issuePool, setIssuePool] = useState<WorkPoolRow | null>(null);
 
   // ── Fetch job card items for this order ───────────────────────────────────
   const { data: jobCardItems = [], isLoading } = useQuery({
@@ -201,6 +339,240 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
         .order('name');
       if (error) throw error;
       return (data || []) as JobOption[];
+    },
+  });
+
+  // ── Fetch work pool for this order ──────────────────────────────────────
+  const { data: workPool = [] } = useQuery({
+    queryKey: ['orderWorkPool', orderId],
+    queryFn: async () => {
+      // Query base table with joins (view FK resolution can be unreliable)
+      const { data: poolRows, error } = await supabase
+        .from('job_work_pool')
+        .select(`
+          pool_id, order_id, product_id, job_id, bol_id, order_detail_id,
+          required_qty, pay_type, piece_rate, piece_rate_id, hourly_rate_id,
+          time_per_unit, source, status,
+          jobs:job_id(name, estimated_minutes, time_unit),
+          products:product_id(name)
+        `)
+        .eq('order_id', orderId)
+        .neq('status', 'cancelled')
+        .order('pool_id');
+      if (error) throw error;
+      if (!poolRows || poolRows.length === 0) return [];
+
+      // Get issuance counts from job_card_items linked to these pool rows
+      const poolIds = poolRows.map((r) => r.pool_id);
+      const { data: issuanceData, error: issuanceErr } = await supabase
+        .from('job_card_items')
+        .select('work_pool_id, quantity, completed_quantity, status, job_cards!job_card_items_job_card_id_fkey(status)')
+        .in('work_pool_id', poolIds);
+      if (issuanceErr) throw issuanceErr;
+
+      // Compute issued/completed per pool row (excluding cancelled cards/items)
+      const issuanceMap = new Map<number, { issued: number; completed: number }>();
+      for (const item of issuanceData ?? []) {
+        const cardStatus = (item.job_cards as any)?.status;
+        if (cardStatus === 'cancelled' || item.status === 'cancelled') continue;
+        const pid = item.work_pool_id!;
+        const cur = issuanceMap.get(pid) ?? { issued: 0, completed: 0 };
+        cur.issued += item.quantity;
+        cur.completed += item.completed_quantity;
+        issuanceMap.set(pid, cur);
+      }
+
+      return poolRows.map((row) => {
+        const agg = issuanceMap.get(row.pool_id) ?? { issued: 0, completed: 0 };
+        const job = row.jobs as { estimated_minutes?: number | null; time_unit?: string | null } | null;
+        return {
+          ...row,
+          time_per_unit: resolvePoolTimePerUnitMinutes(
+            row.time_per_unit,
+            job?.estimated_minutes,
+            job?.time_unit,
+          ),
+          issued_qty: agg.issued,
+          completed_qty: agg.completed,
+          remaining_qty: row.required_qty - agg.issued,
+        } as WorkPoolRow;
+      });
+    },
+  });
+
+  const staleCheckDeps = useMemo(
+    () =>
+      workPool
+        .filter((p) => p.source === 'bol' && p.bol_id != null && p.order_detail_id != null)
+        .map((p) => ({
+          pool_id: p.pool_id,
+          bol_id: p.bol_id,
+          order_detail_id: p.order_detail_id,
+          required_qty: p.required_qty,
+          issued_qty: p.issued_qty,
+        })),
+    [workPool],
+  );
+
+  const { data: bolSync = { hasBolRows: false, isInSync: false } } = useQuery({
+    queryKey: ['orderBolSync', orderId, staleCheckDeps],
+    queryFn: async () => {
+      const bolPreview = await fetchOrderBOLPreview(orderId);
+      if (bolPreview.length === 0) {
+        return { hasBolRows: false, isInSync: false };
+      }
+
+      const bolPool = workPool.filter((row) => row.source === 'bol' && row.bol_id != null && row.order_detail_id != null);
+      const previewByKey = new Map(
+        bolPreview.map((item) => [`${item.order_detail_id}:${item.bol_id}`, item] as const),
+      );
+      const poolByKey = new Map(
+        bolPool.map((row) => [`${row.order_detail_id}:${row.bol_id}`, row] as const),
+      );
+
+      if (previewByKey.size !== poolByKey.size) {
+        return { hasBolRows: true, isInSync: false };
+      }
+
+      for (const [key, item] of previewByKey) {
+        const poolRow = poolByKey.get(key);
+        if (!poolRow) return { hasBolRows: true, isInSync: false };
+
+        const isRowInSync =
+          poolRow.required_qty === item.quantity &&
+          poolRow.pay_type === item.pay_type &&
+          optionalNumbersEqual(poolRow.piece_rate, item.piece_rate) &&
+          optionalNumbersEqual(poolRow.piece_rate_id, item.piece_rate_id) &&
+          optionalNumbersEqual(poolRow.hourly_rate_id, item.hourly_rate_id) &&
+          optionalNumbersEqual(poolRow.time_per_unit, item.time_per_unit);
+
+        if (!isRowInSync) {
+          return { hasBolRows: true, isInSync: false };
+        }
+      }
+
+      return { hasBolRows: true, isInSync: true };
+    },
+    enabled: workPool.length > 0,
+  });
+
+  const isBolGenerateDisabled = bolSync.hasBolRows && bolSync.isInSync;
+
+  // ── Stale pool detection ──────────────────────────────────────────────
+  const { data: staleItems = [] } = useQuery<StalePoolRow[]>({
+    // Include the current pool snapshot in the key because the stale check is derived from it.
+    queryKey: ['orderPoolStaleCheck', orderId, staleCheckDeps],
+    queryFn: async () => {
+      // Only check BOL-sourced pool rows (manual ones don't drift)
+      const bolPool = workPool.filter((p) => p.source === 'bol' && p.bol_id != null && p.order_detail_id != null);
+      if (bolPool.length === 0) return [];
+
+      // Fetch current order_details + BOL quantities
+      const detailIds = [...new Set(bolPool.map((p) => p.order_detail_id!))];
+      const { data: details, error } = await supabase
+        .from('order_details')
+        .select(`
+          order_detail_id,
+          quantity,
+          products:product_id(
+            billoflabour(bol_id, quantity)
+          )
+        `)
+        .in('order_detail_id', detailIds);
+      if (error) throw error;
+
+      // Build a lookup: bol_id → current total qty (order_detail.qty × bol.qty)
+      const currentQtyByBol = new Map<number, number>();
+      for (const detail of details ?? []) {
+        const product = detail.products as any;
+        const bols = Array.isArray(product?.billoflabour) ? product.billoflabour : [];
+        for (const bol of bols) {
+          currentQtyByBol.set(bol.bol_id, (detail.quantity || 1) * (bol.quantity || 1));
+        }
+      }
+
+      // Compare against pool required_qty
+      const stale: StalePoolRow[] = [];
+      for (const row of bolPool) {
+        const currentReq = currentQtyByBol.get(row.bol_id!) ?? 0;
+        if (currentReq !== row.required_qty) {
+          stale.push({
+            pool_id: row.pool_id,
+            job_name: row.jobs?.name ?? null,
+            product_name: row.products?.name ?? null,
+            pool_required: row.required_qty,
+            current_required: currentReq,
+            issued_qty: row.issued_qty,
+            diff: currentReq - row.required_qty,
+          });
+        }
+      }
+      return stale;
+    },
+    enabled: staleCheckDeps.length > 0,
+  });
+
+  // ── Reconciliation mutation ─────────────────────────────────────────────
+  const reconcileMutation = useMutation({
+    mutationFn: async (items: StalePoolRow[]) => {
+      // Atomic reconciliation: updates required_qty + creates/resolves exceptions server-side
+      const results = await Promise.all(
+        items.map((item) =>
+          supabase.rpc('reconcile_work_pool_row', {
+            p_pool_id: item.pool_id,
+            p_new_required_qty: item.current_required,
+          })
+        ),
+      );
+      const failed = results.find((r) => r.error);
+      if (failed?.error) throw failed.error;
+
+      return items.length;
+    },
+    onSuccess: (count) => {
+      queryClient.invalidateQueries({ queryKey: ['orderWorkPool', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderPoolStaleCheck', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderPoolExceptions', orderId] });
+      toast.success(`Updated ${count} work pool row${count !== 1 ? 's' : ''} to match current demand`);
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to update work pool');
+    },
+  });
+
+  // ── Fetch active pool exceptions for this order ────────────────────────
+  const { data: poolExceptions = [] } = useQuery({
+    queryKey: ['orderPoolExceptions', orderId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('job_work_pool_exceptions')
+        .select('exception_id, work_pool_id, exception_type, status, variance_qty')
+        .eq('order_id', orderId)
+        .in('status', ['open', 'acknowledged']);
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: workPool.length > 0,
+  });
+
+  const exceptionByPoolId = useMemo(() => {
+    const map = new Map<number, { exception_type: string; status: string; variance_qty: number }>();
+    for (const ex of poolExceptions) {
+      map.set(ex.work_pool_id, ex);
+    }
+    return map;
+  }, [poolExceptions]);
+
+  // ── Fetch staff for issue dialog picker ─────────────────────────────────
+  const { data: staffOptions = [] } = useQuery({
+    queryKey: ['staff', 'forIssuePicker'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('staff')
+        .select('staff_id, first_name, last_name')
+        .order('first_name');
+      if (error) throw error;
+      return (data ?? []) as StaffOption[];
     },
   });
 
@@ -278,10 +650,28 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setGenerateBOLOpen(true)}>
-            <Wand2 className="h-4 w-4 mr-2" />
-            Generate from BOL
-          </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span tabIndex={isBolGenerateDisabled ? 0 : -1}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setGenerateBOLOpen(true)}
+                    disabled={isBolGenerateDisabled}
+                  >
+                    <Wand2 className="h-4 w-4 mr-2" />
+                    Generate from BOL
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              {isBolGenerateDisabled && (
+                <TooltipContent>
+                  Bill of Labor in sync already
+                </TooltipContent>
+              )}
+            </Tooltip>
+          </TooltipProvider>
           <Button size="sm" onClick={() => setAddJobOpen(true)}>
             <Plus className="h-4 w-4 mr-2" />
             Add Job
@@ -289,7 +679,174 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
         </div>
       </div>
 
-      {/* Jobs Table */}
+      {/* Stale Pool Warning */}
+      {staleItems.length > 0 && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-50 dark:bg-amber-950/30 overflow-hidden">
+          {/* Header bar */}
+          <div className="flex items-center justify-between px-4 py-2.5 bg-amber-100/80 dark:bg-amber-900/40 border-b border-amber-500/20">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+              <span className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                Work pool out of date
+              </span>
+              <span className="text-xs text-amber-700/70 dark:text-amber-400/60">
+                — quantities have changed since the pool was generated
+              </span>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs border-amber-500/40 bg-white/60 dark:bg-amber-950/50 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/60"
+              onClick={() => reconcileMutation.mutate(staleItems)}
+              disabled={reconcileMutation.isPending}
+            >
+              {reconcileMutation.isPending ? (
+                <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3 w-3 mr-1.5" />
+              )}
+              Update Pool
+            </Button>
+          </div>
+          {/* Mismatch table */}
+          <div className="px-4 py-2">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-amber-700/60 dark:text-amber-400/50">
+                  <th className="text-left font-medium py-1 pr-4">Job</th>
+                  <th className="text-left font-medium py-1 pr-4">Product</th>
+                  <th className="text-right font-medium py-1 pr-4">Pool Qty</th>
+                  <th className="text-right font-medium py-1 pr-4">Current Qty</th>
+                  <th className="text-right font-medium py-1">Diff</th>
+                </tr>
+              </thead>
+              <tbody>
+                {staleItems.map((s) => {
+                  const diff = s.current_required - s.pool_required;
+                  const overIssued = s.current_required < s.issued_qty;
+                  return (
+                    <tr key={s.pool_id} className="border-t border-amber-500/10">
+                      <td className="py-1.5 pr-4 font-medium text-amber-900 dark:text-amber-100">
+                        {s.job_name ?? 'Job'}
+                      </td>
+                      <td className="py-1.5 pr-4 text-amber-800/70 dark:text-amber-300/60">
+                        {s.product_name || '—'}
+                      </td>
+                      <td className="py-1.5 pr-4 text-right tabular-nums text-amber-800/70 dark:text-amber-300/60">
+                        {s.pool_required}
+                      </td>
+                      <td className="py-1.5 pr-4 text-right tabular-nums font-medium text-amber-900 dark:text-amber-100">
+                        {s.current_required}
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums">
+                        <span className={diff > 0
+                          ? 'text-amber-700 dark:text-amber-300'
+                          : 'text-red-600 dark:text-red-400'
+                        }>
+                          {diff > 0 ? '+' : ''}{diff}
+                        </span>
+                        {overIssued && (
+                          <Badge variant="destructive" className="ml-2 text-[10px] px-1.5 py-0">
+                            over-issued
+                          </Badge>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Work Pool */}
+      {workPool.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Work Pool</CardTitle>
+            <CardDescription>
+              Demand snapshot from Bill of Labour. Issue job cards from here.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Job</TableHead>
+                  <TableHead>Product</TableHead>
+                  <TableHead className="text-right">Required</TableHead>
+                  <TableHead className="text-right">Issued</TableHead>
+                  <TableHead className="text-right">Remaining</TableHead>
+                  <TableHead>Pay Type</TableHead>
+                  <TableHead className="text-right">Piece Rate</TableHead>
+                  <TableHead className="w-32" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {workPool.map((row) => {
+                  const exception = exceptionByPoolId.get(row.pool_id);
+                  return (
+                  <TableRow key={row.pool_id}>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-1.5">
+                        {row.jobs?.name ?? 'Unknown'}
+                        {exception && (
+                          <Badge
+                            variant="destructive"
+                            className="text-[10px] px-1.5 py-0"
+                          >
+                            {exception.status === 'open' ? 'Exception' : 'Acknowledged'}
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{row.products?.name ?? '-'}</TableCell>
+                    <TableCell className="text-right">{row.required_qty}</TableCell>
+                    <TableCell className="text-right">{row.issued_qty}</TableCell>
+                    <TableCell className="text-right font-medium">
+                      {row.remaining_qty > 0 ? (
+                        row.remaining_qty
+                      ) : row.remaining_qty < 0 ? (
+                        <span className="text-destructive">{row.remaining_qty}</span>
+                      ) : (
+                        <span className="text-green-500">0</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{row.pay_type}</Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {row.piece_rate != null ? `R ${Number(row.piece_rate).toFixed(2)}` : '-'}
+                    </TableCell>
+                    <TableCell>
+                      {row.remaining_qty > 0 ? (
+                        <Button size="sm" variant="outline" onClick={() => setIssuePool(row)}>
+                          <Send className="h-3.5 w-3.5 mr-1.5" />
+                          Issue Card
+                        </Button>
+                      ) : row.remaining_qty < 0 ? (
+                        <Badge variant="destructive" className="gap-1">
+                          <AlertTriangle className="h-3 w-3" />
+                          Over-issued by {Math.abs(row.remaining_qty)}
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="border-green-500 text-green-500">
+                          <CheckCircle className="h-3 w-3 mr-1" />
+                          Fully Issued
+                        </Badge>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Issued Job Cards */}
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -410,6 +967,15 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
         open={generateBOLOpen}
         onOpenChange={setGenerateBOLOpen}
       />
+      {issuePool && (
+        <IssueJobCardDialog
+          orderId={orderId}
+          pool={issuePool}
+          staffOptions={staffOptions}
+          open={!!issuePool}
+          onOpenChange={(v) => { if (!v) setIssuePool(null); }}
+        />
+      )}
     </div>
   );
 }
@@ -474,24 +1040,35 @@ function AddJobDialog({
 
   const addMutation = useMutation({
     mutationFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+      const { data: membership } = await supabase
+        .from('organization_members')
+        .select('org_id')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .single();
+      if (!membership?.org_id) throw new Error('No organization');
+
       const qty = parseInt(quantity) || 1;
-      const jobCardId = await getOrCreateUnassignedJobCard(orderId);
-
-      const { error } = await supabase.from('job_card_items').insert({
-        job_card_id: jobCardId,
-        job_id: parseInt(selectedJobId),
+      const { error } = await supabase.from('job_work_pool').insert({
+        org_id: membership.org_id,
+        order_id: orderId,
+        order_detail_id: null,
         product_id: null,
-        quantity: qty,
-        completed_quantity: 0,
+        job_id: parseInt(selectedJobId),
+        bol_id: null,
+        source: 'manual',
+        required_qty: qty,
+        pay_type: pieceRate ? 'piece' : 'hourly',
         piece_rate: pieceRate ? parseFloat(pieceRate) : null,
-        status: 'pending',
+        status: 'active',
       });
-
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['orderJobCardItems', orderId] });
-      toast.success('Job added to order');
+      queryClient.invalidateQueries({ queryKey: ['orderWorkPool', orderId] });
+      toast.success('Job added to work pool');
       resetForm();
       onOpenChange(false);
     },
@@ -523,9 +1100,9 @@ function AddJobDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add Job to Order</DialogTitle>
+          <DialogTitle>Add Job to Work Pool</DialogTitle>
           <DialogDescription>
-            Add a job manually to this order. Staff assignment can be done later.
+            Add a manual job to the work pool. Issue job cards from the pool after adding.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -582,7 +1159,7 @@ function AddJobDialog({
             </Button>
             <Button type="submit" disabled={addMutation.isPending || !selectedJobId}>
               {addMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Add Job
+              Add to Work Pool
             </Button>
           </DialogFooter>
         </form>
@@ -608,123 +1185,83 @@ function GenerateBOLDialog({
   const {
     data: bolPreview = [],
     isLoading: loadingPreview,
-    refetch,
   } = useQuery({
     queryKey: ['orderBOLPreview', orderId],
-    queryFn: async (): Promise<BOLPreviewItem[]> => {
-      // Get order details with products and their BOL entries
-      const { data: orderDetails, error: odErr } = await supabase
-        .from('order_details')
-        .select(`
-          order_detail_id,
-          product_id,
-          quantity,
-          products:product_id(
-            product_id,
-            name,
-            billoflabour(
-              bol_id,
-              job_id,
-              quantity,
-              pay_type,
-              piece_rate_id,
-              jobs:job_id(job_id, name)
-            )
-          )
-        `)
-        .eq('order_id', orderId);
-
-      if (odErr) throw odErr;
-      if (!orderDetails || orderDetails.length === 0) return [];
-
-      const preview: BOLPreviewItem[] = [];
-
-      for (const detail of orderDetails) {
-        const product = detail.products as any;
-        if (!product) continue;
-
-        const bolEntries = Array.isArray(product.billoflabour)
-          ? product.billoflabour
-          : [];
-
-        for (const bol of bolEntries) {
-          const job = bol.jobs as any;
-          if (!job) continue;
-
-          const orderQty = detail.quantity || 1;
-          const bolQty = bol.quantity || 1;
-          const totalQty = orderQty * bolQty;
-
-          // Lookup piece rate if configured
-          let pieceRate: number | null = null;
-          if (bol.piece_rate_id) {
-            const { data: rateData } = await supabase
-              .from('piece_work_rates')
-              .select('rate')
-              .eq('rate_id', bol.piece_rate_id)
-              .single();
-            pieceRate = rateData?.rate ? Number(rateData.rate) : null;
-          }
-
-          preview.push({
-            job_id: job.job_id,
-            job_name: job.name,
-            product_id: product.product_id,
-            product_name: product.name,
-            quantity: totalQty,
-            pay_type: bol.pay_type || 'hourly',
-            piece_rate: pieceRate,
-          });
-        }
-      }
-
-      return preview;
-    },
+    queryFn: () => fetchOrderBOLPreview(orderId),
     enabled: open,
   });
 
   const generateMutation = useMutation({
     mutationFn: async (items: BOLPreviewItem[]) => {
-      const jobCardId = await getOrCreateUnassignedJobCard(orderId);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+      const { data: membership } = await supabase
+        .from('organization_members')
+        .select('org_id')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .single();
+      if (!membership?.org_id) throw new Error('No organization');
 
-      // Fetch existing items on this card to deduplicate
-      const { data: existingItems } = await supabase
-        .from('job_card_items')
-        .select('job_id, product_id')
-        .eq('job_card_id', jobCardId);
-      const existingKeys = new Set(
-        (existingItems ?? []).map((e) => `${e.job_id ?? 0}:${e.product_id ?? 0}`),
-      );
+      // Insert or update each pool row individually to handle the partial unique index
+      let count = 0;
+      for (const item of items) {
+        // Check if this BOL entry already exists in the pool
+        const { data: existing } = await supabase
+          .from('job_work_pool')
+          .select('pool_id')
+          .eq('order_detail_id', item.order_detail_id)
+          .eq('bol_id', item.bol_id)
+          .maybeSingle();
 
-      const newItems = items.filter(
-        (item) => !existingKeys.has(`${item.job_id ?? 0}:${item.product_id ?? 0}`),
-      );
-
-      if (newItems.length === 0) {
-        throw new Error('All BOL items already exist on this job card');
+        if (existing) {
+          // Update existing pool row with fresh snapshot
+          const { error } = await supabase
+            .from('job_work_pool')
+            .update({
+              required_qty: item.quantity,
+              pay_type: item.pay_type,
+              piece_rate: item.piece_rate,
+              piece_rate_id: item.piece_rate_id,
+              hourly_rate_id: item.hourly_rate_id,
+              time_per_unit: item.time_per_unit,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('pool_id', existing.pool_id);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase
+            .from('job_work_pool')
+            .insert({
+              org_id: membership.org_id,
+              order_id: orderId,
+              order_detail_id: item.order_detail_id,
+              product_id: item.product_id,
+              job_id: item.job_id,
+              bol_id: item.bol_id,
+              source: 'bol' as const,
+              required_qty: item.quantity,
+              pay_type: item.pay_type,
+              piece_rate: item.piece_rate,
+              piece_rate_id: item.piece_rate_id,
+              hourly_rate_id: item.hourly_rate_id,
+              time_per_unit: item.time_per_unit,
+              status: 'active' as const,
+            });
+          if (error) throw error;
+        }
+        count++;
       }
-
-      const inserts = newItems.map((item) => ({
-        job_card_id: jobCardId,
-        job_id: item.job_id,
-        product_id: item.product_id,
-        quantity: item.quantity,
-        completed_quantity: 0,
-        piece_rate: item.piece_rate,
-        status: 'pending' as const,
-      }));
-
-      const { error } = await supabase.from('job_card_items').insert(inserts);
-      if (error) throw error;
-      return inserts.length;
+      return count;
     },
-    onSuccess: (insertedCount) => {
+    onSuccess: (count) => {
+      queryClient.invalidateQueries({ queryKey: ['orderWorkPool', orderId] });
       queryClient.invalidateQueries({ queryKey: ['orderJobCardItems', orderId] });
-      toast.success(`Generated ${insertedCount} job${insertedCount !== 1 ? 's' : ''} from BOL`);
+      toast.success(`Added ${count} job${count !== 1 ? 's' : ''} to work pool`);
       onOpenChange(false);
     },
     onError: (error: any) => {
-      toast.error(error.message || 'Failed to generate jobs from BOL');
+      toast.error(error.message || 'Failed to populate work pool');
     },
   });
 
@@ -732,10 +1269,10 @@ function GenerateBOLDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Generate Jobs from Bill of Labour</DialogTitle>
+          <DialogTitle>Add Jobs to Work Pool from Bill of Labour</DialogTitle>
           <DialogDescription>
-            Preview jobs that will be created based on this order&apos;s products&apos; Bill of Labour
-            configurations.
+            Preview jobs from this order&apos;s Bill of Labour. These will be added to the work pool
+            for issuing as job cards.
           </DialogDescription>
         </DialogHeader>
 
@@ -751,10 +1288,10 @@ function GenerateBOLDialog({
             </AlertDescription>
           </Alert>
         ) : (
-          <div className="max-h-96 overflow-auto rounded-md border">
+          <div className="my-4 max-h-96 overflow-auto rounded-md border border-border/60">
             <Table>
               <TableHeader>
-                <TableRow>
+                <TableRow className="bg-muted/40 hover:bg-muted/40">
                   <TableHead>Job</TableHead>
                   <TableHead>Product</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
@@ -769,7 +1306,7 @@ function GenerateBOLDialog({
                     <TableCell className="text-muted-foreground">{item.product_name}</TableCell>
                     <TableCell className="text-right">{item.quantity}</TableCell>
                     <TableCell>
-                      <Badge variant="outline">{item.pay_type}</Badge>
+                      <Badge variant="secondary" className="font-normal">{item.pay_type}</Badge>
                     </TableCell>
                     <TableCell className="text-right">
                       {item.piece_rate != null ? `R ${item.piece_rate.toFixed(2)}` : '-'}
@@ -790,9 +1327,186 @@ function GenerateBOLDialog({
             disabled={generateMutation.isPending || bolPreview.length === 0}
           >
             {generateMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Generate {bolPreview.length} Job{bolPreview.length !== 1 ? 's' : ''}
+            Add {bolPreview.length} to Work Pool
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Issue Job Card Dialog ──────────────────────────────────────────────────────
+
+function formatDurationFromMinutes(minutes: number): string {
+  if (minutes < 60) return `${Math.round(minutes)}min`;
+  const h = Math.floor(minutes / 60);
+  const m = Math.round(minutes % 60);
+  return m > 0 ? `${h}h ${m}min` : `${h}h`;
+}
+
+function IssueJobCardDialog({
+  orderId,
+  pool,
+  staffOptions,
+  open,
+  onOpenChange,
+}: {
+  orderId: number;
+  pool: WorkPoolRow;
+  staffOptions: StaffOption[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [quantity, setQuantity] = useState<string>(String(pool.remaining_qty));
+  const [staffId, setStaffId] = useState<string>('');
+  const [overrideReason, setOverrideReason] = useState('');
+
+  const qty = parseInt(quantity) || 0;
+  const isOverIssue = qty > pool.remaining_qty;
+  const estimatedMinutes = pool.time_per_unit ? qty * pool.time_per_unit : null;
+
+  const canSubmit =
+    qty >= 1 && (!isOverIssue || overrideReason.trim().length > 0);
+
+  const issueMutation = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.rpc('issue_job_card_from_pool', {
+        p_pool_id: pool.pool_id,
+        p_quantity: qty,
+        p_staff_id: staffId ? parseInt(staffId) : null,
+        p_allow_overissue: isOverIssue,
+        p_override_reason: isOverIssue ? overrideReason.trim() : null,
+      });
+      if (error) throw error;
+      return { cardId: data, qty };
+    },
+    onSuccess: ({ cardId, qty: issuedQty }) => {
+      queryClient.invalidateQueries({ queryKey: ['orderWorkPool', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['orderJobCardItems', orderId] });
+      toast.success(`Issued job card #${cardId} for ${issuedQty} units`);
+      onOpenChange(false);
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to issue job card');
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <div className="flex items-center gap-2">
+            <DialogTitle>Issue Job Card</DialogTitle>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-xs">
+                  <p>Create a job card from the work pool for &quot;{pool.jobs?.name ?? 'Unknown'}&quot;{pool.products?.name ? ` — ${pool.products.name}` : ''}.</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+          <DialogDescription className="sr-only">Issue a job card from the work pool</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-5">
+          {/* Read-only pool info */}
+          <div className="rounded-lg border border-border/50 bg-muted/30 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Pool Status</p>
+            <div className="grid grid-cols-3 gap-3 text-sm">
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground">Required</span>
+                <p className="font-medium">{pool.required_qty}</p>
+              </div>
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground">Already Issued</span>
+                <p className="font-medium">{pool.issued_qty}</p>
+              </div>
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground">Remaining</span>
+                <p className="font-medium">{pool.remaining_qty}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Quantity & Staff */}
+          <div className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Issuance Details</p>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Quantity to Issue</Label>
+              <Input
+                type="number"
+                min={1}
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+              />
+              {estimatedMinutes != null && qty > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Estimated time: ~{formatDurationFromMinutes(estimatedMinutes)}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Assign to Staff (optional)</Label>
+              <Select value={staffId} onValueChange={setStaffId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Unassigned — assign later" />
+                </SelectTrigger>
+                <SelectContent>
+                  {staffOptions.map((s) => (
+                    <SelectItem key={s.staff_id} value={s.staff_id.toString()}>
+                      {s.first_name} {s.last_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Over-issuance warning */}
+          {isOverIssue && (
+            <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>
+                <p className="font-medium mb-1">Over-issuance warning</p>
+                <p className="text-sm">
+                  You are issuing {qty - pool.remaining_qty} more than the remaining {pool.remaining_qty} units.
+                  A production exception will be created and visible in the shared queue.
+                </p>
+                <div className="mt-2">
+                  <Label className="text-destructive-foreground">Reason (required)</Label>
+                  <Textarea
+                    rows={2}
+                    placeholder="Explain why this over-issuance is needed..."
+                    value={overrideReason}
+                    onChange={(e) => setOverrideReason(e.target.value)}
+                    className="mt-1"
+                  />
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
+        </div>
+
+        <div className="border-t border-border/50 pt-4">
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => issueMutation.mutate()}
+            disabled={issueMutation.isPending || !canSubmit}
+            variant={isOverIssue ? 'destructive' : 'default'}
+          >
+            {issueMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {isOverIssue ? 'Override & Issue Card' : 'Issue Job Card'}
+          </Button>
+        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );

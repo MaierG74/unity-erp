@@ -1,6 +1,6 @@
 # Unity ERP Color System
 
-This document describes the centralized color palette used throughout Unity ERP. All colors are defined as CSS custom properties in `app/globals.css` and extended through Tailwind CSS in `tailwind.config.ts`.
+This document describes the centralized color palette used throughout Unity ERP. All colors are defined as CSS custom properties in `app/globals.css` and exposed to Tailwind CSS v4 through the CSS-first `@theme` block in the same file.
 
 ## Quick Reference
 
@@ -67,9 +67,9 @@ Use for neutral informational elements:
 
 ## File Locations
 
-- **CSS Variables**: `app/globals.css` (lines 35-124)
-- **Tailwind Config**: `tailwind.config.ts` (lines 45-120)
-- **Component Classes**: `app/globals.css` (lines 230-312)
+- **Tailwind entrypoint + theme bridge**: `app/globals.css`
+- **CSS Variables**: `app/globals.css`
+- **Component Classes**: `app/globals.css`
 
 ## How to Rollback to Orange Theme
 
@@ -142,5 +142,5 @@ All color combinations meet WCAG AA contrast requirements:
 ## Related Documentation
 
 - [Style Guide](../overview/STYLE_GUIDE.md) - Overall design guidelines
-- [Tailwind Config](../../tailwind.config.ts) - Full Tailwind configuration
 - [Global Styles](../../app/globals.css) - CSS custom properties and base styles
+- [shadcn Config](../../components.json) - Registry/tooling configuration for vendored UI primitives

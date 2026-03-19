@@ -1,10 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireModuleAccess } from '@/lib/api/module-access';
+import { MODULE_KEYS } from '@/lib/modules/keys';
 import { supabaseAdmin } from '@/lib/supabase-admin';
+
+async function requireQuotesAccess(request: NextRequest) {
+  const access = await requireModuleAccess(request, MODULE_KEYS.QUOTING_PROPOSALS, {
+    forbiddenMessage: 'Quoting module access is disabled for your organization',
+  });
+
+  if ('error' in access) {
+    return { error: access.error };
+  }
+
+  if (!access.orgId) {
+    return {
+      error: NextResponse.json(
+        {
+          error: 'Organization context is required for quotes access',
+          reason: 'missing_org_context',
+          module_key: access.moduleKey,
+        },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return { orgId: access.orgId };
+}
 
 export async function GET(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireQuotesAccess(request);
+  if ('error' in auth) return auth.error;
+
   try {
     const { id: quoteId } = await context.params;
     console.log('Fetching quote via API with ID:', quoteId);
@@ -14,6 +44,7 @@ export async function GET(
       .from('quotes')
       .select('*, customer:customers(id, name, email, telephone)')
       .eq('id', quoteId)
+      .eq('org_id', auth.orgId)
       .single();
 
     if (quoteError) {
@@ -28,13 +59,15 @@ export async function GET(
     const { data: items, error: itemsError } = await supabaseAdmin
       .from('quote_items')
       .select('*, quote_item_clusters(*, quote_cluster_lines(*)), quote_item_cutlists(*)')
-      .eq('quote_id', quoteId);
+      .eq('quote_id', quoteId)
+      .eq('org_id', auth.orgId);
 
     // Fetch related attachments
     const { data: attachments, error: attachmentsError } = await supabaseAdmin
       .from('quote_attachments')
       .select('*')
-      .eq('quote_id', quoteId);
+      .eq('quote_id', quoteId)
+      .eq('org_id', auth.orgId);
 
     // Log any errors but don't fail the whole operation
     if (itemsError) console.warn('Failed to fetch quote items:', itemsError);
@@ -88,6 +121,9 @@ export async function DELETE(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireQuotesAccess(request);
+  if ('error' in auth) return auth.error;
+
   try {
     const { id: quoteId } = await context.params;
 
@@ -98,6 +134,7 @@ export async function DELETE(
       .from('quotes')
       .select('id, quote_number')
       .eq('id', quoteId)
+      .eq('org_id', auth.orgId)
       .single();
 
     if (checkErr || !quoteExists) {
@@ -115,7 +152,8 @@ export async function DELETE(
     const { error } = await supabaseAdmin
       .from('quotes')
       .delete()
-      .eq('id', quoteId);
+      .eq('id', quoteId)
+      .eq('org_id', auth.orgId);
 
     if (error) {
       console.error('[DELETE /quotes] Quote delete error:', error);

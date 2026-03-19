@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
@@ -122,6 +122,7 @@ const columns = [
 export function ComponentsTab() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const searchParamsString = searchParams?.toString() || '';
 
   // Initialize state from URL parameters
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -139,11 +140,55 @@ export function ComponentsTab() {
   });
   const [categorySearch, setCategorySearch] = useState('');
   const [supplierSearch, setSupplierSearch] = useState('');
+  const syncingFromUrlRef = useRef(false);
+  const lastSearchParamsRef = useRef(searchParamsString);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
+  // Sync local filter state from URL changes that originated outside this tab,
+  // such as assistant deep-links that open another component in Inventory.
+  useEffect(() => {
+    if (lastSearchParamsRef.current === searchParamsString) {
+      return;
+    }
+
+    lastSearchParamsRef.current = searchParamsString;
+
+    const params = new URLSearchParams(searchParamsString);
+    const nextFilterText = params.get('q') || '';
+    const nextCategory = params.get('category') || '_all';
+    const nextSupplier = params.get('supplier') || '_all';
+    const nextPageParam = Number.parseInt(params.get('page') || '1', 10);
+    const nextPageSizeParam = Number.parseInt(params.get('pageSize') || '10', 10);
+    const nextPage = Number.isFinite(nextPageParam) && nextPageParam > 0 ? nextPageParam - 1 : 0;
+    const nextPageSize = Number.isFinite(nextPageSizeParam) && nextPageSizeParam > 0 ? nextPageSizeParam : 10;
+
+    const shouldSync =
+      filterText !== nextFilterText ||
+      selectedCategory !== nextCategory ||
+      selectedSupplier !== nextSupplier ||
+      currentPage !== nextPage ||
+      pageSize !== nextPageSize;
+
+    if (!shouldSync) {
+      return;
+    }
+
+    syncingFromUrlRef.current = true;
+    setFilterText(nextFilterText);
+    setSelectedCategory(nextCategory);
+    setSelectedSupplier(nextSupplier);
+    setCurrentPage(nextPage);
+    setPageSize(nextPageSize);
+  }, [currentPage, filterText, pageSize, searchParamsString, selectedCategory, selectedSupplier]);
+
   // Sync filter and pagination state to URL (debounced for search, immediate for dropdowns/pagination)
   useEffect(() => {
+    if (syncingFromUrlRef.current) {
+      syncingFromUrlRef.current = false;
+      return;
+    }
+
     const currentUrlQuery = searchParams?.get('q') || '';
     const currentUrlCategory = searchParams?.get('category') || '_all';
     const currentUrlSupplier = searchParams?.get('supplier') || '_all';
@@ -497,7 +542,7 @@ export function ComponentsTab() {
     // CHANGED: Reduced space-y from 6 to 3 for tighter layout
     <div className="space-y-3">
       {/* CHANGED: Combined actions and filters into single compact toolbar */}
-      <div className="p-2 bg-card rounded-xl border shadow-sm">
+      <div className="p-2 bg-card rounded-xl border shadow-xs">
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
           {/* Search */}
           <div className="relative w-full md:w-[520px]">
@@ -545,7 +590,7 @@ export function ComponentsTab() {
                     placeholder="Search categories..."
                     value={categorySearch}
                     onChange={(e) => setCategorySearch(e.target.value)}
-                    className="mb-1 focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="mb-1 focus:outline-hidden focus:ring-2 focus:ring-ring"
                   />
                 </div>
                 {filteredCategories.length > 0 ? (
@@ -584,7 +629,7 @@ export function ComponentsTab() {
                     placeholder="Search suppliers..."
                     value={supplierSearch}
                     onChange={(e) => setSupplierSearch(e.target.value)}
-                    className="mb-1 focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="mb-1 focus:outline-hidden focus:ring-2 focus:ring-ring"
                   />
                 </div>
                 {filteredSuppliers.length > 0 ? (
@@ -621,7 +666,7 @@ export function ComponentsTab() {
       </div>
 
       {/* Component list - full width */}
-      <div className="rounded-xl border bg-card shadow-sm overflow-auto">
+      <div className="rounded-xl border bg-card shadow-xs overflow-auto">
         <DataTable
           columns={columns}
           data={filteredComponents}
@@ -644,4 +689,3 @@ export function ComponentsTab() {
     </div>
   );
 }
-

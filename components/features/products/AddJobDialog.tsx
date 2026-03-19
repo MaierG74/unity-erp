@@ -184,45 +184,23 @@ export default function AddJobDialog({
       {actualOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setOpenState(false)} />
-          <div className="relative bg-background border rounded-md shadow-xl w-[820px] max-h-[80vh] overflow-auto p-4 space-y-4">
+          <div className="relative bg-background border rounded-lg shadow-xl w-[820px] max-h-[80vh] overflow-auto p-5 space-y-5">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">Add Job</h2>
-              <Button variant="ghost" onClick={() => setOpenState(false)}>Close</Button>
+              <Button variant="ghost" size="sm" onClick={() => setOpenState(false)}>Close</Button>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <div className="text-sm font-medium mb-2">Job Category</div>
-                <Select value={selectedCategoryId?.toString() || ""} onValueChange={(v) => setSelectedCategoryId(v ? Number(v) : null)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {parentCategories.map(c => (
-                      <SelectItem key={c.category_id} value={String(c.category_id)}>
-                        {c.name} - R{c.current_hourly_rate.toFixed(2)}/hr
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {hasSubcategories && (
-                <div>
-                  <div className="text-sm font-medium mb-2">Subcategory</div>
-                  <Select
-                    value={selectedSubcategoryId?.toString() || "all"}
-                    onValueChange={(v) => {
-                      setSelectedSubcategoryId(v === "all" ? null : Number(v));
-                      setSelectedJobId(null);
-                    }}
-                  >
+            <section className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Job Selection</h3>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+                <div className="space-y-1.5">
+                  <div className="text-xs text-muted-foreground">Job Category</div>
+                  <Select value={selectedCategoryId?.toString() || ""} onValueChange={(v) => setSelectedCategoryId(v ? Number(v) : null)}>
                     <SelectTrigger>
-                      <SelectValue placeholder="All subcategories" />
+                      <SelectValue placeholder="Select category" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All subcategories</SelectItem>
-                      {subcategories.map(c => (
+                      {parentCategories.map(c => (
                         <SelectItem key={c.category_id} value={String(c.category_id)}>
                           {c.name} - R{c.current_hourly_rate.toFixed(2)}/hr
                         </SelectItem>
@@ -230,67 +208,97 @@ export default function AddJobDialog({
                     </SelectContent>
                   </Select>
                 </div>
-              )}
 
-              <div>
-                <div className="text-sm font-medium mb-2">Job</div>
-                <Select value={selectedJobId?.toString() || ""} onValueChange={(v) => setSelectedJobId(v ? Number(v) : null)} disabled={!selectedCategoryId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select job" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {jobs.map(j => (
-                      <SelectItem key={j.job_id} value={String(j.job_id)}>{j.name}</SelectItem>
-                    ))}
-                    <div className="p-2 border-t">
-                      <Button variant="outline" size="sm" className="w-full" onClick={(e) => { e.preventDefault(); setCreateOpen(true); }}>
-                        <Plus className="h-4 w-4 mr-2" /> Create new job
-                      </Button>
-                    </div>
-                  </SelectContent>
-                </Select>
-              </div>
+                {hasSubcategories && (
+                  <div className="space-y-1.5">
+                    <div className="text-xs text-muted-foreground">Subcategory</div>
+                    <Select
+                      value={selectedSubcategoryId?.toString() || "all"}
+                      onValueChange={(v) => {
+                        setSelectedSubcategoryId(v === "all" ? null : Number(v));
+                        setSelectedJobId(null);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="All subcategories" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All subcategories</SelectItem>
+                        {subcategories.map(c => (
+                          <SelectItem key={c.category_id} value={String(c.category_id)}>
+                            {c.name} - R{c.current_hourly_rate.toFixed(2)}/hr
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
 
-              <div>
-                <div className="text-sm font-medium mb-2">Pay Type</div>
-                <Select value={payType} onValueChange={(v: any) => setPayType(v)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Pay type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="hourly">Hourly</SelectItem>
-                    <SelectItem value="piece">Piecework</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <div className="flex-1">
-                  <div className="text-sm font-medium mb-2">Time Required</div>
-                  <Input type="number" min="0.01" step="0.01" value={timeRequired} onChange={(e) => setTimeRequired(Math.max(0.01, Number(e.target.value)))} disabled={payType === "piece"} />
-                </div>
-                <div className="w-40">
-                  <div className="text-sm font-medium mb-2">Unit</div>
-                  <Select value={timeUnit} onValueChange={(v: any) => setTimeUnit(v)} disabled={payType === "piece"}>
+                <div className="space-y-1.5">
+                  <div className="text-xs text-muted-foreground">Job</div>
+                  <Select value={selectedJobId?.toString() || ""} onValueChange={(v) => setSelectedJobId(v ? Number(v) : null)} disabled={!selectedCategoryId}>
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue placeholder="Select job" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="hours">Hours</SelectItem>
-                      <SelectItem value="minutes">Minutes</SelectItem>
-                      <SelectItem value="seconds">Seconds</SelectItem>
+                      {jobs.map(j => (
+                        <SelectItem key={j.job_id} value={String(j.job_id)}>{j.name}</SelectItem>
+                      ))}
+                      <div className="p-2 border-t">
+                        <Button variant="outline" size="sm" className="w-full" onClick={(e) => { e.preventDefault(); setCreateOpen(true); }}>
+                          <Plus className="h-4 w-4 mr-2" /> Create new job
+                        </Button>
+                      </div>
                     </SelectContent>
                   </Select>
                 </div>
               </div>
+            </section>
 
-              <div>
-                <div className="text-sm font-medium mb-2">Quantity</div>
-                <Input type="number" min={1} step={1} value={quantity} onChange={(e) => setQuantity(Math.max(1, Number(e.target.value)))} />
+            <section className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Pay &amp; Time</h3>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+                <div className="space-y-1.5">
+                  <div className="text-xs text-muted-foreground">Pay Type</div>
+                  <Select value={payType} onValueChange={(v: any) => setPayType(v)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Pay type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="hourly">Hourly</SelectItem>
+                      <SelectItem value="piece">Piecework</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-end gap-2">
+                  <div className="flex-1 space-y-1.5">
+                    <div className="text-xs text-muted-foreground">Time Required</div>
+                    <Input type="number" min="0.01" step="0.01" value={timeRequired} onChange={(e) => setTimeRequired(Math.max(0.01, Number(e.target.value)))} disabled={payType === "piece"} />
+                  </div>
+                  <div className="w-40 space-y-1.5">
+                    <div className="text-xs text-muted-foreground">Unit</div>
+                    <Select value={timeUnit} onValueChange={(v: any) => setTimeUnit(v)} disabled={payType === "piece"}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="hours">Hours</SelectItem>
+                        <SelectItem value="minutes">Minutes</SelectItem>
+                        <SelectItem value="seconds">Seconds</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="text-xs text-muted-foreground">Quantity</div>
+                  <Input type="number" min={1} step={1} value={quantity} onChange={(e) => setQuantity(Math.max(1, Number(e.target.value)))} />
+                </div>
               </div>
-            </div>
+            </section>
 
-            <div className="flex justify-end">
+            <div className="flex justify-end border-t border-border/50 pt-4">
               <Button onClick={add} disabled={!selectedJobId}>Add Job</Button>
             </div>
           </div>

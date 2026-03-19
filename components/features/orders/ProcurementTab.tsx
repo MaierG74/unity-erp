@@ -3,13 +3,15 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { format, parseISO } from 'date-fns';
+import { formatDate, formatDateShort } from '@/lib/date-utils';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { Package, CheckCircle, Clock, Truck, Loader2, ExternalLink, Mail, MessageSquare } from 'lucide-react';
+import { Package, CheckCircle, Clock, Truck, Loader2, ExternalLink, Mail, MessageSquare, ShoppingCart } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
+import { effectiveQty, effectiveReceived } from '@/lib/procurement-utils';
 
 // Types
 interface ProcurementLineDetail {
@@ -212,25 +214,6 @@ async function fetchPOEmailData(purchaseOrderIds: number[]): Promise<Record<numb
   return result;
 }
 
-// Effective quantity for this order's allocation.
-// When a PO line is split across multiple orders, quantity_for_order holds
-// the portion allocated to *this* customer order, which may be less than the
-// full PO line order_quantity.
-function effectiveQty(line: ProcurementLineDetail) {
-  return line.quantity_for_order > 0 ? line.quantity_for_order : line.order_quantity;
-}
-
-// Effective received:
-// - If allocation tracking is available, use it directly.
-// - Otherwise, fall back to capped PO-line received quantity.
-function effectiveReceived(line: ProcurementLineDetail) {
-  if (line.received_quantity !== null) {
-    return line.received_quantity;
-  }
-  const qty = effectiveQty(line);
-  return Math.min(line.total_received, qty);
-}
-
 // Helper: line status colour + progress bar colour
 function getLineStatusInfo(line: ProcurementLineDetail) {
   const qty = effectiveQty(line);
@@ -260,7 +243,7 @@ const followUpStatusLabels: Record<string, string> = {
 };
 
 // Main component
-export function ProcurementTab({ orderId }: { orderId: number }) {
+export function ProcurementTab({ orderId, onOrderComponents }: { orderId: number; onOrderComponents?: () => void }) {
   const { data: lines = [], isLoading } = useQuery({
     queryKey: ['orderProcurement', orderId],
     queryFn: () => fetchOrderProcurement(orderId),
@@ -318,13 +301,40 @@ export function ProcurementTab({ orderId }: { orderId: number }) {
       <div className="flex flex-col items-center justify-center py-16 text-center">
         <Package className="h-10 w-10 text-muted-foreground/40 mb-3" />
         <p className="text-sm font-medium text-muted-foreground">No supplier orders placed for this order</p>
-        <p className="text-xs text-muted-foreground/60 mt-1">Use the Components tab to order parts from suppliers</p>
+        {onOrderComponents ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1 mt-3"
+            onClick={onOrderComponents}
+          >
+            Order Components
+            <ShoppingCart className="h-4 w-4" />
+          </Button>
+        ) : (
+          <p className="text-xs text-muted-foreground/60 mt-1">Use the Components tab to order parts from suppliers</p>
+        )}
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
+      {/* Header with Order Components action */}
+      {onOrderComponents && (
+        <div className="flex justify-end">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1"
+            onClick={onOrderComponents}
+          >
+            Order Components
+            <ShoppingCart className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
+
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <SummaryCard icon={Package} label="Total Lines" value={stats.total} color="text-foreground" bgColor="bg-muted/30" />
@@ -415,7 +425,7 @@ export function ProcurementTab({ orderId }: { orderId: number }) {
 
                       {/* Last receipt */}
                       <span className="text-[11px] text-muted-foreground tabular-nums shrink-0 w-20 text-right">
-                        {line.last_receipt_date ? format(parseISO(line.last_receipt_date), 'MMM d, yyyy') : '—'}
+                        {line.last_receipt_date ? formatDate(line.last_receipt_date) : '—'}
                       </span>
                     </div>
                   );
@@ -442,13 +452,16 @@ function POEmailSummary({ data }: { data: POEmailData }) {
         {lastEmail && (
           <span className="flex items-center gap-1.5 text-muted-foreground">
             <Mail className="h-3 w-3" />
-            Sent {format(parseISO(lastEmail.sent_at), 'MMM d, yyyy')}
+            Sent {formatDate(lastEmail.sent_at)}
             {lastEmail.delivery_status && (
               <Badge variant="outline" className="text-[9px] px-1 py-0 ml-1">
-                {lastEmail.delivery_status === 'delivered' ? 'Delivered' :
-                 lastEmail.delivery_status === 'bounced' ? 'Bounced' :
-                 lastEmail.delivery_status === 'sent' ? 'Sent' :
-                 lastEmail.delivery_status}
+                {lastEmail.delivery_status === 'delivered' || lastEmail.delivery_status === 'opened' || lastEmail.delivery_status === 'clicked'
+                  ? 'Email Delivered'
+                  : lastEmail.delivery_status === 'bounced' || lastEmail.delivery_status === 'complained'
+                    ? 'Email Issue'
+                    : lastEmail.delivery_status === 'sent'
+                      ? 'Email Sent'
+                      : lastEmail.delivery_status}
               </Badge>
             )}
           </span>
@@ -456,7 +469,7 @@ function POEmailSummary({ data }: { data: POEmailData }) {
         {latestFollowUp && (
           <span className="flex items-center gap-1.5 text-muted-foreground">
             <MessageSquare className="h-3 w-3" />
-            Follow-up {format(parseISO(latestFollowUp.sent_at), 'MMM d')}
+            Follow-up {formatDateShort(latestFollowUp.sent_at)}
             {hasResponse ? (
               <Badge variant="outline" className={cn(
                 "text-[9px] px-1 py-0 ml-1",
@@ -480,7 +493,7 @@ function POEmailSummary({ data }: { data: POEmailData }) {
           <div className="flex items-center gap-3 text-[11px]">
             {latestFollowUp.expected_delivery_date && (
               <span className="text-muted-foreground">
-                Supplier ETA: <span className="font-medium text-foreground">{format(parseISO(latestFollowUp.expected_delivery_date), 'MMM d, yyyy')}</span>
+                Supplier ETA: <span className="font-medium text-foreground">{formatDate(latestFollowUp.expected_delivery_date)}</span>
               </span>
             )}
             {latestFollowUp.response_notes && (
@@ -504,7 +517,7 @@ function POEmailSummary({ data }: { data: POEmailData }) {
                     )}
                     {item.item_expected_date && (
                       <span className="text-muted-foreground">
-                        ETA: {format(new Date(item.item_expected_date), 'MMM d')}
+                        ETA: {formatDateShort(item.item_expected_date)}
                       </span>
                     )}
                     {item.item_notes && (

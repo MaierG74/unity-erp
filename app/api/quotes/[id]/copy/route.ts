@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { requireQuotesAccess } from '@/lib/api/quotes-access';
 import {
   buildCutlistLineRefsFromLines,
   cloneCutlistLayoutWithLineRefs,
@@ -88,6 +89,11 @@ export async function POST(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireQuotesAccess(request);
+  if ('error' in auth) {
+    return auth.error;
+  }
+
   let newQuoteId: string | null = null;
 
   try {
@@ -104,22 +110,24 @@ export async function POST(
       return NextResponse.json({ error: 'customer_id must be a positive integer' }, { status: 400 });
     }
 
-    // Fetch all source data in parallel
     const [quoteResult, itemsResult, attachmentsResult] = await Promise.all([
       supabaseAdmin
         .from('quotes')
         .select('*')
         .eq('id', sourceQuoteId)
+        .eq('org_id', auth.orgId)
         .single(),
       supabaseAdmin
         .from('quote_items')
         .select('*, quote_item_clusters(*, quote_cluster_lines(*)), quote_item_cutlists(*)')
         .eq('quote_id', sourceQuoteId)
+        .eq('org_id', auth.orgId)
         .order('position', { ascending: true }),
       supabaseAdmin
         .from('quote_attachments')
         .select('*')
-        .eq('quote_id', sourceQuoteId),
+        .eq('quote_id', sourceQuoteId)
+        .eq('org_id', auth.orgId),
     ]);
 
     if (quoteResult.error || !quoteResult.data) {
@@ -159,10 +167,9 @@ export async function POST(
     const targetContactId =
       targetCustomerId === sourceCustomerId ? (sourceQuote.contact_id ?? null) : null;
 
-    // Create the new quote
     const { data: newQuote, error: createQuoteError } = await supabaseAdmin
       .from('quotes')
-      .insert([{
+      .insert({
         quote_number: quoteNumber,
         customer_id: targetCustomerId,
         contact_id: targetContactId,
@@ -174,7 +181,8 @@ export async function POST(
         notes: sourceQuote.notes ?? null,
         terms_conditions: sourceQuote.terms_conditions ?? null,
         valid_until: sourceQuote.valid_until ?? null,
-      }])
+        org_id: auth.orgId,
+      })
       .select('*')
       .single();
 
@@ -192,8 +200,9 @@ export async function POST(
     for (const sourceItem of sourceItems) {
       const { data: newItem, error: itemError } = await supabaseAdmin
         .from('quote_items')
-        .insert([{
+        .insert({
           quote_id: newQuoteId,
+          org_id: auth.orgId,
           description: sourceItem.description,
           qty: sourceItem.qty,
           unit_price: sourceItem.unit_price,
@@ -204,7 +213,7 @@ export async function POST(
           bullet_points: sourceItem.bullet_points ?? null,
           internal_notes: sourceItem.internal_notes ?? null,
           selected_options: cloneJsonValue(sourceItem.selected_options ?? null),
-        }])
+        })
         .select('id')
         .single();
 
@@ -223,13 +232,14 @@ export async function POST(
       for (const sourceCluster of sourceClusters) {
         const { data: newCluster, error: clusterError } = await supabaseAdmin
           .from('quote_item_clusters')
-          .insert([{
+          .insert({
             quote_item_id: newItemId,
+            org_id: auth.orgId,
             name: sourceCluster.name,
             notes: sourceCluster.notes ?? null,
             position: sourceCluster.position ?? 0,
             markup_percent: sourceCluster.markup_percent ?? 0,
-          }])
+          })
           .select('id')
           .single();
 
@@ -244,8 +254,9 @@ export async function POST(
         for (const sourceLine of sourceLines) {
           const { data: newLine, error: lineError } = await supabaseAdmin
             .from('quote_cluster_lines')
-            .insert([{
+            .insert({
               cluster_id: newCluster.id,
+              org_id: auth.orgId,
               line_type: sourceLine.line_type,
               component_id: sourceLine.component_id ?? null,
               supplier_component_id: sourceLine.supplier_component_id ?? null,
@@ -262,7 +273,7 @@ export async function POST(
               overhead_element_id: sourceLine.overhead_element_id ?? null,
               overhead_cost_type: sourceLine.overhead_cost_type ?? null,
               overhead_percentage_basis: sourceLine.overhead_percentage_basis ?? null,
-            }])
+            })
             .select('id, cutlist_slot')
             .single();
 
@@ -283,12 +294,13 @@ export async function POST(
 
       if (latestCutlist) {
         const duplicatedLineRefs = buildCutlistLineRefsFromLines(copiedLinesForItem);
-        const { error: cutlistError } = await supabaseAdmin.from('quote_item_cutlists').insert([{
+        const { error: cutlistError } = await supabaseAdmin.from('quote_item_cutlists').insert({
           quote_item_id: newItemId,
+          org_id: auth.orgId,
           options_hash: latestCutlist.options_hash ?? null,
           layout_json: cloneCutlistLayoutWithLineRefs(latestCutlist.layout_json, duplicatedLineRefs),
           billing_overrides: cloneJsonValue(latestCutlist.billing_overrides ?? null),
-        }]);
+        });
 
         if (cutlistError) {
           throw new Error(cutlistError.message);
@@ -296,40 +308,36 @@ export async function POST(
       }
     }
 
-    // Batch insert all attachments at once
-    if (sourceAttachments.length > 0) {
-      const attachmentsToInsert = sourceAttachments.map((attachment: SourceQuoteAttachment) => ({
+    for (const sourceAttachment of sourceAttachments) {
+      const { error: attachmentError } = await supabaseAdmin.from('quote_attachments').insert({
         quote_id: newQuoteId,
-        quote_item_id: attachment.quote_item_id
-          ? itemIdMap.get(attachment.quote_item_id) || null
+        org_id: auth.orgId,
+        quote_item_id: sourceAttachment.quote_item_id
+          ? itemIdMap.get(sourceAttachment.quote_item_id) ?? null
           : null,
-        scope: attachment.scope,
-        file_url: attachment.file_url,
-        mime_type: attachment.mime_type,
-        original_name: attachment.original_name,
-        display_in_quote: attachment.display_in_quote,
-        crop_params: cloneJsonValue(attachment.crop_params ?? null),
-        annotations: cloneJsonValue(attachment.annotations ?? null),
-        display_size: attachment.display_size ?? null,
-      }));
+        scope: sourceAttachment.scope ?? null,
+        file_url: sourceAttachment.file_url,
+        mime_type: sourceAttachment.mime_type,
+        original_name: sourceAttachment.original_name ?? null,
+        display_in_quote: sourceAttachment.display_in_quote ?? true,
+        crop_params: cloneJsonValue(sourceAttachment.crop_params ?? null),
+        annotations: cloneJsonValue(sourceAttachment.annotations ?? null),
+        display_size: sourceAttachment.display_size ?? null,
+      });
 
-      const { error: attachmentsError } = await supabaseAdmin
-        .from('quote_attachments')
-        .insert(attachmentsToInsert);
-
-      if (attachmentsError) {
-        throw new Error(attachmentsError.message);
+      if (attachmentError) {
+        throw new Error(attachmentError.message);
       }
     }
 
     return NextResponse.json({ quote: newQuote }, { status: 201 });
-
   } catch (error) {
     if (newQuoteId) {
       await supabaseAdmin
         .from('quotes')
         .delete()
-        .eq('id', newQuoteId);
+        .eq('id', newQuoteId)
+        .eq('org_id', auth.orgId);
     }
 
     console.error('[COPY /quotes] API error:', error);

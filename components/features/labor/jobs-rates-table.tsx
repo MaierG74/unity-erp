@@ -757,7 +757,7 @@ export function JobsRatesTable() {
                     <TableHead>Job Name</TableHead>
                     <TableHead className="w-32">Hourly Rate</TableHead>
                     <TableHead className="w-32">Piece Rate</TableHead>
-                    <TableHead className="w-28">Role</TableHead>
+                    <TableHead className="w-36">Role</TableHead>
                     <TableHead className="w-24">Est. Time</TableHead>
                     <TableHead className="w-24 text-right">Actions</TableHead>
                   </TableRow>
@@ -1053,7 +1053,7 @@ function JobRow({
           {job.labor_roles ? (
             <Badge
               style={{ backgroundColor: job.labor_roles.color || undefined }}
-              className="text-white text-xs"
+              className="text-white text-xs whitespace-nowrap"
             >
               {job.labor_roles.name}
             </Badge>

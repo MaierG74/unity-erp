@@ -22,6 +22,11 @@ Owner: Unassigned
   - added normalized error logging for actionable diagnostics,
   - added retry path with `org_id` when insert fails due org/RLS constraints.
 
+### 2026-03-12 (Consumer rule alignment)
+- Added `public.organizations.payroll_standard_week_hours` (default `44.00`) so payroll consumers no longer rely on a hard-coded weekly cutoff.
+- Updated weekly summary, payroll review, and the legacy `/staff/payroll` fallback to derive regular/OT from the org-configured weekly standard hours.
+- Confirmed current payroll rule from user feedback: overtime is paid after the configured weekly standard hours, not after the daily 9-hour attendance buckets.
+
 ## 1) Why this plan is required
 
 This is a live weekly payroll system. Current code paths can produce different regular/overtime/double-time totals depending on which screen or writer path is used.
@@ -32,7 +37,7 @@ Repo-confirmed issues:
 - Manual-event and segment-edit recalc paths can write summary rows without payroll breakdown fields.
 - Weekly summary fetches `dt_minutes` but still re-derives double-time from day-of-week.
 - Payroll page uses `staff_hours` while most attendance logic uses `time_daily_summary`.
-- Overtime threshold logic conflicts across code paths (daily 9h vs weekly 40/44h).
+- Overtime threshold logic historically conflicted across code paths (daily 9h vs weekly 40/44h); payroll consumers now use an org-configured weekly standard-hours cutoff while attendance summaries still persist daily buckets.
 
 ## 2) Decision gates (blocking)
 
@@ -41,7 +46,7 @@ Choose one authoritative rule:
 1. Daily threshold (recommended): first 9 hours/day regular, remainder overtime.
 2. Weekly threshold: regular up to weekly cap, remainder overtime.
 
-Default for this plan: **Daily 9-hour threshold** (matches existing timekeeping docs and server-side attendance RPC behavior).
+Default for this plan: **Weekly threshold using org-configured standard week hours** (default `44.00`).
 
 ### Gate B: Double-time policy
 Confirm whether double-time applies:
@@ -68,15 +73,15 @@ Default for this plan: **Unity ERP outputs raw hours; payroll system performs pa
 ## 2.1) Gate decision record (lock before Phase 0 execution)
 
 ### Gate A lock
-- Status: `PENDING`
+- Status: `LOCKED (user-confirmed on 2026-03-12)`
 - Selected policy:
   - [ ] `A1` Daily threshold (first 9 hours/day regular, remainder overtime)
-  - [ ] `A2` Weekly threshold (regular up to weekly cap, remainder overtime)
-- Effective date for policy: `YYYY-MM-DD`
-- Decision owner: `Name / Role`
-- Rationale: `Short business rationale`
-- Approved by payroll owner: `Name` on `YYYY-MM-DD`
-- Approved by technical owner: `Name` on `YYYY-MM-DD`
+  - [x] `A2` Weekly threshold (regular up to org-configured weekly cap, remainder overtime)
+- Effective date for policy: `2026-03-12`
+- Decision owner: `User confirmed in chat (formal owner name pending)`
+- Rationale: `Payroll is paid after the weekly standard hours total, and the standard-hours cutoff must remain configurable per organization.`
+- Approved by payroll owner: `Pending name` on `2026-03-12`
+- Approved by technical owner: `Pending name` on `2026-03-12`
 
 ### Gate B lock
 - Status: `LOCKED (user-confirmed on 2026-02-07)`
@@ -117,7 +122,7 @@ Default for this plan: **Unity ERP outputs raw hours; payroll system performs pa
 - Approved by operations owner: `Pending name` on `2026-02-07`
 
 ### Gate readiness summary
-- Gate A: `NOT LOCKED`
+- Gate A: `LOCKED (A2)`
 - Gate B: `LOCKED (B1)`
 - Gate C: `NOT LOCKED`
 - Gate D: `LOCKED (D1)`
@@ -125,7 +130,7 @@ Default for this plan: **Unity ERP outputs raw hours; payroll system performs pa
 
 ## 3) Canonical calculation spec (target state)
 
-Assuming Gate A = daily 9-hour, Gate B policy is confirmed, and Gate D is locked.
+Assuming Gate A = weekly threshold via `organizations.payroll_standard_week_hours`, Gate B policy is confirmed, and Gate D is locked.
 
 1. Week boundary for reporting: Friday -> Thursday.
 2. Tea deduction:
@@ -137,13 +142,18 @@ Assuming Gate A = daily 9-hour, Gate B policy is confirmed, and Gate D is locked
 4. Reconciliation:
 - `net_work_minutes = regular_minutes + ot_minutes + dt_minutes`
 - `total_hours_worked = round(net_work_minutes / 60, 2)`
-5. Payroll handoff:
+5. Weekly payroll consumer rule:
+- Sum non-double-time minutes across the payroll week.
+- Classify the first `organizations.payroll_standard_week_hours` hours as regular.
+- Classify remaining non-double-time minutes as overtime.
+- Keep `dt_minutes` as double-time.
+6. Payroll handoff:
 - Unity ERP exports/stores raw hour buckets for payroll handoff:
   - `regular_hours`
   - `overtime_hours`
   - `doubletime_hours`
 - External third-party payroll system applies the pay multipliers and final currency calculations.
-6. Optional internal wage preview (non-authoritative for payroll payout):
+7. Optional internal wage preview (non-authoritative for payroll payout):
 - `wage_cents = round(((regular_minutes/60 * rate) + (ot_minutes/60 * rate * 1.5) + (dt_minutes/60 * rate * 2.0)) * 100)`
 
 ## 4) Implementation phases
@@ -301,8 +311,9 @@ This appendix summarizes the line-by-line code audit performed by Claude Opus 4.
 |----------|-----------|------|
 | `process_attendance_for_date` RPC | 540 min (9h) | Daily |
 | `generateDailySummary()` in attendance.ts | 540 min (9h) | Daily |
-| `WeeklySummary.tsx` ~L302 | 44h * 60 = 2640 min | Weekly |
-| `payroll/page.tsx` ~L149/177 | `staff.weekly_hours \|\| 40` | Weekly |
+| `WeeklySummary.tsx` | `organizations.payroll_standard_week_hours` | Weekly |
+| `payroll-review/page.tsx` | `organizations.payroll_standard_week_hours` | Weekly |
+| `payroll/page.tsx` | `organizations.payroll_standard_week_hours` | Weekly |
 | CLAUDE.md / timekeeping docs | 9 hours | Daily |
 
 ### A.3) Key schema issues found
@@ -317,6 +328,6 @@ This appendix summarizes the line-by-line code audit performed by Claude Opus 4.
 |------|-----------|---------------------------|------------------------|-----------|---------------|-------------------|------------------|
 | Sunday = all DT | yes | yes | yes | yes | yes | yes (re-derived) | yes |
 | Tea 30min Mon-Thu | yes | yes | yes | yes | yes | no | no |
-| Daily 9h OT | yes | yes | yes | yes | yes | **no (44h weekly)** | **no (40h weekly)** |
+| Weekly standard-hours OT | no | no | no | no | no | yes | yes |
 | Fri no tea | yes | yes | yes | yes | yes | n/a | n/a |
 | Week Fri-Thu | — | — | — | n/a | n/a | yes | unclear |

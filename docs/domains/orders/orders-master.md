@@ -37,6 +37,21 @@
 - Read route:
   - `GET fg-reservations` → reads `product_reservations` then merges product info.
 
+**Component Reservations (Raw Material Earmarking)**
+
+- Earmarks on-hand raw materials/components for a specific order so other orders see reduced available stock.
+- Table: `component_reservations` (`order_id`, `component_id`, `qty_reserved`, `org_id`; unique on `order_id + component_id`).
+- RPCs:
+  - `reserve_order_components(p_order_id, p_org_id)` — idempotent: deletes existing reservations, then inserts new ones based on current BOM requirements vs available stock (minus other orders' reservations). Safe to re-run when stock changes.
+  - `release_order_components(p_order_id, p_org_id)` — deletes all reservations for the order.
+- API routes (same auth pattern as FG):
+  - `POST /api/orders/[orderId]/reserve-components`
+  - `POST /api/orders/[orderId]/release-components`
+- Auto-release trigger: reservations are deleted when an order moves to Completed or Cancelled (`trg_auto_release_component_reservations`).
+- Shortfall math: per-order `apparent_shortfall` and `real_shortfall` in `get_detailed_component_status` use `in_stock - reserved_by_others` as available stock. Global shortfalls are unchanged (reservations redistribute existing stock, they don't change totals).
+- UI: Reserve/Release buttons on Order Detail page; BOM table shows RESERVED column (blue when > 0); component detail Transactions tab hero card shows "X reserved · Y available" when reservations exist.
+- Migrations: `20260303085534` through `20260303151451` (7 files, see `supabase/migrations/`).
+
 **UI & Routes**
 
 - Orders list: status filter, debounced search (order number, customer name, numeric ID), section chips, attachment count, upload dialog.
@@ -64,6 +79,7 @@
 **Order Detail & Purchasing Linkage**
 
 - Detail page `app/orders/[orderId]/page.tsx` loads header (`orders` with `order_statuses`, `customers`, and `quotes`) plus `order_details(product:products)`. For configurable products, extend the line editor to surface option selectors sourced from attached **Option Sets** (global + product overlays), persist `selected_options`, and call the shared resolver so FG reservations and purchasing respect the chosen configuration even when an order is created directly (no quote).
+- The order-detail header tab counts now query live order totals for job cards, purchase-order lines, and stock issuances instead of rendering placeholder zeros. Finished-goods reservation reads and reserve/release/consume actions use authenticated order API requests so the detail page can load under the same organization-scoped access checks as other order mutations.
 - **Stock Issuance** (✅ Implemented January 2025):
   - "Issue Stock" tab on Order Detail page (`IssueStockTab` component)
   - BOM-integrated component selection and aggregation
@@ -81,6 +97,7 @@
   - RPC: `get_detailed_component_status(p_order_id)` for per-order requirements with stock/on-order and global fields.
   - RPC: `get_order_component_history(p_order_id)` for per-component historical context.
   - UI summary now distinguishes **Ready Now** (fully covered by on-hand stock) vs **Pending Deliveries** (covered only once outstanding supplier orders arrive). When any component is pending deliveries, the Components Summary card swaps the "All components available in stock" badge for an amber warning explaining that availability depends on incoming receipts, and it shows the count of affected components so planners know what must arrive before issuing stock.
+  - In the Order Components procurement dialog, toggling `Include in-stock` keeps any user-entered PO quantity and allocation for already listed rows; only newly revealed rows initialize from the computed default shortfall/allocation.
 - Suppliers & PO creation:
   - Suppliers fetched from `suppliercomponents` (with supplier emails joined from `supplier_emails`).
   - Components grouped by supplier; user selects components and quantities, and can allocate between "For this order" vs "For stock".
@@ -147,3 +164,97 @@
 
 - New → In Progress → Completed or Cancelled.
 - Cancel instead of delete in production to preserve auditability. For test/dev, see `docs/domains/orders/orders-reset-guide.md` for a safe deletion path.
+
+**Job Cards / Work Pool (Current Model)**
+
+- The current job-card flow is two-stage:
+  1. create or refresh demand in the `Work Pool`
+  2. issue job cards out of that pool
+- `Generate from BOL` on the order page no longer creates job cards directly. It snapshots BOL demand into `job_work_pool`.
+- When every current BOL row already has a matching work-pool snapshot, the `Generate from BOL` button is disabled and shows the tooltip `Bill of Labor in sync already`.
+- `Add Job` on the order page creates a manual `job_work_pool` row (`source='manual'`), so manual jobs and BOL jobs use the same issuance flow.
+- `Required` = the snapped demand quantity on the pool row.
+- `Issued` = the sum of non-cancelled `job_card_items.quantity` linked to that pool row.
+- `Remaining` = `Required - Issued`. It is computed, not stored.
+- Pool rows are snapshots. If the order quantity or BOL changes later, the order page warns that the pool is stale and offers `Update Pool` reconciliation. After a successful reconcile, the warning should clear when the refreshed pool matches current demand.
+- Partial-completion follow-up cards do not change the issued math for the original pool row; work-pool issuance/counting always resolves through the item's original `job_card_id`.
+
+```mermaid
+flowchart LR
+    A["Order line<br/>quantity on `order_details`"] --> B["Product BOL<br/>jobs + qty/pay type/rates"]
+    B --> C["Generate from BOL"]
+    C --> D["`job_work_pool` rows<br/>one row per order detail + BOL job"]
+    E["Add Job"] --> F["Manual `job_work_pool` row"]
+    D --> G["Work Pool on Order page"]
+    F --> G
+    G --> H["Issue from Order page"]
+    G --> I["Drag onto Labor Planning lane"]
+    H --> J["`issue_job_card_from_pool` RPC"]
+    I --> J
+    J --> K["Create `job_cards` row"]
+    J --> L["Create linked `job_card_items` row<br/>with `work_pool_id`"]
+    I --> M["Create `labor_plan_assignments` schedule row"]
+    K --> N["Job Card detail / mobile scan"]
+    L --> N
+    N --> O["Start work"]
+    O --> P["In progress"]
+    P --> Q["Complete / cancel"]
+    Q --> R["Completed qty, payroll, production status"]
+```
+
+**Where to issue from**
+
+- Use the **Labor Planning Board** when you already know which employee should get the work and when it should happen. Drag the pool job onto a staff lane, set the issue quantity, and confirm. This issues the card **and** creates the schedule assignment in one flow.
+- Use the **Order page Job Cards tab** when you want to convert pool demand into a job card without scheduling it yet, or when you want an ad hoc card quickly. This issues the card, but it does **not** create the scheduler assignment.
+- Current model is still **one staff member per job card**. Team / multi-staff cards are deferred.
+
+```mermaid
+flowchart TD
+    A["Work Pool row<br/>e.g. Assembly / Required 100 / Issued 0 / Remaining 100"] --> B{"Issue path"}
+    B --> C["Order page issue dialog"]
+    B --> D["Labor Planning drag to staff lane"]
+    C --> E["Creates job card<br/>optional `staff_id` on card"]
+    D --> F["Creates job card"]
+    D --> G["Creates schedule assignment"]
+    E --> H["Visible in issued jobs list"]
+    F --> H
+    G --> I["Visible on staff lane / factory schedule"]
+```
+
+**100 items to 10 employees**
+
+- The system supports this as **10 separate issued cards** of quantity `10` each against the same pool row.
+- After each issue:
+  - `Issued` increases by `10`
+  - `Remaining` drops by `10`
+  - the new card is independently trackable for start, completion, cancellation, and piecework value
+- After the tenth issue, that pool row becomes `Fully Issued` (`Remaining = 0`).
+- There is no current bulk "split 100 evenly across 10 employees" action. You issue the ten splits one by one.
+
+```mermaid
+flowchart LR
+    A["Pool row: Required 100 / Issued 0 / Remaining 100"] --> B["Issue 10 to Employee 1"]
+    B --> C["Issue 10 to Employee 2"]
+    C --> D["Issue 10 to Employee 3"]
+    D --> E["...repeat..."]
+    E --> F["Issue 10 to Employee 10"]
+    F --> G["Pool row: Required 100 / Issued 100 / Remaining 0"]
+```
+
+**Operational rules**
+
+- Over-issuing is blocked by default. A user can override it with a reason, and the system creates an acknowledged production exception tied to the pool row.
+- Cancelling a job card removes that card/item from the computed issued total, so the quantity effectively returns to pool availability.
+- Completed cards still count as issued work; only cancelled cards/items are excluded from issued totals.
+- Scheduler demand now comes from the work pool when pool rows exist for the order. Legacy orders without pool rows still fall back to raw BOL/job-card behavior.
+
+**Recommended day-to-day usage**
+
+1. Confirm the order lines and BOL are correct.
+2. Run `Generate from BOL` so the work pool reflects current demand.
+3. Use the **Labor Planning Board** to drag pool demand to employees and issue by quantity.
+4. Let staff complete work from the job-card page or scan page.
+   On the mobile scan page, newly issued cards are presented to workers as `Issued` (even though the underlying card status is still `pending`) and the primary action is `Complete Job`.
+   There is no separate `Start Job` step on the scan page; quantity capture and completion happen directly from the mobile job-card workflow, while supervisors can still adjust timings elsewhere when needed.
+   Completion from the card page or scan page now syncs only the exact card-backed scheduler assignment, so split-issued siblings on the same order/staff/job are not accidentally completed together.
+5. If order quantities change after issuance, reconcile the stale pool warning and then deal with any resulting exception rows.

@@ -92,7 +92,7 @@ export function SimpleCategoryCell({ value: initialValue, onSave, componentId }:
         onMouseUp={stopEvent}
         onKeyDown={stopEvent}
         onKeyUp={stopEvent}
-        className="w-full h-full bg-transparent cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary"
+        className="w-full h-full bg-transparent cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-primary"
         style={{ 
           padding: '8px',
           border: isFocused ? '1px solid #888' : 'none',

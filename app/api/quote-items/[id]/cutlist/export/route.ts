@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+
+import { requireQuoteItemAccess } from '@/lib/api/quotes-access';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { z } from 'zod';
 
@@ -36,6 +38,10 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   }
 
   const quoteItemId = parsedParams.data.id;
+  const auth = await requireQuoteItemAccess(request, quoteItemId);
+  if ('error' in auth) {
+    return auth.error;
+  }
 
   const body = await request.json();
   const parsedBody = payloadSchema.safeParse(body);
@@ -48,20 +54,11 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
   const { existingLineRefs = {}, lines } = parsedBody.data;
 
-  const { data: quoteItem, error: quoteItemError } = await supabaseAdmin
-    .from('quote_items')
-    .select('id, quote_id')
-    .eq('id', quoteItemId)
-    .maybeSingle();
-
-  if (quoteItemError || !quoteItem) {
-    return NextResponse.json({ error: 'Quote item not found or access denied' }, { status: 404 });
-  }
-
   const { data: clusters, error: clustersError } = await supabaseAdmin
     .from('quote_item_clusters')
     .select('id')
     .eq('quote_item_id', quoteItemId)
+    .eq('org_id', auth.orgId)
     .order('position')
     .limit(1);
 
@@ -78,7 +75,13 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   if (!clusterId) {
     const { data: createdCluster, error: createError } = await supabaseAdmin
       .from('quote_item_clusters')
-      .insert({ quote_item_id: quoteItemId, name: 'Costing Cluster', position: 0, markup_percent: 0 })
+      .insert({
+        quote_item_id: quoteItemId,
+        org_id: auth.orgId,
+        name: 'Costing Cluster',
+        position: 0,
+        markup_percent: 0,
+      })
       .select('id')
       .single();
 
@@ -103,7 +106,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
         const { error: deleteError } = await supabaseAdmin
           .from('quote_cluster_lines')
           .delete()
-          .eq('id', existingId);
+          .eq('id', existingId)
+          .eq('org_id', auth.orgId);
 
         if (deleteError) {
           console.warn('Failed to delete costing line', { refKey, existingId, deleteError });
@@ -133,6 +137,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
         .from('quote_cluster_lines')
         .update(payload)
         .eq('id', existingId)
+        .eq('org_id', auth.orgId)
         .select('id')
         .maybeSingle();
 
@@ -150,7 +155,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
     const { data: createdLine, error: createLineError } = await supabaseAdmin
       .from('quote_cluster_lines')
-      .insert({ ...payload, cluster_id: clusterId })
+      .insert({ ...payload, cluster_id: clusterId, org_id: auth.orgId })
       .select('id')
       .single();
 

@@ -26,7 +26,8 @@ Navbar indicator shows:
 - Badge count of bounced/failed emails
 - Dropdown with issue details and timestamps
 - Direct links to affected POs/Quotes
-- PO link fallback using `Purchase Order: Q...` subject parsing when webhook linkage is missing
+- PO issue links now prefer the Purchase Orders list with `Needs Email Attention` preselected and the Q-number filter applied when available
+- PO link fallback still uses `Purchase Order: Q...` subject parsing when webhook linkage is missing
 - Dismiss functionality persisted in browser local storage
 - "Reset dismissed items" action when all visible issues were dismissed
 - Auto-refresh every 60 seconds
@@ -202,10 +203,10 @@ psql -h your-supabase-host -U postgres -d postgres -f db/migrations/20260114_ema
 ### Viewing Email Status
 
 **Purchase Orders**:
-1. Navigate to Purchase Order detail page
-2. Email Activity Card displays below the main content
-3. View status badges: Sent, Delivered, Bounced, Opened
-4. Click "Show details" to expand event timeline
+1. Navigate to the Purchase Orders list to see compact `Email Delivered` / `Email Sent` / `Email Issue` badges in the Communication column
+2. Hover a communication badge to see the longer explanation plus the latest send timestamp
+3. Open a Purchase Order detail page for the full email history
+4. View status badges such as Sent, Delivered, Bounced, and Opened in the Email Activity section
 5. Bounced emails show alert with reason
 
 **Quotes**:
@@ -217,8 +218,8 @@ psql -h your-supabase-host -U postgres -d postgres -f db/migrations/20260114_ema
 **Global Notifications**:
 1. Check navbar for mail icon with badge
 2. Click to view recent issues
-3. Click issue to navigate to affected PO/Quote
-4. If only a PO number exists in subject (for example `Purchase Order: Q26-080`), use "Find Purchase Order ..." to open the PO list pre-filtered by that number
+3. Click a PO issue to open the Purchase Orders list with `Needs Email Attention` preselected; when a Q number is known the list is also pre-filtered to that PO
+4. Quote issues still open the affected quote directly
 5. Dismiss individual issues or all at once
 6. Use "Reset dismissed items" to restore hidden issues in the current browser
 

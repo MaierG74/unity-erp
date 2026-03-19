@@ -25,23 +25,12 @@ import {
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabaseClient"
 import type { InventoryItem } from "@/types/inventory"
-import { Loader2, Upload, Check, ChevronsUpDown, X } from "lucide-react"
+import { Loader2, Upload, X, Crop, Trash2 } from "lucide-react"
+import { ImageCropDialog } from '@/components/ui/image-crop-dialog'
 import { Textarea } from "@/components/ui/textarea"
 import React from "react"
 import { cn } from "@/lib/utils"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-} from "@/components/ui/command"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import ReactSelect from "react-select"
+import CreatableSelect from "react-select/creatable"
 import { useToast } from "@/components/ui/use-toast"
 import { useDropzone } from "react-dropzone"
 
@@ -147,7 +136,6 @@ function useComponentForm(selectedItem: ComponentDialogProps['selectedItem']) {
 
 export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentDialogProps) {
   const [isUploading, setIsUploading] = useState(false)
-  const [openPopover, setOpenPopover] = useState<number | null>(null)
   const queryClient = useQueryClient()
   const form = useComponentForm(selectedItem)
   const storageBucket = 'QButton';
@@ -158,7 +146,6 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
     if (acceptedFiles.length > 0) {
       const file = acceptedFiles[0]
       form.setValue('image', file)
-      console.log('Image file dropped/selected:', file.name)
     }
   }, [form])
 
@@ -187,12 +174,34 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
             type: item.type
           })
           form.setValue('image', newFile)
-          console.log('Image pasted from clipboard:', newFile.name)
           break
         }
       }
     }
   }, [form, isUploading])
+
+  const [cropDialogOpen, setCropDialogOpen] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+
+  // Generate preview URL from File objects
+  const imageFile = form.watch('image')
+  useEffect(() => {
+    if (imageFile instanceof File) {
+      const url = URL.createObjectURL(imageFile)
+      setPreviewUrl(url)
+      return () => URL.revokeObjectURL(url)
+    }
+    setPreviewUrl(null)
+  }, [imageFile])
+
+  // Derived state for current image display
+  const isImageDeleted = form.watch('image_url') === null
+  const currentImageSrc = previewUrl || (!isImageDeleted ? selectedItem?.component.image_url : null) || null
+
+  const handleRemoveImage = () => {
+    form.setValue('image', undefined)
+    form.setValue('image_url', null)
+  }
 
   const { data: units = [] } = useQuery<{ unit_id: number; unit_code?: string; unit_name: string }[]>({
     queryKey: ["units"],
@@ -202,7 +211,6 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
         .select("unit_id, unit_code, unit_name")
         .order("unit_name")
       if (error) throw error
-      console.log('Fetched units:', data)
       return data
     },
   })
@@ -224,7 +232,6 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
         .select("cat_id, categoryname")
         .order("categoryname")
       if (error) throw error
-      console.log('Fetched categories:', data)
       return data
     },
   })
@@ -237,7 +244,6 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
         .select("supplier_id, name")
         .order("name")
       if (error) throw error
-      console.log('Fetched suppliers:', data)
       return data
     },
   })
@@ -253,23 +259,14 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
           .select('supplier_component_id, component_id, supplier_id, supplier_code, price')
           .order('supplier_code')
         
-        if (supplierComponentsError) {
-          console.error('Error fetching supplier components:', supplierComponentsError)
-          throw supplierComponentsError
-        }
+        if (supplierComponentsError) throw supplierComponentsError
         
         // Fetch components for descriptions
         const { data: components, error: componentsError } = await supabase
           .from('components')
           .select('component_id, description')
         
-        if (componentsError) {
-          console.error('Error fetching components:', componentsError)
-          throw componentsError
-        }
-        
-        console.log('Raw supplier components data:', supplierComponents)
-        console.log('Components data:', components)
+        if (componentsError) throw componentsError
 
         // Group by supplier_id for easier lookup
         return supplierComponents.reduce((acc, item) => {
@@ -292,56 +289,14 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
           return acc
         }, {} as Record<number, SupplierComponentWithDescription[]>)
       } catch (error) {
-        console.error('Error in supplier components query:', error)
         throw error
       }
     }
   })
 
-  // Function to handle selecting an existing supplier component
-  const handleSupplierComponentSelect = (index: number, supplierId: string, componentId: string) => {
-    const supplierComponents = supplierComponentsMap[parseInt(supplierId)] || []
-    const selected = supplierComponents.find((sc: SupplierComponentWithDescription) => 
-      sc.component_id.toString() === componentId
-    )
-    
-    if (selected) {
-      form.setValue(`supplierComponents.${index}.supplier_code`, selected.supplier_code)
-      form.setValue(`supplierComponents.${index}.price`, selected.price.toString())
-    }
-  }
-
-  useEffect(() => {
-    // Simple check to ensure we're authenticated
-    async function checkAuth() {
-      try {
-        console.log('Checking Supabase authentication...');
-        
-        // Check authentication
-        const { data: session } = await supabase.auth.getSession();
-        if (!session?.session) {
-          console.error('Not authenticated - storage operations will fail');
-          return;
-        }
-        
-        console.log('Authentication verified, storage operations should work');
-      } catch (error) {
-        console.error('Error checking authentication:', error);
-      }
-    }
-    
-    checkAuth();
-  }, []);
-
   const mutation = useMutation({
     mutationFn: async ({ values, shouldClose = true }: { values: z.infer<typeof formSchema>, shouldClose?: boolean }) => {
       try {
-        console.log('🔍 Starting component update/create process', { 
-          isUpdate: !!selectedItem,
-          componentId: selectedItem?.component.component_id,
-          values 
-        });
-        
         let image_url = selectedItem?.component.image_url
 
         // Handle image deletion
@@ -355,27 +310,20 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
               // The last two parts should be the bucket name and the file path
               if (pathParts.length >= 3) {
                 const filePath = pathParts.slice(2).join('/');
-                console.log('Attempting to delete file from storage:', filePath);
-                
                 const { error: deleteError } = await supabase.storage
                   .from(storageBucket)
                   .remove([filePath]);
                 
                 if (deleteError) {
-                  console.warn('Error deleting file from storage:', deleteError);
                   // Continue anyway, as we still want to update the database
-                } else {
-                  console.log('File successfully deleted from storage');
                 }
               }
-            } catch (error) {
-              console.warn('Error parsing image URL for deletion:', error);
+            } catch {
               // Continue anyway, as we still want to update the database
             }
           }
           
           image_url = null;
-          console.log('Image deleted, setting image_url to null');
         }
         // Handle image upload if a new file is selected
         else if (values.image) {
@@ -389,14 +337,6 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
             
             // Upload directly to the root of the bucket
             const filePath = fileName
-
-            console.log('Attempting to upload file:', {
-              bucket: storageBucket,
-              filePath,
-              fileName,
-              fileType: file.type,
-              fileSize: file.size
-            })
 
             // Check if we're authenticated
             const { data: session } = await supabase.auth.getSession()
@@ -412,45 +352,19 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                 contentType: file.type
               })
 
-            if (uploadError) {
-              console.error('Upload error:', uploadError);
-              throw uploadError;
-            }
-            
-            console.log('File uploaded successfully:', uploadData);
-            
+            if (uploadError) throw uploadError;
+
             // Get the public URL
             const { data: urlData } = supabase.storage
               .from(storageBucket)
               .getPublicUrl(filePath);
               
-            console.log('Generated public URL:', urlData);
-            
             if (urlData && urlData.publicUrl) {
               image_url = urlData.publicUrl;
-              console.log('Setting image_url to:', image_url);
             } else {
-              console.error('Failed to get public URL for uploaded file');
               throw new Error('Failed to get public URL for uploaded file');
             }
-
-            // Verify the URL is accessible
-            try {
-              const response = await fetch(image_url, { method: 'HEAD' })
-              if (!response.ok) {
-                console.warn('Generated URL might not be accessible:', {
-                  status: response.status,
-                  statusText: response.statusText,
-                  url: image_url
-                })
-              } else {
-                console.log('URL is accessible:', image_url)
-              }
-            } catch (urlError) {
-              console.warn('Could not verify URL accessibility:', urlError)
-            }
-          } catch (error) {
-            console.error('Error uploading image:', error)
+          } catch {
             toast({
               title: "Image Upload Failed",
               description: "The component was updated but the image could not be uploaded. Please try again.",
@@ -461,8 +375,6 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
           } finally {
             setIsUploading(false)
           }
-        } else {
-          console.log('No image change detected, keeping existing image_url:', image_url)
         }
 
         // Update or create component
@@ -474,28 +386,19 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
           image_url,
         }
         
-        console.log('📝 Component data to save:', componentData);
-
         if (selectedItem) {
           // Update existing component
-          console.log('🔄 Updating existing component ID:', selectedItem.component.component_id);
           const { data: updateData, error } = await supabase
             .from('components')
             .update(componentData)
             .eq('component_id', selectedItem.component.component_id)
             .select();
-            
-            console.log('🔄 Component update result:', { data: updateData, error });
-            
-            if (error) {
-              console.error('❌ Component update failed:', error);
-              throw error;
-            }
+
+            if (error) throw error;
 
             // Update or create inventory record
             if (selectedItem.inventory_id) {
               // Update existing inventory record
-              console.log('🔄 Updating inventory record ID:', selectedItem.inventory_id);
               const { data: invData, error: inventoryError } = await supabase
                 .from('inventory')
                 .update({
@@ -505,16 +408,10 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                 })
                 .eq('inventory_id', selectedItem.inventory_id)
                 .select();
-              
-              console.log('🔄 Inventory update result:', { data: invData, error: inventoryError });
-              
-              if (inventoryError) {
-                console.error('❌ Inventory update failed:', inventoryError);
-                throw inventoryError;
-              }
+
+              if (inventoryError) throw inventoryError;
             } else {
               // Create new inventory record
-              console.log('➕ Creating new inventory record for component ID:', selectedItem.component.component_id);
               const { data: invData, error: inventoryError } = await supabase
                 .from('inventory')
                 .insert({
@@ -524,31 +421,20 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                   reorder_level: parseInt(values.reorder_level?.toString() || '0')
                 })
                 .select();
-              
-              console.log('➕ Inventory creation result:', { data: invData, error: inventoryError });
-              
-              if (inventoryError) {
-                console.error('❌ Inventory creation failed:', inventoryError);
-                throw inventoryError;
-              }
+
+              if (inventoryError) throw inventoryError;
             }
 
             // Update supplier components
             if (values.supplierComponents) {
               // First delete all existing supplier components for this component
-              console.log('🗑️ Deleting existing supplier components for component ID:', selectedItem.component.component_id);
               const { data: deleteData, error: deleteError } = await supabase
                 .from('suppliercomponents')
                 .delete()
                 .eq('component_id', selectedItem.component.component_id)
                 .select();
-              
-              console.log('🗑️ Supplier components deletion result:', { data: deleteData, error: deleteError });
 
-              if (deleteError) {
-                console.error('❌ Supplier components deletion failed:', deleteError);
-                throw deleteError;
-              }
+              if (deleteError) throw deleteError;
 
               // Then insert the new supplier components
               if (values.supplierComponents.length > 0) {
@@ -558,20 +444,13 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                   supplier_code: sc.supplier_code,
                   price: parseFloat(sc.price),
                 }));
-                
-                console.log('➕ Inserting new supplier components:', supplierComponentsData);
-                
+
                 const { data: insertData, error: insertError } = await supabase
                   .from('suppliercomponents')
                   .insert(supplierComponentsData)
                   .select();
-                
-                console.log('➕ Supplier components insertion result:', { data: insertData, error: insertError });
 
-                if (insertError) {
-                  console.error('❌ Supplier components insertion failed:', insertError);
-                  throw insertError;
-                }
+                if (insertError) throw insertError;
               }
             }
           } else {
@@ -611,30 +490,15 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
             if (inventoryError) throw inventoryError
           }
 
-          console.log('✅ Component update/create process completed successfully');
-          // Return success to trigger onSuccess callback
           return { success: true, shouldClose }
         } catch (error) {
-          console.error('❌ Mutation error:', error)
           throw error
         }
       },
       onSuccess: async (result) => {
         try {
-          // Log success for debugging
-          console.log('✅ Update successful, refreshing data...');
-          
-          // Verify data in Supabase if we're updating
-          if (selectedItem) {
-            console.log('🔍 Verifying data in Supabase after update');
-            const verificationResult = await verifyDataInSupabase(selectedItem.component.component_id);
-            console.log('🔍 Verification result:', verificationResult);
-          }
-          
           // Invalidate all relevant queries to force a refetch
           await queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
-          
-          // Show success toast
           toast({
             title: selectedItem ? "Component Updated" : "Component Added",
             description: selectedItem 
@@ -643,17 +507,14 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
           });
           
           // Force a complete refetch instead of trying to update the cache
-          console.log('🔄 Forcing refetch of inventory components data');
           await queryClient.refetchQueries({ queryKey: ['inventory', 'components'] });
           
           // Only close dialog if shouldClose is true
           if (result.shouldClose) {
-            console.log('🚪 Closing dialog and resetting form');
             onOpenChange(false);
             form.reset();
           }
-        } catch (error) {
-          console.error('❌ Error in onSuccess callback:', error);
+        } catch {
           toast({
             title: "Warning",
             description: "Component was updated but the UI may not reflect all changes. Please refresh the page.",
@@ -662,8 +523,6 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
         }
       },
       onError: (error) => {
-        console.error('❌ Mutation error:', error);
-        
         // Check for unique constraint violation on internal_code
         const errorMessage = error?.message || '';
         if (errorMessage.includes('duplicate key value') && errorMessage.includes('components_internal_code_key')) {
@@ -683,89 +542,8 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
       }
     })
 
-  // Add a function to check Supabase permissions
-  const checkSupabasePermissions = async () => {
-    console.log('🔍 Checking Supabase permissions and connectivity');
-    
-    try {
-      // Check authentication status
-      const { data: session, error: authError } = await supabase.auth.getSession();
-      
-      if (authError) {
-        console.error('❌ Authentication error:', authError);
-        return { success: false, error: authError };
-      }
-      
-      console.log('✅ Authentication status:', session);
-      
-      // Try a simple read operation
-      const { data: readData, error: readError } = await supabase
-        .from('components')
-        .select('component_id')
-        .limit(1);
-      
-      if (readError) {
-        console.error('❌ Read permission error:', readError);
-        return { success: false, error: readError };
-      }
-      
-      console.log('✅ Read permission check passed');
-      
-      // Try a simple write operation (that we'll roll back)
-      // Create a temporary record
-      const tempCode = `TEMP_${Date.now()}`;
-      const { data: writeData, error: writeError } = await supabase
-        .from('components')
-        .insert({
-          internal_code: tempCode,
-          description: 'Temporary component for permission check',
-          unit_id: 1,
-          category_id: 1
-        })
-        .select();
-      
-      if (writeError) {
-        console.error('❌ Write permission error:', writeError);
-        return { success: false, error: writeError };
-      }
-      
-      console.log('✅ Write permission check passed');
-      
-      // Delete the temporary record
-      if (writeData && writeData.length > 0) {
-        const { error: deleteError } = await supabase
-          .from('components')
-          .delete()
-          .eq('internal_code', tempCode);
-        
-        if (deleteError) {
-          console.error('❌ Delete permission error:', deleteError);
-        } else {
-          console.log('✅ Delete permission check passed');
-        }
-      }
-      
-      return { success: true };
-    } catch (error) {
-      console.error('❌ Error checking permissions:', error);
-      return { success: false, error };
-    }
-  };
-
-  // Add a button to check permissions
-  useEffect(() => {
-    if (open) {
-      // Check permissions when dialog opens
-      checkSupabasePermissions().then(result => {
-        console.log('🔍 Permission check result:', result);
-      });
-    }
-  }, [open]);
-
   // Modify the onSubmit function to include more error handling
   const onSubmit = (values: z.infer<typeof formSchema>) => {
-    console.log('Submitting form with values:', values)
-    
     // Check if we're updating and the internal code has changed
     if (selectedItem && values.internal_code !== selectedItem.component.internal_code) {
       // Check if the new code already exists
@@ -793,296 +571,162 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
         .select('component_id')
         .eq('internal_code', code);
       
-      if (error) {
-        console.error('Error checking internal code:', error);
-        return false;
-      }
-      
+      if (error) return false;
+
       // If we're editing, exclude the current component
       if (selectedItem) {
         return data.some(item => item.component_id !== selectedItem.component.component_id);
       }
-      
+
       // For new components, any existing code is a duplicate
       return data.length > 0;
-    } catch (error) {
-      console.error('Error checking internal code:', error);
+    } catch {
       return false;
     }
   }
   
   // Function to proceed with form submission
   const proceedWithSubmit = (values: z.infer<typeof formSchema>) => {
-    // Log image information for debugging
-    if (values.image) {
-      console.log('Image file being submitted:', {
-        name: values.image.name,
-        type: values.image.type,
-        size: values.image.size
-      });
-    } else if (values.image_url === null) {
-      console.log('Image being removed during submission');
-    } else {
-      console.log('No image change during submission');
-    }
-    
-    // Check network connectivity
-    fetch('https://api.supabase.io', { method: 'HEAD' })
-      .then(() => console.log('✅ Network connectivity check passed'))
-      .catch(error => console.error('❌ Network connectivity issue:', error));
-    
     mutation.mutate({ values, shouldClose: true })
   }
 
-  // Function to verify data in Supabase
-  const verifyDataInSupabase = async (componentId: number) => {
-    console.log('🔍 Verifying data in Supabase for component ID:', componentId);
-    
-    try {
-      // Fetch component data
-      const { data: componentData, error: componentError } = await supabase
-        .from('components')
-        .select('*')
-        .eq('component_id', componentId)
-        .single();
-      
-      if (componentError) {
-        console.error('❌ Failed to verify component data:', componentError);
-        return;
-      }
-      
-      console.log('✅ Component data in Supabase:', componentData);
-      
-      // Fetch inventory data
-      const { data: inventoryData, error: inventoryError } = await supabase
-        .from('inventory')
-        .select('*')
-        .eq('component_id', componentId);
-      
-      if (inventoryError) {
-        console.error('❌ Failed to verify inventory data:', inventoryError);
-        return;
-      }
-      
-      console.log('✅ Inventory data in Supabase:', inventoryData);
-      
-      // Fetch supplier components
-      const { data: supplierComponentsData, error: supplierComponentsError } = await supabase
-        .from('suppliercomponents')
-        .select('*')
-        .eq('component_id', componentId);
-      
-      if (supplierComponentsError) {
-        console.error('❌ Failed to verify supplier components data:', supplierComponentsError);
-        return;
-      }
-      
-      console.log('✅ Supplier components data in Supabase:', supplierComponentsData);
-      
-      return {
-        component: componentData,
-        inventory: inventoryData,
-        supplierComponents: supplierComponentsData
-      };
-    } catch (error) {
-      console.error('❌ Error verifying data in Supabase:', error);
-    }
-  }
-
-  // Add debugging for form values
-  useEffect(() => {
-    console.log('Current form values:', form.getValues())
-  }, [form.watch()])
-
-  // Add debugging for selected item
-  useEffect(() => {
-    if (selectedItem) {
-      console.log('Selected item:', selectedItem)
-    }
-  }, [selectedItem])
-
-  // Add an effect to make sure no "_empty" values remain
-  useEffect(() => {
-    const supplierComponents = form.getValues().supplierComponents || [];
-    let needsUpdate = false;
-    
-    supplierComponents.forEach((component, index) => {
-      if ((component.supplier_id === "_empty" || component.supplier_id === "") && suppliers.length > 0) {
-        form.setValue(`supplierComponents.${index}.supplier_id`, suppliers[0].supplier_id.toString());
-        needsUpdate = true;
-      }
-    });
-    
-    if (needsUpdate) {
-      console.log("Fixed invalid supplier component values");
-    }
-  }, [form.watch("supplierComponents"), suppliers]);
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} modal={false}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto z-50">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="mb-4">
+          <DialogTitle>
             {selectedItem ? 'Edit Component' : 'Add Component'}
           </DialogTitle>
           <DialogDescription>
-            {selectedItem 
-              ? 'Edit the details of an existing component.' 
+            {selectedItem
+              ? 'Edit the details of an existing component.'
               : 'Add a new component to the inventory system.'}
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-            <div className="grid grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="internal_code"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Code</FormLabel>
-                    <FormControl>
-                      <Input {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="image"
-                render={({ field: { onChange, value, ...field } }) => (
-                  <FormItem>
-                    <FormLabel>Image</FormLabel>
-                    <FormControl>
-                      <div className="flex flex-col gap-2">
-                        <div
-                          {...getRootProps()}
-                          onPaste={handlePaste}
-                          tabIndex={0}
-                          title="Drag files here or paste from clipboard"
-                          className={cn(
-                            "border-2 border-dashed rounded-lg p-4 text-center transition-colors focus:outline-none focus:ring-2 focus:ring-ring",
-                            "cursor-text",
-                            isDragActive ? "border-primary bg-muted/40" : "border-border hover:bg-muted/40",
-                            isUploading && "opacity-50 cursor-not-allowed"
-                          )}
-                        >
-                          <input {...getInputProps()} disabled={isUploading} />
-                          <Upload className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
-                          {isUploading ? (
-                            <p className="text-sm text-muted-foreground">Uploading...</p>
-                          ) : isDragActive ? (
-                            <p className="text-sm text-foreground">Drop image here...</p>
-                          ) : (
-                            <div className="space-y-1">
-                              <p className="text-sm text-muted-foreground">
-                                Drag & drop, or paste with <span className="font-medium">Ctrl/Cmd+V</span>
-                              </p>
-                              <div>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    openFileDialog()
-                                  }}
-                                  disabled={isUploading}
-                                >
-                                  Click to select
-                                </Button>
-                              </div>
-                              <p className="text-xs text-muted-foreground">
-                                SVG, PNG, JPG or GIF (max. 800×400px)
-                              </p>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          {value instanceof File && (
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                              <Check className="h-4 w-4 text-green-500" />
-                              {value.name}
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="h-4 w-4 p-0"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  onChange(undefined);
-                                  console.log('Image file selection cleared');
-                                }}
-                              >
-                                <X className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          )}
-                          {!value && selectedItem?.component.image_url && (
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                              <Check className="h-4 w-4 text-green-500" />
-                              Current image
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="h-4 w-4 p-0"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  form.setValue('image_url', null);
-                                  console.log('Current image marked for deletion');
-                                }}
-                              >
-                                <X className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          )}
-                          {isUploading && (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          )}
-                        </div>
-                      </div>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            {/* ── Image Section ── */}
+            <div>
+              {currentImageSrc ? (
+                <div className="relative group rounded-lg overflow-hidden border border-border bg-muted/20">
+                  <img
+                    src={currentImageSrc}
+                    alt="Component"
+                    className="w-full object-contain max-h-[140px]"
+                  />
+                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
+                    <Button type="button" size="sm" variant="secondary" onClick={() => setCropDialogOpen(true)}>
+                      <Crop className="h-3.5 w-3.5 mr-1.5" />
+                      Crop
+                    </Button>
+                    <Button type="button" size="sm" variant="destructive" onClick={handleRemoveImage}>
+                      <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                      Remove
+                    </Button>
+                  </div>
+                  {imageFile instanceof File && (
+                    <p className="text-xs text-muted-foreground px-3 py-1 border-t border-border bg-muted/30">
+                      {imageFile.name} ({(imageFile.size / 1024).toFixed(0)} KB)
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div
+                  {...getRootProps()}
+                  onPaste={handlePaste}
+                  tabIndex={0}
+                  className={cn(
+                    "border-2 border-dashed rounded-lg p-4 text-center transition-colors cursor-pointer",
+                    isDragActive ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/50 hover:bg-muted/20",
+                    isUploading && "opacity-50 cursor-not-allowed"
+                  )}
+                  onClick={(e) => { e.stopPropagation(); openFileDialog() }}
+                >
+                  <input {...getInputProps()} disabled={isUploading} />
+                  {isUploading ? (
+                    <>
+                      <Loader2 className="mx-auto h-6 w-6 text-muted-foreground mb-2 animate-spin" />
+                      <p className="text-sm text-muted-foreground">Uploading...</p>
+                    </>
+                  ) : isDragActive ? (
+                    <>
+                      <Upload className="mx-auto h-6 w-6 text-primary mb-2" />
+                      <p className="text-sm text-foreground font-medium">Drop image here...</p>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="mx-auto h-6 w-6 text-muted-foreground mb-2" />
+                      <p className="text-sm text-muted-foreground">
+                        Drag & drop, paste, or{' '}
+                        <span className="text-primary font-medium underline underline-offset-4">browse</span>
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">PNG, JPG, SVG, GIF or WebP</p>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
 
-            <FormField
-              control={form.control}
-              name="description"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Description</FormLabel>
-                  <FormControl>
-                    <Textarea {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            {/* Crop Dialog */}
+            {currentImageSrc && (
+              <ImageCropDialog
+                open={cropDialogOpen}
+                onOpenChange={setCropDialogOpen}
+                imageSrc={currentImageSrc}
+                fileName={imageFile instanceof File ? imageFile.name : 'cropped-component.png'}
+                onCropComplete={(croppedFile) => form.setValue('image', croppedFile)}
+              />
+            )}
 
-            <div className="grid grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="unit_id"
-                render={({ field }) => {
-                  console.log('Unit field render:', {
-                    value: field.value,
-                    type: typeof field.value,
-                    units: units
-                  });
-                  return (
+            {/* ── Details Section ── */}
+            <div className="space-y-3">
+              <h4 className="text-sm font-medium text-muted-foreground">Details</h4>
+              <div className="grid grid-cols-3 gap-3">
+                <FormField
+                  control={form.control}
+                  name="internal_code"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Code</FormLabel>
+                      <FormControl>
+                        <Input {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="category_id"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Category</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || "_none"}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select category" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="_none">None</SelectItem>
+                          {categories.map((category) => (
+                            <SelectItem key={category.cat_id} value={category.cat_id.toString()}>
+                              {category.categoryname}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="unit_id"
+                  render={({ field }) => (
                     <FormItem>
                       <FormLabel>Unit</FormLabel>
-                      <Select 
-                        onValueChange={field.onChange} 
-                        value={field.value || "_none"}
-                      >
+                      <Select onValueChange={field.onChange} value={field.value || "_none"}>
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue placeholder="Select unit" />
@@ -1091,10 +735,7 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                         <SelectContent>
                           <SelectItem value="_none">Select unit</SelectItem>
                           {uniqueUnits.map((unit) => (
-                            <SelectItem
-                              key={unit.unit_id}
-                              value={unit.unit_id.toString()}
-                            >
+                            <SelectItem key={unit.unit_id} value={unit.unit_id.toString()}>
                               {unit.unit_name}{unit.unit_code ? ` (${unit.unit_code.toUpperCase()})` : ''}
                             </SelectItem>
                           ))}
@@ -1102,309 +743,297 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
                       </Select>
                       <FormMessage />
                     </FormItem>
-                  );
-                }}
-              />
+                  )}
+                />
+              </div>
 
               <FormField
                 control={form.control}
-                name="category_id"
+                name="description"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Category</FormLabel>
-                    <Select 
-                      onValueChange={field.onChange} 
-                      value={field.value || "_none"}
-                    >
+                    <FormLabel>Description</FormLabel>
+                    <FormControl>
+                      <Textarea {...field} rows={2} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            {/* ── Inventory Section ── */}
+            <div className="space-y-3">
+              <h4 className="text-sm font-medium text-muted-foreground">Inventory</h4>
+              <div className="grid grid-cols-3 gap-3">
+                <FormField
+                  control={form.control}
+                  name="quantity_on_hand"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Qty on Hand</FormLabel>
                       <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select category" />
-                        </SelectTrigger>
+                        <Input
+                          {...field}
+                          type="number"
+                          min="0"
+                          value={field.value || ''}
+                          placeholder="0"
+                          onBlur={(e) => {
+                            if (!e.target.value) field.onChange('0')
+                          }}
+                        />
                       </FormControl>
-                      <SelectContent>
-                        <SelectItem value="_none">None</SelectItem>
-                        {categories.map((category) => (
-                          <SelectItem
-                            key={category.cat_id}
-                            value={category.cat_id.toString()}
-                          >
-                            {category.categoryname}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="reorder_level"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Reorder Level</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          type="number"
+                          min="0"
+                          value={field.value || ''}
+                          placeholder="0"
+                          onBlur={(e) => {
+                            if (!e.target.value) field.onChange('0')
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="location"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Location</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="e.g. Shelf A3" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
-              <FormField
-                control={form.control}
-                name="quantity_on_hand"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Quantity on Hand</FormLabel>
-                    <FormControl>
-                      <Input {...field} type="number" min="0" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="reorder_level"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Reorder Level</FormLabel>
-                    <FormControl>
-                      <Input {...field} type="number" min="0" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="location"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Location</FormLabel>
-                    <FormControl>
-                      <Input {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-
-            <div className="space-y-4">
+            {/* ── Suppliers Section ── */}
+            <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <FormLabel className="text-base">Suppliers</FormLabel>
+                <h4 className="text-sm font-medium text-muted-foreground">Suppliers</h4>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={() => {
                     const current = form.getValues("supplierComponents") || []
-                    console.log('Adding new supplier component');
-                    const firstSupplierId = suppliers.length > 0 ? suppliers[0].supplier_id.toString() : "1";
                     form.setValue("supplierComponents", [
                       ...current,
-                      { supplier_id: firstSupplierId, supplier_code: "", price: "" },
+                      { supplier_id: "", supplier_code: "", price: "" },
                     ])
                   }}
                 >
                   Add Supplier
                 </Button>
               </div>
-              
-              <div className="space-y-4">
-                {form.watch("supplierComponents")?.map((_, index) => (
-                  <div key={index} className="space-y-4 p-4 border rounded-lg">
-                    <div className="flex justify-between items-center">
-                      <FormLabel>Supplier {index + 1}</FormLabel>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => {
-                          const current = form.getValues("supplierComponents") || []
-                          form.setValue(
-                            "supplierComponents",
-                            current.filter((_, i) => i !== index)
-                          )
-                        }}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
 
-                    <div className="grid grid-cols-3 gap-4 items-start">
+              {(!form.watch("supplierComponents") || form.watch("supplierComponents")!.length === 0) && (
+                <p className="text-sm text-muted-foreground py-4 text-center">No suppliers added</p>
+              )}
+
+              <div className="space-y-3">
+                {form.watch("supplierComponents")?.map((_, index) => (
+                  <React.Fragment key={index}>
+                    {index === 0 && (
+                      <div className="grid grid-cols-12 gap-3 text-xs text-muted-foreground px-0.5">
+                        <span className="col-span-4">Supplier</span>
+                        <span className="col-span-4">Supplier Code</span>
+                        <span className="col-span-3">Price</span>
+                        <span className="col-span-1" />
+                      </div>
+                    )}
+                    <div className="grid grid-cols-12 gap-3 items-center">
                       <FormField
                         control={form.control}
                         name={`supplierComponents.${index}.supplier_id`}
-                        render={({ field }) => {
-                          // Ensure supplier_id has a valid value
-                          if ((field.value === "_empty" || field.value === "") && suppliers.length > 0) {
-                            field.onChange(suppliers[0].supplier_id.toString());
-                          }
-                          
-                          // Ensure we have a valid value for the Select component
-                          const safeValue = field.value || "_none";
-                          
-                          console.log(`Supplier ${index} field render:`, {
-                            value: field.value,
-                            type: typeof field.value,
-                            suppliers: suppliers
-                          });
-                          return (
-                            <FormItem>
-                              <FormLabel>Supplier</FormLabel>
-                              <Select 
-                                onValueChange={(value) => {
-                                  console.log(`Supplier ${index} onValueChange:`, {
-                                    newValue: value,
-                                    type: typeof value
-                                  });
-                                  field.onChange(value);
-                                  // Reset other fields when supplier changes
-                                  form.setValue(`supplierComponents.${index}.supplier_code`, "");
-                                  form.setValue(`supplierComponents.${index}.price`, "");
-                                }} 
-                                value={safeValue}
-                              >
-                                <FormControl>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Select supplier" />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                  <SelectItem value="_none">Select a supplier</SelectItem>
-                                  {suppliers.map((supplier) => (
-                                    <SelectItem
-                                      key={supplier.supplier_id}
-                                      value={supplier.supplier_id.toString()}
-                                    >
-                                      {supplier.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <FormMessage />
-                            </FormItem>
-                          );
-                        }}
+                        render={({ field }) => (
+                          <FormItem className="col-span-4">
+                            <Select
+                              onValueChange={(value) => {
+                                field.onChange(value)
+                                form.setValue(`supplierComponents.${index}.supplier_code`, "")
+                                form.setValue(`supplierComponents.${index}.price`, "")
+                              }}
+                              value={field.value || undefined}
+                            >
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select supplier" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {suppliers.map((supplier) => (
+                                  <SelectItem key={supplier.supplier_id} value={supplier.supplier_id.toString()}>
+                                    {supplier.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
                       />
 
                       <FormField
                         control={form.control}
                         name={`supplierComponents.${index}.supplier_code`}
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Component</FormLabel>
-                            <FormControl>
-                              <ReactSelect<OptionType>
-                                value={field.value ? {
-                                  value: field.value,
-                                  label: field.value
-                                } : null}
-                                onChange={(newValue: OptionType | null) => {
-                                  const selectedComponent = supplierComponentsMap[parseInt(form.watch(`supplierComponents.${index}.supplier_id`))]?.find(
-                                    (sc: SupplierComponentWithDescription) => sc.supplier_code === newValue?.value
-                                  )
-                                  if (selectedComponent) {
-                                    field.onChange(selectedComponent.supplier_code)
-                                    form.setValue(`supplierComponents.${index}.price`, selectedComponent.price.toString())
+                        render={({ field }) => {
+                          const selectedSupplierId = form.watch(`supplierComponents.${index}.supplier_id`)
+                          return (
+                            <FormItem className="col-span-4">
+                              <FormControl>
+                                <CreatableSelect<OptionType, false>
+                                  value={field.value ? { value: field.value, label: field.value } : null}
+                                  onChange={(newValue: OptionType | null) => {
+                                    const selectedComponent = selectedSupplierId ? supplierComponentsMap[parseInt(selectedSupplierId)]?.find(
+                                      (sc: SupplierComponentWithDescription) => sc.supplier_code === newValue?.value
+                                    ) : undefined
+                                    if (selectedComponent) {
+                                      field.onChange(selectedComponent.supplier_code)
+                                      form.setValue(`supplierComponents.${index}.price`, selectedComponent.price.toString())
+                                      return
+                                    }
+                                    field.onChange(newValue?.value || "")
+                                  }}
+                                  onCreateOption={(inputValue) => {
+                                    const trimmedValue = inputValue.trim()
+                                    if (!trimmedValue) return
+                                    field.onChange(trimmedValue)
+                                  }}
+                                  options={
+                                    selectedSupplierId
+                                      ? (supplierComponentsMap[parseInt(selectedSupplierId)] || [])
+                                          .map((sc: SupplierComponentWithDescription) => ({
+                                            value: sc.supplier_code,
+                                            label: `${sc.supplier_code} - ${sc.description}`,
+                                          }))
+                                      : []
                                   }
-                                }}
-                                options={
-                                  form.watch(`supplierComponents.${index}.supplier_id`) 
-                                    ? (supplierComponentsMap[parseInt(form.watch(`supplierComponents.${index}.supplier_id`))] || [])
-                                        .map((sc: SupplierComponentWithDescription) => ({
-                                          value: sc.supplier_code,
-                                          label: `${sc.supplier_code} - ${sc.description}`,
-                                        }))
-                                    : []
-                                }
-                                isSearchable
-                                placeholder="Select component"
-                                className="w-full"
-                                classNames={{
-                                  control: (state) => cn(
-                                    "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background text-foreground",
-                                    state.isFocused && "ring-2 ring-ring ring-offset-2",
-                                    state.isDisabled && "opacity-50 cursor-not-allowed"
-                                  ),
-                                  menu: () => "z-[9999] mt-2 bg-popover text-popover-foreground rounded-md border shadow-md",
-                                  menuList: () => "p-1",
-                                  option: ({ isSelected, isFocused }) => cn(
-                                    "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors",
-                                    isSelected && "bg-primary text-primary-foreground",
-                                    !isSelected && isFocused && "bg-accent text-accent-foreground",
-                                    !isSelected && !isFocused && "text-popover-foreground hover:bg-accent hover:text-accent-foreground"
-                                  ),
-                                  placeholder: () => "text-muted-foreground",
-                                  input: () => "text-sm text-foreground",
-                                  singleValue: () => "text-sm text-foreground",
-                                  valueContainer: () => "gap-1",
-                                  indicatorsContainer: () => "gap-1",
-                                  clearIndicator: () => "text-muted-foreground p-1 hover:text-foreground rounded-sm hover:bg-accent",
-                                  dropdownIndicator: () => "text-muted-foreground p-1 hover:text-foreground rounded-sm hover:bg-accent",
-                                  indicatorSeparator: () => "bg-muted"
-                                }}
-                                theme={(theme) => ({
-                                  ...theme,
-                                  colors: {
-                                    ...theme.colors,
-                                    neutral0: 'hsl(var(--background))',
-                                    neutral5: 'hsl(var(--border))',
-                                    neutral10: 'hsl(var(--input))',
-                                    neutral20: 'hsl(var(--border))',
-                                    neutral30: 'hsl(var(--border))',
-                                    neutral40: 'hsl(var(--muted-foreground))',
-                                    neutral50: 'hsl(var(--muted-foreground))',
-                                    neutral60: 'hsl(var(--foreground))',
-                                    neutral70: 'hsl(var(--foreground))',
-                                    neutral80: 'hsl(var(--foreground))',
-                                    neutral90: 'hsl(var(--foreground))',
-                                    primary: 'hsl(var(--primary))',
-                                    primary25: 'hsl(var(--accent))',
-                                    primary50: 'hsl(var(--accent))',
-                                    primary75: 'hsl(var(--accent))',
-                                  },
-                                })}
-                                unstyled
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
+                                  isSearchable
+                                  isDisabled={!selectedSupplierId}
+                                  placeholder={selectedSupplierId ? "Search or type code" : "Select supplier first"}
+                                  formatCreateLabel={(inputValue) => `Create "${inputValue}"`}
+                                  noOptionsMessage={({ inputValue }) =>
+                                    !selectedSupplierId
+                                      ? "Select a supplier first"
+                                      : inputValue
+                                        ? `No matches. Create "${inputValue}".`
+                                        : "Type to search or create"
+                                  }
+                                  className="w-full"
+                                  classNames={{
+                                    control: (state) => cn(
+                                      "flex h-10 w-full rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background text-foreground",
+                                      state.isFocused && "ring-2 ring-ring ring-offset-2",
+                                      state.isDisabled && "opacity-50 cursor-not-allowed"
+                                    ),
+                                    menu: () => "z-[9999] mt-2 bg-popover text-popover-foreground rounded-md border shadow-md",
+                                    menuList: () => "p-1",
+                                    option: ({ isSelected, isFocused }) => cn(
+                                      "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-hidden transition-colors",
+                                      isSelected && "bg-primary text-primary-foreground",
+                                      !isSelected && isFocused && "bg-accent text-accent-foreground",
+                                      !isSelected && !isFocused && "text-popover-foreground hover:bg-accent hover:text-accent-foreground"
+                                    ),
+                                    placeholder: () => "text-muted-foreground",
+                                    input: () => "text-sm text-foreground",
+                                    singleValue: () => "text-sm text-foreground",
+                                    valueContainer: () => "gap-1",
+                                    indicatorsContainer: () => "gap-1",
+                                    clearIndicator: () => "text-muted-foreground p-1 hover:text-foreground rounded-sm hover:bg-accent",
+                                    dropdownIndicator: () => "text-muted-foreground p-1 hover:text-foreground rounded-sm hover:bg-accent",
+                                    indicatorSeparator: () => "bg-muted"
+                                  }}
+                                  theme={(theme) => ({
+                                    ...theme,
+                                    colors: {
+                                      ...theme.colors,
+                                      neutral0: 'hsl(var(--background))',
+                                      neutral5: 'hsl(var(--border))',
+                                      neutral10: 'hsl(var(--input))',
+                                      neutral20: 'hsl(var(--border))',
+                                      neutral30: 'hsl(var(--border))',
+                                      neutral40: 'hsl(var(--muted-foreground))',
+                                      neutral50: 'hsl(var(--muted-foreground))',
+                                      neutral60: 'hsl(var(--foreground))',
+                                      neutral70: 'hsl(var(--foreground))',
+                                      neutral80: 'hsl(var(--foreground))',
+                                      neutral90: 'hsl(var(--foreground))',
+                                      primary: 'hsl(var(--primary))',
+                                      primary25: 'hsl(var(--accent))',
+                                      primary50: 'hsl(var(--accent))',
+                                      primary75: 'hsl(var(--accent))',
+                                    },
+                                  })}
+                                  unstyled
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )
+                        }}
                       />
 
                       <FormField
                         control={form.control}
                         name={`supplierComponents.${index}.price`}
                         render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Price</FormLabel>
+                          <FormItem className="col-span-3">
                             <FormControl>
-                              <Input {...field} type="number" step="0.01" />
+                              <Input {...field} type="number" step="0.01" placeholder="0.00" />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
                         )}
                       />
+
+                      <div className="col-span-1 flex items-center justify-center pt-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => {
+                            const current = form.getValues("supplierComponents") || []
+                            form.setValue("supplierComponents", current.filter((_, i) => i !== index))
+                          }}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
-                  </div>
+                  </React.Fragment>
                 ))}
               </div>
             </div>
 
-            <div className="flex justify-end gap-4 pt-4 border-t">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-              >
+            {/* ── Footer ── */}
+            <div className="flex justify-end gap-3 pt-3 border-t">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
               <Button type="submit" disabled={mutation.isPending || isUploading}>
-                {mutation.isPending || isUploading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    {selectedItem ? 'Updating...' : 'Adding...'}
-                  </>
-                ) : selectedItem ? (
-                  'Update Component'
-                ) : (
-                  'Add Component'
-                )}
+                {(mutation.isPending || isUploading) && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {selectedItem ? 'Save Changes' : 'Add Component'}
               </Button>
             </div>
           </form>

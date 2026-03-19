@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm, Controller, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { Resolver } from 'react-hook-form';
@@ -25,7 +25,10 @@ import {
   X,
   Split,
 } from 'lucide-react';
-import { PurchaseOrderFormData } from '@/types/purchasing';
+import {
+  PurchaseOrderDraft,
+  PurchaseOrderFormData,
+} from '@/types/purchasing';
 import {
   Select,
   SelectContent,
@@ -44,6 +47,15 @@ import {
   ComponentSelection,
   ModalSupplierComponent,
 } from '@/components/features/purchasing/ComponentSearchModal';
+import {
+  buildPurchaseOrderDraftSignature,
+  createEmptyPurchaseOrderFormData,
+  fetchPurchaseOrderDrafts,
+  hasMeaningfulPurchaseOrderDraftContent,
+  mapPurchaseOrderDraftToFormData,
+  savePurchaseOrderDraft,
+  updatePurchaseOrderDraftStatus,
+} from '@/lib/client/purchase-order-drafts';
 
 // Form validation schema
 const allocationSchema = z.object({
@@ -430,7 +442,7 @@ function SplitAllocationEditor({
                   type="number"
                   className={`h-10 w-full rounded-md border ${
                     overAllocated ? 'border-destructive' : 'border-input'
-                  } bg-background px-2 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
+                  } bg-background px-2 py-2 text-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring`}
                   min="0.01"
                   step="any"
                   placeholder="Qty"
@@ -480,12 +492,19 @@ function SplitAllocationEditor({
   );
 }
 
-const PO_DRAFT_STORAGE_KEY = 'unity-erp:po-draft';
-
 export function NewPurchaseOrderForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
+  const [draftTitle, setDraftTitle] = useState('');
+  const [currentDraftId, setCurrentDraftId] = useState<number | null>(null);
+  const [draftVersion, setDraftVersion] = useState<number | null>(null);
+  const [autosaveState, setAutosaveState] = useState<
+    'idle' | 'saving' | 'saved' | 'error'
+  >('idle');
+  const [autosaveMessage, setAutosaveMessage] = useState<string | null>(null);
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [consolidateDialogOpen, setConsolidateDialogOpen] = useState(false);
   const [suppliersWithDrafts, setSuppliersWithDrafts] = useState<
     SupplierWithDrafts[]
@@ -505,6 +524,7 @@ export function NewPurchaseOrderForm() {
   const [selectedComponentInfoMap, setSelectedComponentInfoMap] = useState<
     Map<number, SelectedComponentInfo>
   >(new Map());
+  const [draftBootstrapComplete, setDraftBootstrapComplete] = useState(false);
 
   // Form setup
   const {
@@ -513,24 +533,12 @@ export function NewPurchaseOrderForm() {
     handleSubmit,
     watch,
     setValue,
+    getValues,
     reset,
     formState: { errors },
   } = useForm<PurchaseOrderFormData>({
     resolver: zodResolver(formSchema) as Resolver<PurchaseOrderFormData>,
-    defaultValues: {
-      order_date: new Date().toISOString().split('T')[0],
-      notes: '',
-      items: [
-        {
-          component_id: 0,
-          supplier_component_id: 0,
-          quantity: undefined as unknown as number,
-          customer_order_id: null,
-          allocations: [],
-          notes: '',
-        },
-      ],
-    },
+    defaultValues: createEmptyPurchaseOrderFormData(),
   });
 
   const { fields, append, remove } = useFieldArray({
@@ -540,98 +548,300 @@ export function NewPurchaseOrderForm() {
 
   // Track which items are in split mode
   const [splitModeItems, setSplitModeItems] = useState<Set<number>>(new Set());
-
-  // Restore saved draft from sessionStorage on mount
-  const draftRestored = useRef(false);
-  useEffect(() => {
-    if (draftRestored.current) return;
-    draftRestored.current = true;
-    try {
-      const saved = sessionStorage.getItem(PO_DRAFT_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as PurchaseOrderFormData;
-        const hasContent =
-          parsed.items?.some((item) => item.component_id > 0) ||
-          (parsed.notes && parsed.notes.trim().length > 0);
-        if (hasContent) {
-          reset(parsed);
-          toast.info('Draft purchase order restored');
-
-          // Re-hydrate component info for restored items
-          const componentIds = parsed.items
-            .map((item) => item.component_id)
-            .filter((id) => id > 0);
-          if (componentIds.length > 0) {
-            supabase
-              .from('components')
-              .select(
-                `component_id, internal_code, description,
-                 category:component_categories(categoryname),
-                 inventory(quantity_on_hand),
-                 suppliercomponents(
-                   supplier_component_id, supplier_id, price, lead_time, min_order_quantity,
-                   supplier:suppliers(name, supplier_id)
-                 )`
-              )
-              .in('component_id', componentIds)
-              .then(({ data }) => {
-                if (!data?.length) return;
-                setSelectedComponentInfoMap((prev) => {
-                  const next = new Map(prev);
-                  data.forEach((comp: any) => {
-                    next.set(comp.component_id, {
-                      internal_code: comp.internal_code,
-                      description: comp.description,
-                      category_name: comp.category?.categoryname ?? null,
-                      stock_on_hand: comp.inventory?.[0]?.quantity_on_hand ?? null,
-                      suppliers: comp.suppliercomponents ?? [],
-                    });
-                  });
-                  return next;
-                });
-              });
-          }
-        }
-      }
-    } catch {
-      sessionStorage.removeItem(PO_DRAFT_STORAGE_KEY);
-    }
-  }, [reset]);
-
-  // Auto-save form data to sessionStorage (debounced)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>();
-  useEffect(() => {
-    const subscription = watch((values) => {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(() => {
-        try {
-          const formData = values as PurchaseOrderFormData;
-          const hasContent =
-            formData.items?.some((item) => item.component_id > 0) ||
-            (formData.notes && formData.notes.trim().length > 0);
-          if (hasContent) {
-            sessionStorage.setItem(
-              PO_DRAFT_STORAGE_KEY,
-              JSON.stringify(formData)
-            );
-          } else {
-            sessionStorage.removeItem(PO_DRAFT_STORAGE_KEY);
-          }
-        } catch {
-          // Ignore storage errors
-        }
-      }, 500);
-    });
-    return () => {
-      subscription.unsubscribe();
-      clearTimeout(saveTimerRef.current);
-    };
-  }, [watch]);
+  const draftBootstrapRef = useRef(false);
+  const lastSavedSignatureRef = useRef<string | null>(null);
+  const currentDraftIdRef = useRef<number | null>(null);
+  const draftVersionRef = useRef<number | null>(null);
+  const prefillAppliedRef = useRef<string | null>(null);
 
-  // Clear saved draft (called on successful submission)
-  const clearDraft = useCallback(() => {
-    sessionStorage.removeItem(PO_DRAFT_STORAGE_KEY);
+  const prefillComponentId = useMemo(() => {
+    const rawValue = searchParams.get('componentId');
+    if (!rawValue) return null;
+
+    const parsed = Number.parseInt(rawValue, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }, [searchParams]);
+
+  const prefillSuggestedQuantity = useMemo(() => {
+    const rawValue = searchParams.get('suggestedQuantity');
+    if (!rawValue) return null;
+
+    const parsed = Number.parseFloat(rawValue);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }, [searchParams]);
+
+  const { data: currentUserId, isLoading: currentUserLoading } = useQuery({
+    queryKey: ['current-user-id'],
+    queryFn: async () => {
+      const { data, error } = await supabase.auth.getUser();
+      if (error) throw error;
+      return data.user?.id ?? null;
+    },
+  });
+
+  const { data: sharedDrafts = [], isLoading: draftsLoading } = useQuery({
+    queryKey: ['purchaseOrderDrafts'],
+    queryFn: fetchPurchaseOrderDrafts,
+  });
+
+  const currentDraft = useMemo(
+    () =>
+      currentDraftId === null
+        ? null
+        : sharedDrafts.find((draft) => draft.draft_id === currentDraftId) ?? null,
+    [currentDraftId, sharedDrafts]
+  );
+
+  const draftProfileIds = useMemo(() => {
+    return Array.from(
+      new Set(
+        sharedDrafts.flatMap((draft) =>
+          [draft.created_by, draft.updated_by, draft.locked_by].filter(
+            (value): value is string => Boolean(value)
+          )
+        )
+      )
+    );
+  }, [sharedDrafts]);
+
+  const { data: profileNameMap = new Map<string, string>() } = useQuery({
+    queryKey: ['purchase-order-draft-profiles', draftProfileIds.join(',')],
+    enabled: draftProfileIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, display_name, first_name, last_name')
+        .in('id', draftProfileIds);
+
+      if (error) throw error;
+
+      return new Map(
+        (data ?? []).map((profile: any) => [
+          profile.id,
+          profile.display_name ||
+            [profile.first_name, profile.last_name].filter(Boolean).join(' ') ||
+            'Unknown',
+        ])
+      );
+    },
+  });
+
+  const hydrateComponentInfo = useCallback(async (componentIds: number[]) => {
+    const uniqueIds = Array.from(
+      new Set(componentIds.filter((id) => Number.isFinite(id) && id > 0))
+    );
+
+    if (uniqueIds.length === 0) {
+      setSelectedComponentInfoMap(new Map());
+      return;
+    }
+
+    const { data } = await supabase
+      .from('components')
+      .select(
+        `component_id, internal_code, description,
+         category:component_categories(categoryname),
+         inventory(quantity_on_hand),
+         suppliercomponents(
+           supplier_component_id, supplier_id, price, lead_time, min_order_quantity,
+           supplier:suppliers(name, supplier_id)
+         )`
+      )
+      .in('component_id', uniqueIds);
+
+    if (!data?.length) {
+      setSelectedComponentInfoMap(new Map());
+      return;
+    }
+
+    const next = new Map<number, SelectedComponentInfo>();
+    data.forEach((component: any) => {
+      next.set(component.component_id, {
+        internal_code: component.internal_code,
+        description: component.description,
+        category_name: component.category?.categoryname ?? null,
+        stock_on_hand: component.inventory?.[0]?.quantity_on_hand ?? null,
+        suppliers: component.suppliercomponents ?? [],
+      });
+    });
+    setSelectedComponentInfoMap(next);
   }, []);
+
+  const applyDraftSelection = useCallback(
+    (draft: PurchaseOrderDraft | null) => {
+      const nextFormData = draft
+        ? mapPurchaseOrderDraftToFormData(draft)
+        : createEmptyPurchaseOrderFormData();
+
+      reset(nextFormData);
+      setDraftTitle(draft?.title ?? '');
+      setCurrentDraftId(draft?.draft_id ?? null);
+      setDraftVersion(draft?.version ?? null);
+      currentDraftIdRef.current = draft?.draft_id ?? null;
+      draftVersionRef.current = draft?.version ?? null;
+      setAutosaveState(draft ? 'saved' : 'idle');
+      setAutosaveMessage(null);
+      setLastSavedAt(draft?.updated_at ?? null);
+      setExpandedNotes(
+        new Set(
+          (draft?.lines ?? [])
+            .map((line, index) => (line.notes?.trim() ? index : -1))
+            .filter((index) => index >= 0)
+        )
+      );
+      setSplitModeItems(
+        new Set(
+          (draft?.lines ?? [])
+            .map((line, index) => (line.allocations.length > 0 ? index : -1))
+            .filter((index) => index >= 0)
+        )
+      );
+
+      lastSavedSignatureRef.current = buildPurchaseOrderDraftSignature(
+        draft?.title ?? '',
+        nextFormData
+      );
+
+      void hydrateComponentInfo(
+        nextFormData.items.map((item) => item.component_id).filter((id) => id > 0)
+      );
+    },
+    [hydrateComponentInfo, reset]
+  );
+
+  useEffect(() => {
+    if (draftBootstrapRef.current || draftsLoading || currentUserLoading) return;
+    draftBootstrapRef.current = true;
+
+    const ownDraft =
+      sharedDrafts.find(
+        (draft) =>
+          draft.updated_by === currentUserId || draft.created_by === currentUserId
+      ) ?? null;
+
+    if (ownDraft) {
+      applyDraftSelection(ownDraft);
+      toast.info('Restored your shared purchase-order draft');
+      return;
+    }
+
+    applyDraftSelection(null);
+    setDraftBootstrapComplete(true);
+  }, [
+    applyDraftSelection,
+    currentUserId,
+    currentUserLoading,
+    draftsLoading,
+    sharedDrafts,
+  ]);
+
+  useEffect(() => {
+    if (!draftsLoading && !currentUserLoading && draftBootstrapRef.current) {
+      setDraftBootstrapComplete(true);
+    }
+  }, [currentUserLoading, draftsLoading]);
+
+  const watchedItems = watch('items');
+  const watchedNotes = watch('notes');
+  const watchedOrderDate = watch('order_date');
+
+  const persistDraftNow = useCallback(
+    async (formData: PurchaseOrderFormData) => {
+      const hasContent = hasMeaningfulPurchaseOrderDraftContent(
+        draftTitle,
+        formData
+      );
+
+      if (!hasContent && currentDraftId === null) {
+        setAutosaveState('idle');
+        setAutosaveMessage(null);
+        setLastSavedAt(null);
+        lastSavedSignatureRef.current = null;
+        return null;
+      }
+
+      const signature = buildPurchaseOrderDraftSignature(draftTitle, formData);
+      if (signature === lastSavedSignatureRef.current) {
+        return null;
+      }
+
+      setAutosaveState('saving');
+      setAutosaveMessage(null);
+
+      const meta = await savePurchaseOrderDraft({
+        draftId: currentDraftIdRef.current,
+        expectedVersion: draftVersionRef.current,
+        title: draftTitle,
+        formData,
+      });
+
+      setCurrentDraftId(meta.draftId);
+      setDraftVersion(meta.version);
+      currentDraftIdRef.current = meta.draftId;
+      draftVersionRef.current = meta.version;
+      setAutosaveState('saved');
+      setLastSavedAt(meta.updatedAt);
+      lastSavedSignatureRef.current = signature;
+      await queryClient.invalidateQueries({ queryKey: ['purchaseOrderDrafts'] });
+
+      return meta;
+    },
+    [currentDraftId, draftTitle, draftVersion, queryClient]
+  );
+
+  useEffect(() => {
+    if (draftsLoading || currentUserLoading) return;
+
+    const formData: PurchaseOrderFormData = {
+      order_date:
+        watchedOrderDate ?? createEmptyPurchaseOrderFormData().order_date,
+      notes: watchedNotes ?? '',
+      items: watchedItems ?? [],
+    };
+
+    clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      void persistDraftNow(formData).catch((draftError) => {
+        const message =
+          draftError instanceof Error
+            ? draftError.message
+            : 'Failed to save purchase-order draft';
+        setAutosaveState('error');
+        setAutosaveMessage(message);
+      });
+    }, 1500);
+
+    return () => clearTimeout(saveTimerRef.current);
+  }, [
+    currentUserLoading,
+    draftsLoading,
+    persistDraftNow,
+    watchedItems,
+    watchedNotes,
+    watchedOrderDate,
+  ]);
+
+  const setCurrentDraftStatus = useCallback(
+    async (status: 'archived' | 'converted', purchaseOrderIds?: number[]) => {
+      const draftId = currentDraftIdRef.current;
+      if (!draftId) return;
+
+      await updatePurchaseOrderDraftStatus({
+        draftId,
+        status,
+        purchaseOrderIds,
+      });
+
+      await queryClient.invalidateQueries({ queryKey: ['purchaseOrderDrafts'] });
+      applyDraftSelection(null);
+    },
+    [applyDraftSelection, queryClient]
+  );
+
+  const startNewDraft = useCallback(() => {
+    applyDraftSelection(null);
+  }, [applyDraftSelection]);
 
   // Get draft status ID
   const { data: draftStatusId, isLoading: statusLoading } = useQuery({
@@ -657,9 +867,6 @@ export function NewPurchaseOrderForm() {
       );
     },
   });
-
-  // Watch for component changes to load suppliers
-  const watchedItems = watch('items');
 
   // Create a single query for all supplier components
   const { data: supplierComponentsMap, isLoading: suppliersLoading } =
@@ -701,8 +908,13 @@ export function NewPurchaseOrderForm() {
         supplierComponentsMap ?? new Map()
       );
     },
-    onSuccess: (results) => {
-      clearDraft();
+    onSuccess: async (results) => {
+      await setCurrentDraftStatus(
+        'converted',
+        results.map((result) => result.purchase_order_id)
+      ).catch((draftError) => {
+        console.error('Failed to mark purchase-order draft converted:', draftError);
+      });
       queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
       queryClient.invalidateQueries({ queryKey: ['purchasing-dashboard'] });
 
@@ -913,7 +1125,12 @@ export function NewPurchaseOrderForm() {
       }
 
       toast.success(toastMessage, { id: toastId });
-      clearDraft();
+      await setCurrentDraftStatus(
+        'converted',
+        results.map((result) => result.purchase_order_id)
+      ).catch((draftError) => {
+        console.error('Failed to mark purchase-order draft converted:', draftError);
+      });
       queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
       queryClient.invalidateQueries({ queryKey: ['purchasing-dashboard'] });
 
@@ -940,6 +1157,9 @@ export function NewPurchaseOrderForm() {
     setIsCheckingDrafts(true);
 
     try {
+      await persistDraftNow(data).catch((draftError) => {
+        console.error('Failed to persist draft before create:', draftError);
+      });
       const drafts = await checkForExistingDrafts(data);
 
       if (drafts.length > 0) {
@@ -967,6 +1187,153 @@ export function NewPurchaseOrderForm() {
       notes: '',
     });
   };
+
+  const addPrefilledComponent = useCallback(
+    async (componentId: number, suggestedQuantity?: number | null) => {
+      const { data, error } = await supabase
+        .from('components')
+        .select(
+          `component_id, internal_code, description,
+           category:component_categories(categoryname),
+           inventory(quantity_on_hand),
+           suppliercomponents(
+             supplier_component_id, supplier_id, price, lead_time, min_order_quantity,
+             supplier:suppliers(name, supplier_id)
+           )`
+        )
+        .eq('component_id', componentId)
+        .single();
+
+      if (error || !data) {
+        throw new Error('Failed to load the selected component for purchase ordering.');
+      }
+
+      const suppliers = data.suppliercomponents ?? [];
+      const defaultSupplierComponentId =
+        suppliers.length === 1 ? suppliers[0].supplier_component_id : 0;
+      const nextQuantity =
+        suggestedQuantity && suggestedQuantity > 0 ? suggestedQuantity : undefined;
+      const existingItems = getValues('items');
+      const existingIndex = existingItems.findIndex(
+        (item) => item.component_id === componentId
+      );
+
+      setSelectedComponentInfoMap((prev) => {
+        const next = new Map(prev);
+        next.set(componentId, {
+          internal_code: data.internal_code,
+          description: data.description,
+          category_name: data.category?.categoryname ?? null,
+          stock_on_hand: data.inventory?.[0]?.quantity_on_hand ?? null,
+          suppliers,
+        });
+        return next;
+      });
+
+      if (existingIndex >= 0) {
+        if (
+          defaultSupplierComponentId > 0 &&
+          (!existingItems[existingIndex]?.supplier_component_id ||
+            existingItems[existingIndex]?.supplier_component_id === 0)
+        ) {
+          setValue(
+            `items.${existingIndex}.supplier_component_id`,
+            defaultSupplierComponentId,
+            { shouldValidate: true, shouldDirty: true }
+          );
+        }
+
+        if (
+          nextQuantity &&
+          (!existingItems[existingIndex]?.quantity ||
+            existingItems[existingIndex]?.quantity <= 0)
+        ) {
+          setValue(`items.${existingIndex}.quantity`, nextQuantity, {
+            shouldValidate: true,
+            shouldDirty: true,
+          });
+        }
+
+        return {
+          added: false,
+          internalCode: data.internal_code,
+        };
+      }
+
+      const blankSingleRow =
+        existingItems.length === 1 &&
+        existingItems[0]?.component_id === 0 &&
+        (existingItems[0]?.supplier_component_id ?? 0) === 0 &&
+        !existingItems[0]?.quantity &&
+        !existingItems[0]?.customer_order_id &&
+        (!existingItems[0]?.allocations || existingItems[0].allocations.length === 0) &&
+        !existingItems[0]?.notes;
+
+      if (blankSingleRow) {
+        setValue('items.0.component_id', componentId, {
+          shouldValidate: true,
+          shouldDirty: true,
+        });
+        setValue('items.0.supplier_component_id', defaultSupplierComponentId, {
+          shouldValidate: defaultSupplierComponentId > 0,
+          shouldDirty: true,
+        });
+        if (nextQuantity) {
+          setValue('items.0.quantity', nextQuantity, {
+            shouldValidate: true,
+            shouldDirty: true,
+          });
+        }
+      } else {
+        append({
+          component_id: componentId,
+          supplier_component_id: defaultSupplierComponentId,
+          quantity: (nextQuantity ?? undefined) as unknown as number,
+          customer_order_id: null,
+          allocations: [],
+          notes: '',
+        });
+      }
+
+      return {
+        added: true,
+        internalCode: data.internal_code,
+      };
+    },
+    [append, getValues, setValue]
+  );
+
+  useEffect(() => {
+    if (!draftBootstrapComplete || !prefillComponentId) return;
+
+    const prefillSignature = `${prefillComponentId}:${prefillSuggestedQuantity ?? ''}`;
+    if (prefillAppliedRef.current === prefillSignature) return;
+    prefillAppliedRef.current = prefillSignature;
+
+    void addPrefilledComponent(prefillComponentId, prefillSuggestedQuantity)
+      .then((result) => {
+        if (result.added) {
+          toast.success(`Added ${result.internalCode} to the purchase-order draft`);
+        } else {
+          toast.info(`${result.internalCode} is already in the current draft`);
+        }
+
+        router.replace('/purchasing/purchase-orders/new', { scroll: false });
+      })
+      .catch((prefillError) => {
+        const message =
+          prefillError instanceof Error
+            ? prefillError.message
+            : 'Failed to prefill the purchase-order form';
+        toast.error(message);
+      });
+  }, [
+    addPrefilledComponent,
+    draftBootstrapComplete,
+    prefillComponentId,
+    prefillSuggestedQuantity,
+    router,
+  ]);
 
   // Open modal for a specific item index
   const openComponentModal = (index: number) => {
@@ -1107,6 +1474,32 @@ export function NewPurchaseOrderForm() {
     }),
   };
 
+  const autosaveLabel =
+    autosaveState === 'saving'
+      ? 'Saving draft...'
+      : autosaveState === 'error'
+        ? autosaveMessage || 'Draft autosave failed'
+        : autosaveState === 'saved' && lastSavedAt
+          ? `Saved ${new Date(lastSavedAt).toLocaleTimeString('en-ZA', {
+              hour: '2-digit',
+              minute: '2-digit',
+            })}`
+          : currentDraftId
+            ? `Draft #${currentDraftId}`
+            : 'New draft';
+
+  const currentDraftOwnerName = currentDraft?.updated_by
+    ? profileNameMap.get(currentDraft.updated_by) || 'Unknown'
+    : null;
+
+  const currentDraftLockedByOther = Boolean(
+    currentDraft?.locked_by &&
+      currentDraft.locked_by !== currentUserId &&
+      currentDraft.locked_at &&
+      new Date(currentDraft.locked_at).getTime() >
+        Date.now() - 10 * 60 * 1000
+  );
+
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
       {error && (
@@ -1116,6 +1509,146 @@ export function NewPurchaseOrderForm() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+
+      <Card className="border-dashed bg-muted/20">
+        <CardContent className="space-y-4 p-4">
+          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h3 className="text-base font-semibold">Shared Draft Workspace</h3>
+              <p className="text-sm text-muted-foreground">
+                Manual purchase orders autosave to Supabase and stay available to
+                everyone in your organization.
+              </p>
+            </div>
+            <Badge variant="secondary">
+              {sharedDrafts.length} active draft
+              {sharedDrafts.length === 1 ? '' : 's'}
+            </Badge>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,18rem)_auto]">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                Open Draft
+              </label>
+              <Select
+                value={currentDraftId ? String(currentDraftId) : 'new'}
+                onValueChange={(value) => {
+                  if (value === 'new') {
+                    startNewDraft();
+                    return;
+                  }
+
+                  const nextDraft =
+                    sharedDrafts.find(
+                      (draft) => draft.draft_id === Number(value)
+                    ) ?? null;
+
+                  if (nextDraft) {
+                    applyDraftSelection(nextDraft);
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a shared draft" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="new">New draft</SelectItem>
+                  {sharedDrafts.map((draft) => {
+                    const updatedByName =
+                      profileNameMap.get(draft.updated_by) || 'Unknown';
+                    const label = draft.title?.trim()
+                      ? draft.title.trim()
+                      : `Draft #${draft.draft_id}`;
+
+                    return (
+                      <SelectItem
+                        key={draft.draft_id}
+                        value={String(draft.draft_id)}
+                      >
+                        {label} • {draft.lines.length} line
+                        {draft.lines.length === 1 ? '' : 's'} • {updatedByName}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label
+                htmlFor="draft_title"
+                className="mb-1 block text-xs font-medium text-muted-foreground"
+              >
+                Draft Name
+              </label>
+              <Input
+                id="draft_title"
+                value={draftTitle}
+                onChange={(event) => setDraftTitle(event.target.value)}
+                placeholder="Optional shared draft name"
+                disabled={createOrderMutation.isPending || statusLoading}
+              />
+            </div>
+
+            <div className="flex items-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={startNewDraft}
+                disabled={createOrderMutation.isPending}
+              >
+                New Draft
+              </Button>
+              {currentDraftId && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => {
+                    void setCurrentDraftStatus('archived')
+                      .then(() => {
+                        toast.success('Draft discarded');
+                      })
+                      .catch((draftError) => {
+                        const message =
+                          draftError instanceof Error
+                            ? draftError.message
+                            : 'Failed to discard draft';
+                        toast.error(message);
+                      });
+                  }}
+                  disabled={createOrderMutation.isPending}
+                >
+                  Discard
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1 text-xs text-muted-foreground md:flex-row md:items-center md:justify-between">
+            <span>
+              {currentDraftId
+                ? `Currently editing draft #${currentDraftId}${
+                    currentDraftOwnerName ? `, last updated by ${currentDraftOwnerName}` : ''
+                  }`
+                : 'No shared draft selected yet'}
+            </span>
+            <span>{autosaveLabel}</span>
+          </div>
+
+          {currentDraftLockedByOther && (
+            <Alert>
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Another user is editing this draft</AlertTitle>
+              <AlertDescription>
+                {profileNameMap.get(currentDraft?.locked_by ?? '') || 'Another user'}{' '}
+                saved this draft recently. Your next save will overwrite their latest
+                changes unless you switch to a different draft.
+              </AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
@@ -1404,7 +1937,7 @@ export function NewPurchaseOrderForm() {
                               errors.items?.[index]?.quantity
                                 ? 'border-destructive'
                                 : 'border-input'
-                            } bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
+                            } bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring`}
                             min="0.01"
                             step="any"
                             placeholder="Qty"

@@ -57,6 +57,11 @@ export function SheetLayoutGrid({
     }
   }, [activePage, totalPages]);
 
+  const formatAreaCm2 = React.useCallback((areaMm2: number) => {
+    const areaCm2 = areaMm2 / 100;
+    return `${areaCm2.toFixed(areaCm2 >= 1000 ? 0 : 1)} cm²`;
+  }, []);
+
   return (
     <div className="space-y-3">
       {/* Global full board toggle */}
@@ -162,6 +167,18 @@ export function SheetLayoutGrid({
                   {((sheetLayout.used_area_mm2 || 0) / 1_000_000).toFixed(2)} m² of{' '}
                   {(sheetArea / 1_000_000).toFixed(2)} m²)
                 </div>
+                {sheetLayout.offcut_summary && (
+                  <div className="rounded border bg-muted/30 px-2 py-1.5 text-[11px] text-muted-foreground space-y-1">
+                    <div>
+                      Reusable offcuts: {sheetLayout.offcut_summary.reusableCount} (
+                      {formatAreaCm2(sheetLayout.offcut_summary.reusableArea_mm2)})
+                    </div>
+                    <div>
+                      Scrap pockets: {sheetLayout.offcut_summary.scrapCount} (
+                      {formatAreaCm2(sheetLayout.offcut_summary.scrapArea_mm2)})
+                    </div>
+                  </div>
+                )}
 
                 <div className="space-y-2">
                   {/* Charge full sheet toggle */}

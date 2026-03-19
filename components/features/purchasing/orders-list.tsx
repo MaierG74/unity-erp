@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import { supabase } from '@/lib/supabase';
 import { SupplierOrderWithDetails } from '@/types/purchasing';
 import { Badge } from '@/components/ui/badge';
@@ -103,7 +103,7 @@ export function PurchasingOrdersList() {
             id="status-filter"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 sm:w-[200px]"
+            className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 sm:w-[200px]"
           >
             {statusOptions.map((option) => (
               <option key={option.value} value={option.value}>
@@ -152,7 +152,7 @@ export function PurchasingOrdersList() {
                     <StatusBadge status={order.status.status_name} />
                   </TableCell>
                   <TableCell>
-                    {format(new Date(order.order_date), 'MMM d, yyyy')}
+                    {formatDate(order.order_date)}
                   </TableCell>
                   <TableCell>
                     <Link

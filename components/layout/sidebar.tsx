@@ -19,13 +19,12 @@ import {
   X,
   Box,
   Hammer,
-  CalendarClock,
   FileText,
   CheckSquare,
   Ruler,
-  Layers,
   LayoutGrid,
-  Clock,
+  Factory,
+  DollarSign,
 } from 'lucide-react';
 import { useState, useEffect, createContext, useContext } from 'react';
 import { Button } from '@/components/ui/button';
@@ -68,9 +67,9 @@ const navigation = [
     icon: Hammer
   },
   {
-    name: 'Scheduling',
-    href: '/labor-planning',
-    icon: CalendarClock
+    name: 'Production',
+    href: '/production',
+    icon: Factory
   },
   {
     name: 'Purchasing', 
@@ -102,25 +101,20 @@ const navigation = [
     href: '/customers',
     icon: Users 
   },
-  { 
-    name: 'Staff', 
+  {
+    name: 'Staff',
     href: '/staff',
-    icon: UserCog 
+    icon: UserCog
+  },
+  {
+    name: 'Payroll Review',
+    href: '/payroll-review',
+    icon: DollarSign
   },
   { 
     name: 'Reports', 
     href: '/reports',
     icon: BarChart 
-  },
-  {
-    name: 'Option Sets',
-    href: '/settings/option-sets',
-    icon: Layers
-  },
-  {
-    name: 'Work Schedules',
-    href: '/settings/work-schedules',
-    icon: Clock
   },
   {
     name: 'Settings',
@@ -165,8 +159,8 @@ export function Sidebar() {
     const storedCollapsed = localStorage.getItem('sidebar-collapsed');
     if (storedCollapsed !== null) {
       setCollapsed(storedCollapsed === 'true');
-    } else if (pathname?.startsWith('/labor-planning')) {
-      // Start the planning view with more canvas space by default.
+    } else if (pathname?.startsWith('/production')) {
+      // Start the production hub with more canvas space by default.
       setCollapsed(true);
       globalSetCollapsed(true);
     }

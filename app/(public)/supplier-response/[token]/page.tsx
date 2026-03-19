@@ -213,7 +213,7 @@ export default function SupplierResponsePage() {
   if (error) {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-xl shadow-sm p-6 text-center">
+        <div className="max-w-md w-full bg-white rounded-xl shadow-xs p-6 text-center">
           <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
           <p className="text-gray-600">{error}</p>
         </div>
@@ -227,7 +227,7 @@ export default function SupplierResponsePage() {
   if (submitted) {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
-        <div className="max-w-lg w-full bg-white rounded-xl shadow-sm p-6 text-center">
+        <div className="max-w-lg w-full bg-white rounded-xl shadow-xs p-6 text-center">
           <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-gray-900 mb-2">Response Submitted</h2>
           <p className="text-gray-600 mb-2">
@@ -260,9 +260,9 @@ export default function SupplierResponsePage() {
   return (
     <div className="min-h-screen bg-gray-100 py-8 px-4">
       <div className="max-w-2xl mx-auto">
-        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+        <div className="bg-white rounded-xl shadow-xs overflow-hidden">
           {/* Header */}
-          <div className="text-center p-6 border-b bg-gradient-to-b from-blue-50 to-white">
+          <div className="text-center p-6 border-b bg-linear-to-b from-blue-50 to-white">
             <Package className="h-10 w-10 text-blue-600 mx-auto mb-3" />
             <h1 className="text-xl font-semibold text-gray-900">Order Delivery Update</h1>
             <p className="text-gray-500 text-sm mt-1">Please provide an update on the delivery status</p>

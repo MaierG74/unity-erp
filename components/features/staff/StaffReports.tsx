@@ -29,6 +29,8 @@ import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format, startOfWeek, endOfWeek, subDays, addDays, differenceInDays, eachDayOfInterval, isSunday } from 'date-fns';
+import { formatDate as formatDateSA } from '@/lib/date-utils';
+import { useOrgSettings } from '@/hooks/use-org-settings';
 import { CalendarIcon, Download, Loader2, Printer, DollarSign, ClipboardList, UserX, BarChart4 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -189,13 +191,14 @@ const HoursTable = ({ data }: { data: PayrollReport[] }) => {
 };
 
 export function StaffReports() {
+  const { weekStartDay } = useOrgSettings();
   const [activeTab, setActiveTab] = useState<string>('payroll');
   const [reportType, setReportType] = useState<string>('weekly');
-  
-  // Calculate the current pay week (Friday to Thursday)
+
+  // Calculate the current pay week based on org settings
   const today = new Date();
-  const currentWeekStart = startOfWeek(today, { weekStartsOn: 5 }) // Start on Friday
-  const currentWeekEnd = endOfWeek(today, { weekStartsOn: 5 }) // End on Thursday
+  const currentWeekStart = startOfWeek(today, { weekStartsOn: weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6 })
+  const currentWeekEnd = endOfWeek(today, { weekStartsOn: weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6 })
   
   const [startDate, setStartDate] = useState<Date | undefined>(currentWeekStart);
   const [endDate, setEndDate] = useState<Date | undefined>(currentWeekEnd);
@@ -415,7 +418,7 @@ export function StaffReports() {
   // Print Payroll report as a formatted PDF
   const printPayrollPdf = async () => {
     if (!reportData || activeTab !== 'payroll') return;
-    const periodText = `${format(startDate || new Date(), 'PP')} – ${format(endDate || new Date(), 'PP')}`;
+    const periodText = `${formatDateSA(startDate || new Date())} – ${formatDateSA(endDate || new Date())}`;
     const doc = (
       <StaffPayrollPDFNamed
         periodText={periodText}
@@ -501,7 +504,7 @@ export function StaffReports() {
                         )}
                       >
                         <CalendarIcon className="mr-2 h-4 w-4" />
-                        {startDate ? format(startDate, 'PP') : <span>Pick a date</span>}
+                        {startDate ? formatDateSA(startDate) : <span>Pick a date</span>}
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0">
@@ -528,7 +531,7 @@ export function StaffReports() {
                         )}
                       >
                         <CalendarIcon className="mr-2 h-4 w-4" />
-                        {endDate ? format(endDate, 'PP') : <span>Pick a date</span>}
+                        {endDate ? formatDateSA(endDate) : <span>Pick a date</span>}
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0">
@@ -669,7 +672,7 @@ export function StaffReports() {
                         )}
                       >
                         <CalendarIcon className="mr-2 h-4 w-4" />
-                        {startDate ? format(startDate, 'PP') : <span>Pick a date</span>}
+                        {startDate ? formatDateSA(startDate) : <span>Pick a date</span>}
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0">
@@ -696,7 +699,7 @@ export function StaffReports() {
                         )}
                       >
                         <CalendarIcon className="mr-2 h-4 w-4" />
-                        {endDate ? format(endDate, 'PP') : <span>Pick a date</span>}
+                        {endDate ? formatDateSA(endDate) : <span>Pick a date</span>}
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0">

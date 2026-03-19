@@ -24,7 +24,7 @@ interface CutlistPart {
 interface CutlistGroup {
   id?: number;
   name: string;
-  board_type: '16mm' | '32mm-both' | '32mm-backer';
+  board_type: string;
   primary_material_id?: string | null;
   primary_material_name?: string | null;
   backer_material_id?: string | null;

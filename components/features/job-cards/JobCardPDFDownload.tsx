@@ -13,6 +13,13 @@ interface JobCardPDFDownloadProps {
   drawingUrl?: string | null;
 }
 
+interface JobCardPDFPrintProps {
+  jobCard: JobCardPDFData;
+  items: JobCardPDFItem[];
+  companyInfo?: Partial<CompanyInfo>;
+  drawingUrl?: string | null;
+}
+
 /** Generate a QR code data URL for the job card scan page. */
 async function generateQRCodeDataURL(jobCardId: number): Promise<string | null> {
   try {
@@ -55,6 +62,26 @@ async function buildPDFBlob(props: {
 
   const blob = await pdf(element).toBlob();
   return new Blob([blob], { type: 'application/pdf' });
+}
+
+export async function openJobCardPrintWindow(
+  { jobCard, items, companyInfo, drawingUrl }: JobCardPDFPrintProps,
+  target: '_blank' | '_self' = '_blank',
+): Promise<void> {
+  const pdfBlob = await buildPDFBlob({ jobCard, items, companyInfo, drawingUrl });
+  const url = URL.createObjectURL(pdfBlob);
+  const printWindow = window.open(url, target);
+
+  if (!printWindow) {
+    URL.revokeObjectURL(url);
+    throw new Error('Unable to open print window. Please allow pop-ups and try again.');
+  }
+
+  const cleanup = () => setTimeout(() => URL.revokeObjectURL(url), 10000);
+  printWindow.onload = () => {
+    printWindow.print();
+    cleanup();
+  };
 }
 
 export function JobCardPDFDownload({
@@ -117,13 +144,7 @@ export function JobCardPDFDownload({
   const handlePrint = async () => {
     try {
       setBusy(true);
-      const pdfBlob = await buildPDFBlob({ jobCard, items, companyInfo, drawingUrl });
-      const url = URL.createObjectURL(pdfBlob);
-      const printWindow = window.open(url, '_blank');
-      if (printWindow) {
-        printWindow.onload = () => printWindow.print();
-      }
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      await openJobCardPrintWindow({ jobCard, items, companyInfo, drawingUrl });
     } catch (err) {
       console.error('PDF print failed:', err);
     } finally {

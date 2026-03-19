@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { cn } from '@/lib/utils';
+import { useOrgSettings } from '@/hooks/use-org-settings';
 import { BarChart3, Info, Calculator, Trash2, HelpCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -108,6 +109,17 @@ function SummaryStat({ label, value }: { label: string; value: string }) {
   );
 }
 
+interface MaterialSheetRollup {
+  sheetsUsed: number;
+  sheetsBillable: number;
+}
+
+interface MaterialEdgingCostRollup {
+  band16Cost: number;
+  band32Cost: number;
+  totalCost: number;
+}
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -180,6 +192,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   headerRight,
   className,
 }: CutlistCalculatorProps, ref) {
+  const { cutlistDefaults } = useOrgSettings();
   // ============== Materials Panel State ==============
   const [primaryBoards, setPrimaryBoards] = React.useState<BoardMaterial[]>(
     () => initialData?.primaryBoards ?? []
@@ -283,6 +296,18 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   const [backerGlobalFullBoard, setBackerGlobalFullBoard] = React.useState(
     () => initialData?.backerGlobalFullBoard ?? false
   );
+  const packingConfig = React.useMemo(
+    () => ({
+      minUsableDimension: cutlistDefaults.minReusableOffcutDimensionMm,
+      preferredMinDimension: cutlistDefaults.preferredOffcutDimensionMm,
+      minUsableArea: cutlistDefaults.minReusableOffcutAreaMm2,
+    }),
+    [
+      cutlistDefaults.minReusableOffcutDimensionMm,
+      cutlistDefaults.preferredOffcutDimensionMm,
+      cutlistDefaults.minReusableOffcutAreaMm2,
+    ]
+  );
 
   // ============== Custom Lamination Modal ==============
   const [customLamPartId, setCustomLamPartId] = React.useState<string | null>(null);
@@ -361,6 +386,49 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
         }
         return sum + pct / 100;
       }, 0);
+    },
+    [defaultSheetArea]
+  );
+
+  const computeMaterialSheetRollups = React.useCallback(
+    (
+      layout: LayoutResult | null,
+      overrides: Record<string, SheetBillingOverride>,
+      fullBoard: boolean,
+      fallbackMaterialId?: string
+    ): Map<string, MaterialSheetRollup> => {
+      const rollups = new Map<string, MaterialSheetRollup>();
+      if (!layout) return rollups;
+
+      for (const layoutSheet of layout.sheets) {
+        const area = (layoutSheet.stock_length_mm && layoutSheet.stock_width_mm)
+          ? layoutSheet.stock_length_mm * layoutSheet.stock_width_mm
+          : defaultSheetArea;
+        if (area <= 0) continue;
+
+        const usedArea = layoutSheet.used_area_mm2 ?? 0;
+        const materialId =
+          layoutSheet.placements.find((placement) => placement.material_id)?.material_id ??
+          fallbackMaterialId;
+        if (!materialId) continue;
+
+        const autoPct = Math.min(100, Math.max(0, (usedArea / area) * 100));
+        const override = overrides[layoutSheet.sheet_id];
+        let pct = autoPct;
+        if (fullBoard) {
+          pct = 100;
+        } else if (override) {
+          if (override.mode === 'full') pct = 100;
+          if (override.mode === 'manual') pct = Math.min(100, Math.max(0, override.manualPct));
+        }
+
+        const current = rollups.get(materialId) ?? { sheetsUsed: 0, sheetsBillable: 0 };
+        current.sheetsUsed += usedArea / area;
+        current.sheetsBillable += pct / 100;
+        rollups.set(materialId, current);
+      }
+
+      return rollups;
     },
     [defaultSheetArea]
   );
@@ -588,25 +656,37 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
       return;
     }
 
-    const sheetAreaSafe = defaultSheetArea > 0 ? defaultSheetArea : 1;
-    const totalPartsArea = parts.reduce((sum, part) => {
-      const qty = Math.max(0, Number(part.quantity) || 0);
-      return sum + (part.length_mm || 0) * (part.width_mm || 0) * qty;
-    }, 0);
-
+    const defaultPrimary = primaryBoards.find((b) => b.isDefault) || primaryBoards[0];
     const defaultBacker = backerBoards.find((b) => b.isDefault) || backerBoards[0];
     const backerPriceNumeric = defaultBacker?.cost || 0;
 
     const edging16 = edging.find((e) => e.thickness_mm === 16 && e.isDefaultForThickness);
     const edging32 = edging.find((e) => e.thickness_mm === 32 && e.isDefaultForThickness);
 
-    const materialStats = new Map<
-      string,
-      { name: string; area: number; band16: number; band32: number; laminateArea: number }
-    >();
+    const materialStats = new Map<string, { band16: number; band32: number }>();
+    const materialEdgingCosts = new Map<string, MaterialEdgingCostRollup>();
+    const primarySheetRollups = computeMaterialSheetRollups(
+      result,
+      sheetOverrides,
+      globalFullBoard,
+      defaultPrimary?.id
+    );
 
     const getMaterial = (id: string | null | undefined) =>
       primaryBoards.find((m) => m.id === id) ?? primaryBoards[0];
+
+    const laminationGroups = new Map<string, typeof parts>();
+    const ungroupedParts: typeof parts = [];
+    for (const part of parts) {
+      if (part.lamination_group) {
+        if (!laminationGroups.has(part.lamination_group)) {
+          laminationGroups.set(part.lamination_group, []);
+        }
+        laminationGroups.get(part.lamination_group)!.push(part);
+      } else {
+        ungroupedParts.push(part);
+      }
+    }
 
     for (const part of parts) {
       const qty = Math.max(0, Number(part.quantity) || 0);
@@ -622,38 +702,30 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
       const mat = getMaterial(part.material_id);
       const key = mat?.id || primaryBoards[0]?.id || 'default';
       if (!materialStats.has(key)) {
-        materialStats.set(key, { name: mat?.name || 'Material', area: 0, band16: 0, band32: 0, laminateArea: 0 });
+        materialStats.set(key, { band16: 0, band32: 0 });
       }
       const bucket = materialStats.get(key)!;
-      bucket.area += area;
       const has32mmEdging = part.lamination_type && part.lamination_type !== 'none';
-      const needsBackerBoard = part.lamination_type === 'with-backer';
 
       if (has32mmEdging) {
         bucket.band32 += totalBandLen;
       } else {
         bucket.band16 += totalBandLen;
       }
-      if (needsBackerBoard) {
-        bucket.laminateArea += area;
-      }
     }
 
     const materialSummaries: CutlistMaterialSummary[] = primaryBoards.map((mat) => {
-      const stats = materialStats.get(mat.id) || { name: mat.name, area: 0, band16: 0, band32: 0, laminateArea: 0 };
-      const matSheetArea = (mat.length_mm * mat.width_mm) || sheetAreaSafe;
-      const sheetsUsed = stats.area / matSheetArea;
-      const usageRatio = totalPartsArea > 0 ? stats.area / totalPartsArea : 0;
-      const sheetsBillable = primaryChargeSheets * usageRatio;
+      const stats = materialStats.get(mat.id) || { band16: 0, band32: 0 };
+      const primaryRollup = primarySheetRollups.get(mat.id);
+      const sheetsUsed = primaryRollup?.sheetsUsed ?? 0;
+      const sheetsBillable = primaryRollup?.sheetsBillable ?? 0;
       const sheetPrice = mat.cost || 0;
       const band16Price = edging16?.cost_per_meter || 0;
       const band32Price = edging32?.cost_per_meter || 0;
       const sheetCost = sheetsBillable * sheetPrice;
       const band16Cost = (stats.band16 / 1000) * band16Price;
       const band32Cost = (stats.band32 / 1000) * band32Price;
-      const backerSheets = stats.laminateArea / matSheetArea;
-      const backerCost = backerSheets * backerPriceNumeric;
-      const totalCost = sheetCost + band16Cost + band32Cost + backerCost;
+      const totalCost = sheetCost + band16Cost + band32Cost;
       return {
         materialId: mat.id,
         materialName: mat.name,
@@ -665,8 +737,8 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
         sheetCost,
         band16Cost,
         band32Cost,
-        backerSheets,
-        backerCost,
+        backerSheets: 0,
+        backerCost: 0,
         totalCost,
       };
     });
@@ -677,17 +749,122 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     for (const e of edging) edgingLookup.set(e.id, e);
 
     for (const [matId, lengthMm] of edgingByMaterialMap) {
-      const mat = edgingLookup.get(matId);
-      if (mat && lengthMm > 0.01) {
+      const edgingMaterial = edgingLookup.get(matId);
+      if (edgingMaterial && lengthMm > 0.01) {
         edgingByMaterial.push({
-          materialId: mat.id,
-          name: mat.name,
-          thickness_mm: mat.thickness_mm,
+          materialId: edgingMaterial.id,
+          name: edgingMaterial.name,
+          thickness_mm: edgingMaterial.thickness_mm,
           length_mm: lengthMm,
-          cost_per_meter: mat.cost_per_meter,
-          component_id: mat.component_id,
+          cost_per_meter: edgingMaterial.cost_per_meter,
+          component_id: edgingMaterial.component_id,
         });
       }
+    }
+
+    const addMaterialEdgingCost = (
+      primaryMaterialId: string,
+      edgingMaterialId: string | undefined,
+      lengthMm: number
+    ) => {
+      if (!edgingMaterialId || lengthMm <= 0) return;
+      const edgingMaterial = edgingLookup.get(edgingMaterialId);
+      if (!edgingMaterial) return;
+
+      const cost = (lengthMm / 1000) * (edgingMaterial.cost_per_meter || 0);
+      const current = materialEdgingCosts.get(primaryMaterialId) ?? {
+        band16Cost: 0,
+        band32Cost: 0,
+        totalCost: 0,
+      };
+
+      if (edgingMaterial.thickness_mm === 16) current.band16Cost += cost;
+      if (edgingMaterial.thickness_mm === 32) current.band32Cost += cost;
+      current.totalCost += cost;
+      materialEdgingCosts.set(primaryMaterialId, current);
+    };
+
+    for (const part of ungroupedParts) {
+      if (part.length_mm <= 0 || part.width_mm <= 0 || part.quantity <= 0) continue;
+
+      const laminationType = part.lamination_type || 'none';
+      const be = part.band_edges;
+      const singlePartEdge =
+        (be.top ? part.width_mm : 0) +
+        (be.bottom ? part.width_mm : 0) +
+        (be.left ? part.length_mm : 0) +
+        (be.right ? part.length_mm : 0);
+
+      let finishedPartCount: number;
+      switch (laminationType) {
+        case 'same-board':
+          finishedPartCount = Math.floor(part.quantity / 2);
+          break;
+        case 'with-backer':
+        case 'none':
+        case 'custom':
+        default:
+          finishedPartCount = part.quantity;
+          break;
+      }
+
+      const totalEdge = singlePartEdge * finishedPartCount;
+      const primaryMaterialId = getMaterial(part.material_id)?.id;
+      if (!primaryMaterialId) continue;
+
+      const edgingMaterialId =
+        part.edging_material_id ||
+        (laminationType === 'none' ? defaultEdging16?.id : defaultEdging32?.id);
+      addMaterialEdgingCost(primaryMaterialId, edgingMaterialId, totalEdge);
+    }
+
+    for (const [, groupParts] of laminationGroups) {
+      if (groupParts.length === 0) continue;
+
+      const memberCount = groupParts.length;
+      const refPart = groupParts[0];
+      if (refPart.length_mm <= 0 || refPart.width_mm <= 0) continue;
+
+      const mergedEdges = { top: false, right: false, bottom: false, left: false };
+      for (const p of groupParts) {
+        if (p.band_edges.top) mergedEdges.top = true;
+        if (p.band_edges.right) mergedEdges.right = true;
+        if (p.band_edges.bottom) mergedEdges.bottom = true;
+        if (p.band_edges.left) mergedEdges.left = true;
+      }
+
+      const singleAssemblyEdge =
+        (mergedEdges.top ? refPart.width_mm : 0) +
+        (mergedEdges.bottom ? refPart.width_mm : 0) +
+        (mergedEdges.left ? refPart.length_mm : 0) +
+        (mergedEdges.right ? refPart.length_mm : 0);
+
+      const assemblies = Math.min(...groupParts.map((p) => p.quantity));
+      const totalEdge = singleAssemblyEdge * assemblies;
+      const primaryMaterialId = getMaterial(refPart.material_id)?.id;
+      if (!primaryMaterialId) continue;
+
+      let edgingMaterialId: string | undefined;
+      if (memberCount === 1) edgingMaterialId = refPart.edging_material_id || defaultEdging16?.id;
+      if (memberCount === 2) edgingMaterialId = refPart.edging_material_id || defaultEdging32?.id;
+      if (memberCount > 2) edgingMaterialId = refPart.edging_material_id;
+
+      addMaterialEdgingCost(primaryMaterialId, edgingMaterialId, totalEdge);
+    }
+
+    const primaryCostTotal = materialSummaries.reduce((sum, material) => sum + material.sheetCost, 0);
+    const edgingCostTotal = Array.from(materialEdgingCosts.values()).reduce(
+      (sum, value) => sum + value.totalCost,
+      0
+    );
+    const backerCostTotal = backerChargeSheets * backerPriceNumeric;
+    const totalCost = primaryCostTotal + edgingCostTotal + backerCostTotal;
+
+    for (const material of materialSummaries) {
+      const edgingCostRollup = materialEdgingCosts.get(material.materialId);
+      material.band16Cost = edgingCostRollup?.band16Cost ?? 0;
+      material.band32Cost = edgingCostRollup?.band32Cost ?? 0;
+      material.totalCost = material.sheetCost + material.band16Cost + material.band32Cost;
     }
 
     const newSummary: CutlistSummary = {
@@ -701,6 +878,10 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
       edgebanding32mm: bandLen32,
       edgebandingTotal: bandLen16 + bandLen32,
       laminationOn,
+      primaryCostTotal,
+      edgingCostTotal,
+      backerCostTotal,
+      totalCost,
       materials: materialSummaries,
       edgingByMaterial: edgingByMaterial.length > 0 ? edgingByMaterial : undefined,
     };
@@ -722,6 +903,11 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     edging,
     parts,
     defaultSheetArea,
+    computeMaterialSheetRollups,
+    sheetOverrides,
+    globalFullBoard,
+    backerSheetOverrides,
+    backerGlobalFullBoard,
     edgingByMaterialMap,
     onSummaryChange,
   ]);
@@ -917,6 +1103,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
           allowRotation,
           singleSheetOnly,
           algorithm,
+          packingConfig,
           timeBudgetMs: isDeep ? deepTimeBudget * 1000 : 2000,
           onProgress: isDeep ? (progress) => setSaProgress(progress) : undefined,
           abortSignal: isDeep ? abortController.signal : undefined,
@@ -1082,6 +1269,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
           allowRotation: true,
           singleSheetOnly,
           algorithm,
+          packingConfig,
           timeBudgetMs: algorithm === 'deep' ? deepTimeBudget * 1000 : 2000,
         });
         setBackerResult(resBacker);
@@ -1095,7 +1283,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
       setSaProgress(null);
       abortControllerRef.current = null;
     }
-  }, [stock, backerStock, kerf, allowRotation, singleSheetOnly, optimizationPriority, deepTimeBudget, primaryBoards, edging]);
+  }, [stock, backerStock, kerf, allowRotation, singleSheetOnly, optimizationPriority, deepTimeBudget, primaryBoards, edging, packingConfig]);
 
   React.useEffect(() => {
     if (pendingCalculateRef.current && parts.length > 0) {
@@ -1583,7 +1771,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                   <Badge variant="secondary">{formatSheets(summary.primarySheetsBillable)} billable sheets</Badge>
                   {summary.materials && summary.materials.length > 0 && (
                     <Badge variant="outline">
-                      {formatCurrency(summary.materials.reduce((sum, mat) => sum + mat.totalCost, 0))} total
+                      {formatCurrency(summary.totalCost)} total
                     </Badge>
                   )}
                 </div>
@@ -1601,6 +1789,12 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                   )}
                   <SummaryStat label="Edgebanding 16mm" value={formatMeters(summary.edgebanding16mm / 1000)} />
                   <SummaryStat label="Edgebanding 32mm" value={formatMeters(summary.edgebanding32mm / 1000)} />
+                  <SummaryStat label="Primary cost" value={formatCurrency(summary.primaryCostTotal)} />
+                  <SummaryStat label="Edging cost" value={formatCurrency(summary.edgingCostTotal)} />
+                  {summary.laminationOn && (
+                    <SummaryStat label="Backer cost" value={formatCurrency(summary.backerCostTotal)} />
+                  )}
+                  <SummaryStat label="Total cost" value={formatCurrency(summary.totalCost)} />
                 </div>
                 {summary.materials && summary.materials.length > 0 && (
                   <div className="space-y-3">
@@ -1619,10 +1813,6 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                             </div>
                             <div>
                               Sheet cost: <span className="text-foreground font-medium">{formatCurrency(mat.sheetCost)}</span>
-                            </div>
-                            <div>
-                              Backer cost:{' '}
-                              <span className="text-foreground font-medium">{formatCurrency(mat.backerCost)}</span>
                             </div>
                             <div>
                               Banding 16mm:{' '}

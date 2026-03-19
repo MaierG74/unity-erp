@@ -8,7 +8,7 @@ import { PurchaseOrder } from '@/types/purchasing';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ExternalLink, Loader2 } from 'lucide-react';
-import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 
 // Status badge component
 const StatusBadge = ({ status }: { status: string }) => {
@@ -128,7 +128,7 @@ export function PurchaseOrdersList() {
                     {order.supplier_orders?.length ?? 0} item{(order.supplier_orders?.length ?? 0) !== 1 ? 's' : ''}
                   </td>
                   <td className="px-4 py-3 text-sm">
-                    {format(new Date(order.created_at), 'MMM d, yyyy')}
+                    {formatDate(order.created_at)}
                   </td>
                   <td className="px-4 py-3 text-sm">
                     <StatusBadge status={order.status.status_name} />

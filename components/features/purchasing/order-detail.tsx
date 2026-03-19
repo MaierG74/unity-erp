@@ -7,6 +7,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { format } from 'date-fns';
+import { formatDate as formatDateSA } from '@/lib/date-utils';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -872,7 +873,7 @@ export function OrderDetail({ orderId }: OrderDetailProps) {
   // Format date function
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'Not set';
-    return format(new Date(dateString), 'MMM d, yyyy');
+    return formatDateSA(dateString);
   };
 
   if (isLoading) {

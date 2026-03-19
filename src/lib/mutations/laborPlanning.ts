@@ -86,6 +86,8 @@ export function useLaborPlanningMutations(queryKey: QueryKey) {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey });
       queryClient.invalidateQueries({ queryKey: ['labor-planning-week-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['jobCards'] });
+      queryClient.invalidateQueries({ queryKey: ['production-summary'] });
     },
   });
 
@@ -163,6 +165,8 @@ export function useLaborPlanningMutations(queryKey: QueryKey) {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey });
       queryClient.invalidateQueries({ queryKey: ['labor-planning-week-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['jobCards'] });
+      queryClient.invalidateQueries({ queryKey: ['production-summary'] });
     },
   });
 
@@ -254,6 +258,8 @@ export function useLaborPlanningMutations(queryKey: QueryKey) {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey });
       queryClient.invalidateQueries({ queryKey: ['labor-planning-week-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['jobCards'] });
+      queryClient.invalidateQueries({ queryKey: ['production-summary'] });
     },
   });
 
@@ -261,12 +267,64 @@ export function useLaborPlanningMutations(queryKey: QueryKey) {
 }
 
 export async function assignJobToStaff(input: AssignJobInput): Promise<LaborPlanAssignment> {
+  if (input.job.orderId != null) {
+    const { data, error } = await supabase.rpc('assign_scheduled_card', {
+      p_job_instance_id: input.job.id,
+      p_order_id: input.job.orderId,
+      p_order_detail_id: input.job.orderDetailId ?? null,
+      p_bol_id: input.job.bolId ?? null,
+      p_job_id: input.job.jobId ?? null,
+      p_staff_id: input.staffId,
+      p_assignment_date: input.assignmentDate,
+      p_start_minutes: Math.round(input.startMinutes),
+      p_end_minutes: Math.round(input.endMinutes),
+      p_status: 'scheduled',
+      p_pay_type: input.job.payType ?? 'hourly',
+      p_rate_id: input.job.rateId ?? input.job.hourlyRateId ?? null,
+      p_hourly_rate_id: input.job.hourlyRateId ?? input.job.rateId ?? null,
+      p_piece_rate_id: input.job.pieceRateId ?? null,
+      p_job_status: normalizeLifecycleJobStatus(input.job.jobStatus),
+    });
+
+    if (error) throw error;
+    if (!data) {
+      throw new Error(`Scheduler assignment did not return job ${input.job.id}`);
+    }
+
+    return normalizeAssignmentRow(data);
+  }
+
   const payload = buildAssignmentPayload(input.job, input);
   return upsertAssignment(payload, input.job.id, input.assignmentDate);
 }
 
 export async function updateJobSchedule(input: UpdateJobScheduleInput): Promise<LaborPlanAssignment> {
   const { assignmentId, jobKey, assignmentDate, ...rest } = input;
+  const numericAssignmentId =
+    assignmentId && /^\d+$/.test(assignmentId) ? Number.parseInt(assignmentId, 10) : null;
+
+  if (numericAssignmentId !== null) {
+    const { data, error } = await supabase.rpc('reassign_scheduled_card', {
+      p_assignment_id: numericAssignmentId,
+      p_new_staff_id: rest.staffId ?? null,
+      p_assignment_date: assignmentDate,
+      p_start_minutes: rest.startMinutes != null ? Math.round(rest.startMinutes) : null,
+      p_end_minutes: rest.endMinutes != null ? Math.round(rest.endMinutes) : null,
+      p_status: rest.status ?? 'scheduled',
+      p_pay_type: rest.payType ?? 'hourly',
+      p_rate_id: rest.rateId ?? null,
+      p_hourly_rate_id: rest.hourlyRateId ?? null,
+      p_piece_rate_id: rest.pieceRateId ?? null,
+    });
+
+    if (error) throw error;
+    if (!data) {
+      throw new Error(`Scheduler update did not return assignment ${numericAssignmentId}`);
+    }
+
+    return normalizeAssignmentRow(data);
+  }
+
   const updatePayload = {
     staff_id: rest.staffId ?? null,
     start_minutes: rest.startMinutes != null ? Math.round(rest.startMinutes) : null,
@@ -361,6 +419,7 @@ function buildAssignmentPayload(job: PlanningJob, input: AssignJobInput) {
     rate_id: job.rateId ?? job.hourlyRateId ?? null,
     hourly_rate_id: job.hourlyRateId ?? job.rateId ?? null,
     piece_rate_id: job.pieceRateId ?? null,
+    job_status: normalizeLifecycleJobStatus(job.jobStatus),
     updated_at: new Date().toISOString(),
   };
 }
@@ -418,11 +477,23 @@ function normalizeAssignmentRow(row: any): LaborPlanAssignment {
     hourlyRateId: toNumber(row?.hourly_rate_id),
     pieceRateId: toNumber(row?.piece_rate_id),
     assignmentDate: row?.assignment_date ?? null,
-    jobStatus: row?.job_status ?? null,
+    jobStatus: normalizeLifecycleJobStatus(row?.job_status),
     issuedAt: row?.issued_at ?? null,
     startedAt: row?.started_at ?? null,
     completedAt: row?.completed_at ?? null,
   };
+}
+
+function normalizeLifecycleJobStatus(status: PlanningJob['jobStatus'] | LaborPlanAssignment['jobStatus'] | null | undefined) {
+  switch (status) {
+    case 'issued':
+    case 'in_progress':
+    case 'completed':
+    case 'on_hold':
+      return status;
+    default:
+      return null;
+  }
 }
 
 function toNumber(value: unknown): number | null {
@@ -474,7 +545,7 @@ function buildOptimisticAssignment(input: AssignJobInput): LaborPlanAssignment {
     hourlyRateId: input.job.hourlyRateId ?? input.job.rateId ?? null,
     pieceRateId: input.job.pieceRateId ?? null,
     assignmentDate: input.assignmentDate,
-    jobStatus: null,
+    jobStatus: normalizeLifecycleJobStatus(input.job.jobStatus),
     issuedAt: null,
     startedAt: null,
     completedAt: null,

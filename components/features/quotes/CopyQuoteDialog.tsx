@@ -17,6 +17,7 @@ import { Loader2, ChevronsUpDown, Check } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchCustomers } from '@/lib/db/customers';
 import type { Customer } from '@/lib/db/customers';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { cn } from '@/lib/utils';
@@ -98,7 +99,7 @@ export function CopyQuoteDialog({
 
     setCopying(true);
     try {
-      const res = await fetch(`/api/quotes/${sourceQuote.id}/copy`, {
+      const res = await authorizedFetch(`/api/quotes/${sourceQuote.id}/copy`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

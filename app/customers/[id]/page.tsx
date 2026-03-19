@@ -59,6 +59,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
+import { getQuoteStatusCustomerBadgeClassName, getQuoteStatusLabel } from '@/lib/quotes/status';
 
 // ---------- Types ----------
 
@@ -112,12 +113,12 @@ function getMonthlyPurchaseData(orders: CustomerOrder[]) {
   const now = new Date();
   for (let i = 11; i >= 0; i--) {
     const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const key = date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+    const key = date.toLocaleDateString('en-ZA', { month: 'short', year: '2-digit' });
     monthlyData[key] = 0;
   }
   orders.forEach(order => {
     const date = new Date(order.order_date);
-    const key = date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+    const key = date.toLocaleDateString('en-ZA', { month: 'short', year: '2-digit' });
     if (key in monthlyData) {
       monthlyData[key] += parseFloat(order.total_amount || '0');
     }
@@ -271,15 +272,7 @@ function getStatusBadgeClass(statusName: string): string {
 }
 
 function getQuoteStatusBadgeClass(status: string): string {
-  switch (status) {
-    case 'accepted':
-      return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
-    case 'rejected':
-    case 'expired':
-      return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
-    default:
-      return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400';
-  }
+  return getQuoteStatusCustomerBadgeClassName(status);
 }
 
 // ---------- Main Component ----------
@@ -1029,7 +1022,7 @@ export default function CustomerDetailPage() {
                           </td>
                           <td className="p-3">
                             <span className={`inline-block px-2 py-0.5 text-xs rounded-full capitalize ${getQuoteStatusBadgeClass(quote.status)}`}>
-                              {quote.status}
+                              {getQuoteStatusLabel(quote.status)}
                             </span>
                           </td>
                           <td className="p-3 text-right text-sm font-medium">

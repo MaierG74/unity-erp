@@ -56,7 +56,7 @@ export function SuppliersTab({ component }: SuppliersTabProps) {
   if (suppliers.length === 0) {
     return (
       <>
-        <Card>
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="flex items-center gap-2">
               <Users className="h-5 w-5" />
@@ -97,7 +97,7 @@ export function SuppliersTab({ component }: SuppliersTabProps) {
     <div className="space-y-6">
       {/* Price Summary with Add Button in first card */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Average Price</CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
@@ -112,7 +112,7 @@ export function SuppliersTab({ component }: SuppliersTabProps) {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Lowest Price</CardTitle>
             <Package className="h-4 w-4 text-green-600" />
@@ -127,7 +127,7 @@ export function SuppliersTab({ component }: SuppliersTabProps) {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="shadow-xs">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Highest Price</CardTitle>
             <Package className="h-4 w-4 text-red-600" />
@@ -144,7 +144,7 @@ export function SuppliersTab({ component }: SuppliersTabProps) {
       </div>
 
       {/* Suppliers Table */}
-      <Card>
+      <Card className="shadow-xs">
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2">
             <Users className="h-5 w-5" />

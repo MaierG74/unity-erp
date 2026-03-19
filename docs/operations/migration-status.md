@@ -28,11 +28,42 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260311141133
-- Latest applied migration name: fractional_purchase_receipts
-- Applied at (UTC): 2026-03-11 14:11:59 UTC
-- Applied by: greg@apexza.net via Supabase MCP
+- Latest applied migration version: 20260319065606
+- Latest applied migration name: factory_floor_issued_progress_zero
+- Applied at (UTC): 2026-03-19 06:56:06 UTC
+- Applied by: Codex via Supabase MCP
 - Verification notes:
+  - Current batch (2026-03-19, Codex):
+    1. `factory_floor_issued_progress_zero` (20260319065606): updated `public.factory_floor_status` so `issued` jobs remain visible on the floor but stay at `0%` progress until work is actually started; only `in_progress` and `on_hold` assignments accrue elapsed minutes and auto progress.
+    2. Verified with MCP `list_migrations`: production history now includes `20260319065606`.
+    3. Verified with MCP SQL: `TEST-LC-002` assignments `74`, `75`, and `76` now all report `minutes_elapsed = 0` and `auto_progress = 0` while still in `issued` status with `started_at = null`.
+  - Current batch (2026-03-19, Codex):
+    1. `factory_floor_parent_category_routing` (20260319062333): updated `public.factory_floor_status` so floor routing follows the top-level job category, allowing subcategories like `Brackets` to inherit the `Steel Work` section; also tightened the job-card lookup to the exact card encoded in `job_instance_id` to avoid duplicate floor rows.
+    2. Verified with MCP `list_migrations`: production history now includes `20260319062333`.
+    3. Verified with MCP SQL: `TEST-LC-002` assignments `74` and `76` (`Brackets`) now resolve to `Steel Section`, while assignment `75` (`Powder Coating`) resolves to `Powder Coating`.
+    4. Verified with MCP SQL: each assignment resolves to its own `job_card_id` (`34`, `35`, `36`) with no duplicate floor rows.
+  - Current batch (2026-03-19, Codex):
+    1. `sync_issued_scheduler_assignments` (20260319060032): backfilled card-backed `labor_plan_assignments` rows that were missing lifecycle state, and updated `public.assign_scheduled_card(...)` so issued scheduler assignments persist `job_status = 'issued'` plus `issued_at` for factory-floor visibility.
+    2. Verified with MCP `list_migrations`: production history now includes `20260319060032`.
+    3. Verified with MCP SQL: `TEST-LC-002` assignment rows `74`, `75`, and `76` now all report `job_status = 'issued'` with populated `issued_at`.
+    4. Verified with MCP SQL at the time of apply: `factory_floor_status` returned the issued `Powder Coating` assignment for `TEST-LC-002`; the follow-up parent-category routing migration below then resolved the two `Brackets` assignments into `Steel Section`.
+  - Current batch (2026-03-12, Codex):
+    1. `add_payroll_standard_week_hours` (20260312154218): added `public.organizations.payroll_standard_week_hours` as org-scoped payroll configuration for the weekly regular-hours cutoff, defaulting existing organizations to `44.00`.
+    2. Verified with MCP `list_migrations`: production history now includes `20260312154218`.
+    3. Verified with MCP SQL: `public.organizations.payroll_standard_week_hours` exists and `QButton` currently reads `44.00`.
+  - Current batch (2026-03-11, Codex):
+    1. `piecework_completion_payroll_phase1b` (20260311073942): added `assign_scheduled_card` so first-time scheduling of an issued card updates `job_cards.staff_id` atomically with `labor_plan_assignments`, closing the initial scheduler/payroll ownership gap.
+    2. Verified with MCP `list_migrations`: production history now includes `20260311073942`.
+    3. Verified with MCP SQL: `public.assign_scheduled_card(...)` exists in `public`.
+  - Current batch (2026-03-11, Codex):
+    1. `reconcile_complete_assignment_with_card_rpc` (20260311072949): reconciled the live `complete_assignment_with_card` RPC into tracked migration history so repo state matches the production database.
+    2. `piecework_completion_payroll_phase1` (20260311073315): added payroll-safe completion metadata on `job_cards`, explicit remainder metadata on `job_card_items`, the `complete_job_card_v2`, `complete_assignment_with_card_v2`, `reassign_scheduled_card`, `extract_job_card_id_from_instance`, and `is_job_card_payroll_locked` RPC/functions, plus updated `job_work_pool_status` math for returned/follow-up remainders.
+    3. Verified with MCP `list_migrations`: production history now includes `20260311072949` and `20260311073315`.
+    4. Verified with MCP SQL: new `job_cards` columns (`completed_by_user_id`, `completion_type`), new `job_card_items` columns (`remainder_action`, `remainder_qty`, `remainder_reason`, `remainder_follow_up_card_id`, `issued_quantity_snapshot`), and the new completion/reassignment functions all exist in `public`.
+  - Current batch (2026-03-08, Codex):
+    1. `organization_cutlist_defaults` (20260308102326): added `public.organizations.cutlist_defaults` as nullable `jsonb` for org-specific reusable offcut thresholds.
+    2. Verified with MCP `list_migrations`: production history now includes `20260308102326`.
+    3. Verified with MCP SQL: `public.organizations.cutlist_defaults` exists as nullable `jsonb`.
   - Current batch (2026-03-11, Codex):
     1. `fractional_purchase_receipts` (20260311141133): converted `supplier_order_receipts.quantity_received`, `inventory_transactions.quantity`, and `inventory.quantity_on_hand` to `numeric`; recreated dependent inventory views/materialized view; and replaced `process_supplier_order_receipt` with the decimal-safe org-aware signature.
     2. Verified with MCP `list_migrations`: production history now includes `20260311141133`.

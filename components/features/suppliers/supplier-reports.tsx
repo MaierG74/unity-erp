@@ -5,7 +5,8 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import type { SupplierWithDetails, SupplierPurchaseOrder, SupplierStatistics } from '@/types/suppliers';
 import { formatCurrency } from '@/lib/quotes';
-import { format, parseISO, isValid, isBefore, isAfter, differenceInDays } from 'date-fns';
+import { parseISO, isValid, isBefore, isAfter, differenceInDays } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import { Calendar, TrendingUp, Package, Clock, CheckCircle, Layers, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
@@ -236,13 +237,13 @@ export function SupplierReports({ supplier }: SupplierReportsProps) {
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <div className="flex gap-3 p-3 bg-card rounded-xl border shadow-sm">
+        <div className="flex gap-3 p-3 bg-card rounded-xl border shadow-xs">
           <div className="h-9 w-48 bg-muted animate-pulse rounded-lg" />
           <div className="h-9 w-48 bg-muted animate-pulse rounded-lg" />
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="p-6 bg-card rounded-xl border shadow-sm">
+            <div key={i} className="p-6 bg-card rounded-xl border shadow-xs">
               <div className="h-4 w-24 bg-muted animate-pulse rounded mb-4" />
               <div className="h-8 w-32 bg-muted animate-pulse rounded" />
             </div>
@@ -255,7 +256,7 @@ export function SupplierReports({ supplier }: SupplierReportsProps) {
   return (
     <div className="space-y-6">
       {/* Date Range Filter */}
-      <div className="flex flex-col gap-3 p-3 bg-card rounded-xl border shadow-sm md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-3 p-3 bg-card rounded-xl border shadow-xs md:flex-row md:items-center md:justify-between">
         <div className="flex flex-col gap-3 md:flex-row md:items-center">
           <span className="text-sm font-medium">Date Range:</span>
           
@@ -270,7 +271,7 @@ export function SupplierReports({ supplier }: SupplierReportsProps) {
                 )}
               >
                 <Calendar className="mr-2 h-4 w-4" />
-                {startDate ? format(startDate, "MMM d, yyyy") : "From Date"}
+                {startDate ? formatDate(startDate) : "From Date"}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="start">
@@ -294,7 +295,7 @@ export function SupplierReports({ supplier }: SupplierReportsProps) {
                 )}
               >
                 <Calendar className="mr-2 h-4 w-4" />
-                {endDate ? format(endDate, "MMM d, yyyy") : "To Date"}
+                {endDate ? formatDate(endDate) : "To Date"}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="start">
@@ -329,7 +330,7 @@ export function SupplierReports({ supplier }: SupplierReportsProps) {
       {/* Statistics Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Total Orders */}
-        <div className="p-6 bg-card rounded-xl border shadow-sm">
+        <div className="p-6 bg-card rounded-xl border shadow-xs">
           <div className="flex items-center gap-3 mb-2">
             <div className="p-2 bg-primary/10 rounded-lg">
               <Package className="h-5 w-5 text-primary" />
@@ -340,7 +341,7 @@ export function SupplierReports({ supplier }: SupplierReportsProps) {
         </div>
 
         {/* Total Order Value */}
-        <div className="p-6 bg-card rounded-xl border shadow-sm">
+        <div className="p-6 bg-card rounded-xl border shadow-xs">
           <div className="flex items-center gap-3 mb-2">
             <div className="p-2 bg-primary/10 rounded-lg">
               <TrendingUp className="h-5 w-5 text-primary" />
@@ -351,7 +352,7 @@ export function SupplierReports({ supplier }: SupplierReportsProps) {
         </div>
 
         {/* Outstanding Orders */}
-        <div className="p-6 bg-card rounded-xl border shadow-sm">
+        <div className="p-6 bg-card rounded-xl border shadow-xs">
           <div className="flex items-center gap-3 mb-2">
             <div className="p-2 bg-orange-500/10 rounded-lg">
               <Clock className="h-5 w-5 text-orange-500" />
@@ -365,7 +366,7 @@ export function SupplierReports({ supplier }: SupplierReportsProps) {
         </div>
 
         {/* Average Lead Time */}
-        <div className="p-6 bg-card rounded-xl border shadow-sm">
+        <div className="p-6 bg-card rounded-xl border shadow-xs">
           <div className="flex items-center gap-3 mb-2">
             <div className="p-2 bg-blue-500/10 rounded-lg">
               <Clock className="h-5 w-5 text-blue-500" />
@@ -378,7 +379,7 @@ export function SupplierReports({ supplier }: SupplierReportsProps) {
         </div>
 
         {/* On-Time Delivery Rate */}
-        <div className="p-6 bg-card rounded-xl border shadow-sm">
+        <div className="p-6 bg-card rounded-xl border shadow-xs">
           <div className="flex items-center gap-3 mb-2">
             <div className="p-2 bg-green-500/10 rounded-lg">
               <CheckCircle className="h-5 w-5 text-green-500" />
@@ -391,7 +392,7 @@ export function SupplierReports({ supplier }: SupplierReportsProps) {
         </div>
 
         {/* Components Variety */}
-        <div className="p-6 bg-card rounded-xl border shadow-sm">
+        <div className="p-6 bg-card rounded-xl border shadow-xs">
           <div className="flex items-center gap-3 mb-2">
             <div className="p-2 bg-purple-500/10 rounded-lg">
               <Layers className="h-5 w-5 text-purple-500" />
@@ -404,7 +405,7 @@ export function SupplierReports({ supplier }: SupplierReportsProps) {
 
       {/* Orders by Status */}
       {Object.keys(statistics.ordersByStatus).length > 0 && (
-        <div className="p-6 bg-card rounded-xl border shadow-sm">
+        <div className="p-6 bg-card rounded-xl border shadow-xs">
           <h3 className="text-lg font-semibold mb-4">Orders by Status</h3>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {Object.entries(statistics.ordersByStatus).map(([status, count]) => (
@@ -419,7 +420,7 @@ export function SupplierReports({ supplier }: SupplierReportsProps) {
 
       {/* Recent Activity */}
       {recentOrders.length > 0 && (
-        <div className="p-6 bg-card rounded-xl border shadow-sm">
+        <div className="p-6 bg-card rounded-xl border shadow-xs">
           <h3 className="text-lg font-semibold mb-4">Recent Purchase Orders</h3>
           <div className="space-y-3">
             {recentOrders.map((order) => {
@@ -447,8 +448,8 @@ export function SupplierReports({ supplier }: SupplierReportsProps) {
                     </div>
                     <p className="text-sm text-muted-foreground mt-1">
                       {order.order_date
-                        ? format(parseISO(order.order_date), 'MMM d, yyyy')
-                        : format(parseISO(order.created_at), 'MMM d, yyyy')}
+                        ? formatDate(order.order_date)
+                        : formatDate(order.created_at)}
                       {' • '}
                       {order.supplier_orders.length} item{order.supplier_orders.length !== 1 ? 's' : ''}
                     </p>
@@ -465,7 +466,7 @@ export function SupplierReports({ supplier }: SupplierReportsProps) {
 
       {/* Empty State */}
       {filteredOrders.length === 0 && (
-        <div className="p-12 bg-card rounded-xl border shadow-sm text-center">
+        <div className="p-12 bg-card rounded-xl border shadow-xs text-center">
           <Package className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
           <h3 className="text-lg font-semibold mb-2">No Purchase Orders Found</h3>
           <p className="text-muted-foreground">

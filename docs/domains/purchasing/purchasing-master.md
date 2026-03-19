@@ -16,8 +16,9 @@
 
 - **Dashboard:** Overview and quick filters for pending/approved metrics and recent POs.
   - Page: `app/purchasing/page.tsx:49` (fetch), `app/purchasing/page.tsx:170` (derived status), `app/purchasing/page.tsx:220` (section title, list).
-- **All Purchase Orders:** Tabbed list (In Progress/Completed) with filtering by status, Q number, supplier, date range.
+- **All Purchase Orders:** Tabbed list (In Progress/Completed) with filtering by status, communication state, Q number, supplier, and date range.
   - Page: `app/purchasing/purchase-orders/page.tsx:1` (page), `app/purchasing/purchase-orders/page.tsx:19` (status badge), `app/purchasing/purchase-orders/page.tsx:28` (fetch & joins), `app/purchasing/purchase-orders/page.tsx:96` (derived status logic).
+  - **Communication column:** The main PO table now surfaces a compact email-status badge per PO so buyers do not need to open each record to confirm supplier-email delivery. The badge is derived from the latest PO-send log per supplier/recipient in `purchase_order_emails` (including legacy rows where `email_type` is `NULL`) and shows `Not Emailed`, `Email Sent`, `Email Delivered`, `Email Partial`, or `Email Issue`. Longer explanations, including the latest send timestamp, now live in a hover tooltip to keep list rows compact. Resend webhook states `opened` and `clicked` are treated as delivered on the list. `Needs Email Attention` is available as a list filter and is intentionally stricter than the global navbar icon: approved/receiving-stage POs remain flagged until every supplier email is delivered.
   - **Date Filtering:** The date range filter uses `order_date` if available, falling back to `created_at` for filtering. Filtering is done client-side after fetching all orders. The "From Date" and "To Date" pickers allow selecting a date range, and orders are filtered to show only those within the selected range. See `app/purchasing/purchase-orders/page.tsx:268-289` for the filtering logic.
 - **PO Details:** Review items, totals, suppliers; submit for approval; approve with Q number; receive items; view receipt history.
   - Page: `app/purchasing/purchase-orders/[id]/page.tsx:1` (page), `app/purchasing/purchase-orders/[id]/page.tsx:115` (fetch with joins), `app/purchasing/purchase-orders/[id]/page.tsx:201` (approve → send emails), `app/purchasing/purchase-orders/[id]/page.tsx:232` (submit for approval), `app/purchasing/purchase-orders/[id]/page.tsx:313` (receipt: total_received), `app/purchasing/purchase-orders/[id]/page.tsx:346` (receipt: inventory), `app/purchasing/purchase-orders/[id]/page.tsx:528` (status flags, UI state), `app/purchasing/purchase-orders/[id]/page.tsx:720` (receipt history section).
@@ -26,6 +27,7 @@
 - **Create PO (manual):** Multi-line form to select components, pick supplier per-line, and set quantities/notes.
   - Page: `app/purchasing/purchase-orders/new/page.tsx:1` (page wrapper)
   - Form: `components/features/purchasing/new-purchase-order-form.tsx:147` (fetch Draft status), `components/features/purchasing/new-purchase-order-form.tsx:180` (supplier component fetch), `components/features/purchasing/new-purchase-order-form.tsx:210` (createPurchaseOrder), `components/features/purchasing/new-purchase-order-form.tsx:284` (mutation, redirect).
+  - Deep-link prefill: `/purchasing/purchase-orders/new?componentId=<id>&suggestedQuantity=<qty>` injects the selected component into the active shared draft (or the blank first row), auto-selects the supplier when only one mapping exists, and removes the query string after the draft is hydrated. This is the canonical route used by the Dashboard low-stock `Order` action.
 - **Create POs from Sales Order:** Generates one PO per supplier containing selected components and links each SO to the customer order.
   - File: `app/orders/[orderId]/page.tsx:655` (createComponentPurchaseOrders), `app/orders/[orderId]/page.tsx:743` (link via junction table).
 
@@ -43,6 +45,8 @@
   - SO line with `supplier_component_id`, decimal-safe `order_quantity` / `total_received`, `status_id`, `order_date`, and `purchase_order_id` FK. See `schema.txt:199`. Column `purchase_order_id` added in `scripts/setup-database-functions.sql`.
 - `purchase_orders`
   - PO header: `purchase_order_id`, `q_number` (unique), `status_id`, `order_date`, `notes`, `created_by/approved_by/at`, and `supplier_id`. See `schema.txt:248` and `migrations/add_supplier_id_to_purchase_orders.sql`.
+- `purchase_order_emails`
+  - Email log rows for PO sends, follow-ups, cancellations, and delivery outcomes. The PO list communication badge currently derives its top-level state from the latest `po_send` entry per supplier, while the detail page continues to show the full activity history and bounce reasons.
 - `supplier_order_receipts`
   - Receipts with `order_id`, `transaction_id`, decimal-safe `quantity_received`, and `receipt_date`. See `schema.txt:181`.
 - `inventory_transactions`

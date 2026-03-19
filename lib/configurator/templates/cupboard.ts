@@ -1,5 +1,6 @@
 import type { CutlistPart } from '@/lib/cutlist/types';
 import type { CupboardConfig, FurnitureTemplate } from './types';
+import { deriveCupboardGeometry } from './cupboardGeometry';
 import { DEFAULT_CUPBOARD_CONFIG } from './types';
 
 /**
@@ -7,83 +8,123 @@ import { DEFAULT_CUPBOARD_CONFIG } from './types';
  *
  * Assembly (bottom to top):
  *   - Adjusters (10mm levelling feet)
- *   - Base assembly (32mm laminated: 2× 16mm same-colour) with overhang
+ *   - Base assembly with configurable construction:
+ *       - 16mm single board
+ *       - 32mm laminated pair
+ *       - 32mm cleated base (16mm full panel + 100mm underside perimeter strips)
  *   - Sides sit on base, between top and base
- *   - Top assembly (32mm laminated: 2× 16mm same-colour) sits ON TOP of sides
- *   - Both top and base overhang 10mm past sides (L+R) and 10mm past back
+ *   - Top assembly with configurable construction (single or laminated) sits ON TOP of sides
+ *   - Top/base can overhang independently at the front and back
  *   - Overhangs configurable to 0 for side-by-side cupboard installations
  *
  * Key dimensions:
  *   carcassWidth = W - max(topOverhangSides, baseOverhangSides) × 2
- *   carcassDepth = D - max(topOverhangBack, baseOverhangBack)
- *   sideHeight = H - adjusterHeight - 32mm(top) - 32mm(base)
+ *   carcassDepth = D - max(topOverhangFront, baseOverhangFront) - max(topOverhangBack, baseOverhangBack)
+ *   sideHeight = H - adjusterHeight - topThickness - baseThickness
  *
  * Back panel:
  *   Sits flush on base top surface, slots 8mm into routed groove in top underside.
  *   backHeight = sideHeight + backSlotDepth
  */
 export function generateCupboardParts(config: CupboardConfig): CutlistPart[] {
-  const { width: W, height: H, depth: D, materialThickness: T } = config;
-  const { shelfCount, doorStyle, hasBack, backMaterialThickness: BT } = config;
-  const { doorGap, shelfSetback, adjusterHeight, backSlotDepth } = config;
-  const { topOverhangSides, topOverhangBack, baseOverhangSides, baseOverhangBack } = config;
-
-  const T2 = T * 2; // 32mm laminated thickness
-
-  // ── Derived dimensions ──
-
-  // Carcass = the box formed by the sides. The sides sit between top and base.
-  // The carcass width is determined by the side-to-side gap inside the overhanging top/base.
-  const carcassWidth = W - Math.max(topOverhangSides, baseOverhangSides) * 2;
-  const carcassDepth = D - Math.max(topOverhangBack, baseOverhangBack);
-
-  // Side height = total H minus adjusters, minus top (32mm, sits on top), minus base (32mm, sides sit on base)
-  const sideHeight = H - adjusterHeight - T2 - T2;
-
-  // Internal width (between side panels)
-  const internalWidth = carcassWidth - T * 2;
+  const { materialThickness: T } = config;
+  const { shelfCount, doorStyle, hasBack, topConstruction, baseConstruction } = config;
+  const { doorGap, backSlotDepth } = config;
+  const {
+    valid,
+    carcassWidth,
+    carcassDepth,
+    sideHeight,
+    internalWidth,
+    topWidth,
+    topDepth,
+    baseWidth,
+    baseDepth,
+    shelfDepth,
+    baseCleatWidth,
+  } = deriveCupboardGeometry(config);
 
   // Validate
-  if (sideHeight <= 0) return [];
-  if (internalWidth <= 0) return [];
-  if (carcassDepth <= T) return [];
+  if (!valid) return [];
 
   const parts: CutlistPart[] = [];
   let counter = 0;
   const nextId = () => `cfg-${++counter}`;
 
-  // ── TOP (32mm laminated, same-board) ──
-  // Two identical 16mm sheets. Overhangs past sides and back.
-  // Top width = carcassWidth + topOverhangSides × 2
-  // Top depth = carcassDepth + topOverhangBack
-  const topWidth = carcassWidth + topOverhangSides * 2;
-  const topDepth = carcassDepth + topOverhangBack;
-
+  // ── TOP ──
   parts.push({
     id: nextId(),
-    name: 'Top (laminated pair)',
+    name: topConstruction === 'laminated' ? 'Top (laminated pair)' : 'Top',
     length_mm: topWidth,
     width_mm: topDepth,
-    quantity: 2,
+    quantity: topConstruction === 'laminated' ? 2 : 1,
     grain: 'length',
     band_edges: { top: true, right: true, bottom: true, left: true },
-    lamination_type: 'same-board',
+    lamination_type: topConstruction === 'laminated' ? 'same-board' : 'none',
   });
 
-  // ── BASE (32mm laminated, same-board — mirrors top) ──
-  const baseWidth = carcassWidth + baseOverhangSides * 2;
-  const baseDepth = carcassDepth + baseOverhangBack;
+  // ── BASE ──
+  if (baseConstruction === 'laminated') {
+    parts.push({
+      id: nextId(),
+      name: 'Base (laminated pair)',
+      length_mm: baseWidth,
+      width_mm: baseDepth,
+      quantity: 2,
+      grain: 'length',
+      band_edges: { top: true, right: true, bottom: true, left: true },
+      lamination_type: 'same-board',
+    });
+  } else if (baseConstruction === 'single') {
+    parts.push({
+      id: nextId(),
+      name: 'Base',
+      length_mm: baseWidth,
+      width_mm: baseDepth,
+      quantity: 1,
+      grain: 'length',
+      band_edges: { top: true, right: true, bottom: true, left: true },
+      lamination_type: 'none',
+    });
+  } else {
+    const sideCleatLength = Math.max(0, baseDepth - baseCleatWidth * 2);
 
-  parts.push({
-    id: nextId(),
-    name: 'Base (laminated pair)',
-    length_mm: baseWidth,
-    width_mm: baseDepth,
-    quantity: 2,
-    grain: 'length',
-    band_edges: { top: true, right: true, bottom: true, left: true },
-    lamination_type: 'same-board',
-  });
+    parts.push({
+      id: nextId(),
+      name: 'Base Panel (cleated)',
+      length_mm: baseWidth,
+      width_mm: baseDepth,
+      quantity: 1,
+      grain: 'length',
+      // 32mm edging is applied around the finished assembly; track the perimeter on the full panel.
+      band_edges: { top: true, right: true, bottom: true, left: true },
+      lamination_type: 'none',
+    });
+
+    parts.push({
+      id: nextId(),
+      name: 'Base Cleat Front/Back',
+      length_mm: baseWidth,
+      width_mm: baseCleatWidth,
+      quantity: 2,
+      grain: 'length',
+      band_edges: { top: false, right: false, bottom: false, left: false },
+      lamination_type: 'none',
+    });
+
+    if (sideCleatLength > 0) {
+      parts.push({
+        id: nextId(),
+        name: 'Base Cleat Sides',
+        length_mm: sideCleatLength,
+        width_mm: baseCleatWidth,
+        quantity: 2,
+        grain: 'length',
+        band_edges: { top: false, right: false, bottom: false, left: false },
+        lamination_type: 'none',
+      });
+    }
+  }
 
   // ── SIDE PANELS ──
   // Sides sit between top and base assemblies. Height = sideHeight, depth = carcassDepth.
@@ -110,7 +151,6 @@ export function generateCupboardParts(config: CupboardConfig): CutlistPart[] {
 
   // ── SHELVES ──
   if (shelfCount > 0) {
-    const shelfDepth = carcassDepth - shelfSetback - (hasBack ? BT : 0);
     if (shelfDepth > 0 && internalWidth > 0) {
       parts.push({
         id: nextId(),
@@ -189,7 +229,7 @@ export function generateCupboardParts(config: CupboardConfig): CutlistPart[] {
 export const cupboardTemplate: FurnitureTemplate<CupboardConfig> = {
   id: 'cupboard',
   name: 'Cupboard',
-  description: 'Standard melamine cupboard with adjusters, laminated top & base, and optional doors',
+  description: 'Standard melamine cupboard with configurable top/base construction and optional doors',
   defaultConfig: DEFAULT_CUPBOARD_CONFIG,
   generateParts: generateCupboardParts,
 };

@@ -27,6 +27,22 @@ interface EmailIssue {
 
 const DISMISSED_STORAGE_KEY = 'unity-email-issues-dismissed-v1';
 
+function getPurchaseOrderIssueHref(issue: EmailIssue) {
+  const params = new URLSearchParams();
+  params.set('communication', 'needsAttention');
+
+  if (issue.purchase_order_number) {
+    params.set('q', issue.purchase_order_number);
+    return `/purchasing/purchase-orders?${params.toString()}`;
+  }
+
+  if (issue.purchase_order_id) {
+    return `/purchasing/purchase-orders/${issue.purchase_order_id}`;
+  }
+
+  return `/purchasing/purchase-orders?${params.toString()}`;
+}
+
 export function EmailIssuesIndicator() {
   const [open, setOpen] = useState(false);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
@@ -226,26 +242,17 @@ export function EmailIssuesIndicator() {
                     )}
                     <div className="mt-2">
                       {(issue.purchase_order_id || issue.purchase_order_number) &&
-                        (issue.purchase_order_id ? (
+                        (
                           <Link
-                            href={`/purchasing/purchase-orders/${issue.purchase_order_id}`}
+                            href={getPurchaseOrderIssueHref(issue)}
                             className="text-xs text-primary hover:underline"
                             onClick={() => setOpen(false)}
                           >
-                            View Purchase Order{' '}
-                            {issue.purchase_order_number || `#${issue.purchase_order_id}`}
+                            {issue.purchase_order_number
+                              ? `Open Purchase Orders for ${issue.purchase_order_number}`
+                              : `View Purchase Order #${issue.purchase_order_id}`}
                           </Link>
-                        ) : (
-                          <Link
-                            href={`/purchasing/purchase-orders?q=${encodeURIComponent(
-                              issue.purchase_order_number || ''
-                            )}`}
-                            className="text-xs text-primary hover:underline"
-                            onClick={() => setOpen(false)}
-                          >
-                            Find Purchase Order {issue.purchase_order_number}
-                          </Link>
-                        ))}
+                        )}
                       {issue.quote_id && (
                         <Link
                           href={`/quotes/${issue.quote_id}/edit`}

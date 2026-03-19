@@ -32,6 +32,7 @@ interface POAttachmentManagerProps {
   attachments: POAttachment[];
   onAttachmentsChange: (attachments: POAttachment[]) => void;
   disabled?: boolean;
+  compact?: boolean;
 }
 
 function formatFileSize(bytes: number | null): string {
@@ -64,6 +65,7 @@ export default function POAttachmentManager({
   attachments,
   onAttachmentsChange,
   disabled = false,
+  compact = false,
 }: POAttachmentManagerProps) {
   const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -225,12 +227,8 @@ export default function POAttachmentManager({
     }
   };
 
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium">Attachments</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
+  const content = (
+    <div className="space-y-3">
         {/* File list */}
         {attachments.length > 0 && (
           <div className="space-y-2">
@@ -313,7 +311,8 @@ export default function POAttachmentManager({
           <div
             {...getRootProps()}
             className={cn(
-              'flex cursor-pointer flex-col items-center justify-center rounded-md border-2 border-dashed px-4 py-6 text-center transition-colors',
+              'flex cursor-pointer flex-col items-center justify-center rounded-md border-2 border-dashed text-center transition-colors',
+              compact ? 'px-4 py-4' : 'px-4 py-6',
               isDragActive
                 ? 'border-primary bg-primary/5'
                 : 'border-muted-foreground/25 hover:border-primary/50',
@@ -333,9 +332,9 @@ export default function POAttachmentManager({
               </>
             ) : (
               <>
-                <Upload className="mb-2 h-6 w-6 text-muted-foreground" />
+                <Upload className={cn('text-muted-foreground', compact ? 'mb-1 h-5 w-5' : 'mb-2 h-6 w-6')} />
                 <p className="text-sm text-muted-foreground">
-                  Drag & drop files here, or click to browse
+                  {compact ? 'Drop files here or click to upload' : 'Drag & drop files here, or click to browse'}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   PDF, images, Word, Excel (max 10MB each)
@@ -344,7 +343,23 @@ export default function POAttachmentManager({
             )}
           </div>
         )}
-      </CardContent>
+      </div>
+  );
+
+  return (
+    <>
+      {compact ? (
+        content
+      ) : (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium">Attachments</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {content}
+          </CardContent>
+        </Card>
+      )}
 
       <Dialog
         open={previewOpen}
@@ -530,6 +545,6 @@ export default function POAttachmentManager({
           )}
         </DialogContent>
       </Dialog>
-    </Card>
+    </>
   );
 }

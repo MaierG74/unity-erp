@@ -27,8 +27,9 @@ const publicRoutes = ['/login', '/forgot-password', '/reset-password', '/bypass'
 // Public routes with dynamic segments (patterns) - accessible without auth
 const publicPatternRoutes = ['/supplier-response/[token]', '/scan/jc/[id]'];
 
-// Development bypass routes - these routes will be accessible without authentication in development mode
-const devBypassRoutes = ['/orders', '/orders/new', '/orders/[orderId]', '/quotes', '/quotes/[id]'];
+// Development bypass routes - DISABLED: these were allowing pages to render without auth,
+// causing confusing behaviour where data shows but API calls fail with 401.
+const devBypassRoutes: string[] = [];
 
 // Check if we're in development mode
 const isDevelopment = process.env.NODE_ENV === 'development';
@@ -52,8 +53,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { toast } = useToast();
 
   useEffect(() => {
-    console.log('AuthProvider mounting, current pathname:', pathname);
-    
     // If we're on a dev bypass route, skip auth initialization entirely
     const isDevBypassRoute = isDevelopment && devBypassRoutes.some(route => {
       const routePattern = route.replace(/\[.*?\]/g, '[^/]+');
@@ -80,7 +79,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       supabase.auth
         .getSession()
         .then(({ data: { session } }) => {
-          console.log('Auth session loaded:', session ? 'User authenticated' : 'No user session');
           setUser(session?.user ?? null);
           setLoading(false);
           initialSessionResolved.current = true;
@@ -93,14 +91,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Set a timeout to prevent endless loading
       timeoutId = setTimeout(() => {
-        console.log('Auth loading timeout reached');
         setLoading(false);
         initialSessionResolved.current = true;
       }, 5000);
 
       // Listen for auth changes
       const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-        console.log('Auth state changed:', _event, session ? 'User authenticated' : 'No user session');
         setUser(session?.user ?? null);
         setLoading(false);
         initialSessionResolved.current = true;
@@ -153,13 +149,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    console.log('Auth state effect triggered:', {
-      loading,
-      user: user ? 'User authenticated' : 'No user',
-      pathname,
-      hasRedirected: hasRedirected.current
-    });
-
     if (loading) return;
     // Do not redirect until we have a verdict from the initial session (or timeout)
     if (!initialSessionResolved.current) return;
@@ -181,7 +170,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (!user && !isPublicRoute && !isDevBypassRoute) {
       hasRedirected.current = true;
-      console.log('Redirecting to login from', pathname);
       try {
         if (typeof window !== 'undefined') {
           localStorage.setItem('returnTo', pathname);
@@ -191,7 +179,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       router.push('/login');
     } else if (shouldRedirectAuthedToDashboard) {
       hasRedirected.current = true;
-      console.log('Redirecting to dashboard from', pathname);
       // If we have a stored returnTo path, prefer that over dashboard
       try {
         const returnTo = returnToRef.current || (typeof window !== 'undefined' ? localStorage.getItem('returnTo') : null);
