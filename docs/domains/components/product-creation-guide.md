@@ -102,6 +102,7 @@ CREATE TABLE public.billoflabour (
 - Shows product code, name, and description
 - Includes search and category filtering
 - "Add Product" opens the create dialog
+- After a successful create, the active catalog query invalidates immediately so the table refreshes without a manual browser reload; if the new product matches the current search/category filters, it appears in the visible list as soon as the refetch completes.
 - Row actions:
   - Edit navigates directly to the full detail page for that product
   - Delete opens a confirmation dialog and removes the item optimistically

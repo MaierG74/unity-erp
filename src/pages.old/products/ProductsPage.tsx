@@ -9,7 +9,7 @@
 
 import { motion, AnimatePresence } from 'framer-motion';
 import { useMemo, useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ProductsTable } from './ProductsTable';
 import { ProductSearchBar } from './ProductSearchBar';
@@ -154,6 +154,7 @@ const skeletonRows = Array.from({ length: 10 }, (_, index) => index);
 export function ProductsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
   const { toast } = useToast();
 
   // Initialize state from URL parameters
@@ -262,6 +263,11 @@ export function ProductsPage() {
     });
   };
 
+  const handleProductCreated = () => {
+    setPage(1);
+    void queryClient.invalidateQueries({ queryKey: ['products'] });
+  };
+
   return (
     // CHANGED: Reduced space-y from 6 to 2
     <div className="space-y-2">
@@ -293,9 +299,7 @@ export function ProductsPage() {
         {/* Right: Primary create action */}
         <div className="flex w-full md:w-auto md:justify-end">
           <ProductCreateForm
-            onProductCreated={() => {
-              setPage(1);
-            }}
+            onProductCreated={handleProductCreated}
             trigger={
               <Button variant="default" size="sm" className="h-9 w-full md:w-auto md:shrink-0">
                 Add Product
@@ -357,7 +361,7 @@ export function ProductsPage() {
                     </p>
                   </div>
                   <ProductCreateForm
-                    onProductCreated={() => setPage(1)}
+                    onProductCreated={handleProductCreated}
                     trigger={<Button>Add your first product</Button>}
                   />
                 </motion.div>

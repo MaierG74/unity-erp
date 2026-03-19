@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useMemo, useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
@@ -14,6 +15,7 @@ import { formatCurrency } from '@/lib/quotes';
 import { useDebounce } from '@/hooks/use-debounce';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
+import { CreateSupplierInventoryItemDialog } from '@/components/features/suppliers/create-supplier-inventory-item-dialog';
 
 type OptionType = {
   value: string;
@@ -52,6 +54,7 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
   const [pageSize, setPageSize] = useState(25);
   const [sortField, setSortField] = useState<'internal_code' | 'price' | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const router = useRouter();
   const queryClient = useQueryClient();
 
@@ -62,14 +65,13 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
 
   const pageSizeOptions = [10, 25, 50, 100];
   const [componentSearchTerm, setComponentSearchTerm] = useState('');
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
   // Store selected component details so we don't lose them when search term changes
   const [selectedAddComponent, setSelectedAddComponent] = useState<{ component_id: number; internal_code: string; description: string } | null>(null);
   // Store selected component details for edit mode
   const [selectedEditComponent, setSelectedEditComponent] = useState<{ component_id: number; internal_code: string; description: string } | null>(null);
 
   // Async component search - only loads when dropdown is opened or search term changes
-  const { data: components = [], isLoading: componentsSearchLoading } = useQuery({
+  const { data: components = [] } = useQuery({
     queryKey: ['components-search', componentSearchTerm],
     queryFn: async () => {
       let query = supabase
@@ -223,7 +225,7 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
   // Derived: options and disabled set for already-linked components
   const linkedComponentIds = useMemo(() => new Set((supplierComponents || []).map(c => c.component_id)), [supplierComponents]);
   const componentOptions: OptionType[] = useMemo(() => {
-    const opts = (components || []).map((c: any) => ({
+    return (components || []).map((c: any) => ({
       value: String(c.component_id),
       label: `${c.internal_code || '(no code)'} - ${c.description || ''}`,
       componentData: {
@@ -232,9 +234,7 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
         description: c.description || ''
       }
     }));
-    console.log('Component options updated:', opts.length, 'options, search term:', componentSearchTerm);
-    return opts;
-  }, [components, componentSearchTerm]);
+  }, [components]);
 
   const supplierOptions: OptionType[] = useMemo(() =>
     (suppliers || []).map((s: any) => ({ value: String(s.supplier_id), label: s.name })),
@@ -255,6 +255,11 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
     setAddError(null);
     setComponentSearchTerm(''); // Reset search when closing add form
     setSelectedAddComponent(null); // Reset selected component
+  };
+
+  const openCreateDialog = () => {
+    cancelAdd();
+    setIsCreateDialogOpen(true);
   };
 
   const handleCreate = async () => {
@@ -516,13 +521,16 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
           </Select>
         </div>
         <div className="flex items-center gap-3">
+          <Button variant="outline" onClick={openCreateDialog}>
+            Create Inventory Item
+          </Button>
           {!isAdding && (
             <button
               onClick={startAdd}
               className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-primary text-primary-foreground shadow-xs hover:bg-primary/90 focus:outline-hidden focus:ring-2 focus:ring-ring"
             >
               <Plus className="h-4 w-4" />
-              Add Component
+              Link Existing
             </button>
           )}
         </div>
@@ -585,16 +593,7 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
                       value: String(selectedAddComponent.component_id),
                       label: `${selectedAddComponent.internal_code || '(no code)'} - ${selectedAddComponent.description}`
                     } : null}
-                    onMenuClose={() => {
-                      console.log('Add Component menu closed');
-                      setIsMenuOpen(false);
-                    }}
-                    onMenuOpen={() => {
-                      console.log('Add Component menu opened');
-                      setIsMenuOpen(true);
-                    }}
                     onChange={(opt) => {
-                      console.log('Add Component onChange called:', opt);
                       if (opt) {
                         // Try to get componentData from the option first
                         let componentData = opt.componentData;
@@ -602,13 +601,11 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
                         // If componentData is missing, try to find it from componentOptions
                         if (!componentData && opt.value) {
                           const foundOption = componentOptions.find(o => o.value === opt.value);
-                          console.log('Found option from componentOptions:', foundOption);
                           componentData = foundOption?.componentData;
                         }
                         
                         // If we still have componentData, use it
                         if (componentData) {
-                          console.log('Using componentData:', componentData);
                           setSelectedAddComponent({
                             component_id: componentData.component_id,
                             internal_code: componentData.internal_code,
@@ -618,7 +615,6 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
                         } else if (opt.value) {
                           // Fallback: extract from components array if componentData is still missing
                           const component = components.find((c: any) => String(c.component_id) === opt.value);
-                          console.log('Found component from components array:', component);
                           if (component) {
                             setSelectedAddComponent({
                               component_id: component.component_id,
@@ -626,16 +622,12 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
                               description: component.description || ''
                             });
                             setAddForm(prev => prev ? { ...prev, component_id: component.component_id } : prev);
-                          } else {
-                            console.error('Could not find component for value:', opt.value);
                           }
                         } else {
-                          console.log('No value in option, clearing selection');
                           setSelectedAddComponent(null);
                           setAddForm(prev => prev ? { ...prev, component_id: 0 } : prev);
                         }
                       } else {
-                        console.log('Option is null, clearing selection');
                         setSelectedAddComponent(null);
                         setAddForm(prev => prev ? { ...prev, component_id: 0 } : prev);
                       }
@@ -644,18 +636,13 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
                     isOptionDisabled={(opt) => linkedComponentIds.has(Number(opt.value))}
                     isSearchable
                     onInputChange={(newValue, actionMeta) => {
-                      console.log('Add Component onInputChange:', newValue, actionMeta.action);
                       // Only update search term on actual input changes, not on selection/blur
                       if (actionMeta.action === 'input-change') {
                         setComponentSearchTerm(newValue);
                       }
                       // Don't clear search term on other actions to preserve options
                     }}
-                    filterOption={(option, inputValue) => {
-                      // Let all options through since we're doing server-side filtering
-                      console.log('filterOption called for:', option.label, 'with input:', inputValue);
-                      return true;
-                    }}
+                    filterOption={() => true}
                     placeholder="Select"
                     menuPlacement="auto"
                     closeMenuOnSelect={true}
@@ -761,7 +748,6 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
                               label: `${selectedEditComponent.internal_code || '(no code)'} - ${selectedEditComponent.description}`
                             } : null}
                             onChange={(newValue: OptionType | null) => {
-                              console.log('Edit Component onChange called:', newValue);
                               if (newValue) {
                                 // Try to get componentData from the option first
                                 let componentData = newValue.componentData;
@@ -769,13 +755,11 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
                                 // If componentData is missing, try to find it from componentOptions
                                 if (!componentData && newValue.value) {
                                   const foundOption = componentOptions.find(o => o.value === newValue.value);
-                                  console.log('Edit: Found option from componentOptions:', foundOption);
                                   componentData = foundOption?.componentData;
                                 }
                                 
                                 // If we still have componentData, use it
                                 if (componentData) {
-                                  console.log('Edit: Using componentData:', componentData);
                                   setSelectedEditComponent({
                                     component_id: componentData.component_id,
                                     internal_code: componentData.internal_code,
@@ -788,7 +772,6 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
                                 } else if (newValue.value) {
                                   // Fallback: extract from components array if componentData is still missing
                                   const foundComponent = components.find((c: any) => String(c.component_id) === newValue.value);
-                                  console.log('Edit: Found component from components array:', foundComponent);
                                   if (foundComponent) {
                                     setSelectedEditComponent({
                                       component_id: foundComponent.component_id,
@@ -799,38 +782,21 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
                                       ...prev,
                                       component_id: foundComponent.component_id
                                     } : null);
-                                  } else {
-                                    console.error('Edit: Could not find component for value:', newValue.value);
                                   }
                                 }
-                              } else {
-                                console.log('Edit: Option is null');
                               }
-                            }}
-                            onMenuClose={() => {
-                              console.log('Edit Component menu closed');
-                              setIsMenuOpen(false);
-                            }}
-                            onMenuOpen={() => {
-                              console.log('Edit Component menu opened');
-                              setIsMenuOpen(true);
                             }}
                             options={componentOptions}
                             isOptionDisabled={(opt) => linkedComponentIds.has(Number(opt.value)) && Number(opt.value) !== component.component_id}
                             isSearchable
                             onInputChange={(newValue, actionMeta) => {
-                              console.log('Edit Component onInputChange:', newValue, actionMeta.action);
                               // Only update search term on actual input changes, not on selection/blur
                               if (actionMeta.action === 'input-change') {
                                 setComponentSearchTerm(newValue);
                               }
                               // Don't clear search term on other actions to preserve options
                             }}
-                            filterOption={(option, inputValue) => {
-                              // Let all options through since we're doing server-side filtering
-                              console.log('Edit filterOption called for:', option.label, 'with input:', inputValue);
-                              return true;
-                            }}
+                            filterOption={() => true}
                             placeholder="Select"
                             menuPlacement="auto"
                             closeMenuOnSelect={true}
@@ -943,13 +909,13 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
                 ) : (
                   <>
                     <td className="p-4">
-                      <a
-                        href={`/inventory?focusComponent=${component.component_id}`}
+                      <Link
+                        href={`/inventory/components/${component.component_id}`}
                         className="text-primary hover:underline"
                         title="View in master components"
                       >
                         {component.component.internal_code}
-                      </a>
+                      </Link>
                     </td>
                     <td className="p-4">{component.component.description}</td>
                     <td className="p-4">{component.supplier_code}</td>
@@ -1050,6 +1016,17 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
           </div>
         </div>
       )}
+
+      <CreateSupplierInventoryItemDialog
+        supplier={supplier}
+        open={isCreateDialogOpen}
+        onOpenChange={setIsCreateDialogOpen}
+        onCreated={() => {
+          setSearchInput('');
+          setSelectedCategory('all');
+          setPage(1);
+        }}
+      />
     </div>
   );
-} 
+}

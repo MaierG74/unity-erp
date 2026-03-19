@@ -23,11 +23,22 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { formatDate } from '@/lib/date-utils';
-import { Plus, Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { Plus, Clock, XCircle, Loader2 } from 'lucide-react';
 import { PageToolbar } from '@/components/ui/page-toolbar';
 import { minutesToClock } from '@/src/lib/laborScheduling';
+import { getExecutionStatusMeta } from '@/components/production/execution-status';
 
 export type JobCardStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
+type AssignmentJobStatus = 'issued' | 'in_progress' | 'completed' | 'on_hold';
+type QueueStatus = JobCardStatus | 'issued' | 'on_hold';
+const issuedMeta = getExecutionStatusMeta('issued')!;
+const inProgressMeta = getExecutionStatusMeta('in_progress')!;
+const onHoldMeta = getExecutionStatusMeta('on_hold')!;
+const completedMeta = getExecutionStatusMeta('completed')!;
+const IssuedIcon = issuedMeta.icon;
+const InProgressIcon = inProgressMeta.icon;
+const OnHoldIcon = onHoldMeta.icon;
+const CompletedIcon = completedMeta.icon;
 
 interface JobCardItem {
   item_id: number;
@@ -68,20 +79,70 @@ interface ScheduledAssignment {
   assignment_date: string | null;
   start_minutes: number | null;
   end_minutes: number | null;
+  job_status: AssignmentJobStatus | null;
   staff?: {
     first_name: string;
     last_name: string;
   } | null;
 }
 
-const statusConfig: Record<JobCardStatus, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; icon: React.ReactNode }> = {
-  pending: { label: 'Pending', variant: 'secondary', icon: <Clock className="h-3 w-3" /> },
-  in_progress: { label: 'In Progress', variant: 'default', icon: <Loader2 className="h-3 w-3" /> },
-  completed: { label: 'Completed', variant: 'outline', icon: <CheckCircle className="h-3 w-3 text-green-500" /> },
-  cancelled: { label: 'Cancelled', variant: 'destructive', icon: <XCircle className="h-3 w-3" /> },
+interface FloorAssignmentRow {
+  job_card_id: number;
+  assignment_id: number;
+  staff_id: number | null;
+  assignment_date: string | null;
+  start_minutes: number | null;
+  end_minutes: number | null;
+  job_status: AssignmentJobStatus | null;
+}
+
+const statusConfig: Record<QueueStatus, { label: string; className: string; icon: React.ReactNode }> = {
+  pending: {
+    label: 'Pending',
+    className: 'border-transparent bg-secondary text-secondary-foreground hover:bg-secondary',
+    icon: <Clock className="h-3 w-3" />,
+  },
+  issued: {
+    label: issuedMeta.label,
+    className: issuedMeta.badgeClassName,
+    icon: <IssuedIcon className="h-3 w-3" />,
+  },
+  in_progress: {
+    label: inProgressMeta.label,
+    className: inProgressMeta.badgeClassName,
+    icon: <InProgressIcon className="h-3 w-3" />,
+  },
+  on_hold: {
+    label: onHoldMeta.label,
+    className: onHoldMeta.badgeClassName,
+    icon: <OnHoldIcon className="h-3 w-3" />,
+  },
+  completed: {
+    label: completedMeta.label,
+    className: completedMeta.badgeClassName,
+    icon: <CompletedIcon className="h-3 w-3" />,
+  },
+  cancelled: {
+    label: 'Cancelled',
+    className: 'border-transparent bg-destructive text-destructive-foreground hover:bg-destructive',
+    icon: <XCircle className="h-3 w-3" />,
+  },
 };
 
-type StatusFilter = 'all' | 'open' | JobCardStatus;
+type StatusFilter = 'all' | 'open' | QueueStatus;
+
+function getEffectiveQueueStatus(jobCard: JobCard): QueueStatus {
+  if (jobCard.status === 'completed' || jobCard.status === 'cancelled') {
+    return jobCard.status;
+  }
+
+  const assignmentStatus = jobCard.scheduledAssignment?.job_status;
+  if (assignmentStatus === 'issued' || assignmentStatus === 'in_progress' || assignmentStatus === 'on_hold') {
+    return assignmentStatus;
+  }
+
+  return jobCard.status;
+}
 
 interface JobQueueTableProps {
   /** Default status filter. 'open' = pending + in_progress. Defaults to 'all'. */
@@ -141,11 +202,11 @@ export function JobQueueTable({
           created_at,
           staff:staff_id(first_name, last_name),
           orders:order_id(order_number, customers(name)),
-          job_card_items(item_id, quantity, jobs:job_id(name), products:product_id(name))
+          job_card_items!job_card_items_job_card_id_fkey(item_id, quantity, jobs:job_id(name), products:product_id(name))
         `)
         .order('issue_date', { ascending: false });
 
-      if (statusFilter === 'open') {
+      if (statusFilter === 'open' || statusFilter === 'pending' || statusFilter === 'issued' || statusFilter === 'in_progress' || statusFilter === 'on_hold') {
         query = query.in('status', ['pending', 'in_progress']);
       } else if (statusFilter !== 'all') {
         query = query.eq('status', statusFilter);
@@ -175,6 +236,32 @@ export function JobQueueTable({
     queryKey: ['jobCards', 'schedule-enrichment', statusFilter, queueOrderIds],
     enabled: queueCardIds.size > 0 && queueOrderIds.length > 0,
     queryFn: async () => {
+      const scheduledMap = new Map<number, ScheduledAssignment>();
+
+      const { data: floorRows, error: floorError } = await supabase
+        .from('factory_floor_status')
+        .select('job_card_id, assignment_id, staff_id, assignment_date, start_minutes, end_minutes, job_status')
+        .in('job_card_id', [...queueCardIds]);
+
+      if (floorError) {
+        console.warn('[job-queue] Failed to load floor-status assignments for queue enrichment', floorError);
+      } else {
+        for (const row of ((floorRows || []) as FloorAssignmentRow[])) {
+          if (!queueCardIds.has(row.job_card_id) || scheduledMap.has(row.job_card_id)) continue;
+          scheduledMap.set(row.job_card_id, {
+            assignment_id: row.assignment_id,
+            job_instance_id: `card-${row.job_card_id}`,
+            order_id: null,
+            staff_id: row.staff_id,
+            assignment_date: row.assignment_date,
+            start_minutes: row.start_minutes,
+            end_minutes: row.end_minutes,
+            job_status: normalizeAssignmentJobStatus(row.job_status),
+            staff: null,
+          });
+        }
+      }
+
       const { data: assignmentRows, error: assignmentError } = await supabase
         .from('labor_plan_assignments')
         .select(`
@@ -185,6 +272,7 @@ export function JobQueueTable({
           assignment_date,
           start_minutes,
           end_minutes,
+          job_status,
           status,
           staff:staff_id(first_name, last_name)
         `)
@@ -195,15 +283,15 @@ export function JobQueueTable({
 
       if (assignmentError) {
         console.warn('[job-queue] Failed to load scheduler assignments for queue enrichment', assignmentError);
-        return new Map<number, ScheduledAssignment>();
+        return scheduledMap;
       }
 
-      const scheduledMap = new Map<number, ScheduledAssignment>();
       for (const row of ((assignmentRows || []) as Array<ScheduledAssignment & { status: string }>)) {
         const cardId = extractJobCardId(row.job_instance_id);
         if (cardId == null || !queueCardIds.has(cardId) || scheduledMap.has(cardId)) continue;
         scheduledMap.set(cardId, {
           ...row,
+          job_status: normalizeAssignmentJobStatus(row.job_status),
           staff: row.staff ?? null,
         });
       }
@@ -241,6 +329,16 @@ export function JobQueueTable({
   const filteredJobCards = useMemo(() => {
     let results = [...jobCards];
 
+    if (statusFilter !== 'all') {
+      results = results.filter((jc) => {
+        const effectiveStatus = getEffectiveQueueStatus(jc);
+        if (statusFilter === 'open') {
+          return effectiveStatus !== 'completed' && effectiveStatus !== 'cancelled';
+        }
+        return effectiveStatus === statusFilter;
+      });
+    }
+
     if (staffFilter !== 'all') {
       const selectedStaffId = parseInt(staffFilter, 10);
       results = results.filter((jc) => getDisplayStaffId(jc) === selectedStaffId);
@@ -260,7 +358,7 @@ export function JobQueueTable({
     }
 
     return results;
-  }, [jobCards, search, staffFilter]);
+  }, [jobCards, search, staffFilter, statusFilter]);
 
   const getItemsCount = (jobCard: JobCard) => {
     return jobCard.job_card_items?.length ?? 0;
@@ -307,7 +405,9 @@ export function JobQueueTable({
             <SelectItem value="all">All Statuses</SelectItem>
             <SelectItem value="open">Open</SelectItem>
             <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="issued">Issued</SelectItem>
             <SelectItem value="in_progress">In Progress</SelectItem>
+            <SelectItem value="on_hold">On Hold</SelectItem>
             <SelectItem value="completed">Completed</SelectItem>
             <SelectItem value="cancelled">Cancelled</SelectItem>
           </SelectContent>
@@ -361,7 +461,7 @@ export function JobQueueTable({
               </TableRow>
             ) : (
               filteredJobCards.map((jobCard) => {
-                const status = statusConfig[jobCard.status] || statusConfig.pending;
+                const status = statusConfig[getEffectiveQueueStatus(jobCard)] || statusConfig.pending;
                 return (
                   <TableRow
                     key={jobCard.job_card_id}
@@ -417,7 +517,7 @@ export function JobQueueTable({
                     </TableCell>
                     <TableCell>
                       <div className="space-y-1">
-                        <Badge variant={status.variant} className="gap-1">
+                        <Badge className={`gap-1 ${status.className}`}>
                           {status.icon}
                           {status.label}
                         </Badge>
@@ -477,4 +577,12 @@ function extractJobCardId(jobInstanceId: string | null | undefined): number | nu
   if (!match) return null;
   const parsed = Number(match[1]);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeAssignmentJobStatus(value: unknown): AssignmentJobStatus | null {
+  const normalized = String(value ?? '').toLowerCase();
+  if (normalized === 'issued' || normalized === 'in_progress' || normalized === 'completed' || normalized === 'on_hold') {
+    return normalized;
+  }
+  return null;
 }

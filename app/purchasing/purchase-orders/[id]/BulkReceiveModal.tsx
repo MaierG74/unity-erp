@@ -639,16 +639,16 @@ export function BulkReceiveModal({
                     </form>
                 ) : (
                     <div className="space-y-6">
-                        <div className="p-6 bg-green-50 border border-green-200 rounded-md text-center space-y-2">
-                            <div className="mx-auto w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mb-2">
-                                <Download className="h-6 w-6 text-green-600" />
+                        <div className="p-6 bg-green-50 dark:bg-green-950/40 border border-green-200 dark:border-green-800 rounded-md text-center space-y-2">
+                            <div className="mx-auto w-12 h-12 bg-green-100 dark:bg-green-900/50 rounded-full flex items-center justify-center mb-2">
+                                <Download className="h-6 w-6 text-green-600 dark:text-green-400" />
                             </div>
-                            <h3 className="text-lg font-medium text-green-900">Bulk Processing Complete</h3>
-                            <p className="text-green-700">
+                            <h3 className="text-lg font-medium text-green-900 dark:text-green-100">Bulk Processing Complete</h3>
+                            <p className="text-green-700 dark:text-green-300">
                                 Successfully processed {successData.processedCount} items.
                             </p>
                             {successData.rejectionCount > 0 && (
-                                <p className="text-sm text-green-700">
+                                <p className="text-sm text-green-700 dark:text-green-300">
                                     {successData.rejectionCount} items were rejected.
                                 </p>
                             )}

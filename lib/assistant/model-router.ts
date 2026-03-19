@@ -46,7 +46,7 @@ export const assistantModelRouteSchema = z.object({
 export type AssistantModelRoute = z.infer<typeof assistantModelRouteSchema>;
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
-const OPENAI_MODEL = 'gpt-5-mini';
+const OPENAI_MODEL = process.env.OPENAI_ASSISTANT_MODEL?.trim() || 'gpt-5.4-mini';
 function buildRoutingInstructions() {
   return [
     'You are a request router for the Unity ERP assistant.',
@@ -70,6 +70,8 @@ function buildRoutingInstructions() {
     'Use unassigned_production_work for questions about unassigned production job cards, orders with unassigned work, or what needs assignment in production.',
     'Use product_cost for questions about the cost, costing, cost breakdown, or top cost drivers of a product.',
     'Use product_open_orders for questions about whether a manufactured product is currently on customer order, whether any customers have ordered a product, or which customer orders include a product.',
+    'If the user is asking for orders for a named customer, keep it in the customer-order lane even if that name could also match a product or component.',
+    'Examples of customer-order phrasing that should not become product_open_orders: "What are the latest orders for Qbutton?", "What are the current orders for Office Group?", "Are there any open orders for Typestar?".',
     'Use order_products for questions about what products or items are on a specific customer order.',
     'Use open_orders when the user wants an open-order count, summary, or list, optionally for a specific customer, including phrasing like placed by, placed for, for, or from a customer.',
     'Use last_customer_order when the user asks for the last, latest, or most recent single order for a specific customer.',
@@ -162,7 +164,7 @@ export async function classifyAssistantRequestWithModel(
       input: message,
       max_output_tokens: 220,
       reasoning: {
-        effort: 'minimal',
+        effort: 'low',
       },
     }),
   });

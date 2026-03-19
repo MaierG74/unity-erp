@@ -857,6 +857,7 @@ export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardPro
             const assignJob: PlanningJob = {
               ...issueDialogState.job,
               id: jobKey,
+              jobStatus: 'issued',
               quantity: issuedQty,
             };
             assignMutation.mutate({

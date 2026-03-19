@@ -122,6 +122,7 @@ const columns = [
 export function ComponentsTab() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const searchParamsString = searchParams?.toString() || '';
 
   // Initialize state from URL parameters
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -140,17 +141,25 @@ export function ComponentsTab() {
   const [categorySearch, setCategorySearch] = useState('');
   const [supplierSearch, setSupplierSearch] = useState('');
   const syncingFromUrlRef = useRef(false);
+  const lastSearchParamsRef = useRef(searchParamsString);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
   // Sync local filter state from URL changes that originated outside this tab,
   // such as assistant deep-links that open another component in Inventory.
   useEffect(() => {
-    const nextFilterText = searchParams?.get('q') || '';
-    const nextCategory = searchParams?.get('category') || '_all';
-    const nextSupplier = searchParams?.get('supplier') || '_all';
-    const nextPageParam = Number.parseInt(searchParams?.get('page') || '1', 10);
-    const nextPageSizeParam = Number.parseInt(searchParams?.get('pageSize') || '10', 10);
+    if (lastSearchParamsRef.current === searchParamsString) {
+      return;
+    }
+
+    lastSearchParamsRef.current = searchParamsString;
+
+    const params = new URLSearchParams(searchParamsString);
+    const nextFilterText = params.get('q') || '';
+    const nextCategory = params.get('category') || '_all';
+    const nextSupplier = params.get('supplier') || '_all';
+    const nextPageParam = Number.parseInt(params.get('page') || '1', 10);
+    const nextPageSizeParam = Number.parseInt(params.get('pageSize') || '10', 10);
     const nextPage = Number.isFinite(nextPageParam) && nextPageParam > 0 ? nextPageParam - 1 : 0;
     const nextPageSize = Number.isFinite(nextPageSizeParam) && nextPageSizeParam > 0 ? nextPageSizeParam : 10;
 
@@ -171,7 +180,7 @@ export function ComponentsTab() {
     setSelectedSupplier(nextSupplier);
     setCurrentPage(nextPage);
     setPageSize(nextPageSize);
-  }, [currentPage, filterText, pageSize, searchParams, selectedCategory, selectedSupplier]);
+  }, [currentPage, filterText, pageSize, searchParamsString, selectedCategory, selectedSupplier]);
 
   // Sync filter and pagination state to URL (debounced for search, immediate for dropdowns/pagination)
   useEffect(() => {

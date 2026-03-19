@@ -58,6 +58,7 @@ import {
   AlertTriangle,
   Send,
   RefreshCw,
+  Info,
 } from 'lucide-react';
 
 // ── Types ───────────────────────────────────────────────────────────────────────
@@ -157,6 +158,35 @@ function optionalNumbersEqual(a: number | null | undefined, b: number | null | u
   return normalizeOptionalNumber(a) === normalizeOptionalNumber(b);
 }
 
+function convertTimeToMinutes(value: number | string | null | undefined, unit?: string | null): number | null {
+  if (value == null) return null;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+
+  const normalizedUnit = (unit ?? 'hours').toLowerCase();
+  if (normalizedUnit === 'minutes') return numeric;
+  if (normalizedUnit === 'seconds') return numeric / 60;
+  return numeric * 60;
+}
+
+function resolveTimePerUnitMinutes(
+  explicitTime: number | string | null | undefined,
+  explicitUnit: string | null | undefined,
+  fallbackTime: number | string | null | undefined,
+  fallbackUnit: string | null | undefined,
+): number | null {
+  return convertTimeToMinutes(explicitTime, explicitUnit) ?? convertTimeToMinutes(fallbackTime, fallbackUnit);
+}
+
+function resolvePoolTimePerUnitMinutes(
+  poolTimePerUnit: number | string | null | undefined,
+  fallbackTime: number | string | null | undefined,
+  fallbackUnit: string | null | undefined,
+): number | null {
+  const explicitMinutes = normalizeOptionalNumber(poolTimePerUnit);
+  return explicitMinutes ?? convertTimeToMinutes(fallbackTime, fallbackUnit);
+}
+
 async function fetchOrderBOLPreview(orderId: number): Promise<BOLPreviewItem[]> {
   const { data: orderDetails, error: odErr } = await supabase
     .from('order_details')
@@ -176,7 +206,7 @@ async function fetchOrderBOLPreview(orderId: number): Promise<BOLPreviewItem[]> 
           hourly_rate_id,
           time_required,
           time_unit,
-          jobs:job_id(job_id, name)
+          jobs:job_id(job_id, name, estimated_minutes, time_unit)
         )
       )
     `)
@@ -213,13 +243,12 @@ async function fetchOrderBOLPreview(orderId: number): Promise<BOLPreviewItem[]> 
         pieceRate = rateData?.rate ? Number(rateData.rate) : null;
       }
 
-      let timePerUnit: number | null = null;
-      if (bol.time_required) {
-        const raw = Number(bol.time_required);
-        if (bol.time_unit === 'hours') timePerUnit = raw * 60;
-        else if (bol.time_unit === 'seconds') timePerUnit = raw / 60;
-        else timePerUnit = raw;
-      }
+      const timePerUnit = resolveTimePerUnitMinutes(
+        bol.time_required,
+        bol.time_unit,
+        job.estimated_minutes,
+        job.time_unit,
+      );
 
       preview.push({
         job_id: job.job_id,
@@ -324,7 +353,7 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
           pool_id, order_id, product_id, job_id, bol_id, order_detail_id,
           required_qty, pay_type, piece_rate, piece_rate_id, hourly_rate_id,
           time_per_unit, source, status,
-          jobs:job_id(name),
+          jobs:job_id(name, estimated_minutes, time_unit),
           products:product_id(name)
         `)
         .eq('order_id', orderId)
@@ -355,8 +384,14 @@ export function JobCardsTab({ orderId }: JobCardsTabProps) {
 
       return poolRows.map((row) => {
         const agg = issuanceMap.get(row.pool_id) ?? { issued: 0, completed: 0 };
+        const job = row.jobs as { estimated_minutes?: number | null; time_unit?: string | null } | null;
         return {
           ...row,
+          time_per_unit: resolvePoolTimePerUnitMinutes(
+            row.time_per_unit,
+            job?.estimated_minutes,
+            job?.time_unit,
+          ),
           issued_qty: agg.issued,
           completed_qty: agg.completed,
           remaining_qty: row.required_qty - agg.issued,
@@ -1253,10 +1288,10 @@ function GenerateBOLDialog({
             </AlertDescription>
           </Alert>
         ) : (
-          <div className="max-h-96 overflow-auto rounded-md border">
+          <div className="my-4 max-h-96 overflow-auto rounded-md border border-border/60">
             <Table>
               <TableHeader>
-                <TableRow>
+                <TableRow className="bg-muted/40 hover:bg-muted/40">
                   <TableHead>Job</TableHead>
                   <TableHead>Product</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
@@ -1271,7 +1306,7 @@ function GenerateBOLDialog({
                     <TableCell className="text-muted-foreground">{item.product_name}</TableCell>
                     <TableCell className="text-right">{item.quantity}</TableCell>
                     <TableCell>
-                      <Badge variant="outline">{item.pay_type}</Badge>
+                      <Badge variant="secondary" className="font-normal">{item.pay_type}</Badge>
                     </TableCell>
                     <TableCell className="text-right">
                       {item.piece_rate != null ? `R ${item.piece_rate.toFixed(2)}` : '-'}
@@ -1361,61 +1396,75 @@ function IssueJobCardDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Issue Job Card</DialogTitle>
-          <DialogDescription>
-            Create a job card from the work pool for &quot;{pool.jobs?.name ?? 'Unknown'}&quot;
-            {pool.products?.name ? ` — ${pool.products.name}` : ''}.
-          </DialogDescription>
+          <div className="flex items-center gap-2">
+            <DialogTitle>Issue Job Card</DialogTitle>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-xs">
+                  <p>Create a job card from the work pool for &quot;{pool.jobs?.name ?? 'Unknown'}&quot;{pool.products?.name ? ` — ${pool.products.name}` : ''}.</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+          <DialogDescription className="sr-only">Issue a job card from the work pool</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-5">
           {/* Read-only pool info */}
-          <div className="grid grid-cols-3 gap-3 text-sm">
-            <div>
-              <span className="text-muted-foreground">Required</span>
-              <p className="font-medium">{pool.required_qty}</p>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Already Issued</span>
-              <p className="font-medium">{pool.issued_qty}</p>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Remaining</span>
-              <p className="font-medium">{pool.remaining_qty}</p>
+          <div className="rounded-lg border border-border/50 bg-muted/30 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Pool Status</p>
+            <div className="grid grid-cols-3 gap-3 text-sm">
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground">Required</span>
+                <p className="font-medium">{pool.required_qty}</p>
+              </div>
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground">Already Issued</span>
+                <p className="font-medium">{pool.issued_qty}</p>
+              </div>
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground">Remaining</span>
+                <p className="font-medium">{pool.remaining_qty}</p>
+              </div>
             </div>
           </div>
 
-          {/* Quantity */}
-          <div className="space-y-2">
-            <Label>Quantity to Issue</Label>
-            <Input
-              type="number"
-              min={1}
-              value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
-            />
-            {estimatedMinutes != null && qty > 0 && (
-              <p className="text-xs text-muted-foreground">
-                Estimated time: ~{formatDurationFromMinutes(estimatedMinutes)}
-              </p>
-            )}
-          </div>
+          {/* Quantity & Staff */}
+          <div className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Issuance Details</p>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Quantity to Issue</Label>
+              <Input
+                type="number"
+                min={1}
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+              />
+              {estimatedMinutes != null && qty > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Estimated time: ~{formatDurationFromMinutes(estimatedMinutes)}
+                </p>
+              )}
+            </div>
 
-          {/* Staff picker */}
-          <div className="space-y-2">
-            <Label>Assign to Staff (optional)</Label>
-            <Select value={staffId} onValueChange={setStaffId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Unassigned — assign later" />
-              </SelectTrigger>
-              <SelectContent>
-                {staffOptions.map((s) => (
-                  <SelectItem key={s.staff_id} value={s.staff_id.toString()}>
-                    {s.first_name} {s.last_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Assign to Staff (optional)</Label>
+              <Select value={staffId} onValueChange={setStaffId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Unassigned — assign later" />
+                </SelectTrigger>
+                <SelectContent>
+                  {staffOptions.map((s) => (
+                    <SelectItem key={s.staff_id} value={s.staff_id.toString()}>
+                      {s.first_name} {s.last_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {/* Over-issuance warning */}
@@ -1443,6 +1492,7 @@ function IssueJobCardDialog({
           )}
         </div>
 
+        <div className="border-t border-border/50 pt-4">
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
@@ -1456,6 +1506,7 @@ function IssueJobCardDialog({
             {isOverIssue ? 'Override & Issue Card' : 'Issue Job Card'}
           </Button>
         </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );

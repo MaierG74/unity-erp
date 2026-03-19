@@ -1004,7 +1004,7 @@ export const OrderComponentsDialog = ({
           </div>
         )}
 
-        <DialogFooter className="flex justify-between">
+        <DialogFooter className="flex justify-between pt-4">
           {step === 'select' ? (
             <>
               <Button variant="ghost" onClick={() => onOpenChange(false)}>

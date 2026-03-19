@@ -20,6 +20,8 @@ type StaffRelation = {
   last_name?: string | null;
 };
 
+type AssignmentJobStatus = 'issued' | 'in_progress' | 'completed' | 'on_hold';
+
 type CustomerRelation = {
   name?: string | null;
 };
@@ -67,9 +69,39 @@ type OrderManufacturingJobCardRow = {
   order?: OrderRelation | OrderRelation[] | null;
 };
 
+type FactoryFloorStatusRow = {
+  job_card_id: number;
+  assignment_id?: number | null;
+  assignment_date?: string | null;
+  start_minutes?: number | null;
+  end_minutes?: number | null;
+  job_status?: string | null;
+};
+
+type LaborPlanAssignmentRow = {
+  assignment_id: number;
+  job_instance_id?: string | null;
+  assignment_date?: string | null;
+  start_minutes?: number | null;
+  end_minutes?: number | null;
+  job_status?: string | null;
+  status?: string | null;
+  staff?: StaffRelation | StaffRelation[] | null;
+};
+
+type ScheduledJobCardContext = {
+  source: 'floor' | 'schedule';
+  job_status: AssignmentJobStatus | null;
+  assignment_date: string | null;
+  start_minutes: number | null;
+  end_minutes: number | null;
+  staff_name: string | null;
+};
+
 type AssistantOrderJobCardDetail = {
   job_card_id: number;
   status: string | null;
+  status_note: string | null;
   issue_date: string | null;
   completion_date: string | null;
   staff_name: string | null;
@@ -256,8 +288,12 @@ function formatPercent(value: number) {
 
 function formatJobCardStatus(status: string | null | undefined) {
   switch (status?.trim().toLowerCase()) {
+    case 'issued':
+      return 'Issued';
     case 'in_progress':
       return 'In progress';
+    case 'on_hold':
+      return 'On hold';
     case 'pending':
       return 'Pending';
     case 'completed':
@@ -272,6 +308,104 @@ function formatJobCardStatus(status: string | null | undefined) {
 function isAssignableJobCardStatus(status: string | null | undefined) {
   const normalized = status?.trim().toLowerCase();
   return normalized !== 'completed' && normalized !== 'cancelled';
+}
+
+function isOpenJobCardStatus(status: string | null | undefined) {
+  const normalized = status?.trim().toLowerCase();
+  return (
+    normalized === 'pending' ||
+    normalized === 'issued' ||
+    normalized === 'in_progress' ||
+    normalized === 'on_hold'
+  );
+}
+
+function normalizeAssignmentJobStatus(value: unknown): AssignmentJobStatus | null {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (
+    normalized === 'issued' ||
+    normalized === 'in_progress' ||
+    normalized === 'completed' ||
+    normalized === 'on_hold'
+  ) {
+    return normalized;
+  }
+
+  return null;
+}
+
+function extractJobCardId(jobInstanceId: string | null | undefined) {
+  if (!jobInstanceId) return null;
+
+  const match = jobInstanceId.match(/:card-(\d+)$/);
+  if (!match) return null;
+
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getEffectiveJobCardStatus(
+  rawStatus: string | null | undefined,
+  scheduledStatus: AssignmentJobStatus | null | undefined
+) {
+  const normalizedRaw = rawStatus?.trim().toLowerCase() ?? null;
+  if (normalizedRaw === 'completed' || normalizedRaw === 'cancelled') {
+    return normalizedRaw;
+  }
+
+  if (
+    scheduledStatus === 'issued' ||
+    scheduledStatus === 'in_progress' ||
+    scheduledStatus === 'on_hold' ||
+    scheduledStatus === 'completed'
+  ) {
+    return scheduledStatus;
+  }
+
+  return normalizedRaw;
+}
+
+function minutesToClock(minutes: number | null | undefined) {
+  if (minutes == null || !Number.isFinite(minutes)) return null;
+
+  const total = Math.max(0, Math.trunc(minutes));
+  const hours = Math.floor(total / 60);
+  const remainder = total % 60;
+  return `${hours.toString().padStart(2, '0')}:${remainder.toString().padStart(2, '0')}`;
+}
+
+function formatDateForAnswer(dateValue: string | null | undefined) {
+  if (!dateValue) return null;
+
+  const date = new Date(`${dateValue}T00:00:00`);
+  if (Number.isNaN(date.getTime())) {
+    return dateValue;
+  }
+
+  return new Intl.DateTimeFormat('en-ZA', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'Africa/Johannesburg',
+  }).format(date);
+}
+
+function formatScheduleContext(context: ScheduledJobCardContext | null | undefined) {
+  if (!context) return null;
+
+  const dateLabel = formatDateForAnswer(context.assignment_date);
+  const startLabel = minutesToClock(context.start_minutes);
+  const endLabel = minutesToClock(context.end_minutes);
+
+  if (dateLabel && startLabel && endLabel) {
+    return `${dateLabel} ${startLabel}-${endLabel}`;
+  }
+
+  if (dateLabel) {
+    return `${dateLabel} · From schedule`;
+  }
+
+  return 'From schedule';
 }
 
 function getCurrentDateInZone(timeZone = 'Africa/Johannesburg') {
@@ -339,6 +473,80 @@ function buildOrderLabel(order: {
 }) {
   const orderNumber = order.order_number?.trim() || `Order ${order.order_id}`;
   return order.customer_name?.trim() ? `${orderNumber} (${order.customer_name.trim()})` : orderNumber;
+}
+
+async function loadScheduledJobCardContexts(
+  supabase: SupabaseClient,
+  orderId: number,
+  jobCardIds: number[]
+) {
+  const contexts = new Map<number, ScheduledJobCardContext>();
+  if (jobCardIds.length === 0) {
+    return contexts;
+  }
+
+  const jobCardIdSet = new Set(jobCardIds);
+
+  const { data: floorRows, error: floorError } = await supabase
+    .from('factory_floor_status')
+    .select('job_card_id, assignment_id, assignment_date, start_minutes, end_minutes, job_status')
+    .in('job_card_id', jobCardIds);
+
+  if (!floorError) {
+    for (const row of (floorRows ?? []) as FactoryFloorStatusRow[]) {
+      if (!jobCardIdSet.has(row.job_card_id) || contexts.has(row.job_card_id)) {
+        continue;
+      }
+
+      contexts.set(row.job_card_id, {
+        source: 'floor',
+        job_status: normalizeAssignmentJobStatus(row.job_status),
+        assignment_date: row.assignment_date ?? null,
+        start_minutes: row.start_minutes ?? null,
+        end_minutes: row.end_minutes ?? null,
+        staff_name: null,
+      });
+    }
+  }
+
+  const { data: assignmentRows, error: assignmentError } = await supabase
+    .from('labor_plan_assignments')
+    .select(`
+      assignment_id,
+      job_instance_id,
+      assignment_date,
+      start_minutes,
+      end_minutes,
+      job_status,
+      status,
+      staff:staff_id(first_name, last_name)
+    `)
+    .eq('order_id', orderId)
+    .neq('status', 'unscheduled')
+    .order('assignment_date', { ascending: true })
+    .order('start_minutes', { ascending: true });
+
+  if (assignmentError) {
+    return contexts;
+  }
+
+  for (const row of (assignmentRows ?? []) as LaborPlanAssignmentRow[]) {
+    const jobCardId = extractJobCardId(row.job_instance_id);
+    if (jobCardId == null || !jobCardIdSet.has(jobCardId) || contexts.has(jobCardId)) {
+      continue;
+    }
+
+    contexts.set(jobCardId, {
+      source: 'schedule',
+      job_status: normalizeAssignmentJobStatus(row.job_status),
+      assignment_date: row.assignment_date ?? null,
+      start_minutes: row.start_minutes ?? null,
+      end_minutes: row.end_minutes ?? null,
+      staff_name: formatStaffName(getRelationRecord(row.staff)),
+    });
+  }
+
+  return contexts;
 }
 
 export function detectManufacturingIntent(message: string) {
@@ -669,7 +877,7 @@ export async function getOrderManufacturingSummary(
       issue_date,
       completion_date,
       staff:staff_id(first_name, last_name),
-      items:job_card_items(
+      items:job_card_items!job_card_items_job_card_id_fkey(
         item_id,
         quantity,
         completed_quantity,
@@ -707,8 +915,15 @@ export async function getOrderManufacturingSummary(
     };
   }
 
+  const scheduledContexts = await loadScheduledJobCardContexts(
+    supabase,
+    resolved.order.order_id,
+    rows.map(row => row.job_card_id)
+  );
+
   const normalizedRows = rows.map(row => {
     const staff = getRelationRecord(row.staff);
+    const scheduledContext = scheduledContexts.get(row.job_card_id) ?? null;
     const items = (row.items ?? []).map(item => {
       const product = getRelationRecord(item.product);
       return {
@@ -725,10 +940,12 @@ export async function getOrderManufacturingSummary(
 
     return {
       job_card_id: row.job_card_id,
-      status: row.status?.trim().toLowerCase() ?? null,
+      status: getEffectiveJobCardStatus(row.status, scheduledContext?.job_status),
+      status_note: formatScheduleContext(scheduledContext),
       issue_date: row.issue_date ?? null,
       completion_date: row.completion_date ?? null,
       completed_by: formatStaffName(staff),
+      staff_name: scheduledContext?.staff_name ?? formatStaffName(staff),
       items,
     };
   });
@@ -737,16 +954,14 @@ export async function getOrderManufacturingSummary(
   const completedJobCards = normalizedRows.filter(
     row => row.status === 'completed' || Boolean(row.completion_date)
   );
-  const activeJobCards = normalizedRows.filter(
-    row => row.status === 'pending' || row.status === 'in_progress'
-  );
-  const assignedJobCards = normalizedRows.filter(row => Boolean(row.completed_by));
-  const unassignedJobCards = normalizedRows.filter(row => !row.completed_by);
+  const activeJobCards = normalizedRows.filter(row => isOpenJobCardStatus(row.status));
+  const assignedJobCards = normalizedRows.filter(row => Boolean(row.staff_name));
+  const unassignedJobCards = normalizedRows.filter(row => !row.staff_name);
   const activeAssignedJobCards = normalizedRows.filter(
-    row => isAssignableJobCardStatus(row.status) && Boolean(row.completed_by)
+    row => isAssignableJobCardStatus(row.status) && Boolean(row.staff_name)
   );
   const activeUnassignedJobCards = normalizedRows.filter(
-    row => isAssignableJobCardStatus(row.status) && !row.completed_by
+    row => isAssignableJobCardStatus(row.status) && !row.staff_name
   );
   const totalPlannedQuantity = normalizedRows.reduce(
     (sum, row) => sum + row.items.reduce((itemSum, item) => itemSum + item.quantity, 0),
@@ -792,9 +1007,10 @@ export async function getOrderManufacturingSummary(
     .map(row => ({
       job_card_id: row.job_card_id,
       status: row.status,
+      status_note: row.status_note,
       issue_date: row.issue_date,
       completion_date: row.completion_date,
-      staff_name: row.completed_by,
+      staff_name: row.staff_name,
       product_labels: Array.from(new Set(row.items.map(item => item.product_label))).filter(
         label => label !== 'Unknown product'
       ),
@@ -835,7 +1051,7 @@ export async function getOrdersInProductionSummary(
       completion_date,
       staff:staff_id(first_name, last_name),
       order:order_id(order_id, order_number, customer:customers(name)),
-      items:job_card_items(
+      items:job_card_items!job_card_items_job_card_id_fkey(
         item_id,
         product:product_id(product_id, internal_code, name, description)
       )
@@ -929,7 +1145,7 @@ export async function getOrdersCompletedThisWeekSummary(
       completion_date,
       staff:staff_id(first_name, last_name),
       order:order_id(order_id, order_number, customer:customers(name)),
-      items:job_card_items(
+      items:job_card_items!job_card_items_job_card_id_fkey(
         item_id,
         product:product_id(product_id, internal_code, name, description)
       )
@@ -1702,11 +1918,13 @@ export function buildOrderJobCardsCard(
       visibleJobCards.length > 0
         ? visibleJobCards.map(jobCard => ({
             job_card: `JC-${jobCard.job_card_id}`,
-            status: formatJobCardStatus(jobCard.status),
+            status: jobCard.status_note
+              ? `${formatJobCardStatus(jobCard.status)} · ${jobCard.status_note}`
+              : formatJobCardStatus(jobCard.status),
             staff: jobCard.staff_name ?? 'Unassigned',
             ...(options?.assignmentFocus
               ? {
-                  issued: jobCard.issue_date ?? 'Not issued',
+                  issued: jobCard.status_note ?? jobCard.issue_date ?? 'Not issued',
                   assignment: jobCard.staff_name ? 'Assigned' : 'Needs assignment',
                 }
               : {

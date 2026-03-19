@@ -125,6 +125,10 @@ const itemStatusConfig: Record<ItemStatus, { label: string; variant: 'default' |
   cancelled: { label: 'Cancelled', variant: 'destructive' },
 };
 
+function cardAssignmentInstancePattern(jobCardId: number): string {
+  return `%:card-${jobCardId}`;
+}
+
 export default function JobCardDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -139,6 +143,23 @@ export default function JobCardDetailPage() {
   const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
   const [completeQuantities, setCompleteQuantities] = useState<Record<number, number>>({});
   const [isConfirming, setIsConfirming] = useState(false);
+
+  const syncExactCardAssignment = async (
+    updates: Record<string, any>,
+    options?: { onlyCurrentStatus?: JobCardStatus }
+  ) => {
+    let query = supabase
+      .from('labor_plan_assignments')
+      .update(updates)
+      .like('job_instance_id', cardAssignmentInstancePattern(jobCardId));
+
+    if (options?.onlyCurrentStatus) {
+      query = query.eq('job_status', options.onlyCurrentStatus);
+    }
+
+    const { error } = await query;
+    if (error) throw error;
+  };
 
   // Fetch job card details
   const { data: jobCard, isLoading: loadingJobCard, error: jobCardError, refetch: refetchJobCard } = useQuery({
@@ -258,19 +279,10 @@ export default function JobCardDetailPage() {
       }
 
       if (newStatus === 'in_progress' || newStatus === 'completed') {
-        const jobIds = items.map((i) => i.job_id).filter(Boolean);
-        if (jobIds.length > 0 && jobCard?.staff_id) {
-          const assignmentUpdates: Record<string, any> = { job_status: newStatus };
-          if (newStatus === 'in_progress') assignmentUpdates.started_at = now;
-          if (newStatus === 'completed') assignmentUpdates.completed_at = now;
-          sideEffects.push(
-            supabase
-              .from('labor_plan_assignments')
-              .update(assignmentUpdates)
-              .in('job_id', jobIds)
-              .eq('staff_id', jobCard.staff_id)
-          );
-        }
+        const assignmentUpdates: Record<string, any> = { job_status: newStatus };
+        if (newStatus === 'in_progress') assignmentUpdates.started_at = now;
+        if (newStatus === 'completed') assignmentUpdates.completed_at = now;
+        sideEffects.push(syncExactCardAssignment(assignmentUpdates));
       }
 
       await Promise.all(sideEffects);
@@ -349,15 +361,10 @@ export default function JobCardDetailPage() {
       if (itemsErr) throw itemsErr;
 
       // 3. Revert linked assignments
-      const jobIds = items.map((i) => i.job_id).filter(Boolean);
-      if (jobIds.length > 0 && jobCard?.staff_id) {
-        await supabase
-          .from('labor_plan_assignments')
-          .update({ job_status: 'in_progress', completed_at: null })
-          .in('job_id', jobIds)
-          .eq('staff_id', jobCard.staff_id)
-          .eq('job_status', 'completed');
-      }
+      await syncExactCardAssignment(
+        { job_status: 'in_progress', completed_at: null },
+        { onlyCurrentStatus: 'completed' }
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobCard', jobCardId] });
@@ -692,66 +699,54 @@ export default function JobCardDetailPage() {
       </div>
 
       {/* Details Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Assigned To</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-lg font-medium">
+      <div className="rounded-lg border border-border/50 bg-muted/30 p-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="space-y-1">
+            <span className="text-xs text-muted-foreground">Assigned To</span>
+            <p className="text-sm font-medium">
               {jobCard.staff
                 ? `${jobCard.staff.first_name} ${jobCard.staff.last_name}`
                 : 'Unassigned'}
             </p>
-          </CardContent>
-        </Card>
+          </div>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Related Order</CardDescription>
-          </CardHeader>
-          <CardContent>
+          <div className="space-y-1">
+            <span className="text-xs text-muted-foreground">Related Order</span>
             {jobCard.orders ? (
-              <Link
-                href={`/orders/${jobCard.orders.order_id}`}
-                className="text-lg font-medium text-primary hover:underline inline-flex items-center gap-1"
-              >
-                {jobCard.orders.order_number}
-                <ExternalLink className="h-3 w-3" />
-              </Link>
+              <div>
+                <Link
+                  href={`/orders/${jobCard.orders.order_id}`}
+                  className="text-sm font-medium text-primary hover:underline inline-flex items-center gap-1"
+                >
+                  {jobCard.orders.order_number}
+                  <ExternalLink className="h-3 w-3" />
+                </Link>
+                {jobCard.orders.customers && (
+                  <p className="text-xs text-muted-foreground">
+                    {jobCard.orders.customers.name}
+                  </p>
+                )}
+              </div>
             ) : (
-              <p className="text-muted-foreground">No order linked</p>
+              <p className="text-sm text-muted-foreground">No order linked</p>
             )}
-            {jobCard.orders?.customers && (
-              <p className="text-sm text-muted-foreground">
-                {jobCard.orders.customers.name}
-              </p>
-            )}
-          </CardContent>
-        </Card>
+          </div>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Due Date</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-lg font-medium">
+          <div className="space-y-1">
+            <span className="text-xs text-muted-foreground">Due Date</span>
+            <p className="text-sm font-medium">
               {jobCard.due_date
                 ? formatDate(jobCard.due_date)
                 : 'No due date'}
             </p>
-          </CardContent>
-        </Card>
+          </div>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Progress</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-lg font-medium">
+          <div className="space-y-1">
+            <span className="text-xs text-muted-foreground">Progress</span>
+            <p className="text-sm font-medium">
               {completedItems} / {totalItems} items
             </p>
-            <div className="mt-2">
+            <div className="mt-1">
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <div>
@@ -767,7 +762,7 @@ export default function JobCardDetailPage() {
                   </TooltipContent>
                 </Tooltip>
             </div>
-            <div className="flex items-center justify-between mt-1">
+            <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
                 {overallPct}%
               </p>
@@ -777,40 +772,36 @@ export default function JobCardDetailPage() {
                 </p>
               )}
             </div>
-            <p className="text-sm text-muted-foreground mt-1">
+            <p className="text-xs text-muted-foreground">
               R {completedValue.toFixed(2)} / R {totalValue.toFixed(2)}
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
 
       {/* Notes */}
       {jobCard.notes && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2">
-              <FileText className="h-4 w-4" />
-              Notes
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="whitespace-pre-wrap">{jobCard.notes}</p>
-          </CardContent>
-        </Card>
+        <div className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <FileText className="h-3.5 w-3.5" />
+            Notes
+          </p>
+          <p className="text-sm whitespace-pre-wrap">{jobCard.notes}</p>
+        </div>
       )}
 
       {/* Items Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Job Card Items</CardTitle>
-          <CardDescription>
+      <div className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Job Card Items</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
             Track completion for each item on this job card
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+          </p>
+        </div>
+        <div className="rounded-md border border-border/50 overflow-hidden">
           <Table>
             <TableHeader>
-              <TableRow>
+              <TableRow className="bg-muted/40 hover:bg-muted/40">
                 <TableHead>Product</TableHead>
                 <TableHead>Job</TableHead>
                 <TableHead className="text-right">Qty</TableHead>
@@ -936,31 +927,30 @@ export default function JobCardDetailPage() {
             </TableBody>
           </Table>
 
-          {/* Totals */}
-          <div className="mt-4 pt-4 border-t flex justify-end">
-            <div className="text-right">
-              <div className="text-sm text-muted-foreground">Total Value</div>
-              <div className="text-2xl font-bold">R {totalValue.toFixed(2)}</div>
-              <div className="text-sm text-muted-foreground">
-                Earned: <span className="text-green-500 font-medium">R {completedValue.toFixed(2)}</span>
-              </div>
+        </div>
+
+        {/* Totals */}
+        <div className="border-t border-border/50 pt-4 flex justify-end">
+          <div className="text-right">
+            <div className="text-xs text-muted-foreground">Total Value</div>
+            <div className="text-xl font-bold">R {totalValue.toFixed(2)}</div>
+            <div className="text-xs text-muted-foreground">
+              Earned: <span className="text-green-500 dark:text-green-400 font-medium">R {completedValue.toFixed(2)}</span>
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Completion Info */}
       {jobCard.status === 'completed' && jobCard.completion_date && (
-        <Card className="border-green-200 bg-green-50/50 dark:bg-green-950/20">
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
-              <CheckCircle className="h-5 w-5" />
-              <span className="font-medium">
-                Completed on {formatDate(jobCard.completion_date)}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="rounded-lg border border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-950/30 p-4">
+          <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
+            <CheckCircle className="h-5 w-5" />
+            <span className="font-medium text-sm">
+              Completed on {formatDate(jobCard.completion_date)}
+            </span>
+          </div>
+        </div>
       )}
     </div>
     <Dialog open={completeDialogOpen} onOpenChange={setCompleteDialogOpen}>

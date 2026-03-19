@@ -54,7 +54,7 @@ This document details the Unity ERP time and attendance system architecture, per
   - Sunday: All hours are double-time
   - First 9 hours: Regular time
   - After 9 hours: Overtime (1.5x)
-- **Consumer Rule**: Weekly payroll rollups use the organization's configured standard week hours (`organizations.payroll_standard_week_hours`, default `44.00`) for non-double-time hours. Consumers should total each day's worked minutes from `time_daily_summary`, keep `dt_minutes` separate, then classify the first configured weekly hours as regular and the balance as overtime. This keeps Weekly Summary, payroll review, exports, and saved `staff_weekly_payroll` rows aligned for the same week.
+- **Consumer Rule**: Weekly payroll rollups use the organization's configured standard week hours (`organizations.payroll_standard_week_hours`, default `44.00`) for non-double-time hours. Consumers should total each day's worked minutes from `time_daily_summary`, keep `dt_minutes` separate, then classify the first configured weekly hours as regular and the balance as overtime. This keeps Weekly Summary, payroll review, exports, and saved `staff_weekly_payroll` rows aligned for the same week. Weekly Summary week navigation should update the `week` query param from event handlers after the local week state changes, not from inside React state updater functions, so the router stays free of render-phase update warnings.
 
 ### Key Files & Components
 

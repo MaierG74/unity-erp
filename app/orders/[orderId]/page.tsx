@@ -1403,7 +1403,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       )}
 
       {activeTab === 'procurement' && (
-        <ProcurementTab orderId={orderId} />
+        <ProcurementTab orderId={orderId} onOrderComponents={() => setOrderComponentsOpen(true)} />
       )}
 
       {activeTab === 'documents' && (

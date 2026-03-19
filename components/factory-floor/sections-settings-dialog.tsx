@@ -123,7 +123,7 @@ export function SectionsSettingsDialog({ open, onOpenChange }: SectionsSettingsD
               {/* Header row */}
               <div className="grid grid-cols-[1fr_150px_48px_60px_50px_60px_36px] gap-2 items-center text-xs font-medium text-muted-foreground px-1">
                 <span>Name</span>
-                <span>Category</span>
+                <span>Main category</span>
                 <span>Color</span>
                 <span>Span</span>
                 <span>Active</span>
@@ -148,7 +148,7 @@ export function SectionsSettingsDialog({ open, onOpenChange }: SectionsSettingsD
                     }}
                   />
 
-                  {/* Category */}
+                  {/* Main category */}
                   <Select
                     value={section.category_id?.toString() ?? 'none'}
                     onValueChange={(v) =>
