@@ -14,7 +14,7 @@
 - Inventory list: `app/inventory/page.tsx` (current canonical) — tabbed interface with Components, Categories, On Order, Transactions, and Reports tabs.
 - Component detail: `app/inventory/components/[id]/page.tsx` — dedicated detail page with Overview, Edit, Inventory, Suppliers, Transactions, Orders, and Analytics tabs.
 - Alternative (modular) client: `app/inventory/inventory-client.tsx` — `DataGrid` + `InventoryFilters`.
-- Supplier view: `app/suppliers/[id]/page.tsx` → Components tab shows supplier-specific mappings.
+- Supplier view: `app/suppliers/[id]/page.tsx` → Components tab shows supplier-specific mappings and can also originate new master inventory items for the current supplier.
 - Purchasing: `app/purchasing/purchase-orders/[id]/page.tsx` — receipts create movements and increase on‑hand.
 
 ## Data Model (working set)
@@ -29,6 +29,7 @@
 - `suppliercomponents`
   - Supplier mapping with `supplier_code`, `price`, `lead_time`, `min_order_quantity`.
   - Add Component dialog: when attaching suppliers during new component creation, the supplier row can now either pick an existing supplier code or create a new supplier-specific code inline. Saving the component inserts the corresponding `suppliercomponents` row in the same submission, so users do not need a second pass through the component detail page.
+  - Supplier-origin quick-create persists the master `components` row, its `inventory` row, and the first `suppliercomponents` mapping together in one organization-scoped save path.
 - Reference: `component_categories`, `unitsofmeasure` (standardized; case‑insensitive unique).
 
 ## Core Operations

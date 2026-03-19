@@ -26,6 +26,12 @@ Manage components, stock levels, locations, supplier links, and images. Provide 
   - Add/Edit component dialog with image upload to Supabase Storage bucket `QButton`.
   - Fields: internal code, description, unit, category, suppliers (code/price), quantity, reorder level, location.
   - On save: upserts component, inventory row, and supplier component rows. Handles image addition/removal.
+  - Remains the inventory-native path for master item creation/editing.
+
+- `components/features/suppliers/create-supplier-inventory-item-dialog.tsx`
+  - Supplier-scoped quick-create modal launched from Suppliers → Components.
+  - Captures the required master item fields plus the initial supplier-specific code, price, lead time, and MOQ.
+  - Saves through `app/api/suppliers/[supplierId]/components/create-item/route.ts` so the first `suppliercomponents` row is created together with the master `components` and `inventory` rows.
 
 - `components/features/inventory/Details.tsx`
   - Right-side panel showing selected item details, stock status badge, category, unit, location, suppliers with prices.
@@ -142,7 +148,9 @@ Types referenced:
    - Selecting a row sets `selectedItem` and renders `InventoryDetails` and `TransactionHistory`.
 
 4) Add or edit component via dialog
-   - Launch `ComponentDialog`; on submit, upserts component/inventory/suppliercomponents.
+   - Creation can start from either Inventory (`ComponentDialog`) or Supplier context (`CreateSupplierInventoryItemDialog`).
+   - Supplier-origin creation binds the current supplier and creates `components`, `inventory`, and `suppliercomponents` during the same save.
+   - Inventory-origin creation still uses `ComponentDialog`; on submit, it upserts component/inventory/suppliercomponents.
    - Image upload handled with Supabase Storage; supports removal.
 
 5) Delete component (from `page.tsx`)
@@ -167,6 +175,7 @@ Types referenced:
 ### Security & RLS
 - All reads/writes depend on Supabase RLS policies. Ensure policies allow intended operations for authenticated users.
 - Image upload requires valid auth; `ComponentDialog` checks session before storage operations.
+- Supplier-side quick-create now uses the organization-scoped server endpoint `app/api/suppliers/[supplierId]/components/create-item/route.ts`, which resolves module/org access before creating `components`, `inventory`, and `suppliercomponents` under the same organization.
 
 ### Performance Considerations
 - Client-side filtering/pagination; could move to server-side for large datasets.
@@ -291,4 +300,3 @@ Types referenced:
 ```
 
 Keep this document updated with structural changes, decisions, and TODOs.
-
