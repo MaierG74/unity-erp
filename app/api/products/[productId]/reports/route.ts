@@ -61,26 +61,33 @@ export async function GET(req: NextRequest, context: { params: Promise<{ product
     }
 
     // Build order_details query
-    let query = supabaseAdmin
+    // Note: Supabase PostgREST doesn't support filtering on nested !inner join fields
+    // with .eq/.not on the parent query. So we fetch all and filter client-side.
+    const { data: rawOrders, error: ordersErr } = await supabaseAdmin
       .from('order_details')
       .select(`
         order_detail_id,
         order_id,
         quantity,
         unit_price,
-        order:orders!inner(order_number, status, order_date, customer:customers(name))
+        order:orders!inner(order_id, order_number, status, order_date, org_id, customer:customers(name))
       `)
       .eq('product_id', productId)
-      .eq('order.org_id', auth.orgId)
-      .not('order.status', 'eq', 'cancelled')
-      .order('order.order_date', { ascending: false })
 
-    if (periodStart) {
-      query = query.gte('order.order_date', periodStart)
+    if (ordersErr) {
+      console.error('product-reports orders query error:', ordersErr)
+      throw ordersErr
     }
 
-    const { data: rawOrders, error: ordersErr } = await query
-    if (ordersErr) throw ordersErr
+    // Filter client-side: org, status, period
+    const filteredOrders = (rawOrders ?? []).filter((row: any) => {
+      const order = row.order
+      if (!order) return false
+      if (order.org_id !== auth.orgId) return false
+      if (order.status === 'cancelled') return false
+      if (periodStart && order.order_date && order.order_date < periodStart) return false
+      return true
+    })
 
     // Get BOM cost via getProductCostSummary (passes auth through to internal API routes)
     const origin = `${url.protocol}//${url.host}`
@@ -100,9 +107,12 @@ export async function GET(req: NextRequest, context: { params: Promise<{ product
         total: costSummary.total_cost,
         missingPrices: costSummary.missing_material_prices,
       }
+    } else {
+      // BOM cost computation failed (product not found, no BOM, etc.) — continue with zero cost
+      console.warn('product-reports: BOM cost unavailable:', costSummary.kind, productRef)
     }
 
-    const orders = (rawOrders ?? []).map((row: any) => ({
+    const orders = filteredOrders.map((row: any) => ({
       orderDetailId: row.order_detail_id,
       orderId: row.order_id,
       orderNumber: row.order?.order_number ?? null,
