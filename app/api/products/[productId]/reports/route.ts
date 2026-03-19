@@ -61,8 +61,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ product
     }
 
     // Build order_details query
-    // Note: Supabase PostgREST doesn't support filtering on nested !inner join fields
-    // with .eq/.not on the parent query. So we fetch all and filter client-side.
+    // orders table uses status_id (FK to order_statuses), not a status column
     const { data: rawOrders, error: ordersErr } = await supabaseAdmin
       .from('order_details')
       .select(`
@@ -70,7 +69,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ product
         order_id,
         quantity,
         unit_price,
-        order:orders!inner(order_id, order_number, status, order_date, org_id, customer:customers(name))
+        order:orders(order_id, order_number, order_date, org_id, status:order_statuses(status_name), customer:customers(name))
       `)
       .eq('product_id', productId)
 
@@ -84,7 +83,8 @@ export async function GET(req: NextRequest, context: { params: Promise<{ product
       const order = row.order
       if (!order) return false
       if (order.org_id !== auth.orgId) return false
-      if (order.status === 'cancelled') return false
+      const statusName = order.status?.status_name?.toLowerCase()
+      if (statusName === 'cancelled') return false
       if (periodStart && order.order_date && order.order_date < periodStart) return false
       return true
     })
