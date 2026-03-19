@@ -263,12 +263,18 @@ importers:
       three-gpu-pathtracer:
         specifier: ^0.0.24
         version: 0.0.24(three-mesh-bvh@0.9.9(three@0.183.2))(three@0.183.2)(xatlas-web@0.1.0)
+      three-mesh-bvh:
+        specifier: ^0.9.9
+        version: 0.9.9(three@0.183.2)
       tw-animate-css:
         specifier: 1.4.0
         version: 1.4.0
       url:
         specifier: ^0.11.4
         version: 0.11.4
+      xatlas-web:
+        specifier: ^0.1.0
+        version: 0.1.0
       zod:
         specifier: ^3.24.2
         version: 3.25.76
