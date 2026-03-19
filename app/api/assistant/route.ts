@@ -122,6 +122,14 @@ import {
   buildAssistantComponentClarifyCard,
 } from '@/lib/assistant/component-resolver';
 import {
+  buildAssistantEntityClarifyAnswer,
+  buildAssistantEntityClarifyCard,
+  formatAssistantEntityCandidate,
+  resolveAssistantEntity,
+  resolveAssistantEntityForIntent,
+  type AssistantEntityCandidate,
+} from '@/lib/assistant/entity-lookup';
+import {
   buildAssistantProductClarifyAnswer,
   buildAssistantProductClarifyCard,
 } from '@/lib/assistant/product-resolver';
@@ -367,6 +375,17 @@ function shouldPreferProductOpenOrdersRoute(options: {
     return true;
   }
 
+  if (
+    options.operationalIntent === 'open_orders' ||
+    options.operationalIntent === 'last_customer_order' ||
+    options.operationalIntent === 'recent_customer_orders' ||
+    options.operationalIntent === 'orders_last_7_days' ||
+    options.operationalIntent === 'orders_due_this_week' ||
+    options.operationalIntent === 'late_orders'
+  ) {
+    return false;
+  }
+
   const normalized = options.message.toLowerCase();
   const scope = getAssistantScope(options.pathname);
   const mentionsSupplierOrInventory =
@@ -407,11 +426,94 @@ function buildInventoryClarifySuggestions(
   });
 }
 
+type CustomerOrderIntent =
+  | 'open_orders'
+  | 'last_customer_order'
+  | 'recent_customer_orders'
+  | 'orders_last_7_days'
+  | 'orders_due_this_week'
+  | 'late_orders';
+
+function buildCustomerOrderPrompt(intent: CustomerOrderIntent, customerName: string) {
+  switch (intent) {
+    case 'last_customer_order':
+      return `What was the latest order for ${customerName}?`;
+    case 'recent_customer_orders':
+      return `What are the latest orders for ${customerName}?`;
+    case 'orders_last_7_days':
+      return `Orders from last 7 days for ${customerName}`;
+    case 'orders_due_this_week':
+      return `Which orders are due this week for ${customerName}?`;
+    case 'late_orders':
+      return `Which orders are late for ${customerName}?`;
+    case 'open_orders':
+    default:
+      return `What open orders do we have for ${customerName}?`;
+  }
+}
+
+function buildProductOrderPrompt(productLabel: string) {
+  return `Which customer orders include ${productLabel}?`;
+}
+
+function buildOrderEntityClarifyReply(
+  pathname: string | null | undefined,
+  query: string,
+  candidates: AssistantEntityCandidate[],
+  intent: CustomerOrderIntent
+) {
+  const clarifyCandidates = candidates.slice(0, 5);
+
+  return buildReply(pathname, {
+    status: 'clarify',
+    message: buildAssistantEntityClarifyAnswer(query, clarifyCandidates, {
+      leadIn: `I found more than one plausible Unity record for "${query}". Did you mean the customer or the product?`,
+    }),
+    card: buildAssistantEntityClarifyCard(query, clarifyCandidates, {
+      title: `Choose what "${query}" refers to`,
+      description:
+        'This name matches more than one Unity record. Pick the customer to see customer orders, or pick the product to inspect product-order demand.',
+      buildPrimaryPrompt: candidate =>
+        candidate.kind === 'customer'
+          ? buildCustomerOrderPrompt(intent, candidate.label)
+          : candidate.kind === 'product'
+            ? buildProductOrderPrompt(formatAssistantEntityCandidate(candidate))
+            : null,
+      buildPrimaryLabel: candidate =>
+        candidate.kind === 'customer' ? 'Use customer' : 'Use product',
+    }),
+    suggestions: clarifyCandidates.map(candidate =>
+      candidate.kind === 'customer'
+        ? buildCustomerOrderPrompt(intent, candidate.label)
+        : buildProductOrderPrompt(formatAssistantEntityCandidate(candidate))
+    ),
+  });
+}
+
 async function resolveOrdersCustomerOrReply(
   supabase: Parameters<typeof resolveOpenOrdersCustomer>[0],
   pathname: string | null | undefined,
-  customerRef: string
+  customerRef: string,
+  intent: CustomerOrderIntent
 ) {
+  const scopedLookup = await resolveAssistantEntityForIntent(supabase, customerRef, {
+    primaryKinds: ['customer'],
+    secondaryKinds: ['product'],
+    limitPerKind: 3,
+    ambiguityGap: 8,
+  });
+  const customerCandidates = scopedLookup.primaryCandidates;
+  const productCandidates = scopedLookup.secondaryCandidates;
+
+  if (scopedLookup.kind === 'clarify' && productCandidates.length > 0) {
+    const candidates = scopedLookup.candidates.slice(0, 4);
+
+    return {
+      resolvedCustomer: null,
+      reply: buildOrderEntityClarifyReply(pathname, customerRef, candidates, intent),
+    };
+  }
+
   const resolvedCustomer = await resolveOpenOrdersCustomer(supabase, customerRef);
 
   if (resolvedCustomer.kind === 'ambiguous') {
@@ -421,7 +523,7 @@ async function resolveOrdersCustomerOrReply(
         status: 'clarify',
         message: `I found multiple possible customers for "${customerRef}". Which one did you mean?`,
         suggestions: resolvedCustomer.candidates.map(
-          candidate => `How many open orders for ${candidate}?`
+          candidate => buildCustomerOrderPrompt(intent, candidate)
         ),
       }),
     };
@@ -434,9 +536,9 @@ async function resolveOrdersCustomerOrReply(
         status: 'unknown',
         message: `I don't know. I couldn't find a customer matching "${customerRef}" in open orders.`,
         suggestions: [
+          buildCustomerOrderPrompt(intent, 'Office Group'),
           'How many open customer orders do we have?',
           'Which orders are due this week?',
-          'Which orders are late?',
         ],
       }),
     };
@@ -519,6 +621,10 @@ export async function POST(req: NextRequest) {
   const openOrdersFollowUp = getOpenOrdersFollowUpContext(normalized, history);
   const detectedOperationalIntent = detectOperationalIntent(normalized);
   const explicitOpenOrdersCustomerRef = extractOpenOrdersCustomerReference(normalized);
+  const explicitLatestOrderCustomerRef = extractLatestOrderCustomerReference(normalized);
+  const explicitRecentCustomerOrdersCustomerRef =
+    extractRecentCustomerOrdersCustomerReference(normalized);
+  const explicitRecentOrdersCustomerRef = extractRecentOrdersCustomerReference(normalized);
   const detectedManufacturingIntent = detectManufacturingIntent(normalized);
   const explicitManufacturingOrderRef =
     extractManufacturingOrderReference(normalized) ||
@@ -541,24 +647,79 @@ export async function POST(req: NextRequest) {
     modelRoute?.action === 'inventory_snapshot'
       ? modelRoute.inventory_intent ?? detectInventoryIntent(normalized)
       : detectInventoryIntent(normalized);
+  const isExplicitCustomerOpenOrdersPhrase =
+    Boolean(explicitOpenOrdersCustomerRef) &&
+    /\b(current|open|outstanding)\b/.test(normalized);
   const shouldForceOpenOrdersIntent =
-    detectedOperationalIntent === 'open_orders' &&
+    (detectedOperationalIntent === 'open_orders' || isExplicitCustomerOpenOrdersPhrase) &&
     Boolean(explicitOpenOrdersCustomerRef || modelRoute?.customer_ref?.trim());
+  const shouldForceLatestCustomerOrderIntent =
+    detectedOperationalIntent === 'last_customer_order' && Boolean(explicitLatestOrderCustomerRef);
+  const shouldForceRecentCustomerOrdersIntent =
+    detectedOperationalIntent === 'recent_customer_orders' &&
+    Boolean(explicitRecentCustomerOrdersCustomerRef || modelRoute?.customer_ref?.trim());
   const activeOrderOperationalIntent =
     activeOrderFollowUpIntent === 'order_products' || activeOrderFollowUpIntent === 'order_blockers'
       ? activeOrderFollowUpIntent
       : null;
   const activeOrderManufacturingIntent =
     activeOrderFollowUpIntent === 'order_job_cards' ? 'order_job_cards' : null;
-  const operationalIntent = openOrdersFollowUp
+  let operationalIntent = openOrdersFollowUp
     ? 'open_orders'
     : explicitManufacturingOrderRef && detectedManufacturingIntent
       ? null
+      : shouldForceLatestCustomerOrderIntent
+        ? 'last_customer_order'
+        : shouldForceRecentCustomerOrdersIntent
+          ? 'recent_customer_orders'
       : shouldForceOpenOrdersIntent
         ? 'open_orders'
       : getOperationalIntentFromModelAction(modelRoute?.action) ??
         detectedOperationalIntent ??
         activeOrderOperationalIntent;
+
+  const explicitCustomerOrderRef =
+    explicitLatestOrderCustomerRef ||
+    explicitRecentCustomerOrdersCustomerRef ||
+    explicitRecentOrdersCustomerRef ||
+    explicitOpenOrdersCustomerRef;
+  const hasExplicitCustomerOrderReference = Boolean(explicitCustomerOrderRef);
+
+  let resolvedCustomerOrderEntity:
+    | Awaited<ReturnType<typeof resolveAssistantEntity>>
+    | null = null;
+  if (explicitCustomerOrderRef) {
+    try {
+      resolvedCustomerOrderEntity = await resolveAssistantEntity(
+        routeClient.supabase,
+        explicitCustomerOrderRef,
+        {
+          preferredKinds: ['customer'],
+          strictPreferredKinds: true,
+          fallbackToOtherKinds: false,
+        }
+      );
+    } catch (error) {
+      console.error('[assistant] customer entity lookup failed', error);
+    }
+  }
+
+  if (resolvedCustomerOrderEntity?.kind === 'resolved') {
+    if (explicitLatestOrderCustomerRef) {
+      operationalIntent = 'last_customer_order';
+    } else if (explicitRecentCustomerOrdersCustomerRef) {
+      operationalIntent = 'recent_customer_orders';
+    } else if (explicitRecentOrdersCustomerRef) {
+      operationalIntent = 'orders_last_7_days';
+    } else if (explicitOpenOrdersCustomerRef) {
+      operationalIntent = 'open_orders';
+    }
+  }
+  const shouldBlockProductOpenOrdersRoute =
+    hasExplicitCustomerOrderReference ||
+    shouldForceOpenOrdersIntent ||
+    shouldForceLatestCustomerOrderIntent ||
+    shouldForceRecentCustomerOrdersIntent;
   const costingIntent =
     getCostingIntentFromModelAction(modelRoute?.action) ?? detectProductCostIntent(normalized);
   const purchasingIntent =
@@ -720,6 +881,7 @@ export async function POST(req: NextRequest) {
     });
       return NextResponse.json(reply);
   } else if (
+    !shouldBlockProductOpenOrdersRoute &&
     (operationalIntent === 'product_open_orders' || preferProductOpenOrders) &&
     activeOrderManufacturingIntent == null &&
     manufacturingIntent !== 'order_job_cards'
@@ -856,7 +1018,7 @@ export async function POST(req: NextRequest) {
     }
   } else if (operationalIntent === 'last_customer_order') {
     const customerRef =
-      modelRoute?.customer_ref?.trim() || extractLatestOrderCustomerReference(normalized);
+      explicitLatestOrderCustomerRef || modelRoute?.customer_ref?.trim();
 
     if (!customerRef) {
       reply = buildReply(pathname, {
@@ -868,7 +1030,12 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      const resolved = await resolveOrdersCustomerOrReply(routeClient.supabase, pathname, customerRef);
+      const resolved = await resolveOrdersCustomerOrReply(
+        routeClient.supabase,
+        pathname,
+        customerRef,
+        'last_customer_order'
+      );
       if (resolved.reply) {
         reply = resolved.reply;
         return NextResponse.json(reply);
@@ -906,7 +1073,7 @@ export async function POST(req: NextRequest) {
     }
   } else if (operationalIntent === 'recent_customer_orders') {
     const customerRef =
-      modelRoute?.customer_ref?.trim() || extractRecentCustomerOrdersCustomerReference(normalized);
+      explicitRecentCustomerOrdersCustomerRef || modelRoute?.customer_ref?.trim();
 
     if (!customerRef) {
       reply = buildReply(pathname, {
@@ -918,7 +1085,12 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      const resolved = await resolveOrdersCustomerOrReply(routeClient.supabase, pathname, customerRef);
+      const resolved = await resolveOrdersCustomerOrReply(
+        routeClient.supabase,
+        pathname,
+        customerRef,
+        'recent_customer_orders'
+      );
       if (resolved.reply) {
         reply = resolved.reply;
         return NextResponse.json(reply);
@@ -996,7 +1168,12 @@ export async function POST(req: NextRequest) {
 
     try {
       if (customerRef) {
-        const resolved = await resolveOrdersCustomerOrReply(routeClient.supabase, pathname, customerRef);
+        const resolved = await resolveOrdersCustomerOrReply(
+          routeClient.supabase,
+          pathname,
+          customerRef,
+          'open_orders'
+        );
         if (resolved.reply) {
           reply = resolved.reply;
           return NextResponse.json(reply);
@@ -1039,7 +1216,12 @@ export async function POST(req: NextRequest) {
 
     try {
       if (customerRef) {
-        const resolved = await resolveOrdersCustomerOrReply(routeClient.supabase, pathname, customerRef);
+        const resolved = await resolveOrdersCustomerOrReply(
+          routeClient.supabase,
+          pathname,
+          customerRef,
+          'orders_due_this_week'
+        );
         if (resolved.reply) {
           reply = resolved.reply;
           return NextResponse.json(reply);
@@ -1085,7 +1267,12 @@ export async function POST(req: NextRequest) {
 
     try {
       if (customerRef) {
-        const resolved = await resolveOrdersCustomerOrReply(routeClient.supabase, pathname, customerRef);
+        const resolved = await resolveOrdersCustomerOrReply(
+          routeClient.supabase,
+          pathname,
+          customerRef,
+          'late_orders'
+        );
         if (resolved.reply) {
           reply = resolved.reply;
           return NextResponse.json(reply);
@@ -1132,7 +1319,12 @@ export async function POST(req: NextRequest) {
 
     try {
       if (customerRef) {
-        const resolved = await resolveOrdersCustomerOrReply(routeClient.supabase, pathname, customerRef);
+        const resolved = await resolveOrdersCustomerOrReply(
+          routeClient.supabase,
+          pathname,
+          customerRef,
+          'orders_last_7_days'
+        );
         if (resolved.reply) {
           reply = resolved.reply;
           return NextResponse.json(reply);

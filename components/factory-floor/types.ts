@@ -1,3 +1,5 @@
+import { executionStatusMeta } from '@/components/production/execution-status';
+
 export interface FactorySection {
   section_id: number;
   name: string;
@@ -55,6 +57,15 @@ export interface SectionWithStaff {
 }
 
 export type ProgressStatus = 'on-track' | 'slightly-behind' | 'behind';
+export type ScheduleProgressState = 'upcoming' | 'active' | 'elapsed';
+
+interface FloorProgressSnapshot {
+  progress: number;
+  autoProgress: number;
+  minutesElapsed: number;
+  source: 'actual' | 'scheduled';
+  scheduleState: ScheduleProgressState | null;
+}
 
 export const statusColors: Record<ProgressStatus, string> = {
   'on-track': 'bg-emerald-500',
@@ -69,9 +80,9 @@ export const statusTrackColors: Record<ProgressStatus, string> = {
 };
 
 export const statusDotClass: Record<FloorStaffJob['job_status'], string> = {
-  'in_progress': 'bg-emerald-400',
-  'issued': 'bg-blue-400',
-  'on_hold': 'bg-amber-400',
+  in_progress: executionStatusMeta.in_progress.dotClassName,
+  issued: executionStatusMeta.issued.dotClassName,
+  on_hold: executionStatusMeta.on_hold.dotClassName,
 };
 
 export const statusBadgeConfig: Record<ProgressStatus, { label: string; className: string }> = {
@@ -95,13 +106,121 @@ export interface EarningsSplitItem {
   original_amount: number;
 }
 
-export function getDisplayProgress(job: FloorStaffJob): number {
-  return job.progress_override ?? job.auto_progress;
+function getSastNowParts(now: Date = new Date()): { dateKey: string; minutesOfDay: number } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Johannesburg',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    hourCycle: 'h23',
+  }).formatToParts(now);
+
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return {
+    dateKey: `${values.year}-${values.month}-${values.day}`,
+    minutesOfDay: Number(values.hour ?? 0) * 60 + Number(values.minute ?? 0),
+  };
 }
 
-export function getProgressStatus(job: FloorStaffJob): ProgressStatus {
-  const display = getDisplayProgress(job);
-  const auto = job.auto_progress;
+function getIssuedScheduleProgress(job: FloorStaffJob, now: Date = new Date()): FloorProgressSnapshot | null {
+  if (
+    job.job_status !== 'issued' ||
+    !job.assignment_date ||
+    job.start_minutes == null ||
+    job.end_minutes == null
+  ) {
+    return null;
+  }
+
+  const scheduledDuration = Math.max(job.end_minutes - job.start_minutes, 0);
+  if (scheduledDuration <= 0) return null;
+
+  const { dateKey, minutesOfDay } = getSastNowParts(now);
+
+  let fraction = 0;
+  let scheduleState: ScheduleProgressState = 'upcoming';
+
+  if (job.assignment_date < dateKey) {
+    fraction = 1;
+    scheduleState = 'elapsed';
+  } else if (job.assignment_date === dateKey) {
+    if (minutesOfDay <= job.start_minutes) {
+      fraction = 0;
+      scheduleState = 'upcoming';
+    } else if (minutesOfDay >= job.end_minutes) {
+      fraction = 1;
+      scheduleState = 'elapsed';
+    } else {
+      fraction = (minutesOfDay - job.start_minutes) / scheduledDuration;
+      scheduleState = 'active';
+    }
+  }
+
+  const clampedFraction = Math.min(1, Math.max(0, fraction));
+  const baselineMinutes =
+    job.estimated_minutes != null && job.estimated_minutes > 0
+      ? job.estimated_minutes
+      : scheduledDuration;
+  const autoProgress = Math.round(clampedFraction * 100);
+  const minutesElapsed = Math.round(baselineMinutes * clampedFraction);
+
+  return {
+    progress: job.progress_override ?? autoProgress,
+    autoProgress,
+    minutesElapsed,
+    source: 'scheduled',
+    scheduleState,
+  };
+}
+
+export function getFloorProgressSnapshot(job: FloorStaffJob, now: Date = new Date()): FloorProgressSnapshot {
+  const scheduledSnapshot = getIssuedScheduleProgress(job, now);
+  if (scheduledSnapshot) return scheduledSnapshot;
+
+  return {
+    progress: job.progress_override ?? job.auto_progress,
+    autoProgress: job.auto_progress,
+    minutesElapsed: job.minutes_elapsed,
+    source: 'actual',
+    scheduleState: null,
+  };
+}
+
+export function getDisplayProgress(job: FloorStaffJob, now: Date = new Date()): number {
+  return getFloorProgressSnapshot(job, now).progress;
+}
+
+export function getEffectiveMinutesElapsed(job: FloorStaffJob, now: Date = new Date()): number {
+  return getFloorProgressSnapshot(job, now).minutesElapsed;
+}
+
+export function getScheduleProgressState(
+  job: FloorStaffJob,
+  now: Date = new Date(),
+): ScheduleProgressState | null {
+  return getFloorProgressSnapshot(job, now).scheduleState;
+}
+
+export function minutesToClock(minutes: number | null | undefined): string {
+  if (minutes == null || Number.isNaN(minutes)) return '--:--';
+  const wholeMinutes = Math.max(0, Math.floor(minutes));
+  const hours = Math.floor(wholeMinutes / 60)
+    .toString()
+    .padStart(2, '0');
+  const remainder = Math.floor(wholeMinutes % 60)
+    .toString()
+    .padStart(2, '0');
+  return `${hours}:${remainder}`;
+}
+
+export function getProgressStatus(job: FloorStaffJob, now: Date = new Date()): ProgressStatus {
+  const snapshot = getFloorProgressSnapshot(job, now);
+  const display = snapshot.progress;
+  const auto = snapshot.autoProgress;
   // If override is set and it's ahead, they're on track
   if (job.progress_override !== null) {
     if (job.progress_override >= auto - 10) return 'on-track';

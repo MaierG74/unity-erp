@@ -28,11 +28,25 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260312154218
-- Latest applied migration name: add_payroll_standard_week_hours
-- Applied at (UTC): 2026-03-12 15:42:25 UTC
+- Latest applied migration version: 20260319065606
+- Latest applied migration name: factory_floor_issued_progress_zero
+- Applied at (UTC): 2026-03-19 06:56:06 UTC
 - Applied by: Codex via Supabase MCP
 - Verification notes:
+  - Current batch (2026-03-19, Codex):
+    1. `factory_floor_issued_progress_zero` (20260319065606): updated `public.factory_floor_status` so `issued` jobs remain visible on the floor but stay at `0%` progress until work is actually started; only `in_progress` and `on_hold` assignments accrue elapsed minutes and auto progress.
+    2. Verified with MCP `list_migrations`: production history now includes `20260319065606`.
+    3. Verified with MCP SQL: `TEST-LC-002` assignments `74`, `75`, and `76` now all report `minutes_elapsed = 0` and `auto_progress = 0` while still in `issued` status with `started_at = null`.
+  - Current batch (2026-03-19, Codex):
+    1. `factory_floor_parent_category_routing` (20260319062333): updated `public.factory_floor_status` so floor routing follows the top-level job category, allowing subcategories like `Brackets` to inherit the `Steel Work` section; also tightened the job-card lookup to the exact card encoded in `job_instance_id` to avoid duplicate floor rows.
+    2. Verified with MCP `list_migrations`: production history now includes `20260319062333`.
+    3. Verified with MCP SQL: `TEST-LC-002` assignments `74` and `76` (`Brackets`) now resolve to `Steel Section`, while assignment `75` (`Powder Coating`) resolves to `Powder Coating`.
+    4. Verified with MCP SQL: each assignment resolves to its own `job_card_id` (`34`, `35`, `36`) with no duplicate floor rows.
+  - Current batch (2026-03-19, Codex):
+    1. `sync_issued_scheduler_assignments` (20260319060032): backfilled card-backed `labor_plan_assignments` rows that were missing lifecycle state, and updated `public.assign_scheduled_card(...)` so issued scheduler assignments persist `job_status = 'issued'` plus `issued_at` for factory-floor visibility.
+    2. Verified with MCP `list_migrations`: production history now includes `20260319060032`.
+    3. Verified with MCP SQL: `TEST-LC-002` assignment rows `74`, `75`, and `76` now all report `job_status = 'issued'` with populated `issued_at`.
+    4. Verified with MCP SQL at the time of apply: `factory_floor_status` returned the issued `Powder Coating` assignment for `TEST-LC-002`; the follow-up parent-category routing migration below then resolved the two `Brackets` assignments into `Steel Section`.
   - Current batch (2026-03-12, Codex):
     1. `add_payroll_standard_week_hours` (20260312154218): added `public.organizations.payroll_standard_week_hours` as org-scoped payroll configuration for the weekly regular-hours cutoff, defaulting existing organizations to `44.00`.
     2. Verified with MCP `list_migrations`: production history now includes `20260312154218`.

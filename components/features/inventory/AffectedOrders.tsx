@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import { Loader2, Mail, CheckCircle, XCircle } from 'lucide-react';
 
 type AffectedOrder = {
@@ -144,7 +145,7 @@ export function AffectedOrders({ componentId }: AffectedOrdersProps) {
                                     </a>
                                 </TableCell>
                                 <TableCell className="py-2">
-                                    {format(new Date(order.order_date), 'MMM d, yyyy')}
+                                    {formatDate(order.order_date)}
                                 </TableCell>
                                 <TableCell className="py-2">
                                     <Badge variant="outline" className="text-xs">
@@ -188,7 +189,7 @@ export function AffectedOrders({ componentId }: AffectedOrdersProps) {
                                         )}
                                     </div>
                                     <div className="text-muted-foreground text-xs">
-                                        {format(new Date(email.sent_at), "MMM d, yyyy 'at' h:mm a")}
+                                        {formatDate(email.sent_at)}
                                     </div>
                                 </div>
                                 
@@ -225,7 +226,7 @@ export function AffectedOrders({ componentId }: AffectedOrdersProps) {
                                                                 <p>
                                                                     <span className="text-muted-foreground">Expected:</span>{' '}
                                                                     <span className="font-medium">
-                                                                        {format(new Date(item.item_expected_date), "MMM d, yyyy")}
+                                                                        {formatDate(item.item_expected_date)}
                                                                     </span>
                                                                 </p>
                                                             )}
@@ -253,7 +254,7 @@ export function AffectedOrders({ componentId }: AffectedOrdersProps) {
                                                     <p>
                                                         <span className="text-muted-foreground">Expected:</span>{' '}
                                                         <span className="font-medium">
-                                                            {format(new Date(email.response.expected_delivery_date), "MMM d, yyyy")}
+                                                            {formatDate(email.response.expected_delivery_date)}
                                                         </span>
                                                     </p>
                                                 )}

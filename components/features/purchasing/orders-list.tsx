@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import { supabase } from '@/lib/supabase';
 import { SupplierOrderWithDetails } from '@/types/purchasing';
 import { Badge } from '@/components/ui/badge';
@@ -152,7 +152,7 @@ export function PurchasingOrdersList() {
                     <StatusBadge status={order.status.status_name} />
                   </TableCell>
                   <TableCell>
-                    {format(new Date(order.order_date), 'MMM d, yyyy')}
+                    {formatDate(order.order_date)}
                   </TableCell>
                   <TableCell>
                     <Link

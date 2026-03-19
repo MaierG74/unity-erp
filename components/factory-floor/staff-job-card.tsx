@@ -16,12 +16,12 @@ interface StaffJobCardProps {
 }
 
 function shiftBorderColor(status: ShiftAwareStatus | null): string {
-  if (!status) return 'border-l-transparent';
+  if (!status) return 'border-l-border';
   switch (status.shiftStatus) {
     case 'overrun': return 'border-l-red-500';
     case 'tight': return 'border-l-amber-500';
     case 'overtime-ok': return 'border-l-blue-500';
-    default: return 'border-l-transparent';
+    default: return 'border-l-border';
   }
 }
 
@@ -43,8 +43,8 @@ export function StaffJobCard({ job, onClick, shiftInfo, precomputedShiftStatus }
     <button
       onClick={onClick}
       className={cn(
-        'w-full text-left rounded-md border border-border/50 bg-card/50',
-        'border-l-[3px] transition-colors hover:bg-muted/50 cursor-pointer',
+        'w-full text-left rounded-md border border-border bg-background',
+        'border-l-[3px] transition-colors hover:bg-muted/60 cursor-pointer',
         'px-2 py-1.5 space-y-0.5',
         shiftBorderColor(shiftStatus),
       )}

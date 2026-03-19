@@ -53,6 +53,10 @@ interface JobCardItem {
   products: { name: string } | null;
 }
 
+function cardAssignmentInstancePattern(jobCardId: number): string {
+  return `%:card-${jobCardId}`;
+}
+
 // ── Page ───────────────────────────────────────────────────────────
 export default function JobCardScanPage() {
   const { user, loading: authLoading } = useAuth();
@@ -145,19 +149,17 @@ export default function JobCardScanPage() {
     return { totalQty, completedQty, totalValue, earnedValue };
   }, [items]);
 
-  /** Sync job_status back to labor_plan_assignments when a job card changes state */
-  const syncAssignmentStatus = async (newStatus: 'in_progress' | 'completed') => {
+  /** Sync completion back to the exact linked scheduled assignment for this card. */
+  const syncAssignmentCompletion = async () => {
     if (!jobCard) return;
-    const jobIds = items.map((i) => i.job_id).filter(Boolean);
-    if (jobIds.length === 0 || !jobCard.staff_id) return;
-    const updates: Record<string, any> = { job_status: newStatus };
-    if (newStatus === 'in_progress') updates.started_at = new Date().toISOString();
-    if (newStatus === 'completed') updates.completed_at = new Date().toISOString();
+    const completionTime = new Date().toISOString();
     await supabase
       .from('labor_plan_assignments')
-      .update(updates)
-      .in('job_id', jobIds)
-      .eq('staff_id', jobCard.staff_id);
+      .update({
+        job_status: 'completed',
+        completed_at: completionTime,
+      })
+      .like('job_instance_id', cardAssignmentInstancePattern(jobCardId));
   };
 
   // ── Actions ────────────────────────────────────────────────────
@@ -171,7 +173,7 @@ export default function JobCardScanPage() {
       });
       if (rpcErr) throw rpcErr;
 
-      await syncAssignmentStatus('completed');
+      await syncAssignmentCompletion();
       setJobCard((prev) => prev ? { ...prev, status: 'completed' } : prev);
       setItems((prev) => prev.map((i) => ({
         ...i,
@@ -257,7 +259,7 @@ export default function JobCardScanPage() {
     );
   }
 
-  const isActive = jobCard.status === 'pending' || jobCard.status === 'in_progress';
+  const canCompleteFromScan = jobCard.status === 'pending' || jobCard.status === 'in_progress';
   const displayStatusLabel =
     jobCard.status === 'pending'
       ? 'Issued'
@@ -364,7 +366,7 @@ export default function JobCardScanPage() {
                     {item.piece_rate ? ` · R ${item.piece_rate}` : ''}
                   </p>
                 </div>
-                {isActive && !done && (
+                {canCompleteFromScan && !done && (
                   <button
                     type="button"
                     onClick={() => {
@@ -391,7 +393,7 @@ export default function JobCardScanPage() {
         )}
 
         {/* ── Action Buttons ─────────────────────── */}
-        {isActive && (
+        {canCompleteFromScan && (
           <div className="space-y-3 pt-2">
             <button
               type="button"

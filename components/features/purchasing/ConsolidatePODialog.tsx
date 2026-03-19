@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import {
   Dialog,
   DialogContent,
@@ -124,7 +124,7 @@ export function ConsolidatePODialog({
                         </span>
                       </div>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Created {format(new Date(draft.created_at), 'MMM d, yyyy')}
+                        Created {formatDate(draft.created_at)}
                         {draft.notes && ` • ${draft.notes.slice(0, 50)}${draft.notes.length > 50 ? '...' : ''}`}
                       </p>
                     </Label>

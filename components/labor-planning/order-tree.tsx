@@ -4,9 +4,11 @@ import { useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, Archive, CalendarClock, CheckCircle2, ChevronRight, ClipboardList, Flame, GripVertical, Pause, Play } from 'lucide-react';
+import { AlertTriangle, Archive, CalendarClock, ChevronRight, Flame, GripVertical } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { PlanningOrder, PlanningJob } from './types';
+import { formatDateShort } from '@/lib/date-utils';
+import { getExecutionStatusMeta } from '@/components/production/execution-status';
 
 const ESTIMATED_ROW_HEIGHT = 48;
 
@@ -36,11 +38,11 @@ const jobStatusLabel: Record<PlanningJob['status'], string> = {
   blocked: 'Blocked',
 };
 
-const formatDate = (input?: string | null) => {
+const formatDueDate = (input?: string | null) => {
   if (!input) return 'No due date';
   const parsed = new Date(input);
   if (Number.isNaN(parsed.getTime())) return 'No due date';
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(parsed);
+  return formatDateShort(parsed);
 };
 
 /** Format duration as human-readable time. Returns empty string for 0/unknown. */
@@ -70,10 +72,10 @@ function orderJobSummary(jobs: PlanningJob[]): string {
   }
   const parts: string[] = [];
   if (pool > 0) parts.push(`${pool} pool`);
-  if (issued > 0) parts.push(`${issued} queued`);
-  if (scheduled > 0) parts.push(`${scheduled} sched`);
-  if (inProgress > 0) parts.push(`${inProgress} active`);
-  if (completed > 0) parts.push(`${completed} done`);
+  if (issued > 0) parts.push(`${issued} issued`);
+  if (scheduled > 0) parts.push(`${scheduled} scheduled`);
+  if (inProgress > 0) parts.push(`${inProgress} in progress`);
+  if (completed > 0) parts.push(`${completed} completed`);
   return parts.join(' · ');
 }
 
@@ -82,21 +84,20 @@ function jobCardDetail(job: PlanningJob): { label: string; className: string; ic
   const time = formatDuration(job.durationHours);
   const timeSuffix = time ? ` · ${time}` : '';
   const qtySuffix = job.quantity ? ` · qty ${job.quantity}` : '';
+  const lifecycleMeta = getExecutionStatusMeta(job.jobStatus);
+  const scheduleSuffix = job.scheduleStatus === 'scheduled' && job.jobStatus !== 'completed'
+    ? ' · scheduled'
+    : '';
 
-  if (job.jobStatus === 'completed') {
-    return { label: `Done${qtySuffix}${timeSuffix}`, className: 'text-emerald-600 dark:text-emerald-400', icon: CheckCircle2 };
-  }
-  if (job.jobStatus === 'in_progress') {
-    return { label: `In Progress${qtySuffix}${timeSuffix}`, className: 'text-amber-600 dark:text-amber-400', icon: Play };
-  }
-  if (job.jobStatus === 'on_hold') {
-    return { label: `On Hold${qtySuffix}${timeSuffix}`, className: 'text-orange-600 dark:text-orange-400', icon: Pause };
+  if (lifecycleMeta) {
+    return {
+      label: `${lifecycleMeta.label}${scheduleSuffix}${qtySuffix}${timeSuffix}`,
+      className: lifecycleMeta.textClassName,
+      icon: lifecycleMeta.icon,
+    };
   }
   if (job.scheduleStatus === 'scheduled') {
     return { label: `Scheduled${qtySuffix}${timeSuffix}`, className: 'text-violet-600 dark:text-violet-400', icon: CalendarClock };
-  }
-  if (job.jobStatus === 'issued') {
-    return { label: `Issued · qty ${job.quantity ?? 1}${timeSuffix}`, className: 'text-blue-600 dark:text-blue-400', icon: ClipboardList };
   }
   // Pool demand — skip time (aggregate is misleading for multi-unit pool)
   if (job.poolId != null && (job.remainingQty ?? 0) > 0) {
@@ -298,7 +299,7 @@ export function OrderTree({ orders, windowSize = 12, onJobDragStart, onJobClick,
                         </Badge>
                       </div>
                       <p className="truncate text-[10px] text-muted-foreground">
-                        {order.customer} • {order.jobs.length} jobs • {formatDate(order.dueDate)}
+                        {order.customer} • {order.jobs.length} jobs • {formatDueDate(order.dueDate)}
                       </p>
                       {isOpen && (
                         <p className="truncate text-[9px] text-muted-foreground/70 mt-0.5">
@@ -330,7 +331,7 @@ export function OrderTree({ orders, windowSize = 12, onJobDragStart, onJobClick,
                       <div>
                         <div className="flex items-center gap-1.5 px-1 py-0.5">
                           <span className="text-[9px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400">
-                            Issued
+                            Active
                           </span>
                           <div className="flex-1 h-px bg-blue-600/20 dark:bg-blue-400/20" />
                           <span className="text-[9px] text-blue-600/70 dark:text-blue-400/70">

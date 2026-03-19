@@ -22,7 +22,7 @@ import { CalendarIcon, ArrowLeft, Loader2 } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
-import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -333,7 +333,7 @@ export default function EditStaffPage() {
                               )}
                             >
                               {field.value ? (
-                                format(field.value, "PPP")
+                                formatDate(field.value)
                               ) : (
                                 <span>Pick a date</span>
                               )}
@@ -375,7 +375,7 @@ export default function EditStaffPage() {
                               )}
                             >
                               {field.value ? (
-                                format(field.value, "PPP")
+                                formatDate(field.value)
                               ) : (
                                 <span>Pick a date</span>
                               )}

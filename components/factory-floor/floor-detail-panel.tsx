@@ -11,11 +11,19 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { formatTimeToSAST } from '@/lib/utils/timezone';
 import type { FloorStaffJob } from './types';
-import { getDisplayProgress, getProgressStatus, statusDotClass, statusBadgeConfig } from './types';
+import {
+  getFloorProgressSnapshot,
+  getProgressStatus,
+  getScheduleProgressState,
+  minutesToClock,
+  statusDotClass,
+  statusBadgeConfig,
+} from './types';
 import { ProgressBar } from './progress-bar';
 import { ExternalLink, CheckCircle, Pause, Play, ArrowRightLeft } from 'lucide-react';
 import type { ShiftInfoWithNow } from '@/hooks/use-shift-info';
 import { computeShiftAwareStatus, minutesToTimeString, formatDuration } from '@/lib/shift-utils';
+import { getExecutionStatusMeta } from '@/components/production/execution-status';
 
 interface FloorDetailPanelProps {
   job: FloorStaffJob | null;
@@ -46,10 +54,24 @@ export function FloorDetailPanel({
 
   if (!job) return null;
 
-  const displayProgress = getDisplayProgress(job);
+  const progressSnapshot = getFloorProgressSnapshot(job);
   const status = getProgressStatus(job);
   const badge = statusBadgeConfig[status];
   const isPaused = job.is_paused;
+  const lifecycleStatus = getExecutionStatusMeta(isPaused ? 'on_hold' : job.job_status);
+  const scheduleState = getScheduleProgressState(job);
+  const scheduleLabel =
+    job.start_minutes != null && job.end_minutes != null
+      ? `${minutesToClock(job.start_minutes)} - ${minutesToClock(job.end_minutes)}`
+      : null;
+  const scheduleStateLabel =
+    scheduleState === 'active'
+      ? 'Scheduled now'
+      : scheduleState === 'elapsed'
+        ? 'Slot elapsed'
+        : scheduleState === 'upcoming'
+          ? 'Upcoming'
+          : null;
 
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
@@ -59,8 +81,8 @@ export function FloorDetailPanel({
             <span className={`h-2.5 w-2.5 rounded-full flex-shrink-0 ${statusDotClass[job.job_status]}`} />
             {job.staff_name}
             {isPaused && (
-              <Badge className="bg-amber-600 hover:bg-amber-600 text-white text-xs ml-auto">
-                Paused
+              <Badge className="text-xs ml-auto border-transparent bg-orange-600 text-white hover:bg-orange-600">
+                On Hold
               </Badge>
             )}
           </SheetTitle>
@@ -95,10 +117,8 @@ export function FloorDetailPanel({
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Status</span>
-                <Badge className={isPaused ? 'bg-amber-600 hover:bg-amber-600 text-white' : badge.className}>
-                  {isPaused ? `Paused` :
-                   job.job_status === 'in_progress' ? 'In Progress' :
-                   job.job_status === 'on_hold' ? 'On Hold' : 'Issued'}
+                <Badge className={lifecycleStatus?.badgeClassName}>
+                  {lifecycleStatus?.label ?? 'Issued'}
                 </Badge>
               </div>
             </div>
@@ -118,6 +138,18 @@ export function FloorDetailPanel({
                   {formatTimeToSAST(job.job_status === 'issued' ? job.issued_at : job.started_at)}
                 </span>
               </div>
+              {scheduleLabel && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Scheduled Slot</span>
+                  <span className="font-medium">{scheduleLabel}</span>
+                </div>
+              )}
+              {scheduleStateLabel && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Schedule State</span>
+                  <span className="font-medium">{scheduleStateLabel}</span>
+                </div>
+              )}
               {job.unit_minutes != null && job.quantity != null && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Unit Duration</span>
@@ -129,9 +161,11 @@ export function FloorDetailPanel({
                 <span className="font-medium">{formatDuration(job.estimated_minutes)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Elapsed</span>
+                <span className="text-muted-foreground">
+                  {progressSnapshot.source === 'scheduled' ? 'Sched. Progress' : 'Elapsed'}
+                </span>
                 <span className="font-medium">
-                  {formatDuration(job.minutes_elapsed)}
+                  {formatDuration(progressSnapshot.minutesElapsed)}
                   {job.total_paused_minutes > 0 && (
                     <span className="text-amber-400 ml-1">(paused: {formatDuration(job.total_paused_minutes)})</span>
                   )}
@@ -231,9 +265,10 @@ function ShiftSection({
   job: FloorStaffJob;
   shiftInfo: ShiftInfoWithNow;
 }) {
+  const progressSnapshot = getFloorProgressSnapshot(job);
   const status = computeShiftAwareStatus(
     job.estimated_minutes,
-    job.minutes_elapsed,
+    progressSnapshot.minutesElapsed,
     shiftInfo.nowMinutes,
     shiftInfo.normalEndMinutes,
     shiftInfo.effectiveEndMinutes,

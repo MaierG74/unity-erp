@@ -22,8 +22,9 @@ import { toast } from 'sonner';
 import type { LaborDragPayload, StaffAssignment, StaffLane, TimeMarker } from './types';
 import { CompleteJobDialog } from './complete-job-dialog';
 import type { ScheduleBreak } from '@/types/work-schedule';
+import { getExecutionStatusMeta } from '@/components/production/execution-status';
 
-import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 
 const PRINT_AFTER_ISSUE_STORAGE_KEY = 'labor-planning-print-after-issue';
 
@@ -62,7 +63,7 @@ function ExpandableDetails({
               <span className="text-foreground">{(() => {
                 try {
                   const d = new Date(dueDate.includes('T') ? dueDate : dueDate + 'T00:00:00');
-                  return Number.isNaN(d.getTime()) ? dueDate : format(d, 'MMM d, yyyy');
+                  return Number.isNaN(d.getTime()) ? dueDate : formatDate(d);
                 } catch { return dueDate; }
               })()}</span>
             </div>
@@ -77,22 +78,6 @@ function ExpandableDetails({
       )}
     </div>
   );
-}
-
-/** Visual metadata for job status indicators on assignment bars */
-function getJobStatusInfo(status?: StaffAssignment['jobStatus']) {
-  switch (status) {
-    case 'issued':
-      return { label: 'Issued', icon: ClipboardList, color: 'text-blue-300', dotColor: 'bg-blue-400', stripe: 'rgba(96,165,250,0.5)' };
-    case 'in_progress':
-      return { label: 'In Progress', icon: Play, color: 'text-amber-300', dotColor: 'bg-amber-400', stripe: 'rgba(251,191,36,0.5)' };
-    case 'completed':
-      return { label: 'Completed', icon: CheckCircle2, color: 'text-emerald-300', dotColor: 'bg-emerald-400', stripe: 'rgba(52,211,153,0.5)' };
-    case 'on_hold':
-      return { label: 'On Hold', icon: Pause, color: 'text-orange-300', dotColor: 'bg-orange-400', stripe: 'rgba(251,146,60,0.5)' };
-    default:
-      return null;
-  }
 }
 
 function extractCardIdFromJobKey(jobKey?: string): number | null {
@@ -843,7 +828,7 @@ export function StaffLaneList({
                       : '#34d399');
 
                 const durationMins = assignment.endMinutes - assignment.startMinutes;
-                const statusInfo = getJobStatusInfo(assignment.jobStatus);
+                const statusInfo = getExecutionStatusMeta(assignment.jobStatus);
                 const isCompleted = assignment.jobStatus === 'completed';
                 // Sliver mode: when the true pixel width is too small for text
                 const isSliver = useFixedWidth && width < 60;
@@ -891,7 +876,7 @@ export function StaffLaneList({
                         'absolute left-0 top-0 h-full',
                         isSliver ? 'w-full rounded-md' : 'w-1 rounded-l-xl',
                       )}
-                      style={{ background: isSliver ? undefined : (statusInfo?.stripe ?? 'rgba(255,255,255,0.35)') }}
+                      style={{ background: isSliver ? undefined : (statusInfo?.stripeColor ?? 'rgba(255,255,255,0.35)') }}
                     />
 
                     {/* ─── Sliver mode: compact dot, expand on hover ─── */}
@@ -921,7 +906,7 @@ export function StaffLaneList({
                             </span>
                           </div>
                           {statusInfo && (
-                            <div className={cn('mr-1.5 flex shrink-0 items-center justify-center rounded-full p-0.5', statusInfo.color)}>
+                            <div className={cn('mr-1.5 flex shrink-0 items-center justify-center rounded-full p-0.5', statusInfo.textClassName)}>
                               <statusInfo.icon className="h-3 w-3 drop-shadow-xs" />
                             </div>
                           )}
@@ -975,7 +960,7 @@ export function StaffLaneList({
 
                         {/* Job status indicator */}
                         {statusInfo && (
-                          <div className={cn('mr-1 flex shrink-0 items-center justify-center rounded-full p-0.5', statusInfo.color)}>
+                          <div className={cn('mr-1 flex shrink-0 items-center justify-center rounded-full p-0.5', statusInfo.textClassName)}>
                             <statusInfo.icon className="h-3.5 w-3.5 drop-shadow-xs" />
                           </div>
                         )}
@@ -1040,7 +1025,7 @@ export function StaffLaneList({
                         </div>
                       )}
                       {statusInfo && (
-                        <div className={cn('flex items-center gap-1.5 text-[10px]', statusInfo.color)}>
+                        <div className={cn('flex items-center gap-1.5 text-[10px]', statusInfo.textClassName)}>
                           <statusInfo.icon className="h-3 w-3 shrink-0" />
                           <span>{statusInfo.label}</span>
                         </div>
@@ -1063,7 +1048,7 @@ export function StaffLaneList({
             const durationMin = selectedAssignment.endMinutes - selectedAssignment.startMinutes;
             const qty = selectedAssignment.quantity ?? 0;
             const perItem = qty > 1 ? durationMin / qty : null;
-            const statusMeta = getJobStatusInfo(selectedAssignment.jobStatus);
+            const statusMeta = getExecutionStatusMeta(selectedAssignment.jobStatus);
             return (
               <>
                 {/* ── Colour accent bar ── */}
@@ -1139,9 +1124,15 @@ export function StaffLaneList({
                   {/* Metadata chips */}
                   <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
                     {selectedAssignment.jobStatus && (
-                      <Badge variant="outline" className="text-[11px] capitalize gap-1 font-medium">
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          'text-[11px] capitalize gap-1 font-medium',
+                          statusMeta?.badgeClassName,
+                        )}
+                      >
                         {statusMeta && <statusMeta.icon className="h-3 w-3" />}
-                        {selectedAssignment.jobStatus.replace('_', ' ')}
+                        {statusMeta?.label ?? selectedAssignment.jobStatus.replace('_', ' ')}
                       </Badge>
                     )}
                     <Badge variant="secondary" className="text-[11px] font-medium">
@@ -1202,7 +1193,7 @@ export function StaffLaneList({
                           {(() => {
                             try {
                               const d = new Date(selectedAssignment.dueDate!.includes('T') ? selectedAssignment.dueDate! : selectedAssignment.dueDate! + 'T00:00:00');
-                              return Number.isNaN(d.getTime()) ? selectedAssignment.dueDate : format(d, 'MMM d, yyyy');
+                              return Number.isNaN(d.getTime()) ? selectedAssignment.dueDate : formatDate(d);
                             } catch { return selectedAssignment.dueDate; }
                           })()}
                         </div>

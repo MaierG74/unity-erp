@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AssistantActionLink, AssistantCard } from '@/lib/assistant/prompt-suggestions';
+import { resolveAssistantEntity } from '@/lib/assistant/entity-lookup';
 import {
   resolveAssistantProduct,
   type AssistantProductLookupResult,
@@ -831,24 +832,6 @@ function escapeIlikeTerm(value: string) {
   return value.replace(/[%_]/g, match => `\\${match}`);
 }
 
-function scoreCustomerCandidate(customerName: string, customerRef: string) {
-  const name = normalizeCustomerReference(customerName);
-  const ref = normalizeCustomerReference(customerRef);
-  let score = 0;
-
-  if (name === ref) score += 150;
-  if (name.startsWith(ref)) score += 90;
-  if (name.includes(ref)) score += 70;
-
-  const refTokens = ref.split(/\s+/).filter(Boolean);
-  const matchedTokens = refTokens.filter(token => name.includes(token)).length;
-  if (refTokens.length > 0 && matchedTokens === refTokens.length) {
-    score += 20 + matchedTokens * 5;
-  }
-
-  return score;
-}
-
 export async function resolveOrderReference(
   supabase: SupabaseClient,
   orderRef: string
@@ -969,35 +952,30 @@ export async function resolveOpenOrdersCustomer(
     return { kind: 'not_found', customer_ref: customerRef };
   }
 
-  const customerMatches = await loadCustomerMatches(supabase, customerRef);
-  const uniqueCustomerNames = Array.from(
-    new Set(customerMatches.map(customer => customer.name))
-  );
+  const result = await resolveAssistantEntity(supabase, customerRef, {
+    preferredKinds: ['customer'],
+    strictPreferredKinds: true,
+    fallbackToOtherKinds: false,
+  });
 
-  const scored = uniqueCustomerNames
-    .map(customerName => ({
-      customer_name: customerName,
-      score: scoreCustomerCandidate(customerName, normalizedRef),
-    }))
-    .filter(item => item.score > 0)
-    .sort((a, b) => b.score - a.score);
-
-  const [top, second] = scored;
-  if (!top || top.score < 70) {
+  if (result.kind === 'not_found') {
     return { kind: 'not_found', customer_ref: customerRef };
   }
 
-  if (second && second.score >= top.score - 10) {
+  if (result.kind === 'ambiguous') {
     return {
       kind: 'ambiguous',
       customer_ref: customerRef,
-      candidates: scored.slice(0, 4).map(item => item.customer_name),
+      candidates: result.candidates
+        .filter(candidate => candidate.kind === 'customer')
+        .map(candidate => candidate.label)
+        .filter(Boolean),
     };
   }
 
   return {
     kind: 'resolved',
-    customer_name: top.customer_name,
+    customer_name: result.candidate.label,
   };
 }
 
@@ -1409,22 +1387,31 @@ export function detectOperationalIntent(message: string): AssistantOperationalIn
   }
 
   if (
-    /\b(?:customer\s+)?orders?\b/.test(normalized) &&
-    /\b(include|includes|contain|contains|for)\b/.test(normalized) &&
-    !/\b(start(?:s|ing)? with|contain(?:s|ing)?\s+(?:the\s+word|the\s+name|name|word)?|matching|match|begin(?:s|ning)? with)\b/.test(
-      normalized
-    )
-  ) {
-    return 'product_open_orders';
-  }
-
-  if (
     /\b(last|latest|recent)\b/.test(normalized) &&
     /\borders\b/.test(normalized) &&
     /\b(by|for|from)\b/.test(normalized) &&
     !/\b(last 7 days|past 7 days|last week|this week so far)\b/.test(normalized)
   ) {
     return 'recent_customer_orders';
+  }
+
+  if (
+    /\bcurrent\b/.test(normalized) &&
+    /\borders?\b/.test(normalized) &&
+    /\b(how many|count|what|show|list|have|currently|can you|are there|do we have)\b/.test(normalized)
+  ) {
+    return 'open_orders';
+  }
+
+  if (
+    /\b(?:customer\s+)?orders?\b/.test(normalized) &&
+    /\b(include|includes|contain|contains)\b/.test(normalized) &&
+    !/\b(last|latest|recent|most recent)\b/.test(normalized) &&
+    !/\b(start(?:s|ing)? with|contain(?:s|ing)?\s+(?:the\s+word|the\s+name|name|word)?|matching|match|begin(?:s|ning)? with)\b/.test(
+      normalized
+    )
+  ) {
+    return 'product_open_orders';
   }
 
   if (
@@ -1548,9 +1535,16 @@ export function extractOpenOrdersCustomerReference(message: string) {
     .trim();
 
   const patterns = [
+    /\b(?:what|which)\s+(?:are\s+)?(?:the\s+)?current\s+orders?\s+(?:for|from)\s+(.+)$/i,
+    /\b(?:can you\s+)?(?:list|show)\s+(?:the\s+)?current\s+orders?\s+(?:for|from)\s+(.+)$/i,
+    /\b(?:how many\s+)?current\s+orders?\s+(?:do\s+we\s+have\s+)?(?:for|from)\s+(.+)$/i,
+    /\b(?:are there|do we have)\s+any\s+current\s+orders?\s+(?:for|from)\s+(.+)$/i,
+    /\b(?:what|which)\s+current\s+(.+?)\s+orders(?:\s+do\s+we\s+have)?$/i,
     /\b(?:what|which)\s+(?:open|outstanding)\s+orders(?:\s+do\s+we\s+have)?\s+(?:for|from)\s+(.+)$/i,
     /\b(?:can you\s+)?(?:list|show)\s+(?:the\s+)?(?:open|outstanding)\s+orders(?:\s+do\s+we\s+have)?\s+(?:for|from)\s+(.+)$/i,
     /\b(?:what|which)\s+orders?\s+(?:are\s+)?(?:open|outstanding)\s+(?:for|from)\s+(.+)$/i,
+    /\b(?:what|which)\s+(.+?)\s+orders?\s+(?:are\s+)?(?:currently\s+)?(?:open|outstanding)\b/i,
+    /\b(?:can you\s+)?(?:list|show)\s+(.+?)\s+orders?\s+(?:are\s+)?(?:currently\s+)?(?:open|outstanding)\b/i,
     /\b(?:what|which|show|list)\s+(?:open|outstanding)\s+(.+?)\s+orders(?:\s+do\s+we\s+have)?$/i,
     /\b(?:how many\s+)?(?:open|outstanding)\s+(.+?)\s+orders(?:\s+do\s+we\s+have)?$/i,
     /\b(?:can you\s+)?list\s+(?:the\s+)?(?:open|outstanding)\s+(.+?)\s+orders$/i,
@@ -1638,10 +1632,16 @@ export function extractRecentCustomerOrdersCustomerReference(message: string) {
     .trim();
 
   const patterns = [
+    /\b(?:what(?:'s| is| are)?\s+)?(?:the\s+)?(?:last|latest|recent)\s+(?:customer\s+)?orders?\s+(?:placed\s+)?(?:for|from|by)\s+(.+)$/i,
+    /\b(?:what(?:'s| is| are)?\s+)?(?:the\s+)?(?:last|latest|recent)\s+(?:customer\s+)?orders?\s+(?:ordered)\s+(?:for|from|by)\s+(.+)$/i,
     /\b(?:last|latest|recent)\s+orders?\s+(?:placed\s+)?(?:for|from|by)\s+(.+)$/i,
+    /\b(?:last|latest|recent)\s+(?:customer\s+)?orders?\s+(?:placed\s+)?(?:for|from|by)\s+(.+)$/i,
     /\b(?:last|latest|recent)\s+orders?\s+(?:ordered)\s+(?:for|from|by)\s+(.+)$/i,
+    /\b(?:last|latest|recent)\s+(?:customer\s+)?orders?\s+(?:ordered)\s+(?:for|from|by)\s+(.+)$/i,
     /\b(?:for|from|by)\s+(.+?)\s+(?:last|latest|recent)\s+orders?\b/i,
+    /\b(?:for|from|by)\s+(.+?)\s+(?:last|latest|recent)\s+(?:customer\s+)?orders?\b/i,
     /\b(?:placed|ordered)\s+(?:by|for)\s+(.+?)\s+(?:last|latest|recent)\s+orders?\b/i,
+    /\b(?:placed|ordered)\s+(?:by|for)\s+(.+?)\s+(?:last|latest|recent)\s+(?:customer\s+)?orders?\b/i,
   ];
 
   for (const pattern of patterns) {

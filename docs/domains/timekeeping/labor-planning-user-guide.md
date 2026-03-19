@@ -26,11 +26,17 @@ Use this guide when scheduling jobs on the `/labor-planning` board. It outlines 
 ## Quick Tips for Schedulers
 - Queue labels reflect lifecycle and schedule separately:
   - `Pool • X remaining` means demand exists but nothing has been issued yet.
-  - `Issued • qty X` means a job card already exists but is not on a lane.
-  - `Scheduled • qty X` means the issued card is currently placed on a lane.
+  - `Issued`, `In Progress`, `On Hold`, and `Completed` are the shared production lifecycle labels across Queue, Schedule, and Floor.
+  - Schedule placement is shown separately (for example `From schedule`, a scheduled time line, or `· scheduled`) instead of replacing the lifecycle label.
   - Unscheduling an issued card should return it to the queue as `Issued`, not `Ready`.
+- Queue, Schedule, and Floor now share the same lifecycle colours and wording: `Issued` = blue, `In Progress` = amber, `On Hold` = orange, `Completed` = green.
+- Clicking a scheduled bar opens an assignment details dialog that reuses those same shared lifecycle chips and labels, so the modal matches the Queue and Floor wording instead of showing a separate scheduler-only status style.
+- Job-card page actions and mobile scan completions now sync scheduler state by the exact card-backed assignment (`job_instance_id ... :card-<id>`), so completing one split-issued card no longer marks another scheduled card for the same staff/job as complete by mistake.
 - The production queue now prefers the active scheduler assignment when showing staff ownership for a scheduled job card, and it shows the scheduled date/time under the status badge when available.
+- The production queue status badge now prefers the scheduler lifecycle (`Issued`, `In Progress`, `On Hold`) when a card is actively scheduled. This keeps the Queue tab aligned with production execution even when the underlying `job_cards.status` still reads `pending`.
+- The Unity Assistant job-card/order drill-downs follow the same effective lifecycle rule as the queue: show the scheduler/floor lifecycle first, and treat the scheduled date/time as secondary context rather than the primary status label.
 - The production queue now caches the open-card list briefly, renders base job-card rows first, and fills schedule owner/time metadata immediately after. That keeps the same queue data while making Queue tab loads and search/filter changes feel noticeably quicker.
+- The production queue and manufacturing assistant now pin `job_cards -> job_card_items` reads to the primary `job_card_id` relationship. This avoids blank queue/assistant results after the follow-up-card remainder link added a second FK path between the same tables.
 - Completing a job from the scheduler now completes the linked job card as well, so it should move into the production queue's `Completed` filter without requiring a manual card-page action.
 - Scheduler changes now invalidate the production queue and production summary as well, so staff/time changes should appear without a manual browser refresh.
 - Putting an issued card onto a lane for the first time, or moving it to a different lane before work starts, now updates the linked `job_cards.staff_id` as well, so piecework payroll follows the scheduler owner. Once work has started, the move is blocked and the card must go through the transfer flow instead.
@@ -40,6 +46,7 @@ Use this guide when scheduling jobs on the `/labor-planning` board. It outlines 
 - Un-issuing a scheduled job card now targets the exact card/item encoded in the assignment key, so cancelling one split-issued sibling card does not cancel other cards for the same order/job/staff.
 - The older lane-level `Issue job card` flow now rewrites the assignment key to the exact issued card/item as well, so later un-issue actions still target the same split-issued card instead of falling back to a broad order/job match.
 - Pool issuance from the scheduler now includes a `Print job card after issue` toggle. It defaults on, remembers the last choice on that browser, and opens a print-ready tab immediately so the operator can hand a physical card to the employee without leaving the board. The success toast also includes a `Reopen print` fallback.
+- Pool-issued duration previews now fall back to the linked job's `estimated_minutes` when the BOL line has no explicit `time_required`, so `Issue & Schedule` still reflects `quantity × per-piece time` instead of dropping to the 15-minute minimum block.
 - If you see an overlap toast, try dragging the bar into one of the dashed “Open slot” placeholders or shorten the duration via the resize handles.
 - Off-shift staff will not accept drops—pick a staff lane with a green “Accepting drops” indicator or adjust staffing for the date first.
 - Use Undo in the success toast immediately after a drop if you placed a job on the wrong lane/time.

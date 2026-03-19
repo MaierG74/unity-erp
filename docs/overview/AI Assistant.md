@@ -73,7 +73,9 @@ These map to current tables (from Supabase) like `components`, `inventory`, `inv
   - no general web/world knowledge
   - no hallucinated answers
   - if no trusted tool is available, the assistant says "I don't know" instead of guessing
-  - request interpretation is now model-assisted with `gpt-5-mini`, but verified answers still come only from trusted Unity data tools
+- request interpretation is now model-assisted with `gpt-5.4-mini` by default (overrideable via `OPENAI_ASSISTANT_MODEL`), but verified answers still come only from trusted Unity data tools
+- a shared assistant entity lookup layer now backs customer resolution for order questions, so names are grounded against real Unity entities before the assistant commits to the customer-order lane
+- the shared entity lookup now also supports intent-aware primary-vs-secondary arbitration, so customer-order prompts can prefer customers first, still surface product alternatives when scores are close, and avoid silently jumping across domains
 - Live read-only tools now shipped:
   - inventory snapshot questions from the assistant chat dock
   - inventory family-search questions now reuse the inventory components search behavior, so broad prompts like "How many gas spindles do we have in stock?" return a choice card with verified matches and inline `Show stock` / `Open inventory` actions instead of silently guessing one component
@@ -83,15 +85,20 @@ These map to current tables (from Supabase) like `components`, `inventory`, `inv
 - customer-scoped open-order questions now list the matching orders directly for prompts like "What orders are currently open for QButton?" and each order row exposes drill-down actions for products, production/job-card progress, and outstanding components
 - customer-scoped open-order routing now also handles customer-name-in-the-middle phrasing such as "What open QButton orders do we have?" and "List the outstanding QButton orders", instead of letting those prompts fall into the product-order route
 - customer-scoped open-order routing also now handles phrasing like "What outstanding orders do we have for Qbutton?" so customer names still win even when a similar token could match a product-like name
+- customer-scoped open-order routing also now handles "current orders for <customer>" phrasing, so prompts like "What are the current orders for Qbutton?" and "Are there any current orders for Office Group?" stay in the customer open-orders lane instead of being misread as product-order questions
+- customer-order prompts like "What are the latest orders for Qbutton?" and "What are the latest customer orders for Qbutton?" now also stay in the customer lane instead of falling into product-order clarify flows, with the shared entity lookup acting as the grounding layer behind that routing decision
 - customer-scoped open-order cards now fall back to the real order list when none of the matching orders have due dates, so prompts phrased as "outstanding orders for QButton" still keep the rows and drill-down actions visible
 - order preview drill-downs now include a dedicated `Job cards` path that shows the actual job cards attached to the selected order, instead of bouncing back through a generic progress prompt
 - switching between order previews in the dock now keeps the current preview visible, adds a small loading overlay, and fades the next order in so preview changes feel less jarring
 - the order job-cards drill-down now uses a short lead-in above the card instead of repeating the same counts and job-card rows in plain text
 - order job-card questions now distinguish assignment coverage too, so prompts like "Have all the job cards been assigned for this order?" answer with assigned, unassigned, and still-to-issue job-card counts
 - order job-card follow-ups now distinguish `outstanding / remaining` job cards from `assigned / unassigned` job cards, so selected-order prompts can show either the open job cards still needing work or the assignment coverage for those cards
+- order job-card status now mirrors the effective scheduler/floor lifecycle used by the Production Queue, so scheduled cards show `Issued`, `In progress`, or `On hold` instead of the raw `job_cards.status`, with the scheduled slot shown as secondary context in the card row
 - open-orders answers now use a short lead-in above the card instead of repeating counts and order rows in plain text
 - active order previews now anchor plain-language follow-ups too, so prompts like "show me the products", "what is still owing", "what job cards are on it", and "open the documents" can reuse the selected order without retyping the order number
 - active order previews now also anchor looser location-based follow-ups like "what job cards are open here?" so the selected order card remains the default order context unless the user explicitly names another order
+- customer-scoped open-order phrasing now also handles customer names in the middle of the sentence, so prompts like "What Office Group orders are currently open?" resolve to the customer instead of falling back to the global open-orders summary
+- customer-order prompts now keep `latest / recent orders for <customer>` in the customer lane, so prompts like "What are the latest orders for Qbutton?" no longer get hijacked by the product open-orders route
   - the order supply-status drill-down now treats prompts like "what is still owing on this order?" and "are there supplier parts still outstanding on this order?" as the same verified component/procurement view, with blocked-now vs covered-by-incoming-delivery rows and a direct procurement jump action
   - short conversational follow-ups like "Can you list them, please?" now reuse the recent open-orders context instead of falling back to `I don't know`, and active order previews can anchor "this order" follow-ups like "What products are on this order?" or "What job cards are owing on this order?"
   - customer-scoped operational summaries and short order lists for prompts like "How many open orders for Office Group?", "Show open orders for Office Group", "Which orders are due this week for Typestar?", and "Which orders are late for Typestar?"

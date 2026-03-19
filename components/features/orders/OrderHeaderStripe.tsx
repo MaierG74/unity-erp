@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import { ArrowLeft, ChevronsUpDown, Check, Search, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -197,7 +197,7 @@ export function OrderHeaderStripe({
         <span>
           Created{' '}
           {order?.created_at &&
-            format(new Date(order.created_at), 'MMM d, yyyy')}
+            formatDate(order.created_at)}
         </span>
 
         <span className="text-muted-foreground/50">|</span>

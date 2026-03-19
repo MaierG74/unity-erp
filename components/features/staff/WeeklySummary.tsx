@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { pdf } from '@react-pdf/renderer';
 import { supabase } from '@/lib/supabase';
+import { formatDate } from '@/lib/date-utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
 import { useOrgSettings } from '@/hooks/use-org-settings';
@@ -426,21 +427,17 @@ export function WeeklySummary() {
 
   // Navigate to previous week
   const goToPreviousWeek = useCallback(() => {
-    setSelectedWeek(prev => {
-      const newWeek = subWeeks(prev, 1);
-      updateWeekUrl(newWeek);
-      return newWeek;
-    });
-  }, [updateWeekUrl]);
+    const newWeek = subWeeks(selectedWeek, 1);
+    setSelectedWeek(newWeek);
+    updateWeekUrl(newWeek);
+  }, [selectedWeek, updateWeekUrl]);
 
   // Navigate to next week
   const goToNextWeek = useCallback(() => {
-    setSelectedWeek(prev => {
-      const newWeek = addWeeks(prev, 1);
-      updateWeekUrl(newWeek);
-      return newWeek;
-    });
-  }, [updateWeekUrl]);
+    const newWeek = addWeeks(selectedWeek, 1);
+    setSelectedWeek(newWeek);
+    updateWeekUrl(newWeek);
+  }, [selectedWeek, updateWeekUrl]);
 
   // Navigate to current week
   const goToCurrentWeek = useCallback(() => {
@@ -607,7 +604,7 @@ export function WeeklySummary() {
           <div>
             <CardTitle>Weekly Hours Summary</CardTitle>
             <CardDescription>
-              Week of {format(weekStart, 'MMMM d, yyyy')} to {format(weekEnd, 'MMMM d, yyyy')}
+              Week of {formatDate(weekStart)} to {formatDate(weekEnd)}
             </CardDescription>
           </div>
           <div className="flex items-center space-x-2">

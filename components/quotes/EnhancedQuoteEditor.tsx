@@ -17,6 +17,8 @@ import { Separator } from '@/components/ui/separator';
 import QuoteAttachmentManager from './QuoteAttachmentManager';
 import { QuotePDFDownload } from './QuotePDF';
 import QuoteItemsTable from '@/components/features/quotes/QuoteItemsTable';
+import QuoteProfitabilityCard from '@/components/features/quotes/QuoteProfitabilityCard';
+import QuoteReportsTab from '@/components/features/quotes/QuoteReportsTab';
 import EmailQuoteDialog from '@/components/features/quotes/EmailQuoteDialog';
 import { EmailActivityCard } from '@/components/features/emails/EmailActivityCard';
 import { useToast } from '@/components/ui/use-toast';
@@ -373,50 +375,31 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
 
       {/* Main Content */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="details">Quote Details</TabsTrigger>
           <TabsTrigger value="items">Line Items</TabsTrigger>
           <TabsTrigger value="attachments">Attachments</TabsTrigger>
+          <TabsTrigger value="reports">Reports</TabsTrigger>
         </TabsList>
 
         {/* Quote Details Tab */}
-        <TabsContent value="details" className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Basic Information</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <Label htmlFor="quote_number">Quote Number</Label>
+        <TabsContent value="details" className="space-y-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <section className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Quote Details</h3>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="quote_number" className="text-xs text-muted-foreground">Quote Number</Label>
                   <Input
                     id="quote_number"
                     value={quote.quote_number}
                     onChange={(e) => handleQuoteChange('quote_number', e.target.value)}
                   />
                 </div>
-                <div>
-                  <Label>Customer</Label>
-                  {quote.customer?.name ? (
-                    <div className="space-y-1">
-                      <div className="text-lg font-medium">{quote.customer.name}</div>
-                      {quote.customer.email && (
-                        <div className="text-sm text-muted-foreground">{quote.customer.email}</div>
-                      )}
-                      {quote.customer.telephone && (
-                        <div className="text-sm text-muted-foreground">{quote.customer.telephone}</div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-muted-foreground">
-                      Customer #{quote.customer_id}
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <Label htmlFor="status">Status</Label>
-                  <Select 
-                    value={quote.status} 
+                <div className="space-y-1.5">
+                  <Label htmlFor="status" className="text-xs text-muted-foreground">Status</Label>
+                  <Select
+                    value={quote.status}
                     onValueChange={(value) => handleQuoteChange('status', value)}
                   >
                     <SelectTrigger>
@@ -431,96 +414,95 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
                     </SelectContent>
                   </Select>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+              {quote.customer?.telephone && (
+                <div className="text-sm text-muted-foreground">
+                  Tel: {quote.customer.telephone}
+                </div>
+              )}
+            </section>
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Calculator size={20} />
-                  Quote Summary
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
+            <section className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                <Calculator size={14} />
+                Quote Summary
+              </h3>
+              <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span>Subtotal:</span>
+                  <span className="text-muted-foreground">Subtotal:</span>
                   <span className="font-medium">R {subtotal.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>VAT (15%):</span>
+                  <span className="text-muted-foreground">VAT (15%):</span>
                   <span className="font-medium">R {vatAmount.toFixed(2)}</span>
                 </div>
-                <Separator />
-                <div className="flex justify-between text-lg font-bold">
+                <Separator className="!my-3" />
+                <div className="flex justify-between text-base font-bold">
                   <span>Total:</span>
                   <span>R {total.toFixed(2)}</span>
                 </div>
-                <div className="text-sm text-muted-foreground mt-4">
-                  <p>{items.length} line item{items.length !== 1 ? 's' : ''}</p>
-                  <p>{attachments.length} attachment{attachments.length !== 1 ? 's' : ''}</p>
-                </div>
-              </CardContent>
-            </Card>
+              </div>
+              <div className="text-xs text-muted-foreground pt-1">
+                <p>{items.length} line item{items.length !== 1 ? 's' : ''}</p>
+                <p>{attachments.length} attachment{attachments.length !== 1 ? 's' : ''}</p>
+              </div>
+            </section>
+            <QuoteProfitabilityCard
+              items={items}
+              onNavigateToReports={() => setActiveTab('reports')}
+            />
           </div>
 
           {/* Notes */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Notes</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <RichTextEditor
-                content={(quote as any).notes || ''}
-                onUpdate={(html) => handleQuoteChange('notes', html)}
-                placeholder="e.g. Goods to be collected from factory, Wrapped for transport…"
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                Notes appear on the PDF below the totals section.
-              </p>
-            </CardContent>
-          </Card>
+          <section className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notes</h3>
+            <RichTextEditor
+              content={(quote as any).notes || ''}
+              onUpdate={(html) => handleQuoteChange('notes', html)}
+              placeholder="e.g. Goods to be collected from factory, Wrapped for transport…"
+            />
+            <p className="text-xs text-muted-foreground">
+              Notes appear on the PDF below the totals section.
+            </p>
+          </section>
 
           {/* Terms & Conditions */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Terms & Conditions</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {termsTemplates.length > 0 && (
-                <Select
-                  key={`tc-${(quote as any).terms_conditions?.length ?? 0}`}
-                  onValueChange={(templateId) => {
-                    const t = termsTemplates.find(t => String(t.template_id) === templateId);
-                    if (t) {
-                      handleQuoteChange('terms_conditions', t.content);
-                    }
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Load from template…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {termsTemplates.map(t => (
-                      <SelectItem key={t.template_id} value={String(t.template_id)}>
-                        {t.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-              <Textarea
-                placeholder="Terms & conditions for this quote…"
-                value={(quote as any).terms_conditions || ''}
-                onChange={(e) => handleQuoteChange('terms_conditions', e.target.value)}
-                rows={5}
-              />
-              <p className="text-xs text-muted-foreground">
-                {(quote as any).terms_conditions
-                  ? 'Custom terms set for this quote.'
-                  : 'No custom terms — the default template from Settings will be used.'}
-              </p>
-            </CardContent>
-          </Card>
+          <section className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Terms &amp; Conditions</h3>
+            {termsTemplates.length > 0 && (
+              <Select
+                key={`tc-${(quote as any).terms_conditions?.length ?? 0}`}
+                onValueChange={(templateId) => {
+                  const t = termsTemplates.find(t => String(t.template_id) === templateId);
+                  if (t) {
+                    handleQuoteChange('terms_conditions', t.content);
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Load from template…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {termsTemplates.map(t => (
+                    <SelectItem key={t.template_id} value={String(t.template_id)}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <Textarea
+              placeholder="Terms & conditions for this quote…"
+              value={(quote as any).terms_conditions || ''}
+              onChange={(e) => handleQuoteChange('terms_conditions', e.target.value)}
+              rows={4}
+            />
+            <p className="text-xs text-muted-foreground">
+              {(quote as any).terms_conditions
+                ? 'Custom terms set for this quote.'
+                : 'No custom terms — the default template from Settings will be used.'}
+            </p>
+          </section>
 
           {/* Email Activity */}
           <EmailActivityCard type="quote" id={quoteId} />
@@ -634,6 +616,11 @@ export default function EnhancedQuoteEditor({ quoteId }: EnhancedQuoteEditorProp
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        {/* Reports Tab */}
+        <TabsContent value="reports" className="space-y-4">
+          <QuoteReportsTab items={items} />
         </TabsContent>
 
       </Tabs>

@@ -255,4 +255,6 @@ flowchart LR
 3. Use the **Labor Planning Board** to drag pool demand to employees and issue by quantity.
 4. Let staff complete work from the job-card page or scan page.
    On the mobile scan page, newly issued cards are presented to workers as `Issued` (even though the underlying card status is still `pending`) and the primary action is `Complete Job`.
+   There is no separate `Start Job` step on the scan page; quantity capture and completion happen directly from the mobile job-card workflow, while supervisors can still adjust timings elsewhere when needed.
+   Completion from the card page or scan page now syncs only the exact card-backed scheduler assignment, so split-issued siblings on the same order/staff/job are not accidentally completed together.
 5. If order quantities change after issuance, reconcile the stale pool warning and then deal with any resulting exception rows.

@@ -2,6 +2,7 @@
 
 import { cn } from '@/lib/utils';
 import type { SectionWithStaff, FloorStaffJob } from './types';
+import { getEffectiveMinutesElapsed } from './types';
 import { StaffJobCard } from './staff-job-card';
 import type { ShiftInfoWithNow } from '@/hooks/use-shift-info';
 import { computeShiftAwareStatus } from '@/lib/shift-utils';
@@ -40,7 +41,7 @@ export function SectionZone({ data, onStaffClick, shiftInfo }: SectionZoneProps)
     for (const j of staffJobs) {
       const s = computeShiftAwareStatus(
         j.estimated_minutes,
-        j.minutes_elapsed,
+        getEffectiveMinutesElapsed(j),
         shiftInfo.nowMinutes,
         shiftInfo.normalEndMinutes,
         shiftInfo.effectiveEndMinutes,
@@ -55,7 +56,7 @@ export function SectionZone({ data, onStaffClick, shiftInfo }: SectionZoneProps)
   if (activeCount === 0) {
     return (
       <div
-        className="rounded-lg border border-border/40 bg-card/20 flex items-center justify-between px-3 py-1.5"
+        className="rounded-lg border border-border bg-muted/20 flex items-center justify-between px-3 py-1.5"
         style={{ gridColumn: `span ${span}` }}
       >
         <div className="flex items-center gap-2">
@@ -63,11 +64,11 @@ export function SectionZone({ data, onStaffClick, shiftInfo }: SectionZoneProps)
             className="h-2.5 w-2.5 rounded-sm flex-shrink-0"
             style={{ backgroundColor: section.color }}
           />
-          <h3 className="font-semibold text-xs tracking-wide uppercase text-muted-foreground/70">
+          <h3 className="font-semibold text-xs tracking-wide uppercase text-muted-foreground/60">
             {section.name}
           </h3>
         </div>
-        <span className="text-[10px] text-muted-foreground/40">0 staff</span>
+        <span className="text-[10px] text-muted-foreground/50">0 staff</span>
       </div>
     );
   }
@@ -75,13 +76,13 @@ export function SectionZone({ data, onStaffClick, shiftInfo }: SectionZoneProps)
   return (
     <div
       className={cn(
-        'rounded-lg border border-border/60 bg-card/30 backdrop-blur-sm',
+        'rounded-lg border border-border bg-muted/40 shadow-sm',
         'flex flex-col',
       )}
       style={{ gridColumn: `span ${span}` }}
     >
       {/* Section header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border/40">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
         <div className="flex items-center gap-2">
           <span
             className="h-3 w-3 rounded-sm flex-shrink-0"

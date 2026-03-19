@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer';
-import { format } from 'date-fns';
+import { formatDateTime } from '@/lib/date-utils';
 
 // PDF Styles
 const styles = StyleSheet.create({
@@ -295,7 +295,7 @@ export const ReturnGoodsPDFDocument: React.FC<ReturnGoodsPDFProps> = ({
             <Text style={styles.grn}>{goodsReturnNumber}</Text>
             <Text style={styles.documentNumber}>PO #: {purchaseOrderNumber}</Text>
             <Text style={styles.documentDate}>
-              Return Date: {format(new Date(returnDate), 'MMM d, yyyy HH:mm')}
+              Return Date: {formatDateTime(returnDate)}
             </Text>
           </View>
         </View>

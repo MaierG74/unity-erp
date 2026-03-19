@@ -40,7 +40,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Plus, Trash2, Calendar as CalendarIcon, Search } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
-import { format } from 'date-fns';
+import { formatDate } from '@/lib/date-utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
@@ -611,8 +611,8 @@ export function PieceworkRatesManager() {
                         <TableCell>{jobName || r.job_id}</TableCell>
                         <TableCell>{product ? ((product.internal_code ? `${product.internal_code} — ` : '') + product.name) : 'All products'}</TableCell>
                         <TableCell>R{r.rate.toFixed(2)}/pc</TableCell>
-                        <TableCell>{format(new Date(r.effective_date), 'PPP')}</TableCell>
-                        <TableCell>{r.end_date ? format(new Date(r.end_date), 'PPP') : 'Current'}</TableCell>
+                        <TableCell>{formatDate(r.effective_date)}</TableCell>
+                        <TableCell>{r.end_date ? formatDate(r.end_date) : 'Current'}</TableCell>
                         <TableCell>
                           <Button variant="ghost" size="icon" onClick={() => {
                             if (confirm('Delete this rate version?')) deleteRate.mutate(r.rate_id);
@@ -666,7 +666,7 @@ export function PieceworkRatesManager() {
                                 variant={'outline'}
                                 className={cn('w-full h-10 pl-3 text-left font-normal', !field.value && 'text-muted-foreground')}
                               >
-                                {field.value ? format(field.value, 'PPP') : <span>Pick a date</span>}
+                                {field.value ? formatDate(field.value) : <span>Pick a date</span>}
                                 <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                               </Button>
                             </FormControl>

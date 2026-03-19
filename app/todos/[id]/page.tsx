@@ -2,7 +2,7 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { formatDistanceToNow, parseISO, format } from 'date-fns';
+import { formatDistanceToNow, parseISO } from 'date-fns';
 import { ArrowLeft, CalendarIcon, CheckCircle2, Loader2, MessageSquare, Paperclip, Upload, X, Download, FileIcon, Edit2, Clock, User, Flag, ChevronDown, ChevronRight } from 'lucide-react';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -24,7 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/components/common/auth-provider';
-import { formatDate } from '@/lib/date-utils';
+import { formatDate, formatDateShort } from '@/lib/date-utils';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 
@@ -735,7 +735,7 @@ export default function TodoDetailPage() {
                   <PopoverTrigger asChild>
                     <Button variant="outline" size="sm" className="h-8 text-sm rounded-md border-none bg-muted/50 hover:bg-muted">
                       <CalendarIcon className="mr-1.5 h-3.5 w-3.5" />
-                      {field.value ? format(field.value, 'MMM d') : 'No date'}
+                      {field.value ? formatDateShort(field.value) : 'No date'}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="end">

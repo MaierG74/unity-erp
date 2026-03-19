@@ -19,6 +19,7 @@ import { fetchJobCardItems } from '@/lib/queries/factoryFloor';
 import { formatDuration } from '@/lib/shift-utils';
 import { supabase } from '@/lib/supabase';
 import { calculateWorkingMinutes } from '@/lib/working-hours';
+import { createSASTTimestamp } from '@/lib/utils/timezone';
 import type { DaySchedule, PauseEvent, ShiftOverride } from '@/lib/working-hours';
 import {
   CompletionItemsList,
@@ -56,6 +57,17 @@ function formatTimestampToInput(ts: string | null): string {
 
 function toDateKey(d: Date): string {
   return `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}-${d.getDate().toString().padStart(2,'0')}`;
+}
+
+function scheduledStartTimestamp(job: FloorStaffJob): string | null {
+  if (!job.assignment_date || job.start_minutes == null) return null;
+  const hours = Math.floor(job.start_minutes / 60)
+    .toString()
+    .padStart(2, '0');
+  const minutes = Math.floor(job.start_minutes % 60)
+    .toString()
+    .padStart(2, '0');
+  return createSASTTimestamp(job.assignment_date, `${hours}:${minutes}`);
 }
 
 export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPending }: CompleteJobDialogProps) {
@@ -152,7 +164,7 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
   // Pre-fill times when dialog opens
   useEffect(() => {
     if (open && job) {
-      const startTs = job.started_at ?? job.issued_at;
+      const startTs = job.started_at ?? scheduledStartTimestamp(job) ?? job.issued_at;
       const startDt = startTs ? new Date(startTs) : new Date();
       setStartDate(toDateKey(startDt));
       setActualStart(formatTimestampToInput(startTs));

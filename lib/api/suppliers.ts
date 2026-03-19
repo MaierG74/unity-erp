@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { SO_STATUS } from '@/types/purchasing';
 import type { Supplier, SupplierEmail, SupplierComponent, SupplierWithDetails, SupplierPricelist, SupplierPurchaseOrder } from '@/types/suppliers';
 
@@ -11,6 +12,36 @@ export type SupplierComponentWithDetails = SupplierComponent & {
       cat_id: number;
       categoryname: string;
     } | null;
+  };
+};
+
+export type CreateSupplierInventoryItemInput = {
+  internal_code: string;
+  description: string;
+  unit_id: number;
+  category_id: number;
+  quantity_on_hand?: number;
+  location?: string | null;
+  reorder_level?: number | null;
+  supplier_code: string;
+  price: number;
+  lead_time?: number | null;
+  min_order_quantity?: number | null;
+};
+
+export type CreateSupplierInventoryItemResult = {
+  success: true;
+  component: {
+    component_id: number;
+    internal_code: string;
+    description: string | null;
+  };
+  supplier_component: {
+    supplier_component_id: number;
+    supplier_code: string;
+    price: number;
+    lead_time: number | null;
+    min_order_quantity: number | null;
   };
 };
 
@@ -190,6 +221,35 @@ export async function deleteSupplierComponent(id: number) {
     .eq('supplier_component_id', id);
 
   if (error) throw error;
+}
+
+export async function createSupplierInventoryItem(
+  supplierId: number,
+  payload: CreateSupplierInventoryItemInput
+) {
+  const response = await authorizedFetch(`/api/suppliers/${supplierId}/components/create-item`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+  let body: Record<string, any> = {};
+  try {
+    body = (await response.json()) as Record<string, any>;
+  } catch {
+    body = {};
+  }
+
+  if (!response.ok) {
+    const errorMessage =
+      typeof body.error === 'string'
+        ? body.error
+        : typeof body.message === 'string'
+          ? body.message
+          : 'Failed to create inventory item for supplier';
+    throw new Error(errorMessage);
+  }
+
+  return body as CreateSupplierInventoryItemResult;
 }
 
 // Pricelist management

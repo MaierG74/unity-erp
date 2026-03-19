@@ -77,6 +77,94 @@ function QuoteItemAttachmentsCell({ quoteId, itemId, version, onItemAttachmentsC
   );
 }
 
+function sortQuoteItemClusters(clusters: QuoteItemCluster[] | undefined): QuoteItemCluster[] {
+  if (!Array.isArray(clusters) || clusters.length === 0) {
+    return [];
+  }
+
+  return [...clusters].sort((a, b) => {
+    const posA = a.position ?? 0;
+    const posB = b.position ?? 0;
+    if (posA !== posB) return posA - posB;
+    const timeA = new Date(a.created_at).getTime();
+    const timeB = new Date(b.created_at).getTime();
+    return timeA - timeB;
+  });
+}
+
+function getDisplayClustersForItem(item: QuoteItem): QuoteItemCluster[] {
+  const sortedClusters = sortQuoteItemClusters(item.quote_item_clusters);
+
+  const clustersWithLines = sortedClusters
+    .map((cluster) => ({
+      ...cluster,
+      quote_cluster_lines: (cluster.quote_cluster_lines || []).filter(Boolean),
+    }))
+    .filter((cluster) => (cluster.quote_cluster_lines?.length ?? 0) > 0);
+
+  const cutlistLines = clustersWithLines.flatMap((cluster) =>
+    (cluster.quote_cluster_lines || []).filter((line) => Boolean(line.cutlist_slot))
+  );
+
+  const manualClusters = clustersWithLines
+    .map((cluster) => ({
+      ...cluster,
+      quote_cluster_lines: (cluster.quote_cluster_lines || []).filter((line) => !line.cutlist_slot),
+    }))
+    .filter((cluster) => (cluster.quote_cluster_lines?.length ?? 0) > 0);
+
+  if (manualClusters.length > 0) {
+    const [primaryManual, ...restManual] = manualClusters;
+    return [
+      {
+        ...primaryManual,
+        quote_cluster_lines: [
+          ...(primaryManual.quote_cluster_lines || []),
+          ...cutlistLines,
+        ],
+      },
+      ...restManual,
+    ];
+  }
+
+  if (cutlistLines.length > 0 && clustersWithLines.length > 0) {
+    const cutlistBase = clustersWithLines[0];
+    return [
+      {
+        ...cutlistBase,
+        quote_cluster_lines: cutlistLines,
+      },
+    ];
+  }
+
+  if (clustersWithLines.length > 0) {
+    return clustersWithLines;
+  }
+
+  return sortedClusters.length > 0 ? [sortedClusters[0]] : [];
+}
+
+function calculateClusterSubtotal(cluster: QuoteItemCluster | null | undefined): number {
+  if (!cluster) return 0;
+  return (cluster.quote_cluster_lines || []).reduce((sum, line) => {
+    const lineTotal = (line.qty || 0) * (line.unit_cost || 0);
+    return sum + lineTotal;
+  }, 0);
+}
+
+function roundCurrencyValue(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function calculateMarkupPercentFromPrice(subtotal: number, unitPrice: number): number | null {
+  if (!Number.isFinite(subtotal) || subtotal <= 0) {
+    return null;
+  }
+
+  const markupPercent = ((unitPrice - subtotal) / subtotal) * 100;
+  return roundCurrencyValue(markupPercent);
+}
+
 // --- Quote Item Row Component (with expandable cluster) ---
 function QuoteItemRow({
   item,
@@ -157,76 +245,7 @@ function QuoteItemRow({
     }
   }, [expandedItemId, autoExpandItemId, item.id, onAutoExpandHandled]);
 
-  const sortedClusters = React.useMemo(() => {
-    if (!Array.isArray(item.quote_item_clusters) || item.quote_item_clusters.length === 0) {
-      return [] as QuoteItemCluster[];
-    }
-    return [...item.quote_item_clusters].sort((a, b) => {
-      const posA = a.position ?? 0;
-      const posB = b.position ?? 0;
-      if (posA !== posB) return posA - posB;
-      const timeA = new Date(a.created_at).getTime();
-      const timeB = new Date(b.created_at).getTime();
-      return timeA - timeB;
-    });
-  }, [item.quote_item_clusters]);
-
-  const clustersWithLines = React.useMemo(() =>
-    sortedClusters
-      .map((cluster) => ({
-        ...cluster,
-        quote_cluster_lines: (cluster.quote_cluster_lines || []).filter(Boolean),
-      }))
-      .filter((cluster) => (cluster.quote_cluster_lines?.length ?? 0) > 0),
-    [sortedClusters]
-  );
-
-  const cutlistLines = React.useMemo(
-    () => clustersWithLines.flatMap((cluster) => (cluster.quote_cluster_lines || []).filter((line) => Boolean(line.cutlist_slot))),
-    [clustersWithLines]
-  );
-
-  const manualClusters = React.useMemo(() =>
-    clustersWithLines
-      .map((cluster) => ({
-        ...cluster,
-        quote_cluster_lines: (cluster.quote_cluster_lines || []).filter((line) => !line.cutlist_slot),
-      }))
-      .filter((cluster) => (cluster.quote_cluster_lines?.length ?? 0) > 0),
-    [clustersWithLines]
-  );
-
-  const displayClusters = React.useMemo(() => {
-    if (manualClusters.length > 0) {
-      const [primaryManual, ...restManual] = manualClusters;
-      return [
-        {
-          ...primaryManual,
-          quote_cluster_lines: [
-            ...(primaryManual.quote_cluster_lines || []),
-            ...cutlistLines,
-          ],
-        },
-        ...restManual,
-      ];
-    }
-
-    if (cutlistLines.length > 0 && clustersWithLines.length > 0) {
-      const cutlistBase = clustersWithLines[0];
-      return [
-        {
-          ...cutlistBase,
-          quote_cluster_lines: cutlistLines,
-        },
-      ];
-    }
-
-    if (clustersWithLines.length > 0) {
-      return clustersWithLines;
-    }
-
-    return sortedClusters.length > 0 ? [sortedClusters[0]] : [];
-  }, [clustersWithLines, manualClusters, cutlistLines, sortedClusters]);
+  const displayClusters = React.useMemo(() => getDisplayClustersForItem(item), [item]);
 
   const hasClusterLines = displayClusters.length > 0;
   const isPriced = !item.item_type || item.item_type === 'priced';
@@ -687,8 +706,36 @@ export default function QuoteItemsTable({
   };
 
   const handleUpdateItem = async (id: string, field: keyof Pick<QuoteItem, 'description' | 'qty' | 'unit_price' | 'bullet_points' | 'internal_notes'>, value: string | number) => {
-    const updated = await updateQuoteItem(id, { [field]: value });
-    onItemsChange(items.map(i => (i.id === id ? { ...i, ...updated } : i)));
+    const originalItem = items.find((item) => item.id === id);
+    if (!originalItem) return;
+
+    const nextValue = typeof value === 'number' ? value : Number(value);
+    const pricingCluster = field === 'unit_price' ? getDisplayClustersForItem(originalItem)[0] ?? null : null;
+    const derivedMarkupPercent =
+      field === 'unit_price' && Number.isFinite(nextValue)
+        ? calculateMarkupPercentFromPrice(calculateClusterSubtotal(pricingCluster), nextValue)
+        : null;
+
+    const [updatedItem, updatedCluster] = await Promise.all([
+      updateQuoteItem(id, { [field]: value }),
+      pricingCluster && derivedMarkupPercent !== null
+        ? updateQuoteItemCluster(pricingCluster.id, { markup_percent: derivedMarkupPercent })
+        : Promise.resolve(null),
+    ]);
+
+    onItemsChange(items.map((item) => {
+      if (item.id !== id) return item;
+
+      return {
+        ...item,
+        ...updatedItem,
+        quote_item_clusters: item.quote_item_clusters?.map((cluster) =>
+          cluster.id === updatedCluster?.id
+            ? { ...cluster, ...updatedCluster }
+            : cluster
+        ),
+      };
+    }));
   };
 
   const handleDeleteItem = async (id: string) => {

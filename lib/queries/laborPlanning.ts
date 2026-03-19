@@ -736,7 +736,11 @@ async function loadWorkPoolByOrder(): Promise<WorkPoolData> {
       piece_rate: row.piece_rate ? Number(row.piece_rate) : null,
       piece_rate_id: row.piece_rate_id,
       hourly_rate_id: row.hourly_rate_id,
-      time_per_unit: row.time_per_unit ? Number(row.time_per_unit) : null,
+      time_per_unit: resolvePoolTimePerUnitMinutes(
+        row.time_per_unit,
+        job?.estimated_minutes,
+        job?.time_unit,
+      ),
       source: row.source,
       job_name: job?.name ?? null,
       product_name: product?.name ?? null,
@@ -1007,7 +1011,17 @@ function convertToMinutes(time: unknown, unit?: string | null): number | null {
   return numeric * 60;
 }
 
+function resolvePoolTimePerUnitMinutes(
+  poolTimePerUnit: unknown,
+  fallbackTime: unknown,
+  fallbackUnit?: string | null,
+): number | null {
+  const explicitMinutes = toNumber(poolTimePerUnit);
+  return explicitMinutes ?? convertToMinutes(fallbackTime, fallbackUnit);
+}
+
 function toNumber(value: unknown): number | null {
+  if (value == null || value === '') return null;
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
 }

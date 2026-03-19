@@ -3,7 +3,13 @@
 import { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import type { FloorStaffJob } from './types';
-import { getDisplayProgress, getProgressStatus, statusColors, statusTrackColors } from './types';
+import {
+  getFloorProgressSnapshot,
+  getProgressStatus,
+  minutesToClock,
+  statusColors,
+  statusTrackColors,
+} from './types';
 import type { ShiftAwareStatus } from '@/lib/shift-utils';
 import {
   Tooltip,
@@ -20,7 +26,8 @@ interface ProgressBarProps {
 }
 
 export function ProgressBar({ job, className, shiftStatus }: ProgressBarProps) {
-  const progress = getDisplayProgress(job);
+  const progressSnapshot = getFloorProgressSnapshot(job);
+  const progress = progressSnapshot.progress;
   const status = getProgressStatus(job);
   const [animated, setAnimated] = useState(false);
 
@@ -34,7 +41,7 @@ export function ProgressBar({ job, className, shiftStatus }: ProgressBarProps) {
   const shiftMarkerPct = (() => {
     if (!shiftStatus || !job.estimated_minutes || job.estimated_minutes <= 0) return null;
     if (shiftStatus.shiftStatus === 'ok') return null;
-    const elapsed = job.minutes_elapsed;
+    const elapsed = progressSnapshot.minutesElapsed;
     const total = job.estimated_minutes;
     const minutesLeft = total - elapsed;
     if (minutesLeft <= 0) return null;
@@ -46,9 +53,19 @@ export function ProgressBar({ job, className, shiftStatus }: ProgressBarProps) {
     return Math.min(99, pct);
   })();
 
+  const slotLabel =
+    job.start_minutes != null && job.end_minutes != null
+      ? `${minutesToClock(job.start_minutes)}-${minutesToClock(job.end_minutes)}`
+      : null;
   const tooltipText = job.progress_override != null
     ? `Manual override: ${progress}%`
-    : `Based on elapsed time: ${formatDuration(job.minutes_elapsed)} of ${formatDuration(job.estimated_minutes)} estimated`;
+    : progressSnapshot.source === 'scheduled' && slotLabel
+      ? progressSnapshot.scheduleState === 'upcoming'
+        ? `Scheduled ${slotLabel} - waiting for the slot to start`
+        : progressSnapshot.scheduleState === 'active'
+          ? `Following schedule: ${progress}% of the ${slotLabel} slot`
+          : `Scheduled slot ${slotLabel} has fully elapsed`
+      : `Based on elapsed time: ${formatDuration(progressSnapshot.minutesElapsed)} of ${formatDuration(job.estimated_minutes)} estimated`;
 
   return (
     <TooltipProvider>

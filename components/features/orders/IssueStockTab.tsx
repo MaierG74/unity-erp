@@ -15,7 +15,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Warehouse, CheckCircle, Printer, RotateCcw, Info, Plus, X, Search, User, ChevronRight, ChevronDown } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { format } from 'date-fns';
+import { formatDateTime } from '@/lib/date-utils';
 import { cn } from '@/lib/utils';
 import { formatQuantity } from '@/lib/format-utils';
 import type { Order } from '@/types/orders';
@@ -119,6 +119,14 @@ function groupIssuances(issuances: StockIssuance[]): GroupedIssuance[] {
 // Composite key for per-product component tracking
 function compKey(orderDetailId: number, componentId: number): string {
   return `${orderDetailId}_${componentId}`;
+}
+
+function setsEqual<T>(left: Set<T>, right: Set<T>): boolean {
+  if (left.size !== right.size) return false;
+  for (const value of left) {
+    if (!right.has(value)) return false;
+  }
+  return true;
 }
 
 
@@ -402,37 +410,44 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
 
   // Auto-expand products that have remaining components on mount
   useEffect(() => {
-    if (productComponentGroups.length > 0 && expandedProducts.size === 0) {
-      const toExpand = new Set<number>();
-      productComponentGroups.forEach(group => {
+    if (productComponentGroups.length === 0) return;
+
+    setExpandedProducts((prev) => {
+      if (prev.size > 0) return prev;
+
+      const next = new Set<number>();
+      productComponentGroups.forEach((group) => {
         // Expand products that still have components to issue
         if (!group.allIssued && group.components.length > 0) {
-          toExpand.add(group.orderDetailId);
+          next.add(group.orderDetailId);
         }
       });
+
       // If nothing to expand (all issued), expand first product
-      if (toExpand.size === 0 && productComponentGroups.length > 0) {
-        toExpand.add(productComponentGroups[0].orderDetailId);
+      if (next.size === 0) {
+        next.add(productComponentGroups[0].orderDetailId);
       }
-      setExpandedProducts(toExpand);
-    }
+
+      return setsEqual(prev, next) ? prev : next;
+    });
   }, [productComponentGroups]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-include components with remaining qty > 0 when groups change
   useEffect(() => {
-    const toInclude = new Set<string>();
-    productComponentGroups.forEach(group => {
-      group.components.forEach(comp => {
+    const next = new Set<string>();
+    productComponentGroups.forEach((group) => {
+      group.components.forEach((comp) => {
         if (comp.issue_quantity > 0) {
-          toInclude.add(compKey(group.orderDetailId, comp.component_id));
+          next.add(compKey(group.orderDetailId, comp.component_id));
         }
       });
     });
     // Include manual components
-    manualComponents.forEach(comp => {
-      toInclude.add(compKey(0, comp.component_id));
+    manualComponents.forEach((comp) => {
+      next.add(compKey(0, comp.component_id));
     });
-    setIncludedComponents(toInclude);
+
+    setIncludedComponents((prev) => (setsEqual(prev, next) ? prev : next));
   }, [productComponentGroups, manualComponents]);
 
   // Toggle product accordion
@@ -1105,7 +1120,7 @@ export function IssueStockTab({ orderId, order, componentRequirements }: IssueSt
                           onClick={() => toggleIssuanceExpanded(group.groupKey)}
                         >
                           <TableCell>
-                            {format(new Date(group.issuance_date), 'MMM d, yyyy HH:mm')}
+                            {formatDateTime(group.issuance_date)}
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">

@@ -93,6 +93,12 @@ Notes:
 ## Email / Preview / Download Consistency
 - All three actions use the same `QuotePDFDocument`, so layout changes apply everywhere.
 
+## Pricing Behavior
+- Costing cluster lines remain the internal cost basis for a priced quote item.
+- `Update Price` copies the currently displayed cluster total into the line item's `unit_price`; it does not zero the cluster markup.
+- If an estimator manually edits `unit_price`, the quote keeps that selling price and recalculates the primary costing cluster's effective `markup_percent` from the current cost subtotal.
+- No automatic whole-Rand rounding is applied during price sync; the estimator remains in control of any manual rounding decisions.
+
 ## Implementation Steps (Detailed)
 1. Schema + triggers
    - Create migration to add `quote_item_type` enum and `item_type` column.
@@ -148,6 +154,8 @@ Notes:
   - Cutlist button hidden for non-priced items
   - Headings render with bold description text
   - Rows with item_type=heading have subtle background highlight
+  - Manual `unit_price` edits now keep the entered sell price and recalculate the displayed cluster markup from the current costing subtotal
+  - `Update Price` keeps the existing markup logic intact while syncing the cluster total into `unit_price`
 
 ### PDF Changes
 - **QuotePDFDocument**:

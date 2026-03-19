@@ -60,8 +60,14 @@
 
 **Relationship**
 - `suppliercomponents.component_id` → FK to `components.component_id` (the master component).
+- Suppliers → Components now supports two paths:
+  - link an existing master inventory item to the supplier
+  - quick-create a new master inventory item and immediately attach the supplier-specific mapping
+- Keep the code split explicit:
+  - master code lives on `components.internal_code`
+  - supplier code lives on `suppliercomponents.supplier_code`
 - On the Suppliers → Components tab, the first column shows the master component’s `internal_code` and now links to the inventory page.
-- Deep link: clicking the code opens `/inventory?focusComponent={component_id}` and the inventory page auto-selects that component in the details pane.
+- Deep link: clicking the code opens the dedicated component detail page at `/inventory/components/{component_id}`.
 - Inventory → Add Component also supports creating the supplier mapping inline: after choosing a supplier, the row’s Component field accepts either an existing supplier code or a newly typed code, and submit creates the `suppliercomponents` record together with the new master component.
 
 **Associate from Suppliers page**
@@ -70,7 +76,11 @@
 
 **Current Behavior: Supplier Components Tab**
 - Displays columns: Component (internal code), Description, Supplier Code, Price, Lead Time, Min Order, Actions.
-- Add Component: Inline create row with searchable `react-select` for master components. Includes server-side search that queries `components` table by `internal_code` and `description` using case-insensitive ILIKE. Search term debounced at 300ms for performance. Selected component displays with code and description; search term clears automatically on selection.
+- `Link Existing`: inline create row with searchable `react-select` for master components. Includes server-side search that queries `components` table by `internal_code` and `description` using case-insensitive ILIKE. Search term debounced at 300ms for performance. Selected component displays with code and description; search term clears automatically on selection.
+- `Create Inventory Item`: supplier-scoped modal for creating a brand-new master inventory item without leaving the supplier page.
+  - Captures required master fields before save (`internal_code`, `description`, `unit_id`, `category_id`) plus inventory defaults (`quantity_on_hand`, `location`, `reorder_level`) and supplier-specific fields (`supplier_code`, `price`, `lead_time`, `min_order_quantity`).
+  - Save creates `components`, `inventory`, and `suppliercomponents` together in one organization-scoped flow.
+  - On success the new row refreshes into the supplier table without navigating away.
 - Inline edit switches row to a form with `react-select` over master `components` with the same searchable functionality.
 - Update and delete mutate through `updateSupplierComponent` and `deleteSupplierComponent`, followed by query invalidation of `['supplier', supplier_id]`.
 - Component search: Uses React Query with query key `['components-search', componentSearchTerm]`. Queries up to 100 results ordered by `internal_code`. Search is server-side filtered (client-side filtering disabled via `filterOption={() => true}`) to ensure newly created or recently renamed components appear in results.
@@ -93,6 +103,13 @@
   - Component search: Server-side search with debounced input (300ms). Searches `internal_code` and `description` fields. Clears search term automatically when component is selected. Displays selected component code and description immediately.
   - UX: `react-select` with searchable dropdown; selected component's `internal_code` + `description` displayed in the Description column.
 
+- ✅ **Quick-create inventory item flow (Implemented 2026-03-18)**
+  - UI: `Create Inventory Item` opens a supplier-scoped modal from the Components toolbar.
+  - Fields: master item (`internal_code`, `description`, `unit_id`, `category_id`), inventory defaults (`quantity_on_hand`, `location`, `reorder_level`), and supplier mapping (`supplier_code`, `price`, `lead_time`, `min_order_quantity`).
+  - Mutation: `createSupplierInventoryItem()` posts to `app/api/suppliers/[supplierId]/components/create-item/route.ts`, which creates `components`, `inventory`, and `suppliercomponents` together under the current organization.
+  - Refresh behavior: on success, the supplier components table and the supplier-page component KPI count are both invalidated so the new linked item appears immediately across the page.
+  - UX: table refreshes in place and the new supplier row appears without leaving the supplier page.
+
 - Table improvements
   - Sorting: allow sort by `internal_code`, `price`. ✅ **Implemented (2025-11-02)**: Clickable column headers with sort indicators (ArrowUp/ArrowDown icons). Toggle between ascending/descending by clicking the same column; clicking a different column defaults to ascending. Resets to page 1 when sort changes.
   - Filtering: quick search over component code/description/supplier code. ✅ **Implemented**
@@ -111,15 +128,23 @@
 **Acceptance Checklist for the Add Flow**
 - Add button is visible and opens a create form.
 - Submitting creates a new `suppliercomponents` row and the table refreshes without a full page reload.
+- Users can create a brand-new master inventory item from the supplier page.
+- Saving the quick-create flow automatically creates the supplier mapping for the current supplier.
 - Attempting to add an existing `(component_id, supplier_id)` shows a readable duplicate error and does not crash.
+- Duplicate master code and duplicate supplier-code conflicts are shown clearly.
 - Price and numbers are validated; ZAR “R” display matches screenshot behavior.
+- The created item appears immediately in the supplier components table.
+- The supplier-page Components KPI refreshes to the new count without a manual reload.
 - Existing edit/delete continue to work.
 
 **Quick How‑To**
 - Where to edit UI: `components/features/suppliers/supplier-components.tsx:1`.
-- Data access: `lib/api/suppliers.ts:1` (`addSupplierComponent`, `updateSupplierComponent`, `deleteSupplierComponent`).
+- Quick-create modal: `components/features/suppliers/create-supplier-inventory-item-dialog.tsx:1`.
+- Data access: `lib/api/suppliers.ts:1` (`addSupplierComponent`, `updateSupplierComponent`, `deleteSupplierComponent`, `createSupplierInventoryItem`).
+- Server save path: `app/api/suppliers/[supplierId]/components/create-item/route.ts:1`.
 - Types: `types/suppliers.ts:1`.
 - Master components for the selector: `components` table; selector currently fetched in `supplier-components.tsx:26`.
+- Operator note: from Suppliers → Components, use `Create Inventory Item` when the master code does not exist yet; use `Link Existing` when the inventory item already exists and you only need to attach supplier-specific pricing/code data.
 
 **Open Questions**
 - Currency: confirm if all suppliers use ZAR or if per‑supplier currency is needed.

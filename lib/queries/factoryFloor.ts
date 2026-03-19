@@ -74,6 +74,7 @@ export async function fetchJobCategories(): Promise<JobCategory[]> {
   const { data, error } = await supabase
     .from('job_categories')
     .select('category_id, name')
+    .is('parent_category_id', null)
     .order('name');
 
   if (error) throw error;
