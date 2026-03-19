@@ -90,26 +90,29 @@ export async function GET(req: NextRequest, context: { params: Promise<{ product
     })
 
     // Get BOM cost via getProductCostSummary (passes auth through to internal API routes)
-    const origin = `${url.protocol}//${url.host}`
-    const authorizationHeader = req.headers.get('authorization')
-    const productRef = product.internal_code ?? String(productId)
-    const costSummary = await getProductCostSummary(supabaseAdmin, productRef, {
-      origin,
-      authorizationHeader,
-    })
-
     let bomCost = { materials: 0, labor: 0, overhead: 0, total: 0, missingPrices: 0 }
-    if (costSummary.kind === 'summary') {
-      bomCost = {
-        materials: costSummary.materials_cost,
-        labor: costSummary.labor_cost,
-        overhead: costSummary.overhead_cost,
-        total: costSummary.total_cost,
-        missingPrices: costSummary.missing_material_prices,
+    try {
+      const origin = `${url.protocol}//${url.host}`
+      const authorizationHeader = req.headers.get('authorization')
+      const productRef = product.internal_code ?? String(productId)
+      const costSummary = await getProductCostSummary(supabaseAdmin, productRef, {
+        origin,
+        authorizationHeader,
+      })
+
+      if (costSummary.kind === 'summary') {
+        bomCost = {
+          materials: costSummary.materials_cost,
+          labor: costSummary.labor_cost,
+          overhead: costSummary.overhead_cost,
+          total: costSummary.total_cost,
+          missingPrices: costSummary.missing_material_prices,
+        }
+      } else {
+        console.warn('product-reports: BOM cost unavailable:', costSummary.kind)
       }
-    } else {
-      // BOM cost computation failed (product not found, no BOM, etc.) — continue with zero cost
-      console.warn('product-reports: BOM cost unavailable:', costSummary.kind, productRef)
+    } catch (bomErr) {
+      console.warn('product-reports: BOM cost fetch failed, continuing with zero cost:', bomErr)
     }
 
     const orders = filteredOrders.map((row: any) => ({
