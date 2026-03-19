@@ -20,20 +20,28 @@ Unlike the quote Reports tab (which computes everything client-side from already
 
 ### Orders Data (server-side, period-filtered)
 
-Query `order_details` joined with `orders`:
+Supabase query on `order_details` with nested `orders` and `customers`:
 
-```sql
-SELECT
-  od.order_detail_id, od.order_id, od.quantity, od.unit_price,
-  o.order_number, o.status, o.created_at,
-  c.name as customer_name
-FROM order_details od
-JOIN orders o ON od.order_id = o.order_id
-LEFT JOIN customers c ON o.customer_id = c.id
-WHERE od.product_id = :productId
-  AND o.created_at >= :periodStart
-ORDER BY o.created_at DESC
+```typescript
+supabaseAdmin
+  .from('order_details')
+  .select(`
+    order_detail_id, order_id, quantity, unit_price,
+    order:orders!inner(order_number, status, order_date, customer:customers(name))
+  `)
+  .eq('product_id', productId)
+  .eq('order.org_id', orgId)           // explicit org filter (supabaseAdmin bypasses RLS)
+  .not('order.status', 'eq', 'cancelled')  // exclude cancelled orders
+  .gte('order.order_date', periodStart)    // period filter
+  .order('order.order_date', { ascending: false })
 ```
+
+Notes:
+- Uses `supabaseAdmin` with **explicit `orgId` filtering** (not RLS — admin client bypasses RLS). Follows the existing pattern from `effective-bom/route.ts` using `requireModuleAccess()` to obtain `orgId`.
+- Filters on `order_date` (business date the order was placed), not `created_at` (record insertion timestamp).
+- Excludes `cancelled` orders from profitability calculations.
+- `order_number` may be null — client should fall back to `Order #${orderId}`.
+- If the same product appears multiple times in one order, each `order_detail` row is a separate entry.
 
 ### BOM Cost Data (server-side, not period-filtered)
 
@@ -43,7 +51,7 @@ Computed via existing infrastructure — the product's effective BOM, BOL, and o
 - **Overhead**: fixed + percentage-based from `product_overhead`
 - **Total**: materials + labor + overhead
 
-Uses the existing API endpoints: `/api/products/[productId]/effective-bom`, `/api/products/[productId]/effective-bol`, `/api/products/[productId]/overhead`.
+Import the underlying computation functions directly (e.g., from the effective-bom route's resolver) rather than making HTTP round-trips to sibling API routes. This avoids the server-to-server fetch antipattern.
 
 ### Period Filter
 
@@ -51,10 +59,10 @@ Dropdown at the top of the Reports tab:
 
 | Option | Filter |
 |--------|--------|
-| Last 7 days | `created_at >= now - 7d` |
-| Last 30 days | `created_at >= now - 30d` |
-| Last quarter | `created_at >= now - 90d` |
-| Last year | `created_at >= now - 365d` |
+| Last 7 days | `order_date >= now - 7d` |
+| Last 30 days | `order_date >= now - 30d` |
+| Last quarter | `order_date >= now - 90d` |
+| Last year | `order_date >= now - 365d` |
 | All time (default) | No date filter |
 
 Period affects: Health stats, Margin Overview, Order History table, Margin Trend chart.
@@ -97,7 +105,7 @@ interface ProductReportResponse {
   orders: Array<{
     orderDetailId: number
     orderId: number
-    orderNumber: string
+    orderNumber: string | null  // may be null; client falls back to "Order #{orderId}"
     customerName: string | null
     date: string           // ISO date string
     quantity: number
@@ -108,7 +116,11 @@ interface ProductReportResponse {
 
 The endpoint returns raw data; the client computes profitability by combining `bomCost.total` with each order's `unitPrice` and `quantity`.
 
-**Implementation:** Uses `supabaseAdmin` for the order query (server-side, org-scoped via RLS). Reuses the existing effective-bom/bol/overhead API pattern from `getProductCostSummary()` but simplified — we only need the totals, not per-line details.
+**Implementation:** Uses `supabaseAdmin` with explicit `orgId` filtering (obtained via `requireModuleAccess()`). For BOM cost, imports the underlying computation functions directly rather than calling sibling API routes. Only needs the category totals, not per-line details.
+
+**Client hook:** `useProductReports(productId, period)` uses `authorizedFetch` from `lib/client/auth-fetch` for authenticated requests. Manages loading, error, and data state. Refetches when period changes.
+
+**Loading state:** Show skeleton placeholders for each section while data loads. On error, show a retry-able error message.
 
 ## UI Design
 
@@ -186,8 +198,9 @@ SVG sparkline:
 - Date labels on x-axis
 - Horizontal grid lines at 20%, 30%, 40%
 
-If only 1 order, show a single point instead of a line.
+If only 1 data point, show a single point instead of a line.
 If 0 orders, show "No orders in this period" message.
+If multiple order_details share the same orderId, aggregate them into a single data point (weighted margin by revenue) for the trend chart. The order history table shows each order_detail row individually.
 
 ### Empty States
 
