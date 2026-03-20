@@ -242,6 +242,41 @@ Install: `openclaw skill install <skill-name>`
 | **OpenClaw Office** | Visual monitoring dashboard for multi-agent systems | https://github.com/WW-AI-Lab/openclaw-office |
 | **awesome-openclaw-agents** | 162 production-ready agent persona templates | https://github.com/mergisi/awesome-openclaw-agents |
 
+## Alternative: Claude Code Channels (Research Preview)
+
+As of Claude Code v2.1.80+, Anthropic offers native Telegram and Discord channel support. This is a lighter-weight alternative to OpenClaw for single-agent setups.
+
+**Setup:**
+```bash
+# In Claude Code:
+/plugin install telegram@claude-plugins-official
+/telegram:configure <bot-token>
+
+# Restart with channel enabled:
+claude --channels plugin:telegram@claude-plugins-official
+```
+
+**Advantages over OpenClaw:**
+- Zero infrastructure — it IS Claude Code, with direct access to codebase, MCP servers, tools
+- Simpler setup (minutes vs hours)
+- Native Anthropic security model (sender allowlists, pairing)
+
+**Limitations vs OpenClaw:**
+- Single agent only (no multi-agent mesh)
+- Claude models only (no multi-model routing)
+- No built-in voice transcription
+- No SOUL.md persona system (uses CLAUDE.md instead)
+- No HEARTBEAT.md (has scheduled tasks, but less flexible)
+- Research preview — may change
+- Permission prompts pause session unless `--dangerously-skip-permissions`
+- Requires claude.ai login (not API key auth)
+
+**When to use which:**
+- **Claude Code Channels** — quick POC, single agent, Claude-only, simple workflows
+- **OpenClaw** — production multi-agent system, multi-model, voice input, 24/7 heartbeats, cost optimization
+
+**Docs:** https://code.claude.com/docs/en/channels
+
 ## Key Links
 
 - OpenClaw: https://openclaw.ai/
