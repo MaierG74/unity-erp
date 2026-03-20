@@ -189,22 +189,21 @@ flowchart LR
     F --> G
     G --> H["Issue from Order page"]
     G --> I["Drag onto Labor Planning lane"]
+    I --> M["Create `labor_plan_assignments` planned row"]
+    M --> N["Open planned assignment on lane"]
+    N --> J["Issue Job from lane modal"]
     H --> J["`issue_job_card_from_pool` RPC"]
-    I --> J
     J --> K["Create `job_cards` row"]
     J --> L["Create linked `job_card_items` row<br/>with `work_pool_id`"]
-    I --> M["Create `labor_plan_assignments` schedule row"]
-    K --> N["Job Card detail / mobile scan"]
-    L --> N
-    N --> O["Start work"]
-    O --> P["In progress"]
-    P --> Q["Complete / cancel"]
-    Q --> R["Completed qty, payroll, production status"]
+    K --> O["Job Card detail / mobile scan"]
+    L --> O
+    O --> P["Complete / cancel"]
+    P --> Q["Completed qty, payroll, production status"]
 ```
 
 **Where to issue from**
 
-- Use the **Labor Planning Board** when you already know which employee should get the work and when it should happen. Drag the pool job onto a staff lane, set the issue quantity, and confirm. This issues the card **and** creates the schedule assignment in one flow.
+- Use the **Labor Planning Board** when you already know which employee should get the work and when it should happen, but you may still want to move the slot later. Dragging the pool job onto a staff lane now creates a **planned** scheduler assignment only. When you are ready to release the work, open that planned bar, choose the issue quantity, optionally tick `Print job card after issue`, and click `Issue Job`.
 - Use the **Order page Job Cards tab** when you want to convert pool demand into a job card without scheduling it yet, or when you want an ad hoc card quickly. This issues the card, but it does **not** create the scheduler assignment.
 - Current model is still **one staff member per job card**. Team / multi-staff cards are deferred.
 
@@ -214,11 +213,13 @@ flowchart TD
     B --> C["Order page issue dialog"]
     B --> D["Labor Planning drag to staff lane"]
     C --> E["Creates job card<br/>optional `staff_id` on card"]
-    D --> F["Creates job card"]
-    D --> G["Creates schedule assignment"]
-    E --> H["Visible in issued jobs list"]
-    F --> H
-    G --> I["Visible on staff lane / factory schedule"]
+    D --> F["Creates planned schedule assignment"]
+    F --> G["Open planned bar / click Issue Job"]
+    G --> H["Creates job card"]
+    E --> I["Visible in issued jobs list"]
+    H --> I
+    F --> J["Visible on staff lane as Planned"]
+    H --> K["Visible on staff lane / factory schedule as Issued"]
 ```
 
 **100 items to 10 employees**
@@ -252,9 +253,10 @@ flowchart LR
 
 1. Confirm the order lines and BOL are correct.
 2. Run `Generate from BOL` so the work pool reflects current demand.
-3. Use the **Labor Planning Board** to drag pool demand to employees and issue by quantity.
-4. Let staff complete work from the job-card page or scan page.
+3. Use the **Labor Planning Board** to drag pool demand to employees and place the work as **Planned**.
+4. When the plan is confirmed, open the planned bar on the lane, set the issue quantity if needed, optionally tick `Print job card after issue`, and click `Issue Job`.
+5. Let staff complete work from the job-card page or scan page.
    On the mobile scan page, newly issued cards are presented to workers as `Issued` (even though the underlying card status is still `pending`) and the primary action is `Complete Job`.
    There is no separate `Start Job` step on the scan page; quantity capture and completion happen directly from the mobile job-card workflow, while supervisors can still adjust timings elsewhere when needed.
    Completion from the card page or scan page now syncs only the exact card-backed scheduler assignment, so split-issued siblings on the same order/staff/job are not accidentally completed together.
-5. If order quantities change after issuance, reconcile the stale pool warning and then deal with any resulting exception rows.
+6. If order quantities change after issuance, reconcile the stale pool warning and then deal with any resulting exception rows.

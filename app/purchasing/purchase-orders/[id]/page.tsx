@@ -220,11 +220,132 @@ type SupplierOrderWithParent = SupplierOrder & {
   };
 };
 
+type SupplierOrderAllocationPayload = {
+  order_id: number | null;
+  quantity_for_order: number;
+  quantity_for_stock: number;
+};
+
+type PreparedLineQuantityUpdate = {
+  orderId: number;
+  componentCode: string;
+  quantity: number;
+  previousQuantity: number;
+  previousAllocations: SupplierOrderAllocationPayload[] | null;
+  nextAllocations: SupplierOrderAllocationPayload[] | null;
+};
+
+const ALLOCATION_EPSILON = 0.000001;
+
 function getAllocationTotal(links: CustomerOrderLink[] | undefined): number {
   return (links || []).reduce(
     (sum, link) => sum + Number(link.quantity_for_order || 0) + Number(link.quantity_for_stock || 0),
     0
   );
+}
+
+function quantitiesMatch(left: number, right: number): boolean {
+  return Math.abs(left - right) < ALLOCATION_EPSILON;
+}
+
+function serializeAllocations(links: CustomerOrderLink[] | undefined): SupplierOrderAllocationPayload[] | null {
+  const serialized = (links || []).flatMap((link) => {
+    const rows: SupplierOrderAllocationPayload[] = [];
+    const quantityForOrder = Number(link.quantity_for_order || 0);
+    const quantityForStock = Number(link.quantity_for_stock || 0);
+
+    if (link.order_id !== null && quantityForOrder > 0) {
+      rows.push({
+        order_id: link.order_id,
+        quantity_for_order: quantityForOrder,
+        quantity_for_stock: 0,
+      });
+    }
+
+    const stockQuantity = quantityForStock + (link.order_id === null ? quantityForOrder : 0);
+    if (stockQuantity > 0) {
+      rows.push({
+        order_id: null,
+        quantity_for_order: 0,
+        quantity_for_stock: stockQuantity,
+      });
+    }
+
+    return rows;
+  });
+
+  return serialized.length > 0 ? serialized : (links && links.length > 0 ? [] : null);
+}
+
+function buildRebalancedAllocations(
+  order: SupplierOrder,
+  newQuantity: number
+): { nextAllocations: SupplierOrderAllocationPayload[] | null; validationError: string | null } {
+  const links = order.customer_order_links || [];
+  if (links.length === 0) {
+    return { nextAllocations: null, validationError: null };
+  }
+
+  const explicitOrderAllocations = links
+    .filter((link) => link.order_id !== null && Number(link.quantity_for_order || 0) > 0)
+    .map((link) => ({
+      order_id: link.order_id as number,
+      quantity_for_order: Number(link.quantity_for_order || 0),
+      quantity_for_stock: 0,
+    }));
+  const explicitOrderTotal = explicitOrderAllocations.reduce(
+    (sum, link) => sum + link.quantity_for_order,
+    0
+  );
+  const stockTotal = links.reduce((sum, link) => {
+    const quantityForStock = Number(link.quantity_for_stock || 0);
+    const orphanedOrderQuantity = link.order_id === null ? Number(link.quantity_for_order || 0) : 0;
+    return sum + quantityForStock + orphanedOrderQuantity;
+  }, 0);
+
+  if (explicitOrderAllocations.length === 1 && quantitiesMatch(stockTotal, 0)) {
+    return {
+      nextAllocations: [{
+        order_id: explicitOrderAllocations[0].order_id,
+        quantity_for_order: newQuantity,
+        quantity_for_stock: 0,
+      }],
+      validationError: null,
+    };
+  }
+
+  if (explicitOrderAllocations.length === 0) {
+    return {
+      nextAllocations: [{
+        order_id: null,
+        quantity_for_order: 0,
+        quantity_for_stock: newQuantity,
+      }],
+      validationError: null,
+    };
+  }
+
+  const stockRemainder = newQuantity - explicitOrderTotal;
+  if (stockRemainder < -ALLOCATION_EPSILON) {
+    return {
+      nextAllocations: null,
+      validationError: `Cannot reduce ${order.supplier_component?.component?.internal_code || `line #${order.order_id}`} below ${explicitOrderTotal} because that quantity is still assigned in "For Order". Edit the allocation split first.`,
+    };
+  }
+
+  const nextAllocations: SupplierOrderAllocationPayload[] = [...explicitOrderAllocations];
+  if (stockRemainder > ALLOCATION_EPSILON) {
+    nextAllocations.push({
+      order_id: null,
+      quantity_for_order: 0,
+      quantity_for_stock: stockRemainder,
+    });
+  }
+
+  return {
+    nextAllocations,
+    validationError: null,
+  };
 }
 
 function getAllocationIssue(order: SupplierOrder): string | null {
@@ -234,7 +355,7 @@ function getAllocationIssue(order: SupplierOrder): string | null {
   const allocationTotal = getAllocationTotal(links);
   const expectedTotal = Number(order.order_quantity || 0);
 
-  if (Math.abs(allocationTotal - expectedTotal) < 0.000001) {
+  if (quantitiesMatch(allocationTotal, expectedTotal)) {
     return null;
   }
 
@@ -1459,24 +1580,110 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   // Edit purchase order mutation
   const editPurchaseOrderMutation = useMutation({
     mutationFn: async (data: { notes?: string; lineUpdates?: { orderId: number; quantity: number }[] }) => {
-      // Update notes if changed
+      const preparedLineUpdates: PreparedLineQuantityUpdate[] = [];
+      if (data.lineUpdates && data.lineUpdates.length > 0) {
+        for (const update of data.lineUpdates) {
+          const existingOrder = purchaseOrder?.supplier_orders?.find((order) => order.order_id === update.orderId);
+          if (!existingOrder) {
+            throw new Error(`Could not find PO line #${update.orderId} while saving changes.`);
+          }
+
+          const { nextAllocations, validationError } = buildRebalancedAllocations(existingOrder, update.quantity);
+          if (validationError) {
+            throw new Error(validationError);
+          }
+
+          preparedLineUpdates.push({
+            orderId: update.orderId,
+            componentCode: existingOrder.supplier_component?.component?.internal_code || `#${update.orderId}`,
+            quantity: update.quantity,
+            previousQuantity: existingOrder.order_quantity,
+            previousAllocations: serializeAllocations(existingOrder.customer_order_links),
+            nextAllocations,
+          });
+        }
+      }
+
+      const rollbackAppliedLines = async (appliedUpdates: PreparedLineQuantityUpdate[]) => {
+        for (const appliedUpdate of [...appliedUpdates].reverse()) {
+          if (appliedUpdate.previousAllocations !== null) {
+            const { error: allocationRollbackError } = await supabase.rpc('update_supplier_order_allocations', {
+              target_supplier_order_id: appliedUpdate.orderId,
+              new_allocations: appliedUpdate.previousAllocations,
+              target_purchase_order_id: Number(id),
+            });
+
+            if (allocationRollbackError) {
+              throw new Error(
+                `Rollback failed for ${appliedUpdate.componentCode} allocations: ${allocationRollbackError.message}`
+              );
+            }
+          }
+
+          const { error: quantityRollbackError } = await supabase
+            .from('supplier_orders')
+            .update({ order_quantity: appliedUpdate.previousQuantity })
+            .eq('order_id', appliedUpdate.orderId);
+
+          if (quantityRollbackError) {
+            throw new Error(
+              `Rollback failed for ${appliedUpdate.componentCode} quantity: ${quantityRollbackError.message}`
+            );
+          }
+        }
+      }
+
+      if (preparedLineUpdates.length > 0) {
+        const appliedUpdates: PreparedLineQuantityUpdate[] = [];
+
+        try {
+          for (const preparedUpdate of preparedLineUpdates) {
+            if (preparedUpdate.nextAllocations !== null) {
+              const { error: allocationError } = await supabase.rpc('update_supplier_order_allocations', {
+                target_supplier_order_id: preparedUpdate.orderId,
+                new_allocations: preparedUpdate.nextAllocations,
+                target_purchase_order_id: Number(id),
+              });
+
+              if (allocationError) {
+                throw new Error(
+                  `Failed to sync the "For Order" split for ${preparedUpdate.componentCode}: ${allocationError.message}`
+                );
+              }
+            }
+
+            appliedUpdates.push(preparedUpdate);
+
+            const { error: lineError } = await supabase
+              .from('supplier_orders')
+              .update({ order_quantity: preparedUpdate.quantity })
+              .eq('order_id', preparedUpdate.orderId);
+
+            if (lineError) {
+              throw new Error(`Failed to update line item ${preparedUpdate.componentCode}: ${lineError.message}`);
+            }
+          }
+        } catch (error) {
+          try {
+            await rollbackAppliedLines(appliedUpdates);
+          } catch (rollbackError) {
+            const message = rollbackError instanceof Error ? rollbackError.message : 'Unknown rollback error';
+            throw new Error(
+              `${error instanceof Error ? error.message : 'Failed to update line items.'} We also could not fully restore the previous draft state: ${message}`
+            );
+          }
+
+          throw error;
+        }
+      }
+
+      // Update notes if changed after quantities are safely saved
       if (data.notes !== undefined) {
         const { error: notesError } = await supabase
           .from('purchase_orders')
           .update({ notes: data.notes })
           .eq('purchase_order_id', id);
         if (notesError) throw new Error(`Failed to update notes: ${notesError.message}`);
-      }
-
-      // Update line quantities if changed
-      if (data.lineUpdates && data.lineUpdates.length > 0) {
-        for (const update of data.lineUpdates) {
-          const { error: lineError } = await supabase
-            .from('supplier_orders')
-            .update({ order_quantity: update.quantity })
-            .eq('order_id', update.orderId);
-          if (lineError) throw new Error(`Failed to update line item: ${lineError.message}`);
-        }
       }
 
       // Log activity
@@ -1607,6 +1814,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
   // Save edits
   const handleSaveEdits = () => {
     const lineUpdates: { orderId: number; quantity: number }[] = [];
+    let hasInvalidQuantity = false;
     
     // Check for quantity changes
     purchaseOrder?.supplier_orders?.forEach(order => {
@@ -1614,11 +1822,16 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
       if (newQty !== undefined && newQty !== order.order_quantity) {
         if (newQty <= 0) {
           setError('Quantity must be greater than 0. Use delete to remove items.');
+          hasInvalidQuantity = true;
           return;
         }
         lineUpdates.push({ orderId: order.order_id, quantity: newQty });
       }
     });
+
+    if (hasInvalidQuantity) {
+      return;
+    }
 
     const notesChanged = editedNotes !== (purchaseOrder?.notes || '');
     
@@ -1892,7 +2105,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>
-              {allocationBlockedOrders.length === 1 ? 'One line is' : `${allocationBlockedOrders.length} lines are`} blocked from receiving because the hidden order/stock allocation does not match the line quantity. Fix the line allocation before receiving more stock.
+              {allocationBlockedOrders.length === 1 ? 'One line is' : `${allocationBlockedOrders.length} lines are`} blocked from receiving because the saved &quot;For Order&quot; split no longer adds up to the line quantity. Edit that line&apos;s order/stock allocation so the totals match before receiving more stock.
             </AlertDescription>
           </Alert>
         )}
@@ -2066,7 +2279,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                                   size="sm"
                                   onClick={() => handleOpenReceiveModal(order)}
                                   disabled={remainingToReceive <= 0 || receiveBlockedByAllocation}
-                                  title={receiveBlockedByAllocation ? 'Allocation mismatch must be fixed before receiving this line.' : undefined}
+                                  title={receiveBlockedByAllocation ? 'The saved "For Order" split must match the line quantity before this line can be received.' : undefined}
                                 >
                                   Receive
                                 </Button>
@@ -2117,7 +2330,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
                           <TableRow className="border-b bg-destructive/5">
                             <TableCell colSpan={isEditMode ? (isApproved ? 8 : 7) : (isApproved ? 11 : 9)} className="py-2 pl-8">
                               <p className="text-xs text-destructive">
-                                Receiving blocked: {allocationIssue} Edit the &quot;For Order&quot; allocation so the line totals match before receiving the remaining {remainingToReceive}.
+                                Receiving blocked: {allocationIssue} Edit the &quot;For Order&quot; allocation so the saved order/stock split matches the remaining line quantity of {remainingToReceive}.
                               </p>
                             </TableCell>
                           </TableRow>
