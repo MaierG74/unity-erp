@@ -140,8 +140,12 @@ export function useLaborPlanningMutations(queryKey: QueryKey) {
         };
       });
 
-      toast.success('Job scheduled', {
-        description: `${variables.job.name} assigned to staff ${variables.staffId}`,
+      const isPlannedPoolDrop = variables.job.poolId != null && !variables.job.jobStatus;
+
+      toast.success(isPlannedPoolDrop ? 'Job planned' : 'Job scheduled', {
+        description: isPlannedPoolDrop
+          ? `${variables.job.name} is planned on the lane. Issue it from the job details panel when ready.`
+          : `${variables.job.name} assigned to staff ${variables.staffId}`,
         action: {
           label: 'Undo',
           onClick: () =>

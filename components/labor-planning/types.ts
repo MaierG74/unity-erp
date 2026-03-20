@@ -64,6 +64,7 @@ export interface StaffAssignment {
   rateId?: number | null;
   bolId?: number | null;
   quantity?: number | null;
+  timePerUnitMinutes?: number | null;
   showHandles?: boolean;
   // Time tracking fields
   jobStatus?: 'issued' | 'in_progress' | 'completed' | 'on_hold';

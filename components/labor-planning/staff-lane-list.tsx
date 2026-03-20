@@ -4,6 +4,7 @@ import type { DragEvent } from 'react';
 import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -12,8 +13,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
-import { minutesToClock, formatDuration } from '@/src/lib/laborScheduling';
+import { minutesToClock, formatDuration, stretchForBreaks } from '@/src/lib/laborScheduling';
 import { Circle, GripHorizontal, X, Calendar, Clock, User, Briefcase, CheckCircle2, ClipboardList, Loader2, Undo2, Play, PackageCheck, Pause, ExternalLink, ChevronDown, ChevronRight, Timer } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useRouter } from 'next/navigation';
@@ -27,12 +29,19 @@ import { getExecutionStatusMeta } from '@/components/production/execution-status
 import { formatDate } from '@/lib/date-utils';
 
 const PRINT_AFTER_ISSUE_STORAGE_KEY = 'labor-planning-print-after-issue';
+const MIN_SCHEDULE_BLOCK = 15;
 
 function getStoredPrintAfterIssue(): boolean {
   if (typeof window === 'undefined') return true;
   const stored = localStorage.getItem(PRINT_AFTER_ISSUE_STORAGE_KEY);
   if (stored == null) return true;
   return stored !== 'false';
+}
+
+function storePrintAfterIssue(enabled: boolean): void {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(PRINT_AFTER_ISSUE_STORAGE_KEY, String(enabled));
+  }
 }
 
 /** Collapsible "More details" section for the job assignment dialog */
@@ -138,6 +147,11 @@ export function StaffLaneList({
   const totalMinutes = endMinutes - startMinutes;
   const laneHeightClass = compact ? 'h-14' : 'h-16';
   const [issuingJobCard, setIssuingJobCard] = useState(false);
+  const [printAfterIssue, setPrintAfterIssue] = useState(() => getStoredPrintAfterIssue());
+
+  useEffect(() => {
+    storePrintAfterIssue(printAfterIssue);
+  }, [printAfterIssue]);
 
   // Use fixed pixel positioning when timelineWidth is provided
   const useFixedWidth = timelineWidth != null && timelineWidth > 0;
@@ -223,6 +237,14 @@ export function StaffLaneList({
       setIssueQty(1);
       return;
     }
+    const poolId = extractPoolIdFromJobKey(selectedAssignment.jobKey);
+    const plannedPoolAssignment = poolId != null && extractCardIdFromJobKey(selectedAssignment.jobKey) == null;
+    if (plannedPoolAssignment) {
+      const plannedQty = Math.max(selectedAssignment.quantity ?? 1, 1);
+      setAvailableQty(plannedQty);
+      setIssueQty(plannedQty);
+      return;
+    }
     const orderId = typeof selectedAssignment.orderId === 'number' ? selectedAssignment.orderId : null;
     const jobId = selectedAssignment.jobId ?? null;
     if (!orderId || !jobId) { setAvailableQty(null); return; }
@@ -256,6 +278,75 @@ export function StaffLaneList({
     setIssuingJobCard(true);
     let printWindow: Window | null = null;
     try {
+      const poolId = extractPoolIdFromJobKey(selectedAssignment.jobKey);
+      const targetCardId = extractCardIdFromJobKey(selectedAssignment.jobKey);
+      const plannedPoolAssignment = poolId != null && targetCardId == null;
+      const qtyToIssue = Math.max(1, issueQty);
+
+      if (printAfterIssue) {
+        printWindow = window.open('about:blank', '_blank');
+      }
+
+      if (plannedPoolAssignment) {
+        const plannedQty = Math.max(selectedAssignment.quantity ?? qtyToIssue, 1);
+        const actualQtyToIssue = Math.min(qtyToIssue, plannedQty);
+        const fallbackPerUnitMinutes =
+          plannedQty > 0
+            ? Math.max((selectedAssignment.endMinutes - selectedAssignment.startMinutes) / plannedQty, 0)
+            : null;
+        const timePerUnitMinutes = selectedAssignment.timePerUnitMinutes ?? fallbackPerUnitMinutes;
+        const workMinutes = Math.max(
+          Math.round((timePerUnitMinutes ?? 0) * actualQtyToIssue) || 0,
+          MIN_SCHEDULE_BLOCK,
+        );
+        const stretched = stretchForBreaks(selectedAssignment.startMinutes, workMinutes, breaks);
+        const computedEnd = Math.min(stretched.wallEnd, endMinutes);
+        const issuedAt = new Date().toISOString();
+
+        const { data: cardId, error: issueError } = await supabase.rpc('issue_job_card_from_pool', {
+          p_pool_id: poolId,
+          p_quantity: actualQtyToIssue,
+          p_staff_id: parseInt(selectedLane.id, 10),
+        });
+
+        if (issueError) throw issueError;
+
+        const nextJobKey = `pool-${poolId}:card-${cardId}`;
+        const { error: assignmentError } = await supabase
+          .from('labor_plan_assignments')
+          .update({
+            job_instance_id: nextJobKey,
+            job_status: 'issued',
+            issued_at: issuedAt,
+            end_minutes: computedEnd,
+            updated_at: issuedAt,
+          })
+          .eq('assignment_id', parseInt(selectedAssignment.id, 10));
+
+        if (assignmentError) throw assignmentError;
+
+        const reopenPrint = () => window.open(`/staff/job-cards/${cardId}?print=1`, '_blank');
+        const remaining = Math.max(plannedQty - actualQtyToIssue, 0);
+        toast.success(`Job card #${cardId} issued`, {
+          description: printAfterIssue
+            ? `${actualQtyToIssue} unit${actualQtyToIssue === 1 ? '' : 's'} issued to ${selectedLane.name}. Print opened.${remaining > 0 ? ` ${remaining} remain in the pool.` : ''}`
+            : `${actualQtyToIssue} unit${actualQtyToIssue === 1 ? '' : 's'} issued to ${selectedLane.name}.${remaining > 0 ? ` ${remaining} remain in the pool.` : ''}`,
+          action: {
+            label: printAfterIssue ? 'Reopen print' : 'Print now',
+            onClick: reopenPrint,
+          },
+        });
+
+        if (printWindow) {
+          printWindow.location.href = `/staff/job-cards/${cardId}?print=1`;
+        }
+
+        setSelectedAssignment(null);
+        setSelectedLane(null);
+        window.dispatchEvent(new Event('focus'));
+        return;
+      }
+
       // Look up BOL data if we have a bolId to get product_id and quantity
       let productId: number | null = null;
       let bolQuantity = 1;
@@ -329,19 +420,12 @@ export function StaffLaneList({
         }
       }
 
-      const qtyToIssue = issueQty;
-
       // If the source item has no remaining balance and is already on a staff-assigned card, block
       if (sourceItem && sourceItem.quantity <= 0 && sourceItem.card_staff_id != null) {
         toast.error('Already fully issued', {
           description: 'This job has already been issued with no remaining balance.',
         });
         return;
-      }
-
-      const shouldPrintAfterIssue = getStoredPrintAfterIssue();
-      if (shouldPrintAfterIssue) {
-        printWindow = window.open('about:blank', '_blank');
       }
 
       // Create the staff-assigned job card
@@ -448,9 +532,9 @@ export function StaffLaneList({
       const reopenPrint = () => window.open(`/staff/job-cards/${jobCardId}?print=1`, '_blank');
 
       toast.success(`Job card #${jobCardId} issued${issuedRemaining}`, {
-        description: printWindow ? 'Print opened.' : undefined,
+        description: printAfterIssue ? 'Print opened.' : undefined,
         action: {
-          label: printWindow ? 'Reopen print' : 'Print now',
+          label: printAfterIssue ? 'Reopen print' : 'Print now',
           onClick: reopenPrint,
         },
       });
@@ -1049,6 +1133,10 @@ export function StaffLaneList({
             const qty = selectedAssignment.quantity ?? 0;
             const perItem = qty > 1 ? durationMin / qty : null;
             const statusMeta = getExecutionStatusMeta(selectedAssignment.jobStatus);
+            const isPlanned = selectedAssignment.status === 'scheduled' && !selectedAssignment.jobStatus;
+            const canIssue = selectedAssignment.jobStatus == null;
+            const canComplete =
+              selectedAssignment.jobStatus != null && selectedAssignment.jobStatus !== 'completed';
             return (
               <>
                 {/* ── Colour accent bar ── */}
@@ -1123,6 +1211,14 @@ export function StaffLaneList({
 
                   {/* Metadata chips */}
                   <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
+                    {isPlanned && (
+                      <Badge
+                        variant="outline"
+                        className="text-[11px] font-medium border-violet-200 bg-violet-500/10 text-violet-700 dark:border-violet-800 dark:bg-violet-500/15 dark:text-violet-300"
+                      >
+                        Planned
+                      </Badge>
+                    )}
                     {selectedAssignment.jobStatus && (
                       <Badge
                         variant="outline"
@@ -1204,10 +1300,10 @@ export function StaffLaneList({
                 </div>
 
                 {/* ── Issue quantity ── */}
-                {availableQty != null && selectedAssignment.jobStatus !== 'issued' && (
+                {availableQty != null && isPlanned && (
                   <div className="mx-5 mb-3 flex items-center gap-3 rounded-lg border px-4 py-2.5">
                     <ClipboardList className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <span className="text-sm font-medium">Issue</span>
+                    <span className="text-sm font-medium">Issue quantity</span>
                     <Input
                       type="number"
                       min={1}
@@ -1217,8 +1313,27 @@ export function StaffLaneList({
                       className="h-7 w-20 text-sm"
                     />
                     <span className="text-[12px] text-muted-foreground">
-                      of {availableQty} available
+                      of {availableQty} available to issue
                     </span>
+                  </div>
+                )}
+
+                {isPlanned && (
+                  <div className="mx-5 mb-3 flex items-start gap-3 rounded-lg border bg-muted/30 px-4 py-3">
+                    <Checkbox
+                      id="lane-print-after-issue"
+                      checked={printAfterIssue}
+                      onCheckedChange={(checked) => setPrintAfterIssue(Boolean(checked))}
+                      disabled={issuingJobCard}
+                    />
+                    <div className="space-y-0.5">
+                      <Label htmlFor="lane-print-after-issue" className="text-sm font-medium">
+                        Print job card after issue
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Opens the print-ready job card as soon as you issue this planned job.
+                      </p>
+                    </div>
                   </div>
                 )}
 
@@ -1239,7 +1354,7 @@ export function StaffLaneList({
                       )}
                       {unissuing ? 'Un-issuing...' : 'Un-issue'}
                     </Button>
-                  ) : (
+                  ) : canIssue ? (
                     <Button
                       variant="outline"
                       size="sm"
@@ -1251,39 +1366,41 @@ export function StaffLaneList({
                       ) : (
                         <ClipboardList className="h-4 w-4 mr-1.5" />
                       )}
-                      {issuingJobCard ? 'Creating...' : `Issue${availableQty != null ? ` (${issueQty})` : ''}`}
+                      {issuingJobCard ? 'Issuing...' : `Issue Job${availableQty != null ? ` (${issueQty})` : ''}`}
+                    </Button>
+                  ) : null}
+                  {canComplete && (
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+                      onClick={() => {
+                        if (!selectedAssignment || !selectedLane) return;
+                        setCompleteAssignment({
+                          assignment_id: parseInt(selectedAssignment.id, 10),
+                          job_instance_id: selectedAssignment.jobKey,
+                          order_id: typeof selectedAssignment.orderId === 'number' ? selectedAssignment.orderId : undefined,
+                          orderNumber: selectedAssignment.orderNumber ?? undefined,
+                          job_id: selectedAssignment.jobId ?? undefined,
+                          jobName: selectedAssignment.jobName ?? undefined,
+                          productName: selectedAssignment.productName ?? undefined,
+                          staffName: selectedLane.name,
+                          staff_id: parseInt(selectedLane.id, 10),
+                          assignment_date: selectedAssignment.assignmentDate ?? undefined,
+                          start_minutes: selectedAssignment.startMinutes,
+                          end_minutes: selectedAssignment.endMinutes,
+                          issued_at: selectedAssignment.issuedAt ?? undefined,
+                          started_at: selectedAssignment.startedAt ?? undefined,
+                          job_status: selectedAssignment.jobStatus,
+                        });
+                        setSelectedAssignment(null);
+                        setSelectedLane(null);
+                      }}
+                    >
+                      <CheckCircle2 className="h-4 w-4 mr-1.5" />
+                      Complete Job
                     </Button>
                   )}
-                  <Button
-                    variant="default"
-                    size="sm"
-                    className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500"
-                    onClick={() => {
-                      if (!selectedAssignment || !selectedLane) return;
-                      setCompleteAssignment({
-                        assignment_id: parseInt(selectedAssignment.id, 10),
-                        job_instance_id: selectedAssignment.jobKey,
-                        order_id: typeof selectedAssignment.orderId === 'number' ? selectedAssignment.orderId : undefined,
-                        orderNumber: selectedAssignment.orderNumber ?? undefined,
-                        job_id: selectedAssignment.jobId ?? undefined,
-                        jobName: selectedAssignment.jobName ?? undefined,
-                        productName: selectedAssignment.productName ?? undefined,
-                        staffName: selectedLane.name,
-                        staff_id: parseInt(selectedLane.id, 10),
-                        assignment_date: selectedAssignment.assignmentDate ?? undefined,
-                        start_minutes: selectedAssignment.startMinutes,
-                        end_minutes: selectedAssignment.endMinutes,
-                        issued_at: selectedAssignment.issuedAt ?? undefined,
-                        started_at: selectedAssignment.startedAt ?? undefined,
-                        job_status: selectedAssignment.jobStatus,
-                      });
-                      setSelectedAssignment(null);
-                      setSelectedLane(null);
-                    }}
-                  >
-                    <CheckCircle2 className="h-4 w-4 mr-1.5" />
-                    Complete Job
-                  </Button>
                   <div className="flex-1" />
                   <Button variant="ghost" size="sm" onClick={() => {
                     setSelectedAssignment(null);

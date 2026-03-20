@@ -59,22 +59,25 @@ function formatDuration(durationHours: number): string {
 function orderJobSummary(jobs: PlanningJob[]): string {
   let pool = 0;
   let issued = 0;
-  let scheduled = 0;
+  let planned = 0;
   let inProgress = 0;
+  let onHold = 0;
   let completed = 0;
   for (const j of jobs) {
     if (j.jobStatus === 'completed') completed++;
     else if (j.jobStatus === 'in_progress') inProgress++;
-    else if (j.scheduleStatus === 'scheduled') scheduled++;
+    else if (j.jobStatus === 'on_hold') onHold++;
     else if (j.jobStatus === 'issued') issued++;
+    else if (j.scheduleStatus === 'scheduled') planned++;
     else if (j.poolId != null && (j.remainingQty ?? 0) > 0) pool++;
     else issued++; // legacy BOL jobs without pool
   }
   const parts: string[] = [];
   if (pool > 0) parts.push(`${pool} pool`);
   if (issued > 0) parts.push(`${issued} issued`);
-  if (scheduled > 0) parts.push(`${scheduled} scheduled`);
+  if (planned > 0) parts.push(`${planned} planned`);
   if (inProgress > 0) parts.push(`${inProgress} in progress`);
+  if (onHold > 0) parts.push(`${onHold} on hold`);
   if (completed > 0) parts.push(`${completed} completed`);
   return parts.join(' · ');
 }
@@ -97,7 +100,7 @@ function jobCardDetail(job: PlanningJob): { label: string; className: string; ic
     };
   }
   if (job.scheduleStatus === 'scheduled') {
-    return { label: `Scheduled${qtySuffix}${timeSuffix}`, className: 'text-violet-600 dark:text-violet-400', icon: CalendarClock };
+    return { label: `Planned${qtySuffix}${timeSuffix}`, className: 'text-violet-600 dark:text-violet-400', icon: CalendarClock };
   }
   // Pool demand — skip time (aggregate is misleading for multi-unit pool)
   if (job.poolId != null && (job.remainingQty ?? 0) > 0) {

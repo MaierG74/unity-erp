@@ -243,6 +243,19 @@ function renderCellValue(columnKey: string, value: string) {
   return value;
 }
 
+function getAssistantMessageSummary(content: string) {
+  const lines = content
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean);
+
+  return lines[0] ?? content.trim();
+}
+
+function shouldCondenseAssistantMessage(message: ChatMessage) {
+  return message.role === 'assistant' && message.status === 'answered' && Boolean(message.card);
+}
+
 /** Extract an href from a card's actions or detail rows if the label matches */
 function getPrimaryTableRowAction(
   card: AssistantTableCard,
@@ -1101,7 +1114,13 @@ export function AssistantDock({ enabled }: { enabled: boolean }) {
                 <div className="mb-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
                   {message.role === 'user' ? 'You' : 'Assistant'}
                 </div>
-                <p className="whitespace-pre-wrap leading-5">{message.content}</p>
+                {shouldCondenseAssistantMessage(message) ? (
+                  <p className="leading-5 text-[11px] text-muted-foreground">
+                    {getAssistantMessageSummary(message.content)}
+                  </p>
+                ) : (
+                  <p className="whitespace-pre-wrap leading-5">{message.content}</p>
+                )}
 
                 {message.role === 'assistant' && message.card ? (
                   <AssistantCardRenderer card={message.card} onAction={handleAssistantAction} />

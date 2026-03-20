@@ -310,10 +310,23 @@ function detectActiveOrderFollowUpIntent(
     return null;
   }
 
-  const refersToActiveOrder =
-    /\b(this|that|current|selected|same)\b/.test(normalized) ||
-    /\b(it|them)\b/.test(normalized) ||
-    !/\border\b/.test(normalized);
+  const hasContextCue =
+    /\b(this|that|current|selected|same|here)\b/.test(normalized) ||
+    /\b(it|them)\b/.test(normalized);
+  const isShortEllipticalFollowUp =
+    /^(?:show|list|open|view)(?:\s+me)?\s+(?:the\s+)?(?:products?|items?)$/.test(normalized) ||
+    /^(?:show|list|open|view)(?:\s+me)?\s+(?:the\s+)?(?:documents?|document|docs|client docs|customer docs)$/.test(
+      normalized
+    ) ||
+    /^(?:what|which|show|list)(?:\s+me)?\s+(?:the\s+)?job cards?(?:\s+are)?(?:\s+(?:open|attached|owing|remaining|left|outstanding))?$/.test(
+      normalized
+    ) ||
+    /^have all (?:the )?job cards? been assigned$/.test(normalized) ||
+    /^what(?:'s| is)\s+on\s+(?:it|this|that)$/.test(normalized) ||
+    /^what(?:'s| is)\s+(?:blocking|outstanding|left)(?:\s+here)?$/.test(normalized) ||
+    /^outstanding parts?$/.test(normalized) ||
+    /^supplier parts?$/.test(normalized);
+  const refersToActiveOrder = hasContextCue || isShortEllipticalFollowUp;
   if (!refersToActiveOrder) {
     return null;
   }
@@ -456,6 +469,10 @@ function buildProductOrderPrompt(productLabel: string) {
   return `Which customer orders include ${productLabel}?`;
 }
 
+function buildComponentDemandPrompt(componentLabel: string) {
+  return `Which customer orders need ${componentLabel}?`;
+}
+
 function buildOrderEntityClarifyReply(
   pathname: string | null | undefined,
   query: string,
@@ -463,30 +480,68 @@ function buildOrderEntityClarifyReply(
   intent: CustomerOrderIntent
 ) {
   const clarifyCandidates = candidates.slice(0, 5);
+  const includesComponent = clarifyCandidates.some(candidate => candidate.kind === 'component');
+  const leadIn = includesComponent
+    ? `I found more than one plausible Unity record for "${query}". Did you mean the customer, the product, or the component?`
+    : `I found more than one plausible Unity record for "${query}". Did you mean the customer or the product?`;
+  const description = includesComponent
+    ? 'This name matches more than one Unity record. Pick the customer to see customer orders, the product to inspect product-order demand, or the component to inspect verified component demand.'
+    : 'This name matches more than one Unity record. Pick the customer to see customer orders, or pick the product to inspect product-order demand.';
 
   return buildReply(pathname, {
     status: 'clarify',
     message: buildAssistantEntityClarifyAnswer(query, clarifyCandidates, {
-      leadIn: `I found more than one plausible Unity record for "${query}". Did you mean the customer or the product?`,
+      leadIn,
     }),
     card: buildAssistantEntityClarifyCard(query, clarifyCandidates, {
       title: `Choose what "${query}" refers to`,
-      description:
-        'This name matches more than one Unity record. Pick the customer to see customer orders, or pick the product to inspect product-order demand.',
-      buildPrimaryPrompt: candidate =>
-        candidate.kind === 'customer'
-          ? buildCustomerOrderPrompt(intent, candidate.label)
-          : candidate.kind === 'product'
-            ? buildProductOrderPrompt(formatAssistantEntityCandidate(candidate))
-            : null,
-      buildPrimaryLabel: candidate =>
-        candidate.kind === 'customer' ? 'Use customer' : 'Use product',
+      description,
+      buildPrimaryPrompt: candidate => {
+        if (candidate.kind === 'customer') {
+          return buildCustomerOrderPrompt(intent, candidate.label);
+        }
+
+        if (candidate.kind === 'product') {
+          return buildProductOrderPrompt(formatAssistantEntityCandidate(candidate));
+        }
+
+        if (candidate.kind === 'component') {
+          return buildComponentDemandPrompt(formatAssistantEntityCandidate(candidate));
+        }
+
+        return null;
+      },
+      buildPrimaryLabel: candidate => {
+        if (candidate.kind === 'customer') {
+          return 'Use customer';
+        }
+
+        if (candidate.kind === 'product') {
+          return 'Use product';
+        }
+
+        if (candidate.kind === 'component') {
+          return 'Use component';
+        }
+
+        return 'Use match';
+      },
     }),
-    suggestions: clarifyCandidates.map(candidate =>
-      candidate.kind === 'customer'
-        ? buildCustomerOrderPrompt(intent, candidate.label)
-        : buildProductOrderPrompt(formatAssistantEntityCandidate(candidate))
-    ),
+    suggestions: clarifyCandidates.flatMap(candidate => {
+      if (candidate.kind === 'customer') {
+        return [buildCustomerOrderPrompt(intent, candidate.label)];
+      }
+
+      if (candidate.kind === 'product') {
+        return [buildProductOrderPrompt(formatAssistantEntityCandidate(candidate))];
+      }
+
+      if (candidate.kind === 'component') {
+        return [buildComponentDemandPrompt(formatAssistantEntityCandidate(candidate))];
+      }
+
+      return [];
+    }),
   });
 }
 
@@ -498,14 +553,13 @@ async function resolveOrdersCustomerOrReply(
 ) {
   const scopedLookup = await resolveAssistantEntityForIntent(supabase, customerRef, {
     primaryKinds: ['customer'],
-    secondaryKinds: ['product'],
+    secondaryKinds: ['product', 'component'],
     limitPerKind: 3,
     ambiguityGap: 8,
   });
-  const customerCandidates = scopedLookup.primaryCandidates;
-  const productCandidates = scopedLookup.secondaryCandidates;
+  const crossDomainCandidates = scopedLookup.secondaryCandidates;
 
-  if (scopedLookup.kind === 'clarify' && productCandidates.length > 0) {
+  if (scopedLookup.kind === 'clarify' && crossDomainCandidates.length > 0) {
     const candidates = scopedLookup.candidates.slice(0, 4);
 
     return {
@@ -632,7 +686,11 @@ export async function POST(req: NextRequest) {
   const activeOrderFollowUpIntent = detectActiveOrderFollowUpIntent(context, normalized);
   let modelRoute: Awaited<ReturnType<typeof classifyAssistantRequestWithModel>> = null;
   try {
-    modelRoute = await classifyAssistantRequestWithModel(normalized);
+    modelRoute = await classifyAssistantRequestWithModel({
+      message: normalized,
+      history,
+      context,
+    });
   } catch (error) {
     console.error('[assistant] model routing failed, falling back to deterministic routing', error);
   }

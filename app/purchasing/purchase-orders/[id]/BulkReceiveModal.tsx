@@ -468,7 +468,7 @@ export function BulkReceiveModal({
                         {blockedOrders.length > 0 && (
                             <Alert variant="destructive">
                                 <AlertDescription>
-                                    {blockedOrders.length === 1 ? 'One open line is' : `${blockedOrders.length} open lines are`} excluded from bulk receiving because the hidden order/stock allocation does not match the line quantity. Fix those allocations on the PO first.
+                                    {blockedOrders.length === 1 ? 'One open line is' : `${blockedOrders.length} open lines are`} excluded from bulk receiving because the saved "For Order" split no longer adds up to the line quantity. Fix those order/stock allocations on the PO first.
                                 </AlertDescription>
                             </Alert>
                         )}

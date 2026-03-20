@@ -5,19 +5,8 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Card, CardContent } from '@/components/ui/card';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { OrderTree } from '@/components/labor-planning/order-tree';
 import { StaffLaneList } from '@/components/labor-planning/staff-lane-list';
 import { TimeAxisHeader } from '@/components/labor-planning/time-axis-header';
@@ -42,11 +31,10 @@ import { useWorkSchedule } from '@/hooks/use-work-schedule';
 import type { ScheduleBreak } from '@/types/work-schedule';
 import { logSchedulingEvent } from '@/src/lib/analytics/scheduling';
 import { useLaborPlanningMutations } from '@/src/lib/mutations/laborPlanning';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { AlertTriangle, ChevronLeft, ChevronRight, Filter, Loader2, Minus, Plus, Search, ZoomIn } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+import { ChevronLeft, ChevronRight, Filter, Loader2, Minus, Plus, Search, ZoomIn } from 'lucide-react';
 import { format, addDays, subDays } from 'date-fns';
 import { formatDate } from '@/lib/date-utils';
 import { cn } from '@/lib/utils';
@@ -54,15 +42,6 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 const MIN_DURATION = 15;
-
-/** Format minutes-from-midnight as 12-hour time (e.g. 810 → "1:30 PM") */
-function formatMinutesAsTime(minutes: number): string {
-  const h24 = Math.floor(minutes / 60);
-  const m = Math.round(minutes % 60);
-  const h12 = h24 % 12 || 12;
-  const ampm = h24 < 12 ? 'AM' : 'PM';
-  return `${h12}:${m.toString().padStart(2, '0')} ${ampm}`;
-}
 
 // Zoom levels: pixels per hour
 const ZOOM_LEVELS = [80, 120, 180, 240] as const;
@@ -72,8 +51,6 @@ const ZOOM_LEVELS = [80, 120, 180, 240] as const;
 // + lane-row border (1) + staff column w-[120px] (120) + border-r (1)
 const LANE_TIMELINE_OFFSET = 143;
 const ZOOM_STORAGE_KEY = 'labor-planning-zoom';
-const PRINT_AFTER_ISSUE_STORAGE_KEY = 'labor-planning-print-after-issue';
-
 function getStoredZoom(): number {
   if (typeof window === 'undefined') return 1;
   const stored = localStorage.getItem(ZOOM_STORAGE_KEY);
@@ -90,19 +67,6 @@ function storeZoom(index: number): void {
   }
 }
 
-function getStoredPrintAfterIssue(): boolean {
-  if (typeof window === 'undefined') return true;
-  const stored = localStorage.getItem(PRINT_AFTER_ISSUE_STORAGE_KEY);
-  if (stored == null) return true;
-  return stored !== 'false';
-}
-
-function storePrintAfterIssue(enabled: boolean): void {
-  if (typeof window !== 'undefined') {
-    localStorage.setItem(PRINT_AFTER_ISSUE_STORAGE_KEY, String(enabled));
-  }
-}
-
 interface LaborPlanningBoardProps {
   /** Extra pixels to subtract from viewport height for column sizing. Default 130. */
   heightOffset?: number;
@@ -111,7 +75,6 @@ interface LaborPlanningBoardProps {
 export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardProps) {
   const searchParams = useSearchParams();
   const pathname = usePathname();
-  const router = useRouter();
   const [selectedDate, setSelectedDate] = useState(
     () => searchParams?.get('date') || format(new Date(), 'yyyy-MM-dd')
   );
@@ -156,14 +119,6 @@ export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardPro
   const [showOnlyWithJobs, setShowOnlyWithJobs] = useState(true);
   const swimlaneScrollRef = useRef<HTMLDivElement>(null);
   const queryKey = ['labor-planning', selectedDate] as const;
-
-  // Issue-and-schedule dialog state (for pool-sourced jobs)
-  const [issueDialogState, setIssueDialogState] = useState<{
-    job: PlanningJob;
-    staffLane: StaffLane;
-    snappedStart: number;
-    wallEnd: number;
-  } | null>(null);
 
   // Load zoom from localStorage on mount
   useEffect(() => {
@@ -428,17 +383,6 @@ export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardPro
           startMinutes: snappedStart,
           endMinutes: end,
         });
-
-        // Pool-sourced jobs: open issue dialog instead of direct assign
-        if (jobMeta.job.poolId != null) {
-          setIssueDialogState({
-            job: jobMeta.job,
-            staffLane: staff,
-            snappedStart,
-            wallEnd: end,
-          });
-          return;
-        }
 
         assignMutation.mutate({
           job: jobMeta.job,
@@ -842,275 +786,7 @@ export function LaborPlanningBoard({ heightOffset = 130 }: LaborPlanningBoardPro
         </Card>
       </div>
 
-      {/* Issue-and-schedule dialog for pool-sourced jobs */}
-      {issueDialogState && (
-        <IssueAndScheduleDialog
-          job={issueDialogState.job}
-          staffLane={issueDialogState.staffLane}
-          snappedStart={issueDialogState.snappedStart}
-          selectedDate={selectedDate}
-          scheduleBreaks={scheduleBreaks}
-          startMinutes={START_MINUTES}
-          endMinutes={END_MINUTES}
-          onClose={() => setIssueDialogState(null)}
-          onIssued={(cardId, issuedQty, jobKey, computedEnd) => {
-            const assignJob: PlanningJob = {
-              ...issueDialogState.job,
-              id: jobKey,
-              jobStatus: 'issued',
-              quantity: issuedQty,
-            };
-            assignMutation.mutate({
-              job: assignJob,
-              staffId: Number(issueDialogState.staffLane.id),
-              startMinutes: issueDialogState.snappedStart,
-              endMinutes: computedEnd,
-              assignmentDate: selectedDate,
-            });
-            setIssueDialogState(null);
-          }}
-        />
-      )}
     </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Issue & Schedule Dialog (pool-sourced jobs)                        */
-/* ------------------------------------------------------------------ */
-
-function IssueAndScheduleDialog({
-  job,
-  staffLane,
-  snappedStart,
-  selectedDate,
-  scheduleBreaks,
-  startMinutes: shiftStart,
-  endMinutes: shiftEnd,
-  onClose,
-  onIssued,
-}: {
-  job: PlanningJob;
-  staffLane: StaffLane;
-  snappedStart: number;
-  selectedDate: string;
-  scheduleBreaks: ScheduleBreak[];
-  startMinutes: number;
-  endMinutes: number;
-  onClose: () => void;
-  onIssued: (cardId: number, qty: number, jobKey: string, computedEnd: number) => void;
-}) {
-  const remaining = job.remainingQty ?? job.quantity ?? 1;
-  const [qty, setQty] = useState(1);
-  const [overrideReason, setOverrideReason] = useState('');
-  const [printAfterIssue, setPrintAfterIssue] = useState(() => getStoredPrintAfterIssue());
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  useEffect(() => {
-    storePrintAfterIssue(printAfterIssue);
-  }, [printAfterIssue]);
-
-  const isOverIssue = qty > remaining;
-  const timePerUnit = job.timePerUnit ?? job.durationMinutes ?? null;
-  const estMinutes = timePerUnit != null ? timePerUnit * qty : null;
-  const estHours = estMinutes != null ? Math.floor(estMinutes / 60) : null;
-  const estMins = estMinutes != null ? Math.round(estMinutes % 60) : null;
-
-  // Recompute end time based on current qty (stretch for breaks)
-  const workMinutes = Math.max(estMinutes ?? MIN_DURATION, MIN_DURATION);
-  const stretched = stretchForBreaks(snappedStart, workMinutes, scheduleBreaks);
-  const computedEnd = Math.min(stretched.wallEnd, shiftEnd);
-
-  const canSubmit =
-    qty >= 1 && (!isOverIssue || overrideReason.trim().length > 0) && !isSubmitting;
-
-  const handleSubmit = async () => {
-    if (!canSubmit || job.poolId == null) return;
-
-    // Re-check lane constraints with the qty-based duration
-    const laneAssignments = staffLane.assignments ?? [];
-    const constraints = checkLaneConstraints(
-      laneAssignments.map((a) => ({
-        id: a.id,
-        startMinutes: a.startMinutes,
-        endMinutes: a.endMinutes,
-        label: a.label,
-      })),
-      { id: `pool-${job.poolId}`, startMinutes: snappedStart, endMinutes: computedEnd },
-      {
-        window: { startMinutes: shiftStart, endMinutes: shiftEnd },
-        availability: staffLane.availability,
-      },
-    );
-
-    if (constraints.hasConflict) {
-      toast.error('Cannot fit job in this slot', {
-        description: constraints.issues[0]?.message ?? 'Lane conflict with adjusted duration.',
-      });
-      return;
-    }
-
-    const printWindow = printAfterIssue ? window.open('about:blank', '_blank') : null;
-    setIsSubmitting(true);
-
-    try {
-      const { data: cardId, error } = await supabase.rpc('issue_job_card_from_pool', {
-        p_pool_id: job.poolId,
-        p_quantity: qty,
-        p_staff_id: parseInt(staffLane.id),
-        p_allow_overissue: isOverIssue,
-        p_override_reason: isOverIssue ? overrideReason.trim() : null,
-      });
-
-      if (error) throw error;
-
-      const jobKey = `pool-${job.poolId}:card-${cardId}`;
-      const reopenPrint = () => window.open(`/staff/job-cards/${cardId}?print=1`, '_blank');
-      toast.success('Job card issued & scheduled', {
-        description: printAfterIssue
-          ? `Card #${cardId} — ${qty} units of ${job.name} assigned to ${staffLane.name}. Print opened.`
-          : `Card #${cardId} — ${qty} units of ${job.name} assigned to ${staffLane.name}.`,
-        action: {
-          label: printAfterIssue ? 'Reopen print' : 'Print now',
-          onClick: reopenPrint,
-        },
-      });
-      if (printAfterIssue) {
-        if (printWindow) {
-          printWindow.location.href = `/staff/job-cards/${cardId}?print=1`;
-        } else {
-          reopenPrint();
-        }
-      }
-      onIssued(cardId as number, qty, jobKey, computedEnd);
-    } catch (err: any) {
-      printWindow?.close();
-      toast.error('Failed to issue job card', { description: err.message });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Issue & Schedule</DialogTitle>
-          <DialogDescription>
-            Issue a job card from the work pool and schedule it on {staffLane.name}&apos;s lane.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            <div className="text-muted-foreground">Job</div>
-            <div className="font-medium">{job.name}</div>
-            {job.productName && (
-              <>
-                <div className="text-muted-foreground">Product</div>
-                <div className="font-medium">{job.productName}</div>
-              </>
-            )}
-            <div className="text-muted-foreground">Staff</div>
-            <div className="font-medium">{staffLane.name}</div>
-            <div className="text-muted-foreground">Remaining in pool</div>
-            <div className="font-medium">{remaining}</div>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="issue-qty">Quantity to issue</Label>
-            <Input
-              id="issue-qty"
-              type="number"
-              min={1}
-              value={qty || ''}
-              placeholder="0"
-              onChange={(e) => setQty(parseInt(e.target.value) || 0)}
-              onBlur={() => { if (!qty || qty < 1) setQty(1); }}
-            />
-          </div>
-
-          <div className="flex items-start gap-3 rounded-md border bg-muted/30 p-3">
-            <Checkbox
-              id="issue-print-after"
-              checked={printAfterIssue}
-              onCheckedChange={(checked) => setPrintAfterIssue(Boolean(checked))}
-              disabled={isSubmitting}
-            />
-            <div className="space-y-0.5">
-              <Label htmlFor="issue-print-after" className="text-sm font-medium">
-                Print job card after issue
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                Opens a print-ready job card in a new tab as soon as this card is issued.
-              </p>
-            </div>
-          </div>
-
-          {/* Schedule time preview — updates live as quantity changes */}
-          <div className="rounded-md border bg-muted/50 p-3 space-y-1.5">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Start</span>
-              <span className="font-medium tabular-nums">{formatMinutesAsTime(snappedStart)}</span>
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Finish</span>
-              <span className="font-medium tabular-nums">{formatMinutesAsTime(computedEnd)}</span>
-            </div>
-            <div className="flex items-center justify-between text-sm border-t pt-1.5">
-              <span className="text-muted-foreground">Block</span>
-              <span className="font-medium tabular-nums">{computedEnd - snappedStart} min</span>
-            </div>
-            {estMinutes != null && (
-              <>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Actual work</span>
-                  <span className="font-medium tabular-nums">
-                    {estHours != null && estHours > 0 ? `${estHours}h ` : ''}{estMins} min
-                    {timePerUnit != null && (
-                      <span className="ml-1 text-muted-foreground font-normal">({timePerUnit} min × {qty})</span>
-                    )}
-                  </span>
-                </div>
-                {estMinutes < MIN_DURATION && (
-                  <p className="text-[11px] text-muted-foreground/70">
-                    Scheduled as {MIN_DURATION} min — minimum block size for the timeline grid.
-                  </p>
-                )}
-              </>
-            )}
-          </div>
-
-          {isOverIssue && (
-            <div className="space-y-2 rounded-md border border-destructive/50 bg-destructive/10 p-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-destructive">
-                <AlertTriangle className="h-4 w-4" />
-                Over-issuance: {qty - remaining} units beyond remaining
-              </div>
-              <p className="text-xs text-muted-foreground">
-                This will create an acknowledged production exception. A reason is required.
-              </p>
-              <Textarea
-                placeholder="Reason for over-issuance..."
-                value={overrideReason}
-                onChange={(e) => setOverrideReason(e.target.value)}
-                rows={2}
-              />
-            </div>
-          )}
-        </div>
-
-        <DialogFooter className="pt-2">
-          <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
-            Cancel
-          </Button>
-          <Button onClick={handleSubmit} disabled={!canSubmit}>
-            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Issue & Schedule
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -1178,6 +854,7 @@ function buildStaffLanes(
         rateId: assignment.rateId,
         bolId: assignment.bolId,
         quantity: job?.quantity ?? null,
+        timePerUnitMinutes: job?.timePerUnit ?? job?.durationMinutes ?? null,
         productId: job?.productId ?? null,
         // Time tracking fields
         jobStatus: assignment.jobStatus ?? job?.jobStatus ?? undefined,
