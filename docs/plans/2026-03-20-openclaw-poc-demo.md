@@ -39,8 +39,8 @@ The following API keys are needed:
 |-----|---------|-------------|
 | `GROQ_API_KEY` | Voice transcription ($0.04/hr) | https://console.groq.com |
 | `GOOGLE_API_KEY` | Gemini 2.5 Flash for vision/OCR ($0.30/M input) | https://aistudio.google.com/apikey |
-| Supabase URL + anon key | Read access to Unity ERP | Already in Unity ERP `.env.local` |
-| `RESEND_API_KEY` | Email sending (for marketing flyer distribution) | Already in Unity ERP env |
+| Supabase URL + service role key | Database access for Unity ERP (POC only — production uses read-only role) | Already in Unity ERP `.env.local` |
+| `RESEND_API_KEY` | Single-recipient email for flyer demo | Already in Unity ERP env |
 
 ### P2: Install Supabase MCP on OpenClaw
 
@@ -65,7 +65,9 @@ openclaw mcp install @supabase/mcp-server-supabase
 # }
 ```
 
-**Security note:** For the POC demo, using the service role key is acceptable. For production, switch to the layered safety model documented in `docs/technical/openclaw-agent-architecture.md` (read-only Postgres role + Edge Functions for writes + pending action queue).
+**Security note:** The POC runs against the **live Supabase environment** (not a lab copy). The service role key is used for the demo to enable flexible ad-hoc reads. Matt's instructions explicitly prohibit DELETE, UPDATE, DROP, and any destructive operations. For production, switch to the layered safety model documented in `docs/technical/openclaw-agent-architecture.md` (read-only Postgres role + Edge Functions for writes + pending action queue).
+
+**Write boundary:** Matt may perform freeform SELECT queries (joins, aggregations, etc.) for maximum flexibility in answering ad-hoc questions. All write operations (INSERT, UPDATE, DELETE) are prohibited in Matt's persona instructions. Freeform reads cannot damage the database — worst case is incorrect data in chat.
 
 ### P3: Configure Voice Transcription
 
@@ -398,13 +400,15 @@ Reply: "Make the text bigger and add '20% OFF this month'"
 
 Expected: Matt adjusts the design and sends an updated version.
 
-- [ ] **Step 5: Test email distribution (if time permits)**
+- [ ] **Step 5: Test single-recipient email (if time permits)**
 
-Reply: "Send this to all our customers"
+Reply: "Send this flyer to John at Typestar"
 
-Expected: Matt queries `customer_contacts` for email addresses, confirms the list count ("I found 45 customer contacts with email addresses. Send to all?"), and on confirmation sends via Resend.
+Expected: Matt looks up the contact in `customer_contacts`, confirms ("Send to john@typestar.co.za?"), and on confirmation sends a single email via Resend with the flyer attached.
 
-**Note:** Email distribution requires the Resend API key accessible from the OpenClaw machine, plus a sending endpoint. For the POC, this could be a simple Edge Function or the agent could call the existing Unity API route.
+**Scope:** Single recipient only for the demo. No bulk sends. Matt must confirm the exact recipient before sending. This demonstrates the capability without the risk of mass emails.
+
+**Note:** Requires the Resend API key accessible from the OpenClaw machine. For the POC, Matt can call the Resend API directly via HTTP. For production, this would go through an Edge Function with rate limiting and org scoping.
 
 ---
 
