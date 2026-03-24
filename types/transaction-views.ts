@@ -4,13 +4,14 @@ export type ViewConfig = {
     to: string | null;
     preset: string | null;
   };
-  groupBy: 'none' | 'component' | 'supplier' | 'period_week' | 'period_month';
+  groupBy: 'none' | 'component' | 'supplier' | 'supplier_component' | 'period_week' | 'period_month';
   filters: {
     search: string;
     transactionTypeId: string;
     supplierId: string;
     categoryId: string;
     productId: string;
+    componentIds: string[];
   };
 };
 
@@ -88,6 +89,7 @@ export const DEFAULT_VIEW_CONFIG: ViewConfig = {
     supplierId: 'all',
     categoryId: 'all',
     productId: 'all',
+    componentIds: [],
   },
 };
 

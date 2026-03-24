@@ -26,12 +26,13 @@ export function TransactionsExplorer() {
     transactionTypeId: config.filters.transactionTypeId,
     supplierId: config.filters.supplierId,
     categoryId: config.filters.categoryId,
+    componentIds: config.filters.componentIds,
     search: config.filters.search,
   });
 
   // Get unique component IDs for stock summary (only when grouping by component)
   const componentIds = useMemo(() => {
-    if (config.groupBy !== 'component') return [];
+    if (config.groupBy !== 'component' && config.groupBy !== 'supplier_component') return [];
     const ids = new Set<number>();
     transactions.forEach((t) => ids.add(t.component_id));
     return Array.from(ids);

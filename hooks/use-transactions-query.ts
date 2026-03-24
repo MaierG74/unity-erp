@@ -1,12 +1,13 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/common/auth-provider';
 import type { EnrichedTransaction } from '@/types/transaction-views';
-import { startOfWeek, subDays, startOfMonth, startOfYear } from 'date-fns';
+import { startOfWeek, subDays, startOfMonth, startOfYear, endOfDay } from 'date-fns';
 
 function getPresetDateRange(preset: string | null): { from: Date; to: Date } {
   const now = new Date();
-  const to = now;
+  const to = endOfDay(now);
   switch (preset) {
     case 'thisWeek':
       return { from: startOfWeek(now, { weekStartsOn: 1 }), to };
@@ -33,16 +34,20 @@ type UseTransactionsQueryParams = {
   transactionTypeId?: string;
   supplierId?: string;
   categoryId?: string;
+  componentIds?: string[];
   search?: string;
 };
 
 export function useTransactionsQuery(params: UseTransactionsQueryParams) {
   const { user } = useAuth();
 
-  // Resolve date range
-  const dateRange = params.dateFrom && params.dateTo
-    ? { from: new Date(params.dateFrom), to: new Date(params.dateTo) }
-    : getPresetDateRange(params.datePreset ?? 'last30');
+  // Resolve date range — memoize so the query key stays stable across re-renders
+  const dateRange = useMemo(() => {
+    if (params.dateFrom && params.dateTo) {
+      return { from: new Date(params.dateFrom), to: new Date(params.dateTo) };
+    }
+    return getPresetDateRange(params.datePreset ?? 'last30');
+  }, [params.dateFrom, params.dateTo, params.datePreset]);
 
   // If filtering by product, first get BOM component IDs
   const bomQuery = useQuery({
@@ -72,6 +77,7 @@ export function useTransactionsQuery(params: UseTransactionsQueryParams) {
         transactionTypeId: params.transactionTypeId,
         supplierId: params.supplierId,
         categoryId: params.categoryId,
+        componentIds: params.componentIds,
         bomComponentIds,
       },
     ],
@@ -123,8 +129,12 @@ export function useTransactionsQuery(params: UseTransactionsQueryParams) {
         query = query.eq('transaction_type_id', Number(params.transactionTypeId));
       }
 
+      // Filter by specific component IDs (multi-select)
+      if (params.componentIds && params.componentIds.length > 0) {
+        query = query.in('component_id', params.componentIds.map(Number));
+      }
       // Filter by BOM components if product selected
-      if (bomComponentIds && bomComponentIds.length > 0) {
+      else if (bomComponentIds && bomComponentIds.length > 0) {
         query = query.in('component_id', bomComponentIds);
       }
 

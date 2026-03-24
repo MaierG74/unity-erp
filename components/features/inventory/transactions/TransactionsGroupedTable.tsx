@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Table,
   TableBody,
@@ -14,10 +14,11 @@ import { Button } from '@/components/ui/button';
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from 'lucide-react';
 import { format, startOfWeek, startOfMonth } from 'date-fns';
 import Link from 'next/link';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { EnrichedTransaction, ComponentStockSummary } from '@/types/transaction-views';
 
-type GroupByMode = 'none' | 'component' | 'supplier' | 'period_week' | 'period_month';
+type GroupByMode = 'none' | 'component' | 'supplier' | 'supplier_component' | 'period_week' | 'period_month';
 
 type TransactionGroup = {
   key: string;
@@ -28,6 +29,7 @@ type TransactionGroup = {
   count: number;
   stockSummary?: ComponentStockSummary;
   transactions: EnrichedTransaction[];
+  subGroups?: TransactionGroup[];
 };
 
 type Props = {
@@ -67,7 +69,8 @@ function groupTransactions(
         label = t.component?.internal_code || 'Unknown';
         sublabel = t.component?.description || undefined;
         break;
-      case 'supplier': {
+      case 'supplier':
+      case 'supplier_component': {
         const supplier = t.purchase_order?.supplier;
         key = supplier ? String(supplier.supplier_id) : 'none';
         label = supplier?.name || 'No Supplier';
@@ -118,6 +121,39 @@ function groupTransactions(
   // Sort groups
   const groups = Array.from(groupMap.values());
   groups.sort((a, b) => a.label.localeCompare(b.label));
+
+  // For supplier_component, create sub-groups by component within each supplier
+  if (groupBy === 'supplier_component') {
+    for (const group of groups) {
+      const subMap = new Map<string, TransactionGroup>();
+      for (const t of group.transactions) {
+        const compKey = String(t.component_id);
+        const existing = subMap.get(compKey);
+        const qty = t.quantity || 0;
+        if (existing) {
+          existing.count++;
+          if (qty > 0) existing.sumIn += qty;
+          else existing.sumOut += Math.abs(qty);
+          existing.transactions.push(t);
+        } else {
+          subMap.set(compKey, {
+            key: `${group.key}-${compKey}`,
+            label: t.component?.internal_code || 'Unknown',
+            sublabel: t.component?.description || undefined,
+            sumIn: qty > 0 ? qty : 0,
+            sumOut: qty < 0 ? Math.abs(qty) : 0,
+            count: 1,
+            stockSummary: stockSummaryMap?.get(t.component_id),
+            transactions: [t],
+          });
+        }
+      }
+      group.subGroups = Array.from(subMap.values()).sort((a, b) =>
+        a.label.localeCompare(b.label)
+      );
+    }
+  }
+
   return groups;
 }
 
@@ -131,11 +167,13 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
   );
 
   // Initialize all groups as expanded when groups change
-  useMemo(() => {
+  useEffect(() => {
     if (groups.length > 0 && allExpanded) {
-      setExpandedGroups(new Set(groups.map((g) => g.key)));
+      const keys = new Set(groups.map((g) => g.key));
+      groups.forEach((g) => g.subGroups?.forEach((s) => keys.add(s.key)));
+      setExpandedGroups(keys);
     }
-  }, [groups.length]);
+  }, [groups, allExpanded]);
 
   const toggleGroup = (key: string) => {
     setExpandedGroups((prev) => {
@@ -151,7 +189,9 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
       setExpandedGroups(new Set());
       setAllExpanded(false);
     } else {
-      setExpandedGroups(new Set(groups.map((g) => g.key)));
+      const keys = new Set(groups.map((g) => g.key));
+      groups.forEach((g) => g.subGroups?.forEach((s) => keys.add(s.key)));
+      setExpandedGroups(keys);
       setAllExpanded(true);
     }
   };
@@ -159,6 +199,7 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
   // Flat mode (no grouping)
   if (groupBy === 'none') {
     return (
+      <TooltipProvider delayDuration={200}>
       <div className="rounded-xl border bg-card shadow-xs">
         <Table>
           <TableHeader>
@@ -187,11 +228,13 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
           </TableBody>
         </Table>
       </div>
+      </TooltipProvider>
     );
   }
 
   // Grouped mode
   return (
+    <TooltipProvider delayDuration={200}>
     <div className="space-y-2">
       <div className="flex justify-end">
         <Button variant="ghost" size="sm" onClick={toggleAll} className="text-xs">
@@ -264,7 +307,60 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
               </button>
 
               {/* Group Body */}
-              {isExpanded && (
+              {isExpanded && group.subGroups ? (
+                <div className="pl-4 space-y-1 py-2">
+                  {group.subGroups.map((sub) => {
+                    const subExpanded = expandedGroups.has(sub.key);
+                    return (
+                      <div key={sub.key} className="border-l-2 border-muted">
+                        <button
+                          type="button"
+                          onClick={() => toggleGroup(sub.key)}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-muted/30 transition-colors text-left text-sm"
+                        >
+                          {subExpanded ? (
+                            <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+                          ) : (
+                            <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+                          )}
+                          <span className="font-medium">{sub.label}</span>
+                          {sub.sublabel && (
+                            <span className="text-xs text-muted-foreground">— {sub.sublabel}</span>
+                          )}
+                          <span className="text-xs text-muted-foreground">({sub.count})</span>
+                          <div className="ml-auto flex items-center gap-3 text-xs shrink-0">
+                            <span className="text-green-600">In: +{sub.sumIn.toLocaleString()}</span>
+                            <span className="text-red-600">Out: -{sub.sumOut.toLocaleString()}</span>
+                          </div>
+                        </button>
+                        {subExpanded && (
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Date</TableHead>
+                                <TableHead>Description</TableHead>
+                                <TableHead>Type</TableHead>
+                                <TableHead className="text-right">Quantity</TableHead>
+                                <TableHead>Order Ref</TableHead>
+                                <TableHead>Reason</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {sub.transactions.map((t) => (
+                                <TransactionRowContent
+                                  key={t.transaction_id}
+                                  transaction={t}
+                                  showComponent={false}
+                                />
+                              ))}
+                            </TableBody>
+                          </Table>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : isExpanded ? (
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -287,12 +383,13 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
                     ))}
                   </TableBody>
                 </Table>
-              )}
+              ) : null}
             </div>
           );
         })
       )}
     </div>
+    </TooltipProvider>
   );
 }
 
@@ -307,12 +404,21 @@ function TransactionRowContent({
   const isAddition = qty > 0;
 
   return (
-    <TableRow>
-      <TableCell className="text-sm whitespace-nowrap">
-        {format(new Date(t.transaction_date), 'MMM dd, yyyy HH:mm')}
+    <TableRow className="text-xs">
+      <TableCell className="whitespace-nowrap py-1.5">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="cursor-default">
+              {format(new Date(t.transaction_date), 'MMM dd')}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            {format(new Date(t.transaction_date), 'MMMM do yyyy, HH:mm')}
+          </TooltipContent>
+        </Tooltip>
       </TableCell>
       {showComponent && (
-        <TableCell>
+        <TableCell className="py-1.5">
           <Link
             href={`/inventory/components/${t.component_id}`}
             target="_blank"
@@ -323,32 +429,32 @@ function TransactionRowContent({
           </Link>
         </TableCell>
       )}
-      <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">
+      <TableCell className="text-muted-foreground max-w-[200px] truncate py-1.5">
         {t.component?.description || '-'}
       </TableCell>
-      <TableCell>
+      <TableCell className="py-1.5">
         <Badge
           variant="outline"
           className={cn(
-            'text-xs',
+            'text-[10px] px-1.5 py-0',
             getTransactionTypeBadge(t.transaction_type?.type_name || '')
           )}
         >
           {t.transaction_type?.type_name || 'Unknown'}
         </Badge>
       </TableCell>
-      <TableCell className="text-right">
+      <TableCell className="text-right py-1.5">
         <span className={cn('font-semibold', isAddition ? 'text-green-600' : 'text-red-600')}>
           {isAddition ? '+' : ''}
           {qty}
         </span>
       </TableCell>
-      <TableCell>
+      <TableCell className="py-1.5">
         {t.order?.order_number ? (
           <Link
             href={`/orders/${t.order_id}`}
             target="_blank"
-            className="text-primary hover:underline text-sm"
+            className="text-primary hover:underline"
             onClick={(e) => e.stopPropagation()}
           >
             {t.order.order_number}
@@ -357,7 +463,7 @@ function TransactionRowContent({
           <Link
             href={`/purchasing/purchase-orders/${t.purchase_order_id}`}
             target="_blank"
-            className="text-primary hover:underline text-sm"
+            className="text-primary hover:underline"
             onClick={(e) => e.stopPropagation()}
           >
             {t.purchase_order.q_number}
@@ -366,7 +472,7 @@ function TransactionRowContent({
           <span className="text-muted-foreground">-</span>
         )}
       </TableCell>
-      <TableCell className="text-sm text-muted-foreground max-w-[150px] truncate" title={t.reason || undefined}>
+      <TableCell className="text-muted-foreground max-w-[150px] truncate py-1.5" title={t.reason || undefined}>
         {t.reason || '-'}
       </TableCell>
     </TableRow>

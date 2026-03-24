@@ -48,3 +48,6 @@ supabase/.temp/
 .claude/
 .worktrees/
 .superpowers/
+
+# Local Netlify folder
+.netlify

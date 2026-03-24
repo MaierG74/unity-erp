@@ -22,12 +22,21 @@ import {
 } from '@/components/ui/popover';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
+import {
   Search,
   X,
   RefreshCw,
   Printer,
   SlidersHorizontal,
   CalendarIcon,
+  Check,
 } from 'lucide-react';
 import { format, subDays, startOfWeek, startOfMonth, startOfYear } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -61,6 +70,7 @@ export function TransactionsToolbar({
   const { user } = useAuth();
   const [showFilters, setShowFilters] = useState(false);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [componentSearch, setComponentSearch] = useState('');
 
   const handlePrint = useReactToPrint({
     contentRef: printRef,
@@ -106,6 +116,22 @@ export function TransactionsToolbar({
         .from('component_categories')
         .select('cat_id, categoryname')
         .order('categoryname');
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!user,
+    staleTime: 120_000,
+  });
+
+  // Fetch components for multi-select filter
+  const { data: allComponents = [] } = useQuery({
+    queryKey: ['components', 'list-brief'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('components')
+        .select('component_id, internal_code, description')
+        .order('internal_code')
+        .limit(500);
       if (error) throw error;
       return data;
     },
@@ -171,6 +197,17 @@ export function TransactionsToolbar({
     }
   };
 
+  const toggleComponent = (componentId: string) => {
+    const current = config.filters.componentIds || [];
+    const next = current.includes(componentId)
+      ? current.filter((id) => id !== componentId)
+      : [...current, componentId];
+    onConfigChange({
+      ...config,
+      filters: { ...config.filters, componentIds: next },
+    });
+  };
+
   // Count active filters (excluding defaults)
   const activeFilterCount = useMemo(() => {
     let count = 0;
@@ -178,11 +215,12 @@ export function TransactionsToolbar({
     if (config.filters.supplierId !== 'all') count++;
     if (config.filters.categoryId !== 'all') count++;
     if (config.filters.productId !== 'all') count++;
+    if ((config.filters.componentIds || []).length > 0) count++;
     return count;
   }, [config.filters]);
 
   const activeFilterChips = useMemo(() => {
-    const chips: Array<{ label: string; key: keyof ViewConfig['filters'] }> = [];
+    const chips: Array<{ label: string; key: keyof ViewConfig['filters']; value?: string }> = [];
     if (config.filters.productId !== 'all') {
       const product = products.find((p) => String(p.product_id) === config.filters.productId);
       chips.push({ label: `Product: ${product?.name || config.filters.productId}`, key: 'productId' });
@@ -201,8 +239,17 @@ export function TransactionsToolbar({
       const cat = categories.find((c) => String(c.cat_id) === config.filters.categoryId);
       chips.push({ label: `Category: ${cat?.categoryname || config.filters.categoryId}`, key: 'categoryId' });
     }
+    // Individual component chips
+    for (const cid of config.filters.componentIds || []) {
+      const comp = allComponents.find((c) => String(c.component_id) === cid);
+      chips.push({
+        label: `Component: ${comp?.internal_code || cid}`,
+        key: 'componentIds',
+        value: cid,
+      });
+    }
     return chips;
-  }, [config.filters, products, transactionTypes, suppliers, categories]);
+  }, [config.filters, products, transactionTypes, suppliers, categories, allComponents]);
 
   const dateLabel = config.dateRange.preset
     ? DATE_PRESETS.find((p) => p.value === config.dateRange.preset)?.label || 'Last 30 Days'
@@ -249,6 +296,7 @@ export function TransactionsToolbar({
             <SelectItem value="none">No Grouping</SelectItem>
             <SelectItem value="component">By Component</SelectItem>
             <SelectItem value="supplier">By Supplier</SelectItem>
+            <SelectItem value="supplier_component">Supplier → Component</SelectItem>
             <SelectItem value="period_week">By Week</SelectItem>
             <SelectItem value="period_month">By Month</SelectItem>
           </SelectContent>
@@ -424,18 +472,84 @@ export function TransactionsToolbar({
               ))}
             </SelectContent>
           </Select>
+
+          {/* Component multi-select */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" className="w-[220px] justify-start text-left font-normal">
+                {(config.filters.componentIds || []).length > 0
+                  ? `${config.filters.componentIds.length} component${config.filters.componentIds.length > 1 ? 's' : ''}`
+                  : 'Select components...'}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[280px] p-0" align="start">
+              <Command>
+                <CommandInput
+                  placeholder="Search components..."
+                  value={componentSearch}
+                  onValueChange={setComponentSearch}
+                />
+                <CommandList>
+                  <CommandEmpty>No components found.</CommandEmpty>
+                  <CommandGroup className="max-h-[200px] overflow-auto">
+                    {allComponents
+                      .filter((c) => {
+                        if (!componentSearch) return true;
+                        const term = componentSearch.toLowerCase();
+                        return (
+                          c.internal_code.toLowerCase().includes(term) ||
+                          (c.description?.toLowerCase().includes(term) ?? false)
+                        );
+                      })
+                      .slice(0, 50)
+                      .map((c) => {
+                        const isSelected = (config.filters.componentIds || []).includes(
+                          String(c.component_id)
+                        );
+                        return (
+                          <CommandItem
+                            key={c.component_id}
+                            value={`${c.internal_code} ${c.description || ''}`}
+                            onSelect={() => toggleComponent(String(c.component_id))}
+                          >
+                            <Check
+                              className={cn(
+                                'mr-2 h-4 w-4',
+                                isSelected ? 'opacity-100' : 'opacity-0'
+                              )}
+                            />
+                            <span className="font-medium">{c.internal_code}</span>
+                            {c.description && (
+                              <span className="ml-1 text-xs text-muted-foreground truncate">
+                                {c.description}
+                              </span>
+                            )}
+                          </CommandItem>
+                        );
+                      })}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
         </div>
       )}
 
       {/* Active filter chips */}
       {activeFilterChips.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          {activeFilterChips.map((chip) => (
+          {activeFilterChips.map((chip, i) => (
             <Badge
-              key={chip.key}
+              key={`${chip.key}-${chip.value ?? i}`}
               variant="secondary"
               className="gap-1 pr-1 cursor-pointer hover:bg-destructive/10"
-              onClick={() => updateFilter(chip.key, 'all')}
+              onClick={() => {
+                if (chip.key === 'componentIds' && chip.value) {
+                  toggleComponent(chip.value);
+                } else {
+                  updateFilter(chip.key, chip.key === 'componentIds' ? [] as never : 'all' as never);
+                }
+              }}
             >
               {chip.label}
               <X className="h-3 w-3" />
@@ -455,6 +569,7 @@ export function TransactionsToolbar({
                     supplierId: 'all',
                     categoryId: 'all',
                     productId: 'all',
+                    componentIds: [],
                   },
                 })
               }
