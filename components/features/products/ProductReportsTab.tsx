@@ -46,7 +46,12 @@ export default function ProductReportsTab({ productId }: ProductReportsTabProps)
           </select>
         </div>
 
-        {data && (
+        {data && !data.bomCostAvailable && (
+          <div className="text-xs px-3 py-2 rounded-sm border border-red-500/40 bg-red-500/10 text-red-400">
+            BOM cost could not be loaded — profitability data unavailable.
+          </div>
+        )}
+        {data && data.bomCostAvailable && (
           <div className={`text-xs px-3 py-2 rounded-sm border ${
             data.bomCost.missingPrices > 0
               ? 'border-amber-500/40 bg-amber-500/10 text-amber-400'
@@ -94,17 +99,23 @@ export default function ProductReportsTab({ productId }: ProductReportsTabProps)
           {/* Section 1: Health bar */}
           <ProductHealthBar stats={data.stats} />
 
-          {/* Section 2 + 3: Two-column cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <ProductMarginCard stats={data.stats} bomCost={data.bomCost} />
-            <BomCostCard bomCost={data.bomCost} />
-          </div>
+          {/* Section 2 + 3: Two-column cards — suppressed when BOM cost unavailable */}
+          {data.bomCostAvailable ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <ProductMarginCard stats={data.stats} bomCost={data.bomCost} />
+              <BomCostCard bomCost={data.bomCost} />
+            </div>
+          ) : (
+            <div className="rounded-sm border border-border/40 bg-muted/10 px-4 py-3 text-sm text-muted-foreground">
+              Margin and BOM cost breakdown unavailable — N/A
+            </div>
+          )}
 
           {/* Section 4: Order history table */}
-          <OrderHistoryTable orders={data.orders} bomCostPerUnit={data.bomCost.total} />
+          <OrderHistoryTable orders={data.orders} bomCostPerUnit={data.bomCostAvailable ? data.bomCost.total : NaN} />
 
-          {/* Section 5: Margin trend */}
-          <MarginTrendChart orders={data.orders} />
+          {/* Section 5: Margin trend — suppressed when BOM cost unavailable */}
+          {data.bomCostAvailable && <MarginTrendChart orders={data.orders} />}
         </div>
       )}
     </div>

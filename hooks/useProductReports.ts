@@ -41,35 +41,39 @@ export interface ProductReportStats {
 
 export interface ProductReportData {
   bomCost: BomCost
+  bomCostAvailable: boolean
   orders: OrderProfitability[]
   stats: ProductReportStats
 }
 
 interface ApiResponse {
   bomCost: BomCost
+  bomCostAvailable: boolean
   orders: RawOrderRow[]
 }
 
 function computeData(raw: ApiResponse): ProductReportData {
+  const bomCostAvailable = raw.bomCostAvailable ?? false
   const bomCostPerUnit = raw.bomCost.total
 
   const orders: OrderProfitability[] = raw.orders.map(row => {
     const revenue = row.quantity * row.unitPrice
-    const cost = row.quantity * bomCostPerUnit
-    const profit = revenue - cost
-    const marginPercent = revenue > 0 ? (profit / revenue) * 100 : NaN
+    const cost = bomCostAvailable ? row.quantity * bomCostPerUnit : NaN
+    const profit = bomCostAvailable ? revenue - cost : NaN
+    const marginPercent = bomCostAvailable && revenue > 0 ? (profit / revenue) * 100 : NaN
     return { ...row, revenue, cost, profit, marginPercent }
   })
 
   const distinctOrders = new Set(orders.map(o => o.orderId)).size
   const totalUnitsSold = orders.reduce((s, o) => s + o.quantity, 0)
   const totalRevenue = orders.reduce((s, o) => s + o.revenue, 0)
-  const totalCost = orders.reduce((s, o) => s + o.cost, 0)
-  const totalProfit = totalRevenue - totalCost
-  const avgMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : NaN
+  const totalCost = bomCostAvailable ? orders.reduce((s, o) => s + o.cost, 0) : NaN
+  const totalProfit = bomCostAvailable ? totalRevenue - totalCost : NaN
+  const avgMargin = bomCostAvailable && totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : NaN
 
   return {
     bomCost: raw.bomCost,
+    bomCostAvailable,
     orders,
     stats: {
       totalOrders: distinctOrders,

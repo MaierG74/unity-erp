@@ -91,10 +91,11 @@ export async function GET(req: NextRequest, context: { params: Promise<{ product
 
     // Get BOM cost via getProductCostSummary (passes auth through to internal API routes)
     let bomCost = { materials: 0, labor: 0, overhead: 0, total: 0, missingPrices: 0 }
+    let bomCostAvailable = false
     try {
       const origin = `${url.protocol}//${url.host}`
       const authorizationHeader = req.headers.get('authorization')
-      const productRef = product.internal_code ?? String(productId)
+      const productRef = String(productId)
       const costSummary = await getProductCostSummary(supabaseAdmin, productRef, {
         origin,
         authorizationHeader,
@@ -108,6 +109,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ product
           total: costSummary.total_cost,
           missingPrices: costSummary.missing_material_prices,
         }
+        bomCostAvailable = true
       } else {
         console.warn('product-reports: BOM cost unavailable:', costSummary.kind)
       }
@@ -125,7 +127,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ product
       unitPrice: Number(row.unit_price),
     }))
 
-    return NextResponse.json({ bomCost, orders })
+    return NextResponse.json({ bomCost, bomCostAvailable, orders })
   } catch (err) {
     console.error('product-reports error:', err)
     return NextResponse.json({ error: 'Failed to load product reports' }, { status: 500 })
