@@ -38,9 +38,12 @@ function MiniBar({ revenue, cost }: { revenue: number; cost: number }) {
   )
 }
 
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
 function formatDate(dateStr: string | null) {
   if (!dateStr) return '—'
-  return new Date(dateStr).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' })
+  const [y, m, d] = dateStr.split('-')
+  return `${parseInt(d)} ${MONTHS[parseInt(m) - 1]} ${y}`
 }
 
 export default function OrderHistoryTable({ orders }: OrderHistoryTableProps) {

@@ -484,7 +484,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
       </div>
 
       <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
-        <TabsList>
+        <TabsList className="overflow-x-auto flex-nowrap">
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="images">Images</TabsTrigger>
           <TabsTrigger value="categories">Categories</TabsTrigger>

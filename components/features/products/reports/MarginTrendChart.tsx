@@ -33,10 +33,12 @@ function aggregateByOrder(orders: OrderProfitability[]): TrendPoint[] {
     .sort((a, b) => a.date.localeCompare(b.date))
 }
 
+const SHORT_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
 function formatShortDate(dateStr: string) {
   if (!dateStr) return ''
-  const d = new Date(dateStr)
-  return d.toLocaleDateString('en-ZA', { day: '2-digit', month: 'short' })
+  const [, m, d] = dateStr.split('-')
+  return `${parseInt(d)} ${SHORT_MONTHS[parseInt(m) - 1]}`
 }
 
 export default function MarginTrendChart({ orders }: MarginTrendChartProps) {

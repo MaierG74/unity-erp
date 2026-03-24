@@ -85,8 +85,17 @@ export async function GET(req: NextRequest, context: { params: Promise<{ product
       if (order.org_id !== auth.orgId) return false
       const statusName = order.status?.status_name?.toLowerCase()
       if (statusName === 'cancelled') return false
-      if (periodStart && order.order_date && order.order_date < periodStart) return false
+      if (periodStart) {
+        if (!order.order_date) return false
+        if (order.order_date < periodStart) return false
+      }
       return true
+    })
+
+    filteredOrders.sort((a: any, b: any) => {
+      const dateA = a.order?.order_date ?? ''
+      const dateB = b.order?.order_date ?? ''
+      return dateB.localeCompare(dateA)
     })
 
     // Get BOM cost via getProductCostSummary (passes auth through to internal API routes)

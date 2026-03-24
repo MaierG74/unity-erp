@@ -72,7 +72,7 @@ export default function PerItemCostTable({ items }: PerItemCostTableProps) {
                 </span>
               </th>
               <th className="text-right font-semibold uppercase tracking-wider pb-2 px-2">Total Cost</th>
-              <th className="text-right font-semibold uppercase tracking-wider pb-2 px-2">Sell Price</th>
+              <th className="text-right font-semibold uppercase tracking-wider pb-2 px-2">Revenue</th>
               <th className="text-right font-semibold uppercase tracking-wider pb-2 px-2">Margin</th>
               <th className="text-right font-semibold uppercase tracking-wider pb-2 pl-2">Cost Split</th>
             </tr>
@@ -115,7 +115,7 @@ export default function PerItemCostTable({ items }: PerItemCostTableProps) {
                     {hasCosting ? formatCurrency(item.costBreakdown.total) : '—'}
                   </td>
                   <td className="py-2 px-2 text-right tabular-nums">
-                    {formatCurrency(item.sellPrice)}
+                    {formatCurrency(item.revenue)}
                   </td>
                   <td className={`py-2 px-2 text-right tabular-nums ${marginClass}`}>
                     {marginDisplay}
