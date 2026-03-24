@@ -50,9 +50,25 @@ export function useFilterOptions() {
     staleTime: 120_000,
   });
 
+  const { data: components = [] } = useQuery({
+    queryKey: ['components', 'list-codes'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('components')
+        .select('component_id, internal_code')
+        .order('internal_code')
+        .limit(1000);
+      if (error) throw error;
+      return data.map((c) => c.internal_code);
+    },
+    enabled,
+    staleTime: 120_000,
+  });
+
   return {
     categories,
     suppliers,
+    components,
     'transaction-types': transactionTypes,
   } as Record<string, string[]>;
 }

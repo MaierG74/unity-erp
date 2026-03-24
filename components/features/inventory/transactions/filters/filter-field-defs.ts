@@ -1,7 +1,7 @@
 import type { FilterFieldDef, FilterFieldType, TextOperator, SelectOperator, NumericOperator, FilterOperator } from './filter-types';
 
 export const TRANSACTION_FILTER_FIELDS: FilterFieldDef[] = [
-  { key: 'component_code', label: 'Component', type: 'text', path: 'component.internal_code' },
+  { key: 'component_code', label: 'Component', type: 'select', path: 'component.internal_code', optionsQueryKey: 'components' },
   { key: 'description', label: 'Description', type: 'text', path: 'component.description' },
   { key: 'category', label: 'Category', type: 'select', path: 'component.category.categoryname', optionsQueryKey: 'categories' },
   { key: 'supplier', label: 'Supplier', type: 'select', path: 'purchase_order.supplier.name', optionsQueryKey: 'suppliers' },
