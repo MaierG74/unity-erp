@@ -122,7 +122,7 @@ export function useTransactionsQuery(params: UseTransactionsQueryParams) {
         .gte('transaction_date', dateRange.from.toISOString())
         .lte('transaction_date', dateRange.to.toISOString())
         .order('transaction_date', { ascending: false })
-        .limit(5000);
+        .range(0, 4999);
 
       // Apply server-side filters
       if (params.transactionTypeId && params.transactionTypeId !== 'all') {
