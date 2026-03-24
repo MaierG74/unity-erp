@@ -37,8 +37,11 @@ export function TransactionsExplorer() {
       const searchable = [
         t.component?.internal_code,
         t.component?.description,
+        t.component?.category?.categoryname,
         t.purchase_order?.q_number,
+        t.purchase_order?.supplier?.name,
         t.order?.order_number,
+        t.transaction_type?.type_name,
         t.reason,
       ]
         .filter(Boolean)
