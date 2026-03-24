@@ -8,6 +8,7 @@ import { useComponentStockSummary } from '@/hooks/use-component-stock-summary';
 import { TransactionsToolbar } from './TransactionsToolbar';
 import { TransactionsGroupedTable } from './TransactionsGroupedTable';
 import { PrintView } from './PrintView';
+import { applyComposableFilter, hasActiveConditions } from './filters/filter-engine';
 import type { ViewConfig, EnrichedTransaction } from '@/types/transaction-views';
 import { DEFAULT_VIEW_CONFIG } from '@/types/transaction-views';
 
@@ -29,27 +30,38 @@ export function TransactionsExplorer() {
     componentIds: config.filters.componentIds,
   });
 
-  // Client-side search filter (instant, no refetch)
+  // Client-side filtering pipeline (composable filter + text search)
   const transactions = useMemo(() => {
-    if (!config.filters.search) return rawTransactions;
-    const terms = config.filters.search.toLowerCase().split(/\s+/);
-    return rawTransactions.filter((t) => {
-      const searchable = [
-        t.component?.internal_code,
-        t.component?.description,
-        t.component?.category?.categoryname,
-        t.purchase_order?.q_number,
-        t.purchase_order?.supplier?.name,
-        t.order?.order_number,
-        t.transaction_type?.type_name,
-        t.reason,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      return terms.every((term) => searchable.includes(term));
-    });
-  }, [rawTransactions, config.filters.search]);
+    let result = rawTransactions;
+
+    // 1. Composable filter (takes precedence when present)
+    if (hasActiveConditions(config.filters.composableFilter)) {
+      result = applyComposableFilter(result, config.filters.composableFilter!);
+    }
+
+    // 2. Text search always applies on top
+    if (config.filters.search) {
+      const terms = config.filters.search.toLowerCase().split(/\s+/);
+      result = result.filter((t) => {
+        const searchable = [
+          t.component?.internal_code,
+          t.component?.description,
+          t.component?.category?.categoryname,
+          t.purchase_order?.q_number,
+          t.purchase_order?.supplier?.name,
+          t.order?.order_number,
+          t.transaction_type?.type_name,
+          t.reason,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return terms.every((term) => searchable.includes(term));
+      });
+    }
+
+    return result;
+  }, [rawTransactions, config.filters]);
 
   // Get unique component IDs for stock summary (only when grouping by component)
   const componentIds = useMemo(() => {

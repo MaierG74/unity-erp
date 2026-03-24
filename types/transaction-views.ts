@@ -1,3 +1,5 @@
+import type { ComposableFilter } from '@/components/features/inventory/transactions/filters/filter-types';
+
 export type ViewConfig = {
   dateRange: {
     from: string | null;
@@ -12,6 +14,7 @@ export type ViewConfig = {
     categoryId: string;
     productId: string;
     componentIds: string[];
+    composableFilter?: ComposableFilter;
   };
 };
 
