@@ -21,7 +21,7 @@ import { PageToolbar } from '@/components/ui/page-toolbar';
 import { ComponentsTab } from '@/components/features/inventory/ComponentsTab';
 import { CategoriesTab } from '@/components/features/inventory/CategoriesTab';
 import { OnOrderTab } from '@/components/features/inventory/OnOrderTab';
-import { TransactionsTab } from '@/components/features/inventory/TransactionsTab';
+import { TransactionsTab } from '@/components/features/inventory/transactions';
 import { ReportsTab } from '@/components/features/inventory/ReportsTab';
 import { ManualStockIssueTab } from '@/components/features/inventory/ManualStockIssueTab';
 import { ImportTabWrapper } from '@/components/features/inventory/ImportTabWrapper';
