@@ -402,6 +402,7 @@ function TransactionRowContent({
 }) {
   const qty = t.quantity || 0;
   const isAddition = qty > 0;
+  const txDate = new Date(t.transaction_date);
 
   return (
     <TableRow className="text-xs">
@@ -409,11 +410,11 @@ function TransactionRowContent({
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="cursor-default">
-              {format(new Date(t.transaction_date), 'MMM dd')}
+              {format(txDate, 'MMM dd')}
             </span>
           </TooltipTrigger>
           <TooltipContent>
-            {format(new Date(t.transaction_date), 'MMMM do yyyy, HH:mm')}
+            {format(txDate, 'MMMM do yyyy, HH:mm')}
           </TooltipContent>
         </Tooltip>
       </TableCell>
