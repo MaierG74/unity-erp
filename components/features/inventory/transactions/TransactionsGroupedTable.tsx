@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from 'lucide-react';
 import { format, startOfWeek, startOfMonth } from 'date-fns';
 import Link from 'next/link';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -32,6 +32,9 @@ type TransactionGroup = {
   subGroups?: TransactionGroup[];
 };
 
+type SortField = 'transaction_date' | 'component' | 'description' | 'type' | 'quantity' | 'order_ref' | 'reason';
+type SortDir = 'asc' | 'desc';
+
 type Props = {
   transactions: EnrichedTransaction[];
   groupBy: GroupByMode;
@@ -47,6 +50,29 @@ function getTransactionTypeBadge(typeName: string) {
     SALE: 'bg-red-500/10 text-red-600 border-red-500/20',
   };
   return styles[typeName] || 'bg-muted text-muted-foreground';
+}
+
+function getSortValue(t: EnrichedTransaction, field: SortField): string | number {
+  switch (field) {
+    case 'transaction_date': return t.transaction_date;
+    case 'component': return t.component?.internal_code || '';
+    case 'description': return t.component?.description || '';
+    case 'type': return t.transaction_type?.type_name || '';
+    case 'quantity': return t.quantity || 0;
+    case 'order_ref': return t.order?.order_number || t.purchase_order?.q_number || '';
+    case 'reason': return t.reason || '';
+  }
+}
+
+function sortTransactions(txns: EnrichedTransaction[], field: SortField, dir: SortDir): EnrichedTransaction[] {
+  return [...txns].sort((a, b) => {
+    const va = getSortValue(a, field);
+    const vb = getSortValue(b, field);
+    const cmp = typeof va === 'number' && typeof vb === 'number'
+      ? va - vb
+      : String(va).localeCompare(String(vb));
+    return dir === 'asc' ? cmp : -cmp;
+  });
 }
 
 function groupTransactions(
@@ -118,11 +144,9 @@ function groupTransactions(
     }
   });
 
-  // Sort groups
   const groups = Array.from(groupMap.values());
   groups.sort((a, b) => a.label.localeCompare(b.label));
 
-  // For supplier_component, create sub-groups by component within each supplier
   if (groupBy === 'supplier_component') {
     for (const group of groups) {
       const subMap = new Map<string, TransactionGroup>();
@@ -157,16 +181,73 @@ function groupTransactions(
   return groups;
 }
 
+/** Inline +/- stats that hide zeros */
+function MovementBadges({ sumIn, sumOut, className }: { sumIn: number; sumOut: number; className?: string }) {
+  if (sumIn === 0 && sumOut === 0) return null;
+  return (
+    <span className={cn('flex items-center gap-2', className)}>
+      {sumIn > 0 && <span className="text-green-600 dark:text-green-400 font-medium">+{sumIn.toLocaleString()}</span>}
+      {sumOut > 0 && <span className="text-red-500 dark:text-red-400 font-medium">-{sumOut.toLocaleString()}</span>}
+    </span>
+  );
+}
+
+/** Sortable column header */
+function SortableHead({
+  label,
+  field,
+  current,
+  dir,
+  onSort,
+  className,
+}: {
+  label: string;
+  field: SortField;
+  current: SortField | null;
+  dir: SortDir;
+  onSort: (field: SortField) => void;
+  className?: string;
+}) {
+  const active = current === field;
+  return (
+    <TableHead className={cn('cursor-pointer select-none hover:text-foreground transition-colors', className)} onClick={() => onSort(field)}>
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {active ? (
+          dir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+        ) : (
+          <ArrowUpDown className="h-3 w-3 opacity-30" />
+        )}
+      </span>
+    </TableHead>
+  );
+}
+
 export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMap }: Props) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['__all__']));
   const [allExpanded, setAllExpanded] = useState(true);
+  const [sortField, setSortField] = useState<SortField | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDir(field === 'quantity' ? 'desc' : 'asc');
+    }
+  };
+
+  const sortedTransactions = useMemo(() => {
+    if (!sortField) return transactions;
+    return sortTransactions(transactions, sortField, sortDir);
+  }, [transactions, sortField, sortDir]);
 
   const groups = useMemo(
-    () => groupTransactions(transactions, groupBy, stockSummaryMap),
-    [transactions, groupBy, stockSummaryMap]
+    () => groupTransactions(sortedTransactions, groupBy, stockSummaryMap),
+    [sortedTransactions, groupBy, stockSummaryMap]
   );
 
-  // Initialize all groups as expanded when groups change
   useEffect(() => {
     if (groups.length > 0 && allExpanded) {
       const keys = new Set(groups.map((g) => g.key));
@@ -196,7 +277,7 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
     }
   };
 
-  const colCount = groupBy === 'component' ? 6 : 7;
+  const showComponent = groupBy !== 'component' && groupBy !== 'supplier_component';
 
   // Flat mode (no grouping)
   if (groupBy === 'none') {
@@ -205,25 +286,25 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
       <div className="rounded-xl border bg-card shadow-xs">
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead>Date</TableHead>
-              <TableHead>Component</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead className="text-right">Quantity</TableHead>
-              <TableHead>Order Ref</TableHead>
-              <TableHead>Reason</TableHead>
+            <TableRow className="bg-muted/30">
+              <SortableHead label="Date" field="transaction_date" current={sortField} dir={sortDir} onSort={handleSort} />
+              <SortableHead label="Component" field="component" current={sortField} dir={sortDir} onSort={handleSort} />
+              <SortableHead label="Description" field="description" current={sortField} dir={sortDir} onSort={handleSort} />
+              <SortableHead label="Type" field="type" current={sortField} dir={sortDir} onSort={handleSort} />
+              <SortableHead label="Quantity" field="quantity" current={sortField} dir={sortDir} onSort={handleSort} className="text-right" />
+              <SortableHead label="Order Ref" field="order_ref" current={sortField} dir={sortDir} onSort={handleSort} />
+              <SortableHead label="Reason" field="reason" current={sortField} dir={sortDir} onSort={handleSort} />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {transactions.length === 0 ? (
+            {sortedTransactions.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                   No transactions found matching your filters.
                 </TableCell>
               </TableRow>
             ) : (
-              transactions.map((t, i) => (
+              sortedTransactions.map((t, i) => (
                 <TransactionRowContent key={t.transaction_id} transaction={t} showComponent striped={i % 2 === 1} />
               ))
             )}
@@ -237,7 +318,7 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
   // Grouped mode
   return (
     <TooltipProvider delayDuration={200}>
-    <div className="space-y-2">
+    <div className="space-y-3">
       <div className="flex justify-end">
         <Button variant="ghost" size="sm" onClick={toggleAll} className="text-xs">
           {allExpanded ? (
@@ -262,12 +343,12 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
         groups.map((group) => {
           const isExpanded = expandedGroups.has(group.key);
           return (
-            <div key={group.key} className="rounded-xl border bg-card shadow-xs overflow-hidden">
+            <div key={group.key} className="rounded-xl border-2 border-border/60 bg-card shadow-xs overflow-hidden">
               {/* Group Header */}
               <button
                 type="button"
                 onClick={() => toggleGroup(group.key)}
-                className="w-full flex items-center gap-3 px-4 py-2.5 bg-muted/30 hover:bg-muted/50 transition-colors text-left"
+                className="w-full flex items-center gap-3 px-4 py-2.5 bg-muted/40 hover:bg-muted/60 transition-colors text-left border-b border-border/40"
               >
                 {isExpanded ? (
                   <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -275,9 +356,9 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
                   <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                 )}
                 <div className="flex-1 min-w-0">
-                  <span className="font-semibold">{group.label}</span>
+                  <span className="font-bold text-sm">{group.label}</span>
                   {group.sublabel && (
-                    <span className="text-sm text-muted-foreground ml-2">
+                    <span className="text-xs text-muted-foreground ml-2">
                       — {group.sublabel}
                     </span>
                   )}
@@ -286,21 +367,16 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
                   </span>
                 </div>
                 <div className="flex items-center gap-4 text-sm shrink-0">
-                  <span className="text-green-600 font-medium">
-                    +{group.sumIn.toLocaleString()}
-                  </span>
-                  <span className="text-red-600 font-medium">
-                    -{group.sumOut.toLocaleString()}
-                  </span>
+                  <MovementBadges sumIn={group.sumIn} sumOut={group.sumOut} />
                   {group.stockSummary && (
                     <>
                       <span className="font-medium">
                         Stock: {group.stockSummary.quantityOnHand.toLocaleString()}
                       </span>
-                      <span className="text-blue-500 text-xs">
+                      <span className="text-blue-500 dark:text-blue-400 text-xs">
                         On Order: {group.stockSummary.onOrder.toLocaleString()}
                       </span>
-                      <span className="text-amber-500 text-xs">
+                      <span className="text-amber-500 dark:text-amber-400 text-xs">
                         Reserved: {group.stockSummary.reserved.toLocaleString()}
                       </span>
                     </>
@@ -308,18 +384,17 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
                 </div>
               </button>
 
-              {/* Group Body — nested sub-groups rendered as inline divider rows */}
+              {/* Group Body — nested sub-groups as inline divider rows */}
               {isExpanded && group.subGroups ? (
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Component</TableHead>
-                      <TableHead>Description</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead className="text-right">Quantity</TableHead>
-                      <TableHead>Order Ref</TableHead>
-                      <TableHead>Reason</TableHead>
+                    <TableRow className="bg-muted/20">
+                      <SortableHead label="Date" field="transaction_date" current={sortField} dir={sortDir} onSort={handleSort} />
+                      <SortableHead label="Description" field="description" current={sortField} dir={sortDir} onSort={handleSort} />
+                      <SortableHead label="Type" field="type" current={sortField} dir={sortDir} onSort={handleSort} />
+                      <SortableHead label="Quantity" field="quantity" current={sortField} dir={sortDir} onSort={handleSort} className="text-right" />
+                      <SortableHead label="Order Ref" field="order_ref" current={sortField} dir={sortDir} onSort={handleSort} />
+                      <SortableHead label="Reason" field="reason" current={sortField} dir={sortDir} onSort={handleSort} />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -331,7 +406,7 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
                           sub={sub}
                           expanded={subExpanded}
                           onToggle={() => toggleGroup(sub.key)}
-                          colCount={7}
+                          colCount={6}
                         />
                       );
                     })}
@@ -340,14 +415,14 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
               ) : isExpanded ? (
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Date</TableHead>
-                      {groupBy !== 'component' && <TableHead>Component</TableHead>}
-                      <TableHead>Description</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead className="text-right">Quantity</TableHead>
-                      <TableHead>Order Ref</TableHead>
-                      <TableHead>Reason</TableHead>
+                    <TableRow className="bg-muted/20">
+                      <SortableHead label="Date" field="transaction_date" current={sortField} dir={sortDir} onSort={handleSort} />
+                      {showComponent && <SortableHead label="Component" field="component" current={sortField} dir={sortDir} onSort={handleSort} />}
+                      <SortableHead label="Description" field="description" current={sortField} dir={sortDir} onSort={handleSort} />
+                      <SortableHead label="Type" field="type" current={sortField} dir={sortDir} onSort={handleSort} />
+                      <SortableHead label="Quantity" field="quantity" current={sortField} dir={sortDir} onSort={handleSort} className="text-right" />
+                      <SortableHead label="Order Ref" field="order_ref" current={sortField} dir={sortDir} onSort={handleSort} />
+                      <SortableHead label="Reason" field="reason" current={sortField} dir={sortDir} onSort={handleSort} />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -355,7 +430,7 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
                       <TransactionRowContent
                         key={t.transaction_id}
                         transaction={t}
-                        showComponent={groupBy !== 'component'}
+                        showComponent={showComponent}
                         striped={i % 2 === 1}
                       />
                     ))}
@@ -385,26 +460,30 @@ function SubGroupRows({
 }) {
   return (
     <>
-      {/* Sub-group divider row */}
+      {/* Sub-group divider row — distinctly different from data rows */}
       <TableRow
-        className="bg-muted/20 hover:bg-muted/40 cursor-pointer border-t"
+        className="bg-muted/40 dark:bg-muted/25 hover:bg-muted/60 dark:hover:bg-muted/40 cursor-pointer border-t-2 border-border/30"
         onClick={onToggle}
       >
-        <TableCell colSpan={colCount} className="py-1.5">
-          <div className="flex items-center gap-2 text-xs">
+        <TableCell colSpan={colCount} className="py-2">
+          <div className="flex items-center gap-2">
             {expanded ? (
-              <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             ) : (
-              <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             )}
-            <span className="font-semibold text-primary">{sub.label}</span>
-            {sub.sublabel && (
-              <span className="text-muted-foreground">— {sub.sublabel}</span>
+            <span className="font-bold text-xs text-primary">{sub.label}</span>
+            {sub.sublabel && sub.sublabel !== sub.label && (
+              <span className="text-xs text-muted-foreground">— {sub.sublabel}</span>
             )}
-            <span className="text-muted-foreground">({sub.count})</span>
-            <div className="ml-auto flex items-center gap-3">
-              <span className="text-green-600 font-medium">+{sub.sumIn.toLocaleString()}</span>
-              <span className="text-red-600 font-medium">-{sub.sumOut.toLocaleString()}</span>
+            <span className="text-[10px] text-muted-foreground">({sub.count})</span>
+            <div className="ml-auto flex items-center gap-3 text-xs">
+              <MovementBadges sumIn={sub.sumIn} sumOut={sub.sumOut} className="text-xs" />
+              {sub.stockSummary && (
+                <span className="font-medium text-foreground/80">
+                  Stock: {sub.stockSummary.quantityOnHand.toLocaleString()}
+                </span>
+              )}
             </div>
           </div>
         </TableCell>
@@ -435,9 +514,10 @@ function TransactionRowContent({
   const qty = t.quantity || 0;
   const isAddition = qty > 0;
   const txDate = new Date(t.transaction_date);
+  const descDiffersFromCode = t.component?.description && t.component.description !== t.component.internal_code;
 
   return (
-    <TableRow className={cn('text-xs hover:bg-muted/20 transition-colors', striped && 'bg-muted/5')}>
+    <TableRow className={cn('text-xs hover:bg-muted/15 transition-colors', striped && 'bg-muted/5')}>
       <TableCell className="whitespace-nowrap py-1.5">
         <Tooltip>
           <TooltipTrigger asChild>
@@ -463,7 +543,7 @@ function TransactionRowContent({
         </TableCell>
       )}
       <TableCell className="text-muted-foreground max-w-[200px] truncate py-1.5">
-        {t.component?.description || ''}
+        {descDiffersFromCode ? t.component?.description : ''}
       </TableCell>
       <TableCell className="py-1.5">
         <Badge
@@ -477,7 +557,7 @@ function TransactionRowContent({
         </Badge>
       </TableCell>
       <TableCell className="text-right py-1.5">
-        <span className={cn('font-semibold', isAddition ? 'text-green-600' : 'text-red-600')}>
+        <span className={cn('font-semibold', isAddition ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400')}>
           {isAddition ? '+' : ''}
           {qty}
         </span>

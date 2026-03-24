@@ -381,12 +381,16 @@ export function TransactionsToolbar({
           <span className="text-xs text-muted-foreground">
             {transactionCount.toLocaleString()} txns
           </span>
-          <span className="text-xs text-green-600 font-medium">
-            +{summary.totalIn.toLocaleString()}
-          </span>
-          <span className="text-xs text-red-600 font-medium">
-            -{summary.totalOut.toLocaleString()}
-          </span>
+          {summary.totalIn > 0 && (
+            <span className="text-xs text-green-600 dark:text-green-400 font-medium">
+              +{summary.totalIn.toLocaleString()}
+            </span>
+          )}
+          {summary.totalOut > 0 && (
+            <span className="text-xs text-red-500 dark:text-red-400 font-medium">
+              -{summary.totalOut.toLocaleString()}
+            </span>
+          )}
           <Button
             variant="outline"
             size="sm"
