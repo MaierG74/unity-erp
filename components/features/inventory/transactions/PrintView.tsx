@@ -44,7 +44,8 @@ function buildGroups(
         label = t.component?.internal_code || 'Unknown';
         sublabel = t.component?.description || undefined;
         break;
-      case 'supplier': {
+      case 'supplier':
+      case 'supplier_component': {
         const supplier = t.purchase_order?.supplier;
         key = supplier ? String(supplier.supplier_id) : 'none';
         label = supplier?.name || 'No Supplier';

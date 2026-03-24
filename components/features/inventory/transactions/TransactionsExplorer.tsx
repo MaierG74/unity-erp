@@ -138,9 +138,11 @@ export function TransactionsExplorer() {
         />
       )}
 
-      {transactions.length >= 5000 && (
+      {rawTransactions.length >= 5000 && (
         <p className="text-sm text-amber-500 text-center">
-          Results limited to 5,000 transactions. Narrow your date range for complete results.
+          Results capped at 5,000 from the database. {transactions.length < rawTransactions.length
+            ? `Showing ${transactions.length.toLocaleString()} after filtering — some matches may be missing.`
+            : 'Narrow your date range for complete results.'}
         </p>
       )}
 

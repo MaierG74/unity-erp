@@ -145,7 +145,9 @@ function groupTransactions(
   });
 
   const groups = Array.from(groupMap.values());
-  groups.sort((a, b) => a.label.localeCompare(b.label));
+  // Sort by key for date-based groups (keys are sortable date strings), by label otherwise
+  const sortByKey = groupBy === 'period_week' || groupBy === 'period_month';
+  groups.sort((a, b) => sortByKey ? a.key.localeCompare(b.key) : a.label.localeCompare(b.label));
 
   if (groupBy === 'supplier_component') {
     for (const group of groups) {

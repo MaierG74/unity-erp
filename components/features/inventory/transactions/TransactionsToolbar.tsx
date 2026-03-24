@@ -23,8 +23,10 @@ import {
   RefreshCw,
   Printer,
   CalendarIcon,
+  AlertTriangle,
 } from 'lucide-react';
-import { format, subDays } from 'date-fns';
+import { Badge } from '@/components/ui/badge';
+import { format, subDays, endOfDay, startOfDay } from 'date-fns';
 import { cn } from '@/lib/utils';
 import type { ViewConfig } from '@/types/transaction-views';
 import { DATE_PRESETS } from '@/types/transaction-views';
@@ -73,8 +75,8 @@ export function TransactionsToolbar({
       onConfigChange({
         ...config,
         dateRange: {
-          from: date.toISOString(),
-          to: config.dateRange.to || new Date().toISOString(),
+          from: startOfDay(date).toISOString(),
+          to: config.dateRange.to || endOfDay(new Date()).toISOString(),
           preset: null,
         },
       });
@@ -86,8 +88,8 @@ export function TransactionsToolbar({
       onConfigChange({
         ...config,
         dateRange: {
-          from: config.dateRange.from || subDays(new Date(), 30).toISOString(),
-          to: date.toISOString(),
+          from: config.dateRange.from || startOfDay(subDays(new Date(), 30)).toISOString(),
+          to: endOfDay(date).toISOString(),
           preset: null,
         },
       });
@@ -246,6 +248,80 @@ export function TransactionsToolbar({
           filters: { ...config.filters, composableFilter: filter },
         })}
       />
+
+      {/* Legacy filter indicators for old saved views */}
+      <LegacyFilterPills config={config} onConfigChange={onConfigChange} />
+    </div>
+  );
+}
+
+/** Shows dismissible pills for legacy filter fields (productId, componentIds, supplierId, etc.) from old saved views */
+function LegacyFilterPills({ config, onConfigChange }: { config: ViewConfig; onConfigChange: (c: ViewConfig) => void }) {
+  const hasLegacy =
+    config.filters.productId !== 'all' ||
+    config.filters.transactionTypeId !== 'all' ||
+    config.filters.supplierId !== 'all' ||
+    config.filters.categoryId !== 'all' ||
+    (config.filters.componentIds || []).length > 0;
+
+  if (!hasLegacy) return null;
+
+  const clear = (key: string) => {
+    onConfigChange({
+      ...config,
+      filters: {
+        ...config.filters,
+        [key]: key === 'componentIds' ? [] : 'all',
+      },
+    });
+  };
+
+  const clearAll = () => {
+    onConfigChange({
+      ...config,
+      filters: {
+        ...config.filters,
+        productId: 'all',
+        transactionTypeId: 'all',
+        supplierId: 'all',
+        categoryId: 'all',
+        componentIds: [],
+      },
+    });
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+      <span className="text-[10px] text-amber-500">Legacy filters from saved view:</span>
+      {config.filters.productId !== 'all' && (
+        <Badge variant="outline" className="text-[10px] h-5 gap-1 pr-1 cursor-pointer border-amber-500/30" onClick={() => clear('productId')}>
+          Product: {config.filters.productId} <X className="h-2.5 w-2.5" />
+        </Badge>
+      )}
+      {config.filters.transactionTypeId !== 'all' && (
+        <Badge variant="outline" className="text-[10px] h-5 gap-1 pr-1 cursor-pointer border-amber-500/30" onClick={() => clear('transactionTypeId')}>
+          Type: {config.filters.transactionTypeId} <X className="h-2.5 w-2.5" />
+        </Badge>
+      )}
+      {config.filters.supplierId !== 'all' && (
+        <Badge variant="outline" className="text-[10px] h-5 gap-1 pr-1 cursor-pointer border-amber-500/30" onClick={() => clear('supplierId')}>
+          Supplier: {config.filters.supplierId} <X className="h-2.5 w-2.5" />
+        </Badge>
+      )}
+      {config.filters.categoryId !== 'all' && (
+        <Badge variant="outline" className="text-[10px] h-5 gap-1 pr-1 cursor-pointer border-amber-500/30" onClick={() => clear('categoryId')}>
+          Category: {config.filters.categoryId} <X className="h-2.5 w-2.5" />
+        </Badge>
+      )}
+      {(config.filters.componentIds || []).length > 0 && (
+        <Badge variant="outline" className="text-[10px] h-5 gap-1 pr-1 cursor-pointer border-amber-500/30" onClick={() => clear('componentIds')}>
+          {config.filters.componentIds.length} components <X className="h-2.5 w-2.5" />
+        </Badge>
+      )}
+      <button type="button" onClick={clearAll} className="text-[10px] text-amber-500 hover:underline ml-1">
+        Clear all legacy
+      </button>
     </div>
   );
 }
