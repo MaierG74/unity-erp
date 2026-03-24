@@ -258,7 +258,7 @@ export function TransactionsToolbar({
       : 'Last 30 Days';
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       {/* Top row: Search, Group By, Views, Print, Refresh */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
         {/* Search */}
@@ -379,7 +379,13 @@ export function TransactionsToolbar({
 
         <div className="ml-auto flex gap-2 items-center">
           <span className="text-xs text-muted-foreground">
-            {transactionCount.toLocaleString()} transactions
+            {transactionCount.toLocaleString()} txns
+          </span>
+          <span className="text-xs text-green-600 font-medium">
+            +{summary.totalIn.toLocaleString()}
+          </span>
+          <span className="text-xs text-red-600 font-medium">
+            -{summary.totalOut.toLocaleString()}
           </span>
           <Button
             variant="outline"

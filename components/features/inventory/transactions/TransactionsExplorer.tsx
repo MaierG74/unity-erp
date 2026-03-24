@@ -80,7 +80,7 @@ export function TransactionsExplorer() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       <TransactionsToolbar
         config={config}
         onConfigChange={handleConfigChange}
@@ -92,26 +92,6 @@ export function TransactionsExplorer() {
         printRef={printRef}
         transactionCount={transactions.length}
       />
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="rounded-xl border bg-card p-4 shadow-xs">
-          <p className="text-sm font-medium text-muted-foreground">Total Transactions</p>
-          <p className="text-2xl font-bold mt-2">{summary.total}</p>
-        </div>
-        <div className="rounded-xl border bg-card p-4 shadow-xs">
-          <p className="text-sm font-medium text-muted-foreground">Stock In</p>
-          <p className="text-2xl font-bold mt-2 text-green-600">
-            +{summary.totalIn.toLocaleString()}
-          </p>
-        </div>
-        <div className="rounded-xl border bg-card p-4 shadow-xs">
-          <p className="text-sm font-medium text-muted-foreground">Stock Out</p>
-          <p className="text-2xl font-bold mt-2 text-red-600">
-            -{summary.totalOut.toLocaleString()}
-          </p>
-        </div>
-      </div>
 
       {isLoading ? (
         <div className="flex items-center justify-center min-h-[400px]">
