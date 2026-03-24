@@ -82,9 +82,7 @@ export function useTransactionsQuery(params: UseTransactionsQueryParams) {
       },
     ],
     queryFn: async () => {
-      let query = supabase
-        .from('inventory_transactions')
-        .select(`
+      const selectStr = `
           transaction_id,
           component_id,
           quantity,
@@ -118,30 +116,41 @@ export function useTransactionsQuery(params: UseTransactionsQueryParams) {
             order_id,
             order_number
           )
-        `)
-        .gte('transaction_date', dateRange.from.toISOString())
-        .lte('transaction_date', dateRange.to.toISOString())
-        .order('transaction_date', { ascending: false })
-        .range(0, 4999);
+        `;
 
-      // Apply server-side filters
-      if (params.transactionTypeId && params.transactionTypeId !== 'all') {
-        query = query.eq('transaction_type_id', Number(params.transactionTypeId));
+      function buildQuery() {
+        let q = supabase
+          .from('inventory_transactions')
+          .select(selectStr)
+          .gte('transaction_date', dateRange.from.toISOString())
+          .lte('transaction_date', dateRange.to.toISOString())
+          .order('transaction_date', { ascending: false });
+
+        if (params.transactionTypeId && params.transactionTypeId !== 'all') {
+          q = q.eq('transaction_type_id', Number(params.transactionTypeId));
+        }
+        if (params.componentIds && params.componentIds.length > 0) {
+          q = q.in('component_id', params.componentIds.map(Number));
+        } else if (bomComponentIds && bomComponentIds.length > 0) {
+          q = q.in('component_id', bomComponentIds);
+        }
+        return q;
       }
 
-      // Filter by specific component IDs (multi-select)
-      if (params.componentIds && params.componentIds.length > 0) {
-        query = query.in('component_id', params.componentIds.map(Number));
-      }
-      // Filter by BOM components if product selected
-      else if (bomComponentIds && bomComponentIds.length > 0) {
-        query = query.in('component_id', bomComponentIds);
+      // Paginate in chunks of 1000 (Supabase default max_rows)
+      const PAGE_SIZE = 1000;
+      const MAX_ROWS = 5000;
+      let allData: unknown[] = [];
+
+      for (let offset = 0; offset < MAX_ROWS; offset += PAGE_SIZE) {
+        const { data, error } = await buildQuery().range(offset, offset + PAGE_SIZE - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        allData = allData.concat(data);
+        if (data.length < PAGE_SIZE) break; // last page
       }
 
-      const { data, error } = await query;
-      if (error) throw error;
-
-      let results = data as unknown as EnrichedTransaction[];
+      let results = allData as unknown as EnrichedTransaction[];
 
       // Client-side filters for nested joins
       if (params.supplierId && params.supplierId !== 'all') {
