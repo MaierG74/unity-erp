@@ -158,23 +158,6 @@ export function useTransactionsQuery(params: UseTransactionsQueryParams) {
         );
       }
 
-      if (params.search) {
-        const terms = params.search.toLowerCase().split(/\s+/);
-        results = results.filter((t) => {
-          const searchable = [
-            t.component?.internal_code,
-            t.component?.description,
-            t.purchase_order?.q_number,
-            t.order?.order_number,
-            t.reason,
-          ]
-            .filter(Boolean)
-            .join(' ')
-            .toLowerCase();
-          return terms.every((term) => searchable.includes(term));
-        });
-      }
-
       return results;
     },
     enabled:

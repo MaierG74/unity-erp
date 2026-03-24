@@ -18,7 +18,7 @@ export function TransactionsExplorer() {
   const printRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
 
-  const { data: transactions = [], isLoading, error, dateRange } = useTransactionsQuery({
+  const { data: rawTransactions = [], isLoading, error, dateRange } = useTransactionsQuery({
     dateFrom: config.dateRange.from,
     dateTo: config.dateRange.to,
     datePreset: config.dateRange.preset,
@@ -27,8 +27,26 @@ export function TransactionsExplorer() {
     supplierId: config.filters.supplierId,
     categoryId: config.filters.categoryId,
     componentIds: config.filters.componentIds,
-    search: config.filters.search,
   });
+
+  // Client-side search filter (instant, no refetch)
+  const transactions = useMemo(() => {
+    if (!config.filters.search) return rawTransactions;
+    const terms = config.filters.search.toLowerCase().split(/\s+/);
+    return rawTransactions.filter((t) => {
+      const searchable = [
+        t.component?.internal_code,
+        t.component?.description,
+        t.purchase_order?.q_number,
+        t.order?.order_number,
+        t.reason,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return terms.every((term) => searchable.includes(term));
+    });
+  }, [rawTransactions, config.filters.search]);
 
   // Get unique component IDs for stock summary (only when grouping by component)
   const componentIds = useMemo(() => {
