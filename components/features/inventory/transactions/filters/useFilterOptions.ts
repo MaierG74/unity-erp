@@ -56,10 +56,11 @@ export function useFilterOptions() {
       const { data, error } = await supabase
         .from('components')
         .select('component_id, internal_code')
+        .not('internal_code', 'is', null)
         .order('internal_code')
         .limit(1000);
       if (error) throw error;
-      return data.map((c) => c.internal_code);
+      return data.map((c) => c.internal_code as string);
     },
     enabled,
     staleTime: 120_000,

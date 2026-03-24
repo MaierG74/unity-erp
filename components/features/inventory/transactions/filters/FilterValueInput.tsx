@@ -30,8 +30,11 @@ type Props = {
   options?: string[];
 };
 
-export function FilterValueInput({ fieldDef, operator, value, onChange, options = [] }: Props) {
+export function FilterValueInput({ fieldDef, operator, value, onChange, options: rawOptions = [] }: Props) {
   if (!operatorNeedsValue(operator)) return null;
+
+  // Deduplicate and filter out empty options
+  const options = [...new Set(rawOptions.filter(Boolean))];
 
   if (fieldDef.type === 'numeric') {
     return (
