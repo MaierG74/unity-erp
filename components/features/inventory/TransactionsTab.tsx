@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '@/components/common/auth-provider';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { RefreshCw, Search, X, Calendar, Loader2 } from 'lucide-react';
@@ -42,6 +43,7 @@ type Transaction = {
 };
 
 export function TransactionsTab() {
+  const { user } = useAuth();
   const [searchText, setSearchText] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const queryClient = useQueryClient();
@@ -78,6 +80,7 @@ export function TransactionsTab() {
 
       return data as Transaction[];
     },
+    enabled: !!user,
     staleTime: 30 * 1000,
     refetchOnWindowFocus: true,
   });

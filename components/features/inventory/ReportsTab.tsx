@@ -3,6 +3,7 @@
 import { useMemo, useState, Fragment } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '@/components/common/auth-provider';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { RefreshCw, AlertTriangle, Package, TrendingDown, BarChart3, ChevronDown, ChevronRight, Clock, Mail, Loader2 } from 'lucide-react';
@@ -47,6 +48,7 @@ type CriticalComponent = {
 };
 
 export function ReportsTab() {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [expandedComponentId, setExpandedComponentId] = useState<number | null>(null);
@@ -124,6 +126,7 @@ export function ReportsTab() {
 
       return data as Component[];
     },
+    enabled: !!user,
     staleTime: 30 * 1000,
     refetchOnWindowFocus: true,
   });
@@ -227,6 +230,7 @@ export function ReportsTab() {
         throw error;
       }
     },
+    enabled: !!user,
     staleTime: 30 * 1000,
     refetchOnWindowFocus: true,
   });

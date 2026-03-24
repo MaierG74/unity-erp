@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '@/components/common/auth-provider';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { RefreshCw, Package, ExternalLink, Loader2 } from 'lucide-react';
@@ -38,6 +39,7 @@ type ComponentOnOrder = {
 };
 
 export function OnOrderTab() {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -156,6 +158,7 @@ export function OnOrderTab() {
         throw e;
       }
     },
+    enabled: !!user,
     staleTime: 30 * 1000,
     refetchOnWindowFocus: true,
   });

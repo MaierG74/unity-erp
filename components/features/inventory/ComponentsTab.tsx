@@ -10,6 +10,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useToast } from "@/components/ui/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useDebounce } from '@/hooks/use-debounce';
+import { useAuth } from '@/components/common/auth-provider';
 import { cn } from "@/lib/utils";
 import { Plus, RefreshCw, Search, X, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -120,6 +121,7 @@ const columns = [
 ]
 
 export function ComponentsTab() {
+  const { user } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const searchParamsString = searchParams?.toString() || '';
@@ -428,6 +430,7 @@ export function ComponentsTab() {
         throw e;
       }
     },
+    enabled: !!user,
     retry: 2,
     retryDelay: attemptIndex => Math.min(1000 * 2 ** attemptIndex, 30000),
     staleTime: 10 * 1000,

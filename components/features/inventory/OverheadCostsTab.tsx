@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '@/components/common/auth-provider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/use-toast';
@@ -52,6 +53,7 @@ export type OverheadElement = {
 };
 
 export function OverheadCostsTab() {
+  const { user } = useAuth();
   const [searchText, setSearchText] = useState('');
   const [selectedElement, setSelectedElement] = useState<OverheadElement | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -73,6 +75,7 @@ export function OverheadCostsTab() {
       const data = await res.json();
       return data.elements as OverheadElement[];
     },
+    enabled: !!user,
     staleTime: 30 * 1000,
     refetchOnWindowFocus: true,
   });

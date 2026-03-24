@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/components/common/auth-provider';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -167,6 +168,7 @@ function formatQuantity(value: number | null | undefined): string {
 }
 
 export function ManualStockIssueTab() {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   
   // Form state
@@ -238,6 +240,7 @@ export function ManualStockIssueTab() {
       if (error) throw error;
       return data || [];
     },
+    enabled: !!user,
   });
 
   // Search components directly from components table
@@ -270,7 +273,7 @@ export function ManualStockIssueTab() {
         };
       });
     },
-    enabled: componentSearchTerm.trim().length >= 2,
+    enabled: !!user && componentSearchTerm.trim().length >= 2,
     staleTime: 30000,
   });
 
@@ -359,6 +362,7 @@ export function ManualStockIssueTab() {
         issue_category: item.issue_category,
       }));
     },
+    enabled: !!user,
     staleTime: 0,
     refetchOnMount: 'always',
   });
@@ -398,6 +402,7 @@ export function ManualStockIssueTab() {
         })),
       }));
     },
+    enabled: !!user,
     staleTime: 0,
     refetchOnMount: 'always',
   });

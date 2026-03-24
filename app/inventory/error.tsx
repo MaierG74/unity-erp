@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
+import { supabase } from '@/lib/supabase'
 
 export default function InventoryError({
   error,
@@ -10,10 +11,23 @@ export default function InventoryError({
   error: Error & { digest?: string }
   reset: () => void
 }) {
+  const hasAutoRetried = useRef(false)
+
   useEffect(() => {
-    // Log the error to an error reporting service
     console.error('Inventory error:', error)
   }, [error])
+
+  // Auto-recover when a valid auth session is restored (e.g. after logout/login in another tab)
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session && !hasAutoRetried.current) {
+        hasAutoRetried.current = true
+        // Short delay to let the new session propagate to all hooks
+        setTimeout(() => reset(), 500)
+      }
+    })
+    return () => subscription.unsubscribe()
+  }, [reset])
 
   return (
     <div className="container mx-auto py-10">
