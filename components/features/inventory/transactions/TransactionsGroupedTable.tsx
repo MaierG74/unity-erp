@@ -344,6 +344,8 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
       ) : (
         groups.map((group) => {
           const isExpanded = expandedGroups.has(group.key);
+          const isComponentGroup = groupBy === 'component';
+          const componentIdForLink = isComponentGroup ? group.transactions[0]?.component_id : undefined;
           return (
             <div key={group.key} className="rounded-xl border-2 border-border/60 bg-card shadow-xs overflow-hidden">
               {/* Group Header */}
@@ -358,7 +360,18 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
                   <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                 )}
                 <div className="flex-1 min-w-0">
-                  <span className="font-bold text-sm">{group.label}</span>
+                  {componentIdForLink ? (
+                    <Link
+                      href={`/inventory/components/${componentIdForLink}`}
+                      target="_blank"
+                      className="font-bold text-sm text-primary hover:underline"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {group.label}
+                    </Link>
+                  ) : (
+                    <span className="font-bold text-sm">{group.label}</span>
+                  )}
                   {group.sublabel && (
                     <span className="text-xs text-muted-foreground ml-2">
                       — {group.sublabel}
@@ -460,6 +473,8 @@ function SubGroupRows({
   onToggle: () => void;
   colCount: number;
 }) {
+  const componentId = sub.transactions[0]?.component_id;
+
   return (
     <>
       {/* Sub-group divider row — distinctly different from data rows */}
@@ -474,7 +489,18 @@ function SubGroupRows({
             ) : (
               <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             )}
-            <span className="font-bold text-xs text-primary">{sub.label}</span>
+            {componentId ? (
+              <Link
+                href={`/inventory/components/${componentId}`}
+                target="_blank"
+                className="font-bold text-xs text-primary hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {sub.label}
+              </Link>
+            ) : (
+              <span className="font-bold text-xs text-primary">{sub.label}</span>
+            )}
             {sub.sublabel && sub.sublabel !== sub.label && (
               <span className="text-xs text-muted-foreground">— {sub.sublabel}</span>
             )}
