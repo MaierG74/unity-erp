@@ -1,36 +1,66 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { requireModuleAccess } from '@/lib/api/module-access';
+import { MODULE_KEYS } from '@/lib/modules/keys';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
 type RouteParams = {
   productId?: string;
 };
 
-function parseId(value?: string): number | null {
+function parseId(value?: string | null): number | null {
   if (!value) return null;
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && !Number.isNaN(parsed) ? parsed : null;
 }
 
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    throw new Error('Supabase environment variables are not configured');
+async function requireProductsAccess(request: NextRequest) {
+  const access = await requireModuleAccess(request, MODULE_KEYS.PRODUCTS_BOM, {
+    forbiddenMessage: 'Products module access is disabled for your organization',
+  });
+  if ('error' in access) {
+    return { error: access.error };
   }
-  return createClient(url, key);
+
+  if (!access.orgId) {
+    return {
+      error: NextResponse.json(
+        {
+          error: 'Organization context is required for products access',
+          reason: 'missing_org_context',
+          module_key: access.moduleKey,
+        },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return { orgId: access.orgId };
 }
 
-export async function GET(_request: NextRequest, context: { params: Promise<RouteParams> }) {
+export async function GET(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
   const productId = parseId(params.productId);
   if (!productId) {
     return NextResponse.json({ error: 'Invalid product id' }, { status: 400 });
   }
 
-  const supabase = getSupabaseAdmin();
-
   try {
-    const { data, error } = await supabase
+    // Verify product belongs to this org
+    const { data: product, error: productErr } = await supabaseAdmin
+      .from('products')
+      .select('product_id')
+      .eq('product_id', productId)
+      .eq('org_id', auth.orgId)
+      .maybeSingle();
+
+    if (productErr || !product) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
+
+    const { data, error } = await supabaseAdmin
       .from('product_overhead_costs')
       .select(`
         id,
@@ -88,6 +118,9 @@ export async function GET(_request: NextRequest, context: { params: Promise<Rout
 }
 
 export async function POST(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
   const productId = parseId(params.productId);
   if (!productId) {
@@ -107,14 +140,13 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
   const quantity = typeof body.quantity === 'number' && body.quantity > 0 ? body.quantity : 1;
   const override_value = typeof body.override_value === 'number' ? body.override_value : null;
 
-  const supabase = getSupabaseAdmin();
-
   try {
-    // Verify product exists
-    const { data: product, error: productError } = await supabase
+    // Verify product belongs to this org
+    const { data: product, error: productError } = await supabaseAdmin
       .from('products')
       .select('product_id')
       .eq('product_id', productId)
+      .eq('org_id', auth.orgId)
       .maybeSingle();
 
     if (productError) {
@@ -127,7 +159,7 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
     }
 
     // Verify element exists and is active
-    const { data: element, error: elementError } = await supabase
+    const { data: element, error: elementError } = await supabaseAdmin
       .from('overhead_cost_elements')
       .select('element_id, is_active')
       .eq('element_id', element_id)
@@ -147,7 +179,7 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
     }
 
     // Insert or update (upsert)
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('product_overhead_costs')
       .upsert({
         product_id: productId,
@@ -210,6 +242,9 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
 }
 
 export async function DELETE(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
   const productId = parseId(params.productId);
   if (!productId) {
@@ -223,10 +258,20 @@ export async function DELETE(request: NextRequest, context: { params: Promise<Ro
     return NextResponse.json({ error: 'element_id query parameter is required' }, { status: 400 });
   }
 
-  const supabase = getSupabaseAdmin();
-
   try {
-    const { error } = await supabase
+    // Verify product belongs to this org before deleting
+    const { data: product, error: productErr } = await supabaseAdmin
+      .from('products')
+      .select('product_id')
+      .eq('product_id', productId)
+      .eq('org_id', auth.orgId)
+      .maybeSingle();
+
+    if (productErr || !product) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
+
+    const { error } = await supabaseAdmin
       .from('product_overhead_costs')
       .delete()
       .eq('product_id', productId)
