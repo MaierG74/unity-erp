@@ -36,31 +36,36 @@ From `stock_issuances` for this order:
 3. `actual_material_cost = SUM(quantity_issued × supplier_price)` per component
 4. Components issued that don't appear in any product BOM are "unmatched" — shown separately
 
-**Price lookup**: For each issued component, find the supplier price via:
-```
-components → suppliercomponents (cheapest/default) → price
-```
-Note: This uses current supplier price, not the price at time of issuance. Phase 2 will add cost snapshots.
+**Price lookup for actual costs**: `stock_issuances` only has `component_id` (not `supplier_component_id`). Price resolution priority:
+1. If the BOM for this order's product links a specific `supplier_component_id`, use that supplier component's price
+2. Otherwise, use the cheapest active supplier component for that `component_id`
+
+Note: This uses current supplier price, not the price at time of issuance. Phase 2 will add cost snapshots to `stock_issuances`.
+
+**Org scoping**: `stock_issuances` has no `org_id` column. Org isolation is achieved by first validating the order belongs to the requesting org (via `orders.org_id = auth.orgId`), then querying issuances by that validated `order_id`.
 
 ### Estimated Labor Cost
 
 From the `job_work_pool` for this order (which snapshots BOL demand):
-1. Fetch all work pool rows: `job_work_pool WHERE order_id = X AND source = 'bol' AND status = 'active'`
-2. For piece work: `estimated_labor = SUM(required_qty × piece_rate)`
-3. Group by `job_id` for the labor variance table
+1. Fetch all work pool rows: `job_work_pool WHERE order_id = X AND status = 'active'` (include both `source = 'bol'` and `source = 'manual'` — manual entries represent intentionally added labor demand)
+2. For piece work (`pay_type = 'piece'`): `estimated_labor = SUM(required_qty × piece_rate)`
+3. For hourly work (`pay_type = 'hourly'`): show row with "Hourly — no piece rate" indicator. Hourly labor is excluded from cost totals in Phase 1 but shown so users see the gap.
+4. Group by `job_id` for the labor variance table
 
 If no work pool exists, fall back to computing from `billoflabour` directly:
-1. For each product in the order, fetch BOL
-2. `estimated_labor = SUM(bol.quantity × piece_rate × order_detail.quantity)` for piece work
+1. For each product in the order, fetch BOL with piece rate via: `billoflabour → piece_work_rates (WHERE rate_id = piece_rate_id) → piece_rate_amount`
+2. `estimated_labor = SUM(bol.quantity × piece_rate_amount × order_detail.quantity)` for piece work only
+3. Hourly BOL entries shown but excluded from cost totals (same as work pool path)
 
 ### Actual Labor Cost
 
 From completed `job_card_items` for this order:
 1. Fetch: `job_card_items JOIN job_cards WHERE job_cards.order_id = X AND job_card_items.status = 'completed'`
-2. For each item: `actual_cost = completed_quantity × (piece_rate_override ?? piece_rate)`
-3. The `piece_rate` on `job_card_items` is snapshotted at issuance time — it's the source of truth
-4. Group by `job_id` for the labor variance table
-5. Account for `remainder_action`: items with `scrap` or `shortage` remainder don't generate additional cost, but `follow_up_card` items do (the follow-up card has its own cost)
+2. For each item: `actual_cost = completed_quantity × piece_rate` (use `piece_rate` column directly — it's snapshotted at issuance time and is the source of truth)
+3. Note: `piece_rate_override` may exist on the table — if present, use `piece_rate_override ?? piece_rate`. Verify column existence during implementation.
+4. Exclude cancelled items (from cancel cascade) even if they have `completed_quantity > 0`
+5. Group by `job_id` for the labor variance table
+6. Account for `remainder_action`: items with `scrap` or `shortage` remainder don't generate additional cost, but `follow_up_card` items do (the follow-up card has its own cost)
 
 ### Estimated Overhead
 
@@ -161,7 +166,7 @@ interface OrderReportResponse {
 
 ### Tab Integration
 
-The order page uses `SmartButtonsRow` for tabs (not shadcn Tabs). Add a 7th button: "📊 Reports". The tab renders `OrderReportsTab` when active.
+The order page uses `SmartButtonsRow` for tabs (not shadcn Tabs). `SmartButtonsRow` has hardcoded tabs with individually named props. Add a 7th button: icon `BarChart3` (Lucide) + "Reports" label. No count badge needed for this tab (pass `null`/`undefined` to suppress the count display, or modify the component to conditionally render counts). The tab renders `OrderReportsTab` when `activeTab === 'reports'`.
 
 ### Layout
 
@@ -255,6 +260,8 @@ Columns: Job | Product | Est. Qty | Actual Qty | Piece Rate | Est. Cost | Actual
 - **No stock issuances and no job cards**: Show "No actual costs recorded yet" with explanation
 - **No BOM for a product**: Material estimated costs show "No BOM" for that product
 - **No BOL for a product**: Labor estimated shows "No BOL"
+- **Zero revenue** (draft order, no prices): Margin shows "N/A" instead of percentage
+- **Info banner**: "Estimated costs from product BOMs + BOL at current prices. Actual material costs from stock issued. Actual labor from completed piecework job cards. Hourly labor and overhead actuals coming in Phase 2."
 
 ## Component Architecture
 
