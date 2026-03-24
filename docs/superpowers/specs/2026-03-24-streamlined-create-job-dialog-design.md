@@ -1,7 +1,7 @@
 # Streamlined Create Job Dialog
 
 **Date**: 2026-03-24
-**Status**: Draft
+**Status**: Reviewed
 **Area**: Labor Management — Job Creation
 
 ## Problem
@@ -28,7 +28,7 @@ Expand the existing Create Job modal to include all commonly-needed fields, and 
 ### Dialog Layout
 
 - **Width**: `max-w-2xl` (wider than current `max-w-md`)
-- **Two-column grid** layout for the fields
+- **Responsive two-column grid**: `grid-cols-1 md:grid-cols-2` — collapses to single column on narrow screens
 - Compact spacing per low-res screen guidelines (`space-y-3`, `gap-3`)
 
 **Left column:**
@@ -37,7 +37,6 @@ Expand the existing Create Job modal to include all commonly-needed fields, and 
 | Category | Cascading select | Yes | Parent category dropdown |
 | Subcategory | Cascading select | No | Appears when parent has children |
 | Name | Text input | Yes | Auto-focused on open |
-| Description | Textarea (rows=2) | No | Compact height |
 
 **Right column:**
 | Field | Type | Required | Notes |
@@ -46,13 +45,29 @@ Expand the existing Create Job modal to include all commonly-needed fields, and 
 | Time Unit | Dropdown | No | Hours / Minutes / Seconds. Default: Minutes |
 | Default Piecework Rate | Number input | No | Prefix "R", suffix "/piece". Decimal (2 places) |
 
+**Full-width row (below the grid):**
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| Description | Textarea (rows=3) | No | Spans both columns for comfortable editing |
+
 ### Footer Buttons
 
 - **Cancel** (ghost) — closes dialog
-- **Create Job** (primary) — creates job, closes dialog
-- **Create & Add Another** (outline) — creates job, resets form, keeps category/subcategory selected, clears other fields, focuses Name input
+- **Create Job** (primary) — creates job, closes dialog, calls `onJobCreated` + `onClose`
+- **Create & Add Another** (outline) — creates job, resets form, keeps category/subcategory/time unit, clears other fields, focuses Name input. Does NOT call `onClose`. Shows toast only.
+
+### Multi-Parent Callback Contract
+
+This modal is mounted from three parents:
+1. `jobs-rates-table.tsx` — main labor list (bulk creation)
+2. `piecework-rates-manager.tsx` — rate management
+3. `AddJobDialog.tsx` — product BOL flow
+
+**"Create & Add Another" is only shown in the labor list context** (parent 1). The other two parents use the modal for single-job creation and close on success as before. This is controlled via a new `showAddAnother?: boolean` prop (default `false`).
 
 ### Data Flow on Submit
+
+**Single mutation function** that handles both inserts. If a piecework rate is provided, both inserts happen together. If the rate insert fails after the job succeeds, the user sees a partial-success toast ("Job created, but piecework rate failed — you can add it later") rather than a generic error.
 
 **Step 1 — Insert job:**
 ```sql
@@ -63,6 +78,7 @@ RETURNING job_id
 
 - `role_id` is NOT set at creation (defaults to null, can be assigned later on detail page)
 - `estimated_minutes` and `time_unit` are null if not provided
+- Empty string inputs → null (explicit mapping in mutation)
 
 **Step 2 — Insert piecework rate (conditional):**
 Only if the user entered a piecework rate value > 0:
@@ -75,9 +91,8 @@ VALUES ($job_id, NULL, $rate, CURRENT_DATE, NULL)
 - `product_id = NULL` means this is the job default rate
 - `effective_date = today`
 - `end_date = NULL` means it's the current active rate
-- No date-versioning logic needed since this is the first rate for a new job
-
-**Both inserts happen in sequence** within the same mutation function. If the piecework rate insert fails, the job still exists (acceptable — user can add rate later).
+- This is the first rate for a brand-new job, so no date-versioning conflicts
+- **Duplicate protection**: The `UNIQUE (job_id, product_id, effective_date)` constraint does NOT protect `NULL` product_id in Postgres. Since we're inserting into a newly-created job, there cannot be an existing default rate. However, if rapid double-click triggers two mutations, we guard with `isPending` check on the button (already standard pattern).
 
 ### Form Reset Behavior ("Create & Add Another")
 
@@ -85,23 +100,28 @@ After successful creation:
 1. Show brief success toast: "Job created"
 2. Clear: Name, Description, Estimated Time, Piecework Rate
 3. Preserve: Category, Subcategory, Time Unit
-4. Focus: Name input
-5. Invalidate `['jobs']` and `['piece-rates']` query keys so the table behind the modal updates
+4. Reset form state (errors, dirty flags) via `form.reset()` with preserved values
+5. Focus: Name input via ref
+6. Invalidate `['jobs']`, `['piece-rates']`, and `['all-piece-rates-current']` query keys so the table behind the modal updates
 
 ### Validation
 
-- **Name**: Required, non-empty after trim
+- **Name**: Required, trimmed, non-empty — `z.string().trim().min(1, 'Name is required')`
 - **Category**: Required
-- **Estimated Time**: Optional. If provided, must be > 0
-- **Piecework Rate**: Optional. If provided, must be > 0
-- **Time Unit**: Defaults to "Minutes" if Estimated Time is provided
+- **Estimated Time**: Optional. Empty string → null. If present, must be > 0
+- **Piecework Rate**: Optional. Empty string → null. If present, must be > 0
+- **Time Unit**: Defaults to "Minutes". Always stored alongside estimated_minutes (both null or both set)
 
 ### Numeric Input UX
 
 Per established project pattern:
 - `value={x || ''}` with `placeholder="0"` (not `value={x || 0}`)
 - Auto-select on focus (handled by `components/ui/input.tsx` for `type="number"`)
-- `onBlur` resets empty fields back to 0
+- **No onBlur-to-zero** for these fields — they stay empty/null when not provided, unlike allocation fields where 0 is a valid default
+
+### Tenancy Note
+
+Labor tables (`jobs`, `piece_work_rates`) do not currently have `org_id` columns or org-scoped RLS. This is pre-existing and out of scope for this change. When labor tables get org-scoped (tracked separately), the mutation will need updating.
 
 ## What Doesn't Change
 
@@ -114,13 +134,17 @@ Per established project pattern:
 
 | File | Change |
 |------|--------|
-| `components/features/labor/create-job-modal.tsx` | Expand form fields, add two-column layout, add "Create & Add Another", add piecework rate insert |
-| No other files | The modal is already imported and used by the parent page |
+| `components/features/labor/create-job-modal.tsx` | Expand form fields, two-column responsive layout, "Create & Add Another" mode, piecework rate insert, partial-success handling |
+| `components/features/labor/jobs-rates-table.tsx` | Pass `showAddAnother={true}` to CreateJobModal |
+| `components/features/labor/piecework-rates-manager.tsx` | No change needed — already passes `showAddAnother` as undefined (false) |
+| `components/features/products/AddJobDialog.tsx` | No change needed — already passes `showAddAnother` as undefined (false) |
 
 ## Edge Cases
 
 - **Category with no subcategories**: Subcategory dropdown hidden (existing behavior)
 - **Piecework rate without estimated time**: Allowed — some jobs are piece-rate only with no time estimate
 - **Estimated time without piecework rate**: Allowed — hourly jobs don't need piece rates
-- **Rapid creation**: Query invalidation on each create ensures the list stays current. No debouncing needed since Supabase handles concurrent inserts fine.
+- **Rapid creation**: Query invalidation on each create ensures the list stays current. `isPending` guard prevents double-submit.
 - **Duplicate job names**: Allowed by the schema (jobs are identified by `job_id`). Same as current behavior.
+- **Category switch during bulk create**: Changing parent category resets subcategory (existing behavior in cascading select)
+- **Partial failure**: Job created but piecework rate insert fails → distinct toast message, job still usable, rate can be added later from detail page
