@@ -196,6 +196,8 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
     }
   };
 
+  const colCount = groupBy === 'component' ? 6 : 7;
+
   // Flat mode (no grouping)
   if (groupBy === 'none') {
     return (
@@ -221,8 +223,8 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
                 </TableCell>
               </TableRow>
             ) : (
-              transactions.map((t) => (
-                <TransactionRowContent key={t.transaction_id} transaction={t} showComponent />
+              transactions.map((t, i) => (
+                <TransactionRowContent key={t.transaction_id} transaction={t} showComponent striped={i % 2 === 1} />
               ))
             )}
           </TableBody>
@@ -265,7 +267,7 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
               <button
                 type="button"
                 onClick={() => toggleGroup(group.key)}
-                className="w-full flex items-center gap-3 px-4 py-3 bg-muted/30 hover:bg-muted/50 transition-colors text-left"
+                className="w-full flex items-center gap-3 px-4 py-2.5 bg-muted/30 hover:bg-muted/50 transition-colors text-left"
               >
                 {isExpanded ? (
                   <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -280,15 +282,15 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
                     </span>
                   )}
                   <span className="text-xs text-muted-foreground ml-2">
-                    ({group.count} transactions)
+                    ({group.count})
                   </span>
                 </div>
                 <div className="flex items-center gap-4 text-sm shrink-0">
                   <span className="text-green-600 font-medium">
-                    In: +{group.sumIn.toLocaleString()}
+                    +{group.sumIn.toLocaleString()}
                   </span>
                   <span className="text-red-600 font-medium">
-                    Out: -{group.sumOut.toLocaleString()}
+                    -{group.sumOut.toLocaleString()}
                   </span>
                   {group.stockSummary && (
                     <>
@@ -306,60 +308,35 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
                 </div>
               </button>
 
-              {/* Group Body */}
+              {/* Group Body — nested sub-groups rendered as inline divider rows */}
               {isExpanded && group.subGroups ? (
-                <div className="pl-4 space-y-1 py-2">
-                  {group.subGroups.map((sub) => {
-                    const subExpanded = expandedGroups.has(sub.key);
-                    return (
-                      <div key={sub.key} className="border-l-2 border-muted">
-                        <button
-                          type="button"
-                          onClick={() => toggleGroup(sub.key)}
-                          className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-muted/30 transition-colors text-left text-sm"
-                        >
-                          {subExpanded ? (
-                            <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-                          ) : (
-                            <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
-                          )}
-                          <span className="font-medium">{sub.label}</span>
-                          {sub.sublabel && (
-                            <span className="text-xs text-muted-foreground">— {sub.sublabel}</span>
-                          )}
-                          <span className="text-xs text-muted-foreground">({sub.count})</span>
-                          <div className="ml-auto flex items-center gap-3 text-xs shrink-0">
-                            <span className="text-green-600">In: +{sub.sumIn.toLocaleString()}</span>
-                            <span className="text-red-600">Out: -{sub.sumOut.toLocaleString()}</span>
-                          </div>
-                        </button>
-                        {subExpanded && (
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead>Date</TableHead>
-                                <TableHead>Description</TableHead>
-                                <TableHead>Type</TableHead>
-                                <TableHead className="text-right">Quantity</TableHead>
-                                <TableHead>Order Ref</TableHead>
-                                <TableHead>Reason</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {sub.transactions.map((t) => (
-                                <TransactionRowContent
-                                  key={t.transaction_id}
-                                  transaction={t}
-                                  showComponent={false}
-                                />
-                              ))}
-                            </TableBody>
-                          </Table>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Component</TableHead>
+                      <TableHead>Description</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead className="text-right">Quantity</TableHead>
+                      <TableHead>Order Ref</TableHead>
+                      <TableHead>Reason</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {group.subGroups.map((sub) => {
+                      const subExpanded = expandedGroups.has(sub.key);
+                      return (
+                        <SubGroupRows
+                          key={sub.key}
+                          sub={sub}
+                          expanded={subExpanded}
+                          onToggle={() => toggleGroup(sub.key)}
+                          colCount={7}
+                        />
+                      );
+                    })}
+                  </TableBody>
+                </Table>
               ) : isExpanded ? (
                 <Table>
                   <TableHeader>
@@ -374,11 +351,12 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {group.transactions.map((t) => (
+                    {group.transactions.map((t, i) => (
                       <TransactionRowContent
                         key={t.transaction_id}
                         transaction={t}
                         showComponent={groupBy !== 'component'}
+                        striped={i % 2 === 1}
                       />
                     ))}
                   </TableBody>
@@ -393,19 +371,73 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
   );
 }
 
+/** Sub-group rendered as inline divider row + data rows within the parent table */
+function SubGroupRows({
+  sub,
+  expanded,
+  onToggle,
+  colCount,
+}: {
+  sub: TransactionGroup;
+  expanded: boolean;
+  onToggle: () => void;
+  colCount: number;
+}) {
+  return (
+    <>
+      {/* Sub-group divider row */}
+      <TableRow
+        className="bg-muted/20 hover:bg-muted/40 cursor-pointer border-t"
+        onClick={onToggle}
+      >
+        <TableCell colSpan={colCount} className="py-1.5">
+          <div className="flex items-center gap-2 text-xs">
+            {expanded ? (
+              <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+            )}
+            <span className="font-semibold text-primary">{sub.label}</span>
+            {sub.sublabel && (
+              <span className="text-muted-foreground">— {sub.sublabel}</span>
+            )}
+            <span className="text-muted-foreground">({sub.count})</span>
+            <div className="ml-auto flex items-center gap-3">
+              <span className="text-green-600 font-medium">+{sub.sumIn.toLocaleString()}</span>
+              <span className="text-red-600 font-medium">-{sub.sumOut.toLocaleString()}</span>
+            </div>
+          </div>
+        </TableCell>
+      </TableRow>
+      {/* Sub-group data rows */}
+      {expanded &&
+        sub.transactions.map((t, i) => (
+          <TransactionRowContent
+            key={t.transaction_id}
+            transaction={t}
+            showComponent={false}
+            striped={i % 2 === 1}
+          />
+        ))}
+    </>
+  );
+}
+
 function TransactionRowContent({
   transaction: t,
   showComponent,
+  striped = false,
 }: {
   transaction: EnrichedTransaction;
   showComponent: boolean;
+  striped?: boolean;
 }) {
   const qty = t.quantity || 0;
   const isAddition = qty > 0;
   const txDate = new Date(t.transaction_date);
 
   return (
-    <TableRow className="text-xs">
+    <TableRow className={cn('text-xs hover:bg-muted/20 transition-colors', striped && 'bg-muted/5')}>
       <TableCell className="whitespace-nowrap py-1.5">
         <Tooltip>
           <TooltipTrigger asChild>
@@ -431,7 +463,7 @@ function TransactionRowContent({
         </TableCell>
       )}
       <TableCell className="text-muted-foreground max-w-[200px] truncate py-1.5">
-        {t.component?.description || '-'}
+        {t.component?.description || ''}
       </TableCell>
       <TableCell className="py-1.5">
         <Badge
@@ -469,12 +501,10 @@ function TransactionRowContent({
           >
             {t.purchase_order.q_number}
           </Link>
-        ) : (
-          <span className="text-muted-foreground">-</span>
-        )}
+        ) : null}
       </TableCell>
       <TableCell className="text-muted-foreground max-w-[150px] truncate py-1.5" title={t.reason || undefined}>
-        {t.reason || '-'}
+        {t.reason || ''}
       </TableCell>
     </TableRow>
   );
