@@ -81,7 +81,12 @@ function evaluateCondition(t: EnrichedTransaction, c: FilterCondition): boolean 
 
   switch (fieldDef.type) {
     case 'text': return evaluateText(raw, c.operator, c.value);
-    case 'select': return evaluateSelect(raw, c.operator, c.value);
+    case 'select': {
+      // Select fields also accept text operators (contains, equals, etc.)
+      const selectOps = ['is', 'is_not', 'is_any_of', 'is_none_of', 'is_empty', 'is_not_empty'];
+      if (selectOps.includes(c.operator)) return evaluateSelect(raw, c.operator, c.value);
+      return evaluateText(raw, c.operator, c.value);
+    }
     case 'numeric': return evaluateNumeric(raw, c.operator, c.value);
   }
 }

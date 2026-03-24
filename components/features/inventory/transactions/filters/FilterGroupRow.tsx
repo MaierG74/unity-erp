@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Plus, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { FilterGroup, FilterCondition } from './filter-types';
-import { getDefaultOperator } from './filter-field-defs';
+import { getDefaultOperator, getFieldDef } from './filter-field-defs';
 import { FilterConditionRow } from './FilterConditionRow';
 
 function makeId() {
@@ -24,7 +24,7 @@ export function FilterGroupRow({ group, onChange, onRemove, options, depth = 0 }
     const newCondition: FilterCondition = {
       id: makeId(),
       field: 'component_code',
-      operator: getDefaultOperator('text'),
+      operator: getDefaultOperator(getFieldDef('component_code')?.type || 'text'),
       value: null,
     };
     onChange({ ...group, conditions: [...group.conditions, newCondition] });
@@ -37,7 +37,7 @@ export function FilterGroupRow({ group, onChange, onRemove, options, depth = 0 }
       conditions: [{
         id: makeId(),
         field: 'component_code',
-        operator: getDefaultOperator('text'),
+        operator: getDefaultOperator(getFieldDef('component_code')?.type || 'text'),
         value: null,
       }],
       groups: [],
