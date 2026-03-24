@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '@/components/common/auth-provider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/use-toast';
@@ -28,6 +29,7 @@ type Category = {
 };
 
 export function CategoriesTab() {
+  const { user } = useAuth();
   const [searchText, setSearchText] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -70,6 +72,7 @@ export function CategoriesTab() {
 
       return categoriesWithCounts;
     },
+    enabled: !!user,
     staleTime: 30 * 1000,
     refetchOnWindowFocus: true,
   });
