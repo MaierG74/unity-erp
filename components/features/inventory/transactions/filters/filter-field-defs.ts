@@ -1,15 +1,15 @@
 import type { FilterFieldDef, FilterFieldType, TextOperator, SelectOperator, NumericOperator, FilterOperator } from './filter-types';
 
 export const TRANSACTION_FILTER_FIELDS: FilterFieldDef[] = [
-  { key: 'component_code', label: 'Component', type: 'select', path: 'component.internal_code', optionsQueryKey: 'components' },
-  { key: 'description', label: 'Description', type: 'text', path: 'component.description' },
-  { key: 'category', label: 'Category', type: 'select', path: 'component.category.categoryname', optionsQueryKey: 'categories' },
-  { key: 'supplier', label: 'Supplier', type: 'select', path: 'purchase_order.supplier.name', optionsQueryKey: 'suppliers' },
-  { key: 'transaction_type', label: 'Type', type: 'select', path: 'transaction_type.type_name', optionsQueryKey: 'transaction-types' },
-  { key: 'quantity', label: 'Quantity', type: 'numeric', path: 'quantity' },
-  { key: 'order_number', label: 'Order Ref', type: 'text', path: 'order.order_number' },
-  { key: 'po_number', label: 'PO Number', type: 'text', path: 'purchase_order.q_number' },
-  { key: 'reason', label: 'Reason', type: 'text', path: 'reason' },
+  { key: 'component_code', label: 'Component', type: 'select', path: 'component.internal_code', viewColumn: 'component_code', optionsQueryKey: 'components' },
+  { key: 'description', label: 'Description', type: 'text', path: 'component.description', viewColumn: 'component_description' },
+  { key: 'category', label: 'Category', type: 'select', path: 'component.category.categoryname', viewColumn: 'category_name', optionsQueryKey: 'categories' },
+  { key: 'supplier', label: 'Supplier', type: 'select', path: 'purchase_order.supplier.name', viewColumn: 'supplier_name', optionsQueryKey: 'suppliers' },
+  { key: 'transaction_type', label: 'Type', type: 'select', path: 'transaction_type.type_name', viewColumn: 'transaction_type_name', optionsQueryKey: 'transaction-types' },
+  { key: 'quantity', label: 'Quantity', type: 'numeric', path: 'quantity', viewColumn: 'quantity' },
+  { key: 'order_number', label: 'Order Ref', type: 'text', path: 'order.order_number', viewColumn: 'order_number' },
+  { key: 'po_number', label: 'PO Number', type: 'text', path: 'purchase_order.q_number', viewColumn: 'po_number' },
+  { key: 'reason', label: 'Reason', type: 'text', path: 'reason', viewColumn: 'reason' },
 ];
 
 export const TEXT_OPERATORS: { value: TextOperator; label: string }[] = [

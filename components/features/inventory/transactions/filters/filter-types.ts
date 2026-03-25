@@ -5,8 +5,10 @@ export type FilterFieldDef = {
   key: string;
   label: string;
   type: FilterFieldType;
-  /** Dot-path accessor into EnrichedTransaction */
+  /** Dot-path accessor into EnrichedTransaction (client-side) */
   path: string;
+  /** Column name in inventory_transactions_enriched view (server-side) */
+  viewColumn?: string;
   /** For 'select' fields: query key to reuse existing React Query cache */
   optionsQueryKey?: string;
 };
