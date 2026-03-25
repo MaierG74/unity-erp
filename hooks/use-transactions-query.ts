@@ -3,6 +3,9 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/common/auth-provider';
 import type { EnrichedTransaction } from '@/types/transaction-views';
+import type { ComposableFilter } from '@/components/features/inventory/transactions/filters/filter-types';
+import { applyServerFilters, buildSearchFilters } from '@/components/features/inventory/transactions/filters/filter-to-postgrest';
+import { mapFlatToEnriched, type FlatTransactionRow } from '@/components/features/inventory/transactions/filters/map-enriched-row';
 import { startOfWeek, subDays, startOfMonth, startOfYear, endOfDay } from 'date-fns';
 
 function getPresetDateRange(preset: string | null): { from: Date; to: Date } {
@@ -36,12 +39,12 @@ type UseTransactionsQueryParams = {
   categoryId?: string;
   componentIds?: string[];
   search?: string;
+  composableFilter?: ComposableFilter;
 };
 
 export function useTransactionsQuery(params: UseTransactionsQueryParams) {
   const { user } = useAuth();
 
-  // Resolve date range — memoize so the query key stays stable across re-renders
   const dateRange = useMemo(() => {
     if (params.dateFrom && params.dateTo) {
       return { from: new Date(params.dateFrom), to: new Date(params.dateTo) };
@@ -49,7 +52,7 @@ export function useTransactionsQuery(params: UseTransactionsQueryParams) {
     return getPresetDateRange(params.datePreset ?? 'last30');
   }, [params.dateFrom, params.dateTo, params.datePreset]);
 
-  // If filtering by product, first get BOM component IDs
+  // BOM component lookup (unchanged)
   const bomQuery = useQuery({
     queryKey: ['bom-components', params.productId],
     queryFn: async () => {
@@ -79,95 +82,73 @@ export function useTransactionsQuery(params: UseTransactionsQueryParams) {
         categoryId: params.categoryId,
         componentIds: params.componentIds,
         bomComponentIds,
+        search: params.search,
+        composableFilter: params.composableFilter,
       },
     ],
     queryFn: async () => {
-      const selectStr = `
-          transaction_id,
-          component_id,
-          quantity,
-          transaction_date,
-          order_id,
-          purchase_order_id,
-          user_id,
-          reason,
-          component:components!inner (
-            component_id,
-            internal_code,
-            description,
-            category:component_categories (
-              cat_id,
-              categoryname
-            )
-          ),
-          transaction_type:transaction_types (
-            transaction_type_id,
-            type_name
-          ),
-          purchase_order:purchase_orders (
-            purchase_order_id,
-            q_number,
-            supplier:suppliers (
-              supplier_id,
-              name
-            )
-          ),
-          order:orders (
-            order_id,
-            order_number
-          )
-        `;
+      // Flat column select from the enriched view
+      const selectStr = [
+        'transaction_id', 'component_id', 'quantity', 'transaction_date',
+        'order_id', 'purchase_order_id', 'user_id', 'reason', 'org_id',
+        'transaction_type_id', 'component_code', 'component_description',
+        'category_id', 'category_name', 'transaction_type_name',
+        'po_number', 'supplier_id', 'supplier_name', 'order_number',
+      ].join(',');
 
       function buildQuery() {
         let q = supabase
-          .from('inventory_transactions')
+          .from('inventory_transactions_enriched')
           .select(selectStr)
           .gte('transaction_date', dateRange.from.toISOString())
           .lte('transaction_date', dateRange.to.toISOString())
           .order('transaction_date', { ascending: false });
 
+        // --- Server-side toolbar filters ---
         if (params.transactionTypeId && params.transactionTypeId !== 'all') {
           q = q.eq('transaction_type_id', Number(params.transactionTypeId));
+        }
+        if (params.supplierId && params.supplierId !== 'all') {
+          q = q.eq('supplier_id', Number(params.supplierId));
+        }
+        if (params.categoryId && params.categoryId !== 'all') {
+          q = q.eq('category_id', Number(params.categoryId));
         }
         if (params.componentIds && params.componentIds.length > 0) {
           q = q.in('component_id', params.componentIds.map(Number));
         } else if (bomComponentIds && bomComponentIds.length > 0) {
           q = q.in('component_id', bomComponentIds);
         }
+
+        // --- Server-side composable filter ---
+        q = applyServerFilters(q, params.composableFilter);
+
+        // --- Server-side text search (AND of ORs: each word must match at least one column) ---
+        if (params.search?.trim()) {
+          const searchFilters = buildSearchFilters(params.search);
+          for (const orFilter of searchFilters) {
+            q = q.or(orFilter);
+          }
+        }
+
         return q;
       }
 
-      // Paginate in chunks of 1000 (Supabase default max_rows)
+      // Paginate in 1000-row chunks (PostgREST max_rows)
       const PAGE_SIZE = 1000;
-      const MAX_ROWS = 5000;
-      let allData: unknown[] = [];
+      const MAX_ROWS = 10_000;
+      let allData: FlatTransactionRow[] = [];
 
       for (let offset = 0; offset < MAX_ROWS; offset += PAGE_SIZE) {
         const { data, error } = await buildQuery().range(offset, offset + PAGE_SIZE - 1);
         if (error) throw error;
         if (!data || data.length === 0) break;
-        allData = allData.concat(data);
-        if (data.length < PAGE_SIZE) break; // last page
+        allData = allData.concat(data as unknown as FlatTransactionRow[]);
+        if (data.length < PAGE_SIZE) break;
       }
 
-      let results = allData as unknown as EnrichedTransaction[];
-
-      // Client-side filters for nested joins
-      if (params.supplierId && params.supplierId !== 'all') {
-        const sid = Number(params.supplierId);
-        results = results.filter(
-          (t) => t.purchase_order?.supplier?.supplier_id === sid
-        );
-      }
-
-      if (params.categoryId && params.categoryId !== 'all') {
-        const cid = Number(params.categoryId);
-        results = results.filter(
-          (t) => t.component?.category?.cat_id === cid
-        );
-      }
-
-      return results;
+      // Map flat rows to nested EnrichedTransaction
+      return allData.map(mapFlatToEnriched);
     },
     enabled:
       !!user &&
