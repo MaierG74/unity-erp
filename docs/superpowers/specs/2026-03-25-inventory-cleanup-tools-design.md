@@ -35,11 +35,13 @@ When the Transactions tab is grouped by component, each component header row get
   - `componentName` (internal_code)
   - `currentStock` from the stock summary
 - Dialog opens as a sheet/modal overlay — user stays on the transactions page
-- On successful adjustment, the transactions query invalidates and refetches — the new ADJUSTMENT transaction appears and the stock figure updates
+- On successful adjustment, the **parent** (`TransactionsExplorer`) invalidates the explorer query keys (`['inventory', 'transactions', 'explorer', ...]`) and the stock summary key (`['component-stock-summary', ...]`) via an `onSuccess` callback passed to the dialog. The dialog's own internal invalidation (component detail page keys) can remain but is not sufficient here.
 
 ### Auto-Advance
 
-After a successful adjustment, instead of just closing the dialog, offer a "Save & Next" button alongside the normal "Record Adjustment" button. "Save & Next" submits the adjustment and immediately opens the dialog for the **next component** in the visible list. This lets users go component-by-component without touching the table.
+After a successful adjustment, offer a "Save & Next" button alongside the normal "Record Adjustment" button. "Save & Next" submits the adjustment and immediately loads the **next component** in the visible list.
+
+**Implementation:** The parent controls a single dialog instance and swaps `componentId`/`componentName`/`currentStock` props while keeping `open=true`. This avoids close/reopen animation jank and form reset timing issues. The dialog resets its form state when it detects the `componentId` prop has changed (a `useEffect` on `componentId`).
 
 ### Files Affected
 
@@ -81,10 +83,28 @@ The RPC atomically:
 
 New transaction type: **TRANSFER** — added to the `transaction_types` table so it appears distinctly in reporting and the type filter.
 
+### Migration Requirements
+
+- Add `transfer_ref uuid NULL` column to `inventory_transactions` (nullable — existing rows unaffected). This is audit-only for now; the UI does not surface linked pairs, but the column enables future "show linked transfer" functionality.
+- Insert TRANSFER row into `transaction_types`
+- Create `transfer_component_stock` RPC with `SECURITY INVOKER`
+
+### RPC Tenancy
+
+The RPC must validate that both `p_from_component_id` and `p_to_component_id` belong to the caller's `p_org_id` before writing. Use the same `is_org_member(auth.uid(), p_org_id)` pattern used elsewhere.
+
+### Transfer Picker + is_active
+
+The "Transfer To" component picker should filter `is_active = true` once Feature 6's `is_active` column exists. Pre-Feature-6, the picker shows all components. Add the filter in the same PR as Feature 6.
+
+### Note: Existing Adjustment Non-Atomicity
+
+The existing `StockAdjustmentDialog` does two sequential client-side writes (insert transaction, then upsert inventory) without a server-side atomic wrapper. This is a pre-existing gap. Fixing it (wrapping in an RPC) is out of scope for this sprint but should be addressed later. The new TRANSFER RPC is atomic by design.
+
 ### Files Affected
 
 - `StockAdjustmentDialog.tsx` — add Transfer mode, component picker, negative guard
-- New migration: `transfer_component_stock` RPC + TRANSFER transaction type
+- New migration: `transfer_ref` column + `transfer_component_stock` RPC + TRANSFER transaction type
 - `use-transactions-query.ts` — no changes needed (TRANSFER type flows through naturally)
 
 ---
@@ -98,10 +118,10 @@ Remove the green `+X` and red `-X` movement totals from component group header r
 ### Layout After Change
 
 ```
-> L650 — Nylon Base CTW38/50 castors 640mm (32)  [Adjust] [...]  Stock: 288  On Order: 0  Reserved: 0
+> L650 — Nylon Base CTW38/50 castors 640mm (32)  [Adjust]  Stock: 288  On Order: 0  Reserved: 0
 ```
 
-The `[...]` is a small overflow/kebab menu (see Feature 6: Disable Component).
+**Note:** This is the layout after Feature 3 alone. Feature 6 later adds a kebab `[...]` menu next to the Adjust button — do not add it until Feature 6 is built.
 
 ### What Stays
 
@@ -139,13 +159,19 @@ One row per component, designed for clipboard use on the warehouse floor:
 
 The count sheet prints whatever is currently filtered. If the user filters to category "Bases", only base components appear on the sheet. This avoids building a separate filter UI.
 
+### Data Sourcing (Important)
+
+The count sheet must **not** rely on the paginated transaction data currently in memory. Instead, "Print Count Sheet" fires a **dedicated query** that fetches all distinct components matching the active filters (category, supplier, type, search, composable filter), along with their current stock from the `inventory` table. This ensures the sheet is complete regardless of which transaction page is displayed.
+
+Query approach: select distinct `component_id` from `inventory_transactions_enriched` (with current filters applied), join to `inventory` for `quantity_on_hand`, join to `components` for code/description/category. Alternatively, query the `components` table directly with the active category/search filters and join to `inventory`.
+
 ### On-Order Section
 
 A second section at the bottom: **"On Order — Not Yet Received"**
 
 Lists components that have open purchase orders (on_order > 0) but zero transactions in the current date range. These are items that may have been physically received but not checked into the system. Same columns but System Stock shows as 0 and an "On Order: X" note.
 
-This section pulls component IDs from the stock summary where `onOrder > 0` and the component doesn't appear in the main transaction results.
+**Data sourcing:** This requires a **separate query** independent of the transaction results. Query `supplier_orders` (status in Open/In Progress/Approved/Partially Received) joined to `components`, filtering to components not already in the main count sheet section and matching the active category/search filters. Uses the same calculation as `use-component-stock-summary.ts` (`order_quantity - total_received`).
 
 ### Print Mechanism
 
@@ -209,6 +235,12 @@ Clicking "Apply All Adjustments" opens a confirmation dialog:
 
 Each changed row creates an individual ADJUSTMENT transaction (same as the single-adjust flow), so the audit trail is granular per-component.
 
+### Error Handling
+
+Submit all mutations in parallel via `Promise.allSettled`. On completion, show a summary:
+- **All succeeded:** "X adjustments applied successfully" → exit batch mode, refetch
+- **Partial failure:** "78 succeeded, 2 failed" with the failed components listed and their error messages. The user can retry failed items individually via the quick-adjust button. Successfully applied adjustments are NOT rolled back.
+
 ### Cancel
 
 Discards all unapplied changes and exits batch mode.
@@ -231,7 +263,7 @@ An action to mark a component as inactive, accessible from the Transactions page
 
 ### Database Change
 
-Add `is_active boolean NOT NULL DEFAULT true` to the `components` table. No migration of existing data needed — all existing components default to active.
+Add `is_active boolean NOT NULL DEFAULT true` to the `components` table. No migration of existing data needed — all existing components default to active. The existing RLS policies on `components` cover all columns including the new one — no new policies needed.
 
 ### UI on Transactions Page
 
@@ -253,8 +285,9 @@ When clicked, a brief confirmation: "Disable [code]? It will be hidden from PO c
 - New migration: add `is_active` column to `components`
 - Update `inventory_transactions_enriched` view to include `is_active`
 - `TransactionsGroupedTable.tsx` — add kebab menu, inactive badge
-- All component picker/search queries — add `.eq('is_active', true)` filter
+- All component picker/search queries — add `.eq('is_active', true)` filter. **Before implementation, enumerate all picker query sites.** If the count exceeds 10 files, flag as a `/batch` candidate per project rules. Known locations include: `ComponentSearchModal.tsx`, `product-bom.tsx`, `ManualStockIssueTab.tsx`, `ComponentPickerDialog.tsx`, `new-purchase-order-form.tsx`, `AddOverheadDialog.tsx`.
 - `ComponentsTab.tsx` — add inactive filter toggle
+- Component detail page (`app/inventory/components/[id]/page.tsx`) — add re-enable action
 
 ---
 
