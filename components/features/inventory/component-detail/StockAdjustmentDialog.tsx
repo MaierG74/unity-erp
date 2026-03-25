@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { useDebounce } from '@/hooks/use-debounce';
 import {
   Dialog,
   DialogContent,
@@ -11,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -23,7 +25,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, AlertTriangle, Plus, Minus, ClipboardCheck } from 'lucide-react';
+import { Loader2, AlertTriangle, Plus, Minus, ClipboardCheck, ArrowRightLeft } from 'lucide-react';
 import { toast } from 'sonner';
 
 // Standard adjustment reason codes based on best practices
@@ -62,18 +64,46 @@ export function StockAdjustmentDialog({
   onSaveAndNext,
 }: StockAdjustmentDialogProps) {
   const queryClient = useQueryClient();
-  
+
   // Form state
-  const [adjustmentType, setAdjustmentType] = useState<'set' | 'add' | 'subtract'>('set');
+  const [adjustmentType, setAdjustmentType] = useState<'set' | 'add' | 'subtract' | 'transfer'>('set');
   const [quantity, setQuantity] = useState<string>('');
   const [reason, setReason] = useState<AdjustmentReason | ''>('');
   const [notes, setNotes] = useState('');
-  
+
+  // Transfer-specific state
+  const [transferToId, setTransferToId] = useState<number | null>(null);
+  const [transferToName, setTransferToName] = useState('');
+  const [transferSearch, setTransferSearch] = useState('');
+  const [allowNegative, setAllowNegative] = useState(false);
+
+  const debouncedTransferSearch = useDebounce(transferSearch, 300);
+
+  // Component search for transfer picker
+  const { data: transferComponents = [] } = useQuery({
+    queryKey: ['components-transfer-picker', debouncedTransferSearch, componentId],
+    queryFn: async () => {
+      let q = supabase
+        .from('components')
+        .select('component_id, internal_code, description')
+        .neq('component_id', componentId)
+        .order('internal_code')
+        .limit(20);
+      if (debouncedTransferSearch) {
+        q = q.or(`internal_code.ilike.%${debouncedTransferSearch}%,description.ilike.%${debouncedTransferSearch}%`);
+      }
+      const { data, error } = await q;
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: adjustmentType === 'transfer',
+  });
+
   // Calculate the new stock level and adjustment quantity
   const numericQuantity = parseInt(quantity) || 0;
   let newStockLevel = currentStock;
   let adjustmentQuantity = 0;
-  
+
   if (adjustmentType === 'set') {
     newStockLevel = numericQuantity;
     adjustmentQuantity = numericQuantity - currentStock;
@@ -84,20 +114,38 @@ export function StockAdjustmentDialog({
     newStockLevel = currentStock - numericQuantity;
     adjustmentQuantity = -numericQuantity;
   }
-  
-  const isLargeAdjustment = Math.abs(adjustmentQuantity) > 50 || 
+
+  const isLargeAdjustment = Math.abs(adjustmentQuantity) > 50 ||
     (currentStock > 0 && Math.abs(adjustmentQuantity / currentStock) > 0.5);
-  
+
+  const isValid = adjustmentType === 'transfer'
+    ? !!transferToId && numericQuantity > 0 && !!reason && (numericQuantity <= currentStock || allowNegative)
+    : !!reason && adjustmentQuantity !== 0 && (reason !== 'other' || notes.trim());
+
   // Mutation for creating the adjustment
   const adjustmentMutation = useMutation({
     mutationFn: async () => {
       // Get current user
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
-      
+
+      if (adjustmentType === 'transfer') {
+        if (!transferToId) throw new Error('No destination component selected');
+        const selectedReason = ADJUSTMENT_REASONS.find(r => r.value === reason);
+        const { data, error } = await supabase.rpc('transfer_component_stock', {
+          p_from_component_id: componentId,
+          p_to_component_id: transferToId,
+          p_quantity: numericQuantity,
+          p_reason: selectedReason?.label || 'Transfer',
+          p_notes: notes || null,
+        });
+        if (error) throw error;
+        return data;
+      }
+
       const selectedReason = ADJUSTMENT_REASONS.find(r => r.value === reason);
       const fullReason = `${selectedReason?.label}${notes ? `: ${notes}` : ''}`;
-      
+
       // Start a transaction: create inventory_transaction and update inventory
       // First, create the transaction record
       const { data: transaction, error: txError } = await supabase
@@ -112,39 +160,49 @@ export function StockAdjustmentDialog({
         })
         .select()
         .single();
-      
+
       if (txError) throw txError;
-      
+
       // Then update or create the inventory record
       const { error: invError } = await supabase
         .from('inventory')
         .upsert(
-          { 
-            component_id: componentId, 
+          {
+            component_id: componentId,
             quantity_on_hand: newStockLevel,
             reorder_level: 0,
             location: null
           },
           { onConflict: 'component_id' }
         );
-      
+
       if (invError) {
         // If inventory update fails, we should ideally rollback the transaction
         // For now, throw the error
         throw invError;
       }
-      
+
       return transaction;
     },
     onSuccess: () => {
-      toast.success('Stock adjustment recorded', {
-        description: `${componentName} stock ${adjustmentQuantity >= 0 ? 'increased' : 'decreased'} by ${Math.abs(adjustmentQuantity)} units`,
-      });
-      
+      if (adjustmentType === 'transfer') {
+        toast.success('Stock transfer recorded', {
+          description: `${numericQuantity} units transferred from ${componentName} to ${transferToName}`,
+        });
+      } else {
+        toast.success('Stock adjustment recorded', {
+          description: `${componentName} stock ${adjustmentQuantity >= 0 ? 'increased' : 'decreased'} by ${Math.abs(adjustmentQuantity)} units`,
+        });
+      }
+
       // Invalidate relevant queries
       queryClient.invalidateQueries({ queryKey: ['component', componentId] });
       queryClient.invalidateQueries({ queryKey: ['component', componentId, 'transactions'] });
       queryClient.invalidateQueries({ queryKey: ['component', componentId, 'inventory'] });
+      if (transferToId) {
+        queryClient.invalidateQueries({ queryKey: ['component', transferToId] });
+        queryClient.invalidateQueries({ queryKey: ['component', transferToId, 'inventory'] });
+      }
       onSuccess?.();
 
       // Reset form and close
@@ -157,41 +215,54 @@ export function StockAdjustmentDialog({
       });
     },
   });
-  
+
   const resetForm = useCallback(() => {
     setAdjustmentType('set');
     setQuantity('');
     setReason('');
     setNotes('');
+    setTransferToId(null);
+    setTransferToName('');
+    setTransferSearch('');
+    setAllowNegative(false);
   }, []);
 
   useEffect(() => {
     resetForm();
   }, [componentId, resetForm]);
-  
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!reason) {
       toast.error('Please select a reason for the adjustment');
       return;
     }
-    
-    if (reason === 'other' && !notes.trim()) {
-      toast.error('Please provide details for "Other" reason');
-      return;
+
+    if (adjustmentType === 'transfer') {
+      if (!transferToId) {
+        toast.error('Please select a destination component');
+        return;
+      }
+      if (numericQuantity <= 0) {
+        toast.error('Please enter a quantity to transfer');
+        return;
+      }
+    } else {
+      if (reason === 'other' && !notes.trim()) {
+        toast.error('Please provide details for "Other" reason');
+        return;
+      }
+
+      if (adjustmentQuantity === 0) {
+        toast.error('No change to stock level');
+        return;
+      }
     }
-    
-    if (adjustmentQuantity === 0) {
-      toast.error('No change to stock level');
-      return;
-    }
-    
+
     adjustmentMutation.mutate();
   };
-  
-  const isValid = reason && adjustmentQuantity !== 0 && (reason !== 'other' || notes.trim());
-  
+
   return (
     <Dialog open={open} onOpenChange={(isOpen) => {
       if (!isOpen) resetForm();
@@ -207,7 +278,7 @@ export function StockAdjustmentDialog({
             Adjust stock levels for <span className="font-medium">{componentName}</span> after stock take or to correct discrepancies.
           </DialogDescription>
         </DialogHeader>
-        
+
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Current Stock Display */}
           <div className="bg-muted/50 rounded-lg p-4 flex items-center justify-between">
@@ -218,18 +289,22 @@ export function StockAdjustmentDialog({
             <div className="text-right">
               <p className="text-sm text-muted-foreground">New Stock</p>
               <p className={`text-2xl font-bold ${
-                newStockLevel > currentStock ? 'text-green-600' : 
-                newStockLevel < currentStock ? 'text-red-600' : ''
+                adjustmentType === 'transfer'
+                  ? (numericQuantity > 0 ? 'text-red-600' : '')
+                  : (newStockLevel > currentStock ? 'text-green-600' : newStockLevel < currentStock ? 'text-red-600' : '')
               }`}>
-                {quantity ? newStockLevel : '-'}
+                {adjustmentType === 'transfer'
+                  ? (quantity ? currentStock - numericQuantity : '-')
+                  : (quantity ? newStockLevel : '-')
+                }
               </p>
             </div>
           </div>
-          
+
           {/* Adjustment Type */}
           <div className="space-y-2">
             <Label>Adjustment Type</Label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-4 gap-2">
               <Button
                 type="button"
                 variant={adjustmentType === 'set' ? 'default' : 'outline'}
@@ -257,33 +332,125 @@ export function StockAdjustmentDialog({
                 <Minus className="h-4 w-4 mr-1" />
                 Subtract
               </Button>
+              <Button
+                type="button"
+                variant={adjustmentType === 'transfer' ? 'default' : 'outline'}
+                className="w-full"
+                onClick={() => setAdjustmentType('transfer')}
+              >
+                <ArrowRightLeft className="h-4 w-4 mr-1" />
+                Transfer
+              </Button>
             </div>
           </div>
-          
-          {/* Quantity Input */}
-          <div className="space-y-2">
-            <Label htmlFor="quantity">
-              {adjustmentType === 'set' ? 'New Stock Level' : 'Quantity'}
-            </Label>
-            <Input
-              id="quantity"
-              type="number"
-              min="0"
-              value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
-              placeholder={adjustmentType === 'set' ? 'Enter counted quantity' : 'Enter quantity'}
-              className="text-lg"
-            />
-            {quantity && adjustmentQuantity !== 0 && (
-              <p className={`text-sm ${adjustmentQuantity > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {adjustmentQuantity > 0 ? '+' : ''}{adjustmentQuantity} units
-              </p>
-            )}
-          </div>
-          
+
+          {/* Transfer-specific fields */}
+          {adjustmentType === 'transfer' && (
+            <div className="space-y-3">
+              {/* Destination component search */}
+              <div className="space-y-2">
+                <Label>Transfer To</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-start text-left font-normal">
+                      {transferToName || 'Search for component...'}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[400px] p-0" align="start">
+                    <div className="p-2">
+                      <Input
+                        placeholder="Search by code or description..."
+                        value={transferSearch}
+                        onChange={(e) => setTransferSearch(e.target.value)}
+                        autoFocus
+                      />
+                    </div>
+                    <div className="max-h-[200px] overflow-y-auto">
+                      {transferComponents.map((c) => (
+                        <button
+                          key={c.component_id}
+                          type="button"
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex justify-between"
+                          onClick={() => {
+                            setTransferToId(c.component_id);
+                            setTransferToName(c.internal_code);
+                            setTransferSearch('');
+                          }}
+                        >
+                          <span className="font-medium">{c.internal_code}</span>
+                          <span className="text-muted-foreground text-xs truncate ml-2">{c.description}</span>
+                        </button>
+                      ))}
+                      {transferComponents.length === 0 && (
+                        <p className="text-sm text-muted-foreground px-3 py-2">No components found</p>
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              {/* Quantity */}
+              <div className="space-y-2">
+                <Label>Quantity to Transfer</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                  placeholder="Enter quantity"
+                  className="text-lg"
+                />
+              </div>
+
+              {/* Negative stock guard */}
+              {numericQuantity > currentStock && !allowNegative && (
+                <Alert>
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertDescription className="flex items-center justify-between">
+                    <span>Insufficient stock (current: {currentStock})</span>
+                    <label className="flex items-center gap-2 text-xs cursor-pointer ml-2">
+                      <input type="checkbox" checked={allowNegative} onChange={(e) => setAllowNegative(e.target.checked)} />
+                      Override
+                    </label>
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {/* Summary */}
+              {transferToId && numericQuantity > 0 && (
+                <p className="text-sm text-muted-foreground">
+                  Transfer {numericQuantity} units: {componentName} → {transferToName}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Quantity Input — only shown for non-transfer modes */}
+          {adjustmentType !== 'transfer' && (
+            <div className="space-y-2">
+              <Label htmlFor="quantity">
+                {adjustmentType === 'set' ? 'New Stock Level' : 'Quantity'}
+              </Label>
+              <Input
+                id="quantity"
+                type="number"
+                min="0"
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                placeholder={adjustmentType === 'set' ? 'Enter counted quantity' : 'Enter quantity'}
+                className="text-lg"
+              />
+              {quantity && adjustmentQuantity !== 0 && (
+                <p className={`text-sm ${adjustmentQuantity > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {adjustmentQuantity > 0 ? '+' : ''}{adjustmentQuantity} units
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Reason Selection */}
           <div className="space-y-2">
-            <Label htmlFor="reason">Reason for Adjustment *</Label>
+            <Label htmlFor="reason">Reason {adjustmentType === 'transfer' ? 'for Transfer' : 'for Adjustment'} *</Label>
             <Select value={reason} onValueChange={(v) => setReason(v as AdjustmentReason)}>
               <SelectTrigger>
                 <SelectValue placeholder="Select a reason..." />
@@ -300,7 +467,7 @@ export function StockAdjustmentDialog({
               </SelectContent>
             </Select>
           </div>
-          
+
           {/* Notes */}
           <div className="space-y-2">
             <Label htmlFor="notes">
@@ -314,18 +481,18 @@ export function StockAdjustmentDialog({
               rows={2}
             />
           </div>
-          
-          {/* Large Adjustment Warning */}
-          {isLargeAdjustment && quantity && (
+
+          {/* Large Adjustment Warning — only for non-transfer modes */}
+          {adjustmentType !== 'transfer' && isLargeAdjustment && quantity && (
             <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" />
               <AlertDescription>
-                This is a significant adjustment ({Math.abs(adjustmentQuantity)} units, {currentStock > 0 ? `${Math.round(Math.abs(adjustmentQuantity / currentStock) * 100)}% of current stock` : 'from zero stock'}). 
+                This is a significant adjustment ({Math.abs(adjustmentQuantity)} units, {currentStock > 0 ? `${Math.round(Math.abs(adjustmentQuantity / currentStock) * 100)}% of current stock` : 'from zero stock'}).
                 Please verify the count is correct.
               </AlertDescription>
             </Alert>
           )}
-          
+
           <DialogFooter>
             <Button
               type="button"
@@ -363,10 +530,10 @@ export function StockAdjustmentDialog({
               {adjustmentMutation.isPending ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Recording...
+                  {adjustmentType === 'transfer' ? 'Transferring...' : 'Recording...'}
                 </>
               ) : (
-                'Record Adjustment'
+                adjustmentType === 'transfer' ? 'Transfer Stock' : 'Record Adjustment'
               )}
             </Button>
           </DialogFooter>
