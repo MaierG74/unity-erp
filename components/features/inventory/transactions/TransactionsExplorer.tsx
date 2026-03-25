@@ -8,13 +8,20 @@ import { useComponentStockSummary } from '@/hooks/use-component-stock-summary';
 import { TransactionsToolbar } from './TransactionsToolbar';
 import { TransactionsGroupedTable } from './TransactionsGroupedTable';
 import { PrintView } from './PrintView';
+import { StockAdjustmentDialog } from '@/components/features/inventory/component-detail/StockAdjustmentDialog';
 import type { ViewConfig } from '@/types/transaction-views';
 import { DEFAULT_VIEW_CONFIG } from '@/types/transaction-views';
+import { toast } from 'sonner';
 
 export function TransactionsExplorer() {
   const [config, setConfig] = useState<ViewConfig>(DEFAULT_VIEW_CONFIG);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [activeViewName, setActiveViewName] = useState<string | null>(null);
+  const [adjustTarget, setAdjustTarget] = useState<{
+    componentId: number;
+    componentName: string;
+    currentStock: number;
+  } | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
 
@@ -41,6 +48,22 @@ export function TransactionsExplorer() {
 
   const { data: stockSummaryMap } = useComponentStockSummary(componentIds);
 
+  const orderedComponents = useMemo(() => {
+    if (config.groupBy !== 'component') return [];
+    const seen = new Map<number, { name: string; stock: number }>();
+    transactions.forEach((t) => {
+      if (!seen.has(t.component_id)) {
+        seen.set(t.component_id, {
+          name: t.component?.internal_code || 'Unknown',
+          stock: stockSummaryMap?.get(t.component_id)?.quantityOnHand ?? 0,
+        });
+      }
+    });
+    return Array.from(seen.entries())
+      .sort(([, a], [, b]) => a.name.localeCompare(b.name))
+      .map(([id, info]) => ({ componentId: id, ...info }));
+  }, [transactions, config.groupBy, stockSummaryMap]);
+
   // Summary stats
   const summary = useMemo(() => {
     let totalIn = 0;
@@ -56,6 +79,28 @@ export function TransactionsExplorer() {
   const handleRefresh = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['inventory', 'transactions', 'explorer'] });
   }, [queryClient]);
+
+  const handleAdjust = useCallback((componentId: number, componentName: string, currentStock: number) => {
+    setAdjustTarget({ componentId, componentName, currentStock });
+  }, []);
+
+  const handleAdjustSuccess = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['inventory', 'transactions', 'explorer'] });
+    queryClient.invalidateQueries({ queryKey: ['component-stock-summary'] });
+  }, [queryClient]);
+
+  const handleSaveAndNext = useCallback(() => {
+    handleAdjustSuccess();
+    if (!adjustTarget) return;
+    const idx = orderedComponents.findIndex((c) => c.componentId === adjustTarget.componentId);
+    const next = orderedComponents[idx + 1];
+    if (next) {
+      setAdjustTarget({ componentId: next.componentId, componentName: next.name, currentStock: next.stock });
+    } else {
+      setAdjustTarget(null);
+      toast.info('All components adjusted');
+    }
+  }, [adjustTarget, orderedComponents, handleAdjustSuccess]);
 
   const handleLoadView = useCallback((viewConfig: ViewConfig, viewId: string, viewName: string) => {
     setConfig(viewConfig);
@@ -103,6 +148,7 @@ export function TransactionsExplorer() {
           transactions={transactions}
           groupBy={config.groupBy}
           stockSummaryMap={stockSummaryMap}
+          onAdjust={handleAdjust}
         />
       )}
 
@@ -122,6 +168,18 @@ export function TransactionsExplorer() {
         summary={summary}
         stockSummaryMap={stockSummaryMap}
       />
+
+      {adjustTarget && (
+        <StockAdjustmentDialog
+          open={!!adjustTarget}
+          onOpenChange={(open) => { if (!open) setAdjustTarget(null); }}
+          componentId={adjustTarget.componentId}
+          componentName={adjustTarget.componentName}
+          currentStock={adjustTarget.currentStock}
+          onSuccess={handleAdjustSuccess}
+          onSaveAndNext={orderedComponents.length > 1 ? handleSaveAndNext : undefined}
+        />
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import {
@@ -48,6 +48,8 @@ type StockAdjustmentDialogProps = {
   componentId: number;
   componentName: string;
   currentStock: number;
+  onSuccess?: () => void;
+  onSaveAndNext?: () => void;
 };
 
 export function StockAdjustmentDialog({
@@ -56,6 +58,8 @@ export function StockAdjustmentDialog({
   componentId,
   componentName,
   currentStock,
+  onSuccess,
+  onSaveAndNext,
 }: StockAdjustmentDialogProps) {
   const queryClient = useQueryClient();
   
@@ -141,7 +145,8 @@ export function StockAdjustmentDialog({
       queryClient.invalidateQueries({ queryKey: ['component', componentId] });
       queryClient.invalidateQueries({ queryKey: ['component', componentId, 'transactions'] });
       queryClient.invalidateQueries({ queryKey: ['component', componentId, 'inventory'] });
-      
+      onSuccess?.();
+
       // Reset form and close
       resetForm();
       onOpenChange(false);
@@ -153,12 +158,16 @@ export function StockAdjustmentDialog({
     },
   });
   
-  const resetForm = () => {
+  const resetForm = useCallback(() => {
     setAdjustmentType('set');
     setQuantity('');
     setReason('');
     setNotes('');
-  };
+  }, []);
+
+  useEffect(() => {
+    resetForm();
+  }, [componentId, resetForm]);
   
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -326,6 +335,27 @@ export function StockAdjustmentDialog({
             >
               Cancel
             </Button>
+            {onSaveAndNext && (
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={!isValid || adjustmentMutation.isPending}
+                onClick={() => {
+                  if (!isValid) return;
+                  adjustmentMutation.mutate(undefined, {
+                    onSuccess: () => {
+                      toast.success(`${componentName} adjusted`);
+                      queryClient.invalidateQueries({ queryKey: ['component', componentId] });
+                      onSuccess?.();
+                      resetForm();
+                      onSaveAndNext();
+                    },
+                  });
+                }}
+              >
+                Save & Next
+              </Button>
+            )}
             <Button
               type="submit"
               disabled={!isValid || adjustmentMutation.isPending}

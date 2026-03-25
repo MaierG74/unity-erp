@@ -39,6 +39,7 @@ type Props = {
   transactions: EnrichedTransaction[];
   groupBy: GroupByMode;
   stockSummaryMap?: Map<number, ComponentStockSummary>;
+  onAdjust?: (componentId: number, componentName: string, currentStock: number) => void;
 };
 
 function getTransactionTypeBadge(typeName: string) {
@@ -225,7 +226,7 @@ function SortableHead({
   );
 }
 
-export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMap }: Props) {
+export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMap, onAdjust }: Props) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['__all__']));
   const [allExpanded, setAllExpanded] = useState(true);
   const [sortField, setSortField] = useState<SortField | null>(null);
@@ -382,6 +383,23 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
                   </span>
                 </div>
                 <div className="flex items-center gap-4 text-sm shrink-0">
+                  {isComponentGroup && onAdjust && group.stockSummary && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 text-xs px-2"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAdjust(
+                          Number(group.key),
+                          group.label,
+                          group.stockSummary!.quantityOnHand
+                        );
+                      }}
+                    >
+                      Adjust
+                    </Button>
+                  )}
                   {group.stockSummary && (
                     <>
                       <span className="font-medium">
