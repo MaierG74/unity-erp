@@ -30,6 +30,7 @@ import {
   Printer,
   CalendarIcon,
   AlertTriangle,
+  ClipboardCheck,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { format, subDays, endOfDay, startOfDay } from 'date-fns';
@@ -50,6 +51,8 @@ type Props = {
   printRef: RefObject<HTMLDivElement | null>;
   transactionCount: number;
   onPrintCountSheet?: () => void;
+  batchMode?: boolean;
+  onBatchAdjust?: () => void;
 };
 
 export function TransactionsToolbar({
@@ -63,6 +66,8 @@ export function TransactionsToolbar({
   printRef,
   transactionCount,
   onPrintCountSheet,
+  batchMode,
+  onBatchAdjust,
 }: Props) {
   const [datePickerOpen, setDatePickerOpen] = useState(false);
 
@@ -166,28 +171,38 @@ export function TransactionsToolbar({
 
         {/* Actions */}
         <div className="flex gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="h-9">
-                <Printer className="h-4 w-4 mr-1.5" />
-                Print
+          {onBatchAdjust && !batchMode && (
+            <Button variant="outline" size="sm" onClick={onBatchAdjust} className="h-9">
+              <ClipboardCheck className="h-4 w-4 mr-1.5" />
+              Batch Adjust
+            </Button>
+          )}
+          {!batchMode && (
+            <>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-9">
+                    <Printer className="h-4 w-4 mr-1.5" />
+                    Print
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handlePrint()}>
+                    Print Transactions
+                  </DropdownMenuItem>
+                  {onPrintCountSheet && (
+                    <DropdownMenuItem onClick={onPrintCountSheet}>
+                      Print Count Sheet
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button variant="outline" size="sm" onClick={onRefresh} className="h-9">
+                <RefreshCw className="h-4 w-4 mr-1.5" />
+                Refresh
               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => handlePrint()}>
-                Print Transactions
-              </DropdownMenuItem>
-              {onPrintCountSheet && (
-                <DropdownMenuItem onClick={onPrintCountSheet}>
-                  Print Count Sheet
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button variant="outline" size="sm" onClick={onRefresh} className="h-9">
-            <RefreshCw className="h-4 w-4 mr-1.5" />
-            Refresh
-          </Button>
+            </>
+          )}
         </div>
       </div>
 

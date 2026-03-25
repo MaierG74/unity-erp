@@ -10,6 +10,7 @@ import { TransactionsGroupedTable } from './TransactionsGroupedTable';
 import { PrintView } from './PrintView';
 import { CountSheetPrintView, type CountSheetComponent } from './CountSheetPrintView';
 import { StockAdjustmentDialog } from '@/components/features/inventory/component-detail/StockAdjustmentDialog';
+import { BatchAdjustMode, type BatchEntry } from './BatchAdjustMode';
 import type { ViewConfig } from '@/types/transaction-views';
 import { DEFAULT_VIEW_CONFIG } from '@/types/transaction-views';
 import { toast } from 'sonner';
@@ -25,6 +26,7 @@ export function TransactionsExplorer() {
     componentName: string;
     currentStock: number;
   } | null>(null);
+  const [batchMode, setBatchMode] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
   const countSheetRef = useRef<HTMLDivElement>(null);
   const [countSheetData, setCountSheetData] = useState<CountSheetComponent[] | null>(null);
@@ -68,6 +70,22 @@ export function TransactionsExplorer() {
       .sort(([, a], [, b]) => a.name.localeCompare(b.name))
       .map(([id, info]) => ({ componentId: id, ...info }));
   }, [transactions, config.groupBy, stockSummaryMap]);
+
+  const batchEntries: BatchEntry[] = useMemo(() => {
+    if (!batchMode) return [];
+    const seen = new Map<number, BatchEntry>();
+    transactions.forEach((t) => {
+      if (!seen.has(t.component_id)) {
+        seen.set(t.component_id, {
+          componentId: t.component_id,
+          code: t.component?.internal_code || 'Unknown',
+          description: t.component?.description || '',
+          systemStock: stockSummaryMap?.get(t.component_id)?.quantityOnHand ?? 0,
+        });
+      }
+    });
+    return Array.from(seen.values()).sort((a, b) => a.code.localeCompare(b.code));
+  }, [batchMode, transactions, stockSummaryMap]);
 
   // Summary stats
   const summary = useMemo(() => {
@@ -119,6 +137,62 @@ export function TransactionsExplorer() {
     setActiveViewId(null);
     setActiveViewName(null);
   }, []);
+
+  const handleBatchApply = useCallback(async (
+    adjustments: Array<{ componentId: number; code: string; systemStock: number; newStock: number }>,
+    reason: string,
+    notes: string
+  ) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const results = await Promise.allSettled(
+      adjustments.map(async (adj) => {
+        const adjustmentQty = adj.newStock - adj.systemStock;
+        const fullReason = `${reason}${notes ? `: ${notes}` : ''}`;
+
+        const { error: txError } = await supabase.from('inventory_transactions').insert({
+          component_id: adj.componentId,
+          quantity: adjustmentQty,
+          transaction_type_id: 3,
+          transaction_date: new Date().toISOString(),
+          user_id: user.id,
+          reason: fullReason,
+        });
+        if (txError) throw txError;
+
+        const { error: invError } = await supabase.from('inventory').upsert(
+          { component_id: adj.componentId, quantity_on_hand: adj.newStock, reorder_level: 0, location: null },
+          { onConflict: 'component_id' }
+        );
+        if (invError) throw invError;
+
+        return adj;
+      })
+    );
+
+    const succeeded = results.filter((r) => r.status === 'fulfilled').length;
+    const failed = results.filter((r) => r.status === 'rejected');
+
+    if (failed.length === 0) {
+      toast.success(`${succeeded} adjustments applied successfully`);
+    } else {
+      toast.warning(`${succeeded} succeeded, ${failed.length} failed`, {
+        description: 'Failed items can be retried individually via the Adjust button.',
+      });
+    }
+
+    queryClient.invalidateQueries({ queryKey: ['inventory', 'transactions', 'explorer'] });
+    queryClient.invalidateQueries({ queryKey: ['component-stock-summary'] });
+    setBatchMode(false);
+  }, [queryClient]);
+
+  const handleEnterBatchMode = useCallback(() => {
+    if (config.groupBy !== 'component') {
+      setConfig((prev) => ({ ...prev, groupBy: 'component' }));
+    }
+    setBatchMode(true);
+  }, [config.groupBy]);
 
   const handlePrintCountSheetNow = useReactToPrint({
     contentRef: countSheetRef,
@@ -197,12 +271,20 @@ export function TransactionsExplorer() {
         printRef={printRef}
         transactionCount={transactions.length}
         onPrintCountSheet={fetchCountSheetData}
+        batchMode={batchMode}
+        onBatchAdjust={handleEnterBatchMode}
       />
 
       {isLoading ? (
         <div className="flex items-center justify-center min-h-[400px]">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
+      ) : batchMode ? (
+        <BatchAdjustMode
+          entries={batchEntries}
+          onApplyAll={handleBatchApply}
+          onCancel={() => setBatchMode(false)}
+        />
       ) : (
         <TransactionsGroupedTable
           transactions={transactions}
