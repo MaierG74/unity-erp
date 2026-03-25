@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/common/auth-provider';
+import { useDebounce } from '@/hooks/use-debounce';
 import type { EnrichedTransaction } from '@/types/transaction-views';
 import type { ComposableFilter } from '@/components/features/inventory/transactions/filters/filter-types';
 import { applyServerFilters, buildSearchFilters } from '@/components/features/inventory/transactions/filters/filter-to-postgrest';
@@ -45,6 +46,9 @@ type UseTransactionsQueryParams = {
 export function useTransactionsQuery(params: UseTransactionsQueryParams) {
   const { user } = useAuth();
 
+  // Debounce search to avoid firing server queries on every keystroke
+  const debouncedSearch = useDebounce(params.search, 300);
+
   const dateRange = useMemo(() => {
     if (params.dateFrom && params.dateTo) {
       return { from: new Date(params.dateFrom), to: new Date(params.dateTo) };
@@ -82,7 +86,7 @@ export function useTransactionsQuery(params: UseTransactionsQueryParams) {
         categoryId: params.categoryId,
         componentIds: params.componentIds,
         bomComponentIds,
-        search: params.search,
+        search: debouncedSearch,
         composableFilter: params.composableFilter,
       },
     ],
@@ -124,8 +128,8 @@ export function useTransactionsQuery(params: UseTransactionsQueryParams) {
         q = applyServerFilters(q, params.composableFilter);
 
         // --- Server-side text search (AND of ORs: each word must match at least one column) ---
-        if (params.search?.trim()) {
-          const searchFilters = buildSearchFilters(params.search);
+        if (debouncedSearch?.trim()) {
+          const searchFilters = buildSearchFilters(debouncedSearch);
           for (const orFilter of searchFilters) {
             q = q.or(orFilter);
           }
@@ -143,7 +147,7 @@ export function useTransactionsQuery(params: UseTransactionsQueryParams) {
         const { data, error } = await buildQuery().range(offset, offset + PAGE_SIZE - 1);
         if (error) throw error;
         if (!data || data.length === 0) break;
-        allData = allData.concat(data as unknown as FlatTransactionRow[]);
+        allData.push(...(data as unknown as FlatTransactionRow[]));
         if (data.length < PAGE_SIZE) break;
       }
 

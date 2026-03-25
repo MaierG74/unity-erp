@@ -4,7 +4,7 @@
  */
 import type { PostgrestFilterBuilder } from '@supabase/postgrest-js';
 import type { ComposableFilter, FilterCondition, FilterGroup } from './filter-types';
-import { getFieldDef } from './filter-field-defs';
+import { getFieldDef, TRANSACTION_FILTER_FIELDS } from './filter-field-defs';
 
 // --- Convert a single condition to a PostgREST filter expression string ---
 
@@ -229,16 +229,9 @@ export function buildSearchFilters(searchTerm: string): string[] {
   const terms = searchTerm.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length === 0) return [];
 
-  const searchColumns = [
-    'component_code',
-    'component_description',
-    'category_name',
-    'supplier_name',
-    'transaction_type_name',
-    'po_number',
-    'order_number',
-    'reason',
-  ];
+  const searchColumns = TRANSACTION_FILTER_FIELDS
+    .filter((f) => f.type !== 'numeric' && f.viewColumn)
+    .map((f) => f.viewColumn!);
 
   // Each word becomes an OR across all columns; words are ANDed by chaining .or() calls
   return terms.map((term) =>
