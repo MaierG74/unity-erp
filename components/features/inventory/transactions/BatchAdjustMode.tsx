@@ -90,20 +90,15 @@ export function BatchAdjustMode({ entries, onApplyAll, onCancel }: Props) {
   }, [entries, countedValues]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent, currentIndex: number) => {
-    if (e.key === 'Tab' || e.key === 'Enter') {
-      if (!e.shiftKey) {
-        e.preventDefault();
-        const nextEntry = entries[currentIndex + 1];
-        if (nextEntry) {
-          inputRefs.current.get(nextEntry.componentId)?.focus();
-        }
-      } else if (e.key === 'Tab') {
-        e.preventDefault();
-        const prevEntry = entries[currentIndex - 1];
-        if (prevEntry) {
-          inputRefs.current.get(prevEntry.componentId)?.focus();
-        }
-      }
+    if (e.key !== 'Tab' && e.key !== 'Enter') return;
+    if (e.shiftKey && e.key === 'Tab') {
+      e.preventDefault();
+      const prevEntry = entries[currentIndex - 1];
+      if (prevEntry) inputRefs.current.get(prevEntry.componentId)?.focus();
+    } else if (!e.shiftKey) {
+      e.preventDefault();
+      const nextEntry = entries[currentIndex + 1];
+      if (nextEntry) inputRefs.current.get(nextEntry.componentId)?.focus();
     }
   }, [entries]);
 
@@ -111,7 +106,7 @@ export function BatchAdjustMode({ entries, onApplyAll, onCancel }: Props) {
     setIsPending(true);
     try {
       await onApplyAll(
-        changedEntries.map(({ componentId, code, systemStock, newStock }) => ({ componentId, code, systemStock, newStock })),
+        changedEntries,
         BATCH_ADJUSTMENT_REASONS.find((r) => r.value === reason)?.label || reason,
         notes
       );

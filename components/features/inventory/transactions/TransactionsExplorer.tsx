@@ -146,10 +146,11 @@ export function TransactionsExplorer() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('Not authenticated');
 
+    const fullReason = `${reason}${notes ? `: ${notes}` : ''}`;
+
     const results = await Promise.allSettled(
       adjustments.map(async (adj) => {
         const adjustmentQty = adj.newStock - adj.systemStock;
-        const fullReason = `${reason}${notes ? `: ${notes}` : ''}`;
 
         const { error: txError } = await supabase.from('inventory_transactions').insert({
           component_id: adj.componentId,
