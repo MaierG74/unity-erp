@@ -8,8 +8,7 @@ import { useComponentStockSummary } from '@/hooks/use-component-stock-summary';
 import { TransactionsToolbar } from './TransactionsToolbar';
 import { TransactionsGroupedTable } from './TransactionsGroupedTable';
 import { PrintView } from './PrintView';
-import { applyComposableFilter, hasActiveConditions } from './filters/filter-engine';
-import type { ViewConfig, EnrichedTransaction } from '@/types/transaction-views';
+import type { ViewConfig } from '@/types/transaction-views';
 import { DEFAULT_VIEW_CONFIG } from '@/types/transaction-views';
 
 export function TransactionsExplorer() {
@@ -19,7 +18,7 @@ export function TransactionsExplorer() {
   const printRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
 
-  const { data: rawTransactions = [], isLoading, error, dateRange } = useTransactionsQuery({
+  const { data: transactions = [], isLoading, error, dateRange } = useTransactionsQuery({
     dateFrom: config.dateRange.from,
     dateTo: config.dateRange.to,
     datePreset: config.dateRange.preset,
@@ -28,40 +27,9 @@ export function TransactionsExplorer() {
     supplierId: config.filters.supplierId,
     categoryId: config.filters.categoryId,
     componentIds: config.filters.componentIds,
+    search: config.filters.search,
+    composableFilter: config.filters.composableFilter,
   });
-
-  // Client-side filtering pipeline (composable filter + text search)
-  const transactions = useMemo(() => {
-    let result = rawTransactions;
-
-    // 1. Composable filter (takes precedence when present)
-    if (hasActiveConditions(config.filters.composableFilter)) {
-      result = applyComposableFilter(result, config.filters.composableFilter!);
-    }
-
-    // 2. Text search always applies on top
-    if (config.filters.search) {
-      const terms = config.filters.search.toLowerCase().split(/\s+/);
-      result = result.filter((t) => {
-        const searchable = [
-          t.component?.internal_code,
-          t.component?.description,
-          t.component?.category?.categoryname,
-          t.purchase_order?.q_number,
-          t.purchase_order?.supplier?.name,
-          t.order?.order_number,
-          t.transaction_type?.type_name,
-          t.reason,
-        ]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase();
-        return terms.every((term) => searchable.includes(term));
-      });
-    }
-
-    return result;
-  }, [rawTransactions, config.filters]);
 
   // Get unique component IDs for stock summary (only when grouping by component)
   const componentIds = useMemo(() => {
@@ -138,11 +106,9 @@ export function TransactionsExplorer() {
         />
       )}
 
-      {rawTransactions.length >= 5000 && (
+      {transactions.length >= 10000 && (
         <p className="text-sm text-amber-500 text-center">
-          Results capped at 5,000 from the database. {transactions.length < rawTransactions.length
-            ? `Showing ${transactions.length.toLocaleString()} after filtering — some matches may be missing.`
-            : 'Narrow your date range for complete results.'}
+          Results capped at 10,000 rows. Narrow your date range or add filters for complete results.
         </p>
       )}
 
