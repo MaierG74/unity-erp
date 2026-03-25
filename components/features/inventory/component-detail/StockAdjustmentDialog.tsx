@@ -86,6 +86,7 @@ export function StockAdjustmentDialog({
       let q = supabase
         .from('components')
         .select('component_id, internal_code, description')
+        .eq('is_active', true)
         .neq('component_id', componentId)
         .order('internal_code')
         .limit(20);

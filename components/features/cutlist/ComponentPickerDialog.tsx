@@ -236,6 +236,7 @@ export function ComponentPickerDialog({
             category:component_categories(categoryname),
             suppliercomponents(price, supplier:suppliers(name))
           `)
+          .eq('is_active', true)
           .order('internal_code')
           .range(offset, offset + PAGE_SIZE); // Fetch PAGE_SIZE + 1 to check if more exist
       }

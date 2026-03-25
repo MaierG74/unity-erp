@@ -84,6 +84,7 @@ async function fetchRichComponents(): Promise<ModalComponent[]> {
       )
     `
     )
+    .eq('is_active', true)
     .order('internal_code');
 
   if (error) throw new Error('Failed to fetch components');

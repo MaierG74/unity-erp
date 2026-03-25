@@ -258,6 +258,7 @@ export function ManualStockIssueTab() {
           description,
           inventory(quantity_on_hand)
         `)
+        .eq('is_active', true)
         .or(`internal_code.ilike.${term},description.ilike.${term}`)
         .limit(15);
 

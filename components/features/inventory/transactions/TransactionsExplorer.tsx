@@ -112,6 +112,27 @@ export function TransactionsExplorer() {
     queryClient.invalidateQueries({ queryKey: ['component-stock-summary'] });
   }, [queryClient]);
 
+  const handleDisableComponent = useCallback(async (componentId: number, componentName: string) => {
+    const confirmed = window.confirm(
+      `Disable ${componentName}? It will be hidden from PO creation, BOM pickers, and stock issue. Historical data is preserved.`
+    );
+    if (!confirmed) return;
+
+    const { error } = await supabase
+      .from('components')
+      .update({ is_active: false })
+      .eq('component_id', componentId);
+
+    if (error) {
+      toast.error('Failed to disable component', { description: error.message });
+      return;
+    }
+
+    toast.success(`${componentName} disabled`);
+    queryClient.invalidateQueries({ queryKey: ['inventory', 'transactions', 'explorer'] });
+    queryClient.invalidateQueries({ queryKey: ['component-stock-summary'] });
+  }, [queryClient]);
+
   const handleSaveAndNext = useCallback(() => {
     handleAdjustSuccess();
     if (!adjustTarget) return;
@@ -292,6 +313,7 @@ export function TransactionsExplorer() {
           groupBy={config.groupBy}
           stockSummaryMap={stockSummaryMap}
           onAdjust={handleAdjust}
+          onDisableComponent={handleDisableComponent}
         />
       )}
 

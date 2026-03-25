@@ -648,8 +648,9 @@ export function ProductBOM({ productId }: ProductBOMProps) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('components')
-        .select('component_id, internal_code, description');
-        
+        .select('component_id, internal_code, description')
+        .eq('is_active', true);
+
       if (error) throw error;
       return data as Component[];
     },

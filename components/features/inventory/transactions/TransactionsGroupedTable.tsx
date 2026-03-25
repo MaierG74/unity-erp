@@ -11,7 +11,8 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, MoreHorizontal } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { format, startOfWeek, startOfMonth } from 'date-fns';
 import Link from 'next/link';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -40,6 +41,7 @@ type Props = {
   groupBy: GroupByMode;
   stockSummaryMap?: Map<number, ComponentStockSummary>;
   onAdjust?: (componentId: number, componentName: string, currentStock: number) => void;
+  onDisableComponent?: (componentId: number, componentName: string) => void;
 };
 
 function getTransactionTypeBadge(typeName: string) {
@@ -226,7 +228,7 @@ function SortableHead({
   );
 }
 
-export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMap, onAdjust }: Props) {
+export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMap, onAdjust, onDisableComponent }: Props) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['__all__']));
   const [allExpanded, setAllExpanded] = useState(true);
   const [sortField, setSortField] = useState<SortField | null>(null);
@@ -399,6 +401,26 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
                     >
                       Adjust
                     </Button>
+                  )}
+                  {isComponentGroup && onDisableComponent && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={(e) => e.stopPropagation()}>
+                          <MoreHorizontal className="h-3.5 w-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          className="text-destructive"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDisableComponent(Number(group.key), group.label);
+                          }}
+                        >
+                          Disable Component
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   )}
                   {group.stockSummary && (
                     <>
