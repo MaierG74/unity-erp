@@ -382,7 +382,6 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
                   </span>
                 </div>
                 <div className="flex items-center gap-4 text-sm shrink-0">
-                  <MovementBadges sumIn={group.sumIn} sumOut={group.sumOut} />
                   {group.stockSummary && (
                     <>
                       <span className="font-medium">
@@ -506,7 +505,6 @@ function SubGroupRows({
             )}
             <span className="text-[10px] text-muted-foreground">({sub.count})</span>
             <div className="ml-auto flex items-center gap-3 text-xs">
-              <MovementBadges sumIn={sub.sumIn} sumOut={sub.sumOut} className="text-xs" />
               {sub.stockSummary && (
                 <span className="font-medium text-foreground/80">
                   Stock: {sub.stockSummary.quantityOnHand.toLocaleString()}
