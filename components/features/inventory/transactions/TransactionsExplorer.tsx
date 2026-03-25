@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useRef, useCallback } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import { useTransactionsQuery } from '@/hooks/use-transactions-query';
@@ -8,10 +8,13 @@ import { useComponentStockSummary } from '@/hooks/use-component-stock-summary';
 import { TransactionsToolbar } from './TransactionsToolbar';
 import { TransactionsGroupedTable } from './TransactionsGroupedTable';
 import { PrintView } from './PrintView';
+import { CountSheetPrintView, type CountSheetComponent } from './CountSheetPrintView';
 import { StockAdjustmentDialog } from '@/components/features/inventory/component-detail/StockAdjustmentDialog';
 import type { ViewConfig } from '@/types/transaction-views';
 import { DEFAULT_VIEW_CONFIG } from '@/types/transaction-views';
 import { toast } from 'sonner';
+import { useReactToPrint } from 'react-to-print';
+import { supabase } from '@/lib/supabase';
 
 export function TransactionsExplorer() {
   const [config, setConfig] = useState<ViewConfig>(DEFAULT_VIEW_CONFIG);
@@ -23,6 +26,8 @@ export function TransactionsExplorer() {
     currentStock: number;
   } | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
+  const countSheetRef = useRef<HTMLDivElement>(null);
+  const [countSheetData, setCountSheetData] = useState<CountSheetComponent[] | null>(null);
   const queryClient = useQueryClient();
 
   const { data: transactions = [], isLoading, error, dateRange } = useTransactionsQuery({
@@ -115,6 +120,60 @@ export function TransactionsExplorer() {
     setActiveViewName(null);
   }, []);
 
+  const handlePrintCountSheetNow = useReactToPrint({
+    contentRef: countSheetRef,
+    documentTitle: 'Stock Count Sheet',
+  });
+
+  useEffect(() => {
+    if (countSheetData) {
+      const timer = setTimeout(() => {
+        handlePrintCountSheetNow();
+        setCountSheetData(null);
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [countSheetData, handlePrintCountSheetNow]);
+
+  const fetchCountSheetData = useCallback(async () => {
+    let q = supabase
+      .from('components')
+      .select('component_id, internal_code, description, category_id, component_categories(categoryname), inventory(quantity_on_hand)')
+      .order('internal_code');
+
+    if (config.filters.categoryId && config.filters.categoryId !== 'all') {
+      q = q.eq('category_id', Number(config.filters.categoryId));
+    }
+    if (config.filters.search?.trim()) {
+      q = q.or(`internal_code.ilike.%${config.filters.search}%,description.ilike.%${config.filters.search}%`);
+    }
+
+    const { data, error: fetchError } = await q;
+    if (fetchError) {
+      toast.error('Failed to load count sheet data');
+      return;
+    }
+
+    const components: CountSheetComponent[] = (data || []).map((c: any) => ({
+      componentId: c.component_id,
+      code: c.internal_code || '',
+      description: c.description || '',
+      category: (c.component_categories as any)?.categoryname || '',
+      currentStock: Array.isArray(c.inventory) ? (c.inventory[0]?.quantity_on_hand ?? 0) : 0,
+      onOrder: 0,
+    }));
+
+    setCountSheetData(components);
+  }, [config.filters]);
+
+  const countSheetFilterDesc = useMemo(() => {
+    const parts: string[] = [];
+    if (config.filters.categoryId && config.filters.categoryId !== 'all') parts.push('Category filter active');
+    if (config.filters.search?.trim()) parts.push(`Search: "${config.filters.search}"`);
+    if (config.filters.supplierId && config.filters.supplierId !== 'all') parts.push('Supplier filter active');
+    return parts.length > 0 ? parts.join(' | ') : 'All components';
+  }, [config.filters]);
+
   if (error) {
     return (
       <div className="p-4">
@@ -137,6 +196,7 @@ export function TransactionsExplorer() {
         summary={summary}
         printRef={printRef}
         transactionCount={transactions.length}
+        onPrintCountSheet={fetchCountSheetData}
       />
 
       {isLoading ? (
@@ -167,6 +227,13 @@ export function TransactionsExplorer() {
         dateRange={dateRange}
         summary={summary}
         stockSummaryMap={stockSummaryMap}
+      />
+
+      {/* Hidden count sheet print container */}
+      <CountSheetPrintView
+        ref={countSheetRef}
+        components={countSheetData || []}
+        filterDescription={countSheetFilterDesc}
       />
 
       {adjustTarget && (

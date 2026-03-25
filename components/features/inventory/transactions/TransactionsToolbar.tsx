@@ -16,6 +16,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import {
   Search,
@@ -43,6 +49,7 @@ type Props = {
   summary: { total: number; totalIn: number; totalOut: number };
   printRef: RefObject<HTMLDivElement | null>;
   transactionCount: number;
+  onPrintCountSheet?: () => void;
 };
 
 export function TransactionsToolbar({
@@ -55,6 +62,7 @@ export function TransactionsToolbar({
   summary,
   printRef,
   transactionCount,
+  onPrintCountSheet,
 }: Props) {
   const [datePickerOpen, setDatePickerOpen] = useState(false);
 
@@ -158,15 +166,24 @@ export function TransactionsToolbar({
 
         {/* Actions */}
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handlePrint()}
-            className="h-9"
-          >
-            <Printer className="h-4 w-4 mr-1.5" />
-            Print
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-9">
+                <Printer className="h-4 w-4 mr-1.5" />
+                Print
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handlePrint()}>
+                Print Transactions
+              </DropdownMenuItem>
+              {onPrintCountSheet && (
+                <DropdownMenuItem onClick={onPrintCountSheet}>
+                  Print Count Sheet
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="outline" size="sm" onClick={onRefresh} className="h-9">
             <RefreshCw className="h-4 w-4 mr-1.5" />
             Refresh
