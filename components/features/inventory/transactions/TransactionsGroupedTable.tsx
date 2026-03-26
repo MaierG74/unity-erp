@@ -352,10 +352,12 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
           return (
             <div key={group.key} className="rounded-xl border-2 border-border/60 bg-card shadow-xs overflow-hidden">
               {/* Group Header */}
-              <button
-                type="button"
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => toggleGroup(group.key)}
-                className="w-full flex items-center gap-3 px-4 py-2.5 bg-muted/40 hover:bg-muted/60 transition-colors text-left border-b border-border/40"
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleGroup(group.key); } }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 bg-muted/40 hover:bg-muted/60 transition-colors text-left border-b border-border/40 cursor-pointer"
               >
                 {isExpanded ? (
                   <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -436,7 +438,7 @@ export function TransactionsGroupedTable({ transactions, groupBy, stockSummaryMa
                     </>
                   )}
                 </div>
-              </button>
+              </div>
 
               {/* Group Body — nested sub-groups as inline divider rows */}
               {isExpanded && group.subGroups ? (
