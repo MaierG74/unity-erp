@@ -168,6 +168,27 @@ function calculateMarkupPercentFromPrice(subtotal: number, unitPrice: number): n
   return roundCurrencyValue(markupPercent);
 }
 
+type BatchPreviewItem = {
+  oldPrice: number;
+  newPrice: number;
+  newTotal: number;
+  oldMarkup: number;
+  newMarkup: number;
+  profit: number;
+};
+
+function getFirstCluster(item: QuoteItem): QuoteItemCluster | undefined {
+  return (item.quote_item_clusters || [])[0];
+}
+
+function calculateItemProfit(item: QuoteItem): number {
+  const cluster = getFirstCluster(item);
+  if (!cluster) return 0;
+  const subtotal = calculateClusterSubtotal(cluster);
+  const markupAmount = subtotal * (cluster.markup_percent / 100);
+  return roundCurrencyValue(markupAmount) * item.qty;
+}
+
 // --- Quote Item Row Component (with expandable cluster) ---
 function QuoteItemRow({
   item,
@@ -231,14 +252,7 @@ function QuoteItemRow({
   batchMarkupType?: 'percentage' | 'fixed';
   isSelected?: boolean;
   onToggleSelect?: (checked: boolean) => void;
-  previewData?: {
-    oldPrice: number;
-    newPrice: number;
-    newTotal: number;
-    oldMarkup: number;
-    newMarkup: number;
-    profit: number;
-  } | null;
+  previewData?: BatchPreviewItem | null;
 }) {
   const [desc, setDesc] = React.useState(item.description);
   const [qty, setQty] = React.useState<string>(String(item.qty));
@@ -363,7 +377,7 @@ function QuoteItemRow({
                   </span>
                 ) : (
                   <span className="text-muted-foreground">
-                    {((item.quote_item_clusters || [])[0]?.markup_percent ?? 0)}%
+                    {(getFirstCluster(item)?.markup_percent ?? 0)}%
                   </span>
                 )
               ) : (
@@ -376,17 +390,11 @@ function QuoteItemRow({
                   <span className="text-green-500 font-medium">
                     {formatCurrency(itemPreview.profit * item.qty)}
                   </span>
-                ) : (() => {
-                  const cluster = (item.quote_item_clusters || [])[0];
-                  if (!cluster) return <span className="text-muted-foreground">—</span>;
-                  const subtotal = calculateClusterSubtotal(cluster);
-                  const markupAmount = subtotal * (cluster.markup_percent / 100);
-                  return (
-                    <span className="text-muted-foreground">
-                      {formatCurrency(roundCurrencyValue(markupAmount) * item.qty)}
-                    </span>
-                  );
-                })()
+                ) : (
+                  <span className="text-muted-foreground">
+                    {formatCurrency(calculateItemProfit(item))}
+                  </span>
+                )
               ) : (
                 <span className="text-muted-foreground">—</span>
               )}
@@ -547,14 +555,7 @@ export default function QuoteItemsTable({
   const [selectedItemIds, setSelectedItemIds] = React.useState<Set<string>>(new Set());
   const [batchMarkupType, setBatchMarkupType] = React.useState<'percentage' | 'fixed'>('percentage');
   const [batchMarkupValue, setBatchMarkupValue] = React.useState<string>('');
-  const [previewData, setPreviewData] = React.useState<Map<string, {
-    oldPrice: number;
-    newPrice: number;
-    newTotal: number;
-    oldMarkup: number;
-    newMarkup: number;
-    profit: number;
-  }> | null>(null);
+  const [previewData, setPreviewData] = React.useState<Map<string, BatchPreviewItem> | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = React.useState(false);
   const [isApplyingBatch, setIsApplyingBatch] = React.useState(false);
 
@@ -595,20 +596,13 @@ export default function QuoteItemsTable({
   };
 
   const handlePreview = () => {
-    const preview = new Map<string, {
-      oldPrice: number;
-      newPrice: number;
-      newTotal: number;
-      oldMarkup: number;
-      newMarkup: number;
-      profit: number;
-    }>();
+    const preview = new Map<string, BatchPreviewItem>();
 
     const markupValue = parseFloat(batchMarkupValue) || 0;
 
     for (const item of items) {
       if (!selectedItemIds.has(item.id)) continue;
-      const cluster = (item.quote_item_clusters || [])[0];
+      const cluster = getFirstCluster(item);
       if (!cluster) continue;
 
       const subtotal = calculateClusterSubtotal(cluster);
@@ -639,12 +633,13 @@ export default function QuoteItemsTable({
 
     try {
       const markupValue = parseFloat(batchMarkupValue) || 0;
+      const itemMap = new Map(items.map(i => [i.id, i]));
       const updates: Promise<unknown>[] = [];
 
       for (const [itemId, preview] of previewData.entries()) {
-        const item = items.find(i => i.id === itemId);
+        const item = itemMap.get(itemId);
         if (!item) continue;
-        const cluster = (item.quote_item_clusters || [])[0];
+        const cluster = getFirstCluster(item);
         if (!cluster) continue;
 
         updates.push(
@@ -658,18 +653,17 @@ export default function QuoteItemsTable({
 
       await Promise.all(updates);
 
-      // Optimistic UI update
       const updatedItems = items.map(item => {
         const preview = previewData.get(item.id);
         if (!preview) return item;
-        const cluster = (item.quote_item_clusters || [])[0];
+        const cluster = getFirstCluster(item);
         return {
           ...item,
           unit_price: preview.newPrice,
           total: preview.newTotal,
           quote_item_clusters: item.quote_item_clusters?.map(c =>
             c.id === cluster?.id
-              ? { ...c, markup_percent: parseFloat(batchMarkupValue) || 0 }
+              ? { ...c, markup_percent: markupValue }
               : c
           ),
         };
@@ -710,14 +704,10 @@ export default function QuoteItemsTable({
         newTotal += preview.newTotal;
         totalProfit += preview.profit * item.qty;
       } else {
-        oldTotal += roundCurrencyValue(item.qty * item.unit_price);
-        newTotal += roundCurrencyValue(item.qty * item.unit_price);
-        const cluster = (item.quote_item_clusters || [])[0];
-        if (cluster) {
-          const subtotal = calculateClusterSubtotal(cluster);
-          const markupAmount = subtotal * (cluster.markup_percent / 100);
-          totalProfit += roundCurrencyValue(markupAmount) * item.qty;
-        }
+        const itemTotal = roundCurrencyValue(item.qty * item.unit_price);
+        oldTotal += itemTotal;
+        newTotal += itemTotal;
+        totalProfit += calculateItemProfit(item);
       }
     }
 

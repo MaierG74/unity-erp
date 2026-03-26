@@ -8,7 +8,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { formatCurrency } from '@/lib/quotes';
+import { formatCurrency } from '@/lib/db/quotes';
 
 interface BatchMarkupConfirmDialogProps {
   open: boolean;
