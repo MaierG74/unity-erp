@@ -534,7 +534,7 @@ export function DailyAttendanceGrid() {
     action,
     time,
     staffIds,
-    force,
+    force: _force,
     note,
   }: {
     action: 'clock_in' | 'clock_out';
@@ -565,6 +565,22 @@ export function DailyAttendanceGrid() {
 
       const successCount = results.filter((r) => r.status === 'fulfilled').length;
       const failCount = results.length - successCount;
+
+      if (successCount > 0) {
+        const processResult = await processAttendanceBatch(dateStr);
+        if (!processResult.success) {
+          console.warn('[handleMassApply] Batch repair failed, falling back to sequential processing:', processResult.error);
+          await processClockEventsIntoSegments(dateStr);
+        }
+
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['time_clock_events', dateStr] }),
+          queryClient.invalidateQueries({ queryKey: ['time_segments', dateStr] }),
+          queryClient.invalidateQueries({ queryKey: ['time_daily_summary_all', dateStr] }),
+          queryClient.invalidateQueries({ queryKey: ['time_daily_summary', dateStr] }),
+        ]);
+      }
+
       toast({
         title: 'Mass Action Complete',
         description: `${action.replace('_', ' ')} applied to ${successCount}/${results.length} staff${failCount ? ` (${failCount} errors)` : ''}.`,

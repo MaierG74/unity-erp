@@ -3,6 +3,8 @@
 ## Overview
 This document details the Unity ERP time and attendance system architecture, performance issues, and optimization work. The system tracks staff clock events, processes them into work segments, and generates daily summaries.
 
+As of 2026-03-26, the intended behavior is that multiple `clock_in` / `clock_out` events in the same day are valid when they form clean alternating work sessions (for example `clock_in -> clock_out -> clock_in -> clock_out`). The UI should only warn when the sequence is genuinely suspicious, such as duplicate scans or out-of-order entries.
+
 ## Core Architecture
 
 ### Database Tables (Supabase)
@@ -100,6 +102,7 @@ This document details the Unity ERP time and attendance system architecture, per
   3. Groups events by staff member
   4. Pairs clock-in/out events to create work segments
   5. Handles overnight shifts and incomplete segments
+  6. Writes `org_id` explicitly on regenerated segments when source events are org-scoped, so tenant-visible repairs do not rely on legacy defaults
 - **Performance**:
   - ✅ Optimized to skip other staff when staffId provided
   - ❌ Still causes mass re-renders due to database operations
@@ -109,7 +112,7 @@ This document details the Unity ERP time and attendance system architecture, per
 - **Process**:
   1. Fetches all segments for date (optionally filtered by staffId)
   2. Calculates total work/break minutes
-  3. Applies business rules for regular/overtime/double-time
+  3. Applies business rules for unpaid tea-break deductions plus regular/overtime/double-time
   4. Handles tea break deductions
   5. Updates or creates daily summary record
 - **Business Rules Applied**:
@@ -123,6 +126,7 @@ This document details the Unity ERP time and attendance system architecture, per
   1. Validates input parameters
   2. Creates timestamp from date + time
   3. Inserts into time_clock_events table
+  4. Uses SAST day boundaries when matching same-day events into segments/summaries, avoiding fragile `event_time::date` filters
 - **Performance**: ✅ Very fast, single database insert
 
 ##### `/lib/utils/timezone.ts`
@@ -217,6 +221,22 @@ for (const staffIdStr in staffEvents) {
 // generateDailySummary(dateStr, currentStaffId), so callers
 // no longer need to fire a second summary job.
 ```
+
+### 3. Complex-Pattern Repair Pass
+```typescript
+// Fast batch RPC remains the default path for the whole day.
+// When a staff member has either:
+// - valid multiple work sessions in one day, or
+// - suspicious in/out sequencing,
+// the client immediately re-runs the safer sequential processor
+// for that staff member after the batch RPC completes.
+```
+- This protects legitimate split shifts (`in -> out -> in -> out`) from being mispaired by the fast path.
+- It also keeps true duplicate-scan / typo scenarios reviewable instead of silently flattening them into incorrect segments.
+
+### 4. Event Anomaly Rules
+- **Valid multi-session day**: alternating `clock_in` / `clock_out` events that produce 2+ completed sessions. This is informational, not an error.
+- **Potential duplicate / out-of-sequence day**: consecutive `clock_in` events before a close, extra `clock_out` events without an open shift, or any other broken sequence. This should remain highlighted for admin review.
 
 ### 3. Targeted Cache Refresh Helper
 ```typescript

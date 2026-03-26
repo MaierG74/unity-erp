@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import React from 'react';
 import { format, parseISO } from 'date-fns';
 import { formatTimeToSAST, createSASTTimestamp } from '@/lib/utils/timezone';
@@ -45,6 +45,7 @@ import {
   Plus
 } from 'lucide-react';
 import { processAttendanceBatch } from '@/lib/utils/attendance';
+import { analyzeClockInOutEvents } from '@/lib/utils/attendance-event-analysis';
 
 // Types
 type ClockEvent = {
@@ -113,7 +114,7 @@ export function DailyHoursDetailDialog({
   staffId,
   staffName,
   date,
-  initialHours
+  initialHours: _initialHours
 }: DailyHoursDetailDialogProps) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -257,19 +258,21 @@ export function DailyHoursDetailDialog({
 
       const isComplete = !!lastClockOut;
       const dayOfWeek = new Date(date).getDay(); // 0=Sunday
+      const unpaidBreakMinutes = dayOfWeek >= 1 && dayOfWeek <= 4 ? Math.min(totalWorkMinutes, 30) : 0;
+      const paidWorkMinutes = Math.max(totalWorkMinutes - unpaidBreakMinutes, 0);
       let regularMinutes = 0;
       let otMinutes = 0;
       let dtMinutes = 0;
 
       if (dayOfWeek === 0) {
-        dtMinutes = totalWorkMinutes;
+        dtMinutes = paidWorkMinutes;
       } else {
         const regularThreshold = 9 * 60; // 9 hours
-        regularMinutes = Math.min(totalWorkMinutes, regularThreshold);
-        otMinutes = Math.max(totalWorkMinutes - regularMinutes, 0);
+        regularMinutes = Math.min(paidWorkMinutes, regularThreshold);
+        otMinutes = Math.max(paidWorkMinutes - regularMinutes, 0);
       }
 
-      const totalHoursWorked = parseFloat((totalWorkMinutes / 60).toFixed(2));
+      const totalHoursWorked = parseFloat((paidWorkMinutes / 60).toFixed(2));
 
       // Keep payroll handoff hours complete even on manual segment edits.
       const { data: staffRateData, error: staffRateError } = await supabase
@@ -295,6 +298,7 @@ export function DailyHoursDetailDialog({
         last_clock_out: lastClockOut,
         total_work_minutes: totalWorkMinutes,
         total_break_minutes: totalBreakMinutes,
+        unpaid_break_minutes: unpaidBreakMinutes,
         lunch_break_minutes: lunchBreakMinutes,
         other_breaks_minutes: otherBreaksMinutes,
         regular_minutes: regularMinutes,
@@ -372,25 +376,8 @@ export function DailyHoursDetailDialog({
   });
 
   // Detect clock event anomalies
-  const eventAnomalies = React.useMemo(() => {
-    const clockIns = clockEvents.filter(e => e.event_type === 'clock_in');
-    const clockOuts = clockEvents.filter(e => e.event_type === 'clock_out');
-    return {
-      clockInCount: clockIns.length,
-      clockOutCount: clockOuts.length,
-      hasMultipleClockIns: clockIns.length > 1,
-      hasMultipleClockOuts: clockOuts.length > 1,
-      hasDuplicates: clockIns.length > 1 || clockOuts.length > 1,
-      missingClockIn: clockOuts.length > 0 && clockIns.length === 0,
-      missingClockOut: clockIns.length > 0 && clockOuts.length === 0,
-      hasAnyAnomaly: clockIns.length > 1 || clockOuts.length > 1 ||
-                     (clockOuts.length > 0 && clockIns.length === 0) ||
-                     (clockIns.length > 0 && clockOuts.length === 0),
-    };
-  }, [clockEvents]);
-
-  // For backward compatibility
-  const duplicateInfo = eventAnomalies;
+  const eventAnomalies = React.useMemo(() => analyzeClockInOutEvents(clockEvents), [clockEvents]);
+  const flaggedEventIds = React.useMemo(() => new Set(eventAnomalies.flaggedEventIds), [eventAnomalies.flaggedEventIds]);
 
   // Reprocess attendance after event changes
   const reprocessAttendance = async () => {
@@ -754,12 +741,15 @@ export function DailyHoursDetailDialog({
                 <h3 className="font-semibold flex items-center gap-2">
                   <Clock className="h-4 w-4" />
                   Clock Events
-                  {eventAnomalies.hasDuplicates && (
+                  {eventAnomalies.hasValidMultipleSessions && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/15 px-2 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-300">
+                      {eventAnomalies.sessionCount} sessions
+                    </span>
+                  )}
+                  {eventAnomalies.hasPotentialDuplicates && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/15 px-2 py-0.5 text-xs font-medium text-orange-700 dark:text-orange-300">
                       <AlertTriangle className="h-3 w-3" />
-                      {eventAnomalies.hasMultipleClockIns && `${eventAnomalies.clockInCount} clock-ins`}
-                      {eventAnomalies.hasMultipleClockIns && eventAnomalies.hasMultipleClockOuts && ' & '}
-                      {eventAnomalies.hasMultipleClockOuts && `${eventAnomalies.clockOutCount} clock-outs`}
+                      Review entries
                     </span>
                   )}
                   {eventAnomalies.missingClockIn && (
@@ -833,16 +823,30 @@ export function DailyHoursDetailDialog({
                 </div>
               )}
 
+              {/* Info for valid multiple sessions */}
+              {eventAnomalies.hasValidMultipleSessions && (
+                <div className="mb-3 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-sm">
+                  <div className="flex items-start gap-2">
+                    <Clock className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="font-medium text-blue-700 dark:text-blue-300">Multiple work sessions recorded</p>
+                      <p className="text-muted-foreground mt-1">
+                        This day contains {eventAnomalies.sessionCount} completed work sessions. That is valid for staff who leave and return later in the day.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Warning for duplicate events */}
-              {eventAnomalies.hasDuplicates && (
+              {eventAnomalies.hasPotentialDuplicates && (
                 <div className="mb-3 p-3 rounded-lg bg-orange-500/10 border border-orange-500/20 text-sm">
                   <div className="flex items-start gap-2">
                     <AlertTriangle className="h-4 w-4 text-orange-500 mt-0.5 flex-shrink-0" />
                     <div>
                       <p className="font-medium text-orange-700 dark:text-orange-300">Potential data entry error detected</p>
                       <p className="text-muted-foreground mt-1">
-                        Multiple {eventAnomalies.hasMultipleClockIns ? 'clock-in' : ''}{eventAnomalies.hasMultipleClockIns && eventAnomalies.hasMultipleClockOuts ? ' and ' : ''}{eventAnomalies.hasMultipleClockOuts ? 'clock-out' : ''} entries found.
-                        Review the events below and delete any duplicates.
+                        These events do not form a clean in/out sequence. Review the highlighted rows below and delete or correct any accidental duplicate scans or typos.
                       </p>
                     </div>
                   </div>
@@ -914,9 +918,7 @@ export function DailyHoursDetailDialog({
                         const eventInfo = getEventTypeInfo(event.event_type);
                         const EventIcon = eventInfo.icon;
                         const isEditing = editingEventId === event.id;
-                        const isDuplicate =
-                          (event.event_type === 'clock_in' && eventAnomalies.hasMultipleClockIns) ||
-                          (event.event_type === 'clock_out' && eventAnomalies.hasMultipleClockOuts);
+                        const isDuplicate = flaggedEventIds.has(event.id);
 
                         return (
                           <TableRow key={event.id} className={isDuplicate ? 'bg-orange-500/5' : ''}>

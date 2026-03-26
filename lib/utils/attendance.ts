@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { analyzeClockInOutEvents } from '@/lib/utils/attendance-event-analysis';
 import { getSASTDayBoundaries, createSASTTimestamp } from './timezone';
 
 /**
@@ -25,6 +26,13 @@ export const processAttendanceBatch = async (
   staffId?: number
 ): Promise<ProcessAttendanceBatchResult> => {
   try {
+    const { data: clockEvents, error: clockEventsError } = await getClockEventsForDate(dateStr, staffId);
+    const repairStaffIds = clockEventsError ? [] : getStaffIdsRequiringSequentialRepair(clockEvents ?? []);
+
+    if (clockEventsError) {
+      console.warn('[processAttendanceBatch] Could not inspect clock events before batch run:', clockEventsError);
+    }
+
     const { data, error } = await supabase.rpc('process_attendance_for_date', {
       p_date_worked: dateStr,
       p_staff_id: staffId ?? null
@@ -40,6 +48,10 @@ export const processAttendanceBatch = async (
         success: false,
         error: data?.error || 'Unknown error from RPC'
       };
+    }
+
+    for (const repairStaffId of repairStaffIds) {
+      await processClockEventsIntoSegments(dateStr, repairStaffId);
     }
 
     return {
@@ -65,6 +77,8 @@ export const calculateDurationMinutes = (startTime: string, endTime: string): nu
 };
 
 type DailyMinuteBreakdown = {
+  unpaidBreakMinutes: number;
+  payableWorkMinutes: number;
   regularMinutes: number;
   otMinutes: number;
   dtMinutes: number;
@@ -73,6 +87,8 @@ type DailyMinuteBreakdown = {
 
 const calculateDailyMinuteBreakdown = (dateStr: string, totalWorkMinutes: number): DailyMinuteBreakdown => {
   const dayOfWeek = new Date(dateStr).getDay(); // 0=Sunday
+  const unpaidBreakMinutes = dayOfWeek >= 1 && dayOfWeek <= 4 ? Math.min(totalWorkMinutes, 30) : 0;
+  const payableWorkMinutes = Math.max(totalWorkMinutes - unpaidBreakMinutes, 0);
   let regularMinutes: number;
   let otMinutes: number;
   let dtMinutes: number;
@@ -81,19 +97,21 @@ const calculateDailyMinuteBreakdown = (dateStr: string, totalWorkMinutes: number
     // Sunday only for current rollout scope
     regularMinutes = 0;
     otMinutes = 0;
-    dtMinutes = totalWorkMinutes;
+    dtMinutes = payableWorkMinutes;
   } else {
     const regularThreshold = 9 * 60; // 9 hours
-    regularMinutes = Math.min(totalWorkMinutes, regularThreshold);
-    otMinutes = Math.max(totalWorkMinutes - regularMinutes, 0);
+    regularMinutes = Math.min(payableWorkMinutes, regularThreshold);
+    otMinutes = Math.max(payableWorkMinutes - regularMinutes, 0);
     dtMinutes = 0;
   }
 
   return {
+    unpaidBreakMinutes,
+    payableWorkMinutes,
     regularMinutes,
     otMinutes,
     dtMinutes,
-    totalHoursWorked: parseFloat((totalWorkMinutes / 60).toFixed(2)),
+    totalHoursWorked: parseFloat((payableWorkMinutes / 60).toFixed(2)),
   };
 };
 
@@ -129,6 +147,42 @@ const normalizeSupabaseError = (error: any) => ({
   details: error?.details ?? null,
   hint: error?.hint ?? null,
 });
+
+const getClockEventsForDate = async (dateStr: string, staffId?: number) => {
+  const { startOfDay, startOfNextDay } = getSASTDayBoundaries(dateStr);
+
+  let query = supabase
+    .from('time_clock_events')
+    .select('id, staff_id, event_time, event_type')
+    .gte('event_time', startOfDay)
+    .lt('event_time', startOfNextDay)
+    .order('event_time', { ascending: true });
+
+  if (typeof staffId === 'number') {
+    query = query.eq('staff_id', staffId);
+  }
+
+  return query;
+};
+
+const getStaffIdsRequiringSequentialRepair = (
+  clockEvents: Array<{ id: string; staff_id: number; event_time: string; event_type: string }>
+) => {
+  const eventsByStaff = new Map<number, Array<{ id: string; staff_id: number; event_time: string; event_type: string }>>();
+
+  clockEvents.forEach(event => {
+    const existing = eventsByStaff.get(event.staff_id) ?? [];
+    existing.push(event);
+    eventsByStaff.set(event.staff_id, existing);
+  });
+
+  return [...eventsByStaff.entries()]
+    .filter(([, events]) => {
+      const analysis = analyzeClockInOutEvents(events);
+      return analysis.hasValidMultipleSessions || analysis.hasAnyAnomaly;
+    })
+    .map(([currentStaffId]) => currentStaffId);
+};
 
 /**
  * Process clock events into time segments for a specific date
@@ -199,6 +253,8 @@ export const processClockEventsIntoSegments = async (dateStr: string, staffId?: 
       
       // console.log(`\n[DEBUG] Processing events for staff_id: ${currentStaffId}`);
       const events = staffEvents[currentStaffId];
+      const staffOrgId = events[0]?.org_id ?? null;
+      const orgScopedSegmentFields = staffOrgId ? { org_id: staffOrgId } : {};
       // console.log(`[DEBUG] Events for staff ${currentStaffId}:`, events);
 
       // Delete all existing segments for this staff member on this day.
@@ -249,6 +305,7 @@ export const processClockEventsIntoSegments = async (dateStr: string, staffId?: 
           const { error: insertError } = await supabase
             .from('time_segments')
             .insert({
+              ...orgScopedSegmentFields,
               staff_id: currentStaffId, // Use numeric staffId
               date_worked: dateStr,
               clock_in_event_id: matchingClockIn.id,
@@ -281,13 +338,13 @@ export const processClockEventsIntoSegments = async (dateStr: string, staffId?: 
           const { data: prevClockIns, error: prevError } = await supabase
             .from('time_clock_events')
             .select('*')
-            .eq('staff_id', staffId)
+            .eq('staff_id', currentStaffId)
             .eq('event_type', 'clock_in')
             .gte('event_time', `${prevDateStr}T00:00:00.000Z`)
             .lt('event_time', `${prevDateStr}T23:59:59.999Z`);
 
           if (prevError) {
-            console.error(`[DEBUG] Error fetching previous day's clock-ins for staff ${staffId}:`, prevError);
+            console.error(`[DEBUG] Error fetching previous day's clock-ins for staff ${currentStaffId}:`, prevError);
           } else if (prevClockIns && prevClockIns.length > 0) {
             // Find an unmatched clock-in (not already processed)
             const unmatchedPrevClockIn = prevClockIns.find(
@@ -296,10 +353,7 @@ export const processClockEventsIntoSegments = async (dateStr: string, staffId?: 
             if (unmatchedPrevClockIn) {
               // Split at midnight
               // SAST midnight for South Africa (UTC+2)
-const [year, month, day] = dateStr.split('-').map(Number);
-const midnight = new Date(`${dateStr}T00:00:00+02:00`);
-              const prevEnd = new Date(midnight.getTime() - 1); // 23:59:59.999 of previous day
-              const outTime = new Date(clockOutEvent.event_time);
+              const midnight = new Date(`${dateStr}T00:00:00+02:00`);
 
               // Segment 1: previous day (clock-in to midnight)
               const seg1Start = unmatchedPrevClockIn.event_time;
@@ -308,7 +362,8 @@ const midnight = new Date(`${dateStr}T00:00:00+02:00`);
               const { error: seg1Error } = await supabase
                 .from('time_segments')
                 .insert({
-                  staff_id: staffId,
+                  ...orgScopedSegmentFields,
+                  staff_id: currentStaffId,
                   date_worked: prevDateStr,
                   clock_in_event_id: unmatchedPrevClockIn.id,
                   clock_out_event_id: null, // No clock-out event for split
@@ -331,7 +386,8 @@ const midnight = new Date(`${dateStr}T00:00:00+02:00`);
               const { error: seg2Error } = await supabase
                 .from('time_segments')
                 .insert({
-                  staff_id: staffId,
+                  ...orgScopedSegmentFields,
+                  staff_id: currentStaffId,
                   date_worked: dateStr,
                   clock_in_event_id: null, // No clock-in event for split
                   clock_out_event_id: clockOutEvent.id,
@@ -380,6 +436,7 @@ const midnight = new Date(`${dateStr}T00:00:00+02:00`);
           const { error: insertError } = await supabase
             .from('time_segments')
             .insert({
+              ...orgScopedSegmentFields,
               staff_id: currentStaffId, // Use numeric staffId
               date_worked: dateStr,
               clock_in_event_id: matchingBreakStart.id,
@@ -413,6 +470,7 @@ const midnight = new Date(`${dateStr}T00:00:00+02:00`);
         const { error: insertError } = await supabase
           .from('time_segments')
           .insert({
+            ...orgScopedSegmentFields,
             staff_id: currentStaffId, // Use numeric staffId (BUG FIX from original where staffId was string from loop key)
             date_worked: dateStr,
             clock_in_event_id: pendingClockIn.id,
@@ -442,6 +500,7 @@ const midnight = new Date(`${dateStr}T00:00:00+02:00`);
         const { error: insertError } = await supabase
           .from('time_segments')
           .insert({
+            ...orgScopedSegmentFields,
             staff_id: currentStaffId, // Use numeric staffId
             date_worked: dateStr,
             clock_in_event_id: pendingBreakStart.id,
@@ -573,6 +632,7 @@ export const generateDailySummary = async (dateStr: string, staffId?: number): P
     // Generate summary for each staff
     for (const [staffIdStr, staffSegmentList] of Object.entries(staffSegments)) {
       const staffId = parseInt(staffIdStr);
+      const staffOrgId = staffSegmentList[0]?.org_id ?? null;
       
       // Filter segments by type
       const workSegments = staffSegmentList.filter(s => s.segment_type === 'work');
@@ -632,7 +692,7 @@ export const generateDailySummary = async (dateStr: string, staffId?: number): P
       // Determine if the day is complete (has both clock in and out)
       const isComplete = !!lastClockOut;
 
-      const { regularMinutes, otMinutes, dtMinutes, totalHoursWorked } = calculateDailyMinuteBreakdown(
+      const { unpaidBreakMinutes, regularMinutes, otMinutes, dtMinutes, totalHoursWorked } = calculateDailyMinuteBreakdown(
         dateStr,
         totalWorkMinutes
       );
@@ -649,6 +709,7 @@ export const generateDailySummary = async (dateStr: string, staffId?: number): P
             last_clock_out: lastClockOut,
             total_work_minutes: totalWorkMinutes,
             total_break_minutes: totalBreakMinutes,
+            unpaid_break_minutes: unpaidBreakMinutes,
             lunch_break_minutes: lunchBreakMinutes,
             other_breaks_minutes: otherBreakMinutes,
             regular_minutes: regularMinutes,
@@ -669,12 +730,14 @@ export const generateDailySummary = async (dateStr: string, staffId?: number): P
         const { error: insertError } = await supabase
           .from('time_daily_summary')
           .insert({
+            ...(staffOrgId ? { org_id: staffOrgId } : {}),
             staff_id: staffId,
             date_worked: dateStr,
             first_clock_in: firstClockIn,
             last_clock_out: lastClockOut,
             total_work_minutes: totalWorkMinutes,
             total_break_minutes: totalBreakMinutes,
+            unpaid_break_minutes: unpaidBreakMinutes,
             lunch_break_minutes: lunchBreakMinutes,
             other_breaks_minutes: otherBreakMinutes,
             regular_minutes: regularMinutes,
@@ -713,6 +776,7 @@ export const addManualClockEvent = async (
   try {
     // Step 1: Insert the clock event directly
     const eventTime = new Date(createSASTTimestamp(dateStr, timeStr));
+    const { startOfDay, startOfNextDay } = getSASTDayBoundaries(dateStr);
     const notesValue = notes || 'Manually added by administrator';
     
     console.log(`Adding manual event: ${eventType} at ${dateStr}T${timeStr} for staff ${staffId}`);
@@ -824,20 +888,29 @@ export const addManualClockEvent = async (
         // Find the matching clock_in or break_start event
         const matchingEventType = eventType === 'clock_out' ? 'clock_in' : 'break_start';
         
-        const { data: matchingEvents } = await supabase
+        const { data: matchingEvents, error: matchingEventsError } = await supabase
           .from('time_clock_events')
           .select('*')
           .eq('staff_id', staffId)
-          .eq('event_time::date', dateStr)
+          .gte('event_time', startOfDay)
+          .lt('event_time', startOfNextDay)
           .eq('event_type', matchingEventType)
           .order('event_time', { ascending: false });
+
+        if (matchingEventsError) {
+          throw matchingEventsError;
+        }
         
         // Find events that aren't already paired in segments
-        const { data: existingSegments } = await supabase
+        const { data: existingSegments, error: existingSegmentsError } = await supabase
           .from('time_segments')
           .select('clock_in_event_id')
           .eq('staff_id', staffId)
           .eq('date_worked', dateStr);
+
+        if (existingSegmentsError) {
+          throw existingSegmentsError;
+        }
         
         // Create a set of already processed event IDs
         const processedEventIds = new Set();
@@ -896,6 +969,7 @@ export const addManualClockEvent = async (
           await supabase
             .from('time_segments')
             .insert({
+              ...(matchingEvent.org_id ? { org_id: matchingEvent.org_id } : {}),
               staff_id: staffId,
               date_worked: dateStr,
               clock_in_event_id: cin_id,
@@ -917,18 +991,27 @@ export const addManualClockEvent = async (
     // Step 3: Update the daily summary
     try {
       // Get all segments for this staff and date
-      const { data: segments } = await supabase
+      const { data: segments, error: segmentsError } = await supabase
         .from('time_segments')
         .select('*')
         .eq('staff_id', staffId)
         .eq('date_worked', dateStr);
+
+      if (segmentsError) {
+        throw segmentsError;
+      }
       
       // Get all clock events for this staff and date
-      const { data: clockEvents } = await supabase
+      const { data: clockEvents, error: clockEventsError } = await supabase
         .from('time_clock_events')
         .select('*')
         .eq('staff_id', staffId)
-        .eq('event_time::date', dateStr);
+        .gte('event_time', startOfDay)
+        .lt('event_time', startOfNextDay);
+
+      if (clockEventsError) {
+        throw clockEventsError;
+      }
       
       if (segments && clockEvents) {
         // Calculate summary data
@@ -947,6 +1030,7 @@ export const addManualClockEvent = async (
         // Get first clock-in and last clock-out
         const clockInEvents = clockEvents.filter(e => e.event_type === 'clock_in');
         const clockOutEvents = clockEvents.filter(e => e.event_type === 'clock_out');
+        const staffOrgId = segments[0]?.org_id ?? clockEvents[0]?.org_id ?? null;
         
         // Sort by time
         clockInEvents.sort((a, b) => new Date(a.event_time).getTime() - new Date(b.event_time).getTime());
@@ -954,7 +1038,7 @@ export const addManualClockEvent = async (
         
         const firstClockIn = clockInEvents.length > 0 ? clockInEvents[0].event_time : null;
         const lastClockOut = clockOutEvents.length > 0 ? clockOutEvents[0].event_time : null;
-        const { regularMinutes, otMinutes, dtMinutes, totalHoursWorked } = calculateDailyMinuteBreakdown(
+        const { unpaidBreakMinutes, regularMinutes, otMinutes, dtMinutes, totalHoursWorked } = calculateDailyMinuteBreakdown(
           dateStr,
           totalWorkMinutes
         );
@@ -977,6 +1061,7 @@ export const addManualClockEvent = async (
               last_clock_out: lastClockOut,
               total_work_minutes: totalWorkMinutes,
               total_break_minutes: totalBreakMinutes,
+              unpaid_break_minutes: unpaidBreakMinutes,
               lunch_break_minutes: lunchBreakMinutes,
               other_breaks_minutes: otherBreakMinutes,
               regular_minutes: regularMinutes,
@@ -993,12 +1078,14 @@ export const addManualClockEvent = async (
           await supabase
             .from('time_daily_summary')
             .insert({
+              ...(staffOrgId ? { org_id: staffOrgId } : {}),
               staff_id: staffId,
               date_worked: dateStr,
               first_clock_in: firstClockIn,
               last_clock_out: lastClockOut,
               total_work_minutes: totalWorkMinutes,
               total_break_minutes: totalBreakMinutes,
+              unpaid_break_minutes: unpaidBreakMinutes,
               lunch_break_minutes: lunchBreakMinutes,
               other_breaks_minutes: otherBreakMinutes,
               regular_minutes: regularMinutes,

@@ -17,6 +17,7 @@ import {
 import { ChevronDown, ChevronUp, Edit3, Trash2, Plus, User, RefreshCw, Loader2, AlertTriangle } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ClockEvent, TimeSegment } from '@/lib/types/attendance';
+import { analyzeClockInOutEvents } from '@/lib/utils/attendance-event-analysis';
 
 import { DailySummary } from '@/lib/types/attendance';
 
@@ -65,27 +66,8 @@ export const AttendanceTimeline = memo(function AttendanceTimeline({
   const [deletingEvent, setDeletingEvent] = useState<ClockEvent | null>(null);
 
   const staffEvents = useMemo(() => clockEvents.filter(event => event.staff_id === staffId), [clockEvents, staffId]);
-
-  // Detect missing clock-out: if last event is clock_in and no subsequent clock_out
-  let missingClockOut = false;
-  if (staffEvents.length > 0) {
-    const lastEvent = staffEvents[staffEvents.length - 1];
-    if (lastEvent.event_type === 'clock_in') {
-      missingClockOut = true;
-    }
-  }
-
-  // Detect multiple clock-ins or clock-outs (potential errors)
-  const duplicateEventInfo = useMemo(() => {
-    const clockInCount = staffEvents.filter(e => e.event_type === 'clock_in').length;
-    const clockOutCount = staffEvents.filter(e => e.event_type === 'clock_out').length;
-    return {
-      hasMultipleClockIns: clockInCount > 1,
-      hasMultipleClockOuts: clockOutCount > 1,
-      clockInCount,
-      clockOutCount,
-    };
-  }, [staffEvents]);
+  const duplicateEventInfo = useMemo(() => analyzeClockInOutEvents(staffEvents), [staffEvents]);
+  const missingClockOut = duplicateEventInfo.missingClockOut;
 
   const staffSegments = useMemo(() => segments.filter(segment => segment.staff_id === staffId), [segments, staffId]);
   // Only include segments with positive duration
@@ -447,26 +429,27 @@ export const AttendanceTimeline = memo(function AttendanceTimeline({
                   Missing clock-out
                 </span>
               )}
-              {(duplicateEventInfo.hasMultipleClockIns || duplicateEventInfo.hasMultipleClockOuts) && (
+              {duplicateEventInfo.hasValidMultipleSessions && (
+                <span className="ml-2 inline-flex items-center align-middle rounded-full bg-blue-500/15 px-2 py-1 text-xs font-semibold text-blue-700 dark:text-blue-100">
+                  {duplicateEventInfo.sessionCount} sessions
+                </span>
+              )}
+              {duplicateEventInfo.hasPotentialDuplicates && (
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span className="ml-2 inline-flex items-center align-middle rounded-full bg-orange-500/15 px-2 py-1 text-xs font-semibold text-orange-700 dark:text-orange-100 cursor-help">
                         <AlertTriangle className="w-3 h-3 mr-1" />
-                        {duplicateEventInfo.hasMultipleClockIns && duplicateEventInfo.hasMultipleClockOuts
-                          ? 'Multiple entries'
-                          : duplicateEventInfo.hasMultipleClockIns
-                            ? `${duplicateEventInfo.clockInCount} clock-ins`
-                            : `${duplicateEventInfo.clockOutCount} clock-outs`}
+                        Review entries
                       </span>
                     </TooltipTrigger>
                     <TooltipContent>
                       <p className="max-w-xs">
-                        {duplicateEventInfo.hasMultipleClockIns && (
-                          <span className="block">{duplicateEventInfo.clockInCount} clock-in events detected</span>
+                        {duplicateEventInfo.hasPotentialDuplicateClockIns && (
+                          <span className="block">One or more clock-in entries look duplicated or out of sequence.</span>
                         )}
-                        {duplicateEventInfo.hasMultipleClockOuts && (
-                          <span className="block">{duplicateEventInfo.clockOutCount} clock-out events detected</span>
+                        {duplicateEventInfo.hasPotentialDuplicateClockOuts && (
+                          <span className="block">One or more clock-out entries look duplicated or out of sequence.</span>
                         )}
                         <span className="block text-muted-foreground mt-1">This may indicate a data entry error. Please review the events below.</span>
                       </p>

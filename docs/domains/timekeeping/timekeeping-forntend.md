@@ -43,7 +43,8 @@ This document describes the current frontend implementation of Time & Attendance
   - Per-staff timeline, used in “Timeline View” for each staff row
   - Displays status, hours summary, clock events list, and computed segments
   - Provides add/edit/delete manual events; triggers staff-scoped processing
-  - Shows “Missing clock-out” hint if last event is a `clock_in`
+  - Shows “Missing clock-out” only for genuinely open shifts; multiple completed sessions in one day are treated as valid
+  - Uses sequence-based anomaly detection so valid split shifts are informational while real duplicate/out-of-order scans still warn
   - Uses design tokens (`bg-card`, `bg-muted`, `text-foreground`, shadcn `Button` variants) so the entire timeline stays legible in both light and dark mode; avoid reintroducing hard-coded gray/white values when tweaking the UI.
 
 - `components/features/staff/MassClockActionDialog.tsx`
@@ -75,6 +76,9 @@ This document describes the current frontend implementation of Time & Attendance
 ## Client utilities and types
 
 - `lib/utils/attendance.ts`
+  - `processAttendanceBatch(dateStr, staffId?)`
+    - Calls the fast batch RPC first
+    - Re-runs the safer sequential processor for staff whose daily event pattern is either a valid multi-session day or an anomalous in/out sequence
   - `processClockEventsIntoSegments(dateStr, staffId?)`
     - Reads events for SAST day window
     - Clears existing `time_segments` for target scope
@@ -82,12 +86,15 @@ This document describes the current frontend implementation of Time & Attendance
     - Calls `generateDailySummary` for the processed staff
   - `generateDailySummary(dateStr, staffId?)`
     - Aggregates `time_segments` into `time_daily_summary`
-    - Computes totals (work/break), first/last, regular vs OT vs DT
+    - Computes totals (work/break), unpaid tea deduction, first/last, regular vs OT vs DT
     - Writes/updates summary row and wage cents (rate lookup from `staff`)
   - `addManualClockEvent(staffId, eventType, dateStr, time, breakType, notes)`
     - Inserts a single event via RPC `add_manual_clock_event_v2` with fallback
-    - Creates the matching segment (for clock_out/break_end)
+    - Creates the matching segment (for clock_out/break_end) using SAST day boundaries
     - Updates the day’s summary
+  - `lib/utils/attendance-event-analysis.ts`
+    - Shared analyzer that distinguishes valid multi-session days from suspicious duplicate/out-of-sequence entries
+    - Used by Weekly Summary, Attendance Timeline, and the daily detail dialog so warnings stay consistent
 
 - `lib/types/attendance.ts`
   - Type definitions: `ClockEvent`, `TimeSegment`, `DailySummary`, etc.
@@ -101,7 +108,7 @@ This document describes the current frontend implementation of Time & Attendance
    - staff list, events, segments, daily summaries, public holidays
 2) User actions:
    - Add/edit/delete event → `addManualClockEvent` or direct Supabase update → call `processClockEventsData(staffId)`
-   - Mass apply → loop `addManualClockEvent` for each staff → per-staff cache refresh
+   - Mass apply → loop `addManualClockEvent` for each staff → run a full-day processing pass so segments and summaries stay synchronized after bulk changes
    - Process all → `processClockEventsData()` without staffId → invalidate global queries
 3) Cache refresh patterns:
    - Prefer targeted refresh using `refreshStaffAttendanceCaches(dateStr, staffId)` to avoid global re-render storms
@@ -110,6 +117,7 @@ This document describes the current frontend implementation of Time & Attendance
 ## UX rules and calculations
 
 - Daily hours shown in timeline prefer `time_daily_summary` when available to reflect unpaid tea-break deductions and Sunday double-time. If summary isn’t available, hours are calculated from segments.
+- Seeing multiple `clock_in` and `clock_out` events in a single day is not automatically an error. The UI only warns when the event order is broken or looks duplicated.
 - Business rules summarized:
   - Mon–Thu: auto 30 min tea deduction
   - Fri: no deduction

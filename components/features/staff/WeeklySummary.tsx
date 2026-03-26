@@ -69,6 +69,7 @@ import { DailyHoursDetailDialog } from '@/components/features/staff/DailyHoursDe
 import React from 'react';
 import { WeeklySummaryPDF, WeeklySummaryDay } from '@/components/features/staff/WeeklySummaryPDF';
 import { calculateWeeklyPayrollMinutes, getWorkedMinutes, standardWeekHoursToMinutes } from '@/lib/payroll-hours';
+import { buildDailyClockAnalysisMap } from '@/lib/utils/attendance-event-analysis';
 
 // Types
 type Staff = {
@@ -113,8 +114,9 @@ type WeeklySummaryRow = {
       isHoliday: boolean;
       isWeekend: boolean;
       isSunday: boolean;
-      hasMultipleClockIns?: boolean;
-      hasMultipleClockOuts?: boolean;
+      hasPotentialDuplicates?: boolean;
+      hasValidMultipleSessions?: boolean;
+      sessionCount?: number;
       missingClockIn?: boolean;  // Has clock-out but no clock-in
       missingClockOut?: boolean; // Has clock-in but no clock-out
     }
@@ -232,7 +234,7 @@ export function WeeklySummary() {
 
       const { data, error } = await supabase
         .from('time_clock_events')
-        .select('staff_id, event_time, event_type')
+        .select('id, staff_id, event_time, event_type')
         .gte('event_time', sastStart)
         .lte('event_time', sastEnd)
         .in('event_type', ['clock_in', 'clock_out']);
@@ -241,29 +243,8 @@ export function WeeklySummary() {
     },
   });
 
-  // Build a map of duplicate events: { "staffId_date" -> { clockIns: number, clockOuts: number } }
   const duplicateEventsMap = useMemo(() => {
-    const map: Record<string, { clockIns: number; clockOuts: number }> = {};
-
-    weeklyClockEvents.forEach(event => {
-      // Extract date from event_time (convert to SAST date)
-      const eventDate = new Date(event.event_time);
-      // Format as YYYY-MM-DD in local time (SAST)
-      const dateStr = format(eventDate, 'yyyy-MM-dd');
-      const key = `${event.staff_id}_${dateStr}`;
-
-      if (!map[key]) {
-        map[key] = { clockIns: 0, clockOuts: 0 };
-      }
-
-      if (event.event_type === 'clock_in') {
-        map[key].clockIns++;
-      } else if (event.event_type === 'clock_out') {
-        map[key].clockOuts++;
-      }
-    });
-
-    return map;
+    return buildDailyClockAnalysisMap(weeklyClockEvents);
   }, [weeklyClockEvents]);
 
   // Process data for weekly summary
@@ -271,7 +252,7 @@ export function WeeklySummary() {
     if (!activeStaff || activeStaff.length === 0) return;
     const processed = activeStaff.map(staff => {
       const staffSummaries = weeklySummaries.filter(s => s.staff_id === staff.staff_id);
-      const dailyHours: Record<string, { hours: number; isHoliday: boolean; isWeekend: boolean; isSunday: boolean; hasMultipleClockIns?: boolean; hasMultipleClockOuts?: boolean; missingClockIn?: boolean; missingClockOut?: boolean }> = {};
+      const dailyHours: Record<string, { hours: number; isHoliday: boolean; isWeekend: boolean; isSunday: boolean; hasPotentialDuplicates?: boolean; hasValidMultipleSessions?: boolean; sessionCount?: number; missingClockIn?: boolean; missingClockOut?: boolean }> = {};
       daysOfWeek.forEach(day => {
         const dateStr = format(day, 'yyyy-MM-dd');
         const summary = staffSummaries.find(s => s.date_worked === dateStr);
@@ -282,25 +263,18 @@ export function WeeklySummary() {
 
         // Check for clock event anomalies
         const duplicateKey = `${staff.staff_id}_${dateStr}`;
-        const eventCounts = duplicateEventsMap[duplicateKey];
-        const clockIns = eventCounts?.clockIns || 0;
-        const clockOuts = eventCounts?.clockOuts || 0;
-
-        // Detect anomalies
-        const hasMultipleClockIns = clockIns > 1;
-        const hasMultipleClockOuts = clockOuts > 1;
-        const missingClockIn = clockOuts > 0 && clockIns === 0;  // Has clock-out but no clock-in
-        const missingClockOut = clockIns > 0 && clockOuts === 0; // Has clock-in but no clock-out
+        const eventAnalysis = duplicateEventsMap[duplicateKey];
 
         dailyHours[dateStr] = {
           hours: Math.round((workMin / 60) * 100) / 100,
           isHoliday,
           isWeekend: isSat || isSun,
           isSunday: isSun,
-          hasMultipleClockIns,
-          hasMultipleClockOuts,
-          missingClockIn,
-          missingClockOut,
+          hasPotentialDuplicates: eventAnalysis?.hasPotentialDuplicates,
+          hasValidMultipleSessions: eventAnalysis?.hasValidMultipleSessions,
+          sessionCount: eventAnalysis?.sessionCount,
+          missingClockIn: eventAnalysis?.missingClockIn,
+          missingClockOut: eventAnalysis?.missingClockOut,
         };
       });
       const weeklyMinutes = calculateWeeklyPayrollMinutes(
@@ -798,18 +772,15 @@ export function WeeklySummary() {
                     }
                     
                     // Check for any anomalies
-                    const hasDuplicateWarning = dayData?.hasMultipleClockIns || dayData?.hasMultipleClockOuts;
+                    const hasDuplicateWarning = dayData?.hasPotentialDuplicates;
                     const hasMissingEvent = dayData?.missingClockIn || dayData?.missingClockOut;
                     const hasAnyWarning = hasDuplicateWarning || hasMissingEvent;
 
                     // Build warning message
                     const warningParts: string[] = [];
-                    if (dayData?.hasMultipleClockIns) warningParts.push('Multiple clock-ins');
-                    if (dayData?.hasMultipleClockOuts) warningParts.push('Multiple clock-outs');
+                    if (dayData?.hasPotentialDuplicates) warningParts.push('Potential duplicate or out-of-sequence clock event');
                     if (dayData?.missingClockIn) warningParts.push('Missing clock-in (only clock-out recorded)');
                     if (dayData?.missingClockOut) warningParts.push('Missing clock-out (only clock-in recorded)');
-                    const warningMessage = warningParts.join('\n');
-
                     // Determine warning color - orange for duplicates, red for missing events
                     const warningColor = hasMissingEvent ? 'text-red-500' : 'text-amber-500';
                     const bgColor = hasMissingEvent ? 'bg-red-500/10' : hasDuplicateWarning ? 'bg-amber-500/10' : '';
