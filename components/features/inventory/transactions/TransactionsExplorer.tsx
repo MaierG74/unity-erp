@@ -271,7 +271,9 @@ export function TransactionsExplorer() {
       code: c.internal_code || '',
       description: c.description || '',
       category: (c.component_categories as any)?.categoryname || '',
-      currentStock: Array.isArray(c.inventory) ? (c.inventory[0]?.quantity_on_hand ?? 0) : 0,
+      currentStock: Array.isArray(c.inventory)
+        ? (c.inventory[0]?.quantity_on_hand ?? 0)
+        : (c.inventory?.quantity_on_hand ?? 0),
       onOrder: 0,
     }));
 
