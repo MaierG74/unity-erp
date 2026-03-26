@@ -37,6 +37,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Trash2, AlertTriangle, Copy, ChevronUp, ChevronDown } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import InlineAttachmentsCell from './InlineAttachmentsCell';
@@ -187,6 +189,11 @@ function QuoteItemRow({
   expandedItemId,
   autoExpandItemId,
   onAutoExpandHandled,
+  batchMode = false,
+  batchMarkupType = 'percentage',
+  isSelected = false,
+  onToggleSelect,
+  previewData: itemPreview = null,
 }: {
   item: QuoteItem;
   quoteId: string;
@@ -219,6 +226,18 @@ function QuoteItemRow({
   expandedItemId?: string;
   autoExpandItemId?: string;
   onAutoExpandHandled?: () => void;
+  batchMode?: boolean;
+  batchMarkupType?: 'percentage' | 'fixed';
+  isSelected?: boolean;
+  onToggleSelect?: (checked: boolean) => void;
+  previewData?: {
+    oldPrice: number;
+    newPrice: number;
+    newTotal: number;
+    oldMarkup: number;
+    newMarkup: number;
+    profit: number;
+  } | null;
 }) {
   const [desc, setDesc] = React.useState(item.description);
   const [qty, setQty] = React.useState<string>(String(item.qty));
@@ -254,7 +273,7 @@ function QuoteItemRow({
 
   return (
     <React.Fragment>
-      <TableRow key={item.id} ref={rowRef} className={isHeading ? 'bg-muted/30' : undefined}>
+      <TableRow key={item.id} ref={rowRef} className={`${isHeading ? 'bg-muted/30' : ''} ${batchMode && isPriced && !isSelected ? 'opacity-40' : ''}`.trim() || undefined}>
         <TableCell>
           <div className="flex items-center gap-1">
             <div className="flex flex-col">
@@ -312,8 +331,19 @@ function QuoteItemRow({
         {isPriced ? (
           <>
             <TableCell><Input type="number" value={qty} onChange={e => setQty(e.target.value)} onBlur={() => { const numQty = Number(qty) || 0; if (numQty !== item.qty) onUpdate(item.id, 'qty', numQty); setQty(String(numQty)); }} onFocus={e => e.target.select()} /></TableCell>
-            <TableCell><Input type="number" step="0.01" value={unitPrice} onChange={e => setUnitPrice(e.target.value)} onBlur={() => { const numPrice = Math.round((Number(unitPrice) || 0) * 100) / 100; if (numPrice !== item.unit_price) onUpdate(item.id, 'unit_price', numPrice); setUnitPrice(String(numPrice)); }} onFocus={e => e.target.select()} /></TableCell>
-            <TableCell className="text-right font-medium">{formatCurrency((Number(qty) || 0) * (Number(unitPrice) || 0))}</TableCell>
+            <TableCell>
+              {itemPreview ? (
+                <div className="flex flex-col items-center">
+                  <span className="line-through text-muted-foreground text-[10px]">{formatCurrency(itemPreview.oldPrice)}</span>
+                  <span className="font-bold text-primary text-xs">{formatCurrency(itemPreview.newPrice)}</span>
+                </div>
+              ) : (
+                <Input type="number" step="0.01" value={unitPrice} onChange={e => setUnitPrice(e.target.value)} onBlur={() => { const numPrice = Math.round((Number(unitPrice) || 0) * 100) / 100; if (numPrice !== item.unit_price) onUpdate(item.id, 'unit_price', numPrice); setUnitPrice(String(numPrice)); }} onFocus={e => e.target.select()} />
+              )}
+            </TableCell>
+            <TableCell className="text-right font-medium">
+              {itemPreview ? formatCurrency(itemPreview.newTotal) : formatCurrency((Number(qty) || 0) * (Number(unitPrice) || 0))}
+            </TableCell>
           </>
         ) : (
           <>
@@ -322,63 +352,114 @@ function QuoteItemRow({
             <TableCell className="text-center text-muted-foreground">—</TableCell>
           </>
         )}
-        <TableCell>
-          <QuoteItemAttachmentsCell
-            quoteId={quoteId}
-            itemId={item.id}
-            version={attachmentsVersion}
-            onItemAttachmentsChange={onItemAttachmentsChange}
-          />
-        </TableCell>
-        <TableCell className="text-center">
-          <div className="flex items-center justify-center gap-2">
-            <Button variant="secondary" size="sm" className="px-3 py-1.5 relative" onClick={() => setDetailsOpen(true)}>
-              Details
-              {item.internal_notes && (
-                <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-500" title="Has internal notes" />
-              )}
-            </Button>
-            {isPriced && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="px-3 py-1.5"
-                title="Cutlist Calculator"
-                aria-label="Cutlist Calculator"
-                asChild
-              >
-                <Link href={`/quotes/${quoteId}/cutlist/${item.id}`}>
-                  Cutlist
-                </Link>
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8"
-              title="Duplicate item"
-              aria-label="Duplicate item"
-              onClick={() => onDuplicate(item.id)}
-              disabled={isDuplicating}
-            >
-              {isDuplicating ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+        {batchMode ? (
+          <>
+            <TableCell className="text-center text-xs">
+              {isPriced ? (
+                itemPreview ? (
+                  <span className="text-amber-500">
+                    {itemPreview.oldMarkup}→{itemPreview.newMarkup}{batchMarkupType === 'percentage' ? '%' : ''}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">
+                    {((item.quote_item_clusters || [])[0]?.markup_percent ?? 0)}%
+                  </span>
+                )
               ) : (
-                <Copy className="h-4 w-4" />
+                <span className="text-muted-foreground">—</span>
               )}
-            </Button>
-            <Button
-              variant="destructiveSoft"
-              size="icon"
-              className="h-8 w-8"
-              title="Delete item"
-              aria-label="Delete item"
-              onClick={() => onDelete(item.id)}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
-        </TableCell>
+            </TableCell>
+            <TableCell className="text-right text-xs">
+              {isPriced ? (
+                itemPreview ? (
+                  <span className="text-green-500 font-medium">
+                    {formatCurrency(itemPreview.profit * item.qty)}
+                  </span>
+                ) : (() => {
+                  const cluster = (item.quote_item_clusters || [])[0];
+                  if (!cluster) return <span className="text-muted-foreground">—</span>;
+                  const subtotal = calculateClusterSubtotal(cluster);
+                  const markupAmount = subtotal * (cluster.markup_percent / 100);
+                  return (
+                    <span className="text-muted-foreground">
+                      {formatCurrency(roundCurrencyValue(markupAmount) * item.qty)}
+                    </span>
+                  );
+                })()
+              ) : (
+                <span className="text-muted-foreground">—</span>
+              )}
+            </TableCell>
+            <TableCell className="text-center">
+              {isPriced && (item.quote_item_clusters || []).length > 0 ? (
+                <Checkbox
+                  checked={isSelected}
+                  onCheckedChange={(checked) => onToggleSelect?.(!!checked)}
+                />
+              ) : null}
+            </TableCell>
+          </>
+        ) : (
+          <>
+            <TableCell>
+              <QuoteItemAttachmentsCell
+                quoteId={quoteId}
+                itemId={item.id}
+                version={attachmentsVersion}
+                onItemAttachmentsChange={onItemAttachmentsChange}
+              />
+            </TableCell>
+            <TableCell className="text-center">
+              <div className="flex items-center justify-center gap-2">
+                <Button variant="secondary" size="sm" className="px-3 py-1.5 relative" onClick={() => setDetailsOpen(true)}>
+                  Details
+                  {item.internal_notes && (
+                    <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-500" title="Has internal notes" />
+                  )}
+                </Button>
+                {isPriced && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="px-3 py-1.5"
+                    title="Cutlist Calculator"
+                    aria-label="Cutlist Calculator"
+                    asChild
+                  >
+                    <Link href={`/quotes/${quoteId}/cutlist/${item.id}`}>
+                      Cutlist
+                    </Link>
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  title="Duplicate item"
+                  aria-label="Duplicate item"
+                  onClick={() => onDuplicate(item.id)}
+                  disabled={isDuplicating}
+                >
+                  {isDuplicating ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
+                </Button>
+                <Button
+                  variant="destructiveSoft"
+                  size="icon"
+                  className="h-8 w-8"
+                  title="Delete item"
+                  aria-label="Delete item"
+                  onClick={() => onDelete(item.id)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </TableCell>
+          </>
+        )}
       </TableRow>
       {/* Item Details Dialog */}
       <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
@@ -427,7 +508,7 @@ function QuoteItemRow({
       </Dialog>
       {isPriced && isExpanded && displayClusters.map((cluster) => (
         <TableRow key={`${item.id}-cluster-${cluster.id}`}>
-          <TableCell colSpan={7} className="p-0">
+          <TableCell colSpan={batchMode ? 8 : 7} className="p-0">
             <QuoteItemClusterGrid
               cluster={cluster}
               onAddLine={onAddClusterLine}
@@ -459,6 +540,127 @@ export default function QuoteItemsTable({
   const { toast } = useToast();
   const [showAddItemDialog, setShowAddItemDialog] = React.useState(false);
   const [duplicatingItemId, setDuplicatingItemId] = React.useState<string | null>(null);
+
+  // Batch markup mode state
+  const [batchMode, setBatchMode] = React.useState(false);
+  const [selectedItemIds, setSelectedItemIds] = React.useState<Set<string>>(new Set());
+  const [batchMarkupType, setBatchMarkupType] = React.useState<'percentage' | 'fixed'>('percentage');
+  const [batchMarkupValue, setBatchMarkupValue] = React.useState<string>('');
+  const [previewData, setPreviewData] = React.useState<Map<string, {
+    oldPrice: number;
+    newPrice: number;
+    newTotal: number;
+    oldMarkup: number;
+    newMarkup: number;
+    profit: number;
+  }> | null>(null);
+  const [showConfirmDialog, setShowConfirmDialog] = React.useState(false);
+
+  const eligibleBatchItems = React.useMemo(() => {
+    return items.filter(item => {
+      const isPriced = !item.item_type || item.item_type === 'priced';
+      const hasCluster = (item.quote_item_clusters || []).length > 0;
+      return isPriced && hasCluster;
+    });
+  }, [items]);
+
+  const exitBatchMode = () => {
+    setBatchMode(false);
+    setSelectedItemIds(new Set());
+    setBatchMarkupValue('');
+    setBatchMarkupType('percentage');
+    setPreviewData(null);
+    setShowConfirmDialog(false);
+  };
+
+  const handleToggleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedItemIds(new Set(eligibleBatchItems.map(item => item.id)));
+    } else {
+      setSelectedItemIds(new Set());
+    }
+    setPreviewData(null);
+  };
+
+  const handleToggleItem = (itemId: string, checked: boolean) => {
+    setSelectedItemIds(prev => {
+      const next = new Set(prev);
+      if (checked) next.add(itemId);
+      else next.delete(itemId);
+      return next;
+    });
+    setPreviewData(null);
+  };
+
+  const handlePreview = () => {
+    const preview = new Map<string, {
+      oldPrice: number;
+      newPrice: number;
+      newTotal: number;
+      oldMarkup: number;
+      newMarkup: number;
+      profit: number;
+    }>();
+
+    const markupValue = parseFloat(batchMarkupValue) || 0;
+
+    for (const item of items) {
+      if (!selectedItemIds.has(item.id)) continue;
+      const cluster = (item.quote_item_clusters || [])[0];
+      if (!cluster) continue;
+
+      const subtotal = calculateClusterSubtotal(cluster);
+      const oldMarkup = cluster.markup_percent;
+      const markupAmount = batchMarkupType === 'percentage'
+        ? subtotal * (markupValue / 100)
+        : markupValue;
+      const newUnitPrice = roundCurrencyValue(subtotal + markupAmount);
+      const newTotal = roundCurrencyValue(item.qty * newUnitPrice);
+      const profit = roundCurrencyValue(markupAmount);
+
+      preview.set(item.id, {
+        oldPrice: item.unit_price,
+        newPrice: newUnitPrice,
+        newTotal,
+        oldMarkup,
+        newMarkup: markupValue,
+        profit,
+      });
+    }
+
+    setPreviewData(preview);
+  };
+
+  const batchPreviewTotals = React.useMemo(() => {
+    if (!previewData) return null;
+
+    let oldTotal = 0;
+    let newTotal = 0;
+    let totalProfit = 0;
+
+    for (const item of items) {
+      const isPriced = !item.item_type || item.item_type === 'priced';
+      if (!isPriced) continue;
+
+      const preview = previewData.get(item.id);
+      if (preview) {
+        oldTotal += roundCurrencyValue(item.qty * item.unit_price);
+        newTotal += preview.newTotal;
+        totalProfit += preview.profit * item.qty;
+      } else {
+        oldTotal += roundCurrencyValue(item.qty * item.unit_price);
+        newTotal += roundCurrencyValue(item.qty * item.unit_price);
+        const cluster = (item.quote_item_clusters || [])[0];
+        if (cluster) {
+          const subtotal = calculateClusterSubtotal(cluster);
+          const markupAmount = subtotal * (cluster.markup_percent / 100);
+          totalProfit += roundCurrencyValue(markupAmount) * item.qty;
+        }
+      }
+    }
+
+    return { oldTotal, newTotal, totalProfit };
+  }, [previewData, items]);
 
   const handleAddItem = () => setShowAddItemDialog(true);
 
@@ -1163,11 +1365,84 @@ export default function QuoteItemsTable({
         <div className="text-sm text-muted-foreground">
           {items.length} {items.length === 1 ? 'item' : 'items'}
         </div>
-        <Button onClick={handleAddItem} size="sm" className="bg-primary hover:bg-primary/90">
-          Add Item
-        </Button>
+        <div className="flex items-center gap-2">
+          {!batchMode && (
+            <Button
+              onClick={() => setBatchMode(true)}
+              size="sm"
+              variant="outline"
+              className="border-primary/50 text-primary hover:bg-primary/10"
+              disabled={eligibleBatchItems.length === 0}
+            >
+              Batch Markup
+            </Button>
+          )}
+          {!batchMode && (
+            <Button onClick={handleAddItem} size="sm" className="bg-primary hover:bg-primary/90">
+              Add Item
+            </Button>
+          )}
+        </div>
       </div>
-      
+
+      {batchMode && (
+        <div className="flex items-center gap-3 px-3 py-2 bg-primary/5 border border-primary/20 rounded-lg text-sm flex-wrap">
+          <label className="flex items-center gap-1.5 text-muted-foreground">
+            <Checkbox
+              checked={selectedItemIds.size === eligibleBatchItems.length && eligibleBatchItems.length > 0}
+              onCheckedChange={(checked) => handleToggleSelectAll(!!checked)}
+            />
+            All
+          </label>
+          <span className="text-muted-foreground text-xs">
+            {selectedItemIds.size} of {eligibleBatchItems.length} selected
+          </span>
+          <span className="border-l border-border h-4" />
+          <Select
+            value={batchMarkupType}
+            onValueChange={(v) => {
+              setBatchMarkupType(v as 'percentage' | 'fixed');
+              setPreviewData(null);
+            }}
+          >
+            <SelectTrigger className="w-[90px] h-7 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="percentage">%</SelectItem>
+              <SelectItem value="fixed">R (fixed)</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
+            type="number"
+            value={batchMarkupValue}
+            onChange={(e) => {
+              setBatchMarkupValue(e.target.value);
+              setPreviewData(null);
+            }}
+            onFocus={(e) => e.target.select()}
+            placeholder="0"
+            className="w-20 h-7 text-xs"
+          />
+          <Button
+            size="sm"
+            className="h-7 text-xs"
+            disabled={selectedItemIds.size === 0 || batchMarkupValue === ''}
+            onClick={previewData ? () => setShowConfirmDialog(true) : handlePreview}
+          >
+            {previewData ? 'Apply' : 'Preview'}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs text-destructive hover:text-destructive ml-auto"
+            onClick={exitBatchMode}
+          >
+            Cancel
+          </Button>
+        </div>
+      )}
+
       <div className="rounded-lg border bg-card overflow-x-auto">
         <Table>
           <TableHeader>
@@ -1177,8 +1452,23 @@ export default function QuoteItemsTable({
               <TableHead className="w-32 text-center font-medium">Qty</TableHead>
               <TableHead className="w-36 text-center font-medium">Unit Price</TableHead>
               <TableHead className="w-40 text-right font-medium">Total</TableHead>
-              <TableHead className="w-28 text-center font-medium">Attachments</TableHead>
-              <TableHead className="w-40 text-center font-medium">Actions</TableHead>
+              {batchMode ? (
+                <>
+                  <TableHead className="w-16 text-center font-medium text-primary">Markup</TableHead>
+                  <TableHead className="w-28 text-right font-medium text-green-500">Profit</TableHead>
+                  <TableHead className="w-10 text-center">
+                    <Checkbox
+                      checked={selectedItemIds.size === eligibleBatchItems.length && eligibleBatchItems.length > 0}
+                      onCheckedChange={(checked) => handleToggleSelectAll(!!checked)}
+                    />
+                  </TableHead>
+                </>
+              ) : (
+                <>
+                  <TableHead className="w-28 text-center font-medium">Attachments</TableHead>
+                  <TableHead className="w-40 text-center font-medium">Actions</TableHead>
+                </>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1205,9 +1495,33 @@ export default function QuoteItemsTable({
                 expandedItemId={expandedItemId}
                 autoExpandItemId={autoExpandItemId}
                 onAutoExpandHandled={onAutoExpandHandled}
+                batchMode={batchMode}
+                batchMarkupType={batchMarkupType}
+                isSelected={selectedItemIds.has(item.id)}
+                onToggleSelect={(checked) => handleToggleItem(item.id, checked)}
+                previewData={previewData?.get(item.id) ?? null}
               />
             ))}
           </TableBody>
+          {batchMode && batchPreviewTotals && (
+            <tfoot>
+              <tr className="border-t bg-muted/30">
+                <td colSpan={4} className="px-4 py-2 text-right text-xs font-medium text-muted-foreground">
+                  Totals
+                </td>
+                <td className="px-4 py-2 text-right text-xs">
+                  <span className="line-through text-muted-foreground">{formatCurrency(batchPreviewTotals.oldTotal)}</span>
+                  {' '}
+                  <span className="font-bold text-primary">{formatCurrency(batchPreviewTotals.newTotal)}</span>
+                </td>
+                <td className="px-4 py-2" />
+                <td className="px-4 py-2 text-right text-xs font-medium text-green-500">
+                  {formatCurrency(batchPreviewTotals.totalProfit)}
+                </td>
+                <td className="px-4 py-2" />
+              </tr>
+            </tfoot>
+          )}
         </Table>
       </div>
       <AddQuoteItemDialog
