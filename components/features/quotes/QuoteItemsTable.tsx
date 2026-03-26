@@ -43,6 +43,7 @@ import { Loader2, Trash2, AlertTriangle, Copy, ChevronUp, ChevronDown } from 'lu
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import InlineAttachmentsCell from './InlineAttachmentsCell';
 import AddQuoteItemDialog from './AddQuoteItemDialog';
+import BatchMarkupConfirmDialog from './BatchMarkupConfirmDialog';
 import { createQuoteAttachmentFromUrl, fetchPrimaryProductImage } from '@/lib/db/quotes';
 import type { ProductOptionSelection } from '@/lib/db/products';
 import { buildCutlistLineRefsFromLines, cloneCutlistLayoutWithLineRefs, cloneJsonValue } from '@/lib/cutlist/quoteSnapshotCopy';
@@ -555,6 +556,7 @@ export default function QuoteItemsTable({
     profit: number;
   }> | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = React.useState(false);
+  const [isApplyingBatch, setIsApplyingBatch] = React.useState(false);
 
   const eligibleBatchItems = React.useMemo(() => {
     return items.filter(item => {
@@ -629,6 +631,66 @@ export default function QuoteItemsTable({
     }
 
     setPreviewData(preview);
+  };
+
+  const handleApplyBatchMarkup = async () => {
+    if (!previewData) return;
+    setIsApplyingBatch(true);
+
+    try {
+      const markupValue = parseFloat(batchMarkupValue) || 0;
+      const updates: Promise<unknown>[] = [];
+
+      for (const [itemId, preview] of previewData.entries()) {
+        const item = items.find(i => i.id === itemId);
+        if (!item) continue;
+        const cluster = (item.quote_item_clusters || [])[0];
+        if (!cluster) continue;
+
+        updates.push(
+          updateQuoteItemCluster(cluster.id, { markup_percent: markupValue }),
+          updateQuoteItem(itemId, {
+            unit_price: preview.newPrice,
+            total: preview.newTotal,
+          }),
+        );
+      }
+
+      await Promise.all(updates);
+
+      // Optimistic UI update
+      const updatedItems = items.map(item => {
+        const preview = previewData.get(item.id);
+        if (!preview) return item;
+        const cluster = (item.quote_item_clusters || [])[0];
+        return {
+          ...item,
+          unit_price: preview.newPrice,
+          total: preview.newTotal,
+          quote_item_clusters: item.quote_item_clusters?.map(c =>
+            c.id === cluster?.id
+              ? { ...c, markup_percent: parseFloat(batchMarkupValue) || 0 }
+              : c
+          ),
+        };
+      });
+
+      onItemsChange(updatedItems);
+      toast({
+        title: 'Markup updated',
+        description: `Updated markup on ${previewData.size} item${previewData.size !== 1 ? 's' : ''}.`,
+      });
+      exitBatchMode();
+    } catch (error) {
+      console.error('Batch markup error:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to apply batch markup. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsApplyingBatch(false);
+    }
   };
 
   const batchPreviewTotals = React.useMemo(() => {
@@ -1531,7 +1593,17 @@ export default function QuoteItemsTable({
         onCreateProduct={handleCreateProductItem}
         onCreateText={handleCreateTextItem}
       />
-
+      <BatchMarkupConfirmDialog
+        open={showConfirmDialog}
+        onOpenChange={setShowConfirmDialog}
+        onConfirm={handleApplyBatchMarkup}
+        selectedCount={previewData?.size ?? 0}
+        markupValue={parseFloat(batchMarkupValue) || 0}
+        markupType={batchMarkupType}
+        oldTotal={batchPreviewTotals?.oldTotal ?? 0}
+        newTotal={batchPreviewTotals?.newTotal ?? 0}
+        isApplying={isApplyingBatch}
+      />
     </div>
   );
 }
