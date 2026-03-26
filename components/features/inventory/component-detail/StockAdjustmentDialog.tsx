@@ -210,9 +210,10 @@ export function StockAdjustmentDialog({
       resetForm();
       onOpenChange(false);
     },
-    onError: (error) => {
+    onError: (error: any) => {
+      const message = error?.message || error?.details || error?.hint || (typeof error === 'string' ? error : 'Unknown error');
       toast.error('Failed to record adjustment', {
-        description: error instanceof Error ? error.message : 'Unknown error',
+        description: message,
       });
     },
   });
