@@ -17,8 +17,19 @@ import { toast } from 'sonner';
 import { useReactToPrint } from 'react-to-print';
 import { supabase } from '@/lib/supabase';
 
+const STORAGE_KEY = 'transactions-explorer-config';
+
+function loadPersistedConfig(): ViewConfig {
+  if (typeof window === 'undefined') return DEFAULT_VIEW_CONFIG;
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) return { ...DEFAULT_VIEW_CONFIG, ...JSON.parse(saved) };
+  } catch { /* corrupted data — fall back to default */ }
+  return DEFAULT_VIEW_CONFIG;
+}
+
 export function TransactionsExplorer() {
-  const [config, setConfig] = useState<ViewConfig>(DEFAULT_VIEW_CONFIG);
+  const [config, setConfig] = useState<ViewConfig>(loadPersistedConfig);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [activeViewName, setActiveViewName] = useState<string | null>(null);
   const [adjustTarget, setAdjustTarget] = useState<{
@@ -31,6 +42,11 @@ export function TransactionsExplorer() {
   const countSheetRef = useRef<HTMLDivElement>(null);
   const [countSheetData, setCountSheetData] = useState<CountSheetComponent[] | null>(null);
   const queryClient = useQueryClient();
+
+  // Persist config to localStorage on every change
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+  }, [config]);
 
   const { data: transactions = [], isLoading, error, dateRange } = useTransactionsQuery({
     dateFrom: config.dateRange.from,
