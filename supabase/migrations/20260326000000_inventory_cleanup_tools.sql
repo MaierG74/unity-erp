@@ -85,7 +85,7 @@ BEGIN
   -- Validate caller is an active member of this org
   IF NOT EXISTS (
     SELECT 1 FROM public.organization_members
-    WHERE user_id = auth.uid() AND org_id = v_org_id AND status = 'active'
+    WHERE user_id = auth.uid() AND org_id = v_org_id AND is_active = true
   ) THEN
     RAISE EXCEPTION 'Not authorized for this organization';
   END IF;
