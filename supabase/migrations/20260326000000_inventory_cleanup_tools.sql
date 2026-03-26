@@ -27,17 +27,17 @@ SELECT
   it.reason,
   it.org_id,
   it.transaction_type_id,
-  it.transfer_ref,
   c.internal_code  AS component_code,
   c.description    AS component_description,
   c.category_id,
-  c.is_active      AS component_is_active,
   cc.categoryname  AS category_name,
   tt.type_name     AS transaction_type_name,
   po.q_number      AS po_number,
   po.supplier_id,
   s.name           AS supplier_name,
-  o.order_number
+  o.order_number,
+  it.transfer_ref,
+  c.is_active      AS component_is_active
 FROM public.inventory_transactions it
 LEFT JOIN public.components        c  ON c.component_id        = it.component_id
 LEFT JOIN public.component_categories cc ON cc.cat_id           = c.category_id
@@ -52,7 +52,7 @@ GRANT SELECT ON public.inventory_transactions_enriched TO authenticated;
 CREATE OR REPLACE FUNCTION public.transfer_component_stock(
   p_from_component_id integer,
   p_to_component_id integer,
-  p_quantity integer,
+  p_quantity numeric,
   p_reason text,
   p_notes text DEFAULT NULL
 )
@@ -68,6 +68,14 @@ DECLARE
   v_full_reason text;
   v_org_id uuid;
 BEGIN
+  IF p_quantity IS NULL OR p_quantity <= 0 THEN
+    RAISE EXCEPTION 'Transfer quantity must be greater than zero';
+  END IF;
+
+  IF p_from_component_id = p_to_component_id THEN
+    RAISE EXCEPTION 'Source and destination components must differ';
+  END IF;
+
   -- Derive org_id from the source component (RLS already ensures the user can see it)
   SELECT org_id INTO v_org_id FROM public.components WHERE component_id = p_from_component_id;
   IF v_org_id IS NULL THEN
@@ -115,17 +123,16 @@ BEGIN
     auth.uid(), v_full_reason, v_org_id, v_transfer_ref
   ) RETURNING transaction_id INTO v_to_txn_id;
 
-  -- Update source inventory (decrement)
-  INSERT INTO public.inventory (component_id, quantity_on_hand, reorder_level)
-  VALUES (p_from_component_id, -p_quantity, 0)
+  -- Explicitly stamp org_id instead of relying on the legacy default.
+  INSERT INTO public.inventory (component_id, quantity_on_hand, reorder_level, org_id)
+  VALUES (p_from_component_id, -p_quantity, 0, v_org_id)
   ON CONFLICT (component_id) DO UPDATE
-  SET quantity_on_hand = public.inventory.quantity_on_hand - p_quantity;
+  SET quantity_on_hand = COALESCE(public.inventory.quantity_on_hand, 0) - p_quantity;
 
-  -- Update destination inventory (increment)
-  INSERT INTO public.inventory (component_id, quantity_on_hand, reorder_level)
-  VALUES (p_to_component_id, p_quantity, 0)
+  INSERT INTO public.inventory (component_id, quantity_on_hand, reorder_level, org_id)
+  VALUES (p_to_component_id, p_quantity, 0, v_org_id)
   ON CONFLICT (component_id) DO UPDATE
-  SET quantity_on_hand = public.inventory.quantity_on_hand + p_quantity;
+  SET quantity_on_hand = COALESCE(public.inventory.quantity_on_hand, 0) + p_quantity;
 
   RETURN jsonb_build_object(
     'transfer_ref', v_transfer_ref,
