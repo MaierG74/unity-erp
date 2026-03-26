@@ -76,6 +76,7 @@ export function StockAdjustmentDialog({
   const [transferToName, setTransferToName] = useState('');
   const [transferSearch, setTransferSearch] = useState('');
   const [allowNegative, setAllowNegative] = useState(false);
+  const [transferPickerOpen, setTransferPickerOpen] = useState(false);
 
   const debouncedTransferSearch = useDebounce(transferSearch, 300);
 
@@ -227,6 +228,7 @@ export function StockAdjustmentDialog({
     setTransferToName('');
     setTransferSearch('');
     setAllowNegative(false);
+    setTransferPickerOpen(false);
   }, []);
 
   useEffect(() => {
@@ -281,15 +283,15 @@ export function StockAdjustmentDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-3">
           {/* Current Stock Display */}
-          <div className="bg-muted/50 rounded-lg p-4 flex items-center justify-between">
+          <div className="bg-muted/50 rounded-md p-3 flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground">Current Stock</p>
+              <p className="text-xs text-muted-foreground uppercase">Current Stock</p>
               <p className="text-2xl font-bold">{currentStock}</p>
             </div>
             <div className="text-right">
-              <p className="text-sm text-muted-foreground">New Stock</p>
+              <p className="text-xs text-muted-foreground uppercase">New Stock</p>
               <p className={`text-2xl font-bold ${
                 adjustmentType === 'transfer'
                   ? (numericQuantity > 0 ? 'text-red-600' : '')
@@ -304,43 +306,47 @@ export function StockAdjustmentDialog({
           </div>
 
           {/* Adjustment Type */}
-          <div className="space-y-2">
-            <Label>Adjustment Type</Label>
-            <div className="grid grid-cols-4 gap-2">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground uppercase">Adjustment Type</Label>
+            <div className="grid grid-cols-4 gap-1.5">
               <Button
                 type="button"
+                size="sm"
                 variant={adjustmentType === 'set' ? 'default' : 'outline'}
-                className="w-full"
+                className="w-full text-xs h-8"
                 onClick={() => setAdjustmentType('set')}
               >
-                <ClipboardCheck className="h-4 w-4 mr-1" />
+                <ClipboardCheck className="h-3.5 w-3.5 mr-1" />
                 Set To
               </Button>
               <Button
                 type="button"
+                size="sm"
                 variant={adjustmentType === 'add' ? 'default' : 'outline'}
-                className="w-full"
+                className="w-full text-xs h-8"
                 onClick={() => setAdjustmentType('add')}
               >
-                <Plus className="h-4 w-4 mr-1" />
+                <Plus className="h-3.5 w-3.5 mr-1" />
                 Add
               </Button>
               <Button
                 type="button"
+                size="sm"
                 variant={adjustmentType === 'subtract' ? 'default' : 'outline'}
-                className="w-full"
+                className="w-full text-xs h-8"
                 onClick={() => setAdjustmentType('subtract')}
               >
-                <Minus className="h-4 w-4 mr-1" />
+                <Minus className="h-3.5 w-3.5 mr-1" />
                 Subtract
               </Button>
               <Button
                 type="button"
+                size="sm"
                 variant={adjustmentType === 'transfer' ? 'default' : 'outline'}
-                className="w-full"
+                className="w-full text-xs h-8"
                 onClick={() => setAdjustmentType('transfer')}
               >
-                <ArrowRightLeft className="h-4 w-4 mr-1" />
+                <ArrowRightLeft className="h-3.5 w-3.5 mr-1" />
                 Transfer
               </Button>
             </div>
@@ -350,41 +356,47 @@ export function StockAdjustmentDialog({
           {adjustmentType === 'transfer' && (
             <div className="space-y-3">
               {/* Destination component search */}
-              <div className="space-y-2">
-                <Label>Transfer To</Label>
-                <Popover>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground uppercase">Transfer To</Label>
+                <Popover open={transferPickerOpen} onOpenChange={setTransferPickerOpen}>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full justify-start text-left font-normal">
-                      {transferToName || 'Search for component...'}
+                    <Button variant="outline" className="w-full justify-start text-left font-normal h-9">
+                      {transferToName ? (
+                        <span className="font-medium">{transferToName}</span>
+                      ) : (
+                        <span className="text-muted-foreground">Search for component...</span>
+                      )}
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-[400px] p-0" align="start">
-                    <div className="p-2">
+                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                    <div className="p-2 border-b">
                       <Input
                         placeholder="Search by code or description..."
                         value={transferSearch}
                         onChange={(e) => setTransferSearch(e.target.value)}
                         autoFocus
+                        className="h-8 text-sm"
                       />
                     </div>
-                    <div className="max-h-[200px] overflow-y-auto">
+                    <div className="max-h-[200px] overflow-y-auto py-1">
                       {transferComponents.map((c) => (
                         <button
                           key={c.component_id}
                           type="button"
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex justify-between"
+                          className="w-full text-left px-3 py-1.5 text-sm hover:bg-muted flex items-center justify-between gap-2"
                           onClick={() => {
                             setTransferToId(c.component_id);
                             setTransferToName(c.internal_code);
                             setTransferSearch('');
+                            setTransferPickerOpen(false);
                           }}
                         >
-                          <span className="font-medium">{c.internal_code}</span>
-                          <span className="text-muted-foreground text-xs truncate ml-2">{c.description}</span>
+                          <span className="font-medium text-xs">{c.internal_code}</span>
+                          <span className="text-muted-foreground text-xs truncate">{c.description}</span>
                         </button>
                       ))}
                       {transferComponents.length === 0 && (
-                        <p className="text-sm text-muted-foreground px-3 py-2">No components found</p>
+                        <p className="text-xs text-muted-foreground px-3 py-2">No components found</p>
                       )}
                     </div>
                   </PopoverContent>
@@ -392,15 +404,15 @@ export function StockAdjustmentDialog({
               </div>
 
               {/* Quantity */}
-              <div className="space-y-2">
-                <Label>Quantity to Transfer</Label>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground uppercase">Quantity to Transfer</Label>
                 <Input
                   type="number"
                   min="1"
                   value={quantity}
                   onChange={(e) => setQuantity(e.target.value)}
                   placeholder="Enter quantity"
-                  className="text-lg"
+                  className="h-9"
                 />
               </div>
 
@@ -429,8 +441,8 @@ export function StockAdjustmentDialog({
 
           {/* Quantity Input — only shown for non-transfer modes */}
           {adjustmentType !== 'transfer' && (
-            <div className="space-y-2">
-              <Label htmlFor="quantity">
+            <div className="space-y-1.5">
+              <Label htmlFor="quantity" className="text-xs text-muted-foreground uppercase">
                 {adjustmentType === 'set' ? 'New Stock Level' : 'Quantity'}
               </Label>
               <Input
@@ -440,7 +452,7 @@ export function StockAdjustmentDialog({
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
                 placeholder={adjustmentType === 'set' ? 'Enter counted quantity' : 'Enter quantity'}
-                className="text-lg"
+                className="h-9"
               />
               {quantity && adjustmentQuantity !== 0 && (
                 <p className={`text-sm ${adjustmentQuantity > 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -451,19 +463,18 @@ export function StockAdjustmentDialog({
           )}
 
           {/* Reason Selection */}
-          <div className="space-y-2">
-            <Label htmlFor="reason">Reason {adjustmentType === 'transfer' ? 'for Transfer' : 'for Adjustment'} *</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="reason" className="text-xs text-muted-foreground uppercase">
+              Reason {adjustmentType === 'transfer' ? 'for Transfer' : 'for Adjustment'} *
+            </Label>
             <Select value={reason} onValueChange={(v) => setReason(v as AdjustmentReason)}>
-              <SelectTrigger>
+              <SelectTrigger className="h-9">
                 <SelectValue placeholder="Select a reason..." />
               </SelectTrigger>
               <SelectContent>
                 {ADJUSTMENT_REASONS.map((r) => (
                   <SelectItem key={r.value} value={r.value}>
-                    <div className="flex flex-col">
-                      <span>{r.label}</span>
-                      <span className="text-xs text-muted-foreground">{r.description}</span>
-                    </div>
+                    {r.label}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -471,15 +482,15 @@ export function StockAdjustmentDialog({
           </div>
 
           {/* Notes */}
-          <div className="space-y-2">
-            <Label htmlFor="notes">
+          <div className="space-y-1.5">
+            <Label htmlFor="notes" className="text-xs text-muted-foreground uppercase">
               Additional Notes {reason === 'other' && '*'}
             </Label>
             <Textarea
               id="notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Enter any additional details about this adjustment..."
+              placeholder="Enter any additional details..."
               rows={2}
             />
           </div>
