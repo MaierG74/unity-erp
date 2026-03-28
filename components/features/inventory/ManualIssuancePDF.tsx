@@ -108,7 +108,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   signatureBox: {
-    width: '45%',
+    width: '30%',
   },
   signatureLine: {
     borderBottomWidth: 1,
@@ -252,6 +252,10 @@ export function ManualIssuancePDFDocument({
 
         {/* Signature Section */}
         <View style={styles.signatureSection}>
+          <View style={styles.signatureBox}>
+            <View style={styles.signatureLine} />
+            <Text style={styles.signatureLabel}>Issued By / Date</Text>
+          </View>
           <View style={styles.signatureBox}>
             <View style={styles.signatureLine} />
             <Text style={styles.signatureLabel}>Picked By / Date</Text>
