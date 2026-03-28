@@ -26,15 +26,24 @@ const jobSchema = z.object({
   name: z.string().trim().min(1, 'Name is required'),
   description: z.string().optional(),
   category_id: z.string().min(1, 'Category is required'),
-  estimated_time: z.string().optional(),
+  estimated_time: z
+    .string()
+    .optional()
+    .transform((v) => (v === '' || v === undefined ? null : parseFloat(v)))
+    .refine((v) => v === null || v > 0, { message: 'Must be greater than 0' }),
   time_unit: z.string().optional(),
-  piecework_rate: z.string().optional(),
+  piecework_rate: z
+    .string()
+    .optional()
+    .transform((v) => (v === '' || v === undefined ? null : parseFloat(v)))
+    .refine((v) => v === null || v > 0, { message: 'Must be greater than 0' }),
 });
 
-type JobFormValues = z.infer<typeof jobSchema>;
+type JobFormValues = z.input<typeof jobSchema>;
+type JobParsedValues = z.output<typeof jobSchema>;
 ```
 
-Note: `estimated_time` and `piecework_rate` are strings because HTML number inputs return strings via React Hook Form. We'll parse them to numbers in the mutation. Using `.trim()` on name per review finding.
+Note: `estimated_time` and `piecework_rate` are strings in the form inputs but get transformed to `number | null` by Zod's `.transform()`. Using `z.input` for form field types and `z.output` for the mutation. This enforces the spec's "> 0 when present" rule at the schema level. Using `.trim()` on name per review finding.
 
 - [ ] **Step 2: Update the form defaultValues**
 
@@ -131,7 +140,7 @@ export function CreateJobModal({
 }: CreateJobModalProps) {
 ```
 
-- [ ] **Step 2: Add a ref for the name input and a state for submit mode**
+- [ ] **Step 2: Add a ref for the name input**
 
 At the top of the component, after the existing state declarations:
 
@@ -140,8 +149,9 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 
 // ... inside component:
 const nameInputRef = useRef<HTMLInputElement>(null);
-const [submitMode, setSubmitMode] = useState<'close' | 'another'>('close');
 ```
+
+No `submitMode` state — mode is passed through mutation variables to avoid state/timing issues.
 
 - [ ] **Step 3: Replace the mutation with the two-step insert**
 
@@ -149,10 +159,14 @@ Replace the entire `addJob` mutation (lines 179-212):
 
 ```typescript
 const addJob = useMutation({
-  mutationFn: async (values: JobFormValues) => {
-    const estimatedTime = values.estimated_time ? parseFloat(values.estimated_time) : null;
-    const timeUnit = estimatedTime !== null ? (values.time_unit || 'minutes') : null;
-    const pieceworkRate = values.piecework_rate ? parseFloat(values.piecework_rate) : null;
+  mutationFn: async ({
+    values,
+    mode,
+  }: {
+    values: JobParsedValues;
+    mode: 'close' | 'another';
+  }) => {
+    const timeUnit = values.estimated_time !== null ? (values.time_unit || 'minutes') : null;
 
     // Step 1: Insert the job
     const { data, error } = await supabase
@@ -161,7 +175,7 @@ const addJob = useMutation({
         name: values.name,
         description: values.description || null,
         category_id: parseInt(values.category_id),
-        estimated_minutes: estimatedTime,
+        estimated_minutes: values.estimated_time,
         time_unit: timeUnit,
       })
       .select();
@@ -170,16 +184,15 @@ const addJob = useMutation({
     const job = data[0] as CreatedJob;
 
     // Step 2: Insert piecework rate if provided
+    // effective_date omitted — DB default is CURRENT_DATE (server-side, timezone-safe)
     let rateError: Error | null = null;
-    if (pieceworkRate !== null && pieceworkRate > 0) {
+    if (values.piecework_rate !== null) {
       const { error: prError } = await supabase
         .from('piece_work_rates')
         .insert({
           job_id: job.job_id,
           product_id: null,
-          rate: pieceworkRate,
-          effective_date: new Date().toISOString().split('T')[0],
-          end_date: null,
+          rate: values.piecework_rate,
         });
 
       if (prError) {
@@ -187,9 +200,9 @@ const addJob = useMutation({
       }
     }
 
-    return { job, rateError };
+    return { job, rateError, mode };
   },
-  onSuccess: ({ job, rateError }) => {
+  onSuccess: ({ job, rateError, mode }) => {
     queryClient.invalidateQueries({ queryKey: ['jobs'] });
     queryClient.invalidateQueries({ queryKey: ['piece-rates'] });
     queryClient.invalidateQueries({ queryKey: ['all-piece-rates-current'] });
@@ -197,14 +210,14 @@ const addJob = useMutation({
     if (rateError) {
       toast({
         title: 'Job created',
-        description: 'Job was created, but piecework rate failed — you can add it later.',
+        description: 'Job created, but piecework rate failed — you can add it later.',
         variant: 'destructive',
       });
     } else {
       toast({ title: 'Job created' });
     }
 
-    if (submitMode === 'another') {
+    if (mode === 'another') {
       // Reset form but preserve category, subcategory, time unit
       const currentTimeUnit = form.getValues('time_unit');
       form.reset({
@@ -233,16 +246,23 @@ const addJob = useMutation({
 });
 ```
 
+Key changes from earlier draft:
+- Mode is passed through mutation variables (`{ values, mode }`) instead of component state — eliminates state/timing race condition.
+- `effective_date` is omitted from the piecework rate insert — the DB column defaults to `CURRENT_DATE` server-side, which is timezone-safe. No more UTC midnight bug.
+- Piecework rate `> 0` check is now handled by Zod transform — the mutation just checks `!== null`.
+- Toast wording matches the approved spec copy verbatim.
+
 - [ ] **Step 4: Update the submit handler to accept a mode**
 
 Replace the `onSubmit` function:
 
 ```typescript
 const handleSubmit = (mode: 'close' | 'another') => {
-  setSubmitMode(mode);
-  form.handleSubmit((values) => addJob.mutate(values))();
+  form.handleSubmit((values) => addJob.mutate({ values: values as unknown as JobParsedValues, mode }))();
 };
 ```
+
+The cast is needed because `form.handleSubmit` uses the input type, but `mutate` expects the output type (after Zod transforms). The resolver guarantees the transform has run by this point.
 
 - [ ] **Step 5: Verify the app compiles**
 
@@ -386,7 +406,7 @@ return (
                       <Input
                         type="number"
                         step="any"
-                        min="0"
+                        min="0.01"
                         placeholder="0"
                         {...field}
                         value={field.value || ''}
@@ -483,14 +503,14 @@ return (
                 disabled={addJob.isPending}
                 onClick={() => handleSubmit('another')}
               >
-                {addJob.isPending && submitMode === 'another' ? 'Creating...' : 'Create & Add Another'}
+                {addJob.isPending ? 'Creating...' : 'Create & Add Another'}
               </Button>
             )}
             <Button
               type="submit"
               disabled={addJob.isPending}
             >
-              {addJob.isPending && submitMode === 'close' ? 'Creating...' : 'Create Job'}
+              {addJob.isPending ? 'Creating...' : 'Create Job'}
             </Button>
           </DialogFooter>
         </form>
@@ -606,21 +626,23 @@ Expected: No new errors from the modified files.
 3. Click "Create Job"
 4. Verify: job is created with null estimated_minutes and no piecework rate
 
-- [ ] **Step 7: Clean up test data**
+- [ ] **Step 7: Verify multi-parent contract — "Create & Add Another" is hidden in other contexts**
 
-Delete the test jobs created during verification:
-- "Test Streamlined Job" and any other test jobs created
-- Delete via Supabase: `DELETE FROM piece_work_rates WHERE job_id IN (SELECT job_id FROM jobs WHERE name LIKE 'Test Streamlined%'); DELETE FROM jobs WHERE name LIKE 'Test Streamlined%';`
+1. Navigate to a product page that has a Bill of Labor
+2. Open the "Add Job" dialog from the BOL section (uses `AddJobDialog.tsx`)
+3. Verify: only "Cancel" and "Create Job" buttons — NO "Create & Add Another"
+4. Close the dialog
 
-- [ ] **Step 8: Final commit**
+This confirms the `showAddAnother` prop defaults to `false` in non-labor-list contexts.
 
-```bash
-git add -A
-git commit -m "feat(labor): streamlined create job dialog with bulk creation support
+- [ ] **Step 8: Clean up test data**
 
-- Expanded dialog with two-column responsive layout
-- Added estimated time + unit and default piecework rate fields
-- Added 'Create & Add Another' button for rapid bulk job creation
-- Partial-failure handling for piecework rate insert
-- Query invalidation for jobs, piece-rates, and all-piece-rates-current"
+Clean up the specific test jobs created during verification. Note the `job_id` values from the toasts/list during Steps 4-6, then delete by exact ID:
+
+```sql
+-- Via Supabase MCP execute_sql tool. Replace with actual job_ids noted during testing.
+DELETE FROM piece_work_rates WHERE job_id IN (<job_id_1>, <job_id_2>, <job_id_3>);
+DELETE FROM jobs WHERE job_id IN (<job_id_1>, <job_id_2>, <job_id_3>);
 ```
+
+Do NOT use `LIKE` patterns — labor tables are not org-scoped, so a wildcard delete could hit other users' data.
