@@ -26,24 +26,15 @@ const jobSchema = z.object({
   name: z.string().trim().min(1, 'Name is required'),
   description: z.string().optional(),
   category_id: z.string().min(1, 'Category is required'),
-  estimated_time: z
-    .string()
-    .optional()
-    .transform((v) => (v === '' || v === undefined ? null : parseFloat(v)))
-    .refine((v) => v === null || v > 0, { message: 'Must be greater than 0' }),
+  estimated_time: z.string().optional(),
   time_unit: z.string().optional(),
-  piecework_rate: z
-    .string()
-    .optional()
-    .transform((v) => (v === '' || v === undefined ? null : parseFloat(v)))
-    .refine((v) => v === null || v > 0, { message: 'Must be greater than 0' }),
+  piecework_rate: z.string().optional(),
 });
 
-type JobFormValues = z.input<typeof jobSchema>;
-type JobParsedValues = z.output<typeof jobSchema>;
+type JobFormValues = z.infer<typeof jobSchema>;
 ```
 
-Note: `estimated_time` and `piecework_rate` are strings in the form inputs but get transformed to `number | null` by Zod's `.transform()`. Using `z.input` for form field types and `z.output` for the mutation. This enforces the spec's "> 0 when present" rule at the schema level. Using `.trim()` on name per review finding.
+Note: `estimated_time` and `piecework_rate` stay as plain optional strings in the schema to avoid Zod transform / RHF type mismatch (`zodResolver` assigns transformed output types to the form, causing compile errors). Parsing and > 0 validation happen in the mutation function instead. Using `.trim()` on name per review finding.
 
 - [ ] **Step 2: Update the form defaultValues**
 
@@ -163,10 +154,20 @@ const addJob = useMutation({
     values,
     mode,
   }: {
-    values: JobParsedValues;
+    values: JobFormValues;
     mode: 'close' | 'another';
   }) => {
-    const timeUnit = values.estimated_time !== null ? (values.time_unit || 'minutes') : null;
+    // Parse numeric strings → number | null, enforce > 0
+    const estimatedTime = values.estimated_time ? parseFloat(values.estimated_time) : null;
+    if (estimatedTime !== null && estimatedTime <= 0) {
+      throw new Error('Estimated time must be greater than 0');
+    }
+    const timeUnit = estimatedTime !== null ? (values.time_unit || 'minutes') : null;
+
+    const pieceworkRate = values.piecework_rate ? parseFloat(values.piecework_rate) : null;
+    if (pieceworkRate !== null && pieceworkRate <= 0) {
+      throw new Error('Piecework rate must be greater than 0');
+    }
 
     // Step 1: Insert the job
     const { data, error } = await supabase
@@ -175,7 +176,7 @@ const addJob = useMutation({
         name: values.name,
         description: values.description || null,
         category_id: parseInt(values.category_id),
-        estimated_minutes: values.estimated_time,
+        estimated_minutes: estimatedTime,
         time_unit: timeUnit,
       })
       .select();
@@ -186,13 +187,13 @@ const addJob = useMutation({
     // Step 2: Insert piecework rate if provided
     // effective_date omitted — DB default is CURRENT_DATE (server-side, timezone-safe)
     let rateError: Error | null = null;
-    if (values.piecework_rate !== null) {
+    if (pieceworkRate !== null) {
       const { error: prError } = await supabase
         .from('piece_work_rates')
         .insert({
           job_id: job.job_id,
           product_id: null,
-          rate: values.piecework_rate,
+          rate: pieceworkRate,
         });
 
       if (prError) {
@@ -246,10 +247,10 @@ const addJob = useMutation({
 });
 ```
 
-Key changes from earlier draft:
+Key design decisions:
 - Mode is passed through mutation variables (`{ values, mode }`) instead of component state — eliminates state/timing race condition.
-- `effective_date` is omitted from the piecework rate insert — the DB column defaults to `CURRENT_DATE` server-side, which is timezone-safe. No more UTC midnight bug.
-- Piecework rate `> 0` check is now handled by Zod transform — the mutation just checks `!== null`.
+- Numeric parsing and > 0 validation happen in the mutation function, NOT in Zod transforms — avoids the `zodResolver` type mismatch with RHF (transforms change the output type, which conflicts with `useForm<JobFormValues>`).
+- `effective_date` is omitted from the piecework rate insert — the DB column defaults to `CURRENT_DATE` server-side, which is timezone-safe.
 - Toast wording matches the approved spec copy verbatim.
 
 - [ ] **Step 4: Update the submit handler to accept a mode**
@@ -258,11 +259,11 @@ Replace the `onSubmit` function:
 
 ```typescript
 const handleSubmit = (mode: 'close' | 'another') => {
-  form.handleSubmit((values) => addJob.mutate({ values: values as unknown as JobParsedValues, mode }))();
+  form.handleSubmit((values) => addJob.mutate({ values, mode }))();
 };
 ```
 
-The cast is needed because `form.handleSubmit` uses the input type, but `mutate` expects the output type (after Zod transforms). The resolver guarantees the transform has run by this point.
+No type cast needed — `JobFormValues` is used consistently across the form and mutation since we parse strings in the mutation function, not in Zod transforms.
 
 - [ ] **Step 5: Verify the app compiles**
 
@@ -457,7 +458,7 @@ return (
                         <Input
                           type="number"
                           step="0.01"
-                          min="0"
+                          min="0.01"
                           placeholder="0.00"
                           className="pl-7 pr-14"
                           {...field}
@@ -628,19 +629,28 @@ Expected: No new errors from the modified files.
 
 - [ ] **Step 7: Verify multi-parent contract — "Create & Add Another" is hidden in other contexts**
 
-1. Navigate to a product page that has a Bill of Labor
-2. Open the "Add Job" dialog from the BOL section (uses `AddJobDialog.tsx`)
-3. Verify: only "Cancel" and "Create Job" buttons — NO "Create & Add Another"
-4. Close the dialog
+Check both non-labor-list mounts to confirm the button is absent:
+
+1. **Product BOL mount** (`AddJobDialog.tsx`): Navigate to a product page that has a Bill of Labor. Open the "Add Job" dialog from the BOL section. Verify: only "Cancel" and "Create Job" buttons — NO "Create & Add Another". Close the dialog.
+
+2. **Piecework rates mount** (`piecework-rates-manager.tsx`): Go to Labor Management, open the Piecework Rates manager. If it has an inline "Create new job" option, open it. Verify: NO "Create & Add Another" button.
 
 This confirms the `showAddAnother` prop defaults to `false` in non-labor-list contexts.
 
 - [ ] **Step 8: Clean up test data**
 
-Clean up the specific test jobs created during verification. Note the `job_id` values from the toasts/list during Steps 4-6, then delete by exact ID:
+Look up the test jobs created during verification, then delete by exact ID:
 
 ```sql
--- Via Supabase MCP execute_sql tool. Replace with actual job_ids noted during testing.
+-- Step 1: Find test job IDs via Supabase MCP execute_sql
+SELECT job_id, name FROM jobs WHERE name IN (
+  'Test Streamlined Job'
+  -- add any other test names used in Steps 4-6
+) ORDER BY job_id DESC;
+```
+
+```sql
+-- Step 2: Delete by exact IDs (replace with actual values from Step 1)
 DELETE FROM piece_work_rates WHERE job_id IN (<job_id_1>, <job_id_2>, <job_id_3>);
 DELETE FROM jobs WHERE job_id IN (<job_id_1>, <job_id_2>, <job_id_3>);
 ```
