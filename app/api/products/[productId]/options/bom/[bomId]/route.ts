@@ -5,6 +5,7 @@ import {
   parsePositiveInt,
   productExistsInOrg,
   requireProductsAccess,
+  validateOrgScopedComponentRefs,
 } from '@/lib/api/products-access';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
@@ -278,7 +279,23 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
         }
       }
 
+      // Validate auto-seeded component refs belong to this org
       if (defaultRows.length > 0) {
+        const seedRefs = defaultRows
+          .filter((r: any) => r.replace_component_id || r.replace_supplier_component_id)
+          .map((r: any) => ({
+            componentId: r.replace_component_id,
+            supplierComponentId: r.replace_supplier_component_id,
+          }));
+        if (seedRefs.length > 0) {
+          const seedRefError = await validateOrgScopedComponentRefs(auth.orgId, seedRefs);
+          if (seedRefError) {
+            console.warn('[bom-overrides] skipping auto-seed: cross-org component refs detected', seedRefError);
+            // Skip seeding rather than writing bad data
+            return NextResponse.json({ overrides: existingOverrides, product_groups: productGroups, option_sets: setsWithOverrides });
+          }
+        }
+
         const { data: seeded, error: seedError } = await supabaseAdmin
           .from('bom_option_overrides')
           .upsert(defaultRows, { onConflict: 'bom_id,option_set_value_id' })
@@ -386,6 +403,18 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
 
       if (linkError || !linkRow) {
         return NextResponse.json({ error: 'Option set value is not attached to this product' }, { status: 400 });
+      }
+    }
+
+    // Validate component refs belong to this org
+    const replaceComponentId = payload.replace_component_id ?? null;
+    const replaceSupplierComponentId = payload.replace_supplier_component_id ?? null;
+    if (replaceComponentId || replaceSupplierComponentId) {
+      const refError = await validateOrgScopedComponentRefs(auth.orgId, [
+        { componentId: replaceComponentId, supplierComponentId: replaceSupplierComponentId },
+      ]);
+      if (refError) {
+        return NextResponse.json({ error: refError }, { status: 400 });
       }
     }
 
