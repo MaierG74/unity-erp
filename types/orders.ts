@@ -33,6 +33,8 @@ export interface Product {
   description: string | null;
 }
 
+import type { BomSnapshotEntry, CutlistSnapshotGroup } from '@/lib/orders/snapshot-types';
+
 export interface OrderDetail {
   order_detail_id: number;
   order_id: number;
@@ -40,6 +42,8 @@ export interface OrderDetail {
   quantity: number;
   unit_price: number;
   product?: Product;
+  bom_snapshot?: BomSnapshotEntry[] | null;
+  cutlist_snapshot?: CutlistSnapshotGroup[] | null;
 }
 
 export type OrderDocumentType = string;
