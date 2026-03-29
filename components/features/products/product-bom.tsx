@@ -597,7 +597,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
   // Allow detaching a linked sub-product
   const detachLink = useMutation({
     mutationFn: async (subProductId: number) => {
-      const res = await fetch(`/api/products/${productId}/bom/attach-product?sub_product_id=${subProductId}`, { method: 'DELETE' })
+      const res = await authorizedFetch(`/api/products/${productId}/bom/attach-product?sub_product_id=${subProductId}`, { method: 'DELETE' })
       if (!res.ok) throw new Error('Failed to detach')
       return true
     },

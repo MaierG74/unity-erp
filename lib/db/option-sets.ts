@@ -1,3 +1,5 @@
+import { authorizedFetch } from '@/lib/client/auth-fetch';
+
 export interface OptionSetValue {
   option_set_value_id: number;
   code: string;
@@ -45,7 +47,7 @@ export async function fetchOptionSets(): Promise<OptionSetSummary[]> {
 }
 
 export async function createOptionSet(payload: { code: string; name: string; description?: string | null }): Promise<OptionSetSummary> {
-  const res = await fetch('/api/option-sets', {
+  const res = await authorizedFetch('/api/option-sets', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),

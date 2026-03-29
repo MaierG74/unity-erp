@@ -1,42 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+
+import {
+  bomBelongsToProduct,
+  parsePositiveInt,
+  productExistsInOrg,
+  requireProductsAccess,
+} from '@/lib/api/products-access';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
 type RouteParams = {
   productId?: string;
   bomId?: string;
 };
 
-function parseId(value?: string): number | null {
-  if (!value) return null;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && !Number.isNaN(parsed) ? parsed : null;
-}
-
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    throw new Error('Supabase environment variables are not configured');
-  }
-  return createClient(url, key) as any;
-}
-
-async function ensureBomBelongsToProduct(client: any, productId: number, bomId: number) {
-  const { data, error } = await client
-    .from('billofmaterials')
-    .select('product_id')
-    .eq('bom_id', bomId)
-    .single();
-
-  const record = data as any;
-
-  if (error || !record || Number(record.product_id) !== productId) {
-    throw new Error('Not found');
-  }
-}
-
-async function loadProductOptionGroups(client: any, productId: number) {
-  const { data, error } = await client
+async function loadProductOptionGroups(productId: number) {
+  const { data, error } = await supabaseAdmin
     .from('product_option_groups')
     .select(`
       option_group_id,
@@ -81,8 +59,8 @@ async function loadProductOptionGroups(client: any, productId: number) {
   }));
 }
 
-async function loadProductOptionSets(client: any, productId: number) {
-  const { data, error } = await client
+async function loadProductOptionSets(productId: number) {
+  const { data, error } = await supabaseAdmin
     .from('product_option_set_links')
     .select(`
       link_id,
@@ -207,31 +185,40 @@ async function loadProductOptionSets(client: any, productId: number) {
 }
 
 
-export async function GET(_req: NextRequest, context: { params: Promise<RouteParams> }) {
+export async function GET(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
-  const productId = parseId(params.productId);
-  const bomId = parseId(params.bomId);
+  const productId = parsePositiveInt(params.productId);
+  const bomId = parsePositiveInt(params.bomId);
   if (!productId || !bomId) {
     return NextResponse.json({ error: 'Invalid identifiers' }, { status: 400 });
   }
 
-  const supabase = getSupabaseAdmin();
-
   try {
-    await ensureBomBelongsToProduct(supabase, productId, bomId);
+    const productExists = await productExistsInOrg(productId, auth.orgId);
+    if (!productExists) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
+
+    const belongs = await bomBelongsToProduct(productId, bomId);
+    if (!belongs) {
+      return NextResponse.json({ error: 'BOM row not found for product' }, { status: 404 });
+    }
 
     const [productGroups, productSets] = await Promise.all([
-      loadProductOptionGroups(supabase, productId).catch((error) => {
+      loadProductOptionGroups(productId).catch((error) => {
         console.error('[bom-overrides] failed loading product groups', error);
         throw new Error('GROUPS_FAILED');
       }),
-      loadProductOptionSets(supabase, productId).catch((error) => {
+      loadProductOptionSets(productId).catch((error) => {
         console.error('[bom-overrides] failed loading option sets', error);
         throw new Error('SETS_FAILED');
       }),
     ]);
 
-    const { data: overridesData, error: overridesError } = await supabase
+    const { data: overridesData, error: overridesError } = await supabaseAdmin
       .from('bom_option_overrides')
       .select('*')
       .eq('bom_id', bomId);
@@ -292,7 +279,7 @@ export async function GET(_req: NextRequest, context: { params: Promise<RoutePar
       }
 
       if (defaultRows.length > 0) {
-        const { data: seeded, error: seedError } = await supabase
+        const { data: seeded, error: seedError } = await supabaseAdmin
           .from('bom_option_overrides')
           .upsert(defaultRows, { onConflict: 'bom_id,option_set_value_id' })
           .select('*');
@@ -319,18 +306,18 @@ export async function GET(_req: NextRequest, context: { params: Promise<RoutePar
     if (error?.message === 'SETS_FAILED') {
       return NextResponse.json({ error: 'Failed to load option sets' }, { status: 500 });
     }
-    if (error?.message === 'Not found') {
-      return NextResponse.json({ error: 'BOM row not found for product' }, { status: 404 });
-    }
     console.error('[bom-overrides] unexpected error', error);
     return NextResponse.json({ error: 'Unexpected error while loading overrides' }, { status: 500 });
   }
 }
 
 export async function PATCH(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
-  const productId = parseId(params.productId);
-  const bomId = parseId(params.bomId);
+  const productId = parsePositiveInt(params.productId);
+  const bomId = parsePositiveInt(params.bomId);
   if (!productId || !bomId) {
     return NextResponse.json({ error: 'Invalid identifiers' }, { status: 400 });
   }
@@ -340,8 +327,8 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  const optionValueId = parseId(String(payload.option_value_id ?? ''));
-  const optionSetValueId = parseId(String(payload.option_set_value_id ?? ''));
+  const optionValueId = parsePositiveInt(String(payload.option_value_id ?? ''));
+  const optionSetValueId = parsePositiveInt(String(payload.option_set_value_id ?? ''));
 
   if (!optionValueId && !optionSetValueId) {
     return NextResponse.json({ error: 'option_value_id or option_set_value_id is required' }, { status: 400 });
@@ -350,14 +337,20 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
     return NextResponse.json({ error: 'Provide only one of option_value_id or option_set_value_id' }, { status: 400 });
   }
 
-  const supabase = getSupabaseAdmin();
-
   try {
-    await ensureBomBelongsToProduct(supabase, productId, bomId);
+    const productExists = await productExistsInOrg(productId, auth.orgId);
+    if (!productExists) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
+
+    const belongs = await bomBelongsToProduct(productId, bomId);
+    if (!belongs) {
+      return NextResponse.json({ error: 'BOM row not found for product' }, { status: 404 });
+    }
     let conflictTarget = 'bom_id,option_value_id';
 
     if (optionValueId) {
-      const { data: ownershipRaw, error: ownershipError } = await supabase
+      const { data: ownershipRaw, error: ownershipError } = await supabaseAdmin
         .from('product_option_values')
         .select('option_group_id, product_option_groups(product_id)')
         .eq('option_value_id', optionValueId)
@@ -371,7 +364,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
 
     if (optionSetValueId) {
       conflictTarget = 'bom_id,option_set_value_id';
-      const { data: valueRowRaw, error: valueError } = await supabase
+      const { data: valueRowRaw, error: valueError } = await supabaseAdmin
         .from('option_set_values')
         .select('option_set_groups(option_set_id)')
         .eq('option_set_value_id', optionSetValueId)
@@ -383,7 +376,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
       }
 
       const optionSetId = Number(valueRow.option_set_groups?.option_set_id);
-      const { data: linkRowRaw, error: linkError } = await supabase
+      const { data: linkRowRaw, error: linkError } = await supabaseAdmin
         .from('product_option_set_links')
         .select('link_id')
         .eq('product_id', productId)
@@ -414,7 +407,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
       updated_at: new Date().toISOString(),
     };
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('bom_option_overrides')
       .upsert(upsertData, { onConflict: conflictTarget })
       .select('*')
@@ -427,18 +420,18 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
 
     return NextResponse.json({ override: data });
   } catch (error: any) {
-    if (error?.message === 'Not found') {
-      return NextResponse.json({ error: 'BOM row not found for product' }, { status: 404 });
-    }
     console.error('[bom-overrides] unexpected upsert error', error);
     return NextResponse.json({ error: 'Unexpected error while saving override' }, { status: 500 });
   }
 }
 
 export async function DELETE(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
-  const productId = parseId(params.productId);
-  const bomId = parseId(params.bomId);
+  const productId = parsePositiveInt(params.productId);
+  const bomId = parsePositiveInt(params.bomId);
   if (!productId || !bomId) {
     return NextResponse.json({ error: 'Invalid identifiers' }, { status: 400 });
   }
@@ -448,8 +441,8 @@ export async function DELETE(request: NextRequest, context: { params: Promise<Ro
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  const optionValueId = parseId(String(payload.option_value_id ?? ''));
-  const optionSetValueId = parseId(String(payload.option_set_value_id ?? ''));
+  const optionValueId = parsePositiveInt(String(payload.option_value_id ?? ''));
+  const optionSetValueId = parsePositiveInt(String(payload.option_set_value_id ?? ''));
 
   if (!optionValueId && !optionSetValueId) {
     return NextResponse.json({ error: 'option_value_id or option_set_value_id is required' }, { status: 400 });
@@ -458,12 +451,18 @@ export async function DELETE(request: NextRequest, context: { params: Promise<Ro
     return NextResponse.json({ error: 'Provide only one of option_value_id or option_set_value_id' }, { status: 400 });
   }
 
-  const supabase = getSupabaseAdmin();
-
   try {
-    await ensureBomBelongsToProduct(supabase, productId, bomId);
+    const productExists = await productExistsInOrg(productId, auth.orgId);
+    if (!productExists) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
 
-    const query = supabase
+    const belongs = await bomBelongsToProduct(productId, bomId);
+    if (!belongs) {
+      return NextResponse.json({ error: 'BOM row not found for product' }, { status: 404 });
+    }
+
+    const query = supabaseAdmin
       .from('bom_option_overrides')
       .delete()
       .eq('bom_id', bomId);
@@ -483,9 +482,6 @@ export async function DELETE(request: NextRequest, context: { params: Promise<Ro
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
-    if (error?.message === 'Not found') {
-      return NextResponse.json({ error: 'BOM row not found for product' }, { status: 404 });
-    }
     console.error('[bom-overrides] unexpected delete error', error);
     return NextResponse.json({ error: 'Unexpected error while deleting override' }, { status: 500 });
   }
