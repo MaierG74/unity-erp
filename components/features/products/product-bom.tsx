@@ -1843,7 +1843,16 @@ const renderCutlistEditor = () => {
                         // Read-only row (either direct not editing or linked)
                         return (
                           <TableRow key={`row-${idx}`}>
-                            <TableCell>{code}</TableCell>
+                            <TableCell>
+                              <a
+                                href={`/inventory/components/${it.component_id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-primary hover:underline"
+                              >
+                                {code}
+                              </a>
+                            </TableCell>
                             <TableCell>{desc}</TableCell>
                             {supplierFeatureAvailable && (
                               <>
