@@ -550,8 +550,11 @@ export function CreateJobModal({
         onOpenChange={setIsNewCategoryOpen}
         onCreated={(cat) => {
           queryClient.setQueryData<JobCategory[]>(['jobCategories'], (old = []) => [...old, cat]);
-          setSelectedParentId(cat.category_id.toString());
-          setSelectedSubId('');
+          // Defer selection so Select re-renders with the new item first
+          requestAnimationFrame(() => {
+            setSelectedParentId(cat.category_id.toString());
+            setSelectedSubId('');
+          });
         }}
       />
 
@@ -563,7 +566,9 @@ export function CreateJobModal({
         defaultRate={parentCategories.find((c) => c.category_id.toString() === selectedParentId)?.current_hourly_rate}
         onCreated={(cat) => {
           queryClient.setQueryData<JobCategory[]>(['jobCategories'], (old = []) => [...old, cat]);
-          setSelectedSubId(cat.category_id.toString());
+          requestAnimationFrame(() => {
+            setSelectedSubId(cat.category_id.toString());
+          });
         }}
       />
     </Dialog>
