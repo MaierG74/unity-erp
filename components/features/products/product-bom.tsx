@@ -1939,7 +1939,7 @@ const renderCutlistEditor = () => {
                                         // Revert on failure
                                         queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] });
                                       }
-                                    }
+                                    }}
                                     title={direct.is_substitutable ? "Substitutable at order time (click to disable)" : "Fixed component (click to make substitutable)"}
                                   >
                                     <ArrowLeftRight className="h-4 w-4" />
