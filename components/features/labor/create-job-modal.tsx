@@ -307,6 +307,7 @@ export function CreateJobModal({
   };
 
   return (
+    <>
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
@@ -544,33 +545,34 @@ export function CreateJobModal({
         </Form>
       </DialogContent>
 
-      {/* Inline category creation dialogs */}
-      <InlineCategoryForm
-        open={isNewCategoryOpen}
-        onOpenChange={setIsNewCategoryOpen}
-        onCreated={(cat) => {
-          queryClient.setQueryData<JobCategory[]>(['jobCategories'], (old = []) => [...old, cat]);
-          // Defer selection so Select re-renders with the new item first
-          requestAnimationFrame(() => {
-            setSelectedParentId(cat.category_id.toString());
-            setSelectedSubId('');
-          });
-        }}
-      />
-
-      <InlineCategoryForm
-        open={isNewSubcategoryOpen}
-        onOpenChange={setIsNewSubcategoryOpen}
-        parentId={selectedParentId ? parseInt(selectedParentId) : undefined}
-        parentName={parentCategories.find((c) => c.category_id.toString() === selectedParentId)?.name}
-        defaultRate={parentCategories.find((c) => c.category_id.toString() === selectedParentId)?.current_hourly_rate}
-        onCreated={(cat) => {
-          queryClient.setQueryData<JobCategory[]>(['jobCategories'], (old = []) => [...old, cat]);
-          requestAnimationFrame(() => {
-            setSelectedSubId(cat.category_id.toString());
-          });
-        }}
-      />
     </Dialog>
+
+    {/* Inline category creation dialogs — outside parent Dialog to avoid nested Radix issues */}
+    <InlineCategoryForm
+      open={isNewCategoryOpen}
+      onOpenChange={setIsNewCategoryOpen}
+      onCreated={(cat) => {
+        queryClient.setQueryData<JobCategory[]>(['jobCategories'], (old = []) => [...old, cat]);
+        requestAnimationFrame(() => {
+          setSelectedParentId(cat.category_id.toString());
+          setSelectedSubId('');
+        });
+      }}
+    />
+
+    <InlineCategoryForm
+      open={isNewSubcategoryOpen}
+      onOpenChange={setIsNewSubcategoryOpen}
+      parentId={selectedParentId ? parseInt(selectedParentId) : undefined}
+      parentName={parentCategories.find((c) => c.category_id.toString() === selectedParentId)?.name}
+      defaultRate={parentCategories.find((c) => c.category_id.toString() === selectedParentId)?.current_hourly_rate}
+      onCreated={(cat) => {
+        queryClient.setQueryData<JobCategory[]>(['jobCategories'], (old = []) => [...old, cat]);
+        requestAnimationFrame(() => {
+          setSelectedSubId(cat.category_id.toString());
+        });
+      }}
+    />
+  </>
   );
 }
