@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useForm } from 'react-hook-form';
@@ -50,9 +50,12 @@ interface CreatedJob {
 }
 
 const jobSchema = z.object({
-  name: z.string().min(1, 'Name is required'),
+  name: z.string().trim().min(1, 'Name is required'),
   description: z.string().optional(),
   category_id: z.string().min(1, 'Category is required'),
+  estimated_time: z.string().optional(),
+  time_unit: z.string().optional(),
+  piecework_rate: z.string().optional(),
 });
 
 type JobFormValues = z.infer<typeof jobSchema>;
@@ -159,6 +162,9 @@ export function CreateJobModal({
       name: '',
       description: '',
       category_id: '',
+      estimated_time: '',
+      time_unit: 'minutes',
+      piecework_rate: '',
     },
   });
 
@@ -170,7 +176,7 @@ export function CreateJobModal({
   // Reset state when dialog opens/closes
   useEffect(() => {
     if (!isOpen) {
-      form.reset({ name: '', description: '', category_id: '' });
+      form.reset({ name: '', description: '', category_id: '', estimated_time: '', time_unit: 'minutes', piecework_rate: '' });
       setSelectedParentId('');
       setSelectedSubId('');
     }
