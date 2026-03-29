@@ -118,6 +118,7 @@ interface BOMItem {
   is_cutlist_item: boolean;
   cutlist_category: string | null;
   cutlist_dimensions: CutlistDimensions | null;
+  is_substitutable?: boolean;
 }
 
 // Effective BOM unified item type (server aggregate)

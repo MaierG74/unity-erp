@@ -292,7 +292,7 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
           if (seedRefError) {
             console.warn('[bom-overrides] skipping auto-seed: cross-org component refs detected', seedRefError);
             // Skip seeding rather than writing bad data
-            return NextResponse.json({ overrides: existingOverrides, product_groups: productGroups, option_sets: setsWithOverrides });
+            return NextResponse.json({ overrides, product_groups: productGroups, option_sets: productSets });
           }
         }
 
