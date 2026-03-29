@@ -47,6 +47,8 @@ interface CreatedJob {
   name: string;
   description: string | null;
   category_id: number;
+  estimated_minutes: number | null;
+  time_unit: string | null;
 }
 
 const jobSchema = z.object({
@@ -65,6 +67,7 @@ interface CreateJobModalProps {
   onClose: () => void;
   onJobCreated: (job: CreatedJob) => void;
   initialCategoryId?: number; // Optional pre-selected category
+  showAddAnother?: boolean;
 }
 
 export function CreateJobModal({
@@ -72,9 +75,11 @@ export function CreateJobModal({
   onClose,
   onJobCreated,
   initialCategoryId,
+  showAddAnother = false,
 }: CreateJobModalProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch job categories
   const { data: categories = [], isLoading: categoriesLoading } = useQuery({
@@ -184,42 +189,120 @@ export function CreateJobModal({
 
   // Add job mutation
   const addJob = useMutation({
-    mutationFn: async (values: JobFormValues) => {
+    mutationFn: async ({
+      values,
+      mode,
+    }: {
+      values: JobFormValues;
+      mode: 'close' | 'another';
+    }) => {
+      const estimatedTime = values.estimated_time ? parseFloat(values.estimated_time) : null;
+      if (estimatedTime !== null && estimatedTime <= 0) {
+        throw new Error('Estimated time must be greater than 0');
+      }
+      const timeUnit = estimatedTime !== null ? (values.time_unit || 'minutes') : null;
+
+      const pieceworkRate = values.piecework_rate ? parseFloat(values.piecework_rate) : null;
+      if (pieceworkRate !== null && pieceworkRate <= 0) {
+        throw new Error('Piecework rate must be greater than 0');
+      }
+
+      // Step 1: Insert the job
       const { data, error } = await supabase
         .from('jobs')
         .insert({
           name: values.name,
           description: values.description || null,
           category_id: parseInt(values.category_id),
+          estimated_minutes: estimatedTime,
+          time_unit: timeUnit,
         })
         .select();
 
       if (error) throw error;
-      return data[0] as CreatedJob;
+      const job = data[0] as CreatedJob;
+
+      // Step 2: Insert piecework rate if provided
+      // effective_date omitted — DB default is CURRENT_DATE (server-side, timezone-safe)
+      let rateError: Error | null = null;
+      if (pieceworkRate !== null) {
+        const { error: prError } = await supabase
+          .from('piece_work_rates')
+          .insert({
+            job_id: job.job_id,
+            product_id: null,
+            rate: pieceworkRate,
+          });
+
+        if (prError) {
+          rateError = new Error(prError.message);
+        }
+      }
+
+      return { job, rateError, mode };
     },
-    onSuccess: (data) => {
+    onSuccess: ({ job, rateError, mode }) => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
-      form.reset();
-      toast({
-        title: 'Success',
-        description: 'Job added successfully',
-      });
-      onJobCreated(data);
-      onClose();
+      queryClient.invalidateQueries({ queryKey: ['piece-rates'] });
+      queryClient.invalidateQueries({ queryKey: ['all-piece-rates-current'] });
+
+      if (rateError) {
+        toast({
+          title: 'Job created',
+          description: 'Job created, but piecework rate failed — you can add it later.',
+          variant: 'destructive',
+        });
+      } else {
+        toast({ title: 'Job created' });
+      }
+
+      if (mode === 'another') {
+        const currentTimeUnit = form.getValues('time_unit');
+        form.reset({
+          name: '',
+          description: '',
+          category_id: effectiveCategoryId,
+          estimated_time: '',
+          time_unit: currentTimeUnit,
+          piecework_rate: '',
+        });
+        setTimeout(() => nameInputRef.current?.focus(), 50);
+      } else {
+        onJobCreated(job);
+        onClose();
+      }
     },
     onError: (error) => {
       toast({
         title: 'Error',
-        description: 'Failed to add job',
+        description: 'Failed to create job',
         variant: 'destructive',
       });
       console.error('Error adding job:', error);
     },
   });
 
-  // Handle form submission
-  const onSubmit = (values: JobFormValues) => {
-    addJob.mutate(values);
+  const validateNumeric = (
+    fieldName: 'estimated_time' | 'piecework_rate',
+    label: string,
+    value: string | undefined,
+  ): boolean => {
+    if (!value || value === '') return true;
+    const num = parseFloat(value);
+    if (!Number.isFinite(num) || num <= 0) {
+      form.setError(fieldName, { message: `${label} must be a number greater than 0` });
+      return false;
+    }
+    return true;
+  };
+
+  const handleSubmit = (mode: 'close' | 'another') => {
+    form.handleSubmit((values) => {
+      const timeOk = validateNumeric('estimated_time', 'Estimated time', values.estimated_time);
+      const rateOk = validateNumeric('piecework_rate', 'Piecework rate', values.piecework_rate);
+      if (!timeOk || !rateOk) return;
+      addJob.mutate({ values, mode });
+    })();
   };
 
   // Handle parent change - reset subcategory
