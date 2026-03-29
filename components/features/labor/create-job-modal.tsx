@@ -26,6 +26,7 @@ import {
   Select,
   SelectContent,
   SelectItem,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
@@ -33,6 +34,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
+import { Plus } from 'lucide-react';
+import { InlineCategoryForm } from './inline-category-form';
 
 interface JobCategory {
   category_id: number;
@@ -134,6 +137,8 @@ export function CreateJobModal({
   // Local state for cascading selects
   const [selectedParentId, setSelectedParentId] = useState('');
   const [selectedSubId, setSelectedSubId] = useState('');
+  const [isNewCategoryOpen, setIsNewCategoryOpen] = useState(false);
+  const [isNewSubcategoryOpen, setIsNewSubcategoryOpen] = useState(false);
 
   // Initialize selects when categories load or initialCategoryId changes
   useEffect(() => {
@@ -172,6 +177,8 @@ export function CreateJobModal({
       form.reset(DEFAULT_FORM_VALUES);
       setSelectedParentId('');
       setSelectedSubId('');
+      setIsNewCategoryOpen(false);
+      setIsNewSubcategoryOpen(false);
     }
   }, [isOpen, form]);
 
@@ -291,6 +298,10 @@ export function CreateJobModal({
 
   // Handle parent change - reset subcategory
   const handleParentChange = (value: string) => {
+    if (value === '__new_category__') {
+      setIsNewCategoryOpen(true);
+      return;
+    }
     setSelectedParentId(value);
     setSelectedSubId('');
   };
@@ -332,6 +343,13 @@ export function CreateJobModal({
                           {category.name} - R{category.current_hourly_rate.toFixed(2)}/hr
                         </SelectItem>
                       ))}
+                      <SelectSeparator />
+                      <SelectItem value="__new_category__" className="text-muted-foreground">
+                        <span className="flex items-center gap-1.5">
+                          <Plus className="h-3 w-3" />
+                          New Category
+                        </span>
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                   {/* Show form-level error for category_id */}
@@ -347,7 +365,13 @@ export function CreateJobModal({
                   <FormItem>
                     <FormLabel>Subcategory (optional)</FormLabel>
                     <Select
-                      onValueChange={(v) => setSelectedSubId(v === '_none' ? '' : v)}
+                      onValueChange={(v) => {
+                        if (v === '__new_subcategory__') {
+                          setIsNewSubcategoryOpen(true);
+                          return;
+                        }
+                        setSelectedSubId(v === '_none' ? '' : v);
+                      }}
                       value={selectedSubId}
                     >
                       <FormControl>
@@ -365,6 +389,13 @@ export function CreateJobModal({
                             {sub.name} - R{sub.current_hourly_rate.toFixed(2)}/hr
                           </SelectItem>
                         ))}
+                        <SelectSeparator />
+                        <SelectItem value="__new_subcategory__" className="text-muted-foreground">
+                          <span className="flex items-center gap-1.5">
+                            <Plus className="h-3 w-3" />
+                            New Subcategory
+                          </span>
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </FormItem>
@@ -512,6 +543,27 @@ export function CreateJobModal({
           </form>
         </Form>
       </DialogContent>
+
+      {/* Inline category creation dialogs */}
+      <InlineCategoryForm
+        open={isNewCategoryOpen}
+        onOpenChange={setIsNewCategoryOpen}
+        onCreated={(cat) => {
+          setSelectedParentId(cat.category_id.toString());
+          setSelectedSubId('');
+        }}
+      />
+
+      <InlineCategoryForm
+        open={isNewSubcategoryOpen}
+        onOpenChange={setIsNewSubcategoryOpen}
+        parentId={selectedParentId ? parseInt(selectedParentId) : undefined}
+        parentName={parentCategories.find((c) => c.category_id.toString() === selectedParentId)?.name}
+        defaultRate={parentCategories.find((c) => c.category_id.toString() === selectedParentId)?.current_hourly_rate}
+        onCreated={(cat) => {
+          setSelectedSubId(cat.category_id.toString());
+        }}
+      />
     </Dialog>
   );
 }
