@@ -1,21 +1,37 @@
-# BOM Component Substitution at Order Time
+# Product Configuration at Order Time
 
 **Date:** 2026-03-29
-**Status:** Approved
+**Status:** Approved (v2 — addresses Codex design review findings)
 
 ## Problem
 
-Products are costed with default components in the BOM (e.g., a bow handle, white melamine). When a customer places an order, they may want different components (e.g., a Neptune handle, Brookhil melamine). The current "option sets" system requires pre-defining every possible substitute per BOM line per product — too cumbersome at scale with hundreds of products.
+Two related problems when adding products to orders:
 
-## Solution: Category-Based Substitution
+1. **Component substitution:** Products are costed with default components (e.g., bow handle, white melamine). Customers may want alternatives (e.g., Neptune handle, Brookhil melamine). The current "option sets" system requires pre-defining every substitute per BOM line per product — too cumbersome at scale.
 
-Mark BOM lines as **substitutable**. At order time, the user sees default components but can swap any substitutable line by picking from a **category-filtered searchable combobox**. The initial filter is the default component's category, but the user can change the filter to any category or browse all inventory.
+2. **Cutlist portability:** Product cutlists live in `product_cutlist_groups` but don't follow the product onto an order. Users need to aggregate cutlists across an entire order (e.g., 10 cupboards + 10 tables = one combined cutting list) and sometimes adjust parts at order level (e.g., "add an extra shelf").
+
+## Solution Overview
+
+When a product is added to an order, a **configuration step** lets the user:
+- **Swap substitutable components** via category-filtered combobox
+- **Review and edit the cutlist** snapshot for that order line
+
+Both are stored on the `order_details` row as immutable JSONB snapshots, creating an order-specific freeze of the product configuration that never drifts when the product template changes later.
+
+---
+
+## Part 1: Category-Based BOM Substitution
+
+### Concept
+
+Mark BOM lines as **substitutable**. At order time, the user can swap any substitutable line by picking from a searchable combobox filtered by the default component's category. The user can change the category filter or browse all inventory.
 
 No per-product configuration needed. Adding a new component to inventory in the right category automatically makes it available as a substitute everywhere.
 
-## Data Model
+### Data Model
 
-### Migration 1: Add `is_substitutable` to `billofmaterials`
+**`billofmaterials` — add column:**
 
 ```sql
 ALTER TABLE billofmaterials
@@ -25,176 +41,267 @@ COMMENT ON COLUMN billofmaterials.is_substitutable IS
   'When true, this BOM line can be swapped for another component at order time';
 ```
 
-### Migration 2: Add `bom_overrides` to `order_details`
+**`order_details` — add columns:**
 
 ```sql
 ALTER TABLE order_details
-  ADD COLUMN bom_overrides jsonb NOT NULL DEFAULT '[]'::jsonb;
+  ADD COLUMN bom_snapshot jsonb NOT NULL DEFAULT '[]'::jsonb;
 
-COMMENT ON COLUMN order_details.bom_overrides IS
-  'Per-line component substitutions. Array of {bom_id, component_id, supplier_component_id?, note?}';
+COMMENT ON COLUMN order_details.bom_snapshot IS
+  'Immutable snapshot of the full effective BOM at order time. Each entry is a resolved BOM line with final component/supplier/cost.';
 ```
 
-**`bom_overrides` shape:**
+### BOM Snapshot (not overrides)
+
+Codex review identified that storing only `bom_overrides` keyed by live `bom_id` would drift when product BOM rows are edited, deleted, or recreated. Instead, we snapshot the **full effective BOM** at order time.
+
+**`bom_snapshot` shape:**
 ```jsonc
 [
   {
-    "bom_id": 42,
-    "component_id": 315,           // the substitute component
-    "supplier_component_id": 780,  // optional: specific supplier pricing
-    "note": "Customer requested Neptune handle"  // optional
+    "source_bom_id": 42,                    // reference back to original BOM row (informational only)
+    "component_id": 315,                    // resolved component (may be substituted)
+    "component_code": "BROOK-MEL-16",       // denormalized for display
+    "component_description": "Brookhil Melamine 16mm",
+    "category_id": 12,                      // component category
+    "category_name": "Melamine Boards",     // denormalized
+    "supplier_component_id": 780,           // resolved supplier pricing
+    "supplier_name": "Apex Manufacturing",  // denormalized
+    "unit_price": 52.00,                    // supplier price at time of order
+    "quantity_required": 2.00,              // from BOM
+    "line_total": 104.00,                   // unit_price * quantity_required
+    "is_substituted": true,                 // true if user changed from default
+    "default_component_id": 201,            // original BOM component (for audit)
+    "default_component_code": "WHT-MEL-16",
+    "is_cutlist_item": true,                // from BOM
+    "cutlist_category": "board",            // from BOM
+    "cutlist_group_link": 220,              // links to cutlist_snapshot group (see Part 2)
+    "note": "Customer requested Brookhil"   // optional user note
   }
+  // ... one entry per BOM line
 ]
 ```
 
-An empty array `[]` means "use all defaults." Only overridden lines appear in the array.
+Key properties:
+- **Immutable** — once created, the snapshot is never updated by product BOM changes
+- **Self-contained** — all display fields are denormalized; no joins needed to render
+- **Complete** — includes ALL BOM lines (not just overrides), so downstream never needs to load the product BOM
+- **Auditable** — `default_component_id` preserved so you can see what changed
 
-### No new tables
+### Product Setup UX (BOM Tab)
 
-The component's existing `category_id` (via `components.category_id → component_categories.cat_id`) determines what substitutes are available. No option set tables involved.
-
-## Product Setup UX (BOM Tab)
-
-Each BOM row in the product costing tab gets a **toggle/checkbox** labelled "Substitutable" (or a small swap icon toggle).
+Each BOM row gets a **toggle/checkbox**: "Substitutable".
 
 - Default: off (component is fixed)
 - When on: this line can be swapped at order time
-- Only meaningful for components that have a `category_id` set — if the component has no category, show a tooltip: "Set a category on this component to enable substitution"
+- Only meaningful for components with a `category_id` — if missing, show tooltip: "Set a category on this component to enable substitution"
 
-This is the **only** setup required. No option sets, no override dialogs, no value lists.
+No option sets, no override dialogs, no value lists.
 
-## Order Entry UX
-
-### Flow: Adding a Product to an Order
-
-1. User clicks "Add Product" on an order
-2. Selects a product and quantity
-3. **If the product has zero substitutable BOM lines:** adds immediately (current behavior)
-4. **If it has substitutable BOM lines:** a **configuration step** appears:
-
-```
-┌─────────────────────────────────────────────────────┐
-│ Configure: Kitchen Cupboard (qty: 2)                │
-│                                                     │
-│ Board     [White Melamine ▾]              R45.00    │
-│ Handle    [Bow Handle ▾]                  R12.50    │
-│ Hinge     [Standard 110° ▾]              R8.00     │
-│                                                     │
-│ Material Cost: R65.50                               │
-│                                    [Add to Order]   │
-└─────────────────────────────────────────────────────┘
-```
-
-- Only substitutable BOM lines are shown (non-substitutable lines use defaults silently)
-- Each line shows the component label and a searchable combobox
-- The default component is pre-selected
-- Cost updates in real-time as selections change
-
-### Combobox Behavior
+### Order Entry UX — Substitution Combobox
 
 ```
 ┌──────────────────────────────────────┐
-│ 🔍 Search...        [Handles ▾]     │
-│──────────────────────────────────────│
-│ ★ Bow Handle (default)      R12.50  │
+│ Search...               [Handles v]  │
+│--------------------------------------│
+│ * Bow Handle (default)       R12.50  │
 │ Neptune Handle               R18.00  │
 │ Brookhil Handle              R15.50  │
-│ T-Bar Handle                 R9.00   │
-│──────────────────────────────────────│
+│ T-Bar Handle                  R9.00  │
+│--------------------------------------│
 │ Browse all categories...             │
 └──────────────────────────────────────┘
 ```
 
 - **Initial filter:** The default component's category (e.g., "Handles")
-- **Category selector** `[Handles ▾]`: dropdown to switch to any other category
+- **Category selector** `[Handles v]`: dropdown to switch to any other category
 - **"Browse all categories"**: removes the category filter, shows entire inventory catalog
 - **Search**: filters within the current category scope
 - **Default marked**: the original BOM component is marked with a star and "(default)"
-- **Price shown**: each option shows the unit price so the user can compare
+- **Price shown**: each option shows the unit price for cost comparison
 
-### Pricing
+### Costing
 
-Each combobox option shows the supplier component price. The material cost total at the bottom recalculates live:
+```
+effective_material_cost = SUM(line_total) for all bom_snapshot entries
+```
 
+Cost delta shown inline during configuration:
 ```
 Material Cost: R72.00 (+R6.50 from defaults)
 ```
 
-The delta from the default BOM cost is shown so the user understands the impact.
+---
 
-### What Gets Saved
+## Part 2: Cutlist Snapshot at Order Time
 
-When the user clicks "Add to Order", the `order_details` row is created with:
-- `product_id`: the selected product
-- `quantity`: as entered
-- `unit_price`: recalculated with substitutions factored in
-- `bom_overrides`: JSON array of only the changed lines (lines left at default are omitted)
+### Concept
 
-## Costing Logic
+When a product is added to an order, its cutlist is **snapshotted** (copied) to the order line. The user can then edit that copy — add a shelf, change a dimension, remove a part. Existing orders are never affected by later product cutlist changes.
 
-### At Order Time (live preview)
+The order-level cutlist export aggregates snapshots across all order lines, multiplied by quantity.
+
+### Data Model
+
+**`order_details` — add column:**
+
+```sql
+ALTER TABLE order_details
+  ADD COLUMN cutlist_snapshot jsonb DEFAULT NULL;
+
+COMMENT ON COLUMN order_details.cutlist_snapshot IS
+  'Frozen copy of product cutlist groups at order time. Editable per order line. NULL = product has no cutlist.';
+```
+
+**`cutlist_snapshot` shape** — mirrors `product_cutlist_groups` structure:
+```jsonc
+[
+  {
+    "source_group_id": 220,          // reference back to product_cutlist_groups.id
+    "name": "Panels (16mm)",
+    "board_type": "16mm",
+    "primary_material_id": 65,
+    "primary_material_name": "White Melamine",
+    "backer_material_id": null,
+    "backer_material_name": null,
+    "parts": [
+      {
+        "id": "uuid",
+        "name": "Top and Base",
+        "grain": "length",
+        "quantity": 2,
+        "width_mm": 450,
+        "length_mm": 600,
+        "band_edges": { "top": true, "left": true, "right": true, "bottom": true },
+        "lamination_type": "none"
+      }
+    ]
+  }
+]
+```
+
+`NULL` means the product has no cutlist. An empty array `[]` means the cutlist was explicitly cleared.
+
+### BOM-to-Cutlist Material Provenance
+
+Codex review flagged that the link between a BOM board component and a cutlist group's material is undefined. The connection is:
+
+**`product_cutlist_groups.primary_material_id`** stores a `component_id` that corresponds to a BOM line's `component_id`.
+
+When a user substitutes a board material via BOM substitution:
+1. Find all `cutlist_snapshot` groups where `primary_material_id` matches the **default** component being replaced
+2. Update those groups' `primary_material_id` and `primary_material_name` to the substitute component
+
+To make this reliable, the `bom_snapshot` includes a `cutlist_group_link` field on board-type BOM lines that explicitly references which cutlist group(s) that material feeds. This link is established at snapshot creation time by matching `billofmaterials.component_id` against `product_cutlist_groups.primary_material_id`.
+
+**Both manual and configurator-generated cutlists** produce the same `product_cutlist_groups` shape with the same `primary_material_id` field, so this provenance works identically regardless of how the cutlist was created.
+
+### Cutlist Snapshot Lifecycle
+
+| Event | Action |
+|-------|--------|
+| Product added to order | Snapshot created from `product_cutlist_groups` |
+| BOM component substituted (board) | Snapshot material fields updated to match |
+| User clicks "Edit" on cutlist | Opens editor against the snapshot (not the product) |
+| User saves cutlist edit | Snapshot updated on `order_details` row |
+| Product cutlist changed later | No effect — snapshot is frozen |
+
+### Order Entry UX — Cutlist Review
+
+After the substitution step, if the product has cutlist groups:
 
 ```
-effective_material_cost = base_material_cost
-  - SUM(default_component_cost for overridden lines)
-  + SUM(substitute_component_cost for overridden lines)
+┌─────────────────────────────────────────────────────┐
+│ Configure: Kitchen Cupboard (qty: 2)                │
+│                                                     │
+│ COMPONENTS                     [Use all defaults]   │
+│ Board     [Brookhil Melamine v]           R52.00    │
+│ Handle    [Neptune Handle v]              R18.00    │
+│ Hinge     [Standard 110° v]               R8.00    │
+│                                                     │
+│ CUTLIST                                    [Edit]   │
+│ Panels (16mm) — 4 parts, Brookhil Melamine          │
+│                                                     │
+│ Material Cost: R78.00 (+R12.50 from defaults)       │
+│                                    [Add to Order]   │
+└─────────────────────────────────────────────────────┘
 ```
 
-Where component cost = `suppliercomponents.price * billofmaterials.quantity_required` for the chosen supplier component (or cheapest available if none specified).
+- Cutlist section collapsed by default, showing summary (group count, total parts, material name)
+- **[Edit]** opens the cutlist editor (same UI as the product cutlist tab, editing the snapshot)
+- Edits only affect this order line, not the product template
+- Board material updates automatically when the corresponding BOM component is substituted
 
-### For Manufacturing / Job Cards
+### Order-Level Cutlist Export
 
-When generating job cards or work orders from an order line:
-1. Load the product's BOM
-2. Apply `bom_overrides` from the `order_details` row — swap `component_id` and optionally `supplier_component_id` for overridden lines
-3. The result is the **effective BOM** for that specific order line
+A new **"Export Cutlist"** action on the order page:
+1. Collects `cutlist_snapshot` from all `order_details` rows
+2. Multiplies each part quantity by the order line quantity
+3. Groups by board type and material
+4. Outputs in the format the cutting diagram / nesting tool expects
 
-### For Purchasing
+---
 
-When creating purchase orders from an order's BOM:
-- Use the effective BOM (with overrides applied) to determine which components to procure
-- Substituted components reference the correct supplier
+## Combined Configuration Dialog
 
-## Component Data Requirements
+The full flow when adding a product to an order:
 
-For this system to work well, components need:
-- `category_id` set (so category filtering works)
-- At least one `suppliercomponents` row with a price (so cost comparison works)
+1. User selects product and quantity
+2. **If no substitutable BOM lines AND no cutlist:** add immediately (current behavior)
+3. **If either exists:** show the configuration dialog with components and/or cutlist sections
+4. **"Use all defaults"** button skips configuration entirely
 
-Components without a category can still be BOM items, but they won't appear as substitutes in the category-filtered view (only via "Browse all").
+---
 
 ## API Endpoints
 
 ### Existing (modified)
 
-**`GET /api/products/[productId]/bom`** — add `is_substitutable` to the response for each BOM row.
-
-**`PATCH /api/products/[productId]/bom`** — accept `is_substitutable` in the update payload.
-
-**`POST /api/orders/[orderId]/add-products`** — accept `bom_overrides` in the request body per product. Store in `order_details.bom_overrides`.
+- **`GET /api/products/[productId]/bom`** — include `is_substitutable` per row
+- **`PATCH /api/products/[productId]/bom`** — accept `is_substitutable` in payload
+- **`POST /api/orders/[orderId]/add-products`** — builds `bom_snapshot` and `cutlist_snapshot` server-side; accepts optional substitution selections per product
 
 ### New
 
-**`GET /api/components/by-category/[categoryId]`** — returns components in a category with their cheapest supplier price. Used by the substitution combobox. Supports `?search=` query param.
+- **`GET /api/components/by-category/[categoryId]`** — components in a category with cheapest supplier price; supports `?search=` query param
+- **`GET /api/orders/[orderId]/details/[detailId]/effective-bom`** — returns `bom_snapshot` for a specific order line (read from stored snapshot, not computed)
+- **`GET /api/orders/[orderId]/export-cutlist`** — aggregated cutlist across all order lines
+- **`PATCH /api/orders/[orderId]/details/[detailId]/cutlist`** — update cutlist snapshot for a specific order line
 
-**`GET /api/orders/[orderId]/details/[detailId]/effective-bom`** — returns the product BOM with overrides applied for a specific order line. Used by job card generation and purchasing.
+## Downstream Integration
+
+### Job Cards / Work Orders
+
+Read `bom_snapshot` and `cutlist_snapshot` directly from the `order_details` row. Never load the product BOM — the snapshot is the source of truth for this order.
+
+### Purchasing
+
+Generate purchase orders from `bom_snapshot` — component and supplier references are already resolved and frozen.
+
+### Cutting Diagram PDF
+
+Accept the order-level aggregated cutlist (from `export-cutlist` endpoint) as input.
 
 ## Migration Path from Option Sets
 
-- The option sets system remains untouched (no breaking changes)
-- Products can be gradually migrated: turn on `is_substitutable` on BOM lines, remove option set links
-- Once all products are migrated, option sets can be deprecated in a future release
-- The `bom_option_overrides`, `option_sets`, `option_set_groups`, `option_set_values`, and related tables stay until deprecation
+- Option sets system remains untouched (no breaking changes)
+- Products can gradually migrate: turn on `is_substitutable` on BOM lines, remove option set links
+- Once all products are migrated, option sets can be deprecated
+- All option set tables stay until formal deprecation
 
 ## Scope Boundaries
 
 **In scope:**
 - `is_substitutable` flag on BOM lines
-- `bom_overrides` JSONB on order details
-- Configuration step when adding products to orders
-- Category-filtered searchable combobox
+- `bom_snapshot` immutable JSONB on order details
+- `cutlist_snapshot` JSONB on order details (editable per line)
+- Configuration dialog when adding products to orders
+- Category-filtered searchable combobox for substitution
+- BOM-to-cutlist material provenance
+- Cutlist review/edit at order line level
+- Order-level cutlist export (aggregated)
 - Live cost preview
-- Effective BOM resolution for downstream (job cards, purchasing)
+- Snapshot-based downstream (job cards, purchasing, cutting diagram)
 
 **Out of scope (future):**
 - Curated preferred substitutes list per BOM line
@@ -202,3 +309,4 @@ Components without a category can still be BOM items, but they won't appear as s
 - Customer-facing self-configuration (e-commerce)
 - Bulk substitution across multiple order lines
 - Deprecation/removal of option sets system
+- Auto-nesting optimization in the cutlist export
