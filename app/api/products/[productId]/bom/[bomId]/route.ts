@@ -18,6 +18,7 @@ type BomUpdatePayload = {
   component_id?: number | null;
   quantity_required?: number;
   supplier_component_id?: number | null;
+  is_substitutable?: boolean | null;
   is_cutlist_item?: boolean | null;
   cutlist_category?: string | null;
   cutlist_dimensions?: Record<string, unknown> | null;
@@ -91,6 +92,10 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
         return NextResponse.json({ error: 'quantity_required must be greater than 0' }, { status: 400 });
       }
       updateData.quantity_required = quantityRequired;
+    }
+
+    if ('is_substitutable' in payload) {
+      updateData.is_substitutable = Boolean(payload.is_substitutable);
     }
 
     if ('is_cutlist_item' in payload) {

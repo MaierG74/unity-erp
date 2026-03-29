@@ -16,6 +16,7 @@ type BomPayload = {
   component_id?: number | null;
   quantity_required?: number;
   supplier_component_id?: number | null;
+  is_substitutable?: boolean | null;
   is_cutlist_item?: boolean | null;
   cutlist_category?: string | null;
   cutlist_dimensions?: Record<string, unknown> | null;
@@ -42,6 +43,9 @@ function normalizeBomPayload(payload: BomPayload): Record<string, unknown> {
     component_id: componentId,
     quantity_required: quantityRequired,
     supplier_component_id: supplierComponentId,
+    is_substitutable: payload.is_substitutable === null || payload.is_substitutable === undefined
+      ? false
+      : Boolean(payload.is_substitutable),
     is_cutlist_item: payload.is_cutlist_item === null || payload.is_cutlist_item === undefined
       ? false
       : Boolean(payload.is_cutlist_item),
@@ -125,6 +129,7 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
       component_id: item.component_id,
       quantity_required: item.quantity_required,
       supplier_component_id: item.supplier_component_id,
+      is_substitutable: item.is_substitutable,
       is_cutlist_item: item.is_cutlist_item,
       cutlist_category: item.cutlist_category,
       cutlist_dimensions: item.cutlist_dimensions,
