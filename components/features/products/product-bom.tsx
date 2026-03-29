@@ -1947,14 +1947,6 @@ const renderCutlistEditor = () => {
                                   <Button variant="ghost" size="icon" onClick={() => startEditing(direct)}>
                                     <Edit className="h-4 w-4" />
                                   </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => setOverrideDialog({ bomId: direct.bom_id, componentId: direct.component_id })}
-                                    aria-label="Configure option overrides"
-                                  >
-                                    <SlidersHorizontal className="h-4 w-4" />
-                                  </Button>
                                   <Button variant="destructiveSoft" size="icon" onClick={() => deleteBOMItem.mutate(direct.bom_id)} aria-label="Delete component">
                                     <Trash2 className="h-4 w-4" />
                                   </Button>
