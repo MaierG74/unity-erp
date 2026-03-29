@@ -1916,7 +1916,7 @@ const renderCutlistEditor = () => {
                                   <Button
                                     variant="ghost"
                                     size="icon"
-                                    className={cn("h-8 w-8", direct.is_substitutable && "text-primary")}
+                                    className={cn("h-8 w-8", direct.is_substitutable ? "bg-primary/15 text-primary ring-1 ring-primary/30" : "text-muted-foreground")}
                                     onClick={async (e) => {
                                       e.stopPropagation();
                                       const newValue = !direct.is_substitutable;
