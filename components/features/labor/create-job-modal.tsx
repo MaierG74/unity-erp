@@ -37,7 +37,6 @@ import { useToast } from '@/components/ui/use-toast';
 interface JobCategory {
   category_id: number;
   name: string;
-  description: string | null;
   current_hourly_rate: number;
   parent_category_id: number | null;
 }
@@ -61,6 +60,15 @@ const jobSchema = z.object({
 });
 
 type JobFormValues = z.infer<typeof jobSchema>;
+
+const DEFAULT_FORM_VALUES: JobFormValues = {
+  name: '',
+  description: '',
+  category_id: '',
+  estimated_time: '',
+  time_unit: 'minutes',
+  piecework_rate: '',
+};
 
 interface CreateJobModalProps {
   isOpen: boolean;
@@ -87,7 +95,7 @@ export function CreateJobModal({
     queryFn: async () => {
       const { data, error } = await supabase
         .from('job_categories')
-        .select('*')
+        .select('category_id, name, current_hourly_rate, parent_category_id')
         .order('name');
 
       if (error) throw error;
@@ -113,27 +121,14 @@ export function CreateJobModal({
     return { parentCategories: parents, childrenByParent: children };
   }, [categories]);
 
-  // Determine initial parent from initialCategoryId
-  const initialParent = useMemo(() => {
-    if (!initialCategoryId || categories.length === 0) return '';
+  // Determine initial parent/sub from initialCategoryId
+  const { initialParent, initialSub } = useMemo(() => {
+    if (!initialCategoryId || categories.length === 0) return { initialParent: '', initialSub: '' };
     const cat = categories.find((c) => c.category_id === initialCategoryId);
-    if (!cat) return '';
-    if (cat.parent_category_id === null) {
-      // It's a parent category
-      return cat.category_id.toString();
-    }
-    // It's a subcategory - return its parent
-    return cat.parent_category_id.toString();
-  }, [initialCategoryId, categories]);
-
-  const initialSub = useMemo(() => {
-    if (!initialCategoryId || categories.length === 0) return '';
-    const cat = categories.find((c) => c.category_id === initialCategoryId);
-    if (!cat) return '';
-    if (cat.parent_category_id !== null) {
-      return cat.category_id.toString();
-    }
-    return '';
+    if (!cat) return { initialParent: '', initialSub: '' };
+    return cat.parent_category_id === null
+      ? { initialParent: cat.category_id.toString(), initialSub: '' }
+      : { initialParent: cat.parent_category_id.toString(), initialSub: cat.category_id.toString() };
   }, [initialCategoryId, categories]);
 
   // Local state for cascading selects
@@ -163,14 +158,7 @@ export function CreateJobModal({
   // Initialize form
   const form = useForm<JobFormValues>({
     resolver: zodResolver(jobSchema),
-    defaultValues: {
-      name: '',
-      description: '',
-      category_id: '',
-      estimated_time: '',
-      time_unit: 'minutes',
-      piecework_rate: '',
-    },
+    defaultValues: DEFAULT_FORM_VALUES,
   });
 
   // Sync effectiveCategoryId to form
@@ -181,7 +169,7 @@ export function CreateJobModal({
   // Reset state when dialog opens/closes
   useEffect(() => {
     if (!isOpen) {
-      form.reset({ name: '', description: '', category_id: '', estimated_time: '', time_unit: 'minutes', piecework_rate: '' });
+      form.reset(DEFAULT_FORM_VALUES);
       setSelectedParentId('');
       setSelectedSubId('');
     }
@@ -257,25 +245,21 @@ export function CreateJobModal({
       }
 
       if (mode === 'another') {
-        const currentTimeUnit = form.getValues('time_unit');
         form.reset({
-          name: '',
-          description: '',
+          ...DEFAULT_FORM_VALUES,
           category_id: effectiveCategoryId,
-          estimated_time: '',
-          time_unit: currentTimeUnit,
-          piecework_rate: '',
+          time_unit: form.getValues('time_unit'),
         });
-        setTimeout(() => nameInputRef.current?.focus(), 50);
+        requestAnimationFrame(() => nameInputRef.current?.focus());
       } else {
         onJobCreated(job);
         onClose();
       }
     },
-    onError: (error) => {
+    onError: (error: Error) => {
       toast({
         title: 'Error',
-        description: 'Failed to create job',
+        description: error.message || 'Failed to create job',
         variant: 'destructive',
       });
       console.error('Error adding job:', error);
