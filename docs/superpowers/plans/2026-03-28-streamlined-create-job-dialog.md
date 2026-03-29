@@ -258,12 +258,34 @@ Key design decisions:
 Replace the `onSubmit` function:
 
 ```typescript
+const validateNumeric = (
+  fieldName: 'estimated_time' | 'piecework_rate',
+  label: string,
+  value: string | undefined,
+): boolean => {
+  if (!value || value === '') return true; // empty is fine (optional)
+  const num = parseFloat(value);
+  if (!Number.isFinite(num) || num <= 0) {
+    form.setError(fieldName, { message: `${label} must be a number greater than 0` });
+    return false;
+  }
+  return true;
+};
+
 const handleSubmit = (mode: 'close' | 'another') => {
-  form.handleSubmit((values) => addJob.mutate({ values, mode }))();
+  form.handleSubmit((values) => {
+    // Pre-submit numeric validation (needed because type="button" skips browser validation
+    // and Zod schema keeps these as plain optional strings)
+    const timeOk = validateNumeric('estimated_time', 'Estimated time', values.estimated_time);
+    const rateOk = validateNumeric('piecework_rate', 'Piecework rate', values.piecework_rate);
+    if (!timeOk || !rateOk) return;
+
+    addJob.mutate({ values, mode });
+  })();
 };
 ```
 
-No type cast needed — `JobFormValues` is used consistently across the form and mutation since we parse strings in the mutation function, not in Zod transforms.
+This surfaces field-level errors via `<FormMessage />` instead of falling through to a generic "Failed to create job" toast. Catches 0, negatives, and NaN. The mutation-side guards remain as defense-in-depth but should never fire in practice.
 
 - [ ] **Step 5: Verify the app compiles**
 
