@@ -418,7 +418,7 @@ export function CreateJobModal({
                   name="estimated_time"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Estimated Time</FormLabel>
+                      <FormLabel>Estimated Time (optional)</FormLabel>
                       <FormControl>
                         <Input
                           type="number"
@@ -449,6 +449,7 @@ export function CreateJobModal({
                         <SelectContent>
                           <SelectItem value="minutes">Minutes</SelectItem>
                           <SelectItem value="hours">Hours</SelectItem>
+                          <SelectItem value="seconds">Seconds</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -461,7 +462,7 @@ export function CreateJobModal({
                   name="piecework_rate"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Default Piecework Rate</FormLabel>
+                      <FormLabel>Default Piecework Rate (optional)</FormLabel>
                       <FormControl>
                         <div className="relative">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">R</span>
@@ -490,7 +491,7 @@ export function CreateJobModal({
               name="description"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Description</FormLabel>
+                  <FormLabel>Description (optional)</FormLabel>
                   <FormControl>
                     <Textarea rows={3} {...field} />
                   </FormControl>
