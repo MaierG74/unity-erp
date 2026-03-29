@@ -1919,19 +1919,27 @@ const renderCutlistEditor = () => {
                                     className={cn("h-8 w-8", direct.is_substitutable && "text-primary")}
                                     onClick={async (e) => {
                                       e.stopPropagation();
+                                      const newValue = !direct.is_substitutable;
+                                      // Optimistic update — flip locally without refetching
+                                      queryClient.setQueryData(
+                                        ['productBOM', productId, supplierFeatureAvailable],
+                                        (old: any) => old?.map((item: any) =>
+                                          item.bom_id === direct.bom_id
+                                            ? { ...item, is_substitutable: newValue }
+                                            : item
+                                        )
+                                      );
                                       try {
                                         await authorizedFetch(`/api/products/${productId}/bom/${direct.bom_id}`, {
                                           method: 'PATCH',
-                                          body: JSON.stringify({ is_substitutable: !direct.is_substitutable }),
+                                          body: JSON.stringify({ is_substitutable: newValue }),
                                         });
-                                        queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] });
-                                        queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
-                                        queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] });
-                                        queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] });
                                       } catch (err) {
                                         console.error('Failed to toggle substitutable', err);
+                                        // Revert on failure
+                                        queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] });
                                       }
-                                    }}
+                                    }
                                     title={direct.is_substitutable ? "Substitutable at order time (click to disable)" : "Fixed component (click to make substitutable)"}
                                   >
                                     <ArrowLeftRight className="h-4 w-4" />
