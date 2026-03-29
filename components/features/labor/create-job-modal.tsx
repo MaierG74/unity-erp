@@ -360,8 +360,8 @@ export function CreateJobModal({
                   )}
                 </FormItem>
 
-                {/* Subcategory select - only show when parent has subcategories */}
-                {subcategoriesForParent.length > 0 && (
+                {/* Subcategory select - show when parent is selected (allows creating first subcategory) */}
+                {selectedParentId && (
                   <FormItem>
                     <FormLabel>Subcategory (optional)</FormLabel>
                     <Select
@@ -389,7 +389,7 @@ export function CreateJobModal({
                             {sub.name} - R{sub.current_hourly_rate.toFixed(2)}/hr
                           </SelectItem>
                         ))}
-                        <SelectSeparator />
+                        {subcategoriesForParent.length > 0 && <SelectSeparator />}
                         <SelectItem value="__new_subcategory__" className="text-muted-foreground">
                           <span className="flex items-center gap-1.5">
                             <Plus className="h-3 w-3" />
