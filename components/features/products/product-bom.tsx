@@ -57,7 +57,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Trash2, Edit, Save, X, Search, Loader2, Building2, SlidersHorizontal, XCircle, Upload } from 'lucide-react';
+import { Plus, Trash2, Edit, Save, X, Search, Loader2, Building2, SlidersHorizontal, XCircle, Upload, ArrowLeftRight } from 'lucide-react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -1912,6 +1912,29 @@ const renderCutlistEditor = () => {
                             <TableCell>
                               {direct ? (
                                 <div className="flex items-center gap-2">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className={cn("h-8 w-8", direct.is_substitutable && "text-primary")}
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      try {
+                                        await authorizedFetch(`/api/products/${productId}/bom/${direct.bom_id}`, {
+                                          method: 'PATCH',
+                                          body: JSON.stringify({ is_substitutable: !direct.is_substitutable }),
+                                        });
+                                        queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] });
+                                        queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
+                                        queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] });
+                                        queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] });
+                                      } catch (err) {
+                                        console.error('Failed to toggle substitutable', err);
+                                      }
+                                    }}
+                                    title={direct.is_substitutable ? "Substitutable at order time (click to disable)" : "Fixed component (click to make substitutable)"}
+                                  >
+                                    <ArrowLeftRight className="h-4 w-4" />
+                                  </Button>
                                   <Button variant="ghost" size="icon" onClick={() => startEditing(direct)}>
                                     <Edit className="h-4 w-4" />
                                   </Button>
