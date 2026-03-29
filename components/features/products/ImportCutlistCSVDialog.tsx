@@ -5,7 +5,7 @@ import { useDropzone } from 'react-dropzone';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/components/ui/use-toast';
-import { supabase } from '@/lib/supabase';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import {
   Upload,
   FileSpreadsheet,
@@ -165,9 +165,14 @@ export default function ImportCutlistCSVDialog({
         cutlist_dimensions: rowToCutlistDimensions(row),
       }));
 
-      const { error } = await supabase.from('billofmaterials').insert(insertData);
-
-      if (error) throw error;
+      const response = await authorizedFetch(`/api/products/${productId}/bom`, {
+        method: 'POST',
+        body: JSON.stringify({ items: insertData }),
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(json?.error || 'Failed to import cutlist rows');
+      }
 
       toast({
         title: 'Import successful',

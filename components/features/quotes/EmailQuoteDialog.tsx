@@ -12,6 +12,7 @@ import { Quote } from '@/lib/db/quotes';
 import { preprocessQuoteImages } from '@/lib/quotes/compositeImage';
 import { useQuery } from '@tanstack/react-query';
 import { fetchContactsByCustomerId } from '@/lib/db/customer-contacts';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import type { CustomerContact } from '@/types/customers';
 
 interface EmailQuoteDialogProps {
@@ -254,7 +255,7 @@ export default function EmailQuoteDialog({
       const d = `${date.getDate()}`.padStart(2, '0');
       const pdfFilename = `Quote-${quote.quote_number}-${y}${m}${d}.pdf`;
 
-      const response = await fetch(`/api/quotes/${quote.id}/send-email`, {
+      const response = await authorizedFetch(`/api/quotes/${quote.id}/send-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

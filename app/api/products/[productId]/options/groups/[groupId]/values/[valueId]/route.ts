@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import {
+  parsePositiveInt,
+  productExistsInOrg,
+  productOptionValueBelongsToProduct,
+  requireProductsAccess,
+} from '@/lib/api/products-access';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
 type RouteParams = {
   productId?: string;
@@ -7,26 +13,14 @@ type RouteParams = {
   valueId?: string;
 };
 
-function parseId(value?: string): number | null {
-  if (!value) return null;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && !Number.isNaN(parsed) ? parsed : null;
-}
-
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    throw new Error('Supabase environment variables are not configured');
-  }
-  return createClient(url, key);
-}
-
 export async function PATCH(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
-  const productId = parseId(params.productId);
-  const groupId = parseId(params.groupId);
-  const valueId = parseId(params.valueId);
+  const productId = parsePositiveInt(params.productId);
+  const groupId = parsePositiveInt(params.groupId);
+  const valueId = parsePositiveInt(params.valueId);
   if (!productId || !groupId || !valueId) {
     return NextResponse.json({ error: 'Invalid identifiers' }, { status: 400 });
   }
@@ -70,10 +64,18 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
     return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
   }
 
-  const supabase = getSupabaseAdmin();
-
   try {
-    const { data, error } = await supabase
+    const exists = await productExistsInOrg(productId, auth.orgId);
+    if (!exists) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
+
+    const valueBelongs = await productOptionValueBelongsToProduct(productId, groupId, valueId);
+    if (!valueBelongs) {
+      return NextResponse.json({ error: 'Option value not found for product' }, { status: 404 });
+    }
+
+    const { data, error } = await supabaseAdmin
       .from('product_option_values')
       .update(updates)
       .eq('option_group_id', groupId)
@@ -90,21 +92,21 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
     }
 
     if (setDefault === true) {
-      await supabase
+      await supabaseAdmin
         .from('product_option_values')
         .update({ is_default: false })
         .eq('option_group_id', groupId)
         .neq('option_value_id', valueId);
     } else if (setDefault === false) {
       // ensure at least one default remains by checking count
-      const { data: defaults } = await supabase
+      const { data: defaults } = await supabaseAdmin
         .from('product_option_values')
         .select('option_value_id')
         .eq('option_group_id', groupId)
         .eq('is_default', true);
       if (!defaults || defaults.length === 0) {
         // revert change: set current value back to true to avoid group without default
-        await supabase
+        await supabaseAdmin
           .from('product_option_values')
           .update({ is_default: true })
           .eq('option_value_id', valueId);
@@ -130,25 +132,36 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
 }
 
 export async function DELETE(_request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(_request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
-  const productId = parseId(params.productId);
-  const groupId = parseId(params.groupId);
-  const valueId = parseId(params.valueId);
+  const productId = parsePositiveInt(params.productId);
+  const groupId = parsePositiveInt(params.groupId);
+  const valueId = parsePositiveInt(params.valueId);
   if (!productId || !groupId || !valueId) {
     return NextResponse.json({ error: 'Invalid identifiers' }, { status: 400 });
   }
 
-  const supabase = getSupabaseAdmin();
-
   try {
-    const { data: valueRow } = await supabase
+    const exists = await productExistsInOrg(productId, auth.orgId);
+    if (!exists) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
+
+    const valueBelongs = await productOptionValueBelongsToProduct(productId, groupId, valueId);
+    if (!valueBelongs) {
+      return NextResponse.json({ error: 'Option value not found for product' }, { status: 404 });
+    }
+
+    const { data: valueRow } = await supabaseAdmin
       .from('product_option_values')
       .select('is_default')
       .eq('option_group_id', groupId)
       .eq('option_value_id', valueId)
       .single();
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('product_option_values')
       .delete()
       .eq('option_group_id', groupId)
@@ -160,14 +173,14 @@ export async function DELETE(_request: NextRequest, context: { params: Promise<R
     }
 
     if (valueRow?.is_default) {
-      const { data: remaining } = await supabase
+      const { data: remaining } = await supabaseAdmin
         .from('product_option_values')
         .select('option_value_id')
         .eq('option_group_id', groupId)
         .limit(1);
 
       if (remaining && remaining.length > 0) {
-        await supabase
+        await supabaseAdmin
           .from('product_option_values')
           .update({ is_default: true })
           .eq('option_value_id', remaining[0].option_value_id);

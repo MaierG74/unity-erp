@@ -114,6 +114,7 @@ export async function GET(
       .from('product_cutlist_groups')
       .select('*')
       .eq('product_id', productIdNum)
+      .eq('org_id', auth.orgId)
       .order('sort_order', { ascending: true });
 
     if (error) {
@@ -168,7 +169,8 @@ export async function POST(
     const { error: deleteError } = await supabaseAdmin
       .from('product_cutlist_groups')
       .delete()
-      .eq('product_id', productIdNum);
+      .eq('product_id', productIdNum)
+      .eq('org_id', auth.orgId);
 
     if (deleteError) {
       console.error('Error deleting existing groups:', deleteError);
@@ -178,6 +180,7 @@ export async function POST(
     if (groups.length > 0) {
       const groupsToInsert = groups.map((group, index) => ({
         product_id: productIdNum,
+        org_id: auth.orgId,
         name: group.name || 'Unnamed Group',
         board_type: group.board_type || '16mm',
         primary_material_id: group.primary_material_id ? Number.parseInt(group.primary_material_id, 10) : null,
@@ -244,7 +247,8 @@ export async function DELETE(
     const { error } = await supabaseAdmin
       .from('product_cutlist_groups')
       .delete()
-      .eq('product_id', productIdNum);
+      .eq('product_id', productIdNum)
+      .eq('org_id', auth.orgId);
 
     if (error) {
       console.error('Error deleting cutlist groups:', error);

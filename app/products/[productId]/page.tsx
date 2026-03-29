@@ -85,60 +85,27 @@ type PendingNavigation =
 // Fetch a single product by ID
 async function fetchProduct(productId: number): Promise<Product | null> {
   try {
-    // Fetch the product
-    const { data: product, error } = await supabase
-      .from('products')
-      .select(`
-        product_id,
-        internal_code,
-        name,
-        description
-      `)
-      .eq('product_id', productId)
-      .single();
-
-    if (error) throw error;
-    if (!product) return null;
-
-    // Fetch images for this product
-    const { data: images, error: imagesError } = await supabase
-      .from('product_images')
-      .select('*')
-      .eq('product_id', productId);
-
-    if (imagesError) throw imagesError;
-
-    // Fetch categories for this product
-    const { data: categoryAssignments, error: catError } = await supabase
-      .from('product_category_assignments')
-      .select(`
-        product_cat_id
-      `)
-      .eq('product_id', productId);
-
-    if (catError) throw catError;
-
-    let categories: ProductCategory[] = [];
-    if (categoryAssignments && categoryAssignments.length > 0) {
-      const catIds = categoryAssignments.map(c => c.product_cat_id);
-      const { data: cats, error: catsError } = await supabase
-        .from('product_categories')
-        .select('*')
-        .in('product_cat_id', catIds);
-
-      if (catsError) throw catsError;
-      categories = cats || [];
+    const response = await authorizedFetch(`/api/products/${productId}`, { cache: 'no-store' });
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(message || 'Failed to fetch product');
     }
 
-    // Find primary image
-    const primaryImage = images?.find(img => img.is_primary)?.image_url || 
-                         (images && images.length > 0 ? images[0].image_url : null);
+    const json = await response.json();
+    const product = json?.product as Product | undefined;
+    if (!product) return null;
+
+    const images = Array.isArray(product.images) ? product.images : [];
+    const primaryImage =
+      images.find((img) => img.is_primary)?.image_url ||
+      (images.length > 0 ? images[0].image_url : null);
 
     return {
       ...product,
       primary_image: primaryImage,
-      images: images || [],
-      categories: categories
+      images,
+      categories: Array.isArray(product.categories) ? product.categories : [],
     };
   } catch (error) {
     console.error('Error fetching product:', error);
@@ -367,22 +334,44 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
     setEditOpen(true);
   };
 
+  const saveProductSnapshot = async (next: {
+    internal_code?: string;
+    name?: string;
+    description?: string | null;
+    categories?: number[];
+  }) => {
+    if (!product) {
+      throw new Error('Product not loaded');
+    }
+
+    const response = await authorizedFetch(`/api/products/${productId}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        internal_code: next.internal_code ?? product.internal_code,
+        name: next.name ?? product.name,
+        description: next.description ?? product.description ?? null,
+        categories: next.categories ?? (product.categories ?? []).map((category) => category.product_cat_id),
+      }),
+    });
+
+    if (!response.ok) {
+      const json = await response.json().catch(() => null);
+      throw new Error(json?.error || 'Failed to update product');
+    }
+  };
+
   const handleSaveProduct = async () => {
     if (!product) return;
     setSavingProduct(true);
     try {
-      const { error } = await supabase
-        .from('products')
-        .update({
-          internal_code: editCode.trim(),
-          name: editName.trim(),
-          description: editDescription || null,
-        })
-        .eq('product_id', productId);
-      if (error) throw error;
+      await saveProductSnapshot({
+        internal_code: editCode.trim(),
+        name: editName.trim(),
+        description: editDescription || null,
+      });
       toast({ title: 'Product updated', description: 'Your changes have been saved.' });
       setEditOpen(false);
-      refetch();
+      await refetch();
     } catch (e: any) {
       console.error('[save-product]', e);
       toast({ title: 'Failed to update product', description: e?.message || 'Please try again', variant: 'destructive' });
@@ -691,20 +680,18 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
                           className="h-4 w-4 p-0 hover:bg-transparent hover:opacity-50"
                           onClick={async () => {
                             try {
-                              const { error } = await supabase
-                                .from('product_category_assignments')
-                                .delete()
-                                .eq('product_id', product.product_id)
-                                .eq('product_cat_id', category.product_cat_id)
-
-                              if (error) throw error
+                              await saveProductSnapshot({
+                                categories: (product.categories || [])
+                                  .filter((entry) => entry.product_cat_id !== category.product_cat_id)
+                                  .map((entry) => entry.product_cat_id),
+                              })
 
                               toast({
                                 title: "Success",
                                 description: "Category removed successfully",
                               })
 
-                              refetch()
+                              await refetch()
                             } catch (error) {
                               console.error('Error removing category:', error)
                               toast({
@@ -726,6 +713,11 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
                 <CategoryDialog
                   productId={product.product_id.toString()}
                   existingCategories={product.categories || []}
+                  onAddCategoryIds={async (categoryIds) => {
+                    const existingIds = (product.categories || []).map((category) => category.product_cat_id);
+                    const nextCategories = Array.from(new Set([...existingIds, ...categoryIds]));
+                    await saveProductSnapshot({ categories: nextCategories });
+                  }}
                   onCategoriesChange={() => refetch()}
                 />
               </div>

@@ -12,6 +12,20 @@
 3. Flag relevant BOM entries as cutlist parts so orders can aggregate material usage automatically when options vary per line item.
 4. Keep quoting → order → production data consistent, leveraging overrides with a single dialog flow rather than hopping between pages.
 
+## Current API Guardrails (2026-03-28)
+- Product-scoped option routes now require authenticated `PRODUCTS_BOM` module access plus an active organization context before any reads or writes run.
+- Every nested product route validates parent ownership before mutating:
+  - product option groups/values must belong to the `[productId]` in the URL
+  - attached option-set links, group overlays, and value overlays must belong to the same product link/set chain
+  - BOM override routes must prove both the BOM row and the referenced option/value belong to the product before patch/delete
+- Global option-set library routes now use the same module gate instead of raw service-role access.
+- Option-set defaults and BOM override writes reject component or supplier-component references outside the caller's organization. When a linked option-set default points at an inaccessible reference, BOM auto-seed skips that default instead of silently writing a cross-organization override.
+- Related tenant correctness fixes shipped in the same pass:
+  - `lib/api/org-context.ts` now treats `banned_until` as an active ban only while the timestamp is still in the future.
+  - `POST /api/products/:productId/cutlist-groups` now writes `org_id`, and cutlist-group reads/deletes also scope by organization.
+  - `POST /api/products/:productId/add-fg` now resolves `quote_company_settings` by `org_id` instead of assuming `setting_id = 1`.
+- Follow-up still pending: older product screens still perform some direct browser-side Supabase CRUD. Those writes should be moved behind the hardened API routes above before the products tenancy workstream is considered complete.
+
 ## Reusable Option Sets
 - **Global Option Sets**: New top-level catalog of reusable option definitions.
   - `option_sets` — named library entries (e.g., `Handles`, `Top Finish`).

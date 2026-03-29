@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import {
+  optionSetGroupBelongsToSet,
+  optionSetLinkForProduct,
+  parsePositiveInt,
+  productExistsInOrg,
+  requireProductsAccess,
+} from '@/lib/api/products-access';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
 type RouteParams = {
   productId?: string;
@@ -7,56 +14,14 @@ type RouteParams = {
   groupId?: string;
 };
 
-function parseId(value?: string): number | null {
-  if (!value) return null;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && !Number.isNaN(parsed) ? parsed : null;
-}
-
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    throw new Error('Supabase environment variables are not configured');
-  }
-  return createClient(url, key);
-}
-
-async function ensureLink(client: any, productId: number, linkId: number) {
-  const { data, error } = await client
-    .from('product_option_set_links')
-    .select('product_id, option_set_id')
-    .eq('link_id', linkId)
-    .maybeSingle();
-
-  const record = data as any;
-
-  if (error || !record || Number(record.product_id) !== productId) {
-    throw new Error('LinkNotFound');
-  }
-
-  return Number(record.option_set_id);
-}
-
-async function ensureGroup(optionSetId: number, groupId: number, client: any) {
-  const { data, error } = await client
-    .from('option_set_groups')
-    .select('option_set_id')
-    .eq('option_set_group_id', groupId)
-    .maybeSingle();
-
-  const record = data as any;
-
-  if (error || !record || Number(record.option_set_id) !== optionSetId) {
-    throw new Error('GroupNotFound');
-  }
-}
-
 export async function PATCH(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
-  const productId = parseId(params.productId);
-  const linkId = parseId(params.linkId);
-  const groupId = parseId(params.groupId);
+  const productId = parsePositiveInt(params.productId);
+  const linkId = parsePositiveInt(params.linkId);
+  const groupId = parsePositiveInt(params.groupId);
   if (!productId || !linkId || !groupId) {
     return NextResponse.json({ error: 'Invalid identifiers' }, { status: 400 });
   }
@@ -75,11 +40,21 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
     return NextResponse.json({ error: 'No fields provided to update' }, { status: 400 });
   }
 
-  const supabase = getSupabaseAdmin();
-
   try {
-    const optionSetId = await ensureLink(supabase, productId, linkId);
-    await ensureGroup(optionSetId, groupId, supabase);
+    const exists = await productExistsInOrg(productId, auth.orgId);
+    if (!exists) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
+
+    const link = await optionSetLinkForProduct(productId, linkId);
+    if (!link) {
+      return NextResponse.json({ error: 'Option set link not found for product' }, { status: 404 });
+    }
+
+    const groupBelongs = await optionSetGroupBelongsToSet(link.optionSetId, groupId);
+    if (!groupBelongs) {
+      return NextResponse.json({ error: 'Option group not part of option set' }, { status: 404 });
+    }
 
     const payload: Record<string, unknown> = {
       link_id: linkId,
@@ -107,7 +82,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
       displayOrder === undefined;
 
     if (shouldDelete) {
-      const { error: deleteError } = await supabase
+      const { error: deleteError } = await supabaseAdmin
         .from('product_option_group_overlays')
         .delete()
         .eq('link_id', linkId)
@@ -121,7 +96,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
       return NextResponse.json({ success: true });
     }
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('product_option_group_overlays')
       .upsert(payload, { onConflict: 'link_id,option_set_group_id' });
 
@@ -131,34 +106,41 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
     }
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
-    if (error?.message === 'LinkNotFound') {
-      return NextResponse.json({ error: 'Option set link not found for product' }, { status: 404 });
-    }
-    if (error?.message === 'GroupNotFound') {
-      return NextResponse.json({ error: 'Option group not part of option set' }, { status: 404 });
-    }
+  } catch (error) {
     console.error('[group-overlays] unexpected error', error);
     return NextResponse.json({ error: 'Unexpected error while updating group overlay' }, { status: 500 });
   }
 }
 
-export async function DELETE(_request: NextRequest, context: { params: Promise<RouteParams> }) {
+export async function DELETE(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
-  const productId = parseId(params.productId);
-  const linkId = parseId(params.linkId);
-  const groupId = parseId(params.groupId);
+  const productId = parsePositiveInt(params.productId);
+  const linkId = parsePositiveInt(params.linkId);
+  const groupId = parsePositiveInt(params.groupId);
   if (!productId || !linkId || !groupId) {
     return NextResponse.json({ error: 'Invalid identifiers' }, { status: 400 });
   }
 
-  const supabase = getSupabaseAdmin();
-
   try {
-    const optionSetId = await ensureLink(supabase, productId, linkId);
-    await ensureGroup(optionSetId, groupId, supabase);
+    const exists = await productExistsInOrg(productId, auth.orgId);
+    if (!exists) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
 
-    const { error } = await supabase
+    const link = await optionSetLinkForProduct(productId, linkId);
+    if (!link) {
+      return NextResponse.json({ error: 'Option set link not found for product' }, { status: 404 });
+    }
+
+    const groupBelongs = await optionSetGroupBelongsToSet(link.optionSetId, groupId);
+    if (!groupBelongs) {
+      return NextResponse.json({ error: 'Option group not part of option set' }, { status: 404 });
+    }
+
+    const { error } = await supabaseAdmin
       .from('product_option_group_overlays')
       .delete()
       .eq('link_id', linkId)
@@ -170,13 +152,7 @@ export async function DELETE(_request: NextRequest, context: { params: Promise<R
     }
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
-    if (error?.message === 'LinkNotFound') {
-      return NextResponse.json({ error: 'Option set link not found for product' }, { status: 404 });
-    }
-    if (error?.message === 'GroupNotFound') {
-      return NextResponse.json({ error: 'Option group not part of option set' }, { status: 404 });
-    }
+  } catch (error) {
     console.error('[group-overlays] unexpected delete error', error);
     return NextResponse.json({ error: 'Unexpected error while deleting group overlay' }, { status: 500 });
   }

@@ -3,8 +3,8 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
+import { supabase } from '@/lib/supabase';
 import {
   Card,
   CardContent,
@@ -290,15 +290,15 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
 
       const hasKeys = Object.keys(next).length > 0;
 
-      const { error } = await supabase
-        .from('billofmaterials')
-        .update({
+      const response = await authorizedFetch(`/api/products/${productId}/bom/${row.bomId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
           cutlist_dimensions: hasKeys ? next : null,
-        })
-        .eq('bom_id', row.bomId);
-
-      if (error) {
-        throw error;
+        }),
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(json?.error || 'Failed to update cutlist material');
       }
       return { rowKey: row.key, nextDimensions: hasKeys ? next : null };
     },
@@ -330,13 +330,12 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
         throw new Error('Only direct BOM rows can be deleted from here.');
       }
 
-      const { error } = await supabase
-        .from('billofmaterials')
-        .delete()
-        .eq('bom_id', row.bomId);
-
-      if (error) {
-        throw error;
+      const response = await authorizedFetch(`/api/products/${productId}/bom/${row.bomId}`, {
+        method: 'DELETE',
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(json?.error || 'Failed to delete cutlist row');
       }
       return { rowKey: row.key };
     },

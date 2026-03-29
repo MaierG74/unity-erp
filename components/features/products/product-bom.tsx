@@ -816,18 +816,17 @@ export function ProductBOM({ productId }: ProductBOMProps) {
         
         console.log('Adding BOM item with data:', insertData);
         
-        const { data, error } = await supabase
-          .from('billofmaterials')
-          .insert(insertData)
-          .select();
-          
-        if (error) {
-          console.error('Supabase error:', error);
-          throw new Error(`Database error: ${error.message}`);
+        const response = await authorizedFetch(`/api/products/${productId}/bom`, {
+          method: 'POST',
+          body: JSON.stringify(insertData),
+        });
+        const json = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(json?.error || 'Failed to add BOM row');
         }
         
-        console.log('Successfully added BOM item:', data);
-        return data;
+        console.log('Successfully added BOM item:', json?.item);
+        return json?.item;
       } catch (error: any) {
         console.error('Error in mutation:', error);
         throw error;
@@ -889,19 +888,17 @@ export function ProductBOM({ productId }: ProductBOMProps) {
         
         console.log('Updating BOM item with data:', updateData);
         
-        const { data, error } = await supabase
-          .from('billofmaterials')
-          .update(updateData)
-          .eq('bom_id', values.bom_id)
-          .select();
-          
-        if (error) {
-          console.error('Supabase error:', error);
-          throw new Error(`Database error: ${error.message}`);
+        const response = await authorizedFetch(`/api/products/${productId}/bom/${values.bom_id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(updateData),
+        });
+        const json = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(json?.error || 'Failed to update BOM row');
         }
         
-        console.log('Successfully updated BOM item:', data);
-        return data;
+        console.log('Successfully updated BOM item:', json?.item);
+        return json?.item;
       } catch (error: any) {
         console.error('Error in update mutation:', error);
         throw error;
@@ -933,12 +930,11 @@ export function ProductBOM({ productId }: ProductBOMProps) {
   // Delete BOM item mutation
   const deleteBOMItem = useMutation({
     mutationFn: async (bomId: number) => {
-      const { error } = await supabase
-        .from('billofmaterials')
-        .delete()
-        .eq('bom_id', bomId);
-        
-      if (error) throw error;
+      const response = await authorizedFetch(`/api/products/${productId}/bom/${bomId}`, {
+        method: 'DELETE',
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(json?.error || 'Failed to delete BOM row');
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['productBOM', productId] });
@@ -1614,24 +1610,26 @@ const renderCutlistEditor = () => {
       if (item.type === 'database') {
         // Add component to BOM
         const insert: Record<string, unknown> = {
-          product_id: productId,
           component_id: item.component_id,
           quantity_required: item.qty || 1,
         }
         if (supplierFeatureAvailable && item.supplier_component_id) {
           insert.supplier_component_id = item.supplier_component_id
         }
-        const { error } = await supabase.from('billofmaterials').insert(insert)
-        if (error) throw error
+        const res = await authorizedFetch(`/api/products/${productId}/bom`, {
+          method: 'POST',
+          body: JSON.stringify(insert),
+        })
+        const json = await res.json().catch(() => null)
+        if (!res.ok) throw new Error(json?.error || 'Failed to add component')
         queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] })
         queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] })
         queryClient.invalidateQueries({ queryKey: ['effective-bom', productId] })
         queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] })
       } else if (item.type === 'collection' && item.collection_id) {
         // Apply collection to BOM
-        const res = await fetch(`/api/products/${productId}/bom/apply-collection`, {
+        const res = await authorizedFetch(`/api/products/${productId}/bom/apply-collection`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ collection_id: item.collection_id, scale: item.qty || 1 }),
         })
         if (!res.ok) throw new Error('Failed to apply collection')
@@ -1649,9 +1647,8 @@ const renderCutlistEditor = () => {
         const payload = mode === 'attach'
           ? { sub_product_id: item.product_id, scale: quantity, mode: 'phantom' }
           : { sub_product_id: item.product_id, quantity }
-        const res = await fetch(url, {
+        const res = await authorizedFetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         })
         if (!res.ok) throw new Error('Failed to add product')

@@ -37,7 +37,7 @@ export interface OptionSetSummary {
 }
 
 export async function fetchOptionSets(): Promise<OptionSetSummary[]> {
-  const res = await fetch('/api/option-sets', { cache: 'no-store' });
+  const res = await authorizedFetch('/api/option-sets', { cache: 'no-store' });
   if (!res.ok) {
     const message = await res.text();
     throw new Error(message || 'Failed to load option sets');
@@ -61,7 +61,7 @@ export async function createOptionSet(payload: { code: string; name: string; des
 }
 
 export async function updateOptionSet(optionSetId: number, payload: { code?: string; name?: string; description?: string | null }) {
-  const res = await fetch(`/api/option-sets/${optionSetId}`, {
+  const res = await authorizedFetch(`/api/option-sets/${optionSetId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -75,7 +75,7 @@ export async function updateOptionSet(optionSetId: number, payload: { code?: str
 }
 
 export async function deleteOptionSet(optionSetId: number): Promise<void> {
-  const res = await fetch(`/api/option-sets/${optionSetId}`, { method: 'DELETE' });
+  const res = await authorizedFetch(`/api/option-sets/${optionSetId}`, { method: 'DELETE' });
   if (!res.ok) {
     const message = await res.text();
     throw new Error(message || 'Failed to delete option set');
@@ -92,7 +92,7 @@ export interface ProductOptionSetLink {
 }
 
 export async function fetchProductOptionSetLinks(productId: number): Promise<ProductOptionSetLink[]> {
-  const res = await fetch(`/api/products/${productId}/option-sets`, { cache: 'no-store' });
+  const res = await authorizedFetch(`/api/products/${productId}/option-sets`, { cache: 'no-store' });
   if (!res.ok) {
     const message = await res.text();
     throw new Error(message || 'Failed to load product option sets');
@@ -102,7 +102,7 @@ export async function fetchProductOptionSetLinks(productId: number): Promise<Pro
 }
 
 export async function attachOptionSetToProduct(productId: number, optionSetId: number, aliasLabel?: string | null): Promise<ProductOptionSetLink> {
-  const res = await fetch(`/api/products/${productId}/option-sets`, {
+  const res = await authorizedFetch(`/api/products/${productId}/option-sets`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ option_set_id: optionSetId, alias_label: aliasLabel ?? null }),
@@ -120,7 +120,7 @@ export async function updateProductOptionSetLink(
   linkId: number,
   payload: { alias_label?: string | null; display_order?: number }
 ): Promise<void> {
-  const res = await fetch(`/api/products/${productId}/option-sets/${linkId}`, {
+  const res = await authorizedFetch(`/api/products/${productId}/option-sets/${linkId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -132,7 +132,7 @@ export async function updateProductOptionSetLink(
 }
 
 export async function detachOptionSetFromProduct(productId: number, linkId: number): Promise<void> {
-  const res = await fetch(`/api/products/${productId}/option-sets/${linkId}`, { method: 'DELETE' });
+  const res = await authorizedFetch(`/api/products/${productId}/option-sets/${linkId}`, { method: 'DELETE' });
   if (!res.ok) {
     const message = await res.text();
     throw new Error(message || 'Failed to detach option set');
@@ -145,7 +145,7 @@ export async function updateGroupOverlay(
   optionSetGroupId: number,
   payload: { alias_label?: string | null; is_required?: boolean; hide?: boolean; display_order?: number }
 ): Promise<void> {
-  const res = await fetch(`/api/products/${productId}/option-sets/${linkId}/groups/${optionSetGroupId}/overlay`, {
+  const res = await authorizedFetch(`/api/products/${productId}/option-sets/${linkId}/groups/${optionSetGroupId}/overlay`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -157,7 +157,7 @@ export async function updateGroupOverlay(
 }
 
 export async function clearGroupOverlay(productId: number, linkId: number, optionSetGroupId: number): Promise<void> {
-  const res = await fetch(`/api/products/${productId}/option-sets/${linkId}/groups/${optionSetGroupId}/overlay`, {
+  const res = await authorizedFetch(`/api/products/${productId}/option-sets/${linkId}/groups/${optionSetGroupId}/overlay`, {
     method: 'DELETE',
   });
   if (!res.ok) {
@@ -172,7 +172,7 @@ export async function updateValueOverlay(
   optionSetValueId: number,
   payload: { alias_label?: string | null; is_default?: boolean; hide?: boolean; display_order?: number }
 ): Promise<void> {
-  const res = await fetch(`/api/products/${productId}/option-sets/${linkId}/values/${optionSetValueId}/overlay`, {
+  const res = await authorizedFetch(`/api/products/${productId}/option-sets/${linkId}/values/${optionSetValueId}/overlay`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -184,7 +184,7 @@ export async function updateValueOverlay(
 }
 
 export async function clearValueOverlay(productId: number, linkId: number, optionSetValueId: number): Promise<void> {
-  const res = await fetch(`/api/products/${productId}/option-sets/${linkId}/values/${optionSetValueId}/overlay`, {
+  const res = await authorizedFetch(`/api/products/${productId}/option-sets/${linkId}/values/${optionSetValueId}/overlay`, {
     method: 'DELETE',
   });
   if (!res.ok) {

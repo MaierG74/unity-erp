@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import CropEditor from '@/components/quotes/CropEditor'
-import { supabase } from '@/lib/supabase'
+import { authorizedFetch } from '@/lib/client/auth-fetch'
 import type { CropParams } from '@/types/image-editor'
 import { toast } from 'sonner'
 
@@ -23,6 +23,7 @@ interface ProductImageEditorTarget {
 interface ProductImageEditorDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  productId: string | number
   image: ProductImageEditorTarget | null
   onSaved: (imageId: string | number, cropParams: CropParams | null) => void
 }
@@ -30,6 +31,7 @@ interface ProductImageEditorDialogProps {
 export function ProductImageEditorDialog({
   open,
   onOpenChange,
+  productId,
   image,
   onSaved,
 }: ProductImageEditorDialogProps) {
@@ -49,15 +51,17 @@ export function ProductImageEditorDialog({
 
     setSaving(true)
     try {
-      const { error } = await supabase
-        .from('product_images')
-        .update({
+      const response = await authorizedFetch(`/api/products/${productId}/images/${image.image_id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
           crop_params: draftCropParams,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('image_id', image.image_id)
+        }),
+      })
 
-      if (error) throw error
+      if (!response.ok) {
+        const message = await response.text()
+        throw new Error(message || 'Failed to save crop')
+      }
 
       onSaved(image.image_id, draftCropParams)
       toast.success('Image crop saved', {

@@ -17,6 +17,7 @@ import { getSuppliers, deleteSupplier, getOpenOrderCounts } from '@/lib/api/supp
 import { Plus, Trash2, Package, ChevronLeft, ChevronRight, Loader2, Users } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useDebounce } from '@/hooks/use-debounce';
+import { useHistoryScrollRestoration } from '@/hooks/use-history-scroll-restoration';
 import { PricelistPreviewModal } from './pricelist-preview-modal';
 import { OpenOrdersModal } from './open-orders-modal';
 import type { SupplierWithDetails } from '@/types/suppliers';
@@ -157,6 +158,10 @@ export function SupplierList() {
   const { data: openOrderCounts = {} } = useQuery({
     queryKey: ['supplier-open-order-counts'],
     queryFn: getOpenOrderCounts,
+  });
+
+  useHistoryScrollRestoration({
+    ready: !isLoading,
   });
 
   const deleteMutation = useMutation({

@@ -42,6 +42,7 @@ Customer Inbox ✉️
 - PDF preview button
 - Client-side PDF generation using `@react-pdf/renderer`
 - Converts PDF to base64 for transmission to API
+- Sends the protected `/api/quotes/[id]/send-email` request via the shared authenticated fetch helper so the bearer token is always forwarded, even when no Supabase auth cookie is present
 
 **PDF Generation:**
 ```typescript
@@ -66,6 +67,7 @@ const pdfBase64 = Buffer.from(pdfBuffer).toString('base64');
 - Renders email template
 - Sends email via Resend with PDF attachment
 - Logs send to `quote_email_log` table
+- Enforces quotes module + organization access, so callers must include either a bearer token or a parseable auth cookie
 
 **Important**: The API now properly structures item attachments by:
 1. Fetching all attachments for the quote
@@ -212,6 +214,8 @@ EMAIL_FROM_SALES=sales@qbutton.co.za
   details?: string;         // Error details
 }
 ```
+
+**Auth note:** This route is protected by `requireModuleAccess(...)`. In the browser, use the shared `authorizedFetch(...)` helper rather than bare `fetch(...)` so the current Supabase access token is forwarded explicitly. Without that header, the request can fail intermittently with `401 Missing Supabase access token` when the session only exists in client storage and not in request cookies.
 
 #### GET `/api/quotes/[id]`
 

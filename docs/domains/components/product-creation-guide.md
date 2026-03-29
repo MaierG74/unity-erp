@@ -93,6 +93,10 @@ CREATE TABLE public.billoflabour (
 );
 ```
 
+Current tenancy note:
+- Product BOM row create/update/delete and cutlist CSV imports now persist through authenticated `/api/products/:productId/bom` server routes.
+- Product BOL row create/update/delete now persist through authenticated `/api/products/:productId/bol` server routes.
+
 ## Current Product Management Features
 
 ### Existing UI Components
@@ -141,6 +145,10 @@ CREATE TABLE public.billoflabour (
 - Consistent styling across tabs:
   - Delete actions use `destructiveSoft` (pastel in light, strong in dark).
   - Image frames use `bg-card` in light and `dark:bg-white/5 dark:ring-1 dark:ring-white/10` with subtle image lift in dark.
+- Tenant/API guardrails as of 2026-03-29:
+  - Product detail reads now load through `GET /api/products/:productId` instead of direct browser-side Supabase reads.
+  - Product edits now persist through `PUT /api/products/:productId`, while category changes persist through `PUT /api/products/:productId` or `POST /api/products/:productId/categories`; both paths enforce products-module access and organization ownership before writing.
+  - Product image insert/update/delete flows now persist through `/api/products/:productId/images` server routes instead of direct browser-side `product_images` mutations.
 
 ### Product Image Management
 
@@ -151,7 +159,7 @@ CREATE TABLE public.billoflabour (
 - Pre-upload crop is non-destructive: the original file is uploaded unchanged and the chosen crop is saved as metadata for display/editing
 - Warns on refresh, page leave, back navigation, and product-tab changes when an image is staged but not yet uploaded
 - Uploads to Supabase storage bucket "QButton"
-- Automatically creates database records in `product_images` table
+- Automatically creates database records in `product_images` through the authenticated product image API routes
 
 #### Image Gallery Component (`/components/features/products/image-gallery.tsx`)
 - Displays all product images in a grid
@@ -194,6 +202,7 @@ products/APOHB/APOHB_20240315123456_front_view.jpg
 - Manages component requirements for products
 - Links products to required components with quantities
 - Used for inventory management and cost calculation
+- Direct BOM row create/update/delete, cutlist CSV import, and cutlist-material updates now flow through authenticated product BOM API routes instead of direct browser-side `billofmaterials` writes.
 - Actions available:
   - Add Component (search components, set quantity, optional supplier)
   - Add From Collection (apply a saved set of components; see Collections)
@@ -240,6 +249,7 @@ API endpoint backing this action:
 - Manages labor requirements for products
 - Links products to required jobs with time estimates
 - Used for production planning and cost calculation
+- Direct BOL row create/update/delete now flow through authenticated product BOL API routes instead of direct browser-side `billoflabour` writes.
 
 ## Missing Product Creation Features
 
