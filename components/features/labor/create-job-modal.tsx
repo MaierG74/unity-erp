@@ -140,11 +140,16 @@ export function CreateJobModal({
   const [isNewCategoryOpen, setIsNewCategoryOpen] = useState(false);
   const [isNewSubcategoryOpen, setIsNewSubcategoryOpen] = useState(false);
 
-  // Initialize selects when categories load or initialCategoryId changes
+  // Initialize selects only when dialog first opens (not on every categories change)
+  const hasInitialized = useRef(false);
   useEffect(() => {
-    if (isOpen && categories.length > 0) {
+    if (isOpen && categories.length > 0 && !hasInitialized.current) {
+      hasInitialized.current = true;
       setSelectedParentId(initialParent);
       setSelectedSubId(initialSub);
+    }
+    if (!isOpen) {
+      hasInitialized.current = false;
     }
   }, [isOpen, categories.length, initialParent, initialSub]);
 
