@@ -313,7 +313,7 @@ export function CreateJobModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[525px]">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Create New Job</DialogTitle>
           <DialogDescription>
@@ -322,84 +322,169 @@ export function CreateJobModal({
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            {/* Category (parent) select */}
-            <FormItem>
-              <FormLabel>Category</FormLabel>
-              <Select
-                onValueChange={handleParentChange}
-                value={selectedParentId}
-                disabled={categoriesLoading}
-              >
-                <FormControl>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  {parentCategories.map((category) => (
-                    <SelectItem
-                      key={category.category_id}
-                      value={category.category_id.toString()}
-                    >
-                      {category.name} - R{category.current_hourly_rate.toFixed(2)}/hr
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {/* Show form-level error for category_id */}
-              {form.formState.errors.category_id && (
-                <p className="text-sm font-medium text-destructive">
-                  {form.formState.errors.category_id.message}
-                </p>
-              )}
-            </FormItem>
-
-            {/* Subcategory select - only show when parent has subcategories */}
-            {subcategoriesForParent.length > 0 && (
-              <FormItem>
-                <FormLabel>Subcategory (optional)</FormLabel>
-                <Select
-                  onValueChange={(v) => setSelectedSubId(v === '_none' ? '' : v)}
-                  value={selectedSubId}
-                >
-                  <FormControl>
-                    <SelectTrigger>
-                      <SelectValue placeholder="None (use parent category)" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <SelectItem value="_none">None (use parent category)</SelectItem>
-                    {subcategoriesForParent.map((sub) => (
-                      <SelectItem
-                        key={sub.category_id}
-                        value={sub.category_id.toString()}
-                      >
-                        {sub.name} - R{sub.current_hourly_rate.toFixed(2)}/hr
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </FormItem>
-            )}
-
-            {/* Hidden field to register category_id with form validation */}
-            <input type="hidden" {...form.register('category_id')} />
-
-            <FormField
-              control={form.control}
-              name="name"
-              render={({ field }) => (
+          <form onSubmit={(e) => { e.preventDefault(); handleSubmit('close'); }} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
+              {/* Left column */}
+              <div className="space-y-3">
+                {/* Category (parent) select */}
                 <FormItem>
-                  <FormLabel>Name</FormLabel>
-                  <FormControl>
-                    <Input {...field} />
-                  </FormControl>
-                  <FormMessage />
+                  <FormLabel>Category</FormLabel>
+                  <Select
+                    onValueChange={handleParentChange}
+                    value={selectedParentId}
+                    disabled={categoriesLoading}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select category" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {parentCategories.map((category) => (
+                        <SelectItem
+                          key={category.category_id}
+                          value={category.category_id.toString()}
+                        >
+                          {category.name} - R{category.current_hourly_rate.toFixed(2)}/hr
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {/* Show form-level error for category_id */}
+                  {form.formState.errors.category_id && (
+                    <p className="text-sm font-medium text-destructive">
+                      {form.formState.errors.category_id.message}
+                    </p>
+                  )}
                 </FormItem>
-              )}
-            />
 
+                {/* Subcategory select - only show when parent has subcategories */}
+                {subcategoriesForParent.length > 0 && (
+                  <FormItem>
+                    <FormLabel>Subcategory (optional)</FormLabel>
+                    <Select
+                      onValueChange={(v) => setSelectedSubId(v === '_none' ? '' : v)}
+                      value={selectedSubId}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="None (use parent category)" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="_none">None (use parent category)</SelectItem>
+                        {subcategoriesForParent.map((sub) => (
+                          <SelectItem
+                            key={sub.category_id}
+                            value={sub.category_id.toString()}
+                          >
+                            {sub.name} - R{sub.current_hourly_rate.toFixed(2)}/hr
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormItem>
+                )}
+
+                {/* Hidden field to register category_id with form validation */}
+                <input type="hidden" {...form.register('category_id')} />
+
+                <FormField
+                  control={form.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Name</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          ref={(e) => {
+                            field.ref(e);
+                            (nameInputRef as React.MutableRefObject<HTMLInputElement | null>).current = e;
+                          }}
+                          autoFocus
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              {/* Right column */}
+              <div className="space-y-3">
+                <FormField
+                  control={form.control}
+                  name="estimated_time"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Estimated Time</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          step="any"
+                          min="0.01"
+                          placeholder="0"
+                          {...field}
+                          value={field.value || ''}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="time_unit"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Time Unit</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select unit" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="minutes">Minutes</SelectItem>
+                          <SelectItem value="hours">Hours</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="piecework_rate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Default Piecework Rate</FormLabel>
+                      <FormControl>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">R</span>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            placeholder="0.00"
+                            className="pl-7 pr-14"
+                            {...field}
+                            value={field.value || ''}
+                          />
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">/piece</span>
+                        </div>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </div>
+
+            {/* Full-width description below grid */}
             <FormField
               control={form.control}
               name="description"
@@ -407,7 +492,7 @@ export function CreateJobModal({
                 <FormItem>
                   <FormLabel>Description</FormLabel>
                   <FormControl>
-                    <Textarea {...field} />
+                    <Textarea rows={3} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -417,11 +502,21 @@ export function CreateJobModal({
             <DialogFooter>
               <Button
                 type="button"
-                variant="outline"
+                variant="ghost"
                 onClick={onClose}
               >
                 Cancel
               </Button>
+              {showAddAnother && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={addJob.isPending}
+                  onClick={() => handleSubmit('another')}
+                >
+                  {addJob.isPending ? 'Creating...' : 'Create & Add Another'}
+                </Button>
+              )}
               <Button
                 type="submit"
                 disabled={addJob.isPending}
