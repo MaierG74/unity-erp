@@ -113,6 +113,7 @@ This document describes the current frontend implementation of Time & Attendance
 3) Cache refresh patterns:
    - Prefer targeted refresh using `refreshStaffAttendanceCaches(dateStr, staffId)` to avoid global re-render storms
    - Fallback to `queryClient.invalidateQueries` when errors occur
+   - Staff/day summary queries must return `null` when no `time_daily_summary` row exists yet; returning `undefined` causes React Query to throw during first-event or no-summary days
 
 ## UX rules and calculations
 

@@ -5,6 +5,8 @@ This document details the Unity ERP time and attendance system architecture, per
 
 As of 2026-03-26, the intended behavior is that multiple `clock_in` / `clock_out` events in the same day are valid when they form clean alternating work sessions (for example `clock_in -> clock_out -> clock_in -> clock_out`). The UI should only warn when the sequence is genuinely suspicious, such as duplicate scans or out-of-order entries.
 
+As of 2026-03-30, Sunday/manual first-event failures were traced to the legacy `update_daily_work_summary()` trigger path creating `time_daily_summary` placeholder rows without a safe `total_work_minutes` value. Any summary writer that runs before canonical segment recomputation must either persist non-null total-minute fields or coalesce missing totals to zero so the `regular_minutes` / `ot_minutes` / `dt_minutes` buckets stay valid under the newer `NOT NULL` constraints.
+
 ## Core Architecture
 
 ### Database Tables (Supabase)
@@ -54,6 +56,7 @@ As of 2026-03-26, the intended behavior is that multiple `clock_in` / `clock_out
   - Monday-Thursday: 30min automatic tea break deduction
   - Friday: No automatic tea break deduction
   - Sunday: All hours are double-time
+  - Public-holiday double-time is still a deferred follow-up; current live rollout is Sunday-only until that later pass is implemented
   - First 9 hours: Regular time
   - After 9 hours: Overtime (1.5x)
 - **Consumer Rule**: Weekly payroll rollups use the organization's configured standard week hours (`organizations.payroll_standard_week_hours`, default `44.00`) for non-double-time hours. Consumers should total each day's worked minutes from `time_daily_summary`, keep `dt_minutes` separate, then classify the first configured weekly hours as regular and the balance as overtime. This keeps Weekly Summary, payroll review, exports, and saved `staff_weekly_payroll` rows aligned for the same week. Weekly Summary week navigation should update the `week` query param from event handlers after the local week state changes, not from inside React state updater functions, so the router stays free of render-phase update warnings.

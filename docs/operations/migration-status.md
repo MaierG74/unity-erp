@@ -28,11 +28,15 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260319065606
-- Latest applied migration name: factory_floor_issued_progress_zero
-- Applied at (UTC): 2026-03-19 06:56:06 UTC
+- Latest applied migration version: 20260330083217
+- Latest applied migration name: fix_timekeeper_summary_null_buckets
+- Applied at (UTC): 2026-03-30 08:32:17 UTC
 - Applied by: Codex via Supabase MCP
 - Verification notes:
+  - Current batch (2026-03-30, Codex):
+    1. `fix_timekeeper_summary_null_buckets` (20260330083217): hardened `before_insert_or_update_time_daily_summary()` to coalesce missing totals to zero instead of deriving `NULL` payroll buckets, and updated `update_daily_work_summary()` so legacy timekeeper inserts/upserts carry safe minute totals/break totals while keeping Sunday rows in the double-time bucket only.
+    2. Verified with MCP `list_migrations`: production history now includes `20260330083217`.
+    3. Verified with MCP SQL: the live `before_insert_or_update_time_daily_summary()` function now clamps null `total_work_minutes` to `0` and writes `regular_minutes = 0`, `ot_minutes = 0`, `dt_minutes = 0` for a rolled-back Sunday placeholder summary insert instead of failing the `dt_minutes` NOT NULL constraint.
   - Current batch (2026-03-19, Codex):
     1. `factory_floor_issued_progress_zero` (20260319065606): updated `public.factory_floor_status` so `issued` jobs remain visible on the floor but stay at `0%` progress until work is actually started; only `in_progress` and `on_hold` assignments accrue elapsed minutes and auto progress.
     2. Verified with MCP `list_migrations`: production history now includes `20260319065606`.

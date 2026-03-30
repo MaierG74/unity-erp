@@ -204,7 +204,7 @@ export function DailyHoursDetailDialog({
         .limit(1);
 
       if (error) throw error;
-      return data?.[0];
+      return data?.[0] ?? null;
     },
     enabled: isOpen && !!staffId && !!date,
   });
