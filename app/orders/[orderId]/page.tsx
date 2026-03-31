@@ -962,9 +962,10 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                           remain: Number(detail.quantity ?? 0),
                           factor: 1,
                         };
-                        const productBom = componentRequirements
-                          .find((pr: any) => pr.product_id === detail.product_id)
-                          ?.components ?? [];
+                        const productBom = (
+                          componentRequirements.find((pr: any) => pr.order_detail_id === detail.order_detail_id)
+                          ?? componentRequirements.find((pr: any) => pr.product_id === detail.product_id)
+                        )?.components ?? [];
                         const productId = detail.product_id?.toString() || detail.order_detail_id?.toString();
                         const isExpanded = expandedRows[productId] === true;
 
@@ -1428,7 +1429,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
         selectedProduct={slideOutProduct}
         bomComponents={
           slideOutProduct
-            ? componentRequirements.find((pr: any) => pr.product_id === slideOutProduct.product_id)?.components ?? []
+            ? (componentRequirements.find((pr: any) => pr.order_detail_id === slideOutProduct.order_detail_id) ?? componentRequirements.find((pr: any) => pr.product_id === slideOutProduct.product_id))?.components ?? []
             : []
         }
         coverage={slideOutProduct ? coverageByProduct.get(slideOutProduct.product_id) ?? null : null}
