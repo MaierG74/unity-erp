@@ -153,14 +153,14 @@ export function ConfigureProductDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-3 py-1">
+        <div className="space-y-4 pt-1">
           {/* COMPONENTS section */}
           {product.bomLines.length > 0 && (
-            <div className="space-y-2">
+            <section className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   Components
-                </span>
+                </h3>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -171,7 +171,7 @@ export function ConfigureProductDialog({
                 </Button>
               </div>
 
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 {product.bomLines.map(line => {
                   const selected = selections.get(line.bom_id);
                   const price = selected?.cheapest_price ?? line.default_price;
@@ -191,36 +191,36 @@ export function ConfigureProductDialog({
                           categories={categories}
                         />
                       </div>
-                      <span className="text-sm shrink-0 w-20 text-right tabular-nums">
+                      <span className="text-sm shrink-0 w-24 text-right tabular-nums font-medium">
                         {formatCurrency(price * line.quantity_required)}
                       </span>
                     </div>
                   );
                 })}
               </div>
-            </div>
+            </section>
           )}
 
           {/* CUTLIST section */}
           {product.cutlistGroups.length > 0 && (
-            <div className="space-y-2">
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <section className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Cutlist
-              </span>
+              </h3>
               <CutlistSnapshotSummary
                 groups={product.cutlistGroups}
                 onEdit={() => toast.info('Cutlist editor coming soon')}
               />
-            </div>
+            </section>
           )}
 
           {/* Material cost summary */}
-          <div className="flex items-center justify-between pt-1 border-t">
-            <span className="text-sm font-medium">Material Cost:</span>
-            <span className="text-sm tabular-nums">
+          <div className="flex items-center justify-between rounded-lg border border-border/50 bg-muted/30 px-4 py-3">
+            <span className="text-sm font-medium">Material Cost</span>
+            <span className="text-sm tabular-nums font-semibold">
               {formatCurrency(materialCost)}
               {deltaLabel && (
-                <span className={`ml-1.5 text-xs ${deltaClass}`}>{deltaLabel}</span>
+                <span className={`ml-2 text-xs font-normal ${deltaClass}`}>{deltaLabel}</span>
               )}
             </span>
           </div>
