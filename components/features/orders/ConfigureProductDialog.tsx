@@ -226,7 +226,7 @@ export function ConfigureProductDialog({
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="pt-4">
           <Button size="sm" onClick={handleAddToOrder}>
             Add to Order
           </Button>
