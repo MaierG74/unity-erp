@@ -972,9 +972,9 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                         return (
                           <React.Fragment key={`frag-${detail.order_detail_id}`}>
                           {idx > 0 && (
-                            <TableRow>
-                              <TableCell colSpan={7} className="h-4 p-0 bg-background border-b-2 border-border/30" />
-                            </TableRow>
+                            <tr className="border-0 hover:bg-transparent">
+                              <td colSpan={7} className="h-5 p-0 border-0" />
+                            </tr>
                           )}
                           <ProductsTableRow
                             key={detail.order_detail_id}
