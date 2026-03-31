@@ -954,7 +954,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {order.details.map((detail: any) => {
+                      {order.details.map((detail: any, idx: number) => {
                         const isEditing = editingDetailId === detail.order_detail_id;
                         const coverage = coverageByProduct.get(detail.product_id) ?? {
                           ordered: Number(detail.quantity ?? 0),
@@ -969,6 +969,12 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                         const isExpanded = expandedRows[productId] === true;
 
                         return (
+                          <React.Fragment key={detail.order_detail_id}>
+                          {idx > 0 && (
+                            <TableRow>
+                              <TableCell colSpan={7} className="h-3 p-0 border-0 bg-transparent" />
+                            </TableRow>
+                          )}
                           <ProductsTableRow
                             key={detail.order_detail_id}
                             detail={detail}
@@ -991,6 +997,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                             deletePending={deleteDetailMutation.isPending}
                             onProductClick={() => setSlideOutProduct(detail)}
                           />
+                          </React.Fragment>
                         );
                       })}
                     </TableBody>
