@@ -966,8 +966,8 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                           componentRequirements.find((pr: any) => pr.order_detail_id === detail.order_detail_id)
                           ?? componentRequirements.find((pr: any) => pr.product_id === detail.product_id)
                         )?.components ?? [];
-                        const productId = detail.product_id?.toString() || detail.order_detail_id?.toString();
-                        const isExpanded = expandedRows[productId] === true;
+                        const expandKey = detail.order_detail_id?.toString() || detail.product_id?.toString();
+                        const isExpanded = expandedRows[expandKey] === true;
 
                         return (
                           <React.Fragment key={`frag-${detail.order_detail_id}`}>
@@ -987,7 +987,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                             bomComponents={productBom}
                             computeComponentMetrics={computeComponentMetrics}
                             showGlobalContext={showGlobalContext}
-                            onToggleExpand={() => toggleRowExpansion(productId)}
+                            onToggleExpand={() => toggleRowExpansion(expandKey)}
                             onStartEdit={() => handleStartEditDetail(detail)}
                             onSaveEdit={() => handleSaveDetail(detail.order_detail_id)}
                             onCancelEdit={handleCancelDetailEdit}
