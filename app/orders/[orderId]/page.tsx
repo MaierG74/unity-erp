@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect, useCallback, useRef, use } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef, use } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { type Product, type OrderDetail, type Customer, type FinishedGoodReservation } from '@/types/orders';
@@ -969,7 +969,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                         const isExpanded = expandedRows[productId] === true;
 
                         return (
-                          <React.Fragment key={detail.order_detail_id}>
+                          <React.Fragment key={`frag-${detail.order_detail_id}`}>
                           {idx > 0 && (
                             <TableRow>
                               <TableCell colSpan={7} className="h-3 p-0 border-0 bg-transparent" />
