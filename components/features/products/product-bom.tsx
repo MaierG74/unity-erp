@@ -398,6 +398,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
         is_cutlist_item: Boolean(item.is_cutlist_item),
         cutlist_category: item.cutlist_category ?? null,
         cutlist_dimensions: cloneCutlistDimensions(item.cutlist_dimensions) ?? null,
+        is_substitutable: Boolean(item.is_substitutable),
       }));
     },
   });
