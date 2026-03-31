@@ -387,7 +387,7 @@ export function AddProductsDialog({
             Add Products
           </Button>
         </DialogTrigger>
-        <DialogContent className="sm:max-w-[800px]">
+        <DialogContent className="sm:max-w-[900px]">
           <DialogHeader>
             <DialogTitle>Add Products to Order</DialogTitle>
             <DialogDescription>
@@ -418,12 +418,12 @@ export function AddProductsDialog({
           ) : (
             <div className="max-h-[400px] overflow-y-auto">
               <table className="w-full">
-                <thead className="bg-muted">
+                <thead className="bg-muted/50 sticky top-0">
                   <tr>
-                    <th className="px-4 py-3 text-left text-sm font-medium"></th>
-                    <th className="px-4 py-3 text-left text-sm font-medium">Product</th>
-                    <th className="px-4 py-3 text-right text-sm font-medium">Price</th>
-                    <th className="px-4 py-3 text-right text-sm font-medium">Quantity</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground w-10"></th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">Product</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">Price</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">Quantity</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -445,7 +445,7 @@ export function AddProductsDialog({
                             <p className="font-medium">{product.name}</p>
                             <p className="text-sm text-muted-foreground">
                               {product.sku || 'No SKU'}
-                              {product.description && ` • ${product.description.substring(0, 50)}${product.description.length > 50 ? '...' : ''}`}
+                              {product.description && ` • ${product.description.substring(0, 100)}${product.description.length > 100 ? '...' : ''}`}
                             </p>
                           </div>
                         </td>
@@ -505,7 +505,7 @@ export function AddProductsDialog({
             </div>
           )}
 
-          <DialogFooter className="flex items-center justify-between">
+          <DialogFooter className="flex items-center justify-between pt-4">
             <div className="text-sm text-muted-foreground">
               {selectedCount} product{selectedCount !== 1 ? 's' : ''} selected
             </div>
