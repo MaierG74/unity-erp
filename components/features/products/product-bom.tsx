@@ -63,6 +63,7 @@ import dynamic from 'next/dynamic';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useDebounce } from '@/hooks/use-debounce';
 import React from 'react';
@@ -1925,37 +1926,43 @@ const renderCutlistEditor = () => {
                             <TableCell>
                               {direct ? (
                                 <div className="flex items-center gap-2">
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className={cn("h-8 w-8", direct.is_substitutable ? "bg-primary/15 text-primary ring-1 ring-primary/30" : "text-muted-foreground")}
-                                    onClick={async (e) => {
-                                      e.stopPropagation();
-                                      const newValue = !direct.is_substitutable;
-                                      // Optimistic update — flip locally without refetching
-                                      queryClient.setQueryData(
-                                        ['productBOM', productId, supplierFeatureAvailable],
-                                        (old: any) => old?.map((item: any) =>
-                                          item.bom_id === direct.bom_id
-                                            ? { ...item, is_substitutable: newValue }
-                                            : item
-                                        )
-                                      );
-                                      try {
-                                        await authorizedFetch(`/api/products/${productId}/bom/${direct.bom_id}`, {
-                                          method: 'PATCH',
-                                          body: JSON.stringify({ is_substitutable: newValue }),
-                                        });
-                                      } catch (err) {
-                                        console.error('Failed to toggle substitutable', err);
-                                        // Revert on failure
-                                        queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] });
-                                      }
-                                    }}
-                                    title={direct.is_substitutable ? "Substitutable at order time (click to disable)" : "Fixed component (click to make substitutable)"}
-                                  >
-                                    <ArrowLeftRight className="h-4 w-4" />
-                                  </Button>
+                                  <TooltipProvider delayDuration={100}>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className={cn("h-8 w-8", direct.is_substitutable ? "bg-primary/15 text-primary ring-1 ring-primary/30" : "text-muted-foreground")}
+                                          onClick={async (e) => {
+                                            e.stopPropagation();
+                                            const newValue = !direct.is_substitutable;
+                                            queryClient.setQueryData(
+                                              ['productBOM', productId, supplierFeatureAvailable],
+                                              (old: any) => old?.map((item: any) =>
+                                                item.bom_id === direct.bom_id
+                                                  ? { ...item, is_substitutable: newValue }
+                                                  : item
+                                              )
+                                            );
+                                            try {
+                                              await authorizedFetch(`/api/products/${productId}/bom/${direct.bom_id}`, {
+                                                method: 'PATCH',
+                                                body: JSON.stringify({ is_substitutable: newValue }),
+                                              });
+                                            } catch (err) {
+                                              console.error('Failed to toggle substitutable', err);
+                                              queryClient.invalidateQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] });
+                                            }
+                                          }}
+                                        >
+                                          <ArrowLeftRight className="h-4 w-4" />
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="top">
+                                        {direct.is_substitutable ? "Substitutable — click to disable" : "Click to enable substitution"}
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
                                   <Button variant="ghost" size="icon" onClick={() => startEditing(direct)}>
                                     <Edit className="h-4 w-4" />
                                   </Button>
