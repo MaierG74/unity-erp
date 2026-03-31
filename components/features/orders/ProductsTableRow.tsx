@@ -65,7 +65,7 @@ export function ProductsTableRow({
   return (
     <>
       {/* Main product row */}
-      <TableRow className={cn(hasShortfall && 'bg-destructive/5')}>
+      <TableRow className={cn('bg-muted/40', hasShortfall && 'bg-destructive/5')}>
         {/* Expand toggle + product name */}
         <TableCell>
           <div className="flex items-center gap-2">
@@ -196,8 +196,8 @@ export function ProductsTableRow({
       {isExpanded && bomComponents.length > 0 && (
         <>
           {/* BOM header row */}
-          <TableRow className="bg-muted/30">
-            <TableCell colSpan={7} className="py-1.5 px-4 pl-12">
+          <TableRow className="hover:bg-transparent">
+            <TableCell colSpan={7} className="py-1.5 px-4 pl-12 border-l-2 border-l-primary/20">
               <div className={cn(bomGridClass, 'text-xs font-medium text-muted-foreground uppercase tracking-wider')}>
                 <span className="min-w-[180px]">Component</span>
                 <span className="block text-right tabular-nums">Required</span>
@@ -222,8 +222,8 @@ export function ProductsTableRow({
               <TableRow
                 key={component.component_id || `bom-${idx}`}
                 className={cn(
-                  'bg-muted/10 border-l-2 border-l-muted',
-                  idx % 2 === 0 ? 'bg-muted/5' : 'bg-muted/15'
+                  'border-l-2 border-l-primary/20 hover:bg-muted/30',
+                  idx % 2 === 0 ? 'bg-transparent' : 'bg-muted/10'
                 )}
               >
                 <TableCell colSpan={7} className="py-1.5 px-4 pl-12">
