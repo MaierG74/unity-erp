@@ -337,6 +337,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
           is_cutlist_item,
           cutlist_category,
           cutlist_dimensions,
+          is_substitutable,
           components (
             component_id,
             internal_code,
@@ -357,6 +358,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
             is_cutlist_item,
             cutlist_category,
             cutlist_dimensions,
+            is_substitutable,
             components (
               component_id,
               internal_code,
