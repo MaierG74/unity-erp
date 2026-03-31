@@ -176,11 +176,11 @@ export function ConfigureProductDialog({
                   const selected = selections.get(line.bom_id);
                   const price = selected?.cheapest_price ?? line.default_price;
                   return (
-                    <div key={line.bom_id} className="flex items-center gap-2">
-                      <span className="text-sm w-28 shrink-0 truncate text-muted-foreground">
+                    <div key={line.bom_id} className="flex items-center gap-3">
+                      <span className="text-sm flex-1 min-w-0 text-muted-foreground">
                         {line.component_description ?? line.component_code}
                       </span>
-                      <div className="flex-1 min-w-0">
+                      <div className="shrink-0">
                         <SubstitutionCombobox
                           defaultComponentId={line.component_id}
                           defaultComponentCode={line.component_code}
