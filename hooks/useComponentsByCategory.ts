@@ -12,6 +12,7 @@ export type ComponentOption = {
   cheapest_price: number | null;
   cheapest_supplier_component_id: number | null;
   cheapest_supplier_name: string | null;
+  all_supplier_names: string;
 };
 
 export function useComponentsByCategory(categoryId: number | 'all' | null, search: string) {

@@ -119,7 +119,7 @@ export function SubstitutionCombobox({
 
         <Command shouldFilter={false}>
           <CommandInput
-            placeholder="Search components..."
+            placeholder="Search by code, description, or supplier..."
             value={search}
             onValueChange={setSearch}
             className="text-xs h-8"

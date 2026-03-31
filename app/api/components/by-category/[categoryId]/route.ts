@@ -41,18 +41,20 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
       query = query.eq('category_id', categoryId);
     }
 
-    if (search.length >= 2) {
-      query = query.or(`internal_code.ilike.%${search}%,description.ilike.%${search}%`);
-    }
-
     const { data, error } = await query;
     if (error) throw error;
+
+    const searchLower = search.toLowerCase();
 
     const results = (data ?? []).map((c: any) => {
       const suppliers = c.suppliercomponents ?? [];
       const cheapest = suppliers.length > 0
         ? suppliers.reduce((min: any, s: any) => (s.price < min.price ? s : min), suppliers[0])
         : null;
+      const allSupplierNames = suppliers
+        .map((s: any) => s.suppliers?.name ?? '')
+        .filter(Boolean)
+        .join(', ');
 
       return {
         component_id: c.component_id,
@@ -63,7 +65,16 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
         cheapest_price: cheapest?.price ?? null,
         cheapest_supplier_component_id: cheapest?.supplier_component_id ?? null,
         cheapest_supplier_name: cheapest?.suppliers?.name ?? null,
+        all_supplier_names: allSupplierNames,
       };
+    }).filter((c: any) => {
+      // Client-side filtering across code, description, AND supplier names
+      if (searchLower.length < 2) return true;
+      return (
+        (c.internal_code ?? '').toLowerCase().includes(searchLower) ||
+        (c.description ?? '').toLowerCase().includes(searchLower) ||
+        (c.all_supplier_names ?? '').toLowerCase().includes(searchLower)
+      );
     });
 
     return NextResponse.json({ components: results });
