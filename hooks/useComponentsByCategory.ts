@@ -40,8 +40,11 @@ export function useComponentsByCategory(categoryId: number | 'all' | null, searc
           setLoading(false);
         }
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setLoading(false);
+      .catch((err) => {
+        if (!controller.signal.aborted) {
+          console.error('[useComponentsByCategory] fetch error:', err);
+          setLoading(false);
+        }
       });
 
     return () => controller.abort();

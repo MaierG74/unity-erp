@@ -30,7 +30,7 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
         suppliercomponents (
           supplier_component_id,
           price,
-          suppliers ( supplier_id, suppliername )
+          suppliers ( supplier_id, name )
         )
       `)
       .eq('org_id', auth.orgId)
@@ -62,7 +62,7 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
         category_name: c.component_categories?.categoryname ?? null,
         cheapest_price: cheapest?.price ?? null,
         cheapest_supplier_component_id: cheapest?.supplier_component_id ?? null,
-        cheapest_supplier_name: cheapest?.suppliers?.suppliername ?? null,
+        cheapest_supplier_name: cheapest?.suppliers?.name ?? null,
       };
     });
 
