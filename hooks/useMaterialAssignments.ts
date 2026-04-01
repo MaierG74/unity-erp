@@ -143,7 +143,7 @@ export function useMaterialAssignments(orderId: number) {
 
   const setEdgingDefault = useCallback(
     (boardComponentId: number, edgingComponentId: number, edgingComponentName: string) => {
-      const current = assignments.edging_defaults;
+      const current = assignments.edging_defaults ?? [];
       const idx = current.findIndex((ed) => ed.board_component_id === boardComponentId);
       const entry: EdgingDefault = {
         board_component_id: boardComponentId,
@@ -168,7 +168,7 @@ export function useMaterialAssignments(orderId: number) {
       edgingComponentId: number,
       edgingComponentName: string,
     ) => {
-      const current = assignments.edging_overrides;
+      const current = assignments.edging_overrides ?? [];
       const idx = current.findIndex(
         (eo) =>
           eo.board_type === boardType &&

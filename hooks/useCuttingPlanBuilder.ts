@@ -124,14 +124,14 @@ export function useCuttingPlanBuilder(orderId: number) {
       }
     }
     for (const boardId of boardIdsWithEdges) {
-      const hasEdgingDefault = matAssignments.edging_defaults.some(
+      const hasEdgingDefault = (matAssignments.edging_defaults ?? []).some(
         (ed) => ed.board_component_id === boardId,
       );
       if (!hasEdgingDefault) {
         const allOverridden = partRoles
           .filter((r) => r.assigned_component_id === boardId && r.has_edges)
           .every((r) =>
-            matAssignments.edging_overrides.some(
+            (matAssignments.edging_overrides ?? []).some(
               (eo) =>
                 eo.board_type === r.board_type &&
                 eo.part_name === r.part_name &&
