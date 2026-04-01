@@ -4,7 +4,8 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { toast } from 'sonner';
 import { useOrderCuttingPlan } from '@/hooks/useOrderCuttingPlan';
 import { useMaterialAssignments } from '@/hooks/useMaterialAssignments';
-import { useBoardComponents, useBackerComponents } from '@/hooks/useBoardComponents';
+import { useBoardComponents, useBackerComponents, useEdgingComponents } from '@/hooks/useBoardComponents';
+import { computeEdging } from '@/lib/orders/edging-computation';
 import { regroupByAssignedMaterial } from '@/lib/orders/material-regroup';
 import { packPartsSmartOptimized } from '@/components/features/cutlist/packing';
 import type { StockSheetSpec, PartSpec, GrainOrientation } from '@/lib/cutlist/types';
@@ -65,10 +66,13 @@ export function useCuttingPlanBuilder(orderId: number) {
     assign,
     assignBulk,
     setBackerDefault,
+    setEdgingDefault,
+    setEdgingOverride,
     isLoading: isAssignmentsLoading,
   } = useMaterialAssignments(orderId);
   const boardComponents = useBoardComponents();
   const backerComponents = useBackerComponents();
+  const edgingComponents = useEdgingComponents();
 
   const [aggData, setAggData] = useState<AggregateResponse | null>(null);
   const [pendingPlan, setPendingPlan] = useState<CuttingPlan | null>(null);
@@ -111,6 +115,34 @@ export function useCuttingPlanBuilder(orderId: number) {
         aggData.material_groups.some((g) => g.backer_material_id != null);
       if (!hasBacker) return false;
     }
+    // Check edging: every assigned board with edged parts needs an edging default
+    // (unless all its edged parts have individual overrides)
+    const boardIdsWithEdges = new Set<number>();
+    for (const role of partRoles) {
+      if (role.has_edges && role.assigned_component_id != null) {
+        boardIdsWithEdges.add(role.assigned_component_id);
+      }
+    }
+    for (const boardId of boardIdsWithEdges) {
+      const hasEdgingDefault = matAssignments.edging_defaults.some(
+        (ed) => ed.board_component_id === boardId,
+      );
+      if (!hasEdgingDefault) {
+        const allOverridden = partRoles
+          .filter((r) => r.assigned_component_id === boardId && r.has_edges)
+          .every((r) =>
+            matAssignments.edging_overrides.some(
+              (eo) =>
+                eo.board_type === r.board_type &&
+                eo.part_name === r.part_name &&
+                eo.length_mm === r.length_mm &&
+                eo.width_mm === r.width_mm,
+            ),
+          );
+        if (!allOverridden) return false;
+      }
+    }
+
     return true;
   }, [aggData, partRoles, allAssigned, matAssignments]);
 
@@ -226,6 +258,22 @@ export function useCuttingPlanBuilder(orderId: number) {
         }
       }
 
+      // 5. Compute edging from parts + edging assignments
+      const edgingResult = computeEdging(regrouped, currentAssignments);
+      if (!edgingResult) {
+        toast.error('Some parts with edges are missing edging assignments');
+        return;
+      }
+
+      // Apply per-group edging entries
+      for (const mg of materialGroups) {
+        const groupKey = `${mg.board_type}|${mg.primary_material_id}|${mg.backer_material_id ?? 'none'}`;
+        mg.edging_by_material = edgingResult.groupEdging.get(groupKey) ?? [];
+      }
+
+      // Add edging overrides to component_overrides
+      overrides.push(...edgingResult.edgingOverrides);
+
       const newPlan: CuttingPlan = {
         version: 1,
         generated_at: new Date().toISOString(),
@@ -296,6 +344,9 @@ export function useCuttingPlanBuilder(orderId: number) {
     // Board data
     boards: boardComponents.data ?? [],
     backerBoards: backerComponents.data ?? [],
+    edgingComponents: edgingComponents.data ?? [],
+    setEdgingDefault,
+    setEdgingOverride,
 
     // Actions
     loadAggregate,
