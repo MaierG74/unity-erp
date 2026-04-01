@@ -426,18 +426,6 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
       }
     }
 
-    // Validate component refs belong to this org
-    const replaceComponentId = payload.replace_component_id ?? null;
-    const replaceSupplierComponentId = payload.replace_supplier_component_id ?? null;
-    if (replaceComponentId || replaceSupplierComponentId) {
-      const refError = await validateOrgScopedComponentRefs(auth.orgId, [
-        { componentId: replaceComponentId, supplierComponentId: replaceSupplierComponentId },
-      ]);
-      if (refError) {
-        return NextResponse.json({ error: refError }, { status: 400 });
-      }
-    }
-
     const cutlistDimensions = payload.cutlist_dimensions;
     const attributes = payload.attributes;
 
