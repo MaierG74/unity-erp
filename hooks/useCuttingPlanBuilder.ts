@@ -250,34 +250,30 @@ export function useCuttingPlanBuilder(orderId: number) {
     setPendingPlan(null);
   }, []);
 
+  const displayPlan = pendingPlan || cuttingPlan.plan;
+  const isPending = pendingPlan != null;
+
   return {
-    // Saved plan from DB
+    // Plan state
     plan: cuttingPlan.plan,
-    isPlanLoading: cuttingPlan.isLoading,
-    isSaving: cuttingPlan.isSaving,
-
-    // Pending (generated but not yet confirmed) plan
     pendingPlan,
-
-    // Generate state
+    displayPlan,
+    isPending,
+    isLoading: cuttingPlan.isLoading || materialAssignments.isLoading,
+    isSaving: cuttingPlan.isSaving,
     isGenerating,
-    quality,
-    setQuality,
 
-    // Aggregate data + loading state
-    aggData,
-    isAggLoading: materialAssignments.isLoading,
-
-    // Material assignments
-    materialAssignments,
-
-    // Board component options (for assignment grid)
-    boardComponents,
-    backerComponents,
-
-    // Derived
+    // Material assignments (flattened for easy access)
+    assignments: materialAssignments.assignments,
+    assign: materialAssignments.assign,
+    assignBulk: materialAssignments.assignBulk,
+    setBackerDefault: materialAssignments.setBackerDefault,
     partRoles,
     canGenerate,
+
+    // Board data
+    boards: boardComponents.data ?? [],
+    backerBoards: backerComponents.data ?? [],
 
     // Actions
     loadAggregate,
@@ -285,5 +281,9 @@ export function useCuttingPlanBuilder(orderId: number) {
     confirmPlan,
     clearPlan,
     discardPending,
+
+    // Quality
+    quality,
+    setQuality,
   };
 }
