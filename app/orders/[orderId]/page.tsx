@@ -21,6 +21,8 @@ import { IssueStockTab } from '@/components/features/orders/IssueStockTab';
 import { OrderDocumentsTab } from '@/components/features/orders/OrderDocumentsTab';
 import { ProcurementTab } from '@/components/features/orders/ProcurementTab';
 import { JobCardsTab } from '@/components/features/orders/JobCardsTab';
+import dynamic from 'next/dynamic';
+const CuttingPlanTab = dynamic(() => import('@/components/features/orders/CuttingPlanTab'), { ssr: false });
 
 // Extracted modules
 import { formatCurrency, formatQuantity } from '@/lib/format-utils';
@@ -1408,6 +1410,10 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
 
       {activeTab === 'job-cards' && (
         <JobCardsTab orderId={orderId} />
+      )}
+
+      {activeTab === 'cutting-plan' && (
+        <CuttingPlanTab orderId={orderId} />
       )}
 
       {activeTab === 'procurement' && (
