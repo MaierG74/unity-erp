@@ -45,8 +45,9 @@ export function useMaterialAssignments(orderId: number) {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        toast.error(body.error || 'Failed to save material assignments');
-        return;
+        const msg = body.error || 'Failed to save material assignments';
+        toast.error(msg);
+        throw new Error(msg);
       }
       queryClient.invalidateQueries({ queryKey: ['material-assignments', orderId] });
       queryClient.invalidateQueries({ queryKey: ['order-cutting-plan', orderId] });
@@ -59,28 +60,32 @@ export function useMaterialAssignments(orderId: number) {
       setLocalAssignments(next);
       pendingPayloadRef.current = next;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      pendingSaveRef.current = new Promise<void>((resolve) => {
-        saveTimerRef.current = setTimeout(async () => {
-          if (pendingPayloadRef.current) {
+      saveTimerRef.current = setTimeout(async () => {
+        if (pendingPayloadRef.current) {
+          try {
             await doSave(pendingPayloadRef.current);
             pendingPayloadRef.current = null;
+          } catch {
+            // doSave already toasts; keep pendingPayloadRef so flush retries
           }
-          pendingSaveRef.current = null;
-          resolve();
-        }, DEBOUNCE_MS);
-      });
+        }
+      }, DEBOUNCE_MS);
     },
     [doSave],
   );
 
+  /**
+   * Flush pending save immediately. Throws if save fails — callers
+   * (e.g., generate) should abort on failure.
+   */
   const flush = useCallback(async () => {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
     if (pendingPayloadRef.current) {
-      await doSave(pendingPayloadRef.current);
-      pendingPayloadRef.current = null;
+      await doSave(pendingPayloadRef.current); // throws on failure
+      pendingPayloadRef.current = null; // only clear on success
     }
   }, [doSave]);
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { toast } from 'sonner';
 import { useOrderCuttingPlan } from '@/hooks/useOrderCuttingPlan';
 import { useMaterialAssignments } from '@/hooks/useMaterialAssignments';
@@ -75,6 +75,22 @@ export function useCuttingPlanBuilder(orderId: number) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [quality, setQuality] = useState<'fast' | 'balanced' | 'quality'>('fast');
 
+  // Keep a ref to the latest assignments so generate() can read post-flush
+  // state instead of the closed-over value from the render that created the callback.
+  const latestAssignmentsRef = useRef(matAssignments);
+  latestAssignmentsRef.current = matAssignments;
+
+  // Discard any pending (unconfirmed) plan when assignments change —
+  // prevents confirming a plan built from stale assignment set A after
+  // the user switches to set B.
+  const prevAssignmentsRef = useRef(matAssignments);
+  useEffect(() => {
+    if (prevAssignmentsRef.current !== matAssignments) {
+      prevAssignmentsRef.current = matAssignments;
+      setPendingPlan(null);
+    }
+  }, [matAssignments]);
+
   // Derive part roles from current aggregate + assignments
   const partRoles = useMemo<PartRole[]>(
     () => buildPartRoles(aggData, matAssignments),
@@ -127,10 +143,11 @@ export function useCuttingPlanBuilder(orderId: number) {
         return;
       }
 
-      // 3. Re-group by assigned material
+      // 3. Re-group by assigned material (read from ref for post-flush freshness)
+      const currentAssignments = latestAssignmentsRef.current;
       const regrouped = regroupByAssignedMaterial(
         agg,
-        matAssignments,
+        currentAssignments,
       );
       if (!regrouped) {
         toast.error(
@@ -228,7 +245,7 @@ export function useCuttingPlanBuilder(orderId: number) {
     } finally {
       setIsGenerating(false);
     }
-  }, [cuttingPlan, flushAssignments, matAssignments, quality]);
+  }, [cuttingPlan, flushAssignments, quality]);
 
   const confirmPlan = useCallback(async () => {
     if (!pendingPlan) return;

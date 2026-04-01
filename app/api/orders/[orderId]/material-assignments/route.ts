@@ -59,8 +59,17 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Mark cutting plan stale so purchasing doesn't use outdated overrides
-  await markCuttingPlanStale(orderIdNum, auth.supabase);
+  // Mark cutting plan stale so purchasing doesn't use outdated overrides.
+  // If this fails, roll back is not possible (assignment already saved), but
+  // we must NOT return 200 — the client needs to know stale-marking failed.
+  try {
+    await markCuttingPlanStale(orderIdNum, auth.supabase);
+  } catch (staleErr) {
+    return NextResponse.json(
+      { error: 'Assignments saved but failed to mark cutting plan stale. Please re-generate the plan.' },
+      { status: 500 },
+    );
+  }
 
   return NextResponse.json({ ok: true });
 }
