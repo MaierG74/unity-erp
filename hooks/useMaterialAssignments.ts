@@ -8,6 +8,8 @@ import type {
   MaterialAssignments,
   MaterialAssignment,
   BackerDefault,
+  EdgingDefault,
+  EdgingOverride,
 } from '@/lib/orders/material-assignment-types';
 import {
   upsertAssignment,
@@ -139,12 +141,66 @@ export function useMaterialAssignments(orderId: number) {
     [assignments, save],
   );
 
+  const setEdgingDefault = useCallback(
+    (boardComponentId: number, edgingComponentId: number, edgingComponentName: string) => {
+      const current = assignments.edging_defaults;
+      const idx = current.findIndex((ed) => ed.board_component_id === boardComponentId);
+      const entry: EdgingDefault = {
+        board_component_id: boardComponentId,
+        edging_component_id: edgingComponentId,
+        edging_component_name: edgingComponentName,
+      };
+      const next: EdgingDefault[] =
+        idx >= 0
+          ? current.map((ed, i) => (i === idx ? entry : ed))
+          : [...current, entry];
+      save({ ...assignments, edging_defaults: next });
+    },
+    [assignments, save],
+  );
+
+  const setEdgingOverride = useCallback(
+    (
+      boardType: string,
+      partName: string,
+      lengthMm: number,
+      widthMm: number,
+      edgingComponentId: number,
+      edgingComponentName: string,
+    ) => {
+      const current = assignments.edging_overrides;
+      const idx = current.findIndex(
+        (eo) =>
+          eo.board_type === boardType &&
+          eo.part_name === partName &&
+          eo.length_mm === lengthMm &&
+          eo.width_mm === widthMm,
+      );
+      const entry: EdgingOverride = {
+        board_type: boardType,
+        part_name: partName,
+        length_mm: lengthMm,
+        width_mm: widthMm,
+        edging_component_id: edgingComponentId,
+        edging_component_name: edgingComponentName,
+      };
+      const next: EdgingOverride[] =
+        idx >= 0
+          ? current.map((eo, i) => (i === idx ? entry : eo))
+          : [...current, entry];
+      save({ ...assignments, edging_overrides: next });
+    },
+    [assignments, save],
+  );
+
   return {
     assignments,
     isLoading: query.isLoading,
     assign,
     assignBulk,
     setBackerDefault,
+    setEdgingDefault,
+    setEdgingOverride,
     flush,
   };
 }
