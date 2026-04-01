@@ -17,6 +17,7 @@ interface MaterialAssignmentGridProps {
   backerBoards: BoardComponent[];
   backerDefault: BackerDefault | null;
   onAssign: (
+    orderDetailId: number,
     boardType: string,
     partName: string,
     lengthMm: number,
@@ -25,7 +26,7 @@ interface MaterialAssignmentGridProps {
     componentName: string,
   ) => void;
   onAssignBulk: (
-    roles: Array<{ board_type: string; part_name: string; length_mm: number; width_mm: number }>,
+    roles: Array<{ order_detail_id: number; board_type: string; part_name: string; length_mm: number; width_mm: number }>,
     componentId: number,
     componentName: string,
   ) => void;
@@ -35,6 +36,7 @@ interface MaterialAssignmentGridProps {
   edgingOverrides: EdgingOverride[];
   onEdgingDefault: (boardComponentId: number, edgingComponentId: number, edgingComponentName: string) => void;
   onEdgingOverride: (
+    orderDetailId: number,
     boardType: string,
     partName: string,
     lengthMm: number,
@@ -64,11 +66,16 @@ export default function MaterialAssignmentGrid({
   const [expandedOverrides, setExpandedOverrides] = useState<Set<string>>(new Set());
 
   const grouped = useMemo(() => {
-    const map = new Map<string, PartRole[]>();
+    const map = new Map<string, Map<number, PartRole[]>>();
     for (const role of partRoles) {
-      const existing = map.get(role.board_type);
+      let btMap = map.get(role.board_type);
+      if (!btMap) {
+        btMap = new Map();
+        map.set(role.board_type, btMap);
+      }
+      const existing = btMap.get(role.order_detail_id);
       if (existing) existing.push(role);
-      else map.set(role.board_type, [role]);
+      else btMap.set(role.order_detail_id, [role]);
     }
     return map;
   }, [partRoles]);
@@ -82,7 +89,7 @@ export default function MaterialAssignmentGrid({
   };
 
   const toggleSelect = (role: PartRole) => {
-    const fp = roleFingerprint(role.board_type, role.part_name, role.length_mm, role.width_mm);
+    const fp = roleFingerprint(role.order_detail_id, role.board_type, role.part_name, role.length_mm, role.width_mm);
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(fp)) {
@@ -102,8 +109,13 @@ export default function MaterialAssignmentGrid({
   };
 
   const selectAllInGroup = (bt: string) => {
-    const roles = grouped.get(bt) ?? [];
-    const fps = roles.map((r) => roleFingerprint(r.board_type, r.part_name, r.length_mm, r.width_mm));
+    const subGroups = grouped.get(bt);
+    if (!subGroups) return;
+    const allRoles: PartRole[] = [];
+    for (const roles of subGroups.values()) {
+      allRoles.push(...roles);
+    }
+    const fps = allRoles.map((r) => roleFingerprint(r.order_detail_id, r.board_type, r.part_name, r.length_mm, r.width_mm));
     const allSelected = fps.every((fp) => selected.has(fp));
     if (allSelected) {
       setSelected(new Set());
@@ -119,9 +131,10 @@ export default function MaterialAssignmentGrid({
       if (!selectedBoardType) return;
       const roles = Array.from(selected).map((fp) => {
         const role = partRoles.find(
-          (r) => roleFingerprint(r.board_type, r.part_name, r.length_mm, r.width_mm) === fp,
+          (r) => roleFingerprint(r.order_detail_id, r.board_type, r.part_name, r.length_mm, r.width_mm) === fp,
         );
         return {
+          order_detail_id: role!.order_detail_id,
           board_type: role!.board_type,
           part_name: role!.part_name,
           length_mm: role!.length_mm,
@@ -195,9 +208,13 @@ export default function MaterialAssignmentGrid({
 
         {/* Board type groups */}
         {boardTypes.map((bt) => {
-          const roles = grouped.get(bt) ?? [];
+          const subGroups = grouped.get(bt)!;
+          const allRoles: PartRole[] = [];
+          for (const roles of subGroups.values()) {
+            allRoles.push(...roles);
+          }
           const isCollapsed = collapsed[bt] ?? false;
-          const groupAssigned = roles.filter((r) => r.assigned_component_id != null).length;
+          const groupAssigned = allRoles.filter((r) => r.assigned_component_id != null).length;
 
           return (
             <div key={bt} className="rounded-sm border">
@@ -213,13 +230,13 @@ export default function MaterialAssignmentGrid({
                 <Layers className="h-3.5 w-3.5 text-muted-foreground" />
                 <span className="text-sm font-medium">{bt}</span>
                 <span className="text-xs text-muted-foreground">
-                  {roles.length} part{roles.length > 1 ? 's' : ''}
+                  {allRoles.length} part{allRoles.length > 1 ? 's' : ''}
                 </span>
                 <Badge
-                  variant={groupAssigned === roles.length ? 'default' : 'outline'}
+                  variant={groupAssigned === allRoles.length ? 'default' : 'outline'}
                   className="ml-auto text-xs"
                 >
-                  {groupAssigned}/{roles.length}
+                  {groupAssigned}/{allRoles.length}
                 </Badge>
               </button>
 
@@ -227,8 +244,8 @@ export default function MaterialAssignmentGrid({
                 <div className="border-t">
                   <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-1">
                     <Checkbox
-                      checked={roles.every((r) =>
-                        selected.has(roleFingerprint(r.board_type, r.part_name, r.length_mm, r.width_mm)),
+                      checked={allRoles.every((r) =>
+                        selected.has(roleFingerprint(r.order_detail_id, r.board_type, r.part_name, r.length_mm, r.width_mm)),
                       )}
                       onCheckedChange={() => selectAllInGroup(bt)}
                       className="h-3.5 w-3.5"
@@ -236,115 +253,122 @@ export default function MaterialAssignmentGrid({
                     <span className="text-xs text-muted-foreground">Select all</span>
                   </div>
 
-                  {/* Board-level edging assignments */}
-                  {(() => {
-                    const boardsInGroup = new Map<number, string>();
-                    for (const role of roles) {
-                      if (role.assigned_component_id != null && role.has_edges) {
-                        if (!boardsInGroup.has(role.assigned_component_id)) {
-                          boardsInGroup.set(role.assigned_component_id, role.assigned_component_name ?? '');
-                        }
-                      }
-                    }
-                    if (boardsInGroup.size === 0) return null;
-                    return Array.from(boardsInGroup.entries()).map(([boardId, boardName]) => {
-                      const edgingDefault = edgingDefaults.find((ed) => ed.board_component_id === boardId);
-                      return (
-                        <div
-                          key={`edging-${boardId}`}
-                          className="flex items-center gap-3 border-b bg-muted/20 px-3 py-1.5"
-                        >
-                          <span className="text-xs text-muted-foreground truncate min-w-0 flex-1">
-                            Edging for <span className="font-medium text-foreground">{boardName}</span>:
-                          </span>
-                          <BoardMaterialCombobox
-                            boards={edgingComponents}
-                            boardType={null}
-                            value={edgingDefault?.edging_component_id ?? null}
-                            onChange={(id, name) => onEdgingDefault(boardId, id, name)}
-                            placeholder="Select edging…"
-                            className="h-8 w-[240px] text-xs"
-                          />
-                        </div>
-                      );
-                    });
-                  })()}
+                  {/* Sub-groups by order line */}
+                  {Array.from(subGroups.entries()).map(([orderDetailId, roles], lineIdx) => {
+                    const lineLabel = roles[0]?.line_product_name || `Line ${lineIdx + 1}`;
+                    const assignedIds = new Set(roles.map((r) => r.assigned_component_id).filter(Boolean));
+                    const subGroupBoardId = assignedIds.size === 1 ? [...assignedIds][0] : null;
+                    const hasEdgedParts = roles.some((r) => r.has_edges && r.assigned_component_id != null);
+                    const edgingDefault = subGroupBoardId
+                      ? edgingDefaults.find((ed) => ed.board_component_id === subGroupBoardId)
+                      : null;
 
-                  {roles.map((role) => {
-                    const fp = roleFingerprint(role.board_type, role.part_name, role.length_mm, role.width_mm);
                     return (
-                      <div
-                        key={fp}
-                        className="flex items-center gap-3 border-b px-3 py-1.5 last:border-0"
-                      >
-                        <Checkbox
-                          checked={selected.has(fp)}
-                          onCheckedChange={() => toggleSelect(role)}
-                          className="h-3.5 w-3.5"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium truncate">
-                              {role.part_name}
+                      <div key={orderDetailId} className="border-b last:border-0">
+                        {/* Sub-group header */}
+                        <div className="flex items-center gap-3 bg-muted/10 px-3 py-1.5 border-b">
+                          <span className="text-xs font-medium text-foreground truncate min-w-0">
+                            {lineLabel}
+                            <span className="text-muted-foreground font-normal ml-1.5">
+                              Line {lineIdx + 1}, Qty {roles[0]?.total_quantity ?? 0}
                             </span>
-                            <span className="text-xs text-muted-foreground tabular-nums">
-                              {role.length_mm}×{role.width_mm}mm
-                            </span>
-                            <span className="text-xs text-muted-foreground">
-                              ×{role.total_quantity}
-                            </span>
-                          </div>
-                          {role.product_names.length > 0 && (
-                            <span className="text-xs text-muted-foreground truncate block">
-                              {role.product_names.join(', ')}
-                            </span>
-                          )}
-                        </div>
-                        <BoardMaterialCombobox
-                          boards={boards}
-                          boardType={role.board_type}
-                          value={role.assigned_component_id}
-                          onChange={(id, name) =>
-                            onAssign(role.board_type, role.part_name, role.length_mm, role.width_mm, id, name)
-                          }
-                          className="h-8 w-[240px] text-xs"
-                        />
-                        {role.has_edges && (
-                          <>
-                            {expandedOverrides.has(fp) || edgingOverrides.some(
-                              (eo) => roleFingerprint(eo.board_type, eo.part_name, eo.length_mm, eo.width_mm) === fp,
-                            ) ? (
+                          </span>
+                          <div className="ml-auto flex items-center gap-2">
+                            <BoardMaterialCombobox
+                              boards={boards}
+                              boardType={bt}
+                              value={subGroupBoardId ?? null}
+                              onChange={(id, name) => {
+                                const bulkRoles = roles.map((r) => ({
+                                  order_detail_id: r.order_detail_id,
+                                  board_type: r.board_type,
+                                  part_name: r.part_name,
+                                  length_mm: r.length_mm,
+                                  width_mm: r.width_mm,
+                                }));
+                                onAssignBulk(bulkRoles, id, name);
+                              }}
+                              placeholder="Assign board…"
+                              className="h-7 w-[200px] text-xs"
+                            />
+                            {hasEdgedParts && subGroupBoardId && (
                               <BoardMaterialCombobox
                                 boards={edgingComponents}
                                 boardType={null}
-                                value={
-                                  edgingOverrides.find(
-                                    (eo) => roleFingerprint(eo.board_type, eo.part_name, eo.length_mm, eo.width_mm) === fp,
-                                  )?.edging_component_id ?? null
-                                }
-                                onChange={(id, name) =>
-                                  onEdgingOverride(role.board_type, role.part_name, role.length_mm, role.width_mm, id, name)
-                                }
-                                placeholder="Override edging…"
-                                className="h-8 w-[180px] text-xs"
+                                value={edgingDefault?.edging_component_id ?? null}
+                                onChange={(id, name) => onEdgingDefault(subGroupBoardId, id, name)}
+                                placeholder="Edging…"
+                                className="h-7 w-[180px] text-xs"
                               />
-                            ) : (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 px-1.5 text-xs text-muted-foreground"
-                                onClick={() => setExpandedOverrides((prev) => {
-                                  const next = new Set(prev);
-                                  next.add(fp);
-                                  return next;
-                                })}
-                                title="Override edging for this part"
-                              >
-                                <Scissors className="h-3 w-3" />
-                              </Button>
                             )}
-                          </>
-                        )}
+                          </div>
+                        </div>
+
+                        {/* Part rows */}
+                        {roles.map((role) => {
+                          const fp = roleFingerprint(role.order_detail_id, role.board_type, role.part_name, role.length_mm, role.width_mm);
+                          return (
+                            <div key={fp} className="flex items-center gap-3 border-b px-3 py-1.5 last:border-0">
+                              <Checkbox
+                                checked={selected.has(fp)}
+                                onCheckedChange={() => toggleSelect(role)}
+                                className="h-3.5 w-3.5"
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-medium truncate">{role.part_name}</span>
+                                  <span className="text-xs text-muted-foreground tabular-nums">{role.length_mm}×{role.width_mm}mm</span>
+                                  <span className="text-xs text-muted-foreground">×{role.total_quantity}</span>
+                                </div>
+                              </div>
+                              <BoardMaterialCombobox
+                                boards={boards}
+                                boardType={role.board_type}
+                                value={role.assigned_component_id}
+                                onChange={(id, name) =>
+                                  onAssign(role.order_detail_id, role.board_type, role.part_name, role.length_mm, role.width_mm, id, name)
+                                }
+                                className="h-8 w-[240px] text-xs"
+                              />
+                              {role.has_edges && (
+                                <>
+                                  {expandedOverrides.has(fp) || edgingOverrides.some(
+                                    (eo) => roleFingerprint(eo.order_detail_id, eo.board_type, eo.part_name, eo.length_mm, eo.width_mm) === fp,
+                                  ) ? (
+                                    <BoardMaterialCombobox
+                                      boards={edgingComponents}
+                                      boardType={null}
+                                      value={
+                                        edgingOverrides.find(
+                                          (eo) => roleFingerprint(eo.order_detail_id, eo.board_type, eo.part_name, eo.length_mm, eo.width_mm) === fp,
+                                        )?.edging_component_id ?? null
+                                      }
+                                      onChange={(id, name) =>
+                                        onEdgingOverride(role.order_detail_id, role.board_type, role.part_name, role.length_mm, role.width_mm, id, name)
+                                      }
+                                      placeholder="Override edging…"
+                                      className="h-8 w-[180px] text-xs"
+                                    />
+                                  ) : (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 px-1.5 text-xs text-muted-foreground"
+                                      onClick={() => setExpandedOverrides((prev) => {
+                                        const next = new Set(prev);
+                                        next.add(fp);
+                                        return next;
+                                      })}
+                                      title="Override edging for this part"
+                                    >
+                                      <Scissors className="h-3 w-3" />
+                                    </Button>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     );
                   })}
