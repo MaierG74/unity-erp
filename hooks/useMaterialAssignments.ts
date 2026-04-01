@@ -14,7 +14,7 @@ import {
   bulkAssign,
 } from '@/lib/orders/material-assignment-types';
 
-const EMPTY: MaterialAssignments = { version: 1, assignments: [], backer_default: null };
+const EMPTY: MaterialAssignments = { version: 1, assignments: [], backer_default: null, edging_defaults: [], edging_overrides: [] };
 const DEBOUNCE_MS = 800;
 
 export function useMaterialAssignments(orderId: number) {

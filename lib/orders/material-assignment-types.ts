@@ -33,12 +33,37 @@ export type BackerDefault = {
 };
 
 /**
+ * Board-level edging default — one edging component per assigned board material.
+ * All parts assigned to this board inherit this edging unless overridden.
+ */
+export type EdgingDefault = {
+  board_component_id: number;     // links to a MaterialAssignment.component_id
+  edging_component_id: number;    // FK to components (category 39)
+  edging_component_name: string;
+};
+
+/**
+ * Per-part edging override — rare exception (e.g., cherry top → black edging).
+ * Keyed by the same role fingerprint as board assignments.
+ */
+export type EdgingOverride = {
+  board_type: string;
+  part_name: string;
+  length_mm: number;
+  width_mm: number;
+  edging_component_id: number;
+  edging_component_name: string;
+};
+
+/**
  * Persisted JSONB shape on orders.material_assignments.
  */
 export type MaterialAssignments = {
   version: 1;
   assignments: MaterialAssignment[];
   backer_default: BackerDefault | null;
+  edging_defaults: EdgingDefault[];
+  edging_overrides: EdgingOverride[];
 };
 
 /**
@@ -57,6 +82,8 @@ export type PartRole = {
   /** Current assignment (null if unassigned) */
   assigned_component_id: number | null;
   assigned_component_name: string | null;
+  /** True if any band_edge is true — this part needs edging */
+  has_edges: boolean;
 };
 
 /**
@@ -147,11 +174,18 @@ export function buildPartRoles(
       const fp = roleFingerprint(group.board_type, part.name, part.length_mm, part.width_mm);
       const existing = map.get(fp);
       const match = assignmentIndex.get(fp);
+      const partHasEdges = !!(
+        part.band_edges?.top ||
+        part.band_edges?.bottom ||
+        part.band_edges?.left ||
+        part.band_edges?.right
+      );
       if (existing) {
         existing.total_quantity += part.quantity;
         if (!existing.product_names.includes(part.product_name)) {
           existing.product_names.push(part.product_name);
         }
+        existing.has_edges = existing.has_edges || partHasEdges;
       } else {
         map.set(fp, {
           board_type: group.board_type,
@@ -162,6 +196,7 @@ export function buildPartRoles(
           product_names: [part.product_name],
           assigned_component_id: match?.component_id ?? null,
           assigned_component_name: match?.component_name ?? null,
+          has_edges: partHasEdges,
         });
       }
     }
@@ -191,6 +226,27 @@ export function validateAssignments(data: unknown): string | null {
     const bd = obj.backer_default as Record<string, unknown>;
     if (typeof bd.component_id !== 'number' || bd.component_id <= 0) return 'backer component_id invalid';
     if (typeof bd.component_name !== 'string' || !bd.component_name) return 'backer component_name invalid';
+  }
+  const edgingDefaults = (obj.edging_defaults ?? []) as unknown[];
+  if (!Array.isArray(edgingDefaults)) return 'edging_defaults must be an array';
+  for (const ed of edgingDefaults) {
+    if (typeof ed !== 'object' || !ed) return 'Invalid edging_defaults entry';
+    const entry = ed as Record<string, unknown>;
+    if (typeof entry.board_component_id !== 'number' || entry.board_component_id <= 0) return 'edging board_component_id must be positive';
+    if (typeof entry.edging_component_id !== 'number' || entry.edging_component_id <= 0) return 'edging_component_id must be positive';
+    if (typeof entry.edging_component_name !== 'string' || !entry.edging_component_name) return 'edging_component_name required';
+  }
+  const edgingOverrides = (obj.edging_overrides ?? []) as unknown[];
+  if (!Array.isArray(edgingOverrides)) return 'edging_overrides must be an array';
+  for (const eo of edgingOverrides) {
+    if (typeof eo !== 'object' || !eo) return 'Invalid edging_overrides entry';
+    const entry = eo as Record<string, unknown>;
+    if (typeof entry.board_type !== 'string' || !entry.board_type) return 'edging override board_type required';
+    if (typeof entry.part_name !== 'string' || !entry.part_name) return 'edging override part_name required';
+    if (typeof entry.length_mm !== 'number' || entry.length_mm <= 0) return 'edging override length_mm must be positive';
+    if (typeof entry.width_mm !== 'number' || entry.width_mm <= 0) return 'edging override width_mm must be positive';
+    if (typeof entry.edging_component_id !== 'number' || entry.edging_component_id <= 0) return 'edging override edging_component_id must be positive';
+    if (typeof entry.edging_component_name !== 'string' || !entry.edging_component_name) return 'edging override edging_component_name required';
   }
   // Check for duplicate fingerprints
   const seen = new Set<string>();
