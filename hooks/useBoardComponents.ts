@@ -9,6 +9,8 @@ import { parseThicknessFromDescription, parseSheetThickness } from '@/lib/cutlis
 const PRIMARY_BOARD_CATEGORY_IDS = [75, 3, 14]; // Melamine, MDF, Plywood
 /** Backer-category IDs (typically MDF, Plywood — thinner sheets) */
 const BACKER_CATEGORY_IDS = [3, 14]; // MDF, Plywood
+/** Edging category ID */
+const EDGING_CATEGORY_ID = 39;
 
 export type BoardComponent = {
   component_id: number;
@@ -59,6 +61,36 @@ export function useBackerComponents() {
     [data],
   );
   return { data: backerData, ...rest };
+}
+
+/**
+ * Fetch active edging components (category 39).
+ * Reuses BoardComponent type — edging components have
+ * parsed_thickness_mm from their description (e.g., "16mm" PVC).
+ */
+export function useEdgingComponents() {
+  return useQuery({
+    queryKey: ['edging-components'],
+    queryFn: async (): Promise<BoardComponent[]> => {
+      const { data, error } = await supabase
+        .from('components')
+        .select('component_id, internal_code, description, category_id')
+        .eq('category_id', EDGING_CATEGORY_ID)
+        .eq('is_active', true)
+        .order('internal_code');
+
+      if (error) throw new Error(error.message);
+
+      return (data ?? []).map((c) => ({
+        component_id: c.component_id,
+        internal_code: c.internal_code ?? '',
+        description: c.description ?? '',
+        category_id: c.category_id,
+        parsed_thickness_mm: parseThicknessFromDescription(c.description ?? ''),
+      }));
+    },
+    staleTime: 5 * 60 * 1000,
+  });
 }
 
 /**
