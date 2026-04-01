@@ -80,14 +80,10 @@ export type PartRole = {
   part_name: string;
   length_mm: number;
   width_mm: number;
-  /** Total quantity across all order lines */
+  /** Quantity for this part role on this order line */
   total_quantity: number;
-  /** Product names that contain this part */
-  product_names: string[];
-  /** The primary product name for this order line */
-  line_product_name: string;
-  /** Quantity for this order line */
-  line_quantity: number;
+  /** Product name for this order line (for grid sub-group header) */
+  product_name: string;
   /** Current assignment (null if unassigned) */
   assigned_component_id: number | null;
   assigned_component_name: string | null;
@@ -182,15 +178,6 @@ export function buildPartRoles(
     ]),
   );
 
-  const lineProductNames = new Map<number, string>();
-  for (const group of agg.material_groups) {
-    for (const part of group.parts) {
-      if (!lineProductNames.has(part.order_detail_id)) {
-        lineProductNames.set(part.order_detail_id, part.product_name);
-      }
-    }
-  }
-
   const map = new Map<string, PartRole>();
   for (const group of agg.material_groups) {
     for (const part of group.parts) {
@@ -205,9 +192,6 @@ export function buildPartRoles(
       );
       if (existing) {
         existing.total_quantity += part.quantity;
-        if (!existing.product_names.includes(part.product_name)) {
-          existing.product_names.push(part.product_name);
-        }
         existing.has_edges = existing.has_edges || partHasEdges;
       } else {
         map.set(fp, {
@@ -217,9 +201,7 @@ export function buildPartRoles(
           length_mm: part.length_mm,
           width_mm: part.width_mm,
           total_quantity: part.quantity,
-          product_names: [part.product_name],
-          line_product_name: lineProductNames.get(part.order_detail_id) ?? '',
-          line_quantity: part.quantity,
+          product_name: part.product_name,
           assigned_component_id: match?.component_id ?? null,
           assigned_component_name: match?.component_name ?? null,
           has_edges: partHasEdges,

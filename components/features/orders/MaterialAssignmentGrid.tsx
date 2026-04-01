@@ -111,10 +111,7 @@ export default function MaterialAssignmentGrid({
   const selectAllInGroup = (bt: string) => {
     const subGroups = grouped.get(bt);
     if (!subGroups) return;
-    const allRoles: PartRole[] = [];
-    for (const roles of subGroups.values()) {
-      allRoles.push(...roles);
-    }
+    const allRoles = Array.from(subGroups.values()).flat();
     const fps = allRoles.map((r) => roleFingerprint(r.order_detail_id, r.board_type, r.part_name, r.length_mm, r.width_mm));
     const allSelected = fps.every((fp) => selected.has(fp));
     if (allSelected) {
@@ -209,10 +206,7 @@ export default function MaterialAssignmentGrid({
         {/* Board type groups */}
         {boardTypes.map((bt) => {
           const subGroups = grouped.get(bt)!;
-          const allRoles: PartRole[] = [];
-          for (const roles of subGroups.values()) {
-            allRoles.push(...roles);
-          }
+          const allRoles = Array.from(subGroups.values()).flat();
           const isCollapsed = collapsed[bt] ?? false;
           const groupAssigned = allRoles.filter((r) => r.assigned_component_id != null).length;
 
@@ -255,7 +249,7 @@ export default function MaterialAssignmentGrid({
 
                   {/* Sub-groups by order line */}
                   {Array.from(subGroups.entries()).map(([orderDetailId, roles], lineIdx) => {
-                    const lineLabel = roles[0]?.line_product_name || `Line ${lineIdx + 1}`;
+                    const lineLabel = roles[0]?.product_name || `Line ${lineIdx + 1}`;
                     const assignedIds = new Set(roles.map((r) => r.assigned_component_id).filter(Boolean));
                     const subGroupBoardId = assignedIds.size === 1 ? [...assignedIds][0] : null;
                     const hasEdgedParts = roles.some((r) => r.has_edges && r.assigned_component_id != null);
@@ -330,42 +324,37 @@ export default function MaterialAssignmentGrid({
                                 }
                                 className="h-8 w-[240px] text-xs"
                               />
-                              {role.has_edges && (
-                                <>
-                                  {expandedOverrides.has(fp) || edgingOverrides.some(
-                                    (eo) => roleFingerprint(eo.order_detail_id, eo.board_type, eo.part_name, eo.length_mm, eo.width_mm) === fp,
-                                  ) ? (
-                                    <BoardMaterialCombobox
-                                      boards={edgingComponents}
-                                      boardType={null}
-                                      value={
-                                        edgingOverrides.find(
-                                          (eo) => roleFingerprint(eo.order_detail_id, eo.board_type, eo.part_name, eo.length_mm, eo.width_mm) === fp,
-                                        )?.edging_component_id ?? null
-                                      }
-                                      onChange={(id, name) =>
-                                        onEdgingOverride(role.order_detail_id, role.board_type, role.part_name, role.length_mm, role.width_mm, id, name)
-                                      }
-                                      placeholder="Override edging…"
-                                      className="h-8 w-[180px] text-xs"
-                                    />
-                                  ) : (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-6 px-1.5 text-xs text-muted-foreground"
-                                      onClick={() => setExpandedOverrides((prev) => {
-                                        const next = new Set(prev);
-                                        next.add(fp);
-                                        return next;
-                                      })}
-                                      title="Override edging for this part"
-                                    >
-                                      <Scissors className="h-3 w-3" />
-                                    </Button>
-                                  )}
-                                </>
-                              )}
+                              {role.has_edges && (() => {
+                                const override = edgingOverrides.find(
+                                  (eo) => roleFingerprint(eo.order_detail_id, eo.board_type, eo.part_name, eo.length_mm, eo.width_mm) === fp,
+                                );
+                                return expandedOverrides.has(fp) || override ? (
+                                  <BoardMaterialCombobox
+                                    boards={edgingComponents}
+                                    boardType={null}
+                                    value={override?.edging_component_id ?? null}
+                                    onChange={(id, name) =>
+                                      onEdgingOverride(role.order_detail_id, role.board_type, role.part_name, role.length_mm, role.width_mm, id, name)
+                                    }
+                                    placeholder="Override edging…"
+                                    className="h-8 w-[180px] text-xs"
+                                  />
+                                ) : (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 px-1.5 text-xs text-muted-foreground"
+                                    onClick={() => setExpandedOverrides((prev) => {
+                                      const next = new Set(prev);
+                                      next.add(fp);
+                                      return next;
+                                    })}
+                                    title="Override edging for this part"
+                                  >
+                                    <Scissors className="h-3 w-3" />
+                                  </Button>
+                                );
+                              })()}
                             </div>
                           );
                         })}
