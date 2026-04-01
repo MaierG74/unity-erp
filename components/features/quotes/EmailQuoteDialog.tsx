@@ -223,7 +223,7 @@ export default function EmailQuoteDialog({
       // Fetch default terms template
       let defaultTermsTemplate: string | undefined;
       try {
-        const templatesRes = await fetch('/api/document-templates?type=quote_default_terms', {
+        const templatesRes = await authorizedFetch('/api/document-templates?type=quote_default_terms', {
           headers: { Accept: 'application/json' },
         });
         if (templatesRes.ok) {
