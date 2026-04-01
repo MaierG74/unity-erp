@@ -101,10 +101,11 @@ export function useMaterialAssignments(orderId: number) {
   }, [doSave]);
 
   const assign = useCallback(
-    (boardType: string, partName: string, lengthMm: number, widthMm: number, componentId: number, componentName: string) => {
+    (orderDetailId: number, boardType: string, partName: string, lengthMm: number, widthMm: number, componentId: number, componentName: string) => {
       const next: MaterialAssignments = {
         ...assignments,
         assignments: upsertAssignment(assignments.assignments, {
+          order_detail_id: orderDetailId,
           board_type: boardType,
           part_name: partName,
           length_mm: lengthMm,
@@ -120,7 +121,7 @@ export function useMaterialAssignments(orderId: number) {
 
   const assignBulk = useCallback(
     (
-      roles: Array<{ board_type: string; part_name: string; length_mm: number; width_mm: number }>,
+      roles: Array<{ order_detail_id: number; board_type: string; part_name: string; length_mm: number; width_mm: number }>,
       componentId: number,
       componentName: string,
     ) => {
@@ -161,6 +162,7 @@ export function useMaterialAssignments(orderId: number) {
 
   const setEdgingOverride = useCallback(
     (
+      orderDetailId: number,
       boardType: string,
       partName: string,
       lengthMm: number,
@@ -171,12 +173,14 @@ export function useMaterialAssignments(orderId: number) {
       const current = assignments.edging_overrides ?? [];
       const idx = current.findIndex(
         (eo) =>
+          eo.order_detail_id === orderDetailId &&
           eo.board_type === boardType &&
           eo.part_name === partName &&
           eo.length_mm === lengthMm &&
           eo.width_mm === widthMm,
       );
       const entry: EdgingOverride = {
+        order_detail_id: orderDetailId,
         board_type: boardType,
         part_name: partName,
         length_mm: lengthMm,
