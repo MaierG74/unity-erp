@@ -1,14 +1,14 @@
 'use client';
 
 import { useState, useMemo, useCallback } from 'react';
-import { ChevronDown, ChevronRight, Layers } from 'lucide-react';
+import { ChevronDown, ChevronRight, Layers, Scissors } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import BoardMaterialCombobox from './BoardMaterialCombobox';
 import type { BoardComponent } from '@/hooks/useBoardComponents';
-import type { PartRole, BackerDefault } from '@/lib/orders/material-assignment-types';
+import type { PartRole, BackerDefault, EdgingDefault, EdgingOverride } from '@/lib/orders/material-assignment-types';
 import { roleFingerprint } from '@/lib/orders/material-assignment-types';
 
 interface MaterialAssignmentGridProps {
@@ -30,6 +30,18 @@ interface MaterialAssignmentGridProps {
     componentName: string,
   ) => void;
   onBackerDefaultChange: (backer: BackerDefault | null) => void;
+  edgingComponents: BoardComponent[];
+  edgingDefaults: EdgingDefault[];
+  edgingOverrides: EdgingOverride[];
+  onEdgingDefault: (boardComponentId: number, edgingComponentId: number, edgingComponentName: string) => void;
+  onEdgingOverride: (
+    boardType: string,
+    partName: string,
+    lengthMm: number,
+    widthMm: number,
+    edgingComponentId: number,
+    edgingComponentName: string,
+  ) => void;
 }
 
 export default function MaterialAssignmentGrid({
@@ -40,10 +52,16 @@ export default function MaterialAssignmentGrid({
   onAssign,
   onAssignBulk,
   onBackerDefaultChange,
+  edgingComponents,
+  edgingDefaults,
+  edgingOverrides,
+  onEdgingDefault,
+  onEdgingOverride,
 }: MaterialAssignmentGridProps) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectedBoardType, setSelectedBoardType] = useState<string | null>(null);
+  const [expandedOverrides, setExpandedOverrides] = useState<Set<string>>(new Set());
 
   const grouped = useMemo(() => {
     const map = new Map<string, PartRole[]>();
@@ -218,6 +236,40 @@ export default function MaterialAssignmentGrid({
                     <span className="text-xs text-muted-foreground">Select all</span>
                   </div>
 
+                  {/* Board-level edging assignments */}
+                  {(() => {
+                    const boardsInGroup = new Map<number, string>();
+                    for (const role of roles) {
+                      if (role.assigned_component_id != null && role.has_edges) {
+                        if (!boardsInGroup.has(role.assigned_component_id)) {
+                          boardsInGroup.set(role.assigned_component_id, role.assigned_component_name ?? '');
+                        }
+                      }
+                    }
+                    if (boardsInGroup.size === 0) return null;
+                    return Array.from(boardsInGroup.entries()).map(([boardId, boardName]) => {
+                      const edgingDefault = edgingDefaults.find((ed) => ed.board_component_id === boardId);
+                      return (
+                        <div
+                          key={`edging-${boardId}`}
+                          className="flex items-center gap-3 border-b bg-muted/20 px-3 py-1.5"
+                        >
+                          <span className="text-xs text-muted-foreground truncate min-w-0 flex-1">
+                            Edging for <span className="font-medium text-foreground">{boardName}</span>:
+                          </span>
+                          <BoardMaterialCombobox
+                            boards={edgingComponents}
+                            boardType={null}
+                            value={edgingDefault?.edging_component_id ?? null}
+                            onChange={(id, name) => onEdgingDefault(boardId, id, name)}
+                            placeholder="Select edging…"
+                            className="h-8 w-[240px] text-xs"
+                          />
+                        </div>
+                      );
+                    });
+                  })()}
+
                   {roles.map((role) => {
                     const fp = roleFingerprint(role.board_type, role.part_name, role.length_mm, role.width_mm);
                     return (
@@ -257,6 +309,42 @@ export default function MaterialAssignmentGrid({
                           }
                           className="h-8 w-[240px] text-xs"
                         />
+                        {role.has_edges && (
+                          <>
+                            {expandedOverrides.has(fp) || edgingOverrides.some(
+                              (eo) => roleFingerprint(eo.board_type, eo.part_name, eo.length_mm, eo.width_mm) === fp,
+                            ) ? (
+                              <BoardMaterialCombobox
+                                boards={edgingComponents}
+                                boardType={null}
+                                value={
+                                  edgingOverrides.find(
+                                    (eo) => roleFingerprint(eo.board_type, eo.part_name, eo.length_mm, eo.width_mm) === fp,
+                                  )?.edging_component_id ?? null
+                                }
+                                onChange={(id, name) =>
+                                  onEdgingOverride(role.board_type, role.part_name, role.length_mm, role.width_mm, id, name)
+                                }
+                                placeholder="Override edging…"
+                                className="h-8 w-[180px] text-xs"
+                              />
+                            ) : (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-1.5 text-xs text-muted-foreground"
+                                onClick={() => setExpandedOverrides((prev) => {
+                                  const next = new Set(prev);
+                                  next.add(fp);
+                                  return next;
+                                })}
+                                title="Override edging for this part"
+                              >
+                                <Scissors className="h-3 w-3" />
+                              </Button>
+                            )}
+                          </>
+                        )}
                       </div>
                     );
                   })}
