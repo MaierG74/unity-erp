@@ -123,6 +123,52 @@ export function bulkAssign(
   return result;
 }
 
+import type { AggregateResponse } from '@/lib/orders/cutting-plan-types';
+
+/**
+ * Derive PartRole[] from aggregate data + assignments.
+ * Groups parts by role fingerprint, sums quantities, attaches assignments.
+ */
+export function buildPartRoles(
+  agg: AggregateResponse | null,
+  assignments: MaterialAssignments,
+): PartRole[] {
+  if (!agg) return [];
+  // Pre-index for O(1) lookups
+  const assignmentIndex = new Map(
+    assignments.assignments.map((a) => [
+      roleFingerprint(a.board_type, a.part_name, a.length_mm, a.width_mm),
+      a,
+    ]),
+  );
+  const map = new Map<string, PartRole>();
+  for (const group of agg.material_groups) {
+    for (const part of group.parts) {
+      const fp = roleFingerprint(group.board_type, part.name, part.length_mm, part.width_mm);
+      const existing = map.get(fp);
+      const match = assignmentIndex.get(fp);
+      if (existing) {
+        existing.total_quantity += part.quantity;
+        if (!existing.product_names.includes(part.product_name)) {
+          existing.product_names.push(part.product_name);
+        }
+      } else {
+        map.set(fp, {
+          board_type: group.board_type,
+          part_name: part.name,
+          length_mm: part.length_mm,
+          width_mm: part.width_mm,
+          total_quantity: part.quantity,
+          product_names: [part.product_name],
+          assigned_component_id: match?.component_id ?? null,
+          assigned_component_name: match?.component_name ?? null,
+        });
+      }
+    }
+  }
+  return Array.from(map.values());
+}
+
 /**
  * Validate a MaterialAssignments object. Returns error message or null.
  */

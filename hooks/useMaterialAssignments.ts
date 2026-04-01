@@ -4,18 +4,14 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { toast } from 'sonner';
-import type { AggregateResponse } from '@/lib/orders/cutting-plan-types';
 import type {
   MaterialAssignments,
   MaterialAssignment,
   BackerDefault,
-  PartRole,
 } from '@/lib/orders/material-assignment-types';
 import {
-  findAssignment,
   upsertAssignment,
   bulkAssign,
-  roleFingerprint,
 } from '@/lib/orders/material-assignment-types';
 
 const EMPTY: MaterialAssignments = { version: 1, assignments: [], backer_default: null };
@@ -26,6 +22,7 @@ export function useMaterialAssignments(orderId: number) {
   const [localAssignments, setLocalAssignments] = useState<MaterialAssignments | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingSaveRef = useRef<Promise<void> | null>(null);
+  const pendingPayloadRef = useRef<MaterialAssignments | null>(null);
 
   const query = useQuery({
     queryKey: ['material-assignments', orderId],
@@ -60,10 +57,14 @@ export function useMaterialAssignments(orderId: number) {
   const save = useCallback(
     (next: MaterialAssignments) => {
       setLocalAssignments(next);
+      pendingPayloadRef.current = next;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       pendingSaveRef.current = new Promise<void>((resolve) => {
         saveTimerRef.current = setTimeout(async () => {
-          await doSave(next);
+          if (pendingPayloadRef.current) {
+            await doSave(pendingPayloadRef.current);
+            pendingPayloadRef.current = null;
+          }
           pendingSaveRef.current = null;
           resolve();
         }, DEBOUNCE_MS);
@@ -77,17 +78,20 @@ export function useMaterialAssignments(orderId: number) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
-    if (localAssignments) {
-      await doSave(localAssignments);
-      pendingSaveRef.current = null;
+    if (pendingPayloadRef.current) {
+      await doSave(pendingPayloadRef.current);
+      pendingPayloadRef.current = null;
     }
-  }, [localAssignments, doSave]);
+  }, [doSave]);
 
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (pendingPayloadRef.current) {
+        doSave(pendingPayloadRef.current).catch(() => {});
+      }
     };
-  }, []);
+  }, [doSave]);
 
   const assign = useCallback(
     (boardType: string, partName: string, lengthMm: number, widthMm: number, componentId: number, componentName: string) => {
@@ -130,57 +134,12 @@ export function useMaterialAssignments(orderId: number) {
     [assignments, save],
   );
 
-  const buildPartRoles = useCallback(
-    (agg: AggregateResponse): PartRole[] => {
-      const map = new Map<string, PartRole>();
-      for (const group of agg.material_groups) {
-        for (const part of group.parts) {
-          const fp = roleFingerprint(group.board_type, part.name, part.length_mm, part.width_mm);
-          const existing = map.get(fp);
-          const match = findAssignment(
-            assignments.assignments,
-            group.board_type,
-            part.name,
-            part.length_mm,
-            part.width_mm,
-          );
-          if (existing) {
-            existing.total_quantity += part.quantity;
-            if (!existing.product_names.includes(part.product_name)) {
-              existing.product_names.push(part.product_name);
-            }
-          } else {
-            map.set(fp, {
-              board_type: group.board_type,
-              part_name: part.name,
-              length_mm: part.length_mm,
-              width_mm: part.width_mm,
-              total_quantity: part.quantity,
-              product_names: [part.product_name],
-              assigned_component_id: match?.component_id ?? null,
-              assigned_component_name: match?.component_name ?? null,
-            });
-          }
-        }
-      }
-      return Array.from(map.values());
-    },
-    [assignments],
-  );
-
-  const isComplete = useCallback(
-    (roles: PartRole[]): boolean => roles.every((r) => r.assigned_component_id != null),
-    [],
-  );
-
   return {
     assignments,
     isLoading: query.isLoading,
     assign,
     assignBulk,
     setBackerDefault,
-    buildPartRoles,
-    isComplete,
     flush,
   };
 }

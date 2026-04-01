@@ -15,6 +15,7 @@ import type {
   CuttingPlanMaterialGroup,
   CuttingPlanOverride,
 } from '@/lib/orders/cutting-plan-types';
+import { buildPartRoles } from '@/lib/orders/material-assignment-types';
 import type { PartRole } from '@/lib/orders/material-assignment-types';
 
 // TODO: resolve per-component stock in future
@@ -25,6 +26,10 @@ const DEFAULT_STOCK: StockSheetSpec = {
   qty: 99,
   kerf_mm: 4,
 };
+
+function toastError(err: unknown, fallback: string) {
+  toast.error(err instanceof Error ? err.message : fallback);
+}
 
 function toGrain(grain: string): GrainOrientation {
   if (grain === 'length' || grain === 'along_length') return 'length';
@@ -54,7 +59,14 @@ function toPartSpecs(group: AggregatedPartGroup): PartSpec[] {
 
 export function useCuttingPlanBuilder(orderId: number) {
   const cuttingPlan = useOrderCuttingPlan(orderId);
-  const materialAssignments = useMaterialAssignments(orderId);
+  const {
+    assignments: matAssignments,
+    flush: flushAssignments,
+    assign,
+    assignBulk,
+    setBackerDefault,
+    isLoading: isAssignmentsLoading,
+  } = useMaterialAssignments(orderId);
   const boardComponents = useBoardComponents();
   const backerComponents = useBackerComponents();
 
@@ -64,27 +76,27 @@ export function useCuttingPlanBuilder(orderId: number) {
   const [quality, setQuality] = useState<'fast' | 'balanced' | 'quality'>('fast');
 
   // Derive part roles from current aggregate + assignments
-  const partRoles = useMemo<PartRole[]>(() => {
-    if (!aggData) return [];
-    return materialAssignments.buildPartRoles(aggData);
-  }, [aggData, materialAssignments]);
+  const partRoles = useMemo<PartRole[]>(
+    () => buildPartRoles(aggData, matAssignments),
+    [aggData, matAssignments],
+  );
+  const allAssigned = partRoles.every((r) => r.assigned_component_id != null);
 
   // canGenerate: all roles assigned AND backer resolved (if any -backer group exists)
   const canGenerate = useMemo<boolean>(() => {
     if (!aggData || partRoles.length === 0) return false;
-    const allAssigned = materialAssignments.isComplete(partRoles);
     if (!allAssigned) return false;
     const needsBacker = aggData.material_groups.some((g) =>
       g.board_type.includes('-backer'),
     );
     if (needsBacker) {
       const hasBacker =
-        materialAssignments.assignments.backer_default != null ||
+        matAssignments.backer_default != null ||
         aggData.material_groups.some((g) => g.backer_material_id != null);
       if (!hasBacker) return false;
     }
     return true;
-  }, [aggData, partRoles, materialAssignments]);
+  }, [aggData, partRoles, allAssigned, matAssignments]);
 
   // Load (or re-load) the aggregate from the API
   const loadAggregate = useCallback(async () => {
@@ -93,8 +105,7 @@ export function useCuttingPlanBuilder(orderId: number) {
       setAggData(agg);
       return agg;
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to load aggregate';
-      toast.error(message);
+      toastError(err, 'Failed to load aggregate');
       return null;
     }
   }, [cuttingPlan]);
@@ -105,7 +116,7 @@ export function useCuttingPlanBuilder(orderId: number) {
     setPendingPlan(null);
     try {
       // 1. Flush any pending assignment saves
-      await materialAssignments.flush();
+      await flushAssignments();
 
       // 2. Re-fetch aggregate to get the latest snapshot
       const agg = await cuttingPlan.aggregate();
@@ -119,7 +130,7 @@ export function useCuttingPlanBuilder(orderId: number) {
       // 3. Re-group by assigned material
       const regrouped = regroupByAssignedMaterial(
         agg,
-        materialAssignments.assignments,
+        matAssignments,
       );
       if (!regrouped) {
         toast.error(
@@ -213,13 +224,11 @@ export function useCuttingPlanBuilder(orderId: number) {
         `Cutting plan generated: ${materialGroups.reduce((s, g) => s + g.sheets_required, 0)} sheets across ${materialGroups.length} material group(s)`,
       );
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'Failed to generate cutting plan';
-      toast.error(message);
+      toastError(err, 'Failed to generate cutting plan');
     } finally {
       setIsGenerating(false);
     }
-  }, [cuttingPlan, materialAssignments, quality]);
+  }, [cuttingPlan, flushAssignments, matAssignments, quality]);
 
   const confirmPlan = useCallback(async () => {
     if (!pendingPlan) return;
@@ -228,9 +237,7 @@ export function useCuttingPlanBuilder(orderId: number) {
       setPendingPlan(null);
       toast.success('Cutting plan confirmed and saved');
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'Failed to confirm cutting plan';
-      toast.error(message);
+      toastError(err, 'Failed to confirm cutting plan');
     }
   }, [pendingPlan, cuttingPlan]);
 
@@ -240,9 +247,7 @@ export function useCuttingPlanBuilder(orderId: number) {
       setPendingPlan(null);
       toast.success('Cutting plan cleared');
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'Failed to clear cutting plan';
-      toast.error(message);
+      toastError(err, 'Failed to clear cutting plan');
     }
   }, [cuttingPlan]);
 
@@ -259,15 +264,15 @@ export function useCuttingPlanBuilder(orderId: number) {
     pendingPlan,
     displayPlan,
     isPending,
-    isLoading: cuttingPlan.isLoading || materialAssignments.isLoading,
+    isLoading: cuttingPlan.isLoading || isAssignmentsLoading,
     isSaving: cuttingPlan.isSaving,
     isGenerating,
 
     // Material assignments (flattened for easy access)
-    assignments: materialAssignments.assignments,
-    assign: materialAssignments.assign,
-    assignBulk: materialAssignments.assignBulk,
-    setBackerDefault: materialAssignments.setBackerDefault,
+    assignments: matAssignments,
+    assign,
+    assignBulk,
+    setBackerDefault,
     partRoles,
     canGenerate,
 

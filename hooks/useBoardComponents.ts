@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { parseThicknessFromDescription, parseSheetThickness } from '@/lib/cutlist/boardCalculator';
@@ -13,6 +14,7 @@ export type BoardComponent = {
   component_id: number;
   internal_code: string;
   description: string;
+  category_id: number;
   parsed_thickness_mm: number | null;
 };
 
@@ -25,7 +27,7 @@ export function useBoardComponents() {
     queryFn: async (): Promise<BoardComponent[]> => {
       const { data, error } = await supabase
         .from('components')
-        .select('component_id, internal_code, description')
+        .select('component_id, internal_code, description, category_id')
         .in('category_id', PRIMARY_BOARD_CATEGORY_IDS)
         .eq('is_active', true)
         .order('internal_code');
@@ -36,6 +38,7 @@ export function useBoardComponents() {
         component_id: c.component_id,
         internal_code: c.internal_code ?? '',
         description: c.description ?? '',
+        category_id: c.category_id,
         parsed_thickness_mm: parseThicknessFromDescription(c.description ?? ''),
       }));
     },
@@ -43,32 +46,19 @@ export function useBoardComponents() {
   });
 }
 
+const BACKER_CATEGORY_SET = new Set(BACKER_CATEGORY_IDS);
+
 /**
- * Fetch backer board components (MDF, Plywood). No thickness filtering —
- * backers vary widely (3mm, 6mm, 9mm) and users should see all options.
+ * Backer board components (MDF, Plywood) — derived from the primary query.
+ * No extra network request; backers vary widely (3mm, 6mm, 9mm) so no thickness filter.
  */
 export function useBackerComponents() {
-  return useQuery({
-    queryKey: ['backer-components'],
-    queryFn: async (): Promise<BoardComponent[]> => {
-      const { data, error } = await supabase
-        .from('components')
-        .select('component_id, internal_code, description')
-        .in('category_id', BACKER_CATEGORY_IDS)
-        .eq('is_active', true)
-        .order('internal_code');
-
-      if (error) throw new Error(error.message);
-
-      return (data ?? []).map((c) => ({
-        component_id: c.component_id,
-        internal_code: c.internal_code ?? '',
-        description: c.description ?? '',
-        parsed_thickness_mm: parseThicknessFromDescription(c.description ?? ''),
-      }));
-    },
-    staleTime: 5 * 60 * 1000,
-  });
+  const { data, ...rest } = useBoardComponents();
+  const backerData = useMemo(
+    () => data?.filter((b) => BACKER_CATEGORY_SET.has(b.category_id)),
+    [data],
+  );
+  return { data: backerData, ...rest };
 }
 
 /**
