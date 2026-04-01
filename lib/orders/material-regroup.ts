@@ -40,6 +40,7 @@ export function regroupByAssignedMaterial(
     for (const part of group.parts) {
       const match = findAssignment(
         materialAssignments.assignments,
+        part.order_detail_id,
         group.board_type,
         part.name,
         part.length_mm,

@@ -17,6 +17,7 @@ type EdgingResult = {
  * Priority: edging_overrides (per-part) > edging_defaults (per-board) > null.
  */
 function resolveEdgingForPart(
+  orderDetailId: number,
   boardType: string,
   partName: string,
   lengthMm: number,
@@ -24,9 +25,9 @@ function resolveEdgingForPart(
   assignedBoardComponentId: number,
   assignments: MaterialAssignments,
 ): { edging_component_id: number; edging_component_name: string } | null {
-  const fp = roleFingerprint(boardType, partName, lengthMm, widthMm);
+  const fp = roleFingerprint(orderDetailId, boardType, partName, lengthMm, widthMm);
   const override = assignments.edging_overrides.find(
-    (eo) => roleFingerprint(eo.board_type, eo.part_name, eo.length_mm, eo.width_mm) === fp,
+    (eo) => roleFingerprint(eo.order_detail_id, eo.board_type, eo.part_name, eo.length_mm, eo.width_mm) === fp,
   );
   if (override) {
     return {
@@ -92,6 +93,7 @@ export function computeEdging(
 
       if (group.primary_material_id == null) return null;
       const resolved = resolveEdgingForPart(
+        part.order_detail_id,
         group.board_type,
         part.name,
         part.length_mm,
