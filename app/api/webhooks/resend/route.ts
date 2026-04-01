@@ -102,11 +102,19 @@ async function findLinkedRecords(emailId: string) {
     .eq('resend_message_id', emailId)
     .single();
 
+  // Check agent_email_log
+  const { data: agentEmail } = await supabaseAdmin
+    .from('agent_email_log')
+    .select('id')
+    .eq('resend_message_id', emailId)
+    .single();
+
   return {
     purchaseOrderId: poEmail?.purchase_order_id || null,
     purchaseOrderEmailId: poEmail?.id || null,
     quoteId: quoteEmail?.quote_id || null,
     quoteEmailLogId: quoteEmail?.id || null,
+    agentEmailLogId: agentEmail?.id || null,
   };
 }
 
@@ -129,6 +137,11 @@ async function updateEmailStatus(
       .from('quote_email_log')
       .update({ delivery_status: 'delivered', delivered_at: now })
       .eq('resend_message_id', emailId);
+
+    await supabaseAdmin
+      .from('agent_email_log')
+      .update({ delivery_status: 'delivered', delivered_at: now })
+      .eq('resend_message_id', emailId);
   } else if (eventType === 'bounced') {
     await supabaseAdmin
       .from('purchase_order_emails')
@@ -147,6 +160,15 @@ async function updateEmailStatus(
         bounce_reason: bounceReason,
       })
       .eq('resend_message_id', emailId);
+
+    await supabaseAdmin
+      .from('agent_email_log')
+      .update({
+        delivery_status: 'bounced',
+        bounced_at: now,
+        bounce_reason: bounceReason,
+      })
+      .eq('resend_message_id', emailId);
   } else if (eventType === 'complained') {
     await supabaseAdmin
       .from('purchase_order_emails')
@@ -157,6 +179,11 @@ async function updateEmailStatus(
       .from('quote_email_log')
       .update({ delivery_status: 'complained' })
       .eq('resend_message_id', emailId);
+
+    await supabaseAdmin
+      .from('agent_email_log')
+      .update({ delivery_status: 'complained' })
+      .eq('resend_message_id', emailId);
   } else if (eventType === 'delayed') {
     await supabaseAdmin
       .from('purchase_order_emails')
@@ -165,6 +192,11 @@ async function updateEmailStatus(
 
     await supabaseAdmin
       .from('quote_email_log')
+      .update({ delivery_status: 'delayed' })
+      .eq('resend_message_id', emailId);
+
+    await supabaseAdmin
+      .from('agent_email_log')
       .update({ delivery_status: 'delayed' })
       .eq('resend_message_id', emailId);
   }
