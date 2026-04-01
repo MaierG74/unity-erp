@@ -335,6 +335,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
       queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
       queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['order-cutting-plan', orderId] });
       toast.success('Product updated successfully');
       setEditingDetailId(null);
     },
@@ -359,6 +360,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
       queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
       queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['order-cutting-plan', orderId] });
       toast.success('Product removed from order');
     },
     onError: (error: Error) => {
