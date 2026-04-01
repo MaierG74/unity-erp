@@ -1,4 +1,4 @@
-import type { SheetLayout, StockSheetSpec } from '@/lib/cutlist/types';
+import type { SheetLayout } from '@/lib/cutlist/types';
 
 // ─── Persisted JSONB shape on orders.cutting_plan ────────────────────────
 
