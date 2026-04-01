@@ -1,7 +1,8 @@
 // components/features/todos/TaskList.tsx
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   isBefore,
   parseISO,
@@ -30,7 +31,6 @@ import {
 import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 
-import { useAuth } from '@/components/common/auth-provider';
 import { useTodoList, useCreateTodo, useUpdateTodo } from '@/hooks/useTodosApi';
 import { useDebounce } from '@/hooks/use-debounce';
 import { useTaskKeyboard } from '@/hooks/useTaskKeyboard';
@@ -47,11 +47,21 @@ import type { TodoItem, TodoPriority } from '@/lib/db/todos';
 type Scope = 'assigned' | 'created' | 'watching' | 'all';
 type GroupBy = 'dueDate' | 'priority' | 'assignee' | 'status' | 'none';
 type SortBy = 'priority' | 'dueDate' | 'status';
+type UrlSyncMode = 'push' | 'replace';
 
 interface TodoGroup {
   key: string;
   label: string;
   todos: TodoItem[];
+}
+
+interface TodoUrlState {
+  scope: Scope;
+  search: string;
+  groupBy: GroupBy;
+  sortBy: SortBy;
+  includeCompleted: boolean;
+  taskId: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,6 +93,76 @@ const STATUS_ORDER: Record<string, number> = {
   done: 3,
   archived: 4,
 };
+
+const DEFAULT_SCOPE: Scope = 'assigned';
+const DEFAULT_GROUP_BY: GroupBy = 'dueDate';
+const DEFAULT_SORT_BY: SortBy = 'priority';
+
+function isScope(value: string | null): value is Scope {
+  return value === 'assigned' || value === 'created' || value === 'watching' || value === 'all';
+}
+
+function isGroupBy(value: string | null): value is GroupBy {
+  return value === 'dueDate' || value === 'priority' || value === 'assignee' || value === 'status' || value === 'none';
+}
+
+function isSortBy(value: string | null): value is SortBy {
+  return value === 'priority' || value === 'dueDate' || value === 'status';
+}
+
+function parseBooleanParam(value: string | null): boolean {
+  return value === '1' || value === 'true';
+}
+
+function parseTodoUrlState(searchParamsString: string): TodoUrlState {
+  const params = new URLSearchParams(searchParamsString);
+
+  return {
+    scope: isScope(params.get('scope')) ? params.get('scope')! : DEFAULT_SCOPE,
+    search: params.get('q') ?? '',
+    groupBy: isGroupBy(params.get('groupBy')) ? params.get('groupBy')! : DEFAULT_GROUP_BY,
+    sortBy: isSortBy(params.get('sortBy')) ? params.get('sortBy')! : DEFAULT_SORT_BY,
+    includeCompleted: parseBooleanParam(params.get('includeCompleted')),
+    taskId: params.get('task')?.trim() || null,
+  };
+}
+
+function applyTodoUrlState(
+  params: URLSearchParams,
+  state: Partial<Omit<TodoUrlState, 'taskId'>> & { taskId?: string | null },
+) {
+  if (state.scope !== undefined) {
+    if (state.scope !== DEFAULT_SCOPE) params.set('scope', state.scope);
+    else params.delete('scope');
+  }
+
+  if (state.search !== undefined) {
+    const search = state.search.trim();
+    if (search) params.set('q', search);
+    else params.delete('q');
+  }
+
+  if (state.groupBy !== undefined) {
+    if (state.groupBy !== DEFAULT_GROUP_BY) params.set('groupBy', state.groupBy);
+    else params.delete('groupBy');
+  }
+
+  if (state.sortBy !== undefined) {
+    if (state.sortBy !== DEFAULT_SORT_BY) params.set('sortBy', state.sortBy);
+    else params.delete('sortBy');
+  }
+
+  if (state.includeCompleted !== undefined) {
+    if (state.includeCompleted) params.set('includeCompleted', '1');
+    else params.delete('includeCompleted');
+  }
+
+  if (state.taskId !== undefined) {
+    const taskId = state.taskId?.trim();
+    if (taskId) params.set('task', taskId);
+    else params.delete('task');
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Grouping logic
@@ -234,19 +314,26 @@ function flattenGroups(groups: TodoGroup[], collapsed: Set<string>): TodoItem[] 
 // ---------------------------------------------------------------------------
 
 export function TaskList() {
-  const { user } = useAuth();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const searchParamsString = searchParams?.toString() || '';
+  const urlState = useMemo(() => parseTodoUrlState(searchParamsString), [searchParamsString]);
   const { toast } = useToast();
+  const syncingFromUrlRef = useRef(false);
+  const lastSearchParamsRef = useRef(searchParamsString);
+  const rowRefs = useRef(new Map<string, HTMLDivElement | null>());
 
   // Filter / view state
-  const [scope, setScope] = useState<Scope>('assigned');
-  const [searchInput, setSearchInput] = useState('');
-  const [groupBy, setGroupBy] = useState<GroupBy>('dueDate');
-  const [sortBy, setSortBy] = useState<SortBy>('priority');
-  const [includeCompleted, setIncludeCompleted] = useState(false);
+  const [scope, setScope] = useState<Scope>(() => urlState.scope);
+  const [searchInput, setSearchInput] = useState(() => urlState.search);
+  const [groupBy, setGroupBy] = useState<GroupBy>(() => urlState.groupBy);
+  const [sortBy, setSortBy] = useState<SortBy>(() => urlState.sortBy);
+  const [includeCompleted, setIncludeCompleted] = useState(() => urlState.includeCompleted);
 
   // Selection / keyboard state
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [focusedIndex, setFocusedIndex] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(() => urlState.taskId);
+  const [focusedId, setFocusedId] = useState<string | null>(() => urlState.taskId);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
   // Quick-add state
@@ -255,7 +342,37 @@ export function TaskList() {
   // Dialog state
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
 
+  // Quick-add input ref (for focus management)
+  const quickAddRef = useRef<HTMLInputElement>(null);
+
   const debouncedSearch = useDebounce(searchInput, 300);
+
+  useEffect(() => {
+    if (lastSearchParamsRef.current === searchParamsString) {
+      return;
+    }
+
+    lastSearchParamsRef.current = searchParamsString;
+
+    if (
+      scope === urlState.scope &&
+      searchInput === urlState.search &&
+      groupBy === urlState.groupBy &&
+      sortBy === urlState.sortBy &&
+      includeCompleted === urlState.includeCompleted &&
+      selectedId === urlState.taskId
+    ) {
+      return;
+    }
+
+    syncingFromUrlRef.current = true;
+    setScope(urlState.scope);
+    setSearchInput(urlState.search);
+    setGroupBy(urlState.groupBy);
+    setSortBy(urlState.sortBy);
+    setIncludeCompleted(urlState.includeCompleted);
+    setSelectedId(urlState.taskId);
+  }, [groupBy, includeCompleted, scope, searchInput, searchParamsString, selectedId, sortBy, urlState]);
 
   // Fetch data
   const { data, isLoading, error } = useTodoList({
@@ -287,10 +404,61 @@ export function TaskList() {
     return map;
   }, [flatList]);
 
-  const focusedTodo = flatList[focusedIndex] ?? null;
+  const todoIdSet = useMemo(() => new Set(todos.map((todo) => todo.id)), [todos]);
+  const focusedIndex = focusedId ? (flatIndexMap.get(focusedId) ?? -1) : -1;
+  const focusedTodo = focusedIndex >= 0 ? flatList[focusedIndex] ?? null : null;
 
   // For toggle complete on focused item
   const focusedUpdateMutation = useUpdateTodo(focusedTodo?.id ?? null);
+
+  const updateUrl = useCallback(
+    (
+      update: (params: URLSearchParams) => void,
+      mode: UrlSyncMode = 'replace',
+    ) => {
+      const params = new URLSearchParams(searchParams?.toString() || '');
+      update(params);
+
+      const query = params.toString();
+      const url = query ? `${pathname}?${query}` : (pathname || '/todos');
+
+      if (mode === 'push') {
+        router.push(url, { scroll: false });
+      } else {
+        router.replace(url, { scroll: false });
+      }
+    },
+    [pathname, router, searchParams],
+  );
+
+  useEffect(() => {
+    if (syncingFromUrlRef.current) {
+      syncingFromUrlRef.current = false;
+      return;
+    }
+
+    const normalizedSearch = debouncedSearch.trim();
+
+    if (
+      urlState.scope === scope &&
+      urlState.search === normalizedSearch &&
+      urlState.groupBy === groupBy &&
+      urlState.sortBy === sortBy &&
+      urlState.includeCompleted === includeCompleted
+    ) {
+      return;
+    }
+
+    updateUrl((params) => {
+      applyTodoUrlState(params, {
+        scope,
+        search: normalizedSearch,
+        groupBy,
+        sortBy,
+        includeCompleted,
+      });
+    });
+  }, [debouncedSearch, groupBy, includeCompleted, scope, sortBy, updateUrl, urlState]);
 
   // Collapse toggle
   const toggleCollapse = useCallback((key: string) => {
@@ -301,6 +469,109 @@ export function TaskList() {
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    setCollapsedGroups((prev) => (prev.size === 0 ? prev : new Set()));
+  }, [groupBy]);
+
+  useEffect(() => {
+    if (!selectedId || isLoading || !!error || todoIdSet.has(selectedId)) {
+      return;
+    }
+
+    setSelectedId(null);
+    updateUrl((params) => {
+      applyTodoUrlState(params, { taskId: null });
+    });
+  }, [error, isLoading, selectedId, todoIdSet, updateUrl]);
+
+  useEffect(() => {
+    if (selectedId && flatIndexMap.has(selectedId) && focusedId !== selectedId) {
+      setFocusedId(selectedId);
+    }
+  }, [flatIndexMap, focusedId, selectedId]);
+
+  useEffect(() => {
+    if (flatList.length === 0) {
+      if (focusedId !== null) {
+        setFocusedId(null);
+      }
+      return;
+    }
+
+    if (focusedId && flatIndexMap.has(focusedId)) {
+      return;
+    }
+
+    const fallbackId =
+      (selectedId && flatIndexMap.has(selectedId) ? selectedId : null) ??
+      flatList[0]?.id ??
+      null;
+
+    if (fallbackId !== focusedId) {
+      setFocusedId(fallbackId);
+    }
+  }, [flatIndexMap, flatList, focusedId, selectedId]);
+
+  useEffect(() => {
+    if (!focusedId) {
+      return;
+    }
+
+    rowRefs.current.get(focusedId)?.scrollIntoView({
+      block: 'nearest',
+    });
+  }, [focusedId]);
+
+  const setRowRef = useCallback((todoId: string, node: HTMLDivElement | null) => {
+    if (node) {
+      rowRefs.current.set(todoId, node);
+    } else {
+      rowRefs.current.delete(todoId);
+    }
+  }, []);
+
+  const moveFocus = useCallback((direction: -1 | 1) => {
+    if (flatList.length === 0) {
+      return;
+    }
+
+    const currentIndex = focusedId ? (flatIndexMap.get(focusedId) ?? -1) : -1;
+    const fallbackIndex = direction > 0 ? 0 : flatList.length - 1;
+    const nextIndex = currentIndex === -1
+      ? fallbackIndex
+      : Math.min(flatList.length - 1, Math.max(0, currentIndex + direction));
+
+    const nextTodo = flatList[nextIndex];
+    if (nextTodo) {
+      setFocusedId(nextTodo.id);
+    }
+  }, [flatIndexMap, flatList, focusedId]);
+
+  const openTask = useCallback((todoId: string, mode: UrlSyncMode = 'push') => {
+    setSelectedId(todoId);
+    setFocusedId(todoId);
+
+    if (selectedId === todoId && urlState.taskId === todoId) {
+      return;
+    }
+
+    updateUrl((params) => {
+      applyTodoUrlState(params, { taskId: todoId });
+    }, mode);
+  }, [selectedId, updateUrl, urlState.taskId]);
+
+  const closeTask = useCallback((mode: UrlSyncMode = 'push') => {
+    setSelectedId(null);
+
+    if (!selectedId && !urlState.taskId) {
+      return;
+    }
+
+    updateUrl((params) => {
+      applyTodoUrlState(params, { taskId: null });
+    }, mode);
+  }, [selectedId, updateUrl, urlState.taskId]);
 
   // Quick-add handler
   const handleQuickAdd = useCallback(async () => {
@@ -318,34 +589,49 @@ export function TaskList() {
   // Keyboard shortcuts
   useTaskKeyboard(
     {
+      onNewTask: () => {
+        quickAddRef.current?.focus();
+      },
       onNavigateUp: () => {
-        setFocusedIndex(prev => Math.max(0, prev - 1));
+        moveFocus(-1);
       },
       onNavigateDown: () => {
-        setFocusedIndex(prev => Math.min(flatList.length - 1, prev + 1));
+        moveFocus(1);
       },
       onOpenPanel: () => {
-        if (focusedTodo) setSelectedId(focusedTodo.id);
+        if (focusedTodo) openTask(focusedTodo.id);
       },
       onClosePanel: () => {
-        setSelectedId(null);
+        if (quickCreateOpen) {
+          setQuickCreateOpen(false);
+          return;
+        }
+
+        if (selectedId) {
+          closeTask();
+        }
       },
       onToggleComplete: () => {
         if (!focusedTodo) return;
         const isDone = focusedTodo.status === 'done' || focusedTodo.status === 'archived';
         focusedUpdateMutation.mutate({ status: isDone ? 'open' : 'done' });
       },
+      onEditTask: () => {
+        if (focusedTodo) openTask(focusedTodo.id);
+      },
     },
     !selectedId, // Disable when panel is open
   );
 
-  // Quick-add input ref (for focus management)
-  const quickAddRef = useRef<HTMLInputElement>(null);
-
   return (
     <div className="flex h-[calc(100vh-4rem)]">
       {/* Left: list pane */}
-      <div className={cn('flex-1 min-w-0 flex flex-col overflow-hidden', selectedId && 'max-w-[calc(100%-480px)]')}>
+      <div
+        className={cn(
+          'flex-1 min-w-0 flex flex-col overflow-hidden',
+          selectedId && 'hidden md:flex md:max-w-[calc(100%-30rem)]',
+        )}
+      >
         {/* Header row */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/40">
           <h1 className="text-lg font-semibold">Tasks</h1>
@@ -492,7 +778,9 @@ export function TaskList() {
                         todo={todo}
                         isActive={selectedId === todo.id}
                         isFocused={focusedIndex === globalIdx}
-                        onSelect={id => setSelectedId(id)}
+                        onFocusRow={setFocusedId}
+                        onSelect={openTask}
+                        rowRef={(node) => setRowRef(todo.id, node)}
                       />
                     );
                   })}
@@ -506,7 +794,7 @@ export function TaskList() {
       {selectedId && (
         <TaskSidePanel
           todoId={selectedId}
-          onClose={() => setSelectedId(null)}
+          onClose={() => closeTask()}
         />
       )}
 

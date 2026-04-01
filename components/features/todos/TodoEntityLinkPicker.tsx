@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 
 import {
@@ -13,12 +13,15 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useEntityLinks } from '@/hooks/useEntityLinks';
+import { formatDateShort } from '@/lib/date-utils';
 import type { EntityLink, EntityLinkType } from '@/lib/client/entity-links';
 
 const typeLabels: Record<EntityLinkType, string> = {
   order: 'Customer Orders',
   supplier_order: 'Supplier Orders',
   quote: 'Quotes',
+  customer: 'Customers',
+  product: 'Products',
 };
 
 interface TodoEntityLinkPickerProps {
@@ -27,29 +30,80 @@ interface TodoEntityLinkPickerProps {
   onSelect: (link: EntityLink) => void;
 }
 
+function formatMetaDate(value: unknown, label: string): string | null {
+  if (typeof value !== 'string' || !value) {
+    return null;
+  }
+
+  return `${label} ${formatDateShort(value)}`;
+}
+
 function formatMeta(link: EntityLink): string | null {
   if (!link.meta) return null;
+
   if (link.type === 'order') {
     const customer = link.meta?.customer as string | null | undefined;
     const status = link.meta?.status as string | null | undefined;
-    return [customer, status].filter(Boolean).join(' • ') || null;
+    const dueDate = formatMetaDate(link.meta?.deliveryDate, 'Due');
+    const createdAt = formatMetaDate(link.meta?.createdAt, 'Created');
+    return [customer, status, dueDate ?? createdAt].filter(Boolean).join(' • ') || null;
   }
+
   if (link.type === 'supplier_order') {
+    const lineId = link.meta?.orderId as number | string | null | undefined;
     const supplier = link.meta?.supplier as string | null | undefined;
+    const componentCode = link.meta?.componentCode as string | null | undefined;
     const status = link.meta?.status as string | null | undefined;
-    return [supplier, status].filter(Boolean).join(' • ') || null;
+    return [
+      lineId ? `Line #${lineId}` : null,
+      supplier,
+      componentCode,
+      status,
+    ]
+      .filter(Boolean)
+      .join(' • ') || null;
   }
+
   if (link.type === 'quote') {
     const customer = link.meta?.customer as string | null | undefined;
     const status = link.meta?.status as string | null | undefined;
-    return [customer, status].filter(Boolean).join(' • ') || null;
+    const createdAt = formatMetaDate(link.meta?.createdAt, 'Created');
+    return [customer, status, createdAt].filter(Boolean).join(' • ') || null;
   }
+
+  if (link.type === 'customer') {
+    const customerId = link.meta?.customerId as number | string | null | undefined;
+    const email = link.meta?.email as string | null | undefined;
+    const telephone = link.meta?.telephone as string | null | undefined;
+    return [
+      customerId ? `Customer #${customerId}` : null,
+      email,
+      telephone,
+    ]
+      .filter(Boolean)
+      .join(' • ') || null;
+  }
+
+  if (link.type === 'product') {
+    const internalCode = link.meta?.internalCode as string | null | undefined;
+    const productId = link.meta?.productId as number | string | null | undefined;
+    const description = link.meta?.description as string | null | undefined;
+    return [
+      internalCode,
+      productId ? `Product #${productId}` : null,
+      description,
+    ]
+      .filter(Boolean)
+      .join(' • ') || null;
+  }
+
   return null;
 }
 
 export function TodoEntityLinkPicker({ open, onOpenChange, onSelect }: TodoEntityLinkPickerProps) {
   const [query, setQuery] = useState('');
-  const { data, isLoading, error } = useEntityLinks(query, open);
+  const deferredQuery = useDeferredValue(query);
+  const { data, isLoading, error } = useEntityLinks(deferredQuery, open);
 
   useEffect(() => {
     if (!open) {
@@ -62,6 +116,8 @@ export function TodoEntityLinkPicker({ open, onOpenChange, onSelect }: TodoEntit
       { type: 'order' as const, links: data?.orders ?? [] },
       { type: 'supplier_order' as const, links: data?.supplierOrders ?? [] },
       { type: 'quote' as const, links: data?.quotes ?? [] },
+      { type: 'customer' as const, links: data?.customers ?? [] },
+      { type: 'product' as const, links: data?.products ?? [] },
     ].filter(group => group.links.length > 0);
   }, [data]);
 
@@ -75,7 +131,7 @@ export function TodoEntityLinkPicker({ open, onOpenChange, onSelect }: TodoEntit
         <div className="flex items-center border-b px-3 py-2">
           <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
           <Input
-            placeholder="Search orders, supplier orders, quotes..."
+            placeholder="Search orders, quotes, supplier orders, customers, products..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0"

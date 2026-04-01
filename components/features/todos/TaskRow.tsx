@@ -16,12 +16,26 @@ interface TaskRowProps {
   todo: TodoItem;
   isActive: boolean;
   isFocused: boolean;
+  onFocusRow: (id: string) => void;
   onSelect: (id: string) => void;
+  rowRef?: (node: HTMLDivElement | null) => void;
 }
 
-export function TaskRow({ todo, isActive, isFocused, onSelect }: TaskRowProps) {
+export function TaskRow({
+  todo,
+  isActive,
+  isFocused,
+  onFocusRow,
+  onSelect,
+  rowRef,
+}: TaskRowProps) {
   const updateMutation = useUpdateTodo(todo.id);
   const isDone = todo.status === 'done' || todo.status === 'archived';
+  const assigneeLabel =
+    todo.assignee?.username ??
+    todo.assignee?.displayName ??
+    todo.assignee?.login ??
+    'Unassigned';
 
   const overdue = (() => {
     if (!todo.dueAt || isDone) return false;
@@ -43,9 +57,15 @@ export function TaskRow({ todo, isActive, isFocused, onSelect }: TaskRowProps) {
 
   return (
     <div
-      role="row"
-      tabIndex={0}
-      onClick={() => onSelect(todo.id)}
+      ref={rowRef}
+      role="button"
+      tabIndex={isFocused ? 0 : -1}
+      aria-pressed={isActive}
+      onClick={() => {
+        onFocusRow(todo.id);
+        onSelect(todo.id);
+      }}
+      onFocus={() => onFocusRow(todo.id)}
       className={cn(
         'flex items-center gap-3 px-3 py-2 border-b border-border/40 cursor-pointer transition-all select-none',
         'hover:bg-muted/30',
@@ -78,11 +98,11 @@ export function TaskRow({ todo, isActive, isFocused, onSelect }: TaskRowProps) {
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <Avatar className="h-5 w-5">
             <AvatarFallback className="text-[9px] bg-muted">
-              {initials(todo.assignee.username)}
+              {initials(assigneeLabel)}
             </AvatarFallback>
           </Avatar>
           <span className="text-xs text-muted-foreground truncate max-w-[80px] hidden sm:inline">
-            {todo.assignee.username}
+            {assigneeLabel}
           </span>
         </div>
       )}

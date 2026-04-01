@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { getRouteClient } from '@/lib/supabase-route';
 import { TODO_PRIORITIES, TODO_STATUSES, fetchTodo, fetchTodoActivities, listTodos } from '@/lib/db/todos';
+import { TODO_CONTEXT_ID_PATTERN, getTodoContextIdForStorage } from '@/lib/todos/context-links';
 
 const createTodoSchema = z.object({
   title: z.string().min(1).max(255),
@@ -13,7 +14,12 @@ const createTodoSchema = z.object({
   watchers: z.array(z.string().uuid()).optional(),
   entityId: z.string().uuid().nullable().optional(),
   contextType: z.string().max(64).nullable().optional(),
-  contextId: z.string().uuid().nullable().optional(),
+  contextId: z
+    .string()
+    .trim()
+    .regex(TODO_CONTEXT_ID_PATTERN, 'Context id must be a UUID or numeric record id')
+    .nullable()
+    .optional(),
   contextPath: z.string().max(255).nullable().optional(),
   contextSnapshot: z.record(z.any()).nullable().optional(),
 });
@@ -99,6 +105,7 @@ export async function POST(req: NextRequest) {
 
   const payload = parsedBody.data;
   const assignedTo = payload.assignedTo ?? ctx.user.id;
+  const storedContextId = getTodoContextIdForStorage(payload.contextId);
 
   console.log('[todos][POST] Attempting insert with:', {
     userId: ctx.user.id,
@@ -118,7 +125,7 @@ export async function POST(req: NextRequest) {
         assigned_to: assignedTo,
         entity_id: payload.entityId ?? null,
         context_type: payload.contextType ?? null,
-        context_id: payload.contextId ?? null,
+        context_id: storedContextId,
         context_path: payload.contextPath ?? null,
         context_snapshot: payload.contextSnapshot ?? null,
       })

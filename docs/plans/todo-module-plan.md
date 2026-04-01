@@ -130,9 +130,9 @@ Link the task to any ERP record without hard-coding each table per feature.
 - `GET|POST /api/todos/:todoId/comments` – loads or appends discussion entries and mirrors them into `todo_activity`.
 - `POST /api/todos/:todoId/acknowledge` – creator-only acknowledgement for completed tasks; writes activity and surfaces refreshed detail payloads.
 - `/api/profiles` – merges `profiles` rows with Supabase auth metadata so UI pickers can show friendly display names + avatars.
-- `/api/entity-links` – search endpoint that returns orders, supplier orders, and quotes with navigation paths for contextual linking.
+- `/api/entity-links` – search endpoint that returns orders, supplier-order / purchase-order records, quotes, customers, and products with navigation paths plus snapshot metadata for contextual linking.
 - Front-end (`/todos`): React Query powered dashboard with scope tabs, status filters, creation dialog, detail editor (status, priority, due date, assignee/watchers), comment stream, and entity link command palette wired to the new endpoints. Uses Supabase session token on requests to respect RLS.
-- Entity linking UX: “Select record” launches a command dialog modal to search orders/supplier orders/quotes, auto-populates `context_type/context_id/context_path`, and stores a snapshot so tasks display helpful metadata.
+- Entity linking UX: “Select record” launches a command dialog modal to search orders, supplier orders, quotes, customers, and products, auto-populates `context_type/context_id/context_path`, and stores a snapshot so tasks display helpful metadata even when numeric ids cannot be persisted in `context_id`.
 
 ## Notifications & Realtime
 - Use Supabase Realtime on `todo_activity` to push UI updates for participants.
@@ -189,17 +189,32 @@ Link the task to any ERP record without hard-coding each table per feature.
 
 **See**: [Entity Link Picker Fix Changelog](../changelogs/todo-entity-link-picker-fix-20251009.md)
 
+### Stability updates (2026-04-01)
+✅ Todo create/update APIs accept numeric `contextId` values from order and supplier-order links without failing validation
+✅ Numeric-linked records persist their working link via `context_type`, `context_path`, and `context_snapshot` while `public.todo_items.context_id` remains UUID-backed
+✅ Side-panel "Open full page" and "Copy link" actions now target `/todos/[id]`
+✅ Attachment open/download flows now resolve through a signed storage URL instead of showing the attachment API JSON payload
+✅ Assignee controls no longer expose an "Unassigned" path while `todo_items.assigned_to` remains `NOT NULL`
+✅ `/todos` persists `scope`, `q`, `groupBy`, `sortBy`, and `includeCompleted` in the URL using default-omitting query params so refresh restores the current triage view
+✅ `/todos?task=<todoId>` safely reopens the selected side panel when the task still belongs to the current filtered result set, which improves browser Back/Forward behavior
+✅ Keyboard navigation now tracks focused tasks by id instead of raw row index so regrouping, filtering, completion removal, or section collapse cannot leave focus on a hidden row
+✅ On smaller screens the selected-task panel takes over the page width instead of squeezing the list beside a fixed 480px panel
+✅ Full-page task detail back actions now prefer browser history and fall back to `/todos`, preserving list query state when the page was opened from the triage list
+✅ Entity link search now covers orders by order number or customer name, quotes by quote number or customer name, supplier-order lines by numeric line id plus purchase-order / supplier context, customers by name, and products by name or internal code
+✅ Supplier-order picker results now show purchase-order labels, supplier/context metadata, and route to the supported `/purchasing/purchase-orders/[purchase_order_id]` page instead of using the supplier-order line id as a page route
+✅ Quick-create context detection now resolves readable labels for `/orders/[orderId]`, `/purchasing/purchase-orders/[id]`, `/quotes/[id]`, `/customers/[id]`, and `/products/[productId]`, and stores those labels in `context_snapshot`
+
 ### Known Issues & Limitations
-- Supplier orders are not searchable by order_id (numeric field limitation)
-- Search only supports order_number and quote_number (not customer/supplier names)
-- Results limited to 20 per entity type by default
+- Blank picker state still prioritizes recent orders, supplier orders, and quotes; customer/product groups appear once the user starts typing a search term
+- Supplier-order links currently open the parent purchase-order detail page because there is no dedicated supplier-order line-item detail route
+- Results remain capped at 20 records per entity type per request
 
 ### Next Steps
 1. ~~Align on entity reference approach~~ ✅ Using context_type/context_id/context_path fallback
 2. ~~Validate dashboard UX with stakeholders~~ ✅ Dashboard implemented and functional
 3. ~~Draft Supabase migration scripts and RLS policies~~ ✅ Migrations created and applied
 4. ~~Spike on entity search experience~~ ✅ Command palette search implemented
-5. **NEW**: Consider adding customer/supplier name search to entity links
+5. **NEW**: Consider a dedicated supplier-order line deep-link or highlight state inside the purchase-order detail page
 6. **NEW**: Add pagination or infinite scroll for >20 results per entity type
 7. **NEW**: Implement comments feed and watchers functionality
 8. **NEW**: Add real-time updates via Supabase subscriptions

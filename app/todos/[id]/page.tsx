@@ -25,6 +25,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/components/common/auth-provider';
 import { formatDate, formatDateShort } from '@/lib/date-utils';
+import { TODO_CONTEXT_ID_PATTERN } from '@/lib/todos/context-links';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 
@@ -167,7 +168,11 @@ const formSchema = z.object({
   watchers: z.array(z.string().uuid()),
   contextPath: z.string().max(255).nullable(),
   contextType: z.string().max(64).nullable(),
-  contextId: z.string().uuid().nullable(),
+  contextId: z
+    .string()
+    .trim()
+    .regex(TODO_CONTEXT_ID_PATTERN, 'Context id must be a UUID or numeric record id')
+    .nullable(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -274,6 +279,15 @@ export default function TodoDetailPage() {
   const uploadAttachmentMutation = useUploadTodoAttachment(todoId);
   const deleteAttachmentMutation = useDeleteTodoAttachment(todoId);
 
+  const handleBack = () => {
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      router.back();
+      return;
+    }
+
+    router.push('/todos');
+  };
+
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
   const [selectedLink, setSelectedLink] = useState<EntityLink | null>(null);
   const [uploadingFile, setUploadingFile] = useState(false);
@@ -330,11 +344,21 @@ export default function TodoDetailPage() {
       });
 
       if (todo.contextPath && todo.contextType) {
+        const contextLabel =
+          todo.contextSnapshot &&
+          typeof todo.contextSnapshot === 'object' &&
+          'label' in todo.contextSnapshot
+            ? String(todo.contextSnapshot.label)
+            : todo.contextPath;
+
         setSelectedLink({
           type: todo.contextType as any,
           path: todo.contextPath,
-          label: todo.contextPath,
-          meta: {},
+          label: contextLabel,
+          meta:
+            todo.contextSnapshot && typeof todo.contextSnapshot === 'object'
+              ? todo.contextSnapshot
+              : {},
         });
       }
     }
@@ -509,19 +533,12 @@ export default function TodoDetailPage() {
     }
   };
 
-  const downloadAttachment = async (attachmentId: string, fileName: string) => {
-    try {
-      const url = await getAttachmentUrl(attachmentId);
-      if (!url) throw new Error('Failed to get download URL');
-      window.open(url, '_blank');
-    } catch (error) {
-      console.error('Failed to download attachment', error);
-      toast({
-        title: 'Download failed',
-        description: error instanceof Error ? error.message : 'Unknown error',
-        variant: 'destructive',
-      });
-    }
+  const downloadAttachment = (attachmentId: string) => {
+    window.open(
+      `/api/todos/${todoId}/attachments/${attachmentId}?download=1`,
+      '_blank',
+      'noopener,noreferrer',
+    );
   };
 
   // Load preview URLs for attachments
@@ -554,7 +571,7 @@ export default function TodoDetailPage() {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-4">
         <p className="text-lg text-muted-foreground">Task not found</p>
-        <Button onClick={() => router.push('/todos')}>
+        <Button onClick={handleBack}>
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back to Tasks
         </Button>
@@ -563,6 +580,14 @@ export default function TodoDetailPage() {
   }
 
   const assignedProfile = profiles.find(p => p.id === assignedTo);
+  const assignedLabel =
+    assignedProfile?.username ??
+    assignedProfile?.email ??
+    todo?.assignee?.displayName ??
+    todo?.assignee?.username ??
+    todo?.assignee?.login ??
+    'Select assignee';
+  const assignedAvatarUrl = assignedProfile?.avatarUrl ?? todo?.assignee?.avatarUrl ?? null;
 
   return (
     <div className="min-h-screen bg-background isolate">
@@ -578,7 +603,7 @@ export default function TodoDetailPage() {
         {/* Left: Back link + Title */}
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <button
-            onClick={() => router.push('/todos')}
+            onClick={handleBack}
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground hover:underline transition-colors"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
@@ -692,19 +717,19 @@ export default function TodoDetailPage() {
                 }}
               >
                 <SelectTrigger className="h-8 text-sm rounded-md border-none bg-muted/50 hover:bg-muted w-[140px]">
-                  <SelectValue placeholder="Unassigned">
-                    {assignedProfile ? (
+                  <SelectValue placeholder="Select assignee">
+                    {assignedTo ? (
                       <div className="flex items-center gap-1.5">
                         <Avatar className="h-4 w-4">
-                          {assignedProfile.avatarUrl && (
-                            <AvatarImage src={assignedProfile.avatarUrl} />
+                          {assignedAvatarUrl && (
+                            <AvatarImage src={assignedAvatarUrl} />
                           )}
-                          <AvatarFallback className="text-[10px]">{initials(assignedProfile.username)}</AvatarFallback>
+                          <AvatarFallback className="text-[10px]">{initials(assignedLabel)}</AvatarFallback>
                         </Avatar>
-                        <span className="truncate text-xs">{assignedProfile.username ?? assignedProfile.email}</span>
+                        <span className="truncate text-xs">{assignedLabel}</span>
                       </div>
                     ) : (
-                      'Unassigned'
+                      'Select assignee'
                     )}
                   </SelectValue>
                 </SelectTrigger>
@@ -1018,7 +1043,7 @@ export default function TodoDetailPage() {
                     <div
                       key={attachment.id}
                       className="group relative rounded-lg border bg-card hover:shadow-md transition-all cursor-pointer overflow-hidden"
-                      onClick={() => downloadAttachment(attachment.id, attachment.fileName)}
+                      onClick={() => downloadAttachment(attachment.id)}
                     >
                       <div className="aspect-video w-full bg-muted/30 flex items-center justify-center border-b">
                         {isImg ? (
@@ -1042,7 +1067,7 @@ export default function TodoDetailPage() {
                           className="h-7 w-7 shadow-xs"
                           onClick={(e) => {
                             e.stopPropagation();
-                            downloadAttachment(attachment.id, attachment.fileName);
+                            downloadAttachment(attachment.id);
                           }}
                         >
                           <Download className="h-3.5 w-3.5" />
@@ -1082,7 +1107,15 @@ export default function TodoDetailPage() {
           setValue('contextPath', link.path, { shouldDirty: true });
           setValue('contextType', link.type, { shouldDirty: true });
           setValue('contextId', link.id ?? null, { shouldDirty: true });
-          updateField({ contextPath: link.path, contextType: link.type, contextId: link.id ?? null });
+          updateField({
+            contextPath: link.path,
+            contextType: link.type,
+            contextId: link.id ?? null,
+            contextSnapshot: {
+              label: link.label,
+              ...(link.meta ?? {}),
+            },
+          });
           setLinkPickerOpen(false);
         }}
       />
