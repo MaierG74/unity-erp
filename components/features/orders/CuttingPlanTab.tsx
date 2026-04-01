@@ -97,6 +97,11 @@ export default function CuttingPlanTab({ orderId }: CuttingPlanTabProps) {
               onAssign={b.assign}
               onAssignBulk={b.assignBulk}
               onBackerDefaultChange={b.setBackerDefault}
+              edgingComponents={b.edgingComponents}
+              edgingDefaults={b.assignments.edging_defaults ?? []}
+              edgingOverrides={b.assignments.edging_overrides ?? []}
+              onEdgingDefault={b.setEdgingDefault}
+              onEdgingOverride={b.setEdgingOverride}
             />
           )}
         </div>
