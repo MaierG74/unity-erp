@@ -662,3 +662,31 @@ export function getBackerBoardCount(
       return 0;
   }
 }
+
+// ============================================================================
+// Description Parsers
+// ============================================================================
+
+/**
+ * Parse thickness in mm from a component description string.
+ * Handles: "2750x1830x16", "16mm White Melamine", "2.750x1.830x16".
+ * Returns null if no thickness found.
+ *
+ * NOTE: Meter-normalization (values < 10 → ×1000) applies only to
+ * length/width dimensions, NEVER to thickness. A 0.6mm laminate stays 0.6.
+ */
+export function parseThicknessFromDescription(desc: string): number | null {
+  // Full dimensions: LxWxT
+  const dimMatch = desc.match(
+    /(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/i,
+  );
+  if (dimMatch) {
+    return parseFloat(dimMatch[3]); // Thickness is always the third value, never meter-normalize
+  }
+  // "Nmm" pattern (e.g., "16mm White Melamine")
+  const mmMatch = desc.match(/(?:^|\s)(\d+(?:\.\d+)?)\s*mm/i);
+  if (mmMatch) {
+    return parseFloat(mmMatch[1]);
+  }
+  return null;
+}

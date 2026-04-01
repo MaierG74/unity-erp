@@ -596,6 +596,9 @@ interface PayrollDetailPanelProps {
 }
 
 function PayrollDetailPanel({ staffId, staffName, weekStart, weekEnd, standardWeekHours, row, onClose, onOtToggle }: PayrollDetailPanelProps) {
+  const [excludedOtDays, setExcludedOtDays] = useState<Set<string>>(new Set());
+  useEffect(() => { setExcludedOtDays(new Set()); }, [staffId]);
+
   const { data: hoursData } = useQuery({
     queryKey: ['payroll-detail-hours', staffId, weekStart],
     queryFn: async () => {
@@ -698,6 +701,7 @@ function PayrollDetailPanel({ staffId, staffName, weekStart, weekEnd, standardWe
             )}
             <p className="text-xs text-muted-foreground px-1">
               Weekly payroll OT starts after {formatHours(standardWeekHours)} standard hours, so overtime is allocated to the later days in the week.
+              {!row?.otOverride && row && row.otHours > 0 && ' Click individual OT values to exclude specific days.'}
             </p>
             <Table>
               <TableHeader>
@@ -719,7 +723,21 @@ function PayrollDetailPanel({ staffId, staffName, weekStart, weekEnd, standardWe
                     <TableCell className="tabular-nums">{formatTimeToSAST(h.first_clock_in)}</TableCell>
                     <TableCell className="tabular-nums">{formatTimeToSAST(h.last_clock_out)}</TableCell>
                     <TableCell className="text-right tabular-nums">{(h.payroll_regular_minutes / 60).toFixed(1)}</TableCell>
-                    <TableCell className={`text-right tabular-nums ${row?.otOverride ? 'line-through text-muted-foreground/50' : ''}`}>
+                    <TableCell
+                      className={`text-right tabular-nums ${
+                        row?.otOverride || excludedOtDays.has(h.date_worked)
+                          ? 'line-through text-muted-foreground/50' : ''
+                      } ${!row?.otOverride && h.payroll_ot_minutes > 0 ? 'cursor-pointer hover:text-amber-400 select-none' : ''}`}
+                      onClick={() => {
+                        if (row?.otOverride || h.payroll_ot_minutes === 0) return;
+                        setExcludedOtDays(prev => {
+                          const next = new Set(prev);
+                          if (next.has(h.date_worked)) next.delete(h.date_worked);
+                          else next.add(h.date_worked);
+                          return next;
+                        });
+                      }}
+                    >
                       {(h.payroll_ot_minutes / 60).toFixed(1)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{(h.payroll_dt_minutes / 60).toFixed(1)}</TableCell>
@@ -748,6 +766,85 @@ function PayrollDetailPanel({ staffId, staffName, weekStart, weekEnd, standardWe
                 )}
               </TableBody>
             </Table>
+
+            {/* Pay Calculation Breakdown */}
+            {row && row.hourly_rate > 0 && payrollHoursData.length > 0 && (() => {
+              const excludedOtMinutes = row.otOverride ? 0 : payrollHoursData
+                .filter(h => excludedOtDays.has(h.date_worked))
+                .reduce((s, h) => s + h.payroll_ot_minutes, 0);
+              const regHrs = row.regularHours + excludedOtMinutes / 60;
+              const otHrs = row.otHours - excludedOtMinutes / 60;
+              const dtHrs = row.dtHours;
+              const rate = row.hourly_rate;
+              const regPay = regHrs * rate;
+              const otPay = otHrs * rate * 1.5;
+              const dtPay = dtHrs * rate * 2.0;
+              const adjustedHourlyTotal = Math.round((regPay + otPay + dtPay) * 100) / 100;
+              const adjustedFinalPay = Math.max(adjustedHourlyTotal, row.pieceworkNet);
+              return (
+                <div className="mt-4 border rounded-sm p-3">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Pay Calculation</h4>
+                    {excludedOtDays.size > 0 && !row.otOverride && (
+                      <button
+                        className="text-[10px] text-muted-foreground hover:text-foreground underline"
+                        onClick={() => setExcludedOtDays(new Set())}
+                      >
+                        Reset OT exclusions
+                      </button>
+                    )}
+                  </div>
+                  {excludedOtDays.size > 0 && !row.otOverride && (
+                    <p className="text-xs text-amber-400 mb-2">
+                      OT excluded for {excludedOtDays.size} day{excludedOtDays.size > 1 ? 's' : ''} — click OT values above to toggle
+                    </p>
+                  )}
+                  <div className="space-y-2.5 text-sm">
+                    <div className="flex justify-between">
+                      <div>
+                        <div>Regular</div>
+                        <div className="text-xs text-muted-foreground tabular-nums">{formatHours(regHrs)} hrs × {formatRand(rate)}</div>
+                      </div>
+                      <span className="tabular-nums self-center">{formatRand(regPay)}</span>
+                    </div>
+                    {otHrs > 0 && (
+                      <div className="flex justify-between">
+                        <div>
+                          <div>Overtime <span className="text-muted-foreground">(1.5×)</span></div>
+                          <div className="text-xs text-muted-foreground tabular-nums">{formatHours(otHrs)} hrs × {formatRand(rate)} × 1.5</div>
+                        </div>
+                        <span className="tabular-nums self-center">{formatRand(otPay)}</span>
+                      </div>
+                    )}
+                    {dtHrs > 0 && (
+                      <div className="flex justify-between">
+                        <div>
+                          <div>Double Time <span className="text-muted-foreground">(2×)</span></div>
+                          <div className="text-xs text-muted-foreground tabular-nums">{formatHours(dtHrs)} hrs × {formatRand(rate)} × 2.0</div>
+                        </div>
+                        <span className="tabular-nums self-center">{formatRand(dtPay)}</span>
+                      </div>
+                    )}
+                    <div className="border-t pt-2 flex justify-between font-semibold">
+                      <span>Hourly Total</span>
+                      <span className="tabular-nums">{formatRand(adjustedHourlyTotal)}</span>
+                    </div>
+                    {row.pieceworkNet > 0 && (
+                      <>
+                        <div className="flex justify-between text-muted-foreground">
+                          <span>vs Piecework Net</span>
+                          <span className="tabular-nums">{formatRand(row.pieceworkNet)}</span>
+                        </div>
+                        <div className="flex justify-between font-semibold text-green-400">
+                          <span>Final Pay <span className="text-xs font-normal text-muted-foreground">(higher of the two)</span></span>
+                          <span className="tabular-nums">{formatRand(adjustedFinalPay)}</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
           </TabsContent>
 
           <TabsContent value="piecework" className="mt-4">

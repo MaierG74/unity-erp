@@ -53,6 +53,8 @@ Key takeaway: the dominant modern pattern is a compact list + side panel detail 
 
 **Search:** Single search input, debounced, searches title + description (existing behavior)
 
+**URL persistence:** `/todos` mirrors the active list state into query params so refresh and browser history restore the same view. Persisted keys: `scope`, `q`, `groupBy`, `sortBy`, `includeCompleted`, plus optional `task` when the side panel is open. Default values are omitted to keep the URL clean.
+
 **Inline quick-add:** A text input row at the top of the list area. Type title, press Enter. Task created with defaults (assigned to current user, medium priority, no due date). No date/priority/assignee selects in the quick-add row -- set those in the side panel after creation.
 
 **Status toggle:** Clicking the checkbox marks a task as done. The row gets strikethrough + muted opacity, then fades out after ~2 seconds (if not showing completed tasks).
@@ -69,20 +71,22 @@ Key takeaway: the dominant modern pattern is a compact list + side panel detail 
 
 **Component:** Sheet (Radix/shadcn) sliding in from the right, ~480px wide.
 
-**Trigger:** Click any task row in the list. The list narrows to accommodate the panel.
+**Trigger:** Click any task row in the list. The list narrows to accommodate the panel on desktop; on smaller screens the panel takes over the full width and the list returns when closed.
+
+**Selection persistence:** When safe, the open side panel is represented by `task=<todoId>` so refresh, browser Back/Forward, and opening the full-page fallback then returning all restore the same selected row.
 
 **Panel layout (top to bottom):**
 
-1. **Header row:** Back arrow (closes panel) + overflow menu (archive, delete, copy link, open full page)
+1. **Header row:** Back arrow (closes panel) + overflow menu (archive, delete, copy link, open full page at `/todos/[id]`)
 
 2. **Title:** Large editable text input (borderless, ~20px font). Click to edit, auto-saves on blur with 500ms debounce.
 
 3. **Metadata chip row:** Horizontal flex row of inline-editable chips:
    - Status chip (click for dropdown: open/in_progress/blocked/done)
    - Priority chip with color dot (click for dropdown)
-   - Assignee chip with avatar (click for dropdown)
+   - Assignee chip with avatar (click for dropdown of valid assignees only while `assigned_to` remains required)
    - Due date chip (click for calendar popover)
-   - Entity link chip (shows linked entity label, click navigates, x to clear, "+ Link" button if none)
+   - Entity link chip (shows linked entity label, click navigates, x to clear, "+ Link" button if none; picker supports orders, supplier orders / purchase orders, quotes, customers, and products)
 
 4. **Description:** Auto-growing textarea, full width, plain text. Generous min-height (~120px) for a spacious feel. Placeholder: "Add details..."
 
@@ -90,6 +94,7 @@ Key takeaway: the dominant modern pattern is a compact list + side panel detail 
 
 6. **Attachments section:**
    - File list with icon, name, size, uploader, delete button
+   - Clicking an attachment resolves to a signed storage URL instead of opening the attachment API JSON payload
    - Drag-and-drop zone at bottom ("Drop files or click to upload")
    - Inline image thumbnails for image files
    - Screenshots can be pasted directly (Ctrl+V in the description or attachment zone)
@@ -120,13 +125,15 @@ Key takeaway: the dominant modern pattern is a compact list + side panel detail 
 **Context auto-detection:**
 The quick-create reads `window.location.pathname` and matches against known entity routes:
 - `/orders/[id]` -> type: "order", fetches order label
-- `/purchasing/purchase-orders/[id]` -> type: "supplier_order", fetches PO label
+- `/purchasing/purchase-orders/[id]` -> type: "supplier_order", resolves through `purchase_orders.purchase_order_id` and fetches the PO label + supplier name
 - `/quotes/[id]` -> type: "quote", fetches quote label
 - `/customers/[id]` -> type: "customer", fetches customer name
 - `/products/[id]` -> type: "product", fetches product name
 - All other pages -> no auto-link
 
 The entity label and path are stored in `context_type`, `context_id`, `context_path`, and `context_snapshot` (existing columns).
+For numeric order and supplier-order ids, `context_path` + `context_snapshot` are the authoritative persisted link fields until `todo_items.context_id` is widened beyond UUID.
+Manual link search should prioritize everyday lookup fields: orders by order number or customer name, quotes by quote number or customer name, supplier-order lines by numeric line id plus purchase-order / supplier context, customers by customer name, and products by product name (plus internal code when available).
 
 User can clear the auto-link with x if not wanted.
 
@@ -148,6 +155,7 @@ User can clear the auto-link with x if not wanted.
 | `E` | Task list (row focused) | Open panel + focus title |
 
 Keyboard shortcuts are registered globally via a `useEffect` with `keydown` listener. They're suppressed when any input/textarea/select is focused (except Esc).
+Focused-row state should track todo ids rather than raw indexes so regrouping, filtering, or collapsing a section cannot strand keyboard focus on a hidden row.
 
 ### 5. Visual Design
 

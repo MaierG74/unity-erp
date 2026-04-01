@@ -12,7 +12,7 @@ async function getAccessToken(): Promise<string> {
   return token;
 }
 
-export type EntityLinkType = 'order' | 'supplier_order' | 'quote';
+export type EntityLinkType = 'order' | 'supplier_order' | 'quote' | 'customer' | 'product';
 
 export interface EntityLinkMeta {
   [key: string]: unknown;
@@ -30,6 +30,8 @@ export interface EntityLinkSearchResult {
   orders: EntityLink[];
   supplierOrders: EntityLink[];
   quotes: EntityLink[];
+  customers: EntityLink[];
+  products: EntityLink[];
 }
 
 async function authorizedFetch(input: RequestInfo | URL, init?: FetchOptions) {
@@ -58,5 +60,7 @@ export async function fetchEntityLinks(query: string, limit = 20): Promise<Entit
     orders: Array.isArray(json?.orders) ? (json.orders as EntityLink[]) : [],
     supplierOrders: Array.isArray(json?.supplierOrders) ? (json.supplierOrders as EntityLink[]) : [],
     quotes: Array.isArray(json?.quotes) ? (json.quotes as EntityLink[]) : [],
+    customers: Array.isArray(json?.customers) ? (json.customers as EntityLink[]) : [],
+    products: Array.isArray(json?.products) ? (json.products as EntityLink[]) : [],
   };
 }

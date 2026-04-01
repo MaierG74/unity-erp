@@ -9,5 +9,7 @@ export function useEntityLinks(query: string, enabled: boolean) {
     queryKey: ['entity-links', query],
     queryFn: () => fetchEntityLinks(query),
     enabled,
+    staleTime: 30_000,
+    placeholderData: previousData => previousData,
   });
 }

@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import { parseISO } from 'date-fns';
 import { formatDate } from '@/lib/date-utils';
-import { CalendarIcon, Circle, Link2, Loader2, X, Plus, User } from 'lucide-react';
+import { CalendarIcon, Circle, Link2, Loader2, X, Plus } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -46,7 +46,7 @@ export function TaskMetadataChips({
 
   const statusCfg = STATUS_CONFIG[todo.status] ?? STATUS_CONFIG.open;
   const priorityCfg = PRIORITY_CONFIG[todo.priority] ?? PRIORITY_CONFIG.medium;
-  const assigneeName = todo.assignee?.username ?? todo.assignee?.displayName ?? 'Unassigned';
+  const assigneeName = todo.assignee?.username ?? todo.assignee?.displayName ?? 'Assignee';
 
   const contextLabel = getContextLabel(todo);
 
@@ -119,16 +119,6 @@ export function TaskMetadataChips({
           </button>
         </PopoverTrigger>
         <PopoverContent className="w-48 p-1" align="start">
-          <button
-            onClick={() => { onUpdate('assignedTo', null); setAssigneeOpen(false); }}
-            className={cn(
-              'w-full text-left px-2 py-1.5 text-xs rounded flex items-center gap-2 hover:bg-muted transition-colors',
-              !todo.assignedTo && 'bg-muted font-medium',
-            )}
-          >
-            <User className="h-3.5 w-3.5 text-muted-foreground" />
-            Unassigned
-          </button>
           {profiles.map(p => (
             <button
               key={p.id}
