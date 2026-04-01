@@ -1,21 +1,24 @@
 /**
- * Role fingerprint: board_type|part_name|length_mm|width_mm
- * Uniquely identifies a physical part role. Same-name parts with different
- * dimensions (e.g., "Left Side" in cupboard vs pedestal) are distinct roles.
+ * Role fingerprint: order_detail_id|board_type|part_name|length_mm|width_mm
+ * Uniquely identifies a physical part role per order line. Same-name parts with different
+ * dimensions (e.g., "Left Side" in cupboard vs pedestal) are distinct roles, and parts
+ * from different order lines are also kept separate.
  */
 export function roleFingerprint(
+  orderDetailId: number,
   boardType: string,
   partName: string,
   lengthMm: number,
   widthMm: number,
 ): string {
-  return `${boardType}|${partName}|${lengthMm}|${widthMm}`;
+  return `${orderDetailId}|${boardType}|${partName}|${lengthMm}|${widthMm}`;
 }
 
 /**
  * A single material assignment: maps a part role to a board component.
  */
 export type MaterialAssignment = {
+  order_detail_id: number;
   board_type: string;
   part_name: string;
   length_mm: number;
@@ -47,6 +50,7 @@ export type EdgingDefault = {
  * Keyed by the same role fingerprint as board assignments.
  */
 export type EdgingOverride = {
+  order_detail_id: number;
   board_type: string;
   part_name: string;
   length_mm: number;
@@ -67,10 +71,11 @@ export type MaterialAssignments = {
 };
 
 /**
- * Unique part role within a board type — one row in the assignment grid.
- * Aggregates quantities across all order lines where the fingerprint matches.
+ * Unique part role within a board type and order line — one row in the assignment grid.
+ * Parts from different order lines are kept separate (order_detail_id is part of the key).
  */
 export type PartRole = {
+  order_detail_id: number;
   board_type: string;
   part_name: string;
   length_mm: number;
@@ -79,6 +84,10 @@ export type PartRole = {
   total_quantity: number;
   /** Product names that contain this part */
   product_names: string[];
+  /** The primary product name for this order line */
+  line_product_name: string;
+  /** Quantity for this order line */
+  line_quantity: number;
   /** Current assignment (null if unassigned) */
   assigned_component_id: number | null;
   assigned_component_name: string | null;
@@ -91,6 +100,7 @@ export type PartRole = {
  */
 export function findAssignment(
   assignments: MaterialAssignment[],
+  orderDetailId: number,
   boardType: string,
   partName: string,
   lengthMm: number,
@@ -98,6 +108,7 @@ export function findAssignment(
 ): MaterialAssignment | undefined {
   return assignments.find(
     (a) =>
+      a.order_detail_id === orderDetailId &&
       a.board_type === boardType &&
       a.part_name === partName &&
       a.length_mm === lengthMm &&
@@ -114,6 +125,7 @@ export function upsertAssignment(
 ): MaterialAssignment[] {
   const idx = assignments.findIndex(
     (a) =>
+      a.order_detail_id === assignment.order_detail_id &&
       a.board_type === assignment.board_type &&
       a.part_name === assignment.part_name &&
       a.length_mm === assignment.length_mm &&
@@ -132,13 +144,14 @@ export function upsertAssignment(
  */
 export function bulkAssign(
   assignments: MaterialAssignment[],
-  roles: Array<{ board_type: string; part_name: string; length_mm: number; width_mm: number }>,
+  roles: Array<{ order_detail_id: number; board_type: string; part_name: string; length_mm: number; width_mm: number }>,
   componentId: number,
   componentName: string,
 ): MaterialAssignment[] {
   let result = [...assignments];
   for (const role of roles) {
     result = upsertAssignment(result, {
+      order_detail_id: role.order_detail_id,
       board_type: role.board_type,
       part_name: role.part_name,
       length_mm: role.length_mm,
@@ -154,24 +167,34 @@ import type { AggregateResponse } from '@/lib/orders/cutting-plan-types';
 
 /**
  * Derive PartRole[] from aggregate data + assignments.
- * Groups parts by role fingerprint, sums quantities, attaches assignments.
+ * Groups parts by role fingerprint (including order_detail_id), sums quantities,
+ * attaches assignments. Parts from different order lines are kept separate.
  */
 export function buildPartRoles(
   agg: AggregateResponse | null,
   assignments: MaterialAssignments,
 ): PartRole[] {
   if (!agg) return [];
-  // Pre-index for O(1) lookups
   const assignmentIndex = new Map(
     assignments.assignments.map((a) => [
-      roleFingerprint(a.board_type, a.part_name, a.length_mm, a.width_mm),
+      roleFingerprint(a.order_detail_id, a.board_type, a.part_name, a.length_mm, a.width_mm),
       a,
     ]),
   );
+
+  const lineProductNames = new Map<number, string>();
+  for (const group of agg.material_groups) {
+    for (const part of group.parts) {
+      if (!lineProductNames.has(part.order_detail_id)) {
+        lineProductNames.set(part.order_detail_id, part.product_name);
+      }
+    }
+  }
+
   const map = new Map<string, PartRole>();
   for (const group of agg.material_groups) {
     for (const part of group.parts) {
-      const fp = roleFingerprint(group.board_type, part.name, part.length_mm, part.width_mm);
+      const fp = roleFingerprint(part.order_detail_id, group.board_type, part.name, part.length_mm, part.width_mm);
       const existing = map.get(fp);
       const match = assignmentIndex.get(fp);
       const partHasEdges = !!(
@@ -188,12 +211,15 @@ export function buildPartRoles(
         existing.has_edges = existing.has_edges || partHasEdges;
       } else {
         map.set(fp, {
+          order_detail_id: part.order_detail_id,
           board_type: group.board_type,
           part_name: part.name,
           length_mm: part.length_mm,
           width_mm: part.width_mm,
           total_quantity: part.quantity,
           product_names: [part.product_name],
+          line_product_name: lineProductNames.get(part.order_detail_id) ?? '',
+          line_quantity: part.quantity,
           assigned_component_id: match?.component_id ?? null,
           assigned_component_name: match?.component_name ?? null,
           has_edges: partHasEdges,
@@ -216,6 +242,7 @@ export function validateAssignments(data: unknown): string | null {
     if (typeof a !== 'object' || !a) return 'Invalid assignment entry';
     const entry = a as Record<string, unknown>;
     if (typeof entry.board_type !== 'string' || !entry.board_type) return 'board_type required';
+    if (typeof entry.order_detail_id !== 'number' || entry.order_detail_id <= 0) return 'order_detail_id must be positive';
     if (typeof entry.part_name !== 'string' || !entry.part_name) return 'part_name required';
     if (typeof entry.length_mm !== 'number' || entry.length_mm <= 0) return 'length_mm must be positive';
     if (typeof entry.width_mm !== 'number' || entry.width_mm <= 0) return 'width_mm must be positive';
@@ -242,6 +269,7 @@ export function validateAssignments(data: unknown): string | null {
     if (typeof eo !== 'object' || !eo) return 'Invalid edging_overrides entry';
     const entry = eo as Record<string, unknown>;
     if (typeof entry.board_type !== 'string' || !entry.board_type) return 'edging override board_type required';
+    if (typeof entry.order_detail_id !== 'number' || entry.order_detail_id <= 0) return 'edging override order_detail_id must be positive';
     if (typeof entry.part_name !== 'string' || !entry.part_name) return 'edging override part_name required';
     if (typeof entry.length_mm !== 'number' || entry.length_mm <= 0) return 'edging override length_mm must be positive';
     if (typeof entry.width_mm !== 'number' || entry.width_mm <= 0) return 'edging override width_mm must be positive';
@@ -251,7 +279,7 @@ export function validateAssignments(data: unknown): string | null {
   // Check for duplicate fingerprints
   const seen = new Set<string>();
   for (const a of obj.assignments as MaterialAssignment[]) {
-    const fp = roleFingerprint(a.board_type, a.part_name, a.length_mm, a.width_mm);
+    const fp = roleFingerprint(a.order_detail_id, a.board_type, a.part_name, a.length_mm, a.width_mm);
     if (seen.has(fp)) return `Duplicate assignment for ${fp}`;
     seen.add(fp);
   }
