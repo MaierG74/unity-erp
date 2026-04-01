@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRouteClient } from '@/lib/supabase-route';
+import { markCuttingPlanStale } from '@/lib/orders/cutting-plan-utils';
 
 type RouteParams = { orderId: string; detailId: string };
 
@@ -59,6 +60,8 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+  await markCuttingPlanStale(orderIdNum, auth.supabase);
 
   return NextResponse.json({ cutlist_snapshot: data.cutlist_snapshot });
 }

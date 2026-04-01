@@ -4,6 +4,7 @@ import { MODULE_KEYS } from '@/lib/modules/keys';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { buildBomSnapshot } from '@/lib/orders/build-bom-snapshot';
 import { buildCutlistSnapshot } from '@/lib/orders/build-cutlist-snapshot';
+import { markCuttingPlanStale } from '@/lib/orders/cutting-plan-utils';
 
 type Substitution = {
   bom_id: number;
@@ -199,6 +200,9 @@ export async function POST(
         { status: 500 }
       );
     }
+
+    // Mark cutting plan stale since products were added
+    await markCuttingPlanStale(orderId, supabaseAdmin);
 
     // Calculate total increase
     const totalIncrease = insertRows.reduce(
