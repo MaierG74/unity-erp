@@ -11,9 +11,10 @@ import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useDebounce } from '@/hooks/use-debounce';
+import { useHistoryScrollRestoration } from '@/hooks/use-history-scroll-restoration';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
-import { PlusCircle, ArrowLeft, Search, CalendarIcon, ExternalLink, FilterX, Trash2, Loader2 } from 'lucide-react';
+import { PlusCircle, ArrowLeft, Search, CalendarIcon, ExternalLink, FilterX, Trash2, Loader2, Check, ChevronsUpDown } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   AlertDialog,
@@ -33,6 +34,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { format, isAfter, isBefore, isValid, parseISO } from 'date-fns';
 import { formatDate } from '@/lib/date-utils';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
@@ -424,6 +426,7 @@ export default function PurchaseOrdersPage() {
   );
   const [qNumberSearch, setQNumberSearch] = useState<string>(() => searchParams?.get('q') || '');
   const [supplierSearch, setSupplierSearch] = useState<string>(() => searchParams?.get('supplier') || 'all');
+  const [supplierPopoverOpen, setSupplierPopoverOpen] = useState(false);
   const [startDate, setStartDate] = useState<Date | undefined>(() => {
     const sd = searchParams?.get('startDate');
     return sd ? new Date(sd) : undefined;
@@ -578,6 +581,10 @@ export default function PurchaseOrdersPage() {
   }, [purchaseOrderEmailLogs, purchaseOrders]);
 
   const isPageLoading = isLoading || (!!purchaseOrders?.length && isCommunicationLoading);
+
+  useHistoryScrollRestoration({
+    ready: !isPageLoading,
+  });
 
   // Delete mutation
   const deletePOMutation = useMutation({
@@ -872,26 +879,57 @@ export default function PurchaseOrdersPage() {
         {/* Supplier Search/Filter */}
         <div>
           <Label>Supplier</Label>
-          <Select
-            value={supplierSearch}
-            onValueChange={(value) => {
-              setSupplierSearch(value);
-              setCurrentPage(0);
-            }}
-            disabled={isPageLoading}
-          >
-            <SelectTrigger disabled={isPageLoading}>
-              <SelectValue placeholder="All Suppliers" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Suppliers</SelectItem>
-              {uniqueSuppliers.map((supplier, index) => (
-                <SelectItem key={index} value={supplier}>
-                  {supplier}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Popover open={supplierPopoverOpen} onOpenChange={setSupplierPopoverOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                role="combobox"
+                aria-expanded={supplierPopoverOpen}
+                className="w-full justify-between font-normal"
+                disabled={isPageLoading}
+              >
+                {supplierSearch === 'all'
+                  ? 'All Suppliers'
+                  : supplierSearch}
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+              <Command>
+                <CommandInput placeholder="Search suppliers..." />
+                <CommandList>
+                  <CommandEmpty>No supplier found.</CommandEmpty>
+                  <CommandGroup>
+                    <CommandItem
+                      value="all"
+                      onSelect={() => {
+                        setSupplierSearch('all');
+                        setCurrentPage(0);
+                        setSupplierPopoverOpen(false);
+                      }}
+                    >
+                      <Check className={cn("mr-2 h-4 w-4", supplierSearch === 'all' ? "opacity-100" : "opacity-0")} />
+                      All Suppliers
+                    </CommandItem>
+                    {uniqueSuppliers.map((supplier) => (
+                      <CommandItem
+                        key={supplier}
+                        value={supplier}
+                        onSelect={() => {
+                          setSupplierSearch(supplier);
+                          setCurrentPage(0);
+                          setSupplierPopoverOpen(false);
+                        }}
+                      >
+                        <Check className={cn("mr-2 h-4 w-4", supplierSearch === supplier ? "opacity-100" : "opacity-0")} />
+                        {supplier}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
       

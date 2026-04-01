@@ -1,36 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import {
+  parsePositiveInt,
+  productExistsInOrg,
+  requireProductsAccess,
+} from '@/lib/api/products-access';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
 type RouteParams = {
   productId?: string;
 };
 
-function parseId(value?: string): number | null {
-  if (!value) return null;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && !Number.isNaN(parsed) ? parsed : null;
-}
+export async function GET(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(request);
+  if ('error' in auth) return auth.error;
 
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    throw new Error('Supabase environment variables are not configured');
-  }
-  return createClient(url, key);
-}
-
-export async function GET(_request: NextRequest, context: { params: Promise<RouteParams> }) {
   const params = await context.params;
-  const productId = parseId(params.productId);
+  const productId = parsePositiveInt(params.productId);
   if (!productId) {
     return NextResponse.json({ error: 'Invalid product id' }, { status: 400 });
   }
 
-  const supabase = getSupabaseAdmin();
-
   try {
-    const { data, error } = await supabase
+    const exists = await productExistsInOrg(productId, auth.orgId);
+    if (!exists) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
+
+    const { data, error } = await supabaseAdmin
       .from('product_option_set_links')
       .select(`
         link_id,
@@ -162,8 +158,11 @@ export async function GET(_request: NextRequest, context: { params: Promise<Rout
 }
 
 export async function POST(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
-  const productId = parseId(params.productId);
+  const productId = parsePositiveInt(params.productId);
   if (!productId) {
     return NextResponse.json({ error: 'Invalid product id' }, { status: 400 });
   }
@@ -173,7 +172,7 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  const optionSetId = parseId(String(body.option_set_id ?? ''));
+  const optionSetId = parsePositiveInt(String(body.option_set_id ?? ''));
   if (!optionSetId) {
     return NextResponse.json({ error: 'option_set_id is required' }, { status: 400 });
   }
@@ -181,10 +180,13 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
   const aliasLabel = typeof body.alias_label === 'string' ? body.alias_label.trim() || null : null;
   const displayOrderInput = body.display_order;
 
-  const supabase = getSupabaseAdmin();
-
   try {
-    const { data: setCheck, error: setError } = await supabase
+    const exists = await productExistsInOrg(productId, auth.orgId);
+    if (!exists) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
+
+    const { data: setCheck, error: setError } = await supabaseAdmin
       .from('option_sets')
       .select('option_set_id')
       .eq('option_set_id', optionSetId)
@@ -202,7 +204,7 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
     if (typeof displayOrderInput === 'number' && Number.isFinite(displayOrderInput)) {
       resolvedDisplayOrder = displayOrderInput;
     } else {
-      const { data: existing, error: existingError } = await supabase
+      const { data: existing, error: existingError } = await supabaseAdmin
         .from('product_option_set_links')
         .select('display_order')
         .eq('product_id', productId)
@@ -215,7 +217,7 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
       resolvedDisplayOrder = currentMax + 1;
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('product_option_set_links')
       .insert({
         product_id: productId,

@@ -38,7 +38,9 @@ function normalizeUuid(value: unknown): string | null {
 function isMembershipActive(row: Pick<OrgMembershipRow, 'is_active' | 'banned_until'>): boolean {
   if (!row.is_active) return false;
   if (!row.banned_until) return true;
-  return new Date(row.banned_until).getTime() > Date.now();
+  const bannedUntil = new Date(row.banned_until).getTime();
+  if (!Number.isFinite(bannedUntil)) return false;
+  return bannedUntil <= Date.now();
 }
 
 async function fetchMembership(

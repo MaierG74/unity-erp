@@ -71,12 +71,13 @@ export async function POST(req: NextRequest, context: { params: Promise<RoutePar
 
     let autoConsume = false;
     try {
-      const { data: settingsRow } = await supabaseAdmin
+      const { data: settingsRows } = await supabaseAdmin
         .from('quote_company_settings')
         .select('fg_auto_consume_on_add')
-        .eq('setting_id', 1)
-        .single();
-      autoConsume = Boolean(settingsRow?.fg_auto_consume_on_add);
+        .eq('org_id', auth.orgId)
+        .order('setting_id', { ascending: true })
+        .limit(1);
+      autoConsume = Boolean(settingsRows?.[0]?.fg_auto_consume_on_add);
     } catch (_err) {
       autoConsume = false;
     }

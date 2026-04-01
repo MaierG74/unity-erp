@@ -153,6 +153,8 @@ Change the back button to use `router.back()` instead of a hard-coded Link:
 
 **Important**: Remove the `Link` import if it's no longer used in the file.
 
+If operators work through long lists, preserving filters alone is not enough. Save the list page's scroll offset into the current browser history entry and restore it when the user returns so Back lands at the same vertical position instead of the top of the list.
+
 ## URL Parameter Conventions
 
 | Parameter | Purpose | Example Values |

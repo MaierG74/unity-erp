@@ -1,27 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { validateCutlistDimensions } from '@/lib/cutlist/cutlistDimensions';
+import {
+  parsePositiveInt,
+  requireProductsAccess,
+  validateOrgScopedComponentRefs,
+} from '@/lib/api/products-access';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
 type RouteParams = {
   setId?: string;
   groupId?: string;
   valueId?: string;
 };
-
-function parseId(value?: string): number | null {
-  if (!value) return null;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && !Number.isNaN(parsed) ? parsed : null;
-}
-
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    throw new Error('Supabase environment variables are not configured');
-  }
-  return createClient(url, key);
-}
 
 async function fetchValueForUpdate(client: any, setId: number, groupId: number, valueId: number) {
   const { data, error } = await client
@@ -48,7 +38,6 @@ async function fetchValueForUpdate(client: any, setId: number, groupId: number, 
   if (
     !group ||
     Number(record.option_set_group_id) !== groupId ||
-    Number(group.option_set_group_id) !== groupId ||
     Number(group.option_set_id) !== setId
   ) {
     throw new Error('Not found');
@@ -58,10 +47,13 @@ async function fetchValueForUpdate(client: any, setId: number, groupId: number, 
 }
 
 export async function PATCH(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
-  const setId = parseId(params.setId);
-  const groupId = parseId(params.groupId);
-  const valueId = parseId(params.valueId);
+  const setId = parsePositiveInt(params.setId);
+  const groupId = parsePositiveInt(params.groupId);
+  const valueId = parsePositiveInt(params.valueId);
   if (!setId || !groupId || !valueId) {
     return NextResponse.json({ error: 'Invalid identifiers' }, { status: 400 });
   }
@@ -125,11 +117,9 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
     updates.default_cutlist_category = null;
   }
 
-  const supabase = getSupabaseAdmin();
-
   let existingValue: any;
   try {
-    existingValue = await fetchValueForUpdate(supabase, setId, groupId, valueId);
+    existingValue = await fetchValueForUpdate(supabaseAdmin, setId, groupId, valueId);
   } catch (error: any) {
     if (error?.message === 'Not found') {
       return NextResponse.json({ error: 'Option value not found for set/group' }, { status: 404 });
@@ -186,8 +176,20 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
   }
 
   try {
+    const refError = await validateOrgScopedComponentRefs(auth.orgId, [
+      {
+        componentId: parsePositiveInt(updates.default_component_id as number | null | undefined),
+        supplierComponentId: parsePositiveInt(
+          updates.default_supplier_component_id as number | null | undefined
+        ),
+      },
+    ]);
+    if (refError) {
+      return NextResponse.json({ error: refError }, { status: 400 });
+    }
+
     if (updates.is_default === true) {
-      const { error: resetError } = await supabase
+      const { error: resetError } = await supabaseAdmin
         .from('option_set_values')
         .update({ is_default: false, updated_at: new Date().toISOString() })
         .eq('option_set_group_id', groupId)
@@ -198,7 +200,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
       }
     }
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('option_set_values')
       .update({ ...updates, updated_at: new Date().toISOString() })
       .eq('option_set_value_id', valueId);
@@ -222,20 +224,21 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
 }
 
 export async function DELETE(_request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(_request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
-  const setId = parseId(params.setId);
-  const groupId = parseId(params.groupId);
-  const valueId = parseId(params.valueId);
+  const setId = parsePositiveInt(params.setId);
+  const groupId = parsePositiveInt(params.groupId);
+  const valueId = parsePositiveInt(params.valueId);
   if (!setId || !groupId || !valueId) {
     return NextResponse.json({ error: 'Invalid identifiers' }, { status: 400 });
   }
 
-  const supabase = getSupabaseAdmin();
-
   try {
-    await fetchValueForUpdate(supabase, setId, groupId, valueId);
+    await fetchValueForUpdate(supabaseAdmin, setId, groupId, valueId);
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('option_set_values')
       .delete()
       .eq('option_set_value_id', valueId);

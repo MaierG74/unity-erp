@@ -1,44 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import {
+  optionSetLinkForProduct,
+  parsePositiveInt,
+  productExistsInOrg,
+  requireProductsAccess,
+} from '@/lib/api/products-access';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
 type RouteParams = {
   productId?: string;
   linkId?: string;
 };
 
-function parseId(value?: string): number | null {
-  if (!value) return null;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && !Number.isNaN(parsed) ? parsed : null;
-}
-
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    throw new Error('Supabase environment variables are not configured');
-  }
-  return createClient(url, key);
-}
-
-async function ensureLinkBelongsToProduct(client: any, productId: number, linkId: number) {
-  const { data, error } = await client
-    .from('product_option_set_links')
-    .select('product_id')
-    .eq('link_id', linkId)
-    .single();
-
-  const record = data as any;
-
-  if (error || !record || Number(record.product_id) !== productId) {
-    throw new Error('Not found');
-  }
-}
-
 export async function PATCH(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
-  const productId = parseId(params.productId);
-  const linkId = parseId(params.linkId);
+  const productId = parsePositiveInt(params.productId);
+  const linkId = parsePositiveInt(params.linkId);
   if (!productId || !linkId) {
     return NextResponse.json({ error: 'Invalid identifiers' }, { status: 400 });
   }
@@ -62,12 +42,18 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
     return NextResponse.json({ error: 'No fields provided to update' }, { status: 400 });
   }
 
-  const supabase = getSupabaseAdmin();
-
   try {
-    await ensureLinkBelongsToProduct(supabase, productId, linkId);
+    const exists = await productExistsInOrg(productId, auth.orgId);
+    if (!exists) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
 
-    const { error } = await supabase
+    const link = await optionSetLinkForProduct(productId, linkId);
+    if (!link) {
+      return NextResponse.json({ error: 'Option set link not found for product' }, { status: 404 });
+    }
+
+    const { error } = await supabaseAdmin
       .from('product_option_set_links')
       .update({ ...updates, updated_at: new Date().toISOString() })
       .eq('link_id', linkId);
@@ -78,29 +64,35 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
     }
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
-    if (error?.message === 'Not found') {
-      return NextResponse.json({ error: 'Option set link not found for product' }, { status: 404 });
-    }
+  } catch (error) {
     console.error('[product-option-sets] unexpected update error', error);
     return NextResponse.json({ error: 'Unexpected error while updating option set link' }, { status: 500 });
   }
 }
 
-export async function DELETE(_request: NextRequest, context: { params: Promise<RouteParams> }) {
+export async function DELETE(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
-  const productId = parseId(params.productId);
-  const linkId = parseId(params.linkId);
+  const productId = parsePositiveInt(params.productId);
+  const linkId = parsePositiveInt(params.linkId);
   if (!productId || !linkId) {
     return NextResponse.json({ error: 'Invalid identifiers' }, { status: 400 });
   }
 
-  const supabase = getSupabaseAdmin();
-
   try {
-    await ensureLinkBelongsToProduct(supabase, productId, linkId);
+    const exists = await productExistsInOrg(productId, auth.orgId);
+    if (!exists) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
 
-    const { error } = await supabase
+    const link = await optionSetLinkForProduct(productId, linkId);
+    if (!link) {
+      return NextResponse.json({ error: 'Option set link not found for product' }, { status: 404 });
+    }
+
+    const { error } = await supabaseAdmin
       .from('product_option_set_links')
       .delete()
       .eq('link_id', linkId);
@@ -111,10 +103,7 @@ export async function DELETE(_request: NextRequest, context: { params: Promise<R
     }
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
-    if (error?.message === 'Not found') {
-      return NextResponse.json({ error: 'Option set link not found for product' }, { status: 404 });
-    }
+  } catch (error) {
     console.error('[product-option-sets] unexpected delete error', error);
     return NextResponse.json({ error: 'Unexpected error while detaching option set' }, { status: 500 });
   }

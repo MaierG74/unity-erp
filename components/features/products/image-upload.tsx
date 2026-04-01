@@ -5,6 +5,7 @@ import { useDropzone } from 'react-dropzone'
 import Image from 'next/image'
 import { Crop, Loader2, Trash2, Upload } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { authorizedFetch } from '@/lib/client/auth-fetch'
 import { generateUniqueImageName, getProductImagePath } from '@/lib/utils/image'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -118,7 +119,6 @@ export function ImageUpload({ productCode, productId, onUploadComplete, onPendin
           data: { publicUrl },
         } = supabase.storage.from('QButton').getPublicUrl(filePath)
 
-        let dbError: unknown = null
         let insertedImage:
           | {
               image_id: string | number
@@ -136,29 +136,16 @@ export function ImageUpload({ productCode, productId, onUploadComplete, onPendin
           crop_params: cropParams,
         }
 
-        const insertResult = await supabase
-          .from('product_images')
-          .insert(insertPayload)
-          .select('image_id, product_id, image_url, is_primary, crop_params')
-          .single()
-        if (insertResult.error && /crop_params/i.test(insertResult.error.message || '')) {
-          const fallbackInsert = await supabase
-            .from('product_images')
-            .insert({
-              product_id: productId,
-              image_url: publicUrl,
-              is_primary: false,
-            })
-            .select('image_id, product_id, image_url, is_primary')
-            .single()
-          dbError = fallbackInsert.error
-          insertedImage = fallbackInsert.data
-        } else {
-          dbError = insertResult.error
-          insertedImage = insertResult.data
+        const response = await authorizedFetch(`/api/products/${productId}/images`, {
+          method: 'POST',
+          body: JSON.stringify(insertPayload),
+        })
+        const json = await response.json().catch(() => null)
+        if (!response.ok) {
+          throw new Error(json?.error || 'Failed to attach product image')
         }
 
-        if (dbError) throw dbError
+        insertedImage = json?.image ?? null
         if (!insertedImage) {
           throw new Error('Product image insert succeeded but no image row was returned.')
         }

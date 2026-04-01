@@ -1,30 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import {
+  parsePositiveInt,
+  productExistsInOrg,
+  productOptionGroupBelongsToProduct,
+  requireProductsAccess,
+} from '@/lib/api/products-access';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
 type RouteParams = {
   productId?: string;
   groupId?: string;
 };
 
-function parseId(value?: string): number | null {
-  if (!value) return null;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && !Number.isNaN(parsed) ? parsed : null;
-}
-
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    throw new Error('Supabase environment variables are not configured');
-  }
-  return createClient(url, key);
-}
-
 export async function POST(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
-  const productId = parseId(params.productId);
-  const groupId = parseId(params.groupId);
+  const productId = parsePositiveInt(params.productId);
+  const groupId = parsePositiveInt(params.groupId);
   if (!productId || !groupId) {
     return NextResponse.json({ error: 'Invalid identifiers' }, { status: 400 });
   }
@@ -51,12 +45,20 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
     return NextResponse.json({ error: 'Option value label is required' }, { status: 400 });
   }
 
-  const supabase = getSupabaseAdmin();
-
   try {
+    const exists = await productExistsInOrg(productId, auth.orgId);
+    if (!exists) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
+
+    const groupBelongs = await productOptionGroupBelongsToProduct(productId, groupId);
+    if (!groupBelongs) {
+      return NextResponse.json({ error: 'Option group not found for product' }, { status: 404 });
+    }
+
     let resolvedDisplayOrder = displayOrder;
     if (resolvedDisplayOrder === null) {
-      const { data: rows, error: orderError } = await supabase
+      const { data: rows, error: orderError } = await supabaseAdmin
         .from('product_option_values')
         .select('display_order')
         .eq('option_group_id', groupId)
@@ -69,7 +71,7 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
       resolvedDisplayOrder = currentMax + 1;
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('product_option_values')
       .insert({
         option_group_id: groupId,
@@ -91,7 +93,7 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
     }
 
     if (isDefault) {
-      await supabase
+      await supabaseAdmin
         .from('product_option_values')
         .update({ is_default: false })
         .eq('option_group_id', groupId)

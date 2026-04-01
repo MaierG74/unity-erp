@@ -65,7 +65,10 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
 
   const jobId = parsePositiveInt(payload.job_id);
   const quantity = Number(payload.quantity ?? 0);
-  const payType = payload.pay_type === 'piece' ? 'piece' : 'hourly';
+  const payType = payload.pay_type ?? 'hourly';
+  if (payType !== 'hourly' && payType !== 'piece') {
+    return NextResponse.json({ error: 'pay_type must be "hourly" or "piece"' }, { status: 400 });
+  }
   if (!jobId) {
     return NextResponse.json({ error: 'job_id is required' }, { status: 400 });
   }
@@ -98,9 +101,14 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
       if (!Number.isFinite(timeRequired) || timeRequired <= 0) {
         return NextResponse.json({ error: 'time_required must be greater than 0 for hourly jobs' }, { status: 400 });
       }
+      const validTimeUnits = ['minutes', 'hours', 'seconds'];
+      const timeUnit = payload.time_unit ?? 'minutes';
+      if (!validTimeUnits.includes(timeUnit)) {
+        return NextResponse.json({ error: `time_unit must be one of: ${validTimeUnits.join(', ')}` }, { status: 400 });
+      }
       insertData.pay_type = 'hourly';
       insertData.time_required = timeRequired;
-      insertData.time_unit = payload.time_unit ?? 'minutes';
+      insertData.time_unit = timeUnit;
       insertData.hourly_rate_id = await resolveHourlyRateId(jobId, today);
       insertData.piece_rate_id = null;
     }

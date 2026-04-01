@@ -4,6 +4,7 @@
 
 **Routes & Pages**
 - `app/suppliers/page.tsx:1`: Supplier list with search and “Has price list” filter.
+  - Back-navigation now restores the previous scroll position after opening a supplier detail page, so operators can continue from the same spot in long supplier lists while keeping the URL-backed filters/page intact.
 - `app/suppliers/new/page.tsx:1`: Create supplier via `SupplierForm`.
 - `app/suppliers/[id]/page.tsx:1`: Supplier detail with tabs: Details, Components, Price Lists, Orders, Reports. Emails are managed inside the Details tab.
 

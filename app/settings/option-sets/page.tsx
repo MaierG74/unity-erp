@@ -18,6 +18,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/use-toast';
 import { Textarea } from '@/components/ui/textarea';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Loader2, Pencil, Plus, Trash2, ChevronDown, Search, X } from 'lucide-react';
@@ -105,7 +106,7 @@ async function searchComponentOptions(search: string): Promise<ComponentOption[]
     if (search.trim().length > 0) {
       params.set('search', search.trim());
     }
-    const res = await fetch(`/api/components?${params.toString()}`, { cache: 'no-store' });
+    const res = await authorizedFetch(`/api/components?${params.toString()}`, { cache: 'no-store' });
     if (!res.ok) return [];
     const json = await res.json();
     const items = Array.isArray(json?.components) ? json.components : [];
@@ -124,7 +125,7 @@ async function fetchComponentOptionsByIds(ids: number[]): Promise<ComponentOptio
   if (!ids.length) return [];
   try {
     const params = new URLSearchParams({ ids: ids.join(',') });
-    const res = await fetch(`/api/components?${params.toString()}`, { cache: 'no-store' });
+    const res = await authorizedFetch(`/api/components?${params.toString()}`, { cache: 'no-store' });
     if (!res.ok) return [];
     const json = await res.json();
     const items = Array.isArray(json?.components) ? json.components : [];
@@ -145,7 +146,7 @@ async function fetchSupplierComponentsForDefault(componentId: number): Promise<S
     const params = new URLSearchParams({ componentId: String(componentId), limit: '100' });
     const url = `/api/supplier-components?${params.toString()}`;
     console.log('Fetching supplier components from:', url);
-    const res = await fetch(url, { cache: 'no-store' });
+    const res = await authorizedFetch(url, { cache: 'no-store' });
     if (!res.ok) {
       console.error('Failed to fetch supplier components:', res.status, res.statusText);
       return [];
@@ -172,7 +173,7 @@ async function fetchSupplierComponentsByIds(ids: number[]): Promise<SupplierComp
   if (!ids.length) return [];
   try {
     const params = new URLSearchParams({ ids: ids.join(',') });
-    const res = await fetch(`/api/supplier-components?${params.toString()}`, { cache: 'no-store' });
+    const res = await authorizedFetch(`/api/supplier-components?${params.toString()}`, { cache: 'no-store' });
     if (!res.ok) return [];
     const json = await res.json();
     const items = Array.isArray(json?.supplier_components) ? json.supplier_components : [];
@@ -517,7 +518,7 @@ export default function OptionSetLibraryPage() {
     setSavingSet(true);
     try {
       if (editingSet) {
-        const res = await fetch(`/api/option-sets/${editingSet.option_set_id}`, {
+        const res = await authorizedFetch(`/api/option-sets/${editingSet.option_set_id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -528,7 +529,7 @@ export default function OptionSetLibraryPage() {
         }
         toast({ title: 'Option set updated' });
       } else {
-        const res = await fetch('/api/option-sets', {
+        const res = await authorizedFetch('/api/option-sets', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -567,7 +568,7 @@ export default function OptionSetLibraryPage() {
 
   const handleDeleteSet = async (set: OptionSet) => {
     try {
-      const res = await fetch(`/api/option-sets/${set.option_set_id}`, {
+      const res = await authorizedFetch(`/api/option-sets/${set.option_set_id}`, {
         method: 'DELETE',
       });
       if (!res.ok) {
@@ -618,7 +619,7 @@ export default function OptionSetLibraryPage() {
     const baseUrl = `/api/option-sets/${groupTarget.setId}/groups`;
 
     try {
-      const res = await fetch(groupTarget.group ? `${baseUrl}/${groupTarget.group.option_set_group_id}` : baseUrl, {
+      const res = await authorizedFetch(groupTarget.group ? `${baseUrl}/${groupTarget.group.option_set_group_id}` : baseUrl, {
         method: groupTarget.group ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -642,7 +643,7 @@ export default function OptionSetLibraryPage() {
 
   const handleDeleteGroup = async (setId: number, group: OptionSetGroup) => {
     try {
-      const res = await fetch(`/api/option-sets/${setId}/groups/${group.option_set_group_id}`, {
+      const res = await authorizedFetch(`/api/option-sets/${setId}/groups/${group.option_set_group_id}`, {
         method: 'DELETE',
       });
       if (!res.ok) {
@@ -734,7 +735,7 @@ export default function OptionSetLibraryPage() {
     const baseUrl = `/api/option-sets/${valueTarget.setId}/groups/${valueTarget.group.option_set_group_id}/values`;
 
     try {
-      const res = await fetch(valueTarget.value ? `${baseUrl}/${valueTarget.value.option_set_value_id}` : baseUrl, {
+      const res = await authorizedFetch(valueTarget.value ? `${baseUrl}/${valueTarget.value.option_set_value_id}` : baseUrl, {
         method: valueTarget.value ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -758,7 +759,7 @@ export default function OptionSetLibraryPage() {
 
   const handleDeleteValue = async (setId: number, group: OptionSetGroup, value: OptionSetValue) => {
     try {
-      const res = await fetch(
+      const res = await authorizedFetch(
         `/api/option-sets/${setId}/groups/${group.option_set_group_id}/values/${value.option_set_value_id}`,
         {
           method: 'DELETE',

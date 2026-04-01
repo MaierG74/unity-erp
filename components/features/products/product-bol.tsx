@@ -356,63 +356,21 @@ export function ProductBOL({ productId }: ProductBOLProps) {
   // Update BOL item mutation
   const updateBOLItem = useMutation({
     mutationFn: async (values: BOLItemFormValues & { bol_id: number }) => {
-      const categoryId = parseInt(values.job_category_id);
       const jobId = parseInt(values.job_id);
-      const today = new Date().toISOString().split('T')[0];
-
-      let updateData: any = {
+      const updateData: any = {
         job_id: jobId,
+        pay_type: values.pay_type || 'hourly',
+        time_required: (values.pay_type || 'hourly') === 'hourly' ? values.time_required ?? 1.0 : null,
+        time_unit: (values.pay_type || 'hourly') === 'hourly' ? values.time_unit ?? 'minutes' : 'hours',
         quantity: values.quantity,
       };
-
-      if ((values.pay_type || 'hourly') === 'hourly') {
-        const { data: rates, error: ratesError } = await supabase
-          .from('job_hourly_rates')
-          .select('*')
-          .eq('job_id', jobId)
-          .lte('effective_date', today)
-          .or(`end_date.is.null,end_date.gte.${today}`)
-          .order('effective_date', { ascending: false })
-          .limit(1);
-        if (ratesError) throw ratesError;
-        const hourlyRateId = rates && rates.length > 0 ? rates[0].rate_id : null;
-        updateData = {
-          ...updateData,
-          pay_type: 'hourly',
-          time_required: values.time_required ?? 1.0,
-          time_unit: values.time_unit ?? 'minutes',
-          hourly_rate_id: hourlyRateId,
-          piece_rate_id: null,
-        };
-      } else {
-        const { data: prates, error: prError } = await supabase
-          .from('piece_work_rates')
-          .select('rate_id, job_id, product_id, rate, effective_date, end_date')
-          .eq('job_id', jobId)
-          .lte('effective_date', today)
-          .or(`end_date.is.null,end_date.gte.${today}`)
-          .order('effective_date', { ascending: false });
-        if (prError) throw prError;
-        const chosen = (prates || []).find((r: any) => r.product_id === productId) || (prates || []).find((r: any) => r.product_id == null) || null;
-        const pieceRateId = chosen ? chosen.rate_id : null;
-        updateData = {
-          ...updateData,
-          pay_type: 'piece',
-          time_required: null,
-          time_unit: 'hours',
-          rate_id: null,
-          piece_rate_id: pieceRateId,
-        };
-      }
-
-      const { data, error } = await supabase
-        .from('billoflabour')
-        .update(updateData)
-        .eq('bol_id', values.bol_id)
-        .select();
-
-      if (error) throw error;
-      return data;
+      const response = await authorizedFetch(`/api/products/${productId}/bol/${values.bol_id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updateData),
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(json?.error || 'Failed to update BOL item');
+      return json;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['productBOL', productId] });
@@ -436,12 +394,11 @@ export function ProductBOL({ productId }: ProductBOLProps) {
   // Delete BOL item mutation
   const deleteBOLItem = useMutation({
     mutationFn: async (bolId: number) => {
-      const { error } = await supabase
-        .from('billoflabour')
-        .delete()
-        .eq('bol_id', bolId);
-        
-      if (error) throw error;
+      const response = await authorizedFetch(`/api/products/${productId}/bol/${bolId}`, {
+        method: 'DELETE',
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(json?.error || 'Failed to remove job from BOL');
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['productBOL', productId] });

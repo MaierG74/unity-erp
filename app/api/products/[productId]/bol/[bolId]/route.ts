@@ -92,7 +92,10 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
     const today = new Date().toISOString().split('T')[0];
     const updateData: Record<string, unknown> = {};
     const jobId = 'job_id' in payload ? parsePositiveInt(payload.job_id) : null;
-    const payType = payload.pay_type === 'piece' ? 'piece' : 'hourly';
+    const payType = payload.pay_type;
+    if (payType !== undefined && payType !== 'hourly' && payType !== 'piece') {
+      return NextResponse.json({ error: 'pay_type must be "hourly" or "piece"' }, { status: 400 });
+    }
 
     if (jobId) {
       updateData.job_id = jobId;
@@ -106,7 +109,10 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
       updateData.quantity = quantity;
     }
 
-    if (payType === 'piece') {
+    if (payType === undefined) {
+      // pay_type not being changed — only update other fields
+    } else if (payType === 'piece') {
+
       const chosenJobId = jobId || Number((await supabaseAdmin.from('billoflabour').select('job_id').eq('bol_id', bolId).single()).data?.job_id);
       updateData.pay_type = 'piece';
       updateData.time_required = null;
@@ -119,9 +125,14 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
       if (!Number.isFinite(timeRequired) || timeRequired <= 0) {
         return NextResponse.json({ error: 'time_required must be greater than 0 for hourly jobs' }, { status: 400 });
       }
+      const validTimeUnits = ['minutes', 'hours', 'seconds'];
+      const timeUnit = payload.time_unit ?? 'minutes';
+      if (!validTimeUnits.includes(timeUnit)) {
+        return NextResponse.json({ error: `time_unit must be one of: ${validTimeUnits.join(', ')}` }, { status: 400 });
+      }
       updateData.pay_type = 'hourly';
       updateData.time_required = timeRequired;
-      updateData.time_unit = payload.time_unit ?? 'minutes';
+      updateData.time_unit = timeUnit;
       updateData.hourly_rate_id = await resolveHourlyRateId(chosenJobId, today);
       updateData.piece_rate_id = null;
     }

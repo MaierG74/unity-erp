@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/lib/supabase";
+import { authorizedFetch } from "@/lib/client/auth-fetch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus } from "lucide-react";
 import { CreateJobModal } from "@/components/features/labor/create-job-modal";
@@ -122,54 +123,22 @@ export default function AddJobDialog({
 
   async function add() {
     if (!selectedJobId) return;
-    const today = new Date().toISOString().split("T")[0];
     try {
-      let insertData: any = {
-        product_id: productId,
+      const insertData: any = {
         job_id: selectedJobId,
+        pay_type: payType,
+        time_required: payType === "hourly" ? timeRequired : null,
+        time_unit: payType === "hourly" ? timeUnit : "hours",
         quantity,
       };
-      if (payType === "hourly") {
-        const { data: rates, error } = await supabase
-          .from("job_hourly_rates")
-          .select("*")
-          .eq("job_id", selectedJobId)
-          .lte("effective_date", today)
-          .or(`end_date.is.null,end_date.gte.${today}`)
-          .order("effective_date", { ascending: false })
-          .limit(1);
-        if (error) throw error;
-        const hourlyRateId = rates && rates.length > 0 ? rates[0].rate_id : null;
-        insertData = {
-          ...insertData,
-          pay_type: "hourly",
-          time_required: timeRequired,
-          time_unit: timeUnit,
-          hourly_rate_id: hourlyRateId,
-          piece_rate_id: null,
-        };
-      } else {
-        const { data: prates, error: prErr } = await supabase
-          .from("piece_work_rates")
-          .select("rate_id, job_id, product_id, rate, effective_date, end_date")
-          .eq("job_id", selectedJobId)
-          .lte("effective_date", today)
-          .or(`end_date.is.null,end_date.gte.${today}`)
-          .order("effective_date", { ascending: false });
-        if (prErr) throw prErr;
-        const chosen = (prates || []).find((r: any) => r.product_id === productId) || (prates || []).find((r: any) => r.product_id == null) || null;
-        const pieceRateId = chosen ? chosen.rate_id : null;
-        insertData = {
-          ...insertData,
-          pay_type: "piece",
-          time_required: null,
-          time_unit: "hours",
-          rate_id: null,
-          piece_rate_id: pieceRateId,
-        };
+      const response = await authorizedFetch(`/api/products/${productId}/bol`, {
+        method: "POST",
+        body: JSON.stringify(insertData),
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(json?.error || "Failed to add job");
       }
-      const { error: insErr } = await supabase.from("billoflabour").insert(insertData);
-      if (insErr) throw insErr;
       setOpenState(false);
       resetForm();
       onApplied?.();

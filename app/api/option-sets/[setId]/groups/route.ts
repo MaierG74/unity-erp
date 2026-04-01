@@ -1,28 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import {
+  parsePositiveInt,
+  requireProductsAccess,
+} from '@/lib/api/products-access';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
 type RouteParams = {
   setId?: string;
 };
 
-function parseId(value?: string): number | null {
-  if (!value) return null;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && !Number.isNaN(parsed) ? parsed : null;
-}
-
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    throw new Error('Supabase environment variables are not configured');
-  }
-  return createClient(url, key);
-}
-
 export async function POST(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
-  const setId = parseId(params.setId);
+  const setId = parsePositiveInt(params.setId);
   if (!setId) {
     return NextResponse.json({ error: 'Invalid option set id' }, { status: 400 });
   }
@@ -44,14 +36,12 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
     return NextResponse.json({ error: 'Option group label is required' }, { status: 400 });
   }
 
-  const supabase = getSupabaseAdmin();
-
   try {
     let resolvedDisplayOrder: number | null = null;
     if (typeof displayOrderInput === 'number' && Number.isFinite(displayOrderInput)) {
       resolvedDisplayOrder = displayOrderInput;
     } else {
-      const { data: maxRows, error: maxError } = await supabase
+      const { data: maxRows, error: maxError } = await supabaseAdmin
         .from('option_set_groups')
         .select('display_order')
         .eq('option_set_id', setId)
@@ -64,7 +54,7 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
       resolvedDisplayOrder = currentMax + 1;
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('option_set_groups')
       .insert({
         option_set_id: setId,

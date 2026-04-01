@@ -86,6 +86,7 @@ export async function fetchOrderComponentRequirements(orderId: number): Promise<
         product_id,
         quantity,
         unit_price,
+        bom_snapshot,
         product:products(
           product_id,
           name,
@@ -170,10 +171,25 @@ export async function fetchOrderComponentRequirements(orderId: number): Promise<
     });
 
     return orderDetails.map((detail) => {
-      const bomRows = bomByProduct.get(detail.product_id) ?? [];
+      // Prefer bom_snapshot (frozen at order time) over live product BOM
+      const snapshot = Array.isArray((detail as any).bom_snapshot) && (detail as any).bom_snapshot.length > 0
+        ? (detail as any).bom_snapshot
+        : null;
+
+      const bomRows = snapshot
+        ? snapshot.map((entry: any) => ({
+            component_id: entry.component_id,
+            quantity_required: entry.quantity_required,
+            component: {
+              component_id: entry.component_id,
+              internal_code: entry.component_code,
+              description: entry.component_description,
+            },
+          }))
+        : bomByProduct.get(detail.product_id) ?? [];
 
       const components = bomRows
-        .map((bomRow) => {
+        .map((bomRow: any) => {
           const componentId = bomRow.component_id;
           const component = bomRow.component;
 

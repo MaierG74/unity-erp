@@ -293,12 +293,11 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
       if (seedComponentRefs.length > 0) {
         const refError = await validateOrgScopedComponentRefs(auth.orgId, seedComponentRefs);
         if (refError) {
-          console.error('[bom-overrides] seed component ref validation failed:', refError);
+          console.warn('[bom-overrides] skipping auto-seed: cross-org component refs detected', refError);
           // Skip seeding rather than 500 — the defaults reference stale/wrong-org components
           defaultRows.length = 0;
         }
       }
-
       if (defaultRows.length > 0) {
         const { data: seeded, error: seedError } = await supabaseAdmin
           .from('bom_option_overrides')
@@ -368,7 +367,6 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
     if (!belongs) {
       return NextResponse.json({ error: 'BOM row not found for product' }, { status: 404 });
     }
-
     // Validate org-scoped component refs from payload
     const replaceComponentId = payload.replace_component_id != null
       ? parsePositiveInt(payload.replace_component_id)
@@ -386,7 +384,6 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
         return NextResponse.json({ error: refError }, { status: 400 });
       }
     }
-
     let conflictTarget = 'bom_id,option_value_id';
 
     if (optionValueId) {
@@ -426,6 +423,18 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
 
       if (linkError || !linkRow) {
         return NextResponse.json({ error: 'Option set value is not attached to this product' }, { status: 400 });
+      }
+    }
+
+    // Validate component refs belong to this org
+    const replaceComponentId = payload.replace_component_id ?? null;
+    const replaceSupplierComponentId = payload.replace_supplier_component_id ?? null;
+    if (replaceComponentId || replaceSupplierComponentId) {
+      const refError = await validateOrgScopedComponentRefs(auth.orgId, [
+        { componentId: replaceComponentId, supplierComponentId: replaceSupplierComponentId },
+      ]);
+      if (refError) {
+        return NextResponse.json({ error: refError }, { status: 400 });
       }
     }
 

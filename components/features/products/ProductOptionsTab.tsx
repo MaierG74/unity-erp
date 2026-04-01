@@ -23,6 +23,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { Loader2, Pencil, Plus, Settings2, Trash2 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
@@ -90,7 +91,7 @@ type PendingConfirmAction =
   | { type: 'detach-set'; link: ProductOptionSetLink };
 
 async function fetchProductOptions(productId: number): Promise<ProductOptionsResponse> {
-  const res = await fetch(`/api/products/${productId}/options`, { cache: 'no-store' });
+  const res = await authorizedFetch(`/api/products/${productId}/options`, { cache: 'no-store' });
   if (!res.ok) {
     const message = await res.text();
     throw new Error(message || 'Failed to load product options');
@@ -241,7 +242,7 @@ export function ProductOptionsTab({ productId }: ProductOptionsTabProps) {
     const baseUrl = `/api/products/${productId}/options`;
 
     try {
-      const res = await fetch(editingGroup ? `${baseUrl}/groups/${editingGroup.option_group_id}` : baseUrl, {
+      const res = await authorizedFetch(editingGroup ? `${baseUrl}/groups/${editingGroup.option_group_id}` : baseUrl, {
         method: editingGroup ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -267,7 +268,7 @@ export function ProductOptionsTab({ productId }: ProductOptionsTabProps) {
 
   async function handleDeleteGroup(group: ProductOptionGroup) {
     try {
-      const res = await fetch(`/api/products/${productId}/options/groups/${group.option_group_id}`, { method: 'DELETE' });
+      const res = await authorizedFetch(`/api/products/${productId}/options/groups/${group.option_group_id}`, { method: 'DELETE' });
       if (!res.ok) {
         const message = await res.text();
         throw new Error(message || 'Failed to delete option group');
@@ -299,7 +300,7 @@ export function ProductOptionsTab({ productId }: ProductOptionsTabProps) {
     const baseUrl = `/api/products/${productId}/options/groups/${targetGroupForValue.option_group_id}/values`;
 
     try {
-      const res = await fetch(editingValue ? `${baseUrl}/${editingValue.option_value_id}` : baseUrl, {
+      const res = await authorizedFetch(editingValue ? `${baseUrl}/${editingValue.option_value_id}` : baseUrl, {
         method: editingValue ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -325,7 +326,7 @@ export function ProductOptionsTab({ productId }: ProductOptionsTabProps) {
 
   async function handleDeleteValue(group: ProductOptionGroup, value: ProductOptionValue) {
     try {
-      const res = await fetch(`/api/products/${productId}/options/groups/${group.option_group_id}/values/${value.option_value_id}`, {
+      const res = await authorizedFetch(`/api/products/${productId}/options/groups/${group.option_group_id}/values/${value.option_value_id}`, {
         method: 'DELETE',
       });
       if (!res.ok) {
