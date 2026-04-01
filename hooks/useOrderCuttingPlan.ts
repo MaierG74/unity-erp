@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/lib/supabase';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import type {
   AggregateResponse,
@@ -12,14 +13,17 @@ export function useOrderCuttingPlan(orderId: number) {
   const queryClient = useQueryClient();
   const [isSaving, setIsSaving] = useState(false);
 
-  // Fetch current cutting plan from order
+  // Fetch current cutting plan from order via Supabase client
   const planQuery = useQuery({
     queryKey: ['order-cutting-plan', orderId],
     queryFn: async () => {
-      const res = await authorizedFetch(`/api/orders/${orderId}`);
-      if (!res.ok) throw new Error('Failed to fetch order');
-      const data = await res.json();
-      return (data.cutting_plan ?? null) as CuttingPlan | null;
+      const { data, error } = await supabase
+        .from('orders')
+        .select('cutting_plan')
+        .eq('order_id', orderId)
+        .maybeSingle();
+      if (error) throw new Error('Failed to fetch cutting plan');
+      return (data?.cutting_plan ?? null) as CuttingPlan | null;
     },
   });
 
