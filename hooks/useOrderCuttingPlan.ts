@@ -13,7 +13,6 @@ export function useOrderCuttingPlan(orderId: number) {
   const queryClient = useQueryClient();
   const [isSaving, setIsSaving] = useState(false);
 
-  // Fetch current cutting plan from order via Supabase client
   const planQuery = useQuery({
     queryKey: ['order-cutting-plan', orderId],
     queryFn: async () => {

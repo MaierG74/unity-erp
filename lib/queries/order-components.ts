@@ -6,7 +6,6 @@ import {
   SupplierInfo,
   SupplierOption,
 } from '@/types/components';
-import type { CuttingPlan } from '@/lib/orders/cutting-plan-types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -104,16 +103,6 @@ export async function fetchOrderComponentRequirements(orderId: number): Promise<
     if (!orderDetails || orderDetails.length === 0) {
       return [];
     }
-
-    // Fetch cutting plan for UI awareness (e.g. "optimized" badge)
-    const { data: orderData } = await supabase
-      .from('orders')
-      .select('cutting_plan')
-      .eq('order_id', orderId)
-      .maybeSingle();
-
-    const cuttingPlan = orderData?.cutting_plan as CuttingPlan | null;
-    const hasFreshPlan = cuttingPlan != null && !cuttingPlan.stale;
 
     const productIds = Array.from(
       new Set(

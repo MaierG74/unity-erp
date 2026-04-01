@@ -50,7 +50,6 @@ export default function CuttingPlanTab({ orderId }: CuttingPlanTabProps) {
     'fast'
   );
 
-  /** Convert AggregatedPart[] → PartSpec[] for the packing engine */
   function toPartSpecs(group: AggregatedPartGroup): PartSpec[] {
     return group.parts.map((p) => ({
       id: p.id,
@@ -81,26 +80,31 @@ export default function CuttingPlanTab({ orderId }: CuttingPlanTabProps) {
         return;
       }
 
+      const sheetArea = DEFAULT_STOCK.length_mm * DEFAULT_STOCK.width_mm;
+
+      // Pack all material groups in parallel
+      const packResults = await Promise.all(
+        agg.material_groups.map(async (group) => {
+          const parts = toPartSpecs(group);
+          const result = await packPartsSmartOptimized(parts, [DEFAULT_STOCK]);
+          return { group, parts, result };
+        })
+      );
+
       const materialGroups: CuttingPlanMaterialGroup[] = [];
       const overrides: CuttingPlanOverride[] = [];
 
-      for (const group of agg.material_groups) {
-        const parts = toPartSpecs(group);
-        const result = await packPartsSmartOptimized(parts, [DEFAULT_STOCK]);
-
+      for (const { group, parts, result } of packResults) {
         const sheetsUsed = result.sheets.length;
-        const totalArea =
-          DEFAULT_STOCK.length_mm * DEFAULT_STOCK.width_mm * sheetsUsed;
+        const totalArea = sheetArea * sheetsUsed;
         const usedArea = result.stats.used_area_mm2;
         const wastePercent =
           totalArea > 0 ? ((totalArea - usedArea) / totalArea) * 100 : 0;
 
-        // BOM estimate: naive total-area / sheet-area, rounded up
-        const sheetArea = DEFAULT_STOCK.length_mm * DEFAULT_STOCK.width_mm;
-        let bomEstimateArea = 0;
-        for (const part of parts) {
-          bomEstimateArea += part.length_mm * part.width_mm * part.qty;
-        }
+        const bomEstimateArea = parts.reduce(
+          (s, p) => s + p.length_mm * p.width_mm * p.qty,
+          0
+        );
         const bomEstimateSheets = Math.ceil(bomEstimateArea / sheetArea);
 
         materialGroups.push({
@@ -123,7 +127,6 @@ export default function CuttingPlanTab({ orderId }: CuttingPlanTabProps) {
           },
         });
 
-        // Component overrides for purchasing
         if (group.primary_material_id != null) {
           overrides.push({
             component_id: group.primary_material_id,
@@ -135,7 +138,7 @@ export default function CuttingPlanTab({ orderId }: CuttingPlanTabProps) {
         if (group.backer_material_id != null) {
           overrides.push({
             component_id: group.backer_material_id,
-            quantity: 0, // No backer packing in v1
+            quantity: 0,
             unit: 'sheets',
             source: 'cutlist_backer',
           });
