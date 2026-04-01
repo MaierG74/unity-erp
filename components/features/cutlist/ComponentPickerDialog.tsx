@@ -29,6 +29,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
+import { parseThicknessFromDescription } from '@/lib/cutlist/boardCalculator';
 
 // =============================================================================
 // Types
@@ -88,6 +89,9 @@ export const CATEGORY_IDS = {
  * - "2.750x1.830x16" or "2750x1830x16" (L x W x T)
  * - "16mm African Wenge" (just thickness)
  * - "1mm x 36mm" (thickness x width for edging)
+ *
+ * Thickness parsing is delegated to parseThicknessFromDescription (boardCalculator).
+ * Length/width parsing stays inline because it applies meter-normalization (< 10 → ×1000).
  */
 function parseDimensions(description: string | null): {
   length_mm?: number;
@@ -101,25 +105,19 @@ function parseDimensions(description: string | null): {
   // Try to match "2.750x1.830x16" or "2750x1830x16" format (with or without decimals)
   const fullMatch = description.match(/(\d+(?:\.\d+)?)\s*[xX×]\s*(\d+(?:\.\d+)?)\s*[xX×]\s*(\d+)/);
   if (fullMatch) {
-    // Parse values - multiply by 1000 if looks like meters (e.g., 2.750)
+    // Parse length/width with meter-normalization (< 10 → ×1000); thickness never normalized
     let length = parseFloat(fullMatch[1]);
     let width = parseFloat(fullMatch[2]);
-    const thickness = parseFloat(fullMatch[3]);
 
-    // If length/width look like meters (< 10), convert to mm
     if (length < 10) length *= 1000;
     if (width < 10) width *= 1000;
 
     result.length_mm = Math.round(length);
     result.width_mm = Math.round(width);
-    result.thickness_mm = Math.round(thickness);
+    // Delegate thickness to shared utility
+    const t = parseThicknessFromDescription(description);
+    if (t !== null) result.thickness_mm = t;
     return result;
-  }
-
-  // Try to match just thickness at start like "16mm African Wenge"
-  const thicknessMatch = description.match(/^(\d+)\s*mm/i);
-  if (thicknessMatch) {
-    result.thickness_mm = parseInt(thicknessMatch[1], 10);
   }
 
   // Try to match edging format "1mm x 36mm" (thickness x width)
@@ -127,7 +125,12 @@ function parseDimensions(description: string | null): {
   if (edgingMatch) {
     result.thickness_mm = parseFloat(edgingMatch[1]);
     result.width_mm = parseFloat(edgingMatch[2]);
+    return result;
   }
+
+  // Fall back to shared thickness parser for standalone patterns like "16mm African Wenge"
+  const t = parseThicknessFromDescription(description);
+  if (t !== null) result.thickness_mm = t;
 
   return result;
 }
