@@ -61,6 +61,7 @@ export default function MaterialAssignmentGrid({
   onEdgingOverride,
 }: MaterialAssignmentGridProps) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [collapsedLines, setCollapsedLines] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectedBoardType, setSelectedBoardType] = useState<string | null>(null);
   const [expandedOverrides, setExpandedOverrides] = useState<Set<string>>(new Set());
@@ -256,22 +257,59 @@ export default function MaterialAssignmentGrid({
                     const edgingDefault = subGroupBoardId
                       ? edgingDefaults.find((ed) => ed.board_component_id === subGroupBoardId)
                       : null;
+                    const lineKey = `${bt}:${orderDetailId}`;
+                    const isLineCollapsed = collapsedLines[lineKey] ?? false;
+                    const lineAssigned = roles.filter((r) => r.assigned_component_id != null).length;
+                    const isMixed = assignedIds.size > 1;
+                    const overrideCount = isLineCollapsed
+                      ? roles.filter((r) => edgingOverrides.some((eo) =>
+                          eo.order_detail_id === r.order_detail_id &&
+                          eo.board_type === r.board_type &&
+                          eo.part_name === r.part_name &&
+                          eo.length_mm === r.length_mm &&
+                          eo.width_mm === r.width_mm,
+                        )).length
+                      : 0;
 
                     return (
                       <div key={orderDetailId} className="border-b last:border-0">
-                        {/* Sub-group header */}
-                        <div className="flex items-center gap-3 bg-muted/10 px-3 py-1.5 border-b">
-                          <span className="text-xs font-medium text-foreground truncate min-w-0">
-                            {lineLabel}
-                            <span className="text-muted-foreground font-normal ml-1.5">
+                        {/* Sub-group header — clickable to collapse */}
+                        <div className="flex items-center gap-2 bg-muted/10 px-3 py-1.5 border-b">
+                          <button
+                            onClick={() => setCollapsedLines((prev) => ({ ...prev, [lineKey]: !prev[lineKey] }))}
+                            className="flex items-center gap-2 min-w-0 hover:text-foreground"
+                          >
+                            {isLineCollapsed ? (
+                              <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+                            ) : (
+                              <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+                            )}
+                            <span className="text-xs font-medium text-foreground truncate">
+                              {lineLabel}
+                            </span>
+                            <span className="text-xs text-muted-foreground font-normal whitespace-nowrap">
                               Line {lineIdx + 1}, Qty {roles[0]?.total_quantity ?? 0}
                             </span>
-                          </span>
+                          </button>
+                          <Badge
+                            variant={lineAssigned === roles.length ? 'default' : 'outline'}
+                            className="text-xs shrink-0"
+                          >
+                            {lineAssigned}/{roles.length}
+                          </Badge>
+                          {isLineCollapsed && isMixed && (
+                            <span className="text-xs text-yellow-500 shrink-0">Mixed</span>
+                          )}
+                          {overrideCount > 0 && (
+                            <span className="text-xs text-muted-foreground shrink-0">
+                              {overrideCount} override{overrideCount > 1 ? 's' : ''}
+                            </span>
+                          )}
                           <div className="ml-auto flex items-center gap-2">
                             <BoardMaterialCombobox
                               boards={boards}
                               boardType={bt}
-                              value={subGroupBoardId ?? null}
+                              value={isMixed ? null : (subGroupBoardId ?? null)}
                               onChange={(id, name) => {
                                 const bulkRoles = roles.map((r) => ({
                                   order_detail_id: r.order_detail_id,
@@ -282,7 +320,7 @@ export default function MaterialAssignmentGrid({
                                 }));
                                 onAssignBulk(bulkRoles, id, name);
                               }}
-                              placeholder="Assign board…"
+                              placeholder={isMixed ? "Mixed — reassign all…" : "Assign board…"}
                               className="h-7 w-[200px] text-xs"
                             />
                             {hasEdgedParts && subGroupBoardId && (
@@ -298,8 +336,8 @@ export default function MaterialAssignmentGrid({
                           </div>
                         </div>
 
-                        {/* Part rows */}
-                        {roles.map((role) => {
+                        {/* Part rows — collapsible */}
+                        {!isLineCollapsed && roles.map((role) => {
                           const fp = roleFingerprint(role.order_detail_id, role.board_type, role.part_name, role.length_mm, role.width_mm);
                           return (
                             <div key={fp} className="flex items-center gap-3 border-b px-3 py-1.5 last:border-0">
