@@ -14,6 +14,7 @@ This repository is being actively migrated to **multi-tenant** (organization/ten
 - Create each new task branch from `codex/integration` unless the user explicitly asks for a different base.
 - Use a dedicated short-lived branch for each meaningful task or session, not for every single message.
 - If local work, cloud Codex, and cloud Claude are running at the same time, each must use a different task branch.
+- If multiple task branches need to be tested locally at the same time, use separate git worktrees (one worktree/folder per branch, one dev server per worktree).
 - Branch names should use the `codex/` prefix and clearly describe the worker and task, for example:
   - `codex/integration`
   - `codex/local-purchasing-fix`

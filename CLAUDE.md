@@ -6,6 +6,7 @@
 - `codex/integration` is the shared working branch for approved but not-yet-released work.
 - Every meaningful task/session gets its own short-lived branch. Branch off `codex/integration`, do the work, then merge back into `codex/integration`.
 - Do not create a new branch for every single follow-up message on the same task.
+- If two task branches need to be tested locally at the same time, use separate git worktrees so each branch has its own folder and dev server.
 - Use the `codex/` prefix with a clear worker and task name:
   - `codex/integration`
   - `codex/local-purchasing-fix`
