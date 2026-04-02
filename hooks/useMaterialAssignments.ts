@@ -32,7 +32,13 @@ export function useMaterialAssignments(orderId: number) {
       const res = await authorizedFetch(`/api/orders/${orderId}/material-assignments`);
       if (!res.ok) throw new Error('Failed to load material assignments');
       const data = await res.json();
-      return data ?? null;
+      if (!data) return null;
+      // Strip legacy entries missing order_detail_id (pre-refactor data)
+      return {
+        ...data,
+        assignments: (data.assignments ?? []).filter((a: Record<string, unknown>) => typeof a.order_detail_id === 'number' && a.order_detail_id > 0),
+        edging_overrides: (data.edging_overrides ?? []).filter((eo: Record<string, unknown>) => typeof eo.order_detail_id === 'number' && eo.order_detail_id > 0),
+      };
     },
   });
 
