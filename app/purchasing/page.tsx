@@ -407,7 +407,7 @@ export default function PurchasingPage() {
         <Button variant="outline" asChild>
           <Link href="/purchasing/quick-upload">
             <Paperclip className="h-4 w-4 mr-2" />
-            Upload Delivery Note
+            Upload Document
           </Link>
         </Button>
         <Button variant="outline" asChild>
