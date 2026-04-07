@@ -35,7 +35,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import styles from './page.module.css';
 import { fetchPOAttachments, POAttachment } from '@/lib/db/purchase-order-attachments';
-import POAttachmentManager from '@/components/features/purchasing/POAttachmentManager';
+import POAttachmentManager, { POAttachmentReceiptOption } from '@/components/features/purchasing/POAttachmentManager';
 import { ForOrderEditPopover } from '@/components/features/purchasing/ForOrderEditPopover';
 // import { sendPurchaseOrderEmail } from '@/lib/email'; // not used here; email is sent via API route
 
@@ -887,6 +887,26 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
     queryFn: () => fetchPOAttachments(Number(id)),
     enabled: !!id,
   });
+
+  const poReceiptOptions = useMemo<POAttachmentReceiptOption[]>(() => {
+    if (!purchaseOrder) return [];
+
+    const receiptMap = new Map<number, POAttachmentReceiptOption>();
+
+    purchaseOrder.supplier_orders.forEach((supplierOrder) => {
+      supplierOrder.receipts?.forEach((receipt) => {
+        if (!receiptMap.has(receipt.receipt_id)) {
+          receiptMap.set(receipt.receipt_id, {
+            receiptId: receipt.receipt_id,
+            quantityReceived: receipt.quantity_received,
+            receiptDate: receipt.receipt_date,
+          });
+        }
+      });
+    });
+
+    return Array.from(receiptMap.values()).sort((left, right) => right.receiptId - left.receiptId);
+  }, [purchaseOrder]);
 
   useEffect(() => {
     const headerEl = headerRef.current;
@@ -3092,6 +3112,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
             <POAttachmentManager
               purchaseOrderId={purchaseOrder.purchase_order_id}
               attachments={poAttachments}
+              receiptOptions={poReceiptOptions}
               onAttachmentsChange={() => {
                 void refetchAttachments();
               }}

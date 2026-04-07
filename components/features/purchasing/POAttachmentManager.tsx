@@ -2,7 +2,15 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { POAttachment, uploadPOAttachment, deletePOAttachment } from '@/lib/db/purchase-order-attachments';
+import {
+  POAttachment,
+  POAttachmentType,
+  PO_ATTACHMENT_TYPE_OPTIONS,
+  deletePOAttachment,
+  getPOAttachmentTypeLabel,
+  normalizePOAttachmentType,
+  uploadPOAttachment,
+} from '@/lib/db/purchase-order-attachments';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -20,12 +28,15 @@ import {
   ExternalLink,
   Download,
   Search,
+  CreditCard,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import Panzoom, { PanzoomObject } from '@panzoom/panzoom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface POAttachmentManagerProps {
   purchaseOrderId: number;
@@ -33,6 +44,13 @@ interface POAttachmentManagerProps {
   onAttachmentsChange: (attachments: POAttachment[]) => void;
   disabled?: boolean;
   compact?: boolean;
+  receiptOptions?: POAttachmentReceiptOption[];
+}
+
+export interface POAttachmentReceiptOption {
+  receiptId: number;
+  quantityReceived: number;
+  receiptDate: string;
 }
 
 function formatFileSize(bytes: number | null): string {
@@ -66,9 +84,12 @@ export default function POAttachmentManager({
   onAttachmentsChange,
   disabled = false,
   compact = false,
+  receiptOptions = [],
 }: POAttachmentManagerProps) {
   const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [uploadAttachmentType, setUploadAttachmentType] = useState<POAttachmentType>('general');
+  const [uploadReceiptId, setUploadReceiptId] = useState<string>('none');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewAtt, setPreviewAtt] = useState<POAttachment | null>(null);
   const [rotation, setRotation] = useState(0);
@@ -86,9 +107,16 @@ export default function POAttachmentManager({
       if (disabled) return;
       setUploading(true);
       try {
+        const receiptId =
+          uploadAttachmentType === 'delivery_note' && uploadReceiptId !== 'none'
+            ? Number(uploadReceiptId)
+            : undefined;
         const newAttachments: POAttachment[] = [];
         for (const file of acceptedFiles) {
-          const att = await uploadPOAttachment(file, purchaseOrderId);
+          const att = await uploadPOAttachment(file, purchaseOrderId, {
+            attachmentType: uploadAttachmentType,
+            receiptId,
+          });
           newAttachments.push(att);
         }
         onAttachmentsChange([...attachments, ...newAttachments]);
@@ -104,7 +132,7 @@ export default function POAttachmentManager({
         setUploading(false);
       }
     },
-    [purchaseOrderId, attachments, onAttachmentsChange, disabled]
+    [purchaseOrderId, attachments, onAttachmentsChange, disabled, uploadAttachmentType, uploadReceiptId]
   );
 
   const cleanupPanzoom = useCallback(() => {
@@ -229,121 +257,205 @@ export default function POAttachmentManager({
 
   const content = (
     <div className="space-y-3">
-        {/* File list */}
-        {attachments.length > 0 && (
-          <div className="space-y-2">
-            {attachments.map((att) => {
-              const isDeliveryNote = att.attachment_type === 'delivery_note';
-              const Icon = isDeliveryNote ? Truck : getFileIcon(att.mime_type);
-              const isImage = !!att.mime_type?.startsWith('image/');
-              return (
-                <div
-                  key={att.id}
-                  className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
-                >
-                  <Icon className={cn('h-4 w-4 shrink-0', isDeliveryNote ? 'text-primary' : 'text-muted-foreground')} />
-                  <div className="flex-1 min-w-0">
-                    {isImage ? (
-                      <button
-                        type="button"
-                        className="truncate hover:underline block text-left w-full"
-                        onClick={() => openImagePreview(att)}
-                      >
-                        {att.original_name || 'Attachment'}
-                      </button>
-                    ) : (
-                      <a
-                        href={att.file_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="truncate hover:underline block"
-                      >
-                        {att.original_name || 'Attachment'}
-                      </a>
-                    )}
-                    <div className="flex items-center gap-2 mt-0.5">
-                      {isDeliveryNote && (
-                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                          Delivery Note
-                        </Badge>
-                      )}
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
-                        Uploaded {formatUploadedDate(att.uploaded_at)}
-                      </Badge>
-                      {att.receipt_id && (
-                        <span className="text-[10px] text-muted-foreground">
-                          Receipt #{att.receipt_id}
-                        </span>
-                      )}
-                      {att.notes && (
-                        <span className="text-[10px] text-muted-foreground truncate">
-                          {att.notes}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {formatFileSize(att.file_size)}
-                  </span>
-                  {!disabled && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 shrink-0"
-                      disabled={deletingId === att.id}
-                      onClick={() => handleDelete(att)}
-                    >
-                      {deletingId === att.id ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <X className="h-3 w-3" />
-                      )}
-                    </Button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
+      {/* File list */}
+      {attachments.length > 0 && (
+        <div className="space-y-2">
+          {attachments.map((att) => {
+            const attachmentType = normalizePOAttachmentType(att.attachment_type);
+            const isDeliveryNote = attachmentType === 'delivery_note';
+            const isProofOfPayment = attachmentType === 'proof_of_payment';
+            const Icon = isDeliveryNote
+              ? Truck
+              : isProofOfPayment
+                ? CreditCard
+                : getFileIcon(att.mime_type);
+            const isImage = !!att.mime_type?.startsWith('image/');
 
-        {/* Dropzone */}
-        {!disabled && (
+            return (
+              <div
+                key={att.id}
+                className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
+              >
+                <Icon
+                  className={cn(
+                    'h-4 w-4 shrink-0',
+                    isDeliveryNote && 'text-primary',
+                    isProofOfPayment && 'text-emerald-600 dark:text-emerald-400',
+                    !isDeliveryNote && !isProofOfPayment && 'text-muted-foreground'
+                  )}
+                />
+                <div className="flex-1 min-w-0">
+                  {isImage ? (
+                    <button
+                      type="button"
+                      className="truncate hover:underline block text-left w-full"
+                      onClick={() => openImagePreview(att)}
+                    >
+                      {att.original_name || 'Attachment'}
+                    </button>
+                  ) : (
+                    <a
+                      href={att.file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="truncate hover:underline block"
+                    >
+                      {att.original_name || 'Attachment'}
+                    </a>
+                  )}
+                  <div className="mt-0.5 flex items-center gap-2">
+                    <Badge
+                      variant={isDeliveryNote || isProofOfPayment ? 'secondary' : 'outline'}
+                      className={cn(
+                        'text-[10px] px-1.5 py-0 font-normal',
+                        isDeliveryNote && 'border-primary/20 bg-primary/10 text-primary',
+                        isProofOfPayment && 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                      )}
+                    >
+                      {getPOAttachmentTypeLabel(attachmentType)}
+                    </Badge>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
+                      Uploaded {formatUploadedDate(att.uploaded_at)}
+                    </Badge>
+                    {att.receipt_id && (
+                      <span className="text-[10px] text-muted-foreground">
+                        Receipt #{att.receipt_id}
+                      </span>
+                    )}
+                    {att.notes && (
+                      <span className="text-[10px] text-muted-foreground truncate">
+                        {att.notes}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {formatFileSize(att.file_size)}
+                </span>
+                {!disabled && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 shrink-0"
+                    disabled={deletingId === att.id}
+                    onClick={() => handleDelete(att)}
+                  >
+                    {deletingId === att.id ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <X className="h-3 w-3" />
+                    )}
+                  </Button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {!disabled && (
+        <div className="rounded-md border bg-muted/20 px-3 py-3">
           <div
-            {...getRootProps()}
             className={cn(
-              'flex cursor-pointer flex-col items-center justify-center rounded-md border-2 border-dashed text-center transition-colors',
-              compact ? 'px-4 py-4' : 'px-4 py-6',
-              isDragActive
-                ? 'border-primary bg-primary/5'
-                : 'border-muted-foreground/25 hover:border-primary/50',
-              uploading && 'pointer-events-none opacity-50'
+              'grid gap-3',
+              uploadAttachmentType === 'delivery_note' && receiptOptions.length > 0
+                ? 'md:grid-cols-2'
+                : 'grid-cols-1'
             )}
           >
-            <input {...getInputProps()} />
-            {uploading ? (
-              <>
-                <Loader2 className="mb-2 h-6 w-6 animate-spin text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">Uploading...</p>
-              </>
-            ) : isDragActive ? (
-              <>
-                <Upload className="mb-2 h-6 w-6 text-primary" />
-                <p className="text-sm text-primary">Drop files here</p>
-              </>
-            ) : (
-              <>
-                <Upload className={cn('text-muted-foreground', compact ? 'mb-1 h-5 w-5' : 'mb-2 h-6 w-6')} />
-                <p className="text-sm text-muted-foreground">
-                  {compact ? 'Drop files here or click to upload' : 'Drag & drop files here, or click to browse'}
+            <div className="space-y-1.5">
+              <Label htmlFor={`po-attachment-type-${purchaseOrderId}`}>File as</Label>
+              <Select
+                value={uploadAttachmentType}
+                onValueChange={(value) => setUploadAttachmentType(value as POAttachmentType)}
+                disabled={uploading}
+              >
+                <SelectTrigger id={`po-attachment-type-${purchaseOrderId}`} className="h-10">
+                  <SelectValue placeholder="Choose document type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PO_ATTACHMENT_TYPE_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {PO_ATTACHMENT_TYPE_OPTIONS.find((option) => option.value === uploadAttachmentType)?.description}
+              </p>
+            </div>
+
+            {uploadAttachmentType === 'delivery_note' && receiptOptions.length > 0 && (
+              <div className="space-y-1.5">
+                <Label htmlFor={`po-attachment-receipt-${purchaseOrderId}`}>Link to receipt</Label>
+                <Select
+                  value={uploadReceiptId}
+                  onValueChange={setUploadReceiptId}
+                  disabled={uploading}
+                >
+                  <SelectTrigger id={`po-attachment-receipt-${purchaseOrderId}`} className="h-10">
+                    <SelectValue placeholder="General delivery note" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">General delivery note</SelectItem>
+                    {receiptOptions.map((receipt) => (
+                      <SelectItem key={receipt.receiptId} value={receipt.receiptId.toString()}>
+                        {`Receipt #${receipt.receiptId} - ${receipt.quantityReceived} items - ${new Date(receipt.receiptDate).toLocaleDateString('en-ZA')}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Optional: tie this delivery note to a specific receipt entry.
                 </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  PDF, images, Word, Excel (max 10MB each)
-                </p>
-              </>
+              </div>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Dropzone */}
+      {!disabled && (
+        <div
+          {...getRootProps()}
+          className={cn(
+            'flex cursor-pointer flex-col items-center justify-center rounded-md border-2 border-dashed text-center transition-colors',
+            compact ? 'px-4 py-4' : 'px-4 py-6',
+            isDragActive
+              ? 'border-primary bg-primary/5'
+              : 'border-muted-foreground/25 hover:border-primary/50',
+            uploading && 'pointer-events-none opacity-50'
+          )}
+        >
+          <input {...getInputProps()} />
+          {uploading ? (
+            <>
+              <Loader2 className="mb-2 h-6 w-6 animate-spin text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Uploading...</p>
+            </>
+          ) : isDragActive ? (
+            <>
+              <Upload className="mb-2 h-6 w-6 text-primary" />
+              <p className="text-sm text-primary">Drop files here</p>
+            </>
+          ) : (
+            <>
+              <Upload className={cn('text-muted-foreground', compact ? 'mb-1 h-5 w-5' : 'mb-2 h-6 w-6')} />
+              <p className="text-sm text-muted-foreground">
+                {compact ? 'Drop files here or click to upload' : 'Drag & drop files here, or click to browse'}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                PDF, images, Word, Excel (max 10MB each)
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Files will be saved as {getPOAttachmentTypeLabel(uploadAttachmentType).toLowerCase()}.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 
   return (

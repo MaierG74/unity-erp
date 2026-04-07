@@ -1,5 +1,31 @@
 import { supabase } from '@/lib/supabase';
 
+export const PO_ATTACHMENT_TYPES = ['general', 'delivery_note', 'proof_of_payment'] as const;
+
+export type POAttachmentType = (typeof PO_ATTACHMENT_TYPES)[number];
+
+export const PO_ATTACHMENT_TYPE_OPTIONS: Array<{
+  value: POAttachmentType;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: 'general',
+    label: 'General Attachment',
+    description: 'Store a supporting file against the purchase order.',
+  },
+  {
+    value: 'delivery_note',
+    label: 'Delivery Note',
+    description: 'File supplier delivery paperwork, optionally linked to a receipt.',
+  },
+  {
+    value: 'proof_of_payment',
+    label: 'Proof of Payment',
+    description: 'Store EFT slips, remittance advice, or payment confirmations.',
+  },
+];
+
 export type POAttachment = {
   id: string;
   purchase_order_id: number;
@@ -13,6 +39,22 @@ export type POAttachment = {
   notes: string | null;
   attachment_type: string | null;
 };
+
+export function normalizePOAttachmentType(value: string | null | undefined): POAttachmentType {
+  switch (value) {
+    case 'delivery_note':
+      return 'delivery_note';
+    case 'proof_of_payment':
+      return 'proof_of_payment';
+    default:
+      return 'general';
+  }
+}
+
+export function getPOAttachmentTypeLabel(value: string | null | undefined): string {
+  const normalized = normalizePOAttachmentType(value);
+  return PO_ATTACHMENT_TYPE_OPTIONS.find((option) => option.value === normalized)?.label ?? 'General Attachment';
+}
 
 const STORAGE_BUCKET = 'QButton';
 const STORAGE_PATH_PREFIX = 'Purchase Orders';
@@ -38,7 +80,7 @@ export async function uploadPOAttachment(
   options?: {
     receiptId?: number;
     notes?: string;
-    attachmentType?: 'general' | 'delivery_note';
+    attachmentType?: POAttachmentType;
   }
 ): Promise<POAttachment> {
   const fileExt = file.name.split('.').pop() || 'bin';

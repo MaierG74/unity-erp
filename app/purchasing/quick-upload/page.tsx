@@ -9,7 +9,10 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import DeliveryNoteUpload from '@/components/features/purchasing/DeliveryNoteUpload';
-import { uploadPOAttachment } from '@/lib/db/purchase-order-attachments';
+import {
+  POAttachmentType,
+  uploadPOAttachment,
+} from '@/lib/db/purchase-order-attachments';
 import { supabase } from '@/lib/supabase';
 
 type PurchaseOrderResult = {
@@ -41,9 +44,32 @@ function getStatusColor(status: string | undefined) {
   }
 }
 
+function getUploadDocumentLabel(type: POAttachmentType): string {
+  switch (type) {
+    case 'delivery_note':
+      return 'Delivery Note';
+    case 'proof_of_payment':
+      return 'Proof of Payment';
+    default:
+      return 'Document';
+  }
+}
+
+function getUploadDocumentSubtitle(type: POAttachmentType): string {
+  switch (type) {
+    case 'delivery_note':
+      return 'Photo or PDF';
+    case 'proof_of_payment':
+      return 'Image, PDF, Word, or Excel';
+    default:
+      return 'Image, PDF, Word, Excel, text, or CSV';
+  }
+}
+
 export default function QuickUploadPage() {
   // State
   const [file, setFile] = useState<File | null>(null);
+  const [attachmentType, setAttachmentType] = useState<POAttachmentType>('delivery_note');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<PurchaseOrderResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -105,6 +131,12 @@ export default function QuickUploadPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (attachmentType !== 'delivery_note') {
+      setSelectedReceiptId(null);
+    }
+  }, [attachmentType]);
+
   // Get all receipts for selected PO
   const allReceipts: ReceiptOption[] = selectedPO?.supplier_orders
     ?.flatMap((so) => so.receipts || [])
@@ -119,8 +151,8 @@ export default function QuickUploadPage() {
 
     try {
       await uploadPOAttachment(file, selectedPO.purchase_order_id, {
+        attachmentType,
         receiptId: selectedReceiptId ?? undefined,
-        attachmentType: 'delivery_note',
       });
       setUploadSuccess(true);
     } catch (err) {
@@ -150,7 +182,7 @@ export default function QuickUploadPage() {
           <div className="mx-auto inline-flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
             <CheckCircle2 className="h-8 w-8 text-green-600" />
           </div>
-          <h1 className="text-xl font-semibold">Delivery note uploaded</h1>
+          <h1 className="text-xl font-semibold">{getUploadDocumentLabel(attachmentType)} uploaded</h1>
           <p className="text-sm text-muted-foreground">
             Attached to {selectedPO.q_number || `PO #${selectedPO.purchase_order_id}`}
           </p>
@@ -181,22 +213,43 @@ export default function QuickUploadPage() {
             <ArrowLeft className="h-5 w-5" />
           </Link>
         </Button>
-        <h1 className="text-lg font-semibold">Upload Delivery Note</h1>
+        <h1 className="text-lg font-semibold">Upload Document</h1>
       </div>
 
-      {/* Step 1: Select photo */}
+      {/* Step 1: Choose document type */}
       <div className="space-y-2">
-        <Label className="text-sm font-medium">1. Select delivery note</Label>
+        <Label className="text-sm font-medium">1. Choose document type</Label>
+        <select
+          value={attachmentType}
+          onChange={(e) => setAttachmentType(e.target.value as POAttachmentType)}
+          className="w-full border rounded-md p-3 text-sm bg-background h-12"
+        >
+          <option value="delivery_note">Delivery Note</option>
+          <option value="proof_of_payment">Proof of Payment</option>
+          <option value="general">General Attachment</option>
+        </select>
+        <p className="text-xs text-muted-foreground">
+          Delivery notes can be linked to a receipt. Other document types are filed against the purchase order.
+        </p>
+      </div>
+
+      {/* Step 2: Select file */}
+      <div className="space-y-2">
+        <Label className="text-sm font-medium">2. Select document</Label>
         <DeliveryNoteUpload
           onFileSelect={setFile}
           selectedFile={file}
           large
+          buttonTitle="Attach document"
+          buttonSubtitle={getUploadDocumentSubtitle(attachmentType)}
+          previewAlt={getUploadDocumentLabel(attachmentType)}
+          uploadMode={attachmentType === 'delivery_note' ? 'delivery-note' : 'document'}
         />
       </div>
 
-      {/* Step 2: Find PO */}
+      {/* Step 3: Find PO */}
       <div className="space-y-2">
-        <Label className="text-sm font-medium">2. Find purchase order</Label>
+        <Label className="text-sm font-medium">3. Find purchase order</Label>
         {selectedPO ? (
           <Card>
             <CardContent className="p-3">
@@ -293,10 +346,10 @@ export default function QuickUploadPage() {
         )}
       </div>
 
-      {/* Step 3: Link to receipt (optional) */}
-      {selectedPO && allReceipts.length > 0 && (
+      {/* Step 4: Link to receipt (optional) */}
+      {selectedPO && attachmentType === 'delivery_note' && allReceipts.length > 0 && (
         <div className="space-y-2">
-          <Label className="text-sm font-medium">3. Link to receipt (optional)</Label>
+          <Label className="text-sm font-medium">4. Link to receipt (optional)</Label>
           <select
             value={selectedReceiptId ?? ''}
             onChange={(e) => setSelectedReceiptId(e.target.value ? Number(e.target.value) : null)}
@@ -333,7 +386,9 @@ export default function QuickUploadPage() {
             Uploading...
           </>
         ) : (
-          'Upload Delivery Note'
+          attachmentType === 'general'
+            ? 'Upload Document'
+            : `Upload ${getUploadDocumentLabel(attachmentType)}`
         )}
       </Button>
     </div>

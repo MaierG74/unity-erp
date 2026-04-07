@@ -22,8 +22,13 @@
   - **Date Filtering:** The date range filter uses `order_date` if available, falling back to `created_at` for filtering. Filtering is done client-side after fetching all orders. The "From Date" and "To Date" pickers allow selecting a date range, and orders are filtered to show only those within the selected range. See `app/purchasing/purchase-orders/page.tsx:268-289` for the filtering logic.
 - **PO Details:** Review items, totals, suppliers; submit for approval; approve with Q number; receive items; view receipt history.
   - Page: `app/purchasing/purchase-orders/[id]/page.tsx:1` (page), `app/purchasing/purchase-orders/[id]/page.tsx:115` (fetch with joins), `app/purchasing/purchase-orders/[id]/page.tsx:201` (approve → send emails), `app/purchasing/purchase-orders/[id]/page.tsx:232` (submit for approval), `app/purchasing/purchase-orders/[id]/page.tsx:313` (receipt: total_received), `app/purchasing/purchase-orders/[id]/page.tsx:346` (receipt: inventory), `app/purchasing/purchase-orders/[id]/page.tsx:528` (status flags, UI state), `app/purchasing/purchase-orders/[id]/page.tsx:720` (receipt history section).
-  - Layout: the detail page now prioritizes `Order Items` first, places `Receipt History` immediately after it, and renders the remaining sections collapsed by default. `Attachments` stays near the bottom with a compact upload dropzone so supporting files do not dominate the page.
+  - Layout: the detail page now prioritizes `Order Items` first, places `Receipt History` immediately after it, and renders the remaining sections collapsed by default. `Attachments` stays near the bottom with a compact upload area so supporting files do not dominate the page.
+  - **Attachment filing:** The PO detail page now asks operators how each upload should be filed before it is stored. Supported types are `Delivery Note`, `Proof of Payment`, and `General Attachment`. Delivery notes can optionally be linked to an existing receipt so the supporting paperwork stays tied to the receipt trail.
   - **Sticky Header:** Uses the "Page-Level Sticky Header" pattern (see `docs/overview/STYLE_GUIDE.md`) with dynamic offset calculation to position the blue header bar flush below the navbar. Implementation: `app/purchasing/purchase-orders/[id]/page.tsx:1078` (header), `app/purchasing/purchase-orders/[id]/page.module.css:1` (styles), `app/purchasing/purchase-orders/[id]/page.tsx:584` (offset calculation).
+- **Quick Upload (documents):** Mobile-friendly purchasing-document filing route used by receiving and accounts staff.
+  - Pages: `app/purchasing/quick-upload/page.tsx:1` and shortcut redirect `app/upload/page.tsx:1`.
+  - Flow: choose the document type (`Delivery Note`, `Proof of Payment`, or `General Attachment`), select the file, find the PO, and upload it directly to the purchase order. Delivery notes can optionally be linked to an existing receipt.
+  - Desktop behavior: the quick-upload tile supports click-to-browse, drag-and-drop, and clipboard paste (`Ctrl/Cmd+V`). Delivery notes stay limited to image/PDF uploads, while proof-of-payment and general attachments also accept Word, Excel, text, and CSV files.
 - **Create PO (manual):** Multi-line form to select components, pick supplier per-line, and set quantities/notes.
   - Page: `app/purchasing/purchase-orders/new/page.tsx:1` (page wrapper)
   - Form: `components/features/purchasing/new-purchase-order-form.tsx:147` (fetch Draft status), `components/features/purchasing/new-purchase-order-form.tsx:180` (supplier component fetch), `components/features/purchasing/new-purchase-order-form.tsx:210` (createPurchaseOrder), `components/features/purchasing/new-purchase-order-form.tsx:284` (mutation, redirect).
@@ -47,6 +52,8 @@
   - PO header: `purchase_order_id`, `q_number` (unique), `status_id`, `order_date`, `notes`, `created_by/approved_by/at`, and `supplier_id`. See `schema.txt:248` and `migrations/add_supplier_id_to_purchase_orders.sql`.
 - `purchase_order_emails`
   - Email log rows for PO sends, follow-ups, cancellations, and delivery outcomes. The PO list communication badge currently derives its top-level state from the latest `po_send` entry per supplier, while the detail page continues to show the full activity history and bounce reasons.
+- `purchase_order_attachments`
+  - Supporting PO documents stored against the purchase order, including delivery notes, proof of payment, and general supporting files. Rows can optionally link to a `supplier_order_receipts.receipt_id` when a document should live against a specific receipt event.
 - `supplier_order_receipts`
   - Receipts with `order_id`, `transaction_id`, decimal-safe `quantity_received`, and `receipt_date`. See `schema.txt:181`.
 - `inventory_transactions`

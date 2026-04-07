@@ -23,10 +23,10 @@ export default function manifest(): MetadataRoute.Manifest {
     ],
     shortcuts: [
       {
-        name: 'Upload Delivery Note',
+        name: 'Upload Document',
         short_name: 'Upload',
         url: '/upload',
-        description: 'Quick upload a delivery note photo to a purchase order',
+        description: 'Quickly upload a purchasing document to a purchase order',
         icons: [
           {
             src: '/icon-upload-96.png',
