@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/components/common/auth-provider';
-import { RefreshCw, Loader2, FileDown } from 'lucide-react';
+import { RefreshCw, Loader2, FileDown, Search, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -13,9 +13,16 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { buildInventorySnapshotCsv, type InventorySnapshotResponse } from '@/lib/inventory/snapshot';
 import { fetchInventorySnapshot } from '@/lib/client/inventory';
 
@@ -45,6 +52,8 @@ export function ReportsSnapshotTab() {
   const { user } = useAuth();
   const [snapshotDate, setSnapshotDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [showEstimatedValue, setShowEstimatedValue] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
 
   const {
     data: snapshot,
@@ -68,17 +77,39 @@ export function ReportsSnapshotTab() {
     [snapshot]
   );
 
+  // Extract unique categories for the filter dropdown
+  const categories = useMemo(() => {
+    const cats = new Set<string>();
+    snapshotRows.forEach((row) => cats.add(row.category_name || 'Uncategorized'));
+    return Array.from(cats).sort();
+  }, [snapshotRows]);
+
+  // Apply search + category filter
+  const filteredRows = useMemo(() => {
+    let rows = snapshotRows;
+    if (categoryFilter !== 'all') {
+      rows = rows.filter((row) => (row.category_name || 'Uncategorized') === categoryFilter);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      rows = rows.filter(
+        (row) =>
+          row.internal_code.toLowerCase().includes(q) ||
+          (row.description || '').toLowerCase().includes(q)
+      );
+    }
+    return rows;
+  }, [snapshotRows, searchQuery, categoryFilter]);
+
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="pb-3">
         <CardTitle>Stock Snapshot As Of Date</CardTitle>
-        <CardDescription>
-          Reverse-calculates stock quantity for a selected day by subtracting later transactions from the current on-hand balance.
-        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Controls row */}
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <div className="w-full max-w-xs space-y-2">
+          <div className="w-full max-w-xs space-y-1">
             <label htmlFor="snapshot-date" className="text-sm font-medium">
               Snapshot date
             </label>
@@ -96,7 +127,7 @@ export function ReportsSnapshotTab() {
                 Show estimated value
               </label>
               <p className="text-xs text-muted-foreground">
-                Uses the current lowest supplier price per component.
+                Current lowest supplier price.
               </p>
             </div>
             <Switch
@@ -141,20 +172,24 @@ export function ReportsSnapshotTab() {
           </div>
         ) : snapshot ? (
           <>
+            {/* Consolidated notice — best-effort warning merged with value disclaimer */}
             {snapshot.best_effort ? (
-              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-                <p className="font-medium">Approximate historical quantity</p>
-                <p className="mt-1">{snapshot.best_effort_reason}</p>
+              <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-200">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                <div>
+                  <span className="font-medium">Approximate quantities before {snapshot.hardening_reference_date}.</span>
+                  {' '}Some historical edits were not ledger-tracked.
+                  {showEstimatedValue && ' Values use current supplier prices, not historical cost.'}
+                </div>
+              </div>
+            ) : showEstimatedValue ? (
+              <div className="flex items-start gap-2 rounded-lg border border-blue-500/30 bg-blue-500/5 p-3 text-sm text-blue-200">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-blue-400" />
+                <span>Estimated values use current supplier prices, not historical cost at the selected date.</span>
               </div>
             ) : null}
 
-            <div className="rounded-lg border border-blue-300 bg-blue-50 p-3 text-sm text-blue-900">
-              {showEstimatedValue
-                ? snapshot.estimated_value_disclaimer ??
-                  'Estimated using the current lowest supplier price per component, not historical cost at the selected date.'
-                : 'This release is quantity-first. Turn on estimated value only when a current supplier-price estimate is acceptable.'}
-            </div>
-
+            {/* Summary metrics */}
             <div className={`grid grid-cols-1 gap-4 ${showEstimatedValue ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
               <div className="rounded-xl border bg-card p-4 shadow-xs">
                 <p className="text-sm font-medium text-muted-foreground">Stocked Components</p>
@@ -178,6 +213,44 @@ export function ReportsSnapshotTab() {
               </div>
             </div>
 
+            {/* Search + Category filter */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="relative flex-1 max-w-sm">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search by code or description..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="All categories" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All categories</SelectItem>
+                  {categories.map((cat) => (
+                    <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {(searchQuery || categoryFilter !== 'all') && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => { setSearchQuery(''); setCategoryFilter('all'); }}
+                  className="text-muted-foreground"
+                >
+                  Reset
+                </Button>
+              )}
+              <span className="text-xs text-muted-foreground ml-auto">
+                {filteredRows.length} of {snapshotRows.length} components
+              </span>
+            </div>
+
+            {/* Table */}
             <div className="max-h-[420px] overflow-auto rounded-xl border">
               <Table>
                 <TableHeader>
@@ -197,16 +270,27 @@ export function ReportsSnapshotTab() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {snapshotRows.length === 0 ? (
+                  {filteredRows.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={showEstimatedValue ? 8 : 6} className="py-8 text-center text-sm text-muted-foreground">
-                        No non-zero stock balances were found for {snapshot.as_of_date}.
+                        {snapshotRows.length === 0
+                          ? `No non-zero stock balances were found for ${snapshot.as_of_date}.`
+                          : 'No components match the current filters.'}
                       </TableCell>
                     </TableRow>
                   ) : (
-                    snapshotRows.map((row) => (
+                    filteredRows.map((row) => (
                       <TableRow key={row.component_id}>
-                        <TableCell className="font-medium">{row.internal_code}</TableCell>
+                        <TableCell className="font-medium">
+                          <a
+                            href={`/inventory/components/${row.component_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 dark:text-blue-400 hover:underline"
+                          >
+                            {row.internal_code}
+                          </a>
+                        </TableCell>
                         <TableCell>{row.description || '-'}</TableCell>
                         <TableCell>{row.category_name || 'Uncategorized'}</TableCell>
                         <TableCell>{row.location || '-'}</TableCell>
