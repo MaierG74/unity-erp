@@ -278,7 +278,11 @@ function tableColumns({ onActionError }: TableColumnConfig): ColumnDef<ProductRo
       id: 'actions',
       enableSorting: false,
       cell: ({ row }) => (
-        <div className="flex justify-end">
+        <div
+          className="flex justify-end"
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
           <ProductsRowActions product={row.original} onError={onActionError} />
         </div>
       ),

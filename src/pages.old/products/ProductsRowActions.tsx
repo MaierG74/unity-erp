@@ -12,6 +12,9 @@ import { useToast } from '@/components/ui/use-toast';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { ProductRow } from './ProductsPage';
+import { CopyProductDialog } from './CopyProductDialog';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 
 interface ProductsRowActionsProps {
   product: ProductRow;
@@ -19,8 +22,10 @@ interface ProductsRowActionsProps {
 }
 
 export function ProductsRowActions({ product, onError }: ProductsRowActionsProps) {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [copyDialogOpen, setCopyDialogOpen] = useState(false);
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
@@ -46,66 +51,50 @@ export function ProductsRowActions({ product, onError }: ProductsRowActionsProps
     },
   });
 
-  const duplicateMutation = useMutation({
-    mutationFn: async () => {
-      const response = await authorizedFetch(`/api/products/${product.product_id}/duplicate`, {
-        method: 'POST',
-      });
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body.error ?? 'Failed to duplicate product');
-      }
-    },
-    onSuccess: async () => {
-      toast({
-        title: 'Product duplicated',
-        description: `${product.name} has a new copy`,
-      });
-      await queryClient.invalidateQueries({ queryKey: ['products'] });
-    },
-    onError: (error: unknown) => {
-      const message = error instanceof Error ? error.message : 'Failed to duplicate product';
-      onError(message);
-    },
-  });
-
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={`Open actions menu for ${product.name}`}
-          className="h-8 w-8 text-muted-foreground hover:text-foreground"
-        >
-          <MoreVertical className="h-4 w-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-40">
-        <DropdownMenuItem
-          onClick={() => {
-            window.location.assign(`/products/${product.product_id}`);
-          }}
-        >
-          <Pencil className="mr-2 h-4 w-4" /> Edit
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => duplicateMutation.mutate()}
-          disabled={duplicateMutation.isPending}
-        >
-          <Copy className="mr-2 h-4 w-4" /> Duplicate
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          className="text-destructive focus:text-destructive"
-          onClick={() => {
-            // TODO: Wire AlertDialog confirmation before deleting
-            deleteMutation.mutate();
-          }}
-        >
-          <Trash2 className="mr-2 h-4 w-4" /> Delete
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={`Open actions menu for ${product.name}`}
+            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+          >
+            <MoreVertical className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-40">
+          <DropdownMenuItem
+            onClick={() => {
+              router.push(`/products/${product.product_id}`);
+            }}
+          >
+            <Pencil className="mr-2 h-4 w-4" /> Edit
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setCopyDialogOpen(true)}>
+            <Copy className="mr-2 h-4 w-4" /> Duplicate
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="text-destructive focus:text-destructive"
+            onClick={() => {
+              // TODO: Wire AlertDialog confirmation before deleting
+              deleteMutation.mutate();
+            }}
+          >
+            <Trash2 className="mr-2 h-4 w-4" /> Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <CopyProductDialog
+        open={copyDialogOpen}
+        onOpenChange={setCopyDialogOpen}
+        sourceProduct={product}
+        onCopyComplete={(newProduct) => {
+          router.push(`/products/${newProduct.product_id}`);
+        }}
+      />
+    </>
   );
 }

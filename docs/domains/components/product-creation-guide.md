@@ -105,6 +105,7 @@ CREATE TABLE public.billoflabour (
 - After a successful create, the active catalog query invalidates immediately so the table refreshes without a manual browser reload; if the new product matches the current search/category filters, it appears in the visible list as soon as the refetch completes.
 - Row actions:
   - Edit navigates directly to the full detail page for that product
+  - Duplicate opens a copy dialog where authors choose the new product code/name and whether to copy categories, BOM, BOL, and overhead into the new product.
   - Delete opens a confirmation dialog and removes the item optimistically
 - Clicking on a row still previews details in the right-side card
  - The side card also includes a Delete action with confirmation
