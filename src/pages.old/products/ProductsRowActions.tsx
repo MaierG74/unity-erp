@@ -1,13 +1,22 @@
 'use client';
 
 import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
-import { Pencil, Copy, Trash2, MoreVertical } from 'lucide-react';
+import { Pencil, Copy, Trash2, MoreVertical, Loader2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
@@ -26,6 +35,7 @@ export function ProductsRowActions({ product, onError }: ProductsRowActionsProps
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [copyDialogOpen, setCopyDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
@@ -39,6 +49,7 @@ export function ProductsRowActions({ product, onError }: ProductsRowActionsProps
       }
     },
     onSuccess: async () => {
+      setDeleteDialogOpen(false);
       toast({
         title: 'Product deleted',
         description: `${product.name} was removed successfully`,
@@ -77,10 +88,8 @@ export function ProductsRowActions({ product, onError }: ProductsRowActionsProps
           </DropdownMenuItem>
           <DropdownMenuItem
             className="text-destructive focus:text-destructive"
-            onClick={() => {
-              // TODO: Wire AlertDialog confirmation before deleting
-              deleteMutation.mutate();
-            }}
+            onClick={() => setDeleteDialogOpen(true)}
+            disabled={deleteMutation.isPending}
           >
             <Trash2 className="mr-2 h-4 w-4" /> Delete
           </DropdownMenuItem>
@@ -95,6 +104,31 @@ export function ProductsRowActions({ product, onError }: ProductsRowActionsProps
           router.push(`/products/${newProduct.product_id}`);
         }}
       />
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete product?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete &quot;{product.internal_code} - {product.name}&quot;? This will remove the
+              product and its own setup data such as categories, BOM, labor, overhead, and images.
+              Products already referenced by orders cannot be deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => deleteMutation.mutate()}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

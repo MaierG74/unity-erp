@@ -268,6 +268,112 @@ export async function DELETE(
       );
     }
 
+    const { data: bomRows, error: bomLookupError } = await supabaseAdmin
+      .from('billofmaterials')
+      .select('bom_id')
+      .eq('product_id', productId);
+
+    if (bomLookupError) {
+      console.error('Error checking BOM references:', bomLookupError);
+      return NextResponse.json({ error: 'Error preparing product deletion' }, { status: 500 });
+    }
+
+    const bomIds = (bomRows ?? [])
+      .map((row: any) => Number(row.bom_id))
+      .filter((value) => Number.isInteger(value) && value > 0);
+
+    if (bomIds.length > 0) {
+      const { error: bomOverridesError } = await supabaseAdmin
+        .from('bom_option_overrides')
+        .delete()
+        .in('bom_id', bomIds);
+
+      if (bomOverridesError) {
+        console.error('Error deleting BOM option overrides:', bomOverridesError);
+        return NextResponse.json({ error: 'Failed to delete product option overrides' }, { status: 500 });
+      }
+    }
+
+    const { data: optionGroupRows, error: optionGroupLookupError } = await supabaseAdmin
+      .from('product_option_groups')
+      .select('option_group_id')
+      .eq('product_id', productId);
+
+    if (optionGroupLookupError) {
+      console.error('Error checking product option groups:', optionGroupLookupError);
+      return NextResponse.json({ error: 'Error preparing product deletion' }, { status: 500 });
+    }
+
+    const optionGroupIds = (optionGroupRows ?? [])
+      .map((row: any) => Number(row.option_group_id))
+      .filter((value) => Number.isInteger(value) && value > 0);
+
+    if (optionGroupIds.length > 0) {
+      const { error: optionValuesError } = await supabaseAdmin
+        .from('product_option_values')
+        .delete()
+        .in('option_group_id', optionGroupIds);
+
+      if (optionValuesError) {
+        console.error('Error deleting product option values:', optionValuesError);
+        return NextResponse.json({ error: 'Failed to delete product option values' }, { status: 500 });
+      }
+    }
+
+    const cleanupSteps: Array<{
+      label: string;
+      run: () => Promise<{ error: unknown }>;
+    }> = [
+      {
+        label: 'product overhead',
+        run: () => supabaseAdmin.from('product_overhead_costs').delete().eq('product_id', productId),
+      },
+      {
+        label: 'product labor',
+        run: () => supabaseAdmin.from('billoflabour').delete().eq('product_id', productId),
+      },
+      {
+        label: 'product BOM links (parent)',
+        run: () => supabaseAdmin.from('product_bom_links').delete().eq('product_id', productId),
+      },
+      {
+        label: 'product BOM links (child)',
+        run: () => supabaseAdmin.from('product_bom_links').delete().eq('sub_product_id', productId),
+      },
+      {
+        label: 'product BOM',
+        run: () => supabaseAdmin.from('billofmaterials').delete().eq('product_id', productId),
+      },
+      {
+        label: 'product option set links',
+        run: () => supabaseAdmin.from('product_option_set_links').delete().eq('product_id', productId),
+      },
+      {
+        label: 'product option groups',
+        run: () => supabaseAdmin.from('product_option_groups').delete().eq('product_id', productId),
+      },
+      {
+        label: 'product cutlist groups',
+        run: () => supabaseAdmin.from('product_cutlist_groups').delete().eq('product_id', productId),
+      },
+      {
+        label: 'product images',
+        run: () => supabaseAdmin.from('product_images').delete().eq('product_id', productId),
+      },
+      {
+        label: 'product categories',
+        run: () => supabaseAdmin.from('product_category_assignments').delete().eq('product_id', productId),
+      },
+    ];
+
+    for (const step of cleanupSteps) {
+      const { error } = await step.run();
+      if (error) {
+        console.error(`Error deleting ${step.label}:`, error);
+        return NextResponse.json({ error: 'Failed to delete product dependencies' }, { status: 500 });
+      }
+    }
+
     const { data: deletedProduct, error: deleteError } = await supabaseAdmin
       .from('products')
       .delete()

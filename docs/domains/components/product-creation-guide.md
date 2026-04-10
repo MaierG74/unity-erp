@@ -106,7 +106,7 @@ CREATE TABLE public.billoflabour (
 - Row actions:
   - Edit navigates directly to the full detail page for that product
   - Duplicate opens a copy dialog where authors choose the new product code/name and whether to copy categories, BOM, BOL, and overhead into the new product.
-  - Delete opens a confirmation dialog and removes the item optimistically
+  - Delete opens a confirmation dialog before removing the product from the catalog list.
 - Clicking on a row still previews details in the right-side card
  - The side card also includes a Delete action with confirmation
 
@@ -143,6 +143,11 @@ CREATE TABLE public.billoflabour (
 - Consistent styling across tabs:
   - Delete actions use `destructiveSoft` (pastel in light, strong in dark).
   - Image frames use `bg-card` in light and `dark:bg-white/5 dark:ring-1 dark:ring-white/10` with subtle image lift in dark.
+- Tenant/API guardrails as of 2026-03-29:
+  - Product detail reads now load through `GET /api/products/:productId` instead of direct browser-side Supabase reads.
+  - Product edits now persist through `PUT /api/products/:productId`, while category changes persist through `PUT /api/products/:productId` or `POST /api/products/:productId/categories`; both paths enforce products-module access and organization ownership before writing.
+  - Product image insert/update/delete flows now persist through `/api/products/:productId/images` server routes instead of direct browser-side `product_images` mutations.
+  - Costing overhead load/add/remove calls now use the authenticated `/api/products/:productId/overhead` route so product costing mutations send the active Supabase bearer token required by products-module access checks.
 
 ### Product Image Management
 
@@ -153,7 +158,7 @@ CREATE TABLE public.billoflabour (
 - Pre-upload crop is non-destructive: the original file is uploaded unchanged and the chosen crop is saved as metadata for display/editing
 - Warns on refresh, page leave, back navigation, and product-tab changes when an image is staged but not yet uploaded
 - Uploads to Supabase storage bucket "QButton"
-- Automatically creates database records in `product_images` table
+- Automatically creates database records in `product_images` through the authenticated product image API routes
 
 #### Image Gallery Component (`/components/features/products/image-gallery.tsx`)
 - Displays all product images in a grid
@@ -196,6 +201,7 @@ products/APOHB/APOHB_20240315123456_front_view.jpg
 - Manages component requirements for products
 - Links products to required components with quantities
 - Used for inventory management and cost calculation
+- Direct BOM row create/update/delete, cutlist CSV import, and cutlist-material updates now flow through authenticated product BOM API routes instead of direct browser-side `billofmaterials` writes.
 - Actions available:
   - Add Component (search components, set quantity, optional supplier)
   - Add From Collection (apply a saved set of components; see Collections)
@@ -242,6 +248,7 @@ API endpoint backing this action:
 - Manages labor requirements for products
 - Links products to required jobs with time estimates
 - Used for production planning and cost calculation
+- Direct BOL row create/update/delete now flow through authenticated product BOL API routes instead of direct browser-side `billoflabour` writes.
 
 ## Missing Product Creation Features
 
@@ -290,13 +297,13 @@ API endpoint backing this action:
 
 ### Frontend UI (Implemented)
 - Location: `app/products/page.tsx`
-- Interaction: Select a product in the table. In the right-side Product Details card, click the "Delete" button.
+- Interaction: Open the row actions menu in the products table and click "Delete".
 - Safety: A confirmation `AlertDialog` is shown before deletion.
-- Feedback: While deleting, the dialog action shows "Deleting..." and disables controls. The deleted row disappears immediately (optimistic update), then the list refetches and the selection clears.
+- Feedback: While deleting, the dialog action shows "Deleting..." and disables controls. After a successful delete, the products query invalidates and the row disappears on refetch.
 
 ### Backend API (Already existed)
 - Endpoint: `DELETE /api/products/[productId]`
-- Behavior: Prevents deletion if product is referenced by orders (`order_details`). Otherwise deletes product and relies on FK cascade for related records (e.g., categories, images).
+- Behavior: Prevents deletion if product is referenced by orders (`order_details`). Otherwise deletes the product's own dependent setup data first (BOM overrides, BOM/BOL rows, categories, images, overhead, option links, and product BOM links) before removing the product record.
 - Responses:
   - 200: `{ success: true, message: 'Product deleted successfully' }`
   - 409: `{ error: 'Cannot delete product that is referenced by orders' }`
