@@ -262,7 +262,7 @@ export function ProductCosting({ productId }: { productId: number }) {
   const { data: overheadData = [], isLoading: overheadLoading } = useQuery({
     queryKey: ['product-overhead', productId],
     queryFn: async () => {
-      const res = await fetch(`/api/products/${productId}/overhead`)
+      const res = await authorizedFetch(`/api/products/${productId}/overhead`)
       if (!res.ok) return []
       const json = await res.json()
       // API returns { items: [...] }, extract the items array
@@ -307,7 +307,7 @@ export function ProductCosting({ productId }: { productId: number }) {
 
   async function handleRemoveOverhead(elementId: number) {
     try {
-      const res = await fetch(`/api/products/${productId}/overhead?element_id=${elementId}`, {
+      const res = await authorizedFetch(`/api/products/${productId}/overhead?element_id=${elementId}`, {
         method: 'DELETE',
       })
       if (!res.ok) {

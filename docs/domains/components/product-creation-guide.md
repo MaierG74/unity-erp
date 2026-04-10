@@ -124,6 +124,7 @@ CREATE TABLE public.billoflabour (
 - **Bill of Labor** – Labor requirements
 - **Options** – Manage configurable attributes (option groups + values) and hook BOM overrides
 - **Costing** – Combined materials + labor unit cost summary (see `docs/plans/product-costing-plan.md`)
+  - Product overhead load/add/remove actions now go through the authenticated `/api/products/:productId/overhead` route so organization-scoped product access checks receive the active Supabase bearer token.
 - Options tab specifics:
   - Focuses on attaching **Option Sets** from the global library (see `docs/domains/components/bom-option-cut.md`).
   - Displays attached sets in order; each group shows usage badges indicating which BOM rows reference it.
