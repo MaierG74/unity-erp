@@ -33,6 +33,11 @@
   - Page: `app/purchasing/purchase-orders/new/page.tsx:1` (page wrapper)
   - Form: `components/features/purchasing/new-purchase-order-form.tsx:147` (fetch Draft status), `components/features/purchasing/new-purchase-order-form.tsx:180` (supplier component fetch), `components/features/purchasing/new-purchase-order-form.tsx:210` (createPurchaseOrder), `components/features/purchasing/new-purchase-order-form.tsx:284` (mutation, redirect).
   - Deep-link prefill: `/purchasing/purchase-orders/new?componentId=<id>&suggestedQuantity=<qty>` injects the selected component into the active shared draft (or the blank first row), auto-selects the supplier when only one mapping exists, and removes the query string after the draft is hydrated. This is the canonical route used by the Dashboard low-stock `Order` action.
+  - Shared-draft recovery is now tab-aware: the form remembers the exact draft selected in the current browser tab and restores that draft after refresh instead of falling back to whichever org draft was most recently updated by the same user.
+  - Shared-draft autosave is now serialized client-side before submit/status transitions so large multi-line forms cannot race overlapping saves into stale version conflicts or recreate stray one-line drafts after conversion/discard.
+  - Crash recovery: the form writes a local backup to `localStorage` on every autosave debounce (before the network call). If the browser crashes or the network is down and no server-side draft exists on reload, the form recovers from the local backup and warns the user to review and save. The local backup is cleared on successful autosave, draft selection change, submit, or discard.
+  - Navigation guard: a `beforeunload` prompt fires if the form has meaningful unsaved content, preventing accidental data loss from refresh or tab close.
+  - Validation errors now surface as toast notifications with a summary of the first few problems, and the form scrolls to the first errored field. Creation errors also surface as toasts so they are visible regardless of scroll position on long forms.
 - **Create POs from Sales Order:** Generates one PO per supplier containing selected components and links each SO to the customer order.
   - File: `app/orders/[orderId]/page.tsx:655` (createComponentPurchaseOrders), `app/orders/[orderId]/page.tsx:743` (link via junction table).
 
