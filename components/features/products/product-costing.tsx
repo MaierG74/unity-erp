@@ -18,6 +18,7 @@ import { AddOverheadDialog } from './AddOverheadDialog'
 import { ProductBOM } from './product-bom'
 import { ProductBOL } from './product-bol'
 import { useToast } from '@/components/ui/use-toast'
+import { ProductPricingSection } from './ProductPricingSection'
 
 type BomRow = {
   bom_id: number
@@ -262,7 +263,7 @@ export function ProductCosting({ productId }: { productId: number }) {
   const { data: overheadData = [], isLoading: overheadLoading } = useQuery({
     queryKey: ['product-overhead', productId],
     queryFn: async () => {
-      const res = await fetch(`/api/products/${productId}/overhead`)
+      const res = await authorizedFetch(`/api/products/${productId}/overhead`)
       if (!res.ok) return []
       const json = await res.json()
       // API returns { items: [...] }, extract the items array
@@ -307,7 +308,7 @@ export function ProductCosting({ productId }: { productId: number }) {
 
   async function handleRemoveOverhead(elementId: number) {
     try {
-      const res = await fetch(`/api/products/${productId}/overhead?element_id=${elementId}`, {
+      const res = await authorizedFetch(`/api/products/${productId}/overhead?element_id=${elementId}`, {
         method: 'DELETE',
       })
       if (!res.ok) {
@@ -467,6 +468,9 @@ export function ProductCosting({ productId }: { productId: number }) {
                     <div className="text-sm text-muted-foreground">No costs recorded yet.</div>
                   )}
                 </div>
+
+                {/* Standard Pricing */}
+                <ProductPricingSection productId={productId} unitCost={unitCost} />
 
                 {/* Category cards */}
                 <div className="grid grid-cols-3 gap-3">
