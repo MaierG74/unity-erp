@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { DollarSign } from 'lucide-react'
+import { DollarSign, AlertTriangle, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useProductPricing, type MarkupType } from '@/hooks/useProductPricing'
@@ -32,19 +32,42 @@ export function ProductPricingSection({ productId, unitCost }: ProductPricingSec
     }
   }, [price])
 
-  // Calculate derived values
-  const markupAmount =
+  // Calculate what the price WOULD be at current cost + markup
+  const expectedMarkupAmount =
     markupType === 'percentage' ? unitCost * (markupValue / 100) : markupValue
-  const sellingPrice = unitCost + markupAmount
-  const margin = sellingPrice > 0 ? (markupAmount / sellingPrice) * 100 : 0
+  const expectedSellingPrice = unitCost + expectedMarkupAmount
+
+  // When editing (dirty) or no saved price, show live calculation
+  // When saved and not editing, show the locked saved price
+  const hasSavedPrice = !!price && !dirty
+  const displaySellingPrice = hasSavedPrice ? price.selling_price : expectedSellingPrice
+  const displayMarkupAmount = displaySellingPrice - unitCost
+  const displayMargin = displaySellingPrice > 0
+    ? (displayMarkupAmount / displaySellingPrice) * 100
+    : 0
+
+  // Detect margin erosion: cost has changed since price was saved
+  const marginEroded = hasSavedPrice && unitCost > 0 && expectedSellingPrice > price.selling_price
+  const effectiveMarkupPct = hasSavedPrice && unitCost > 0
+    ? ((price.selling_price - unitCost) / unitCost) * 100
+    : null
 
   const handleSave = () => {
     savePrice({
       markupType,
       markupValue,
-      sellingPrice,
+      sellingPrice: expectedSellingPrice,
     })
     setDirty(false)
+  }
+
+  const handleRecalculate = () => {
+    // Re-save with the same markup but at the current cost
+    savePrice({
+      markupType,
+      markupValue,
+      sellingPrice: expectedSellingPrice,
+    })
   }
 
   if (isLoading) {
@@ -66,6 +89,31 @@ export function ProductPricingSection({ productId, unitCost }: ProductPricingSec
         <DollarSign className="h-4 w-4 text-muted-foreground" />
         <span className="text-sm font-semibold">Standard Pricing</span>
       </div>
+
+      {/* Margin erosion warning */}
+      {marginEroded && (
+        <div className="flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 mb-4">
+          <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium text-amber-500">Markup below target</div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Costs have changed — effective markup is {effectiveMarkupPct!.toFixed(1)}%,
+              below your {markupType === 'percentage' ? `${markupValue}%` : fmtMoney(markupValue)} target.
+              Price list still shows {fmtMoney(price.selling_price)}.
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRecalculate}
+            disabled={isSaving}
+            className="shrink-0 border-amber-500/30 text-amber-500 hover:bg-amber-500/10"
+          >
+            <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+            Recalculate
+          </Button>
+        </div>
+      )}
 
       {/* Markup controls */}
       <div className="grid grid-cols-2 gap-3 mb-4">
@@ -150,19 +198,27 @@ export function ProductPricingSection({ productId, unitCost }: ProductPricingSec
             Markup{markupType === 'percentage' ? ` (${markupValue}%)` : ''}
           </div>
           <div className="text-lg font-bold tabular-nums text-amber-500">
-            {fmtMoney(markupAmount)}
+            {fmtMoney(displayMarkupAmount)}
           </div>
         </div>
 
         <div className="px-2 text-muted-foreground/50 text-lg font-light">=</div>
 
         {/* Selling Price */}
-        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-center">
-          <div className="text-[11px] uppercase text-emerald-400 tracking-wide mb-1">
+        <div className={`rounded-lg border p-3 text-center ${
+          marginEroded
+            ? 'border-amber-500/30 bg-amber-500/5'
+            : 'border-emerald-500/30 bg-emerald-500/5'
+        }`}>
+          <div className={`text-[11px] uppercase tracking-wide mb-1 ${
+            marginEroded ? 'text-amber-400' : 'text-emerald-400'
+          }`}>
             Selling Price
           </div>
-          <div className="text-lg font-bold tabular-nums text-emerald-500">
-            {fmtMoney(sellingPrice)}
+          <div className={`text-lg font-bold tabular-nums ${
+            marginEroded ? 'text-amber-500' : 'text-emerald-500'
+          }`}>
+            {fmtMoney(displaySellingPrice)}
           </div>
         </div>
       </div>
@@ -170,8 +226,8 @@ export function ProductPricingSection({ productId, unitCost }: ProductPricingSec
       {/* Footer: margin + save */}
       <div className="flex items-center justify-between mt-3">
         <div className="flex gap-3 text-[11px] text-muted-foreground">
-          <span>Margin: {margin.toFixed(1)}%</span>
-          <span>Profit: {fmtMoney(markupAmount)} per unit</span>
+          <span>Margin: {displayMargin.toFixed(1)}%</span>
+          <span>Profit: {fmtMoney(displayMarkupAmount)} per unit</span>
         </div>
         <Button
           size="sm"
