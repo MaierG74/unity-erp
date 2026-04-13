@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useDebounce } from '@/hooks/use-debounce';
@@ -77,6 +77,7 @@ export function StockAdjustmentDialog({
   const [transferSearch, setTransferSearch] = useState('');
   const [allowNegative, setAllowNegative] = useState(false);
   const [transferPickerOpen, setTransferPickerOpen] = useState(false);
+  const advancingRef = useRef(false);
 
   const debouncedTransferSearch = useDebounce(transferSearch, 300);
 
@@ -187,6 +188,12 @@ export function StockAdjustmentDialog({
       return transaction;
     },
     onSuccess: () => {
+      // Skip default close/reset when Save & Next is handling the flow
+      if (advancingRef.current) {
+        advancingRef.current = false;
+        return;
+      }
+
       if (adjustmentType === 'transfer') {
         toast.success('Stock transfer recorded', {
           description: `${numericQuantity} units transferred from ${componentName} to ${transferToName}`,
@@ -197,7 +204,6 @@ export function StockAdjustmentDialog({
         });
       }
 
-      // Invalidate relevant queries
       queryClient.invalidateQueries({ queryKey: ['component', componentId] });
       queryClient.invalidateQueries({ queryKey: ['component', componentId, 'transactions'] });
       queryClient.invalidateQueries({ queryKey: ['component', componentId, 'inventory'] });
@@ -207,7 +213,6 @@ export function StockAdjustmentDialog({
       }
       onSuccess?.();
 
-      // Reset form and close
       resetForm();
       onOpenChange(false);
     },
@@ -522,6 +527,7 @@ export function StockAdjustmentDialog({
                 disabled={!isValid || adjustmentMutation.isPending}
                 onClick={() => {
                   if (!isValid) return;
+                  advancingRef.current = true;
                   adjustmentMutation.mutate(undefined, {
                     onSuccess: () => {
                       toast.success(`${componentName} adjusted`);
@@ -529,6 +535,9 @@ export function StockAdjustmentDialog({
                       onSuccess?.();
                       resetForm();
                       onSaveAndNext();
+                    },
+                    onError: () => {
+                      advancingRef.current = false;
                     },
                   });
                 }}

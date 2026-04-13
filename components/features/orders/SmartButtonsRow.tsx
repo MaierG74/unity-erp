@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Package, Wrench, ClipboardList, FileText, ShoppingCart, Layers } from 'lucide-react';
+import { Package, Wrench, ClipboardList, FileText, ShoppingCart, Layers, Scissors } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface TabButton {
@@ -58,6 +58,12 @@ export function SmartButtonsRow({
       label: 'Job Cards',
       icon: <ClipboardList className="h-3.5 w-3.5" />,
       count: jobCardCount,
+    },
+    {
+      id: 'cutting-plan',
+      label: 'Cutting Plan',
+      icon: <Scissors className="h-3.5 w-3.5" />,
+      count: 0,
     },
     {
       id: 'procurement',

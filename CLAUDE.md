@@ -3,13 +3,20 @@
 ## Git Workflow
 
 - `main` is release-only. Keep it clean — no direct development on `main`.
-- Every task gets its own short-lived branch. Branch off `main`, do the work, merge back.
+- `codex/integration` is the shared working branch for approved but not-yet-released work.
+- Every meaningful task/session gets its own short-lived branch. Branch off `codex/integration`, do the work, then merge back into `codex/integration`.
+- Do not create a new branch for every single follow-up message on the same task.
+- If two task branches need to be tested locally at the same time, use separate git worktrees so each branch has its own folder and dev server.
 - Use the `codex/` prefix with a clear worker and task name:
+  - `codex/integration`
   - `codex/local-purchasing-fix`
   - `codex/cloud-codex-assistant-routing`
   - `codex/cloud-claude-docs-purchasing`
 - When multiple environments are working at the same time (local, cloud Codex, cloud Claude), each must use a separate branch.
-- Before merging to `main`, treat it as a release slice — review for production safety.
+- Review scope is git-based, not chat-based:
+  - `/codex:review` reviews the current uncommitted changes
+  - `/codex:review --base codex/integration` reviews the current task branch against the shared working branch
+- Before merging to `main`, treat it as a release slice from `codex/integration` and review for production safety.
 - Always update the canonical doc for the feature or domain you changed.
 - Do **not** update shared summary/index docs (`docs/README.md`, `docs/overview/todo-index.md`) on every task. Only update them when status materially changes, a new workstream is introduced, or during release/reconciliation work.
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { markCuttingPlanStaleForDetail } from '@/lib/orders/cutting-plan-utils';
 
 export async function PATCH(
   request: NextRequest,
@@ -65,6 +66,11 @@ export async function PATCH(
       return NextResponse.json({ error: `Failed to update order detail: ${updateErr.message}` }, { status: 500 });
     }
 
+    // Mark cutting plan stale if order details changed
+    if (detailExists.order_id) {
+      await markCuttingPlanStaleForDetail(detailExists.order_id, supabaseAdmin);
+    }
+
     console.log(`[PATCH /order-details/${detailId}] Successfully updated order detail`);
     return NextResponse.json({ success: true, detail: updatedDetail });
   } catch (e: any) {
@@ -115,6 +121,9 @@ export async function DELETE(
       console.error(`[DELETE /order-details/${detailId}] Failed to delete order detail`, delErr);
       return NextResponse.json({ error: `Failed to delete order detail: ${delErr.message}` }, { status: 500 });
     }
+
+    // Mark cutting plan stale since a product was removed
+    await markCuttingPlanStaleForDetail(detailExists.order_id, supabaseAdmin);
 
     console.log(`[DELETE /order-details/${detailId}] Successfully deleted order detail`);
     return NextResponse.json({ success: true, order_id: detailExists.order_id });

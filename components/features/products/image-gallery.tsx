@@ -4,11 +4,11 @@ import { useEffect, useState } from "react"
 import { ImageUpload } from "./image-upload"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
-import { supabase } from "@/lib/supabase"
 import { Crop, Trash2 } from "lucide-react"
 import type { CropParams } from '@/types/image-editor'
 import { ProductImageDisplay } from './ProductImageDisplay'
 import { ProductImageEditorDialog } from './ProductImageEditorDialog'
+import { authorizedFetch } from "@/lib/client/auth-fetch"
 
 interface ProductImage {
   image_id: string | number
@@ -93,19 +93,15 @@ export function ImageGallery({
 
   const handleSetPrimary = async (image: ProductImage) => {
     try {
-      // First, set all images to non-primary
-      await supabase
-        .from("product_images")
-        .update({ is_primary: false })
-        .eq("product_id", productId)
+      const response = await authorizedFetch(`/api/products/${productId}/images/${image.image_id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ is_primary: true }),
+      })
 
-      // Then set the selected image as primary
-      const { error } = await supabase
-        .from("product_images")
-        .update({ is_primary: true })
-        .eq("image_id", image.image_id)
-
-      if (error) throw error
+      if (!response.ok) {
+        const message = await response.text()
+        throw new Error(message || 'Failed to update primary image')
+      }
 
       setLocalImages((prev) =>
         prev.map((img) => ({
@@ -137,12 +133,14 @@ export function ImageGallery({
 
   const handleDelete = async (image: ProductImage) => {
     try {
-      const { error } = await supabase
-        .from("product_images")
-        .delete()
-        .eq("image_id", image.image_id)
+      const response = await authorizedFetch(`/api/products/${productId}/images/${image.image_id}`, {
+        method: 'DELETE',
+      })
 
-      if (error) throw error
+      if (!response.ok) {
+        const message = await response.text()
+        throw new Error(message || 'Failed to delete image')
+      }
 
       setLocalImages((prev) => prev.filter((img) => img.image_id !== image.image_id))
       if (selectedImage?.image_id === image.image_id) {
@@ -256,6 +254,7 @@ export function ImageGallery({
         onOpenChange={(open) => {
           if (!open) setEditingImage(null)
         }}
+        productId={productId}
         image={editingImage}
         onSaved={handleCropSaved}
       />

@@ -111,7 +111,9 @@ export function TaskQuickCreate({ open, onOpenChange }: TaskQuickCreateProps) {
         contextType: linkedContext?.contextType ?? undefined,
         contextId: linkedContext?.contextId ?? undefined,
         contextPath: linkedContext?.contextPath ?? undefined,
-        contextSnapshot: linkedContext ? { label: linkedContext.contextLabel } : undefined,
+        contextSnapshot: linkedContext
+          ? linkedContext.contextSnapshot ?? { label: linkedContext.contextLabel }
+          : undefined,
       });
 
       // Upload staged files if any

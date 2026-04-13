@@ -93,6 +93,10 @@ CREATE TABLE public.billoflabour (
 );
 ```
 
+Current tenancy note:
+- Product BOM row create/update/delete and cutlist CSV imports now persist through authenticated `/api/products/:productId/bom` server routes.
+- Product BOL row create/update/delete now persist through authenticated `/api/products/:productId/bol` server routes.
+
 ## Current Product Management Features
 
 ### Existing UI Components

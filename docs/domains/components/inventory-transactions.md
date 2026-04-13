@@ -71,6 +71,19 @@ Canonical specification for `inventory_transactions` and how movements affect on
   - Log `user_id` from session
   - Validate permissions and prevent zero‑delta writes
 
+## Stock-Level Edit Contract (Server)
+- RPC: `record_component_stock_level(p_component_id, p_new_quantity, p_reason, p_notes, p_transaction_date, p_transaction_type)`
+- Purpose:
+  - Used by hardened inventory edit paths that set stock to a target quantity rather than applying a free-form delta manually.
+  - Records the **delta** between the previous and new stock level in `inventory_transactions`, then sets `inventory.quantity_on_hand` to the requested target.
+- Supported transaction types:
+  - `ADJUSTMENT` — standard stock-level correction from an inventory edit screen.
+  - `OPENING_BALANCE` — one-time initial seeding for a newly created component. Guarded so it can only be recorded before any other inventory transactions exist for that component.
+- Return shape:
+  - `transaction_id`, `previous_quantity`, `new_quantity`, `delta`, `transaction_type_name`
+- Hardening note:
+  - The goal is that quantity edits no longer bypass the ledger. Direct metadata edits (`location`, `reorder_level`) still update the `inventory` row, but quantity changes should flow through this helper.
+
 ## Stock Adjustment UI (Client)
 The Transactions tab on the component detail page (`/inventory/components/[id]`) includes:
 
@@ -181,6 +194,7 @@ order by i.quantity_on_hand - i.reorder_level asc;
 ## Reporting/Assistant Hooks
 - `inventory.list_below_reorder` — surface low stock with suggested reorder qty (see policy in Inventory Master).
 - `inventory.get_stock_on_hand` — single component lookup (optionally by location).
+- `inventory.get_snapshot_as_of_date` — report-layer helper that reverse-calculates historical stock quantity by subtracting post-cutoff transactions from current on-hand.
 
 ## Notes
 - Move heavy joins to views for performance.

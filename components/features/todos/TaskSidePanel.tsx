@@ -223,7 +223,11 @@ export function TaskSidePanel({ todoId, onClose }: TaskSidePanelProps) {
 
   const handleDownload = useCallback(
     (attachmentId: string) => {
-      window.open(`/api/todos/${todoId}/attachments/${attachmentId}`, '_blank');
+      window.open(
+        `/api/todos/${todoId}/attachments/${attachmentId}?download=1`,
+        '_blank',
+        'noopener,noreferrer',
+      );
     },
     [todoId],
   );
@@ -253,7 +257,7 @@ export function TaskSidePanel({ todoId, onClose }: TaskSidePanelProps) {
 
   if (isLoading) {
     return (
-      <div className="w-[480px] border-l bg-background flex flex-col h-full overflow-hidden shrink-0">
+      <div className="w-full md:w-[30rem] border-l-0 md:border-l bg-background flex flex-col h-full overflow-hidden shrink-0">
         <div className="flex items-center justify-between p-3 border-b">
           <Button variant="ghost" size="sm" onClick={onClose}>
             <ArrowLeft className="h-4 w-4 mr-1" /> Back
@@ -268,7 +272,7 @@ export function TaskSidePanel({ todoId, onClose }: TaskSidePanelProps) {
 
   if (!todo) {
     return (
-      <div className="w-[480px] border-l bg-background flex flex-col h-full overflow-hidden shrink-0">
+      <div className="w-full md:w-[30rem] border-l-0 md:border-l bg-background flex flex-col h-full overflow-hidden shrink-0">
         <div className="flex items-center justify-between p-3 border-b">
           <Button variant="ghost" size="sm" onClick={onClose}>
             <ArrowLeft className="h-4 w-4 mr-1" /> Back
@@ -297,7 +301,7 @@ export function TaskSidePanel({ todoId, onClose }: TaskSidePanelProps) {
   const checklist = todo.checklist ?? [];
 
   return (
-    <div className="w-[480px] border-l bg-background flex flex-col h-full overflow-hidden shrink-0">
+    <div className="w-full md:w-[30rem] border-l-0 md:border-l bg-background flex flex-col h-full overflow-hidden shrink-0">
       {/* Header */}
       <div className="flex items-center justify-between p-3 border-b">
         <Button variant="ghost" size="sm" onClick={onClose}>
@@ -318,14 +322,14 @@ export function TaskSidePanel({ todoId, onClose }: TaskSidePanelProps) {
               Archive
             </DropdownMenuItem>
             <DropdownMenuItem
-              onClick={() => router.push(`/tasks/${todoId}`)}
+              onClick={() => router.push(`/todos/${todoId}`)}
             >
               Open full page
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
                 navigator.clipboard.writeText(
-                  `${window.location.origin}/tasks/${todoId}`,
+                  `${window.location.origin}/todos/${todoId}`,
                 );
               }}
             >

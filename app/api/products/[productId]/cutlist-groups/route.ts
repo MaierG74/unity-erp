@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { requireModuleAccess } from '@/lib/api/module-access';
-import { MODULE_KEYS, type ModuleKey } from '@/lib/modules/keys';
+import { requireProductsAccess } from '@/lib/api/products-access';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
 interface CutlistPart {
@@ -33,13 +32,6 @@ interface CutlistGroup {
   sort_order?: number;
 }
 
-function resolveRequiredModule(req: NextRequest): ModuleKey {
-  const requested = (req.nextUrl.searchParams.get('module') ?? '').trim().toLowerCase();
-  return requested === MODULE_KEYS.FURNITURE_CONFIGURATOR
-    ? MODULE_KEYS.FURNITURE_CONFIGURATOR
-    : MODULE_KEYS.CUTLIST_OPTIMIZER;
-}
-
 function parseProductId(raw: string): number | null {
   const id = Number.parseInt(raw, 10);
   return Number.isFinite(id) && id > 0 ? id : null;
@@ -60,31 +52,6 @@ async function ensureProductExists(productId: number, orgId: string): Promise<bo
   return Boolean(data);
 }
 
-async function requireAccess(req: NextRequest, moduleKey: ModuleKey) {
-  const access = await requireModuleAccess(req, moduleKey, {
-    forbiddenMessage: `Access denied: module "${moduleKey}" is disabled for your organization`,
-  });
-
-  if ('error' in access) {
-    return { error: access.error };
-  }
-
-  if (!access.orgId) {
-    return {
-      error: NextResponse.json(
-        {
-          error: 'Organization context is required for cutlist access',
-          reason: 'missing_org_context',
-          module_key: access.moduleKey,
-        },
-        { status: 403 }
-      ),
-    };
-  }
-
-  return { orgId: access.orgId };
-}
-
 /**
  * GET /api/products/[productId]/cutlist-groups
  * Fetch all cutlist groups for a product
@@ -93,8 +60,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ productId: string }> }
 ) {
-  const moduleKey = resolveRequiredModule(request);
-  const auth = await requireAccess(request, moduleKey);
+  const auth = await requireProductsAccess(request);
   if ('error' in auth) return auth.error;
 
   try {
@@ -114,6 +80,7 @@ export async function GET(
       .from('product_cutlist_groups')
       .select('*')
       .eq('product_id', productIdNum)
+      .eq('org_id', auth.orgId)
       .order('sort_order', { ascending: true });
 
     if (error) {
@@ -136,8 +103,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ productId: string }> }
 ) {
-  const moduleKey = resolveRequiredModule(request);
-  const auth = await requireAccess(request, moduleKey);
+  const auth = await requireProductsAccess(request);
   if ('error' in auth) return auth.error;
 
   try {
@@ -168,7 +134,8 @@ export async function POST(
     const { error: deleteError } = await supabaseAdmin
       .from('product_cutlist_groups')
       .delete()
-      .eq('product_id', productIdNum);
+      .eq('product_id', productIdNum)
+      .eq('org_id', auth.orgId);
 
     if (deleteError) {
       console.error('Error deleting existing groups:', deleteError);
@@ -178,6 +145,7 @@ export async function POST(
     if (groups.length > 0) {
       const groupsToInsert = groups.map((group, index) => ({
         product_id: productIdNum,
+        org_id: auth.orgId,
         name: group.name || 'Unnamed Group',
         board_type: group.board_type || '16mm',
         primary_material_id: group.primary_material_id ? Number.parseInt(group.primary_material_id, 10) : null,
@@ -224,8 +192,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ productId: string }> }
 ) {
-  const moduleKey = resolveRequiredModule(request);
-  const auth = await requireAccess(request, moduleKey);
+  const auth = await requireProductsAccess(request);
   if ('error' in auth) return auth.error;
 
   try {
@@ -244,7 +211,8 @@ export async function DELETE(
     const { error } = await supabaseAdmin
       .from('product_cutlist_groups')
       .delete()
-      .eq('product_id', productIdNum);
+      .eq('product_id', productIdNum)
+      .eq('org_id', auth.orgId);
 
     if (error) {
       console.error('Error deleting cutlist groups:', error);

@@ -1,45 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { validateCutlistDimensions } from '@/lib/cutlist/cutlistDimensions';
+import {
+  optionSetGroupBelongsToSet,
+  parsePositiveInt,
+  requireProductsAccess,
+  validateOrgScopedComponentRefs,
+} from '@/lib/api/products-access';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
 type RouteParams = {
   setId?: string;
   groupId?: string;
 };
 
-function parseId(value?: string): number | null {
-  if (!value) return null;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && !Number.isNaN(parsed) ? parsed : null;
-}
-
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    throw new Error('Supabase environment variables are not configured');
-  }
-  return createClient(url, key);
-}
-
-async function ensureGroupBelongsToSet(client: any, setId: number, groupId: number) {
-  const { data, error } = await client
-    .from('option_set_groups')
-    .select('option_set_id')
-    .eq('option_set_group_id', groupId)
-    .single();
-
-  const record = data as any;
-
-  if (error || !record || Number(record.option_set_id) !== setId) {
-    throw new Error('Not found');
-  }
-}
-
 export async function POST(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
-  const setId = parseId(params.setId);
-  const groupId = parseId(params.groupId);
+  const setId = parsePositiveInt(params.setId);
+  const groupId = parsePositiveInt(params.groupId);
   if (!setId || !groupId) {
     return NextResponse.json({ error: 'Invalid identifiers' }, { status: 400 });
   }
@@ -116,16 +96,27 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
     return NextResponse.json({ error: 'Option value label is required' }, { status: 400 });
   }
 
-  const supabase = getSupabaseAdmin();
-
   try {
-    await ensureGroupBelongsToSet(supabase, setId, groupId);
+    const groupBelongs = await optionSetGroupBelongsToSet(setId, groupId);
+    if (!groupBelongs) {
+      return NextResponse.json({ error: 'Option group not found for set' }, { status: 404 });
+    }
+
+    const refError = await validateOrgScopedComponentRefs(auth.orgId, [
+      {
+        componentId: parsePositiveInt(defaultComponentId),
+        supplierComponentId: parsePositiveInt(defaultSupplierComponentId),
+      },
+    ]);
+    if (refError) {
+      return NextResponse.json({ error: refError }, { status: 400 });
+    }
 
     let resolvedDisplayOrder: number | null = null;
     if (typeof displayOrderInput === 'number' && Number.isFinite(displayOrderInput)) {
       resolvedDisplayOrder = displayOrderInput;
     } else {
-      const { data: maxRows, error: maxError } = await supabase
+      const { data: maxRows, error: maxError } = await supabaseAdmin
         .from('option_set_values')
         .select('display_order')
         .eq('option_set_group_id', groupId)
@@ -139,7 +130,7 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
     }
 
     if (isDefault) {
-      const { error: resetError } = await supabase
+      const { error: resetError } = await supabaseAdmin
         .from('option_set_values')
         .update({ is_default: false, updated_at: new Date().toISOString() })
         .eq('option_set_group_id', groupId);
@@ -149,7 +140,7 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
       }
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('option_set_values')
       .insert({
         option_set_group_id: groupId,
@@ -195,10 +186,7 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
         default_cutlist_dimensions: data.default_cutlist_dimensions ?? null,
       },
     }, { status: 201 });
-  } catch (error: any) {
-    if (error?.message === 'Not found') {
-      return NextResponse.json({ error: 'Option group not found for set' }, { status: 404 });
-    }
+  } catch (error) {
     console.error('[option-set-values] unexpected create error', error);
     return NextResponse.json({ error: 'Unexpected error while creating option value' }, { status: 500 });
   }

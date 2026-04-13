@@ -19,6 +19,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Save, Package, MapPin, AlertTriangle } from 'lucide-react';
+import { updateComponentStockLevel } from '@/lib/client/inventory';
 
 const formSchema = z.object({
   quantity_on_hand: z.string().min(1, 'Quantity is required'),
@@ -57,33 +58,44 @@ export function InventoryTab({ component }: InventoryTabProps) {
   // Update inventory mutation
   const updateMutation = useMutation({
     mutationFn: async (values: z.infer<typeof formSchema>) => {
-      if (inventory?.inventory_id) {
-        // Update existing inventory
-        const { error } = await supabase
-          .from('inventory')
-          .update({
-            quantity_on_hand: parseInt(values.quantity_on_hand),
-            reorder_level: parseInt(values.reorder_level),
-            location: values.location || null,
-          })
-          .eq('inventory_id', inventory.inventory_id);
+      const nextQuantity = Number.parseFloat(values.quantity_on_hand);
+      const nextReorderLevel = Number.parseFloat(values.reorder_level);
 
-        if (error) throw error;
-      } else {
-        // Create new inventory record
-        const { error } = await supabase.from('inventory').insert({
-          component_id: component.component_id,
-          quantity_on_hand: parseInt(values.quantity_on_hand),
-          reorder_level: parseInt(values.reorder_level),
-          location: values.location || null,
-        });
-
-        if (error) throw error;
+      if (!Number.isFinite(nextQuantity) || nextQuantity < 0) {
+        throw new Error('Quantity on hand must be zero or greater');
       }
+
+      if (!Number.isFinite(nextReorderLevel) || nextReorderLevel < 0) {
+        throw new Error('Reorder level must be zero or greater');
+      }
+
+      const currentQuantity = Number(inventory?.quantity_on_hand ?? 0);
+      if (nextQuantity !== currentQuantity) {
+        await updateComponentStockLevel(component.component_id, {
+          new_quantity: nextQuantity,
+          reason: 'Data Entry Correction',
+          notes: 'Updated via component inventory tab',
+          transaction_type: 'ADJUSTMENT',
+        });
+      }
+
+      const inventoryPayload = {
+        component_id: component.component_id,
+        reorder_level: nextReorderLevel,
+        location: values.location || null,
+        ...(nextQuantity === currentQuantity ? { quantity_on_hand: nextQuantity } : {}),
+      };
+
+      const { error } = await supabase.from('inventory').upsert(inventoryPayload, {
+        onConflict: 'component_id',
+      });
+
+      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['component', component.component_id] });
       queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory', 'snapshot'] });
       toast({
         title: 'Inventory updated',
         description: 'Inventory settings have been successfully updated.',
@@ -125,6 +137,7 @@ export function InventoryTab({ component }: InventoryTabProps) {
                       <Input
                         type="number"
                         min="0"
+                        step="any"
                         placeholder="0"
                         {...field}
                       />
@@ -145,6 +158,7 @@ export function InventoryTab({ component }: InventoryTabProps) {
                       <Input
                         type="number"
                         min="0"
+                        step="any"
                         placeholder="0"
                         {...field}
                       />
@@ -209,9 +223,6 @@ export function InventoryTab({ component }: InventoryTabProps) {
     </Form>
   );
 }
-
-
-
 
 
 

@@ -18,6 +18,7 @@ import { AddOverheadDialog } from './AddOverheadDialog'
 import { ProductBOM } from './product-bom'
 import { ProductBOL } from './product-bol'
 import { useToast } from '@/components/ui/use-toast'
+import { ProductPricingSection } from './ProductPricingSection'
 
 type BomRow = {
   bom_id: number
@@ -467,6 +468,9 @@ export function ProductCosting({ productId }: { productId: number }) {
                     <div className="text-sm text-muted-foreground">No costs recorded yet.</div>
                   )}
                 </div>
+
+                {/* Standard Pricing */}
+                <ProductPricingSection productId={productId} unitCost={unitCost} />
 
                 {/* Category cards */}
                 <div className="grid grid-cols-3 gap-3">

@@ -1,28 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import {
+  parsePositiveInt,
+  requireProductsAccess,
+} from '@/lib/api/products-access';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
 type RouteParams = {
   setId?: string;
 };
 
-function parseId(value?: string): number | null {
-  if (!value) return null;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && !Number.isNaN(parsed) ? parsed : null;
-}
-
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    throw new Error('Supabase environment variables are not configured');
-  }
-  return createClient(url, key);
-}
-
 async function fetchOptionSet(setId: number) {
-  const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('option_sets')
     .select(`
       option_set_id,
@@ -99,8 +87,11 @@ async function fetchOptionSet(setId: number) {
 }
 
 export async function GET(_request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(_request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
-  const setId = parseId(params.setId);
+  const setId = parsePositiveInt(params.setId);
   if (!setId) {
     return NextResponse.json({ error: 'Invalid option set id' }, { status: 400 });
   }
@@ -119,8 +110,11 @@ export async function GET(_request: NextRequest, context: { params: Promise<Rout
 }
 
 export async function PATCH(request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
-  const setId = parseId(params.setId);
+  const setId = parsePositiveInt(params.setId);
   if (!setId) {
     return NextResponse.json({ error: 'Invalid option set id' }, { status: 400 });
   }
@@ -151,10 +145,8 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
     return NextResponse.json({ error: 'No fields provided to update' }, { status: 400 });
   }
 
-  const supabase = getSupabaseAdmin();
-
   try {
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('option_sets')
       .update({ ...updates, updated_at: new Date().toISOString() })
       .eq('option_set_id', setId);
@@ -180,16 +172,17 @@ export async function PATCH(request: NextRequest, context: { params: Promise<Rou
 }
 
 export async function DELETE(_request: NextRequest, context: { params: Promise<RouteParams> }) {
+  const auth = await requireProductsAccess(_request);
+  if ('error' in auth) return auth.error;
+
   const params = await context.params;
-  const setId = parseId(params.setId);
+  const setId = parsePositiveInt(params.setId);
   if (!setId) {
     return NextResponse.json({ error: 'Invalid option set id' }, { status: 400 });
   }
 
-  const supabase = getSupabaseAdmin();
-
   try {
-    const { data: usageRows, error: usageError } = await supabase
+    const { data: usageRows, error: usageError } = await supabaseAdmin
       .from('product_option_set_links')
       .select('link_id')
       .eq('option_set_id', setId)
@@ -204,7 +197,7 @@ export async function DELETE(_request: NextRequest, context: { params: Promise<R
       return NextResponse.json({ error: 'Option set is attached to products and cannot be deleted' }, { status: 409 });
     }
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('option_sets')
       .delete()
       .eq('option_set_id', setId);

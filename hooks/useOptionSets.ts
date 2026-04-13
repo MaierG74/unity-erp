@@ -1,4 +1,5 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 
 export interface OptionSetValue {
   option_set_value_id: number;
@@ -38,7 +39,7 @@ export interface OptionSet {
 }
 
 export async function fetchOptionSets(): Promise<OptionSet[]> {
-  const res = await fetch('/api/option-sets', { cache: 'no-store' });
+  const res = await authorizedFetch('/api/option-sets', { cache: 'no-store' });
   if (!res.ok) {
     const message = await res.text();
     throw new Error(message || 'Failed to load option sets');
@@ -82,7 +83,7 @@ export interface ProductOptionSetLink {
 }
 
 export async function fetchProductOptionSetLinks(productId: number): Promise<ProductOptionSetLink[]> {
-  const res = await fetch(`/api/products/${productId}/option-sets`, { cache: 'no-store' });
+  const res = await authorizedFetch(`/api/products/${productId}/option-sets`, { cache: 'no-store' });
   if (!res.ok) {
     const message = await res.text();
     throw new Error(message || 'Failed to load product option sets');

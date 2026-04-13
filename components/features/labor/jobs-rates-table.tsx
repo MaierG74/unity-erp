@@ -796,6 +796,7 @@ export function JobsRatesTable() {
           queryClient.invalidateQueries({ queryKey: ['jobs'] });
           setIsAddJobOpen(false);
         }}
+        showAddAnother
       />
 
       {/* Delete confirmation */}

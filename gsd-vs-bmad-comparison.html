@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GSD vs BMAD Method — Comparison Explorer</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #1c2128;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --accent2: #f0883e;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --purple: #bc8cff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+  .header {
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .header h1 { font-size: 18px; font-weight: 600; }
+  .header .subtitle { color: var(--text-muted); font-size: 13px; }
+  .tabs {
+    display: flex;
+    gap: 4px;
+    padding: 12px 28px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    padding: 8px 16px;
+    font-size: 13px;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+    background: none;
+    border-top: none; border-left: none; border-right: none;
+    font-family: inherit;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .content { padding: 24px 28px; max-width: 1400px; margin: 0 auto; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* Side-by-side comparison */
+  .compare-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .card-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .card-header .logo {
+    width: 28px; height: 28px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 12px;
+  }
+  .logo-gsd { background: var(--accent); color: #000; }
+  .logo-bmad { background: var(--purple); color: #000; }
+  .card-header h2 { font-size: 15px; font-weight: 600; }
+  .card-header .stars { color: var(--yellow); font-size: 12px; margin-left: auto; }
+  .card-body { padding: 16px; }
+  .card-body p { color: var(--text-muted); font-size: 13px; margin-bottom: 12px; }
+
+  /* Stat rows */
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .stat-row:last-child { border-bottom: none; }
+  .stat-label { color: var(--text-muted); }
+  .stat-value { font-weight: 500; }
+
+  /* Rating bars */
+  .rating-section { margin-top: 20px; }
+  .rating-section h3 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;
+    color: var(--text-muted); margin-bottom: 12px;
+  }
+  .rating-row {
+    display: grid;
+    grid-template-columns: 140px 1fr 40px 1fr 40px;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 13px;
+  }
+  .rating-row .label { color: var(--text-muted); text-align: right; }
+  .bar-container {
+    height: 20px;
+    background: var(--surface2);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+  }
+  .bar-gsd {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 4px;
+    transition: width 0.4s ease;
+  }
+  .bar-bmad {
+    height: 100%;
+    background: var(--purple);
+    border-radius: 4px;
+    transition: width 0.4s ease;
+  }
+  .score { font-size: 12px; font-weight: 600; text-align: center; }
+
+  /* Workflow diagram */
+  .workflow {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin: 12px 0;
+  }
+  .wf-step {
+    padding: 6px 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .wf-arrow { color: var(--text-muted); font-size: 14px; }
+
+  /* Pros/Cons */
+  .pros-cons { margin-top: 12px; }
+  .pro, .con, .neutral {
+    padding: 6px 0;
+    font-size: 13px;
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+  }
+  .pro::before { content: '+'; color: var(--green); font-weight: 700; min-width: 14px; }
+  .con::before { content: '−'; color: var(--red); font-weight: 700; min-width: 14px; }
+  .neutral::before { content: '~'; color: var(--yellow); font-weight: 700; min-width: 14px; }
+
+  /* Community quotes */
+  .quote-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .quote-card .source {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .quote-card blockquote {
+    font-size: 13px;
+    color: var(--text);
+    font-style: italic;
+    padding-left: 12px;
+    border-left: 2px solid var(--border);
+  }
+  .quote-card .verdict {
+    margin-top: 8px;
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    display: inline-block;
+  }
+  .verdict-positive { background: rgba(63,185,80,0.15); color: var(--green); }
+  .verdict-mixed { background: rgba(210,153,34,0.15); color: var(--yellow); }
+  .verdict-negative { background: rgba(248,81,73,0.15); color: var(--red); }
+
+  /* Fit analysis */
+  .fit-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .fit-card h3 { font-size: 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .fit-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+  }
+  .fit-high { background: rgba(63,185,80,0.15); color: var(--green); }
+  .fit-medium { background: rgba(210,153,34,0.15); color: var(--yellow); }
+  .fit-low { background: rgba(248,81,73,0.15); color: var(--red); }
+
+  .detail-list { list-style: none; padding: 0; }
+  .detail-list li {
+    padding: 6px 0;
+    font-size: 13px;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+  }
+  .detail-list li:last-child { border-bottom: none; }
+  .detail-list li strong { color: var(--text); }
+
+  /* Prompt output */
+  .prompt-section {
+    margin-top: 32px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .prompt-header {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .prompt-header span { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .copy-btn {
+    padding: 4px 12px;
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .copy-btn:hover { opacity: 0.85; }
+  .prompt-body {
+    padding: 16px;
+    font-family: 'SF Mono', Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-muted);
+    white-space: pre-wrap;
+    min-height: 80px;
+  }
+
+  /* Filter controls */
+  .filters {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .filter-btn {
+    padding: 5px 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: 12px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
+  }
+  .filter-btn:hover { border-color: var(--text-muted); }
+  .filter-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .compare-grid { grid-template-columns: 1fr; }
+    .rating-row { grid-template-columns: 100px 1fr 30px 1fr 30px; font-size: 12px; }
+  }
+
+  /* Table */
+  .compare-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .compare-table th {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 2px solid var(--border);
+    color: var(--text-muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .compare-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .compare-table tr:last-child td { border-bottom: none; }
+  .compare-table .dim { color: var(--text-muted); font-weight: 500; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>GSD vs BMAD Method</h1>
+    <div class="subtitle">Spec-Driven Development frameworks for AI-assisted coding — evaluated for Unity ERP</div>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('overview')">Overview</button>
+  <button class="tab" onclick="switchTab('detailed')">Detailed Comparison</button>
+  <button class="tab" onclick="switchTab('community')">Community Feedback</button>
+  <button class="tab" onclick="switchTab('fit')">Fit for Unity ERP</button>
+</div>
+
+<div class="content">
+
+  <!-- OVERVIEW PANEL -->
+  <div id="panel-overview" class="panel active">
+    <div class="compare-grid">
+      <div class="card">
+        <div class="card-header">
+          <div class="logo logo-gsd">GSD</div>
+          <h2>Get Shit Done</h2>
+          <div class="stars">23k stars</div>
+        </div>
+        <div class="card-body">
+          <p>A lightweight meta-prompting and context engineering system by TACHES. Built for solo devs who want to describe requirements once and have them built reliably.</p>
+          <div class="stat-row"><span class="stat-label">Philosophy</span><span class="stat-value">Anti-ceremony, spec-driven</span></div>
+          <div class="stat-row"><span class="stat-label">Target</span><span class="stat-value">Solo devs / small teams</span></div>
+          <div class="stat-row"><span class="stat-label">Install</span><span class="stat-value">npx get-shit-done-cc@latest</span></div>
+          <div class="stat-row"><span class="stat-label">License</span><span class="stat-value">MIT</span></div>
+          <div class="stat-row"><span class="stat-label">Context Strategy</span><span class="stat-value">Fresh 200k per task</span></div>
+          <div class="stat-row"><span class="stat-label">Max Tasks/Plan</span><span class="stat-value">3 (atomic)</span></div>
+          <div class="stat-row"><span class="stat-label">Platforms</span><span class="stat-value">Claude Code, OpenCode, Gemini CLI, Codex, Cursor, Windsurf</span></div>
+
+          <h3 style="font-size:12px; color:var(--text-muted); margin-top:16px; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Workflow</h3>
+          <div class="workflow">
+            <span class="wf-step">Init Project</span><span class="wf-arrow">→</span>
+            <span class="wf-step">Discuss</span><span class="wf-arrow">→</span>
+            <span class="wf-step">Plan</span><span class="wf-arrow">→</span>
+            <span class="wf-step">Execute (waves)</span><span class="wf-arrow">→</span>
+            <span class="wf-step">Verify</span><span class="wf-arrow">→</span>
+            <span class="wf-step">Ship</span>
+          </div>
+
+          <div class="pros-cons">
+            <div class="pro">Fresh context per task prevents degradation</div>
+            <div class="pro">Wave-based parallel execution</div>
+            <div class="pro">Atomic git commits per task (bisectable)</div>
+            <div class="pro">Minimal ceremony — no sprints/story points</div>
+            <div class="pro">Quick mode for ad-hoc tasks</div>
+            <div class="con">High token consumption (fresh contexts)</div>
+            <div class="con">Newer project, less battle-tested</div>
+            <div class="neutral">Max 3 tasks per plan (forces decomposition)</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="logo logo-bmad">BM</div>
+          <h2>BMAD Method</h2>
+          <div class="stars">42.4k stars</div>
+        </div>
+        <div class="card-body">
+          <p>Agile AI-driven development framework with specialized agent personas (PM, Architect, Dev, Scrum Master). Emphasizes structured governance and artifact-driven workflows.</p>
+          <div class="stat-row"><span class="stat-label">Philosophy</span><span class="stat-value">Agile + AI personas</span></div>
+          <div class="stat-row"><span class="stat-label">Target</span><span class="stat-value">Teams / structured projects</span></div>
+          <div class="stat-row"><span class="stat-label">Install</span><span class="stat-value">npx bmad-method install</span></div>
+          <div class="stat-row"><span class="stat-label">License</span><span class="stat-value">MIT</span></div>
+          <div class="stat-row"><span class="stat-label">Context Strategy</span><span class="stat-value">Large prompt payloads (~31k tokens/run)</span></div>
+          <div class="stat-row"><span class="stat-label">Workflows</span><span class="stat-value">34+ across 4 phases</span></div>
+          <div class="stat-row"><span class="stat-label">Agent Personas</span><span class="stat-value">12+ specialized roles</span></div>
+
+          <h3 style="font-size:12px; color:var(--text-muted); margin-top:16px; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px;">Workflow</h3>
+          <div class="workflow">
+            <span class="wf-step">Analysis (PRD)</span><span class="wf-arrow">→</span>
+            <span class="wf-step">Planning (Stories)</span><span class="wf-arrow">→</span>
+            <span class="wf-step">Solutioning</span><span class="wf-arrow">→</span>
+            <span class="wf-step">Implementation</span>
+          </div>
+
+          <div class="pros-cons">
+            <div class="pro">Massive community (42k stars, 5k forks)</div>
+            <div class="pro">Comprehensive agent ecosystem</div>
+            <div class="pro">Module system (testing, game dev, creative)</div>
+            <div class="pro">Party mode (multi-agent collaboration)</div>
+            <div class="pro">Built-in help system</div>
+            <div class="con">Steep learning curve</div>
+            <div class="con">Heavy prompt payloads (~$847/mo reported)</div>
+            <div class="con">Agents can collaborate on wrong solutions</div>
+            <div class="con">Over-engineered for solo/small team work</div>
+            <div class="neutral">Requires comprehensive PRD before coding</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Rating comparison -->
+    <div class="rating-section" style="margin-top:28px;">
+      <h3>Head-to-Head Ratings (assessed for solo/small team context)</h3>
+      <div class="rating-row">
+        <span class="label">Simplicity</span>
+        <div class="bar-container"><div class="bar-gsd" style="width:85%"></div></div>
+        <span class="score" style="color:var(--accent)">8.5</span>
+        <div class="bar-container"><div class="bar-bmad" style="width:40%"></div></div>
+        <span class="score" style="color:var(--purple)">4.0</span>
+      </div>
+      <div class="rating-row">
+        <span class="label">Context Mgmt</span>
+        <div class="bar-container"><div class="bar-gsd" style="width:90%"></div></div>
+        <span class="score" style="color:var(--accent)">9.0</span>
+        <div class="bar-container"><div class="bar-bmad" style="width:50%"></div></div>
+        <span class="score" style="color:var(--purple)">5.0</span>
+      </div>
+      <div class="rating-row">
+        <span class="label">Solo Dev Fit</span>
+        <div class="bar-container"><div class="bar-gsd" style="width:90%"></div></div>
+        <span class="score" style="color:var(--accent)">9.0</span>
+        <div class="bar-container"><div class="bar-bmad" style="width:35%"></div></div>
+        <span class="score" style="color:var(--purple)">3.5</span>
+      </div>
+      <div class="rating-row">
+        <span class="label">Team Scaling</span>
+        <div class="bar-container"><div class="bar-gsd" style="width:40%"></div></div>
+        <span class="score" style="color:var(--accent)">4.0</span>
+        <div class="bar-container"><div class="bar-bmad" style="width:80%"></div></div>
+        <span class="score" style="color:var(--purple)">8.0</span>
+      </div>
+      <div class="rating-row">
+        <span class="label">Maturity</span>
+        <div class="bar-container"><div class="bar-gsd" style="width:60%"></div></div>
+        <span class="score" style="color:var(--accent)">6.0</span>
+        <div class="bar-container"><div class="bar-bmad" style="width:85%"></div></div>
+        <span class="score" style="color:var(--purple)">8.5</span>
+      </div>
+      <div class="rating-row">
+        <span class="label">Token Efficiency</span>
+        <div class="bar-container"><div class="bar-gsd" style="width:55%"></div></div>
+        <span class="score" style="color:var(--accent)">5.5</span>
+        <div class="bar-container"><div class="bar-bmad" style="width:35%"></div></div>
+        <span class="score" style="color:var(--purple)">3.5</span>
+      </div>
+      <div class="rating-row">
+        <span class="label">Git Integration</span>
+        <div class="bar-container"><div class="bar-gsd" style="width:90%"></div></div>
+        <span class="score" style="color:var(--accent)">9.0</span>
+        <div class="bar-container"><div class="bar-bmad" style="width:60%"></div></div>
+        <span class="score" style="color:var(--purple)">6.0</span>
+      </div>
+      <div class="rating-row">
+        <span class="label">Documentation</span>
+        <div class="bar-container"><div class="bar-gsd" style="width:65%"></div></div>
+        <span class="score" style="color:var(--accent)">6.5</span>
+        <div class="bar-container"><div class="bar-bmad" style="width:80%"></div></div>
+        <span class="score" style="color:var(--purple)">8.0</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- DETAILED PANEL -->
+  <div id="panel-detailed" class="panel">
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th style="width:180px">Dimension</th>
+          <th style="width:45%">GSD</th>
+          <th>BMAD</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="dim">Core Idea</td>
+          <td>Meta-prompting layer that combats context rot by spawning fresh sub-agents per task with clean 200k token windows</td>
+          <td>Agile framework with AI agent personas (PM, Architect, Dev, SM) that produce versioned artifacts governing development</td>
+        </tr>
+        <tr>
+          <td class="dim">Planning Model</td>
+          <td>Max 3 atomic tasks per plan. Discussion phase captures ambiguity before planning. Plans verified by checker agent before execution.</td>
+          <td>Full PRD → user stories → architecture sketch → implementation. Comprehensive upfront documentation required before coding starts.</td>
+        </tr>
+        <tr>
+          <td class="dim">Execution Model</td>
+          <td>Wave-based: independent plans run in parallel, dependent plans sequential. Each task gets fresh context. Atomic git commit per task.</td>
+          <td>Iterative: small stories with acceptance criteria. Multiple agents collaborate in session. Party mode for multi-agent work.</td>
+        </tr>
+        <tr>
+          <td class="dim">Context Strategy</td>
+          <td><strong>Fresh context per task.</strong> Each sub-agent starts with 200k clean tokens + only the plan/spec it needs. Prevents degradation.</td>
+          <td><strong>Shared context with large payloads.</strong> ~31k tokens per workflow run. Agents share context within session. Can degrade on long sessions.</td>
+        </tr>
+        <tr>
+          <td class="dim">Verification</td>
+          <td>Dedicated verify phase with manual acceptance testing. Failures auto-generate fix plans. Git bisect supported via atomic commits.</td>
+          <td>Acceptance criteria per story. PR reviews with AI agents. Multi-layered review process.</td>
+        </tr>
+        <tr>
+          <td class="dim">Token Cost</td>
+          <td>High per-task (fresh 200k windows), but claimed lower cumulative cost vs. failed retry loops. No published cost figures.</td>
+          <td>~31k tokens/workflow run. Reported $847/mo for one early adopter. Optimizations underway in v6.x.</td>
+        </tr>
+        <tr>
+          <td class="dim">File Structure</td>
+          <td><code>.planning/</code> with research/, quick/, threads/, todos/, seeds/. Also PROJECT.md, REQUIREMENTS.md, ROADMAP.md, STATE.md</td>
+          <td>Generates PRDs, architecture docs, user stories, control manifests. Agent definitions in project config.</td>
+        </tr>
+        <tr>
+          <td class="dim">Learning Curve</td>
+          <td>Low. 6 main commands. Linear workflow. Quick mode for simple tasks.</td>
+          <td>High. 34+ workflows, 12+ agent personas, module ecosystem. Requires understanding agile concepts.</td>
+        </tr>
+        <tr>
+          <td class="dim">Customization</td>
+          <td>Minimal — opinionated workflow. Research/plan/execute phases can be shortened for clear-architecture projects.</td>
+          <td>Extensive — BMad Builder for custom agents/workflows, module system, party mode configuration.</td>
+        </tr>
+        <tr>
+          <td class="dim">Platform Support</td>
+          <td>Claude Code, OpenCode, Gemini CLI, Codex, Cursor, Windsurf, Antigravity</td>
+          <td>Primarily Claude Code. Cross-platform agent support in v6.2+.</td>
+        </tr>
+        <tr>
+          <td class="dim">Conflict with Existing Setup</td>
+          <td>Adds .planning/ dir + markdown files. Could overlap with existing CLAUDE.md conventions and custom skills.</td>
+          <td>More invasive — installs agent personas, workflows, and config that may conflict with existing CLAUDE.md, skills, and hooks.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- COMMUNITY PANEL -->
+  <div id="panel-community" class="panel">
+    <div class="filters">
+      <button class="filter-btn active" onclick="filterQuotes('all')">All</button>
+      <button class="filter-btn" onclick="filterQuotes('gsd')">GSD Only</button>
+      <button class="filter-btn" onclick="filterQuotes('bmad')">BMAD Only</button>
+      <button class="filter-btn" onclick="filterQuotes('positive')">Positive</button>
+      <button class="filter-btn" onclick="filterQuotes('mixed')">Mixed</button>
+      <button class="filter-btn" onclick="filterQuotes('negative')">Concerns</button>
+    </div>
+
+    <div id="quotes-container">
+      <div class="quote-card" data-framework="gsd" data-sentiment="positive">
+        <div class="source">Esteban Torres — Blog Post (Feb 2026)</div>
+        <blockquote>Built a complete BlogWatcher UI in a single session. Functionally correct initial output requiring only minor stylistic tweaks. The planning phase proved most valuable.</blockquote>
+        <span class="verdict verdict-positive">Positive</span>
+      </div>
+
+      <div class="quote-card" data-framework="gsd" data-sentiment="mixed">
+        <div class="source">Esteban Torres — on Token Cost</div>
+        <blockquote>Token expenditure is no joke, but it likely prevents the higher cumulative token cost and wasted time on multiple failed attempts associated with less structured methods.</blockquote>
+        <span class="verdict verdict-mixed">Mixed — cost trade-off</span>
+      </div>
+
+      <div class="quote-card" data-framework="gsd" data-sentiment="positive">
+        <div class="source">The New Stack — Technical Analysis</div>
+        <blockquote>GSD spawns fresh Claude instances for each task. Each sub-agent gets a clean 200,000 token context window, preventing the quality degradation that plagues long sessions.</blockquote>
+        <span class="verdict verdict-positive">Positive</span>
+      </div>
+
+      <div class="quote-card" data-framework="gsd" data-sentiment="positive">
+        <div class="source">TACHES (GSD Creator) — on Motivation</div>
+        <blockquote>Created as a reaction to the perceived complexity of BMAD. I'm a solo developer who doesn't write code — Claude does — but other SDD tools complicate everything with sprint ceremonies and Jira workflows.</blockquote>
+        <span class="verdict verdict-positive">Positive — clear positioning</span>
+      </div>
+
+      <div class="quote-card" data-framework="bmad" data-sentiment="positive">
+        <div class="source">DEV Community — Framework Review</div>
+        <blockquote>BMAD puts words to a frustration a lot of us feel with AI-assisted coding — identifying structure, not model capability, as the actual limitation.</blockquote>
+        <span class="verdict verdict-positive">Positive</span>
+      </div>
+
+      <div class="quote-card" data-framework="bmad" data-sentiment="positive">
+        <div class="source">Benny Cheung — Applied BMAD (Enterprise Context)</div>
+        <blockquote>Successfully used for legacy system modernization — enabled teams to provably trace new microservices back to specific, previously opaque business logic. Enabled continuous compliance for SOC 2 and HIPAA.</blockquote>
+        <span class="verdict verdict-positive">Positive — enterprise use case</span>
+      </div>
+
+      <div class="quote-card" data-framework="bmad" data-sentiment="negative">
+        <div class="source">Marco Mornati — 1-Day BMAD Experiment (2026)</div>
+        <blockquote>Spent more than nine hours only to encounter a nonfunctional authentication system. Agents marked the story as complete despite the feature being broken.</blockquote>
+        <span class="verdict verdict-negative">Negative — false completion</span>
+      </div>
+
+      <div class="quote-card" data-framework="bmad" data-sentiment="mixed">
+        <div class="source">Marius Sabaliauskas — Comparative Analysis</div>
+        <blockquote>BMAD works best as a planning accelerator and consistency engine, rather than a fully automated coding tool. The framework shines in structured environments but adds overhead for simple projects.</blockquote>
+        <span class="verdict verdict-mixed">Mixed — context-dependent</span>
+      </div>
+
+      <div class="quote-card" data-framework="bmad" data-sentiment="negative">
+        <div class="source">Community Reports — Token Costs</div>
+        <blockquote>Earlier versions averaged approximately 31,667 tokens per workflow run. Monthly API costs reached $847 for one early adopter. Optimizations ongoing in v6.x.</blockquote>
+        <span class="verdict verdict-negative">Concern — cost</span>
+      </div>
+
+      <div class="quote-card" data-framework="gsd" data-sentiment="positive">
+        <div class="source">Threads — Ecosystem Commentary</div>
+        <blockquote>SpecKit, BMAD, OpenSpec, TaskMaster, Get Shit Done... it reminds me of the explosion in JavaScript frameworks a decade ago. GSD stands out for opinionated simplicity.</blockquote>
+        <span class="verdict verdict-positive">Positive — differentiation</span>
+      </div>
+
+      <div class="quote-card" data-framework="bmad" data-sentiment="positive">
+        <div class="source">Community — Maturity & Scale</div>
+        <blockquote>42.4k stars, 5.1k forks, 1,736 commits, version 6.2.2. The module ecosystem (Test Architect, Game Dev Studio, Creative Intelligence Suite) shows real ambition and breadth.</blockquote>
+        <span class="verdict verdict-positive">Positive — ecosystem</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- FIT FOR UNITY ERP PANEL -->
+  <div id="panel-fit" class="panel">
+    <div class="fit-card">
+      <h3>Your Current Setup <span class="fit-badge" style="background:rgba(88,166,255,0.15); color:var(--accent);">Reference</span></h3>
+      <ul class="detail-list">
+        <li><strong>Workflow:</strong> Custom CLAUDE.md + skills system (superpowers, tailwind-v4, unity-erp-tenancy, etc.)</li>
+        <li><strong>Planning:</strong> superpowers:writing-plans + superpowers:brainstorming skills</li>
+        <li><strong>Execution:</strong> superpowers:executing-plans + superpowers:dispatching-parallel-agents</li>
+        <li><strong>Review:</strong> superpowers:requesting-code-review + /simplify</li>
+        <li><strong>Debugging:</strong> superpowers:systematic-debugging + superpowers:test-driven-development</li>
+        <li><strong>Memory:</strong> Auto-memory system with typed memories</li>
+        <li><strong>Git:</strong> Branch-per-task with codex/ prefix convention</li>
+        <li><strong>Verification:</strong> Chrome MCP + Supabase MCP + lint/typecheck</li>
+      </ul>
+    </div>
+
+    <div class="fit-card">
+      <h3>GSD Fit Analysis <span class="fit-badge fit-medium">Medium Fit</span></h3>
+      <ul class="detail-list">
+        <li><strong>Overlap:</strong> GSD's discuss→plan→execute→verify maps closely to your brainstorm→write-plan→execute-plan→verify flow</li>
+        <li><strong>Conflict:</strong> GSD creates .planning/ dir with its own PROJECT.md, REQUIREMENTS.md, STATE.md — would overlap with your docs/ structure and memory system</li>
+        <li><strong>Value-add:</strong> Wave-based parallel execution with fresh contexts is GSD's killer feature — your current parallel agents are similar but less formalized</li>
+        <li><strong>Value-add:</strong> Atomic git commits per task would complement your codex/ branch convention</li>
+        <li><strong>Risk:</strong> GSD's opinionated workflow may conflict with your custom skills — two systems trying to orchestrate the same work</li>
+        <li><strong>Recommendation:</strong> Cherry-pick the wave execution + fresh context pattern rather than adopting the full framework. Your existing setup already covers 70% of what GSD provides.</li>
+      </ul>
+    </div>
+
+    <div class="fit-card">
+      <h3>BMAD Fit Analysis <span class="fit-badge fit-low">Low Fit</span></h3>
+      <ul class="detail-list">
+        <li><strong>Overlap:</strong> BMAD's agent personas duplicate your skills system (brainstorming, planning, code-review, debugging all have dedicated skills)</li>
+        <li><strong>Conflict:</strong> BMAD installs its own agent definitions, workflows, and config — would heavily conflict with your CLAUDE.md, skills, and hooks setup</li>
+        <li><strong>Overkill:</strong> 34+ workflows and 12+ agent personas is massive overhead for a solo/small-team ERP project</li>
+        <li><strong>Cost:</strong> ~31k tokens per workflow run on top of your existing context usage — reported $847/mo by early adopters</li>
+        <li><strong>Risk:</strong> Agents marking work as complete when it isn't (documented issue) conflicts with your verification-first culture</li>
+        <li><strong>Consideration:</strong> BMAD's Test Architect module could be interesting for adding structured test strategies, but the full framework is too heavy</li>
+        <li><strong>Recommendation:</strong> Not recommended for Unity ERP. Your custom setup is already more tailored and lighter weight.</li>
+      </ul>
+    </div>
+
+    <div class="fit-card">
+      <h3>Alternative: Hybrid Approach <span class="fit-badge fit-high">Recommended</span></h3>
+      <ul class="detail-list">
+        <li><strong>Strategy:</strong> Don't adopt either framework wholesale. Instead, steal the best ideas and encode them into your existing skills.</li>
+        <li><strong>From GSD:</strong> Wave-based execution with fresh contexts — formalize your parallel agent dispatching to always use clean context windows</li>
+        <li><strong>From GSD:</strong> Max 3 tasks per plan — enforce atomic task decomposition in your writing-plans skill</li>
+        <li><strong>From GSD:</strong> Atomic git commits per task — already close to your practice, just make it a hard rule</li>
+        <li><strong>From BMAD:</strong> Acceptance criteria per story — add explicit "done when" criteria to your plan format</li>
+        <li><strong>From BMAD:</strong> Structured research phase — your brainstorming skill could benefit from parallel research agents (like GSD's 4 researchers)</li>
+        <li><strong>Result:</strong> A lightweight, Unity-ERP-specific system that gets the benefits without the conflicts or overhead</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- PROMPT OUTPUT -->
+  <div class="prompt-section">
+    <div class="prompt-header">
+      <span>Decision Prompt — copy back to Claude</span>
+      <button class="copy-btn" onclick="copyPrompt()">Copy</button>
+    </div>
+    <div class="prompt-body" id="prompt-output"></div>
+  </div>
+</div>
+
+<script>
+  // Tab switching
+  function switchTab(name) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.querySelector(`[onclick="switchTab('${name}')"]`).classList.add('active');
+    document.getElementById(`panel-${name}`).classList.add('active');
+    updatePrompt();
+  }
+
+  // Quote filtering
+  function filterQuotes(filter) {
+    document.querySelectorAll('.filters .filter-btn').forEach(b => b.classList.remove('active'));
+    event.target.classList.add('active');
+    document.querySelectorAll('.quote-card').forEach(card => {
+      const fw = card.dataset.framework;
+      const sent = card.dataset.sentiment;
+      let show = filter === 'all';
+      if (filter === 'gsd') show = fw === 'gsd';
+      if (filter === 'bmad') show = fw === 'bmad';
+      if (filter === 'positive') show = sent === 'positive';
+      if (filter === 'mixed') show = sent === 'mixed';
+      if (filter === 'negative') show = sent === 'negative';
+      card.style.display = show ? 'block' : 'none';
+    });
+  }
+
+  // Prompt generation
+  function updatePrompt() {
+    const activeTab = document.querySelector('.tab.active').textContent.trim();
+    let prompt = '';
+    if (activeTab === 'Fit for Unity ERP') {
+      prompt = `After reviewing GSD and BMAD Method for Unity ERP:
+
+Neither framework should be adopted wholesale — our existing skills system (brainstorming, writing-plans, executing-plans, parallel agents, code review) already covers most of what they offer, and both would create conflicts with our CLAUDE.md + skills setup.
+
+Recommended hybrid approach — steal the best ideas:
+1. From GSD: Formalize wave-based execution with fresh 200k contexts in our dispatching-parallel-agents skill
+2. From GSD: Enforce max 3 atomic tasks per plan in our writing-plans skill
+3. From GSD: Make atomic git commits per task a hard rule (one commit = one task)
+4. From BMAD: Add explicit acceptance criteria ("done when...") to our plan format
+5. From BMAD: Add parallel research agents to our brainstorming skill
+
+Please update our superpowers skills to incorporate these patterns.`;
+    } else {
+      prompt = `I've reviewed GSD (github.com/gsd-build/get-shit-done) and BMAD Method (github.com/bmad-code-org/BMAD-METHOD) for potential use in our project.
+
+Key findings:
+- GSD: Lightweight, solo-dev focused, fresh contexts per task, wave-based parallel execution, 23k stars
+- BMAD: Heavy agile framework, 12+ agent personas, 34+ workflows, 42.4k stars, steep learning curve
+- Community reports high token costs for both, with BMAD at ~$847/mo for one adopter
+- BMAD has documented issues with agents falsely marking work as complete
+- GSD's context management (fresh 200k per task) is its standout feature
+- Our existing skills setup already covers ~70% of what both frameworks provide
+
+I'd like to discuss: should we adopt one, cherry-pick ideas from both, or continue with our current setup?`;
+    }
+    document.getElementById('prompt-output').textContent = prompt;
+  }
+
+  function copyPrompt() {
+    const text = document.getElementById('prompt-output').textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      const btn = document.querySelector('.copy-btn');
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+    });
+  }
+
+  // Init
+  updatePrompt();
+</script>
+
+</body>
+</html>

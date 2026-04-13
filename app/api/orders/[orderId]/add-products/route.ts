@@ -2,33 +2,28 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireModuleAccess } from '@/lib/api/module-access';
 import { MODULE_KEYS } from '@/lib/modules/keys';
 import { supabaseAdmin } from '@/lib/supabase-admin';
+import { buildBomSnapshot } from '@/lib/orders/build-bom-snapshot';
+import { buildCutlistSnapshot } from '@/lib/orders/build-cutlist-snapshot';
+import { markCuttingPlanStale } from '@/lib/orders/cutting-plan-utils';
+
+type Substitution = {
+  bom_id: number;
+  component_id: number;
+  supplier_component_id?: number | null;
+  note?: string;
+};
 
 type OrderProductInput = {
   product_id?: number | string;
   quantity?: number | string;
   unit_price?: number | string;
+  substitutions?: Substitution[];
 };
 
 function parseOrderId(raw: string): number | null {
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isFinite(parsed) || Number.isNaN(parsed) || parsed <= 0) return null;
   return parsed;
-}
-
-function normalizeOrderProducts(products: unknown[], orderId: number, orgId: string) {
-  return products.map((detail) => {
-    const line = (detail ?? {}) as OrderProductInput;
-    const productId = Number(line.product_id);
-    const quantity = Number(line.quantity);
-    const unitPrice = Number(line.unit_price);
-    return {
-      order_id: orderId,
-      org_id: orgId,
-      product_id: Number.isFinite(productId) ? productId : null,
-      quantity: Number.isFinite(quantity) ? quantity : 0,
-      unit_price: Number.isFinite(unitPrice) ? unitPrice : 0,
-    };
-  });
 }
 
 async function requireOrdersAccess(request: NextRequest) {
@@ -68,7 +63,7 @@ export async function POST(
     const body = (await request.json()) as { products?: unknown[] };
     const { products } = body;
 
-    console.log('[API] Adding products to order:', { orderId, products });
+    console.log('[API] Adding products to order:', { orderId, productCount: Array.isArray(products) ? products.length : 0 });
 
     if (!orderId || !Array.isArray(products) || products.length === 0) {
       return NextResponse.json(
@@ -99,12 +94,103 @@ export async function POST(
       );
     }
 
-    const normalizedProducts = normalizeOrderProducts(products, orderId, auth.orgId);
+    // Build order_details rows with snapshots
+    const insertRows: {
+      order_id: number;
+      org_id: string;
+      product_id: number | null;
+      quantity: number;
+      unit_price: number;
+      bom_snapshot: unknown;
+      cutlist_snapshot: unknown;
+    }[] = [];
+
+    for (const detail of products) {
+      const line = (detail ?? {}) as OrderProductInput;
+      const productId = Number(line.product_id);
+      const quantity = Number(line.quantity);
+      const unitPrice = Number(line.unit_price);
+      const substitutions: Substitution[] = Array.isArray(line.substitutions)
+        ? line.substitutions
+        : [];
+
+      const normalizedProductId = Number.isFinite(productId) ? productId : null;
+      const normalizedQuantity = Number.isFinite(quantity) ? quantity : 0;
+      const normalizedUnitPrice = Number.isFinite(unitPrice) ? unitPrice : 0;
+
+      let bomSnapshot: unknown = null;
+      let cutlistSnapshot: unknown = null;
+
+      if (normalizedProductId) {
+        try {
+          // Build cutlist snapshot first (we need groupMap for BOM snapshot)
+          // Derive materialOverrides from substitutions + BOM is_cutlist_item flags
+          const materialOverrides = new Map<number, { component_id: number; name: string }>();
+
+          if (substitutions.length > 0) {
+            // Load BOM to identify cutlist items that were substituted
+            const { data: bomRows } = await supabaseAdmin
+              .from('billofmaterials')
+              .select('bom_id, component_id, is_cutlist_item')
+              .eq('product_id', normalizedProductId);
+
+            for (const bomRow of bomRows ?? []) {
+              if (!bomRow.is_cutlist_item) continue;
+              const sub = substitutions.find(s => s.bom_id === bomRow.bom_id);
+              if (sub && sub.component_id !== bomRow.component_id) {
+                // Load the substitute component name
+                const { data: comp } = await supabaseAdmin
+                  .from('components')
+                  .select('component_id, internal_code, description')
+                  .eq('component_id', sub.component_id)
+                  .eq('org_id', auth.orgId)
+                  .maybeSingle();
+
+                if (comp) {
+                  materialOverrides.set(bomRow.component_id!, {
+                    component_id: sub.component_id,
+                    name: comp.description || comp.internal_code || String(sub.component_id),
+                  });
+                }
+              }
+            }
+          }
+
+          const { snapshot: cutlistSnap, groupMap } = await buildCutlistSnapshot(
+            normalizedProductId,
+            auth.orgId,
+            materialOverrides
+          );
+          cutlistSnapshot = cutlistSnap;
+
+          const bomSnap = await buildBomSnapshot(
+            normalizedProductId,
+            auth.orgId,
+            substitutions,
+            groupMap
+          );
+          bomSnapshot = bomSnap.length > 0 ? bomSnap : null;
+        } catch (snapshotErr) {
+          console.error(`[API] Error building snapshots for product ${normalizedProductId}:`, snapshotErr);
+          // Continue without snapshots rather than failing the entire request
+        }
+      }
+
+      insertRows.push({
+        order_id: orderId,
+        org_id: auth.orgId,
+        product_id: normalizedProductId,
+        quantity: normalizedQuantity,
+        unit_price: normalizedUnitPrice,
+        bom_snapshot: bomSnapshot,
+        cutlist_snapshot: cutlistSnapshot,
+      });
+    }
 
     // Insert products into order_details
     const { data: insertedDetails, error: insertError } = await supabaseAdmin
       .from('order_details')
-      .insert(normalizedProducts)
+      .insert(insertRows as any)
       .select();
 
     if (insertError) {
@@ -115,8 +201,11 @@ export async function POST(
       );
     }
 
+    // Mark cutting plan stale since products were added
+    await markCuttingPlanStale(orderId, supabaseAdmin);
+
     // Calculate total increase
-    const totalIncrease = normalizedProducts.reduce(
+    const totalIncrease = insertRows.reduce(
       (sum, detail) => sum + detail.unit_price * detail.quantity,
       0
     );
@@ -131,23 +220,20 @@ export async function POST(
 
     if (orderError) {
       console.error('[API] Error fetching order total:', orderError);
-      // Continue anyway since products were added
     }
 
     const currentTotal = orderData?.total_amount || 0;
     const newTotal = parseFloat(currentTotal) + totalIncrease;
 
     // Update order total
-    const { data: updateData, error: updateError } = await supabaseAdmin
+    const { error: updateError } = await supabaseAdmin
       .from('orders')
       .update({ total_amount: newTotal })
       .eq('order_id', orderId)
-      .eq('org_id', auth.orgId)
-      .select();
+      .eq('org_id', auth.orgId);
 
     if (updateError) {
       console.error('[API] Error updating order total:', updateError);
-      // Continue anyway since products were added
     }
 
     return NextResponse.json({
@@ -162,4 +248,4 @@ export async function POST(
       { status: 500 }
     );
   }
-} 
+}

@@ -10,13 +10,19 @@ This repository is being actively migrated to **multi-tenant** (organization/ten
 
 ## Branch Workflow
 - `main` is release-only. Do not use it as the default branch for ongoing feature work.
-- Use a dedicated short-lived branch for each task.
-- If local work, cloud Codex, and cloud Claude are running at the same time, each must use a different branch.
+- `codex/integration` is the shared working branch. It holds approved but not-yet-released work.
+- Create each new task branch from `codex/integration` unless the user explicitly asks for a different base.
+- Use a dedicated short-lived branch for each meaningful task or session, not for every single message.
+- If local work, cloud Codex, and cloud Claude are running at the same time, each must use a different task branch.
+- If multiple task branches need to be tested locally at the same time, use separate git worktrees (one worktree/folder per branch, one dev server per worktree).
 - Branch names should use the `codex/` prefix and clearly describe the worker and task, for example:
+  - `codex/integration`
   - `codex/local-purchasing-fix`
   - `codex/cloud-codex-assistant-routing`
   - `codex/cloud-claude-docs-purchasing`
-- Treat anything going to `main` as a release slice: only move reviewed, production-safe changes.
+- Review task branches against `codex/integration`, not against chat history. Review scope is git-based.
+- Merge approved task branches back into `codex/integration`.
+- Treat anything going to `main` as a release slice from `codex/integration`: only move reviewed, production-safe changes.
 
 ## Documentation Update Rules
 - Always update the canonical doc for the feature or domain you changed.

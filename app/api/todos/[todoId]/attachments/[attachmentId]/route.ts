@@ -107,6 +107,10 @@ export async function GET(
       );
     }
 
+    if (request.nextUrl.searchParams.get('download') === '1') {
+      return NextResponse.redirect(data.signedUrl);
+    }
+
     return NextResponse.json({ url: data.signedUrl });
   } catch (error) {
     console.error('Error getting attachment URL:', error);

@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { getRouteClient } from '@/lib/supabase-route';
 import { TODO_PRIORITIES, TODO_STATUSES, fetchTodo, fetchTodoActivities, fetchTodoComments, fetchTodoAttachments, type TodoItem } from '@/lib/db/todos';
+import { TODO_CONTEXT_ID_PATTERN, getTodoContextIdForStorage } from '@/lib/todos/context-links';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +20,12 @@ const updateSchema = z.object({
   assignedTo: z.string().uuid().optional(),
   entityId: z.string().uuid().nullable().optional(),
   contextType: z.string().max(64).nullable().optional(),
-  contextId: z.string().uuid().nullable().optional(),
+  contextId: z
+    .string()
+    .trim()
+    .regex(TODO_CONTEXT_ID_PATTERN, 'Context id must be a UUID or numeric record id')
+    .nullable()
+    .optional(),
   contextPath: z.string().max(255).nullable().optional(),
   contextSnapshot: z.record(z.any()).nullable().optional(),
   watchers: z.array(z.string().uuid()).optional(),
@@ -90,6 +96,7 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ todoI
     const activityEntries: Array<{ event_type: string; payload?: Record<string, unknown> | null }> = [];
 
     const payload = parsedBody.data;
+    const storedContextId = getTodoContextIdForStorage(payload.contextId);
 
     if (payload.title && payload.title !== existing.title) {
       updates.title = payload.title;
@@ -144,8 +151,8 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ todoI
       updates.context_type = payload.contextType ?? null;
     }
 
-    if (payload.contextId !== undefined && payload.contextId !== existing.contextId) {
-      updates.context_id = payload.contextId ?? null;
+    if (payload.contextId !== undefined && storedContextId !== existing.contextId) {
+      updates.context_id = storedContextId;
     }
 
     if (payload.contextPath !== undefined && payload.contextPath !== existing.contextPath) {

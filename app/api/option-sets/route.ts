@@ -1,20 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { requireProductsAccess } from '@/lib/api/products-access';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    throw new Error('Supabase environment variables are not configured');
-  }
-  return createClient(url, key);
-}
-
-export async function GET() {
-  const supabase = getSupabaseAdmin();
+export async function GET(request: NextRequest) {
+  const auth = await requireProductsAccess(request);
+  if ('error' in auth) return auth.error;
 
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('option_sets')
       .select(`
         option_set_id,
@@ -98,6 +91,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = await requireProductsAccess(request);
+  if ('error' in auth) return auth.error;
+
   const body = await request.json().catch(() => null);
   if (!body || typeof body !== 'object') {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
@@ -114,10 +110,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Option set name is required' }, { status: 400 });
   }
 
-  const supabase = getSupabaseAdmin();
-
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('option_sets')
       .insert({ code, name, description })
       .select('*')

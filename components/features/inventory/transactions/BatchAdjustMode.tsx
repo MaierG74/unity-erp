@@ -76,7 +76,8 @@ export function BatchAdjustMode({ entries, onApplyAll, onCancel }: Props) {
     return entries.filter((e) => {
       const counted = countedValues.get(e.componentId);
       if (counted === undefined || counted === '') return false;
-      return Number(counted) !== e.systemStock;
+      const num = Number(counted);
+      return Number.isFinite(num) && num >= 0 && num !== e.systemStock;
     }).map((e) => {
       const counted = Number(countedValues.get(e.componentId));
       return {

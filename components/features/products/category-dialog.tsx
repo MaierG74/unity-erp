@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog"
 import { useToast } from "@/components/ui/use-toast"
 import { supabase } from "@/lib/supabase"
+import { authorizedFetch } from "@/lib/client/auth-fetch"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 
@@ -23,6 +24,7 @@ interface CategoryDialogProps {
   trigger?: React.ReactNode
   existingCategories: { product_cat_id: number; categoryname: string }[]
   onCategoriesChange?: () => void
+  onAddCategoryIds?: (categoryIds: number[]) => Promise<void>
   /** When provided, skips database insert and returns selected categories directly (for new product creation) */
   onSelectCategories?: (categories: { product_cat_id: number; categoryname: string }[]) => void
 }
@@ -32,6 +34,7 @@ export function CategoryDialog({
   trigger,
   existingCategories,
   onCategoriesChange,
+  onAddCategoryIds,
   onSelectCategories
 }: CategoryDialogProps) {
   const [dialogOpen, setDialogOpen] = React.useState(false)
@@ -103,16 +106,18 @@ export function CategoryDialog({
     }
 
     try {
-      const assignments = selectedCategories.map(categoryId => ({
-        product_id: productId,
-        product_cat_id: categoryId,
-      }))
-
-      const { error } = await supabase
-        .from("product_category_assignments")
-        .insert(assignments)
-
-      if (error) throw error
+      if (onAddCategoryIds) {
+        await onAddCategoryIds(selectedCategories)
+      } else {
+        const response = await authorizedFetch(`/api/products/${productId}/categories`, {
+          method: 'POST',
+          body: JSON.stringify({ category_ids: selectedCategories }),
+        })
+        const json = await response.json().catch(() => null)
+        if (!response.ok) {
+          throw new Error(json?.error || 'Failed to add categories')
+        }
+      }
 
       toast({
         title: "Success",

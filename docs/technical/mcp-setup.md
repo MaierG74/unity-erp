@@ -59,6 +59,25 @@ Both files should contain the following configuration:
 }
 ```
 
+## When to Use Which Browser MCP
+
+We run two browser MCPs. Pick the right one for the job:
+
+| Task | Use |
+|---|---|
+| **UI verification** (does the page render correctly?) | `claude-in-chrome` — `read_page` gives structured content |
+| **Visual element search** ("find the save button") | `claude-in-chrome` — `find` locates elements visually |
+| **GIF recording** of a workflow | `claude-in-chrome` — `gif_creator` |
+| **Performance profiling** (slow page, LCP, traces) | `chrome-devtools` — `performance_start_trace` + `performance_analyze_insight` |
+| **Lighthouse audit** (perf, a11y, best practices) | `chrome-devtools` — `lighthouse_audit` |
+| **Network debugging** (API responses, CORS, status codes) | `chrome-devtools` — `list_network_requests` + `get_network_request` |
+| **Memory leak investigation** | `chrome-devtools` — `take_memory_snapshot` |
+| **Form filling & clicks** | Either works — `chrome-devtools` is more reliable for complex forms |
+| **Console log inspection** | Either works — both have `list_console_messages` |
+| **Screenshots** | Either works — `chrome-devtools` `take_screenshot` or `claude-in-chrome` `computer` |
+
+**Key architectural difference:** `chrome-devtools` uses Puppeteer via Chrome DevTools Protocol (launches its own Chrome instance). `claude-in-chrome` is a browser extension injected into your existing Chrome. They don't share sessions — if you log in via one, the other won't see it.
+
 ## Chrome DevTools Details
 
 - Launches a visible Chrome window (no `--headless` flag)

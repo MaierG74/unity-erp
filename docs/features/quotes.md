@@ -92,6 +92,7 @@ Notes:
 
 ## Email / Preview / Download Consistency
 - All three actions use the same `QuotePDFDocument`, so layout changes apply everywhere.
+- The protected quote email send action must call `/api/quotes/[id]/send-email` via the shared authenticated fetch helper so the Supabase bearer token is forwarded explicitly; relying on request cookies alone can surface intermittent `Missing Supabase access token` failures.
 
 ## Pricing Behavior
 - Costing cluster lines remain the internal cost basis for a priced quote item.

@@ -28,7 +28,15 @@ export async function getAccessToken(): Promise<string> {
   pendingTokenPromise = (async () => {
     const { data, error } = await supabase.auth.getSession();
     if (error) throw error;
-    const token = data?.session?.access_token;
+    let token = data?.session?.access_token;
+
+    // If no session in memory, force a refresh before giving up
+    if (!token) {
+      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+      if (refreshError) throw refreshError;
+      token = refreshData?.session?.access_token;
+    }
+
     if (!token) {
       const err = new Error('Missing Supabase access token');
       (err as Error & { code?: string }).code = 'NO_TOKEN';

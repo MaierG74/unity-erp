@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { requireModuleAccess } from '@/lib/api/module-access';
-import { MODULE_KEYS } from '@/lib/modules/keys';
+import { parsePositiveInt, requireProductsAccess } from '@/lib/api/products-access';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
 type RouteParams = { productId: string };
@@ -23,39 +22,10 @@ type AddFgResponse = {
   };
 };
 
-function parseProductId(id: string | undefined): number | null {
-  const n = Number(id);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
 function parseLocation(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
-}
-
-async function requireProductsAccess(request: NextRequest) {
-  const access = await requireModuleAccess(request, MODULE_KEYS.PRODUCTS_BOM, {
-    forbiddenMessage: 'Products module access is disabled for your organization',
-  });
-  if ('error' in access) {
-    return { error: access.error };
-  }
-
-  if (!access.orgId) {
-    return {
-      error: NextResponse.json(
-        {
-          error: 'Organization context is required for products access',
-          reason: 'missing_org_context',
-          module_key: access.moduleKey,
-        },
-        { status: 403 }
-      ),
-    };
-  }
-
-  return { orgId: access.orgId };
 }
 
 export async function POST(req: NextRequest, context: { params: Promise<RouteParams> }) {
@@ -63,7 +33,7 @@ export async function POST(req: NextRequest, context: { params: Promise<RoutePar
   if ('error' in auth) return auth.error;
 
   const { productId: productIdParam } = await context.params;
-  const productId = parseProductId(productIdParam);
+  const productId = parsePositiveInt(productIdParam);
   if (!productId) {
     return NextResponse.json({ error: 'Invalid product ID' }, { status: 400 });
   }
@@ -101,12 +71,13 @@ export async function POST(req: NextRequest, context: { params: Promise<RoutePar
 
     let autoConsume = false;
     try {
-      const { data: settingsRow } = await supabaseAdmin
+      const { data: settingsRows } = await supabaseAdmin
         .from('quote_company_settings')
         .select('fg_auto_consume_on_add')
-        .eq('setting_id', 1)
-        .single();
-      autoConsume = Boolean(settingsRow?.fg_auto_consume_on_add);
+        .eq('org_id', auth.orgId)
+        .order('setting_id', { ascending: true })
+        .limit(1);
+      autoConsume = Boolean(settingsRows?.[0]?.fg_auto_consume_on_add);
     } catch (_err) {
       autoConsume = false;
     }
