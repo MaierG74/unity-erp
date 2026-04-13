@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import {
   Dialog,
   DialogContent,
@@ -115,9 +116,8 @@ export function AddOverheadDialog({
         payload.override_value = parseFloat(overrideValue);
       }
 
-      const res = await fetch(`/api/products/${productId}/overhead`, {
+      const res = await authorizedFetch(`/api/products/${productId}/overhead`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 

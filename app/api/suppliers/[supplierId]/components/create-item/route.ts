@@ -248,7 +248,7 @@ export async function POST(
     const { error: inventoryError } = await auth.supabase.from('inventory').insert({
       org_id: auth.orgId,
       component_id: createdComponentId,
-      quantity_on_hand: quantityOnHand,
+      quantity_on_hand: 0,
       location: location || null,
       reorder_level: reorderLevel,
     });
@@ -277,6 +277,22 @@ export async function POST(
       console.error('[suppliers:create-item] supplier component insert failed', supplierComponentError);
       await rollbackCreatedComponent(auth.supabase, auth.orgId, createdComponentId);
       return NextResponse.json({ error: 'Failed to create supplier mapping' }, { status: 500 });
+    }
+
+    if (quantityOnHand > 0) {
+      const { error: openingBalanceError } = await auth.supabase.rpc('record_component_stock_level', {
+        p_component_id: createdComponentId,
+        p_new_quantity: quantityOnHand,
+        p_reason: 'Opening Balance',
+        p_notes: 'Initial stock entered during supplier item creation',
+        p_transaction_type: 'OPENING_BALANCE',
+      });
+
+      if (openingBalanceError) {
+        console.error('[suppliers:create-item] opening balance failed', openingBalanceError);
+        await rollbackCreatedComponent(auth.supabase, auth.orgId, createdComponentId);
+        return NextResponse.json({ error: 'Failed to record opening stock' }, { status: 500 });
+      }
     }
 
     return NextResponse.json(

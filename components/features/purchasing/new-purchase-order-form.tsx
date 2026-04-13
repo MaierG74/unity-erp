@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useForm, Controller, useFieldArray } from 'react-hook-form';
+import { useForm, Controller, useFieldArray, FieldErrors } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { Resolver } from 'react-hook-form';
 import { z } from 'zod';
@@ -132,6 +132,12 @@ type PurchaseOrderCreationResult = {
   supplier_order_ids: number[] | null;
 };
 
+type DraftPersistSnapshot = {
+  sessionKey: number;
+  title: string;
+  formData: PurchaseOrderFormData;
+};
+
 // Selected component info (stored alongside form data for display)
 type SelectedComponentInfo = {
   internal_code: string;
@@ -140,6 +146,11 @@ type SelectedComponentInfo = {
   stock_on_hand: number | null;
   suppliers: ModalSupplierComponent[];
 };
+
+const PURCHASE_ORDER_DRAFT_SESSION_KEY =
+  'unity-erp.current-purchase-order-draft-id';
+const PURCHASE_ORDER_DRAFT_LOCAL_BACKUP_KEY =
+  'unity-erp.purchase-order-draft-local-backup';
 
 // Fetch supplier components for a specific component
 async function fetchSupplierComponentsForComponent(
@@ -536,6 +547,7 @@ export function NewPurchaseOrderForm() {
     getValues,
     reset,
     formState: { errors },
+    setFocus,
   } = useForm<PurchaseOrderFormData>({
     resolver: zodResolver(formSchema) as Resolver<PurchaseOrderFormData>,
     defaultValues: createEmptyPurchaseOrderFormData(),
@@ -554,6 +566,73 @@ export function NewPurchaseOrderForm() {
   const currentDraftIdRef = useRef<number | null>(null);
   const draftVersionRef = useRef<number | null>(null);
   const prefillAppliedRef = useRef<string | null>(null);
+  const draftPersistChainRef = useRef<Promise<void>>(Promise.resolve());
+  const draftSessionKeyRef = useRef(0);
+
+  const persistDraftSelection = useCallback((draftId: number | null) => {
+    if (typeof window === 'undefined') return;
+
+    if (draftId === null) {
+      window.sessionStorage.removeItem(PURCHASE_ORDER_DRAFT_SESSION_KEY);
+      return;
+    }
+
+    window.sessionStorage.setItem(
+      PURCHASE_ORDER_DRAFT_SESSION_KEY,
+      String(draftId)
+    );
+  }, []);
+
+  const readPersistedDraftSelection = useCallback(() => {
+    if (typeof window === 'undefined') return null;
+
+    const rawValue = window.sessionStorage.getItem(
+      PURCHASE_ORDER_DRAFT_SESSION_KEY
+    );
+    if (!rawValue) return null;
+
+    const parsed = Number.parseInt(rawValue, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }, []);
+
+  const writeLocalBackup = useCallback(
+    (title: string, formData: PurchaseOrderFormData) => {
+      if (typeof window === 'undefined') return;
+      try {
+        window.localStorage.setItem(
+          PURCHASE_ORDER_DRAFT_LOCAL_BACKUP_KEY,
+          JSON.stringify({ title, formData, savedAt: new Date().toISOString() })
+        );
+      } catch {
+        // Storage full or unavailable — not critical
+      }
+    },
+    []
+  );
+
+  const clearLocalBackup = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.removeItem(PURCHASE_ORDER_DRAFT_LOCAL_BACKUP_KEY);
+  }, []);
+
+  const readLocalBackup = useCallback(():
+    | { title: string; formData: PurchaseOrderFormData; savedAt: string }
+    | null => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = window.localStorage.getItem(
+        PURCHASE_ORDER_DRAFT_LOCAL_BACKUP_KEY
+      );
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.formData && Array.isArray(parsed.formData.items)) {
+        return parsed;
+      }
+    } catch {
+      // Corrupt data — ignore
+    }
+    return null;
+  }, []);
 
   const prefillComponentId = useMemo(() => {
     const rawValue = searchParams.get('componentId');
@@ -669,7 +748,12 @@ export function NewPurchaseOrderForm() {
   }, []);
 
   const applyDraftSelection = useCallback(
-    (draft: PurchaseOrderDraft | null) => {
+    (draft: PurchaseOrderDraft | null, options?: { newSession?: boolean }) => {
+      clearTimeout(saveTimerRef.current);
+      if (options?.newSession !== false) {
+        draftSessionKeyRef.current += 1;
+      }
+
       const nextFormData = draft
         ? mapPurchaseOrderDraftToFormData(draft)
         : createEmptyPurchaseOrderFormData();
@@ -697,6 +781,8 @@ export function NewPurchaseOrderForm() {
             .filter((index) => index >= 0)
         )
       );
+      persistDraftSelection(draft?.draft_id ?? null);
+      clearLocalBackup();
 
       lastSavedSignatureRef.current = buildPurchaseOrderDraftSignature(
         draft?.title ?? '',
@@ -707,12 +793,24 @@ export function NewPurchaseOrderForm() {
         nextFormData.items.map((item) => item.component_id).filter((id) => id > 0)
       );
     },
-    [hydrateComponentInfo, reset]
+    [clearLocalBackup, hydrateComponentInfo, persistDraftSelection, reset]
   );
 
   useEffect(() => {
     if (draftBootstrapRef.current || draftsLoading || currentUserLoading) return;
     draftBootstrapRef.current = true;
+
+    const persistedDraftId = readPersistedDraftSelection();
+    const persistedDraft =
+      persistedDraftId === null
+        ? null
+        : sharedDrafts.find((draft) => draft.draft_id === persistedDraftId) ?? null;
+
+    if (persistedDraft) {
+      applyDraftSelection(persistedDraft);
+      toast.info('Restored your shared purchase-order draft');
+      return;
+    }
 
     const ownDraft =
       sharedDrafts.find(
@@ -726,6 +824,27 @@ export function NewPurchaseOrderForm() {
       return;
     }
 
+    // Last resort: recover from local backup (crash/network-loss recovery)
+    const localBackup = readLocalBackup();
+    if (
+      localBackup &&
+      hasMeaningfulPurchaseOrderDraftContent(
+        localBackup.title,
+        localBackup.formData
+      )
+    ) {
+      reset(localBackup.formData);
+      setDraftTitle(localBackup.title);
+      setAutosaveState('error');
+      setAutosaveMessage('Recovered from local backup — not yet saved to server');
+      toast.warning(
+        'Recovered unsaved draft from local backup. Please review and save.',
+        { duration: 8000 }
+      );
+      setDraftBootstrapComplete(true);
+      return;
+    }
+
     applyDraftSelection(null);
     setDraftBootstrapComplete(true);
   }, [
@@ -733,6 +852,9 @@ export function NewPurchaseOrderForm() {
     currentUserId,
     currentUserLoading,
     draftsLoading,
+    readLocalBackup,
+    readPersistedDraftSelection,
+    reset,
     sharedDrafts,
   ]);
 
@@ -746,14 +868,18 @@ export function NewPurchaseOrderForm() {
   const watchedNotes = watch('notes');
   const watchedOrderDate = watch('order_date');
 
-  const persistDraftNow = useCallback(
-    async (formData: PurchaseOrderFormData) => {
+  const persistDraftSnapshot = useCallback(
+    async (snapshot: DraftPersistSnapshot) => {
+      if (snapshot.sessionKey !== draftSessionKeyRef.current) {
+        return;
+      }
+
       const hasContent = hasMeaningfulPurchaseOrderDraftContent(
-        draftTitle,
-        formData
+        snapshot.title,
+        snapshot.formData
       );
 
-      if (!hasContent && currentDraftId === null) {
+      if (!hasContent && currentDraftIdRef.current === null) {
         setAutosaveState('idle');
         setAutosaveMessage(null);
         setLastSavedAt(null);
@@ -761,69 +887,145 @@ export function NewPurchaseOrderForm() {
         return null;
       }
 
-      const signature = buildPurchaseOrderDraftSignature(draftTitle, formData);
+      const signature = buildPurchaseOrderDraftSignature(
+        snapshot.title,
+        snapshot.formData
+      );
       if (signature === lastSavedSignatureRef.current) {
         return null;
       }
 
       setAutosaveState('saving');
       setAutosaveMessage(null);
+      try {
+        const meta = await savePurchaseOrderDraft({
+          draftId: currentDraftIdRef.current,
+          expectedVersion: draftVersionRef.current,
+          title: snapshot.title,
+          formData: snapshot.formData,
+        });
 
-      const meta = await savePurchaseOrderDraft({
-        draftId: currentDraftIdRef.current,
-        expectedVersion: draftVersionRef.current,
-        title: draftTitle,
-        formData,
-      });
+        if (snapshot.sessionKey !== draftSessionKeyRef.current) {
+          return null;
+        }
 
-      setCurrentDraftId(meta.draftId);
-      setDraftVersion(meta.version);
-      currentDraftIdRef.current = meta.draftId;
-      draftVersionRef.current = meta.version;
-      setAutosaveState('saved');
-      setLastSavedAt(meta.updatedAt);
-      lastSavedSignatureRef.current = signature;
-      await queryClient.invalidateQueries({ queryKey: ['purchaseOrderDrafts'] });
+        setCurrentDraftId(meta.draftId);
+        setDraftVersion(meta.version);
+        currentDraftIdRef.current = meta.draftId;
+        draftVersionRef.current = meta.version;
+        setAutosaveState('saved');
+        setLastSavedAt(meta.updatedAt);
+        lastSavedSignatureRef.current = signature;
+        persistDraftSelection(meta.draftId);
+        await queryClient.invalidateQueries({ queryKey: ['purchaseOrderDrafts'] });
 
-      return meta;
-    },
-    [currentDraftId, draftTitle, draftVersion, queryClient]
-  );
-
-  useEffect(() => {
-    if (draftsLoading || currentUserLoading) return;
-
-    const formData: PurchaseOrderFormData = {
-      order_date:
-        watchedOrderDate ?? createEmptyPurchaseOrderFormData().order_date,
-      notes: watchedNotes ?? '',
-      items: watchedItems ?? [],
-    };
-
-    clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      void persistDraftNow(formData).catch((draftError) => {
+        return meta;
+      } catch (draftError) {
         const message =
           draftError instanceof Error
             ? draftError.message
             : 'Failed to save purchase-order draft';
         setAutosaveState('error');
         setAutosaveMessage(message);
-      });
+        throw draftError;
+      }
+    },
+    [currentDraftId, persistDraftSelection, queryClient]
+  );
+
+  const enqueueDraftPersist = useCallback(
+    (snapshot: DraftPersistSnapshot) => {
+      const nextPersist = draftPersistChainRef.current
+        .catch(() => undefined)
+        .then(() => persistDraftSnapshot(snapshot));
+
+      draftPersistChainRef.current = nextPersist
+        .then(() => undefined)
+        .catch(() => undefined);
+
+      return nextPersist;
+    },
+    [persistDraftSnapshot]
+  );
+
+  useEffect(() => {
+    if (draftsLoading || currentUserLoading) return;
+
+    const snapshot: DraftPersistSnapshot = {
+      sessionKey: draftSessionKeyRef.current,
+      title: draftTitle,
+      formData: {
+        order_date:
+          watchedOrderDate ?? createEmptyPurchaseOrderFormData().order_date,
+        notes: watchedNotes ?? '',
+        items: watchedItems ?? [],
+      },
+    };
+
+    // Write local backup immediately so data survives crashes/network loss
+    writeLocalBackup(snapshot.title, snapshot.formData);
+
+    clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      void enqueueDraftPersist(snapshot)
+        .then((meta) => {
+          if (meta) clearLocalBackup();
+        })
+        .catch((draftError) => {
+          const message =
+            draftError instanceof Error
+              ? draftError.message
+              : 'Failed to save purchase-order draft';
+          setAutosaveState('error');
+          setAutosaveMessage(message);
+        });
     }, 1500);
 
     return () => clearTimeout(saveTimerRef.current);
   }, [
+    clearLocalBackup,
     currentUserLoading,
     draftsLoading,
-    persistDraftNow,
+    draftTitle,
+    enqueueDraftPersist,
     watchedItems,
     watchedNotes,
     watchedOrderDate,
+    writeLocalBackup,
   ]);
+
+  // Warn before leaving with unsaved changes
+  useEffect(() => {
+    const currentSignature = buildPurchaseOrderDraftSignature(draftTitle, {
+      order_date:
+        watchedOrderDate ?? createEmptyPurchaseOrderFormData().order_date,
+      notes: watchedNotes ?? '',
+      items: watchedItems ?? [],
+    });
+
+    const hasUnsavedChanges =
+      currentSignature !== lastSavedSignatureRef.current &&
+      hasMeaningfulPurchaseOrderDraftContent(draftTitle, {
+        order_date:
+          watchedOrderDate ?? createEmptyPurchaseOrderFormData().order_date,
+        notes: watchedNotes ?? '',
+        items: watchedItems ?? [],
+      });
+
+    if (!hasUnsavedChanges) return;
+
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [draftTitle, watchedItems, watchedNotes, watchedOrderDate]);
 
   const setCurrentDraftStatus = useCallback(
     async (status: 'archived' | 'converted', purchaseOrderIds?: number[]) => {
+      clearTimeout(saveTimerRef.current);
+      await draftPersistChainRef.current.catch(() => undefined);
       const draftId = currentDraftIdRef.current;
       if (!draftId) return;
 
@@ -834,9 +1036,10 @@ export function NewPurchaseOrderForm() {
       });
 
       await queryClient.invalidateQueries({ queryKey: ['purchaseOrderDrafts'] });
+      clearLocalBackup();
       applyDraftSelection(null);
     },
-    [applyDraftSelection, queryClient]
+    [applyDraftSelection, clearLocalBackup, queryClient]
   );
 
   const startNewDraft = useCallback(() => {
@@ -932,6 +1135,9 @@ export function NewPurchaseOrderForm() {
     },
     onError: (error: Error) => {
       setError(error.message);
+      toast.error(`Failed to create purchase order: ${error.message}`, {
+        duration: 8000,
+      });
     },
   });
 
@@ -995,6 +1201,7 @@ export function NewPurchaseOrderForm() {
     decisions: Record<number, number | 'new'>
   ) => {
     setConsolidateDialogOpen(false);
+    clearTimeout(saveTimerRef.current);
 
     if (!pendingFormData || !draftStatusId) return;
 
@@ -1152,12 +1359,89 @@ export function NewPurchaseOrderForm() {
     setPendingFormData(null);
   };
 
+  const onValidationError = useCallback(
+    (fieldErrors: FieldErrors<PurchaseOrderFormData>) => {
+      // Build a human-readable summary of what's wrong
+      const problems: string[] = [];
+
+      if (fieldErrors.order_date) {
+        problems.push('Order date is invalid');
+      }
+
+      if (fieldErrors.items && !Array.isArray(fieldErrors.items)) {
+        problems.push(
+          fieldErrors.items.message || 'Please add at least one item'
+        );
+      }
+
+      if (Array.isArray(fieldErrors.items)) {
+        fieldErrors.items.forEach((itemError, idx) => {
+          if (!itemError) return;
+          const itemNum = idx + 1;
+          if (itemError.component_id) {
+            problems.push(`Item ${itemNum}: select a component`);
+          }
+          if (itemError.supplier_component_id) {
+            problems.push(`Item ${itemNum}: select a supplier`);
+          }
+          if (itemError.quantity) {
+            problems.push(
+              `Item ${itemNum}: ${itemError.quantity.message || 'enter a valid quantity'}`
+            );
+          }
+          if (itemError.allocations) {
+            problems.push(`Item ${itemNum}: check allocation quantities`);
+          }
+        });
+      }
+
+      const summary =
+        problems.length > 0
+          ? problems.slice(0, 3).join('. ') +
+            (problems.length > 3
+              ? `. And ${problems.length - 3} more issue${problems.length - 3 > 1 ? 's' : ''}.`
+              : '.')
+          : 'Please fix the highlighted fields and try again.';
+
+      toast.error(summary, { duration: 6000 });
+
+      // Try to focus the first errored field so it scrolls into view
+      try {
+        if (Array.isArray(fieldErrors.items)) {
+          const firstIdx = fieldErrors.items.findIndex((e) => e);
+          if (firstIdx >= 0) {
+            const itemErr = fieldErrors.items[firstIdx];
+            if (itemErr?.component_id) {
+              setFocus(`items.${firstIdx}.component_id`);
+            } else if (itemErr?.supplier_component_id) {
+              setFocus(`items.${firstIdx}.supplier_component_id`);
+            } else if (itemErr?.quantity) {
+              setFocus(`items.${firstIdx}.quantity`);
+            }
+          }
+        } else if (fieldErrors.order_date) {
+          setFocus('order_date');
+        }
+      } catch {
+        // setFocus can fail on non-focusable fields — fall back to scroll
+        const firstError = document.querySelector('[class*="border-destructive"]');
+        firstError?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    },
+    [setFocus]
+  );
+
   const onSubmit = async (data: PurchaseOrderFormData) => {
     setError(null);
     setIsCheckingDrafts(true);
+    clearTimeout(saveTimerRef.current);
 
     try {
-      await persistDraftNow(data).catch((draftError) => {
+      await enqueueDraftPersist({
+        sessionKey: draftSessionKeyRef.current,
+        title: draftTitle,
+        formData: data,
+      }).catch((draftError) => {
         console.error('Failed to persist draft before create:', draftError);
       });
       const drafts = await checkForExistingDrafts(data);
@@ -1501,7 +1785,7 @@ export function NewPurchaseOrderForm() {
   );
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+    <form onSubmit={handleSubmit(onSubmit, onValidationError)} className="space-y-6">
       {error && (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />

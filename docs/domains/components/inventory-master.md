@@ -45,11 +45,16 @@
 - Adjust stock (Counts/Corrections)
   - ADJUST with reason and user attribution; affects on‑hand and audit trail.
   - Transactions tab now shows the Stock Adjustment banner even when a component has no prior movements, allowing initial stocktakes to be recorded immediately.
+  - Inventory edit hardening (2026-04-09): UI quantity edits should no longer overwrite `inventory.quantity_on_hand` silently. Inventory list/detail edit paths now route quantity changes through the stock-level recording helper so the delta is written to `inventory_transactions`, while metadata (`location`, `reorder_level`) continues to live on `inventory`.
 - Manual issuance (Samples/Non‑BOM work)
   - `process_manual_stock_issuance` RPC handles validations, decrements stock, and emits `stock_issuances` rows.
   - Manual issuance history includes PDF download buttons for signed issuance records (mirrors Purchase Order issuance PDFs).
 
 ## Reporting & Queries
+- Stock Snapshot As Of Date (Reports tab)
+  - New report card on `app/inventory/page.tsx` → Reports tab lets users choose an `as_of` date and reverse-calculate historical stock by subtracting transactions after that date from the current on-hand quantity.
+  - Default view is quantity-first. An optional toggle can show an **estimated** value using the current lowest supplier price per component, clearly labeled as a current-price estimate rather than historical cost.
+  - Historical snapshots before `2026-04-09` are marked **approximate** because older quantity edits may have bypassed the transaction ledger.
 - Below Reorder: `inventory.quantity_on_hand < inventory.reorder_level` with joins to components and location.
 - Movement History: recent `inventory_transactions` for a component with IN/OUT/ADJUST totals.
 - Where Used: BOM/collections usage via `billofmaterials` and `bom_collections` (for shortages and planning).
@@ -80,6 +85,7 @@
 ## Known Gaps
 - Canonical spec for `inventory_transactions` (types, invariants, reconciliation) — see `inventory-transactions.md` (kept current with manual issuance notes).
 - Reorder policy and alerts/digests.
+- Historical inventory valuation is still not released. The current report can optionally show a current-price estimate, but a true as-of-date value still needs per-movement historical unit cost.
 - Two UI variants exist; converging on a single canonical page is recommended.
 
 ## Cross‑Links

@@ -33,6 +33,7 @@ import { cn } from "@/lib/utils"
 import CreatableSelect from "react-select/creatable"
 import { useToast } from "@/components/ui/use-toast"
 import { useDropzone } from "react-dropzone"
+import { updateComponentStockLevel } from "@/lib/client/inventory"
 
 type OptionType = {
   value: string
@@ -386,6 +387,10 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
           image_url,
         }
         
+        const nextQuantityOnHand = Number(values.quantity_on_hand?.toString() || '0')
+        const nextReorderLevel = Number(values.reorder_level?.toString() || '0')
+        const currentQuantityOnHand = Number(selectedItem?.quantity_on_hand || 0)
+
         if (selectedItem) {
           // Update existing component
           const { data: updateData, error } = await supabase
@@ -396,34 +401,26 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
 
             if (error) throw error;
 
-            // Update or create inventory record
-            if (selectedItem.inventory_id) {
-              // Update existing inventory record
-              const { data: invData, error: inventoryError } = await supabase
-                .from('inventory')
-                .update({
-                  quantity_on_hand: parseInt(values.quantity_on_hand?.toString() || '0'),
-                  location: values.location || null,
-                  reorder_level: parseInt(values.reorder_level?.toString() || '0')
-                })
-                .eq('inventory_id', selectedItem.inventory_id)
-                .select();
-
-              if (inventoryError) throw inventoryError;
-            } else {
-              // Create new inventory record
-              const { data: invData, error: inventoryError } = await supabase
-                .from('inventory')
-                .insert({
-                  component_id: selectedItem.component.component_id,
-                  quantity_on_hand: parseInt(values.quantity_on_hand?.toString() || '0'),
-                  location: values.location || null,
-                  reorder_level: parseInt(values.reorder_level?.toString() || '0')
-                })
-                .select();
-
-              if (inventoryError) throw inventoryError;
+            if (nextQuantityOnHand !== currentQuantityOnHand) {
+              await updateComponentStockLevel(selectedItem.component.component_id, {
+                new_quantity: nextQuantityOnHand,
+                reason: 'Data Entry Correction',
+                notes: 'Updated via component dialog',
+                transaction_type: 'ADJUSTMENT',
+              });
             }
+
+            const { error: inventoryError } = await supabase
+              .from('inventory')
+              .upsert({
+                component_id: selectedItem.component.component_id,
+                location: values.location || null,
+                reorder_level: nextReorderLevel,
+                ...(nextQuantityOnHand === currentQuantityOnHand ? { quantity_on_hand: nextQuantityOnHand } : {})
+              }, { onConflict: 'component_id' })
+              .select();
+
+            if (inventoryError) throw inventoryError;
 
             // Update supplier components
             if (values.supplierComponents) {
@@ -477,17 +474,26 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
               if (supplierError) throw supplierError
             }
             
-            // Create inventory record for the new component
+            // Create the inventory row with metadata first.
             const { error: inventoryError } = await supabase
               .from('inventory')
               .insert({
                 component_id: newComponent.component_id,
-                quantity_on_hand: parseInt(values.quantity_on_hand?.toString() || '0'),
+                quantity_on_hand: 0,
                 location: values.location || null,
-                reorder_level: parseInt(values.reorder_level?.toString() || '0')
+                reorder_level: nextReorderLevel
               })
             
             if (inventoryError) throw inventoryError
+
+            if (nextQuantityOnHand > 0) {
+              await updateComponentStockLevel(newComponent.component_id, {
+                new_quantity: nextQuantityOnHand,
+                reason: 'Opening Balance',
+                notes: 'Initial stock entered during component creation',
+                transaction_type: 'OPENING_BALANCE',
+              })
+            }
           }
 
           return { success: true, shouldClose }
@@ -499,6 +505,7 @@ export function ComponentDialog({ open, onOpenChange, selectedItem }: ComponentD
         try {
           // Invalidate all relevant queries to force a refetch
           await queryClient.invalidateQueries({ queryKey: ['inventory', 'components'] });
+          await queryClient.invalidateQueries({ queryKey: ['inventory', 'snapshot'] });
           toast({
             title: selectedItem ? "Component Updated" : "Component Added",
             description: selectedItem 
