@@ -827,7 +827,11 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
                         </thead>
                         <tbody>
                           {filteredProducts.map((p) => (
-                            <tr key={p.product_id} className="border-b hover:bg-muted/40">
+                            <tr
+                              key={p.product_id}
+                              className="border-b hover:bg-muted/40 cursor-pointer"
+                              onClick={() => productBomMode ? handleProductSelectForBom(p) : setSelectedProduct(p)}
+                            >
                               <td className="p-2 max-w-0">
                                 <div className="truncate">{p.name}</div>
                                 {p.internal_code && (
@@ -838,7 +842,7 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
                                 <Button
                                   size="sm"
                                   className="h-7 text-xs px-2"
-                                  onClick={() => productBomMode ? handleProductSelectForBom(p) : setSelectedProduct(p)}
+                                  onClick={(e) => { e.stopPropagation(); productBomMode ? handleProductSelectForBom(p) : setSelectedProduct(p); }}
                                 >
                                   {productBomMode ? 'Preview' : 'Select'}
                                 </Button>
