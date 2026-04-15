@@ -64,8 +64,11 @@ import type {
   CutlistMaterialSummary,
   EdgingSummaryEntry,
   SheetBillingOverride,
+  EdgingBillingOverride,
   CutlistPart,
 } from '@/lib/cutlist/types';
+
+import { EdgingOverrideRow } from './primitives/EdgingOverrideRow';
 
 // Import packing
 import { packPartsSmartOptimized, type SAProgressInfo } from '@/components/features/cutlist/packing';
@@ -137,6 +140,7 @@ export interface CutlistCalculatorData {
   globalFullBoard: boolean;
   backerSheetOverrides: Record<string, SheetBillingOverride>;
   backerGlobalFullBoard: boolean;
+  edgingOverrides: Record<string, EdgingBillingOverride>;
 }
 
 export interface CutlistCalculatorProps {
@@ -296,6 +300,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   const [backerGlobalFullBoard, setBackerGlobalFullBoard] = React.useState(
     () => initialData?.backerGlobalFullBoard ?? false
   );
+  const [edgingOverrides, setEdgingOverrides] = React.useState<Record<string, EdgingBillingOverride>>({});
   const packingConfig = React.useMemo(
     () => ({
       minUsableDimension: cutlistDefaults.minReusableOffcutDimensionMm,
@@ -625,6 +630,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
         globalFullBoard,
         backerSheetOverrides,
         backerGlobalFullBoard,
+        edgingOverrides,
       });
     }, 300);
 
@@ -644,6 +650,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     globalFullBoard,
     backerSheetOverrides,
     backerGlobalFullBoard,
+    edgingOverrides,
     onDataChange,
   ]);
 
@@ -1341,6 +1348,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     globalFullBoard,
     backerSheetOverrides,
     backerGlobalFullBoard,
+    edgingOverrides,
   });
 
   // ============== Render ==============
@@ -1714,7 +1722,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                       <div className="flex items-center justify-between">
                         <div>
                           <div className="text-sm font-semibold text-foreground">Backer Board Cutlist</div>
-                          <div className="text-xs text-muted-foreground">Sheets for parts with “With Backer” lamination.</div>
+                          <div className="text-xs text-muted-foreground">Sheets for parts with "With Backer" lamination.</div>
                         </div>
                       </div>
                       <SheetLayoutGrid
@@ -1725,6 +1733,32 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                         sheetOverrides={backerSheetOverrides}
                         onSheetOverridesChange={setBackerSheetOverrides}
                       />
+                    </div>
+                  )}
+
+                  {summary?.edgingByMaterial && summary.edgingByMaterial.length > 0 && (
+                    <div className="space-y-2 mt-4">
+                      <h4 className="text-xs font-medium text-muted-foreground uppercase">Edging Overrides (for Costing)</h4>
+                      {summary.edgingByMaterial.map(e => (
+                        <EdgingOverrideRow
+                          key={e.materialId}
+                          name={e.name}
+                          thickness_mm={e.thickness_mm}
+                          metersActual={e.length_mm / 1000}
+                          override={edgingOverrides[e.materialId]}
+                          onOverrideChange={(override) => {
+                            setEdgingOverrides(prev => {
+                              const next = { ...prev };
+                              if (override) {
+                                next[e.materialId] = override;
+                              } else {
+                                delete next[e.materialId];
+                              }
+                              return next;
+                            });
+                          }}
+                        />
+                      ))}
                     </div>
                   )}
                 </div>
