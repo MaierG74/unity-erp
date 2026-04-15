@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { authorizedFetch } from '@/lib/client/auth-fetch'
@@ -19,6 +19,9 @@ import { ProductBOM } from './product-bom'
 import { ProductBOL } from './product-bol'
 import { useToast } from '@/components/ui/use-toast'
 import { ProductPricingSection } from './ProductPricingSection'
+import type { CutlistCostingSnapshot } from '@/lib/cutlist/costingSnapshot'
+import { computePartsHash } from '@/lib/cutlist/costingSnapshot'
+import { flattenGroupsToCompactParts } from '@/lib/configurator/cutlistGroupConversion'
 
 type BomRow = {
   bom_id: number
@@ -78,6 +81,7 @@ type EffectiveItem = {
   quantity_required: number
   supplier_component_id: number | null
   suppliercomponents?: { price?: number | null } | null
+  is_cutlist_item?: boolean | null
   _source?: 'direct' | 'link'
   _sub_product_id?: number
 }
@@ -93,6 +97,103 @@ function fmtMoney(v: number | null | undefined) {
   return `R${v.toFixed(2)}`
 }
 
+interface CutlistMaterialCostLine {
+  label: string
+  unit: string
+  actual: number
+  padded: number
+  unitPrice: number | null
+  actualCost: number | null
+  paddedCost: number | null
+}
+
+function deriveCutlistCostLines(snap: CutlistCostingSnapshot): CutlistMaterialCostLine[] {
+  const lines: CutlistMaterialCostLine[] = []
+
+  // Board lines — aggregate per material from per-sheet data
+  const materialSheets = new Map<string, { actual: number; padded: number; name: string }>()
+  for (const sheet of snap.sheets) {
+    const matId = sheet.material_id || 'unknown'
+    const current = materialSheets.get(matId) ?? { actual: 0, padded: 0, name: sheet.material_name }
+    const sheetArea = sheet.sheet_length_mm * sheet.sheet_width_mm
+    const usedFrac = sheetArea > 0 ? sheet.used_area_mm2 / sheetArea : 0
+    current.actual += usedFrac
+
+    let billedFrac = usedFrac
+    if (snap.global_full_board) {
+      billedFrac = 1
+    } else if (sheet.billing_override) {
+      if (sheet.billing_override.mode === 'full') billedFrac = 1
+      if (sheet.billing_override.mode === 'manual') billedFrac = sheet.billing_override.manualPct / 100
+    }
+    current.padded += billedFrac
+    materialSheets.set(matId, current)
+  }
+
+  for (const [matId, { actual, padded, name }] of materialSheets) {
+    const price = snap.board_prices.find(b => b.material_id === matId)?.unit_price_per_sheet ?? null
+    lines.push({
+      label: name || matId,
+      unit: 'sheets',
+      actual,
+      padded,
+      unitPrice: price,
+      actualCost: price !== null ? actual * price : null,
+      paddedCost: price !== null ? padded * price : null,
+    })
+  }
+
+  // Edging lines
+  for (const e of snap.edging) {
+    let paddedMeters = e.meters_actual
+    if (e.meters_override !== null) {
+      paddedMeters = e.meters_override
+    } else if (e.pct_override !== null) {
+      paddedMeters = e.meters_actual * (1 + e.pct_override / 100)
+    }
+    lines.push({
+      label: `${e.material_name} (${e.thickness_mm}mm edging)`,
+      unit: 'm',
+      actual: e.meters_actual,
+      padded: paddedMeters,
+      unitPrice: e.unit_price_per_meter,
+      actualCost: e.unit_price_per_meter !== null ? e.meters_actual * e.unit_price_per_meter : null,
+      paddedCost: e.unit_price_per_meter !== null ? paddedMeters * e.unit_price_per_meter : null,
+    })
+  }
+
+  // Backer lines
+  if (snap.backer_sheets && snap.backer_sheets.length > 0) {
+    let backerActual = 0
+    let backerPadded = 0
+    for (const s of snap.backer_sheets) {
+      const area = s.sheet_length_mm * s.sheet_width_mm
+      const frac = area > 0 ? s.used_area_mm2 / area : 0
+      backerActual += frac
+      let billed = frac
+      if (snap.backer_global_full_board) {
+        billed = 1
+      } else if (s.billing_override) {
+        if (s.billing_override.mode === 'full') billed = 1
+        if (s.billing_override.mode === 'manual') billed = s.billing_override.manualPct / 100
+      }
+      backerPadded += billed
+    }
+    const backerPrice = snap.backer_price_per_sheet
+    lines.push({
+      label: 'Backer board',
+      unit: 'sheets',
+      actual: backerActual,
+      padded: backerPadded,
+      unitPrice: backerPrice,
+      actualCost: backerPrice !== null ? backerActual * backerPrice : null,
+      paddedCost: backerPrice !== null ? backerPadded * backerPrice : null,
+    })
+  }
+
+  return lines
+}
+
 type CostingSection = 'summary' | 'materials' | 'labor' | 'overhead'
 
 export function ProductCosting({ productId }: { productId: number }) {
@@ -103,6 +204,42 @@ export function ProductCosting({ productId }: { productId: number }) {
 
   // Feature flag: include linked sub-products in Effective BOM
   const featureAttach = typeof process !== 'undefined' && process.env.NEXT_PUBLIC_FEATURE_ATTACH_BOM === 'true'
+
+  // Fetch costing snapshot
+  const { data: snapshotResponse } = useQuery({
+    queryKey: ['cutlist-costing-snapshot', productId],
+    queryFn: async () => {
+      const res = await authorizedFetch(`/api/products/${productId}/cutlist-costing-snapshot`)
+      if (!res.ok) return { snapshot: null }
+      return (await res.json()) as { snapshot: { snapshot_data: CutlistCostingSnapshot; parts_hash: string } | null }
+    },
+  })
+
+  // Fetch cutlist groups for staleness check
+  const { data: cutlistGroups } = useQuery({
+    queryKey: ['cutlist-groups-costing', productId],
+    queryFn: async () => {
+      const res = await authorizedFetch(`/api/products/${productId}/cutlist-groups`)
+      if (!res.ok) return { groups: [] }
+      return (await res.json()) as { groups: unknown[] }
+    },
+  })
+
+  const snapshot = snapshotResponse?.snapshot?.snapshot_data ?? null
+  const storedHash = snapshotResponse?.snapshot?.parts_hash ?? null
+  const hasCutlistGroups = (cutlistGroups?.groups?.length ?? 0) > 0
+
+  const currentPartsHash = useMemo(() => {
+    if (!cutlistGroups?.groups?.length) return null
+    const parts = flattenGroupsToCompactParts(cutlistGroups.groups as never[])
+    return computePartsHash(parts)
+  }, [cutlistGroups])
+
+  const isStale = storedHash !== null && currentPartsHash !== null && storedHash !== currentPartsHash
+
+  const cutlistCostLines = snapshot ? deriveCutlistCostLines(snapshot) : []
+  const cutlistPaddedTotal = cutlistCostLines.reduce((s, l) => s + (l.paddedCost ?? 0), 0)
+  const cutlistActualTotal = cutlistCostLines.reduce((s, l) => s + (l.actualCost ?? 0), 0)
 
   // Effective BOM (explicit + linked) via API
   const { data: effective = { items: [] as EffectiveItem[] }, isLoading: effLoading } = useQuery({
@@ -156,8 +293,13 @@ export function ProductCosting({ productId }: { productId: number }) {
   const usingEffective = featureAttach && (effective?.items?.length || 0) > 0
   const compsMap = new Map(componentMeta.map((c) => [Number(c.component_id), c]))
 
+  // When cutlist snapshot exists, exclude cutlist BOM items from hardware materials
+  const effectiveItems = snapshot
+    ? (effective.items || []).filter(it => !it.is_cutlist_item)
+    : (effective.items || [])
+
   const materials = usingEffective
-    ? (effective.items || []).map((it) => {
+    ? effectiveItems.map((it) => {
         const meta = compsMap.get(Number(it.component_id))
         const unit = it.suppliercomponents?.price ?? null
         const line = unit != null ? Number(unit) * Number(it.quantity_required) : null
@@ -184,6 +326,7 @@ export function ProductCosting({ productId }: { productId: number }) {
   const materialsLoading = usingEffective ? (effLoading || compsLoading) : bomLoading
   const missingPrices = materials.filter((m) => m.unitPrice == null).length
   const materialsCost = materials.reduce((sum, m) => sum + (m.lineTotal || 0), 0)
+  const totalMaterialsCost = materialsCost + cutlistPaddedTotal
 
   // Labor (BOL)
   const { data: bol = [], isLoading: bolLoading } = useQuery({
@@ -285,10 +428,10 @@ export function ProductCosting({ productId }: { productId: number }) {
     // Percentage type
     const basis =
       item.element.percentage_basis === 'materials'
-        ? materialsCost
+        ? totalMaterialsCost
         : item.element.percentage_basis === 'labor'
         ? labourCost
-        : materialsCost + labourCost // 'total'
+        : totalMaterialsCost + labourCost // 'total'
 
     return (basis * value / 100) * qty
   }
@@ -304,7 +447,7 @@ export function ProductCosting({ productId }: { productId: number }) {
   }))
   const overheadCost = overhead.reduce((sum, o) => sum + o.lineTotal, 0)
 
-  const unitCost = materialsCost + labourCost + overheadCost
+  const unitCost = totalMaterialsCost + labourCost + overheadCost
 
   async function handleRemoveOverhead(elementId: number) {
     try {
@@ -329,7 +472,7 @@ export function ProductCosting({ productId }: { productId: number }) {
 
   const sections: { key: CostingSection; label: string; count?: number; cost?: number }[] = [
     { key: 'summary', label: 'Summary' },
-    { key: 'materials', label: 'Materials', count: materials.length, cost: materialsCost },
+    { key: 'materials', label: 'Materials', count: materials.length + cutlistCostLines.length, cost: totalMaterialsCost },
     { key: 'labor', label: 'Labor', count: labour.length, cost: labourCost },
     { key: 'overhead', label: 'Overhead', count: overhead.length, cost: overheadCost },
   ]
@@ -339,6 +482,11 @@ export function ProductCosting({ productId }: { productId: number }) {
   materials.forEach((m) => {
     if (m.lineTotal && m.lineTotal > 0) {
       costDrivers.push({ name: m.code + (m.description ? ` – ${m.description}` : ''), category: 'Materials', amount: m.lineTotal })
+    }
+  })
+  cutlistCostLines.forEach((cl) => {
+    if (cl.paddedCost && cl.paddedCost > 0) {
+      costDrivers.push({ name: cl.label, category: 'Materials', amount: cl.paddedCost })
     }
   })
   labour.forEach((l) => {
@@ -430,10 +578,10 @@ export function ProductCosting({ productId }: { productId: number }) {
                   {unitCost > 0 ? (
                     <div className="space-y-2">
                       <div className="flex h-3 w-full overflow-hidden rounded-full bg-muted/50">
-                        {materialsCost > 0 && (
+                        {totalMaterialsCost > 0 && (
                           <div
                             className="bg-blue-500 transition-all duration-500"
-                            style={{ width: `${pctOf(materialsCost)}%` }}
+                            style={{ width: `${pctOf(totalMaterialsCost)}%` }}
                           />
                         )}
                         {labourCost > 0 && (
@@ -452,7 +600,7 @@ export function ProductCosting({ productId }: { productId: number }) {
                       <div className="flex items-center gap-4 text-xs text-muted-foreground">
                         <span className="flex items-center gap-1.5">
                           <span className="inline-block h-2.5 w-2.5 rounded-full bg-blue-500" />
-                          Materials {pctOf(materialsCost)}%
+                          Materials {pctOf(totalMaterialsCost)}%
                         </span>
                         <span className="flex items-center gap-1.5">
                           <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
@@ -475,7 +623,7 @@ export function ProductCosting({ productId }: { productId: number }) {
                 {/* Category cards */}
                 <div className="grid grid-cols-3 gap-3">
                   {[
-                    { label: 'Materials', cost: materialsCost, count: materials.length, section: 'materials' as CostingSection },
+                    { label: 'Materials', cost: totalMaterialsCost, count: materials.length + cutlistCostLines.length, section: 'materials' as CostingSection },
                     { label: 'Labor', cost: labourCost, count: labour.length, section: 'labor' as CostingSection },
                     { label: 'Overhead', cost: overheadCost, count: overhead.length, section: 'overhead' as CostingSection },
                   ].map((cat) => {
@@ -570,7 +718,81 @@ export function ProductCosting({ productId }: { productId: number }) {
         )}
 
         {activeSection === 'materials' && (
-          <ProductBOM productId={productId} />
+          <div className="space-y-0">
+            {isStale && (
+              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-sm px-3 py-2 mb-3 flex items-center gap-2 text-xs text-yellow-200">
+                <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+                <span>Cutlist parts have been modified since the last layout calculation. Costs may be outdated.</span>
+                <a href={`/products/${productId}/cutlist-builder`} className="text-primary underline ml-auto whitespace-nowrap">
+                  Open Cutlist Builder &rarr;
+                </a>
+              </div>
+            )}
+            {!snapshot && hasCutlistGroups && (
+              <div className="bg-muted/50 border border-border rounded-sm px-3 py-2 mb-3 flex items-center gap-2 text-xs text-muted-foreground">
+                <Package className="h-3.5 w-3.5 flex-shrink-0" />
+                <span>This product has cutlist parts but no layout has been calculated yet.</span>
+                <a href={`/products/${productId}/cutlist-builder`} className="text-primary underline ml-auto whitespace-nowrap">
+                  Open Cutlist Builder &rarr;
+                </a>
+              </div>
+            )}
+
+            <ProductBOM productId={productId} />
+
+            {snapshot && cutlistCostLines.length > 0 && (
+              <div className="mt-4">
+                <h4 className="text-xs font-medium text-muted-foreground uppercase mb-2">Cutlist Materials</h4>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Material</TableHead>
+                      <TableHead className="text-right">Actual</TableHead>
+                      <TableHead className="text-right">Padded</TableHead>
+                      <TableHead className="text-right">Unit Price</TableHead>
+                      <TableHead className="text-right">Actual Cost</TableHead>
+                      <TableHead className="text-right">Padded Cost</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {cutlistCostLines.map((line, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="text-sm">{line.label}</TableCell>
+                        <TableCell className="text-right tabular-nums text-sm">
+                          {line.actual.toFixed(3)} {line.unit}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm font-medium">
+                          {line.padded.toFixed(3)} {line.unit}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm">
+                          {line.unitPrice !== null ? fmtMoney(line.unitPrice) : '—'}
+                          {line.unit === 'm' ? '/m' : ''}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                          {fmtMoney(line.actualCost)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm font-medium">
+                          {fmtMoney(line.paddedCost)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    <TableRow className="border-t-2">
+                      <TableCell className="font-medium text-sm">Cutlist Subtotal</TableCell>
+                      <TableCell />
+                      <TableCell />
+                      <TableCell />
+                      <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                        {fmtMoney(cutlistActualTotal)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-sm font-medium">
+                        {fmtMoney(cutlistPaddedTotal)}
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
         )}
 
         {activeSection === 'labor' && (
