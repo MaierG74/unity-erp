@@ -942,6 +942,16 @@ export function ProductBOM({ productId }: ProductBOMProps) {
       const json = await response.json().catch(() => null);
       if (!response.ok) throw new Error(json?.error || 'Failed to delete BOM row');
     },
+    onMutate: async (bomId: number) => {
+      // Optimistic update: remove row from cache immediately
+      await queryClient.cancelQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] });
+      const previous = queryClient.getQueryData(['productBOM', productId, supplierFeatureAvailable]);
+      queryClient.setQueryData(
+        ['productBOM', productId, supplierFeatureAvailable],
+        (old: any) => old?.filter((item: any) => item.bom_id !== bomId) ?? []
+      );
+      return { previous };
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['productBOM', productId] });
       queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
@@ -952,7 +962,11 @@ export function ProductBOM({ productId }: ProductBOMProps) {
         description: 'Component removed from BOM',
       });
     },
-    onError: (error) => {
+    onError: (error, _bomId, context) => {
+      // Roll back optimistic update on failure
+      if (context?.previous) {
+        queryClient.setQueryData(['productBOM', productId, supplierFeatureAvailable], context.previous);
+      }
       toast({
         title: 'Error',
         description: 'Failed to remove component from BOM',
