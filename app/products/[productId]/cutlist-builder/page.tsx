@@ -96,81 +96,62 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
     };
   }, [adapter]);
 
-  // Manual save
+  const persistSnapshot = useCallback(async () => {
+    const data = dataRef.current;
+    const summary = summaryRef.current;
+    if (!data || !summary?.result) return;
+
+    const snapshot = buildSnapshotFromCalculator({
+      result: summary.result,
+      backerResult: summary.backerResult,
+      parts: data.parts,
+      primaryBoards: data.primaryBoards,
+      backerBoards: data.backerBoards,
+      edgingMaterials: data.edging,
+      kerf: data.kerf,
+      optimizationPriority: data.optimizationPriority,
+      sheetOverrides: data.sheetOverrides,
+      globalFullBoard: data.globalFullBoard,
+      backerSheetOverrides: data.backerSheetOverrides,
+      backerGlobalFullBoard: data.backerGlobalFullBoard,
+      edgingByMaterial: summary.edgingByMaterial ?? [],
+      edgingOverrides: data.edgingOverrides,
+    });
+    const partsHash = computePartsHash(data.parts);
+    await adapter.saveSnapshot(snapshot, partsHash);
+  }, [adapter]);
+
   const handleSave = useCallback(async () => {
     const data = dataRef.current;
     if (!data || !data.parts.length) return;
 
     setSaving(true);
     try {
-      // 1. Save parts groups (existing behavior)
       await adapter.save(data);
-
-      // 2. If a layout result exists, also save the costing snapshot
-      const summary = summaryRef.current;
-      if (summary?.result) {
-        const snapshot = buildSnapshotFromCalculator({
-          result: summary.result,
-          backerResult: summary.backerResult,
-          parts: data.parts,
-          primaryBoards: data.primaryBoards,
-          backerBoards: data.backerBoards,
-          edgingMaterials: data.edging,
-          kerf: data.kerf,
-          optimizationPriority: data.optimizationPriority,
-          sheetOverrides: data.sheetOverrides,
-          globalFullBoard: data.globalFullBoard,
-          backerSheetOverrides: data.backerSheetOverrides,
-          backerGlobalFullBoard: data.backerGlobalFullBoard,
-          edgingByMaterial: summary.edgingByMaterial ?? [],
-          edgingOverrides: data.edgingOverrides,
-        });
-        const partsHash = computePartsHash(data.parts);
-        await adapter.saveSnapshot(snapshot, partsHash);
-      }
-
+      if (summaryRef.current?.result) await persistSnapshot();
       toast.success('Cutlist saved to product');
     } catch {
       toast.error('Failed to save cutlist');
     } finally {
       setSaving(false);
     }
-  }, [adapter]);
+  }, [adapter, persistSnapshot]);
 
   const [savingToCosting, setSavingToCosting] = useState(false);
 
   const handleSaveToCosting = useCallback(async () => {
-    const data = dataRef.current;
-    const summary = summaryRef.current;
-    if (!data || !summary?.result) return;
+    if (!dataRef.current || !summaryRef.current?.result) return;
 
     setSavingToCosting(true);
     try {
-      const snapshot = buildSnapshotFromCalculator({
-        result: summary.result,
-        backerResult: summary.backerResult,
-        parts: data.parts,
-        primaryBoards: data.primaryBoards,
-        backerBoards: data.backerBoards,
-        edgingMaterials: data.edging,
-        kerf: data.kerf,
-        optimizationPriority: data.optimizationPriority,
-        sheetOverrides: data.sheetOverrides,
-        globalFullBoard: data.globalFullBoard,
-        backerSheetOverrides: data.backerSheetOverrides,
-        backerGlobalFullBoard: data.backerGlobalFullBoard,
-        edgingByMaterial: summary.edgingByMaterial ?? [],
-        edgingOverrides: data.edgingOverrides,
-      });
-      const partsHash = computePartsHash(data.parts);
-      await adapter.saveSnapshot(snapshot, partsHash);
+      await persistSnapshot();
       toast.success('Costing snapshot saved');
     } catch {
       toast.error('Failed to save costing snapshot');
     } finally {
       setSavingToCosting(false);
     }
-  }, [adapter]);
+  }, [persistSnapshot]);
 
   if (isNaN(productId)) {
     return (

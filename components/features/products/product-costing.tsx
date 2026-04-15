@@ -237,9 +237,9 @@ export function ProductCosting({ productId }: { productId: number }) {
 
   const isStale = storedHash !== null && currentPartsHash !== null && storedHash !== currentPartsHash
 
-  const cutlistCostLines = snapshot ? deriveCutlistCostLines(snapshot) : []
-  const cutlistPaddedTotal = cutlistCostLines.reduce((s, l) => s + (l.paddedCost ?? 0), 0)
-  const cutlistActualTotal = cutlistCostLines.reduce((s, l) => s + (l.actualCost ?? 0), 0)
+  const cutlistCostLines = useMemo(() => snapshot ? deriveCutlistCostLines(snapshot) : [], [snapshot])
+  const cutlistPaddedTotal = useMemo(() => cutlistCostLines.reduce((s, l) => s + (l.paddedCost ?? 0), 0), [cutlistCostLines])
+  const cutlistActualTotal = useMemo(() => cutlistCostLines.reduce((s, l) => s + (l.actualCost ?? 0), 0), [cutlistCostLines])
 
   // Effective BOM (explicit + linked) via API
   const { data: effective = { items: [] as EffectiveItem[] }, isLoading: effLoading } = useQuery({
@@ -293,10 +293,10 @@ export function ProductCosting({ productId }: { productId: number }) {
   const usingEffective = featureAttach && (effective?.items?.length || 0) > 0
   const compsMap = new Map(componentMeta.map((c) => [Number(c.component_id), c]))
 
-  // When cutlist snapshot exists, exclude cutlist BOM items from hardware materials
-  const effectiveItems = snapshot
-    ? (effective.items || []).filter(it => !it.is_cutlist_item)
-    : (effective.items || [])
+  const effectiveItems = useMemo(
+    () => snapshot ? (effective.items || []).filter(it => !it.is_cutlist_item) : (effective.items || []),
+    [snapshot, effective.items]
+  )
 
   const materials = usingEffective
     ? effectiveItems.map((it) => {

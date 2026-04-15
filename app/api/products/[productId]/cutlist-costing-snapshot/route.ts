@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireProductsAccess } from '@/lib/api/products-access';
+import { requireProductsAccess, parsePositiveInt } from '@/lib/api/products-access';
 import { supabaseAdmin } from '@/lib/supabase-admin';
-
-function parseProductId(raw: string): number | null {
-  const id = Number.parseInt(raw, 10);
-  return Number.isFinite(id) && id > 0 ? id : null;
-}
 
 /**
  * GET /api/products/[productId]/cutlist-costing-snapshot
@@ -19,7 +14,7 @@ export async function GET(
   if ('error' in auth) return auth.error;
 
   const { productId } = await params;
-  const productIdNum = parseProductId(productId);
+  const productIdNum = parsePositiveInt(productId);
   if (!productIdNum) {
     return NextResponse.json({ error: 'Invalid product ID' }, { status: 400 });
   }
@@ -51,7 +46,7 @@ export async function PUT(
   if ('error' in auth) return auth.error;
 
   const { productId } = await params;
-  const productIdNum = parseProductId(productId);
+  const productIdNum = parsePositiveInt(productId);
   if (!productIdNum) {
     return NextResponse.json({ error: 'Invalid product ID' }, { status: 400 });
   }

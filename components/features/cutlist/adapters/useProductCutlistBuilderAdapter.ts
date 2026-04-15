@@ -94,7 +94,8 @@ export function useProductCutlistBuilderAdapter(productId: number | null | undef
     );
 
     if (!res.ok) {
-      throw new Error('Failed to save costing snapshot');
+      const text = await res.text().catch(() => '');
+      throw new Error(`Failed to save costing snapshot: ${res.status} ${text}`);
     }
   }, [productId]);
 
