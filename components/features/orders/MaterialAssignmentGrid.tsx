@@ -253,10 +253,15 @@ export default function MaterialAssignmentGrid({
                     const lineLabel = roles[0]?.product_name || `Line ${lineIdx + 1}`;
                     const assignedIds = new Set(roles.map((r) => r.assigned_component_id).filter(Boolean));
                     const subGroupBoardId = assignedIds.size === 1 ? [...assignedIds][0] : null;
-                    const hasEdgedParts = roles.some((r) => r.has_edges && r.assigned_component_id != null);
-                    const edgingDefault = subGroupBoardId
-                      ? edgingDefaults.find((ed) => ed.board_component_id === subGroupBoardId)
-                      : null;
+                    // Collect unique assigned boards that have edged parts (for edging comboboxes)
+                    const boardsWithEdges = new Map<number, string>();
+                    for (const r of roles) {
+                      if (r.has_edges && r.assigned_component_id != null) {
+                        if (!boardsWithEdges.has(r.assigned_component_id)) {
+                          boardsWithEdges.set(r.assigned_component_id, r.assigned_component_name ?? '');
+                        }
+                      }
+                    }
                     const lineKey = `${bt}:${orderDetailId}`;
                     const isLineCollapsed = collapsedLines[lineKey] ?? false;
                     const lineAssigned = roles.filter((r) => r.assigned_component_id != null).length;
@@ -323,11 +328,11 @@ export default function MaterialAssignmentGrid({
                               placeholder={isMixed ? "Mixed — reassign all…" : "Assign board…"}
                               className="h-7 w-[200px] text-xs"
                             />
-                            {hasEdgedParts && subGroupBoardId && (
+                            {!isMixed && subGroupBoardId && boardsWithEdges.has(subGroupBoardId) && (
                               <BoardMaterialCombobox
                                 boards={edgingComponents}
                                 boardType={null}
-                                value={edgingDefault?.edging_component_id ?? null}
+                                value={edgingDefaults.find((ed) => ed.board_component_id === subGroupBoardId)?.edging_component_id ?? null}
                                 onChange={(id, name) => onEdgingDefault(subGroupBoardId, id, name)}
                                 placeholder="Edging…"
                                 className="h-7 w-[180px] text-xs"
@@ -335,6 +340,29 @@ export default function MaterialAssignmentGrid({
                             )}
                           </div>
                         </div>
+
+                        {/* Per-board edging rows when mixed materials */}
+                        {isMixed && boardsWithEdges.size > 0 && Array.from(boardsWithEdges.entries()).map(([boardId, boardName]) => {
+                          const ed = edgingDefaults.find((e) => e.board_component_id === boardId);
+                          return (
+                            <div
+                              key={`edging-${boardId}`}
+                              className="flex items-center gap-3 border-b bg-muted/20 px-3 py-1"
+                            >
+                              <span className="text-xs text-muted-foreground truncate min-w-0 flex-1">
+                                Edging for <span className="font-medium text-foreground">{boardName}</span>:
+                              </span>
+                              <BoardMaterialCombobox
+                                boards={edgingComponents}
+                                boardType={null}
+                                value={ed?.edging_component_id ?? null}
+                                onChange={(id, name) => onEdgingDefault(boardId, id, name)}
+                                placeholder="Select edging…"
+                                className="h-7 w-[200px] text-xs"
+                              />
+                            </div>
+                          );
+                        })}
 
                         {/* Part rows — collapsible */}
                         {!isLineCollapsed && roles.map((role) => {
