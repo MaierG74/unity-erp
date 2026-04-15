@@ -39,7 +39,7 @@ CREATE TABLE product_cutlist_costing_snapshots (
   -- Full layout snapshot (see JSONB structure below)
   snapshot_data JSONB NOT NULL,
   -- Hash of the full layout input contract at calculation time (for staleness detection)
-  inputs_hash TEXT NOT NULL,
+  parts_hash TEXT NOT NULL,
 
   -- Timestamps
   calculated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -109,6 +109,40 @@ interface CutlistCostingSnapshot {
   backer_global_full_board: boolean;
   backer_price_per_sheet: number | null;
 
+  // Calculator settings at calculation time (product-scoped snapshot of what was used)
+  // These make the snapshot self-contained — no dependency on user-scoped material defaults
+  calculator_inputs: {
+    primaryBoards: {
+      id: string;
+      name: string;
+      length_mm: number;
+      width_mm: number;
+      cost: number;
+      isDefault: boolean;
+      component_id?: number;
+    }[];
+    backerBoards: {
+      id: string;
+      name: string;
+      length_mm: number;
+      width_mm: number;
+      cost: number;
+      isDefault: boolean;
+      component_id?: number;
+    }[];
+    edging: {
+      id: string;
+      name: string;
+      thickness_mm: number;
+      width_mm: number;
+      cost_per_meter: number;
+      isDefaultForThickness: boolean;
+      component_id?: number;
+    }[];
+    kerf: number;
+    optimizationPriority: 'fast' | 'offcut' | 'deep';
+  };
+
   // Aggregate stats for reference
   stats: {
     total_parts: number;
@@ -122,50 +156,39 @@ interface CutlistCostingSnapshot {
 
 **Why per-sheet data:** The existing calculator stores billing overrides (`SheetBillingOverride`) per sheet via `sheetOverrides: Record<string, SheetBillingOverride>`. On a multi-sheet material, the user may set sheet 1 to "charge full" and sheet 2 to "manual 80%". Collapsing to a per-material override would lose these inputs. The snapshot preserves the full per-sheet model; the costing tab derives material-level totals by summing across sheets (using `computeSheetCharge` logic).
 
+**Why `calculator_inputs` is stored:** Material settings (boards, edging, kerf) come from `cutlist_material_defaults`, which is **user-scoped** — each user has their own saved defaults. Without storing the inputs that produced this snapshot, two users viewing the same product would see different staleness results depending on their personal defaults, and the snapshot's prices wouldn't be reproducible. Storing `calculator_inputs` makes the snapshot fully self-contained and deterministic.
+
 **Why one row per product (UNIQUE constraint):** A product has one cutlist definition and one costing snapshot. Re-calculating replaces the previous snapshot.
 
-### 2. Inputs Hash for Staleness Detection
+### 2. Staleness Detection
 
-The layout result depends on more than just the parts — it also depends on kerf, optimization priority, board definitions (dimensions, defaults), edging defaults, and sheet overrides. The hash must cover the full layout input contract as emitted by `CutlistCalculator.onDataChange`:
+**Problem with hashing all inputs:** The layout result depends on parts, board definitions, edging defaults, kerf, and optimization priority. However, only the parts are product-scoped (persisted in `product_cutlist_groups`). Board/edging/kerf settings come from `cutlist_material_defaults`, which is **user-scoped** — each user has their own saved defaults. If the staleness hash included material settings, two users would see different stale/fresh results for the same product, and even the same user could flip the banner by changing personal defaults.
+
+**Solution:** Staleness detection is narrowed to **product-scoped data only** — the parts stored in `product_cutlist_groups`. The material/settings state that produced the layout is baked into the snapshot via `calculator_inputs` (see section 1), making the snapshot self-contained regardless of who views it.
 
 ```typescript
-function computeInputsHash(data: CutlistCalculatorData): string {
-  const normalized = {
-    parts: data.parts.map(p => ({
-      id: p.id,
-      length_mm: p.length_mm,
-      width_mm: p.width_mm,
-      quantity: p.quantity,
-      material_id: p.material_id,
-      grain: p.grain,
-      band_edges: p.band_edges,
-      lamination_type: p.lamination_type,
-      lamination_group: p.lamination_group,
-      edging_material_id: p.edging_material_id,
-    })),
-    primaryBoards: data.primaryBoards.map(b => ({
-      id: b.id, length_mm: b.length_mm, width_mm: b.width_mm,
-    })),
-    backerBoards: data.backerBoards.map(b => ({
-      id: b.id, length_mm: b.length_mm, width_mm: b.width_mm,
-    })),
-    edging: data.edging.map(e => ({
-      id: e.id, thickness_mm: e.thickness_mm,
-    })),
-    kerf: data.kerf,
-    optimizationPriority: data.optimizationPriority,
-    sheetOverrides: data.sheetOverrides,
-    globalFullBoard: data.globalFullBoard,
-    backerSheetOverrides: data.backerSheetOverrides,
-    backerGlobalFullBoard: data.backerGlobalFullBoard,
-  };
+function computePartsHash(parts: CompactPart[]): string {
+  const normalized = parts.map(p => ({
+    id: p.id,
+    length_mm: p.length_mm,
+    width_mm: p.width_mm,
+    quantity: p.quantity,
+    material_id: p.material_id,
+    grain: p.grain,
+    band_edges: p.band_edges,
+    lamination_type: p.lamination_type,
+    lamination_group: p.lamination_group,
+    edging_material_id: p.edging_material_id,
+  }));
   return hashString(JSON.stringify(normalized));
 }
 ```
 
-This aligns with the `CutlistCalculatorData` interface (lines 128–140 of `CutlistCalculator.tsx`) and the dependency array of the `onDataChange` effect (lines 636–648). Changing any of these inputs invalidates the snapshot.
+The DB column is renamed from `parts_hash` to `parts_hash` to reflect this scope.
 
-When the costing tab loads, it fetches the snapshot AND the current cutlist groups + material settings. It recomputes the inputs hash and compares to `inputs_hash`. If they differ, the snapshot is stale.
+**When the costing tab loads:** It fetches the snapshot and the current `product_cutlist_groups`. It reconstructs `CompactPart[]` from the groups (using `flattenGroupsToCompactParts`), computes the parts hash, and compares to `parts_hash`. If they differ → "parts have changed" stale banner.
+
+**Material drift detection (secondary, non-blocking):** The costing tab can also compare the snapshot's `calculator_inputs` board/edging prices against current `suppliercomponents` prices (via the stored `component_id`). If prices have changed, show a subtle "prices may have changed since last calculation" note — but this is informational, not a staleness gate.
 
 ### 3. Cutlist Builder Changes
 
@@ -194,7 +217,7 @@ Edging overrides are stored in component state (like `sheetOverrides`) and inclu
 
 **Why separate from autosave:** The autosave fires on every keystroke (debounced). Parts-only autosave is fine — the parts are the source of truth and cheap to write. But the snapshot represents a calculated+reviewed layout with billing overrides. It should only be persisted when the user has intentionally calculated and reviewed the result. Autosaving a stale or mid-edit snapshot would create confusion in costing.
 
-**Invalidation rule:** When parts are autosaved without a snapshot (user edited parts but didn't recalculate), the existing snapshot becomes stale. The staleness is detected via the `inputs_hash` mismatch — no explicit invalidation write is needed. The costing tab simply shows the stale banner.
+**Invalidation rule:** When parts are autosaved without a snapshot (user edited parts but didn't recalculate), the existing snapshot becomes stale. The staleness is detected via the `parts_hash` mismatch — no explicit invalidation write is needed. The costing tab simply shows the stale banner.
 
 #### 3c. Write Path — Dedicated Endpoint with Upsert
 
@@ -215,7 +238,7 @@ const { data: cutlistSnapshot } = useQuery({
 });
 ```
 
-It also fetches the current cutlist groups and material defaults to recompute the inputs hash for staleness detection.
+It also fetches the current `product_cutlist_groups` to reconstruct parts and recompute the parts hash for staleness detection (see section 2).
 
 #### 4b. Price Resolution
 
@@ -250,9 +273,9 @@ The **Total Materials** line at the bottom sums hardware subtotal + cutlist padd
 
 #### 4d. Staleness Banner
 
-When inputs hash doesn't match:
+When parts hash doesn't match:
 
-> "Cutlist inputs have changed since the last layout calculation. Costs may be outdated. [Open Cutlist Builder →]"
+> "Cutlist parts have been modified since the last layout calculation. Costs may be outdated. [Open Cutlist Builder →]"
 
 Shown as a warning banner above the Cutlist Materials sub-section.
 
@@ -277,7 +300,7 @@ Upserts the snapshot. Uses `INSERT ... ON CONFLICT (product_id, org_id) DO UPDAT
 ```json
 {
   "snapshot_data": { ... },
-  "inputs_hash": "abc123"
+  "parts_hash": "abc123"
 }
 ```
 
@@ -331,5 +354,5 @@ This matches the RLS pattern used across the tenant rollout (e.g. `20260222_tena
 - **Multiple material groups**: each material gets its own aggregated row in the cutlist materials table. A product with white doors + black carcass shows two board lines, each derived from their respective per-sheet data.
 - **Backer boards**: shown as a separate line in cutlist materials if present (lamination with backer). Per-sheet overrides also apply to backer sheets.
 - **Sub-products**: linked sub-products that have their own cutlists are not aggregated — each product manages its own cutlist costing independently.
-- **Autosave after edit without recalculate**: parts are saved, snapshot goes stale (detected by inputs hash mismatch), costing tab shows warning banner. No data loss.
+- **Autosave after edit without recalculate**: parts are saved, snapshot goes stale (detected by parts hash mismatch), costing tab shows warning banner. No data loss.
 - **Multiple sheets with different overrides for same material**: per-sheet overrides are preserved in the snapshot. Costing tab sums the per-sheet billable fractions to get the material total — same logic as `computeMaterialSheetRollups` in the calculator.
