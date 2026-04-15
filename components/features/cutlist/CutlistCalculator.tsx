@@ -69,6 +69,7 @@ import type {
 } from '@/lib/cutlist/types';
 
 import { EdgingOverrideRow } from './primitives/EdgingOverrideRow';
+import type { CutlistCostingSnapshot } from '@/lib/cutlist/costingSnapshot';
 
 // Import packing
 import { packPartsSmartOptimized, type SAProgressInfo } from '@/components/features/cutlist/packing';
@@ -164,6 +165,8 @@ export interface CutlistCalculatorProps {
   optimizationStorageKey?: string | null;
   /** Extra content rendered in the card header actions area */
   headerRight?: React.ReactNode;
+  /** Previously saved costing snapshot — used to restore sheet/edging overrides on load */
+  savedSnapshot?: CutlistCostingSnapshot | null;
   /** Additional class name */
   className?: string;
 }
@@ -199,6 +202,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   saveMaterialDefaults: shouldSaveDefaults = true,
   partsStorageKey = null,
   optimizationStorageKey = null,
+  savedSnapshot,
   headerRight,
   className,
 }: CutlistCalculatorProps, ref) {
@@ -307,6 +311,53 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     () => initialData?.backerGlobalFullBoard ?? false
   );
   const [edgingOverrides, setEdgingOverrides] = React.useState<Record<string, EdgingBillingOverride>>({});
+
+  // Restore billing overrides from saved snapshot (if any)
+  React.useEffect(() => {
+    if (!savedSnapshot) return;
+
+    // Restore sheet billing overrides
+    const restoredSheetOverrides: Record<string, SheetBillingOverride> = {};
+    for (const sheet of savedSnapshot.sheets) {
+      if (sheet.billing_override) {
+        restoredSheetOverrides[sheet.sheet_id] = {
+          mode: sheet.billing_override.mode,
+          manualPct: sheet.billing_override.manualPct,
+        };
+      }
+    }
+    setSheetOverrides(restoredSheetOverrides);
+    setGlobalFullBoard(savedSnapshot.global_full_board);
+
+    // Restore backer overrides
+    if (savedSnapshot.backer_sheets) {
+      const restoredBackerOverrides: Record<string, SheetBillingOverride> = {};
+      for (const sheet of savedSnapshot.backer_sheets) {
+        if (sheet.billing_override) {
+          restoredBackerOverrides[sheet.sheet_id] = {
+            mode: sheet.billing_override.mode,
+            manualPct: sheet.billing_override.manualPct,
+          };
+        }
+      }
+      setBackerSheetOverrides(restoredBackerOverrides);
+    }
+    setBackerGlobalFullBoard(savedSnapshot.backer_global_full_board);
+
+    // Restore edging overrides
+    const restoredEdgingOverrides: Record<string, EdgingBillingOverride> = {};
+    for (const e of savedSnapshot.edging) {
+      if (e.meters_override !== null || e.pct_override !== null) {
+        restoredEdgingOverrides[e.material_id] = {
+          metersOverride: e.meters_override,
+          pctOverride: e.pct_override,
+        };
+      }
+    }
+    setEdgingOverrides(restoredEdgingOverrides);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run once on mount — savedSnapshot is a prop, not state
+
   const packingConfig = React.useMemo(
     () => ({
       minUsableDimension: cutlistDefaults.minReusableOffcutDimensionMm,

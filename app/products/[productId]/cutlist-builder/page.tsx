@@ -10,6 +10,7 @@ import type { CutlistCalculatorData } from '@/components/features/cutlist/Cutlis
 import { useProductCutlistBuilderAdapter } from '@/components/features/cutlist/adapters';
 import type { CutlistSummary } from '@/lib/cutlist/types';
 import { buildSnapshotFromCalculator, computePartsHash } from '@/lib/cutlist/costingSnapshot';
+import type { CutlistCostingSnapshot } from '@/lib/cutlist/costingSnapshot';
 
 // Dynamic import to avoid SSR issues
 const CutlistCalculator = dynamic(
@@ -34,6 +35,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
   const [initialData, setInitialData] = useState<
     Partial<CutlistCalculatorData> | undefined
   >(undefined);
+  const [savedSnapshot, setSavedSnapshot] = useState<CutlistCostingSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [calculatorKey, setCalculatorKey] = useState(0);
@@ -53,6 +55,12 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
         if (!cancelled && loaded) {
           setInitialData(loaded);
           setCalculatorKey((k) => k + 1);
+        }
+
+        // After loading parts, also load saved snapshot
+        const snapshot = await adapter.loadSnapshot();
+        if (!cancelled && snapshot) {
+          setSavedSnapshot(snapshot);
         }
       } catch (err) {
         console.warn('[CutlistBuilder] Failed to load product groups:', err);
@@ -207,6 +215,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
           <CutlistCalculator
             key={calculatorKey}
             initialData={initialData}
+            savedSnapshot={savedSnapshot}
             onDataChange={handleDataChange}
             onSummaryChange={handleSummaryChange}
             onSaveToCosting={handleSaveToCosting}
