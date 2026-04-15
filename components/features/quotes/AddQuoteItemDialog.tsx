@@ -31,6 +31,7 @@ interface AddQuoteItemDialogProps {
     include_overhead?: boolean;
     attach_image?: boolean;
     selected_options?: ProductOptionSelection;
+    bullet_points?: string | null;
   }) => void | Promise<void>;
   onCreateText?: (payload: { description: string; item_type: QuoteItemType; text_align: QuoteItemTextAlign }) => void | Promise<void>;
 }
@@ -210,6 +211,7 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
             include_overhead: includeOverhead as boolean,
             attach_image: attachImage as boolean,
             selected_options: Object.keys(normalizedOptions).length ? normalizedOptions : undefined,
+            bullet_points: selectedProduct.bullet_points || null,
           })
         );
         handleClose();

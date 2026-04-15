@@ -80,14 +80,14 @@ export default function ImageEditorModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+        <DialogHeader className="pb-2">
           <DialogTitle>
             Edit Image — {attachment.original_name || 'Attachment'}
           </DialogTitle>
         </DialogHeader>
 
         {/* Display Size selector */}
-        <div className="flex items-center gap-3 pb-2 border-b">
+        <div className="flex items-center gap-3 py-3 border-y">
           <Label className="text-sm font-medium">PDF Size</Label>
           <div className="flex gap-1">
             {SIZE_OPTIONS.map((opt) => (
@@ -108,7 +108,7 @@ export default function ImageEditorModal({
           </span>
         </div>
 
-        <Tabs defaultValue="crop">
+        <Tabs defaultValue="crop" className="mt-1">
           <TabsList>
             <TabsTrigger value="crop">Crop & Zoom</TabsTrigger>
             <TabsTrigger value="annotate">

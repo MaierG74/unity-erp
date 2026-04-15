@@ -8,6 +8,7 @@ type ProductPayload = {
   internal_code?: string;
   name?: string;
   description?: string | null;
+  bullet_points?: string | null;
   categories?: number[];
 };
 
@@ -74,7 +75,7 @@ export async function GET(
 
     const { data: product, error: productError } = await supabaseAdmin
       .from('products')
-      .select('product_id, internal_code, name, description')
+      .select('product_id, internal_code, name, description, bullet_points')
       .eq('product_id', productId)
       .eq('org_id', auth.orgId)
       .maybeSingle();
@@ -154,6 +155,7 @@ export async function PUT(
     const internalCode = (body.internal_code ?? '').trim();
     const name = (body.name ?? '').trim();
     const description = typeof body.description === 'string' ? body.description.trim() : '';
+    const bulletPoints = typeof body.bullet_points === 'string' ? body.bullet_points.trim() : '';
     const categories = normalizeCategories(body.categories);
 
     if (!internalCode || !name) {
@@ -183,10 +185,11 @@ export async function PUT(
         internal_code: internalCode,
         name,
         description: description || null,
+        bullet_points: bulletPoints || null,
       })
       .eq('product_id', productId)
       .eq('org_id', auth.orgId)
-      .select('product_id, internal_code, name, description')
+      .select('product_id, internal_code, name, description, bullet_points')
       .maybeSingle();
 
     if (productError) {

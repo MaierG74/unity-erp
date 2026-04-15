@@ -610,6 +610,7 @@ export interface Product {
   product_id: number
   name: string
   internal_code?: string | null
+  bullet_points?: string | null
 }
 
 export interface ProductComponent {
@@ -648,7 +649,7 @@ async function routeFetch(input: RequestInfo | URL, init?: RequestInit): Promise
 export async function fetchProducts(): Promise<Product[]> {
   const { data, error } = await supabase
     .from('products')
-    .select('product_id, name, internal_code')
+    .select('product_id, name, internal_code, bullet_points')
     .order('name');
   if (error) {
     console.error('Error fetching products:', error);

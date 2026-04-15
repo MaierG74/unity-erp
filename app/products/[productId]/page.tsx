@@ -55,6 +55,7 @@ interface Product {
   internal_code: string;
   name: string;
   description: string | null;
+  bullet_points: string | null;
   primary_image?: string | null;
   images?: ProductImage[];
   categories?: ProductCategory[];
@@ -124,6 +125,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
   const [editCode, setEditCode] = useState('');
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  const [editBulletPoints, setEditBulletPoints] = useState('');
   const [savingProduct, setSavingProduct] = useState(false);
   const [addFgQty, setAddFgQty] = useState('');
   const [addFgLocation, setAddFgLocation] = useState('');
@@ -331,6 +333,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
     setEditCode(product?.internal_code ?? '');
     setEditName(product?.name ?? '');
     setEditDescription(product?.description ?? '');
+    setEditBulletPoints(product?.bullet_points ?? '');
     setEditOpen(true);
   };
 
@@ -338,6 +341,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
     internal_code?: string;
     name?: string;
     description?: string | null;
+    bullet_points?: string | null;
     categories?: number[];
   }) => {
     if (!product) {
@@ -350,6 +354,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
         internal_code: next.internal_code ?? product.internal_code,
         name: next.name ?? product.name,
         description: next.description ?? product.description ?? null,
+        bullet_points: next.bullet_points ?? product.bullet_points ?? null,
         categories: next.categories ?? (product.categories ?? []).map((category) => category.product_cat_id),
       }),
     });
@@ -368,6 +373,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
         internal_code: editCode.trim(),
         name: editName.trim(),
         description: editDescription || null,
+        bullet_points: editBulletPoints || null,
       });
       toast({ title: 'Product updated', description: 'Your changes have been saved.' });
       setEditOpen(false);
@@ -460,6 +466,17 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
               <div className="grid gap-2">
                 <Label htmlFor="desc">Description</Label>
                 <Textarea id="desc" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} rows={4} />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="bullet_points">Details / Bullet Points</Label>
+                <Textarea
+                  id="bullet_points"
+                  value={editBulletPoints}
+                  onChange={(e) => setEditBulletPoints(e.target.value)}
+                  rows={4}
+                  placeholder="Size: 2m x 3m&#10;Material: Solid wood&#10;Finish: Walnut"
+                />
+                <p className="text-xs text-muted-foreground">One per line — auto-fills into quotes as bullet points</p>
               </div>
             </div>
             <DialogFooter>

@@ -24,6 +24,7 @@ interface Product {
   internal_code: string;
   name: string;
   description: string | null;
+  bullet_points: string | null;
 }
 
 interface ProductEditFormProps {
@@ -39,6 +40,7 @@ export function ProductEditForm({ product, trigger, onProductUpdated }: ProductE
     internal_code: product.internal_code,
     name: product.name,
     description: product.description || '',
+    bullet_points: product.bullet_points || '',
   });
   const [existingCategoryIds, setExistingCategoryIds] = useState<number[]>([]);
   const { toast } = useToast();
@@ -83,6 +85,7 @@ export function ProductEditForm({ product, trigger, onProductUpdated }: ProductE
           internal_code: formData.internal_code,
           name: formData.name,
           description: formData.description || null,
+          bullet_points: formData.bullet_points || null,
           // Preserve category assignments during simple edits
           categories: existingCategoryIds,
         }),
@@ -164,6 +167,21 @@ export function ProductEditForm({ product, trigger, onProductUpdated }: ProductE
                 className="col-span-3"
                 rows={3}
               />
+            </div>
+            <div className="grid grid-cols-4 items-start gap-4">
+              <Label htmlFor="bullet_points" className="text-right pt-2">
+                Details
+              </Label>
+              <div className="col-span-3 space-y-1">
+                <Textarea
+                  id="bullet_points"
+                  value={formData.bullet_points}
+                  onChange={(e) => handleInputChange('bullet_points', e.target.value)}
+                  rows={4}
+                  placeholder="Size: 2m x 3m&#10;Material: Solid wood&#10;Finish: Walnut"
+                />
+                <p className="text-xs text-muted-foreground">One per line — auto-fills into quotes as bullet points</p>
+              </div>
             </div>
           </div>
           <DialogFooter>

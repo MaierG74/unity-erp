@@ -51,22 +51,41 @@ export default function QuotesPage() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
-  const [searchInput, setSearchInput] = useState('');
-  const [status, setStatus] = useState<'all' | QuoteStatus>('all');
-  const [sort, setSort] = useState<'created_desc' | 'created_asc' | 'total_desc' | 'total_asc'>('created_desc');
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [copyDialogOpen, setCopyDialogOpen] = useState(false);
-  const [copySource, setCopySource] = useState<{ id: string; quote_number: string; customer_id?: string } | null>(null);
   const { toast } = useToast();
   const routerNav = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const tableContainerRef = useRef<HTMLDivElement | null>(null);
   const [tableFlash, setTableFlash] = useReactState(false);
+
+  // Initialize filter state directly from URL params so the first render is correct
+  const initQ = searchParams.get('q') || '';
+  const initStatus = searchParams.get('status') || 'all';
+  const initSort = searchParams.get('sort') || 'created_desc';
+  const initPage = searchParams.get('page');
+  const initPageSize = searchParams.get('pageSize');
+
+  const [search, setSearch] = useState(initQ);
+  const [searchInput, setSearchInput] = useState(initQ);
+  const [status, setStatus] = useState<'all' | QuoteStatus>(
+    initStatus === 'all' || isQuoteStatus(initStatus) ? initStatus : 'all'
+  );
+  const [sort, setSort] = useState<'created_desc' | 'created_asc' | 'total_desc' | 'total_asc'>(
+    (['created_desc','created_asc','total_desc','total_asc'] as const).includes(initSort as any)
+      ? (initSort as any) : 'created_desc'
+  );
+  const [page, setPage] = useState(() => {
+    const pg = parseInt(initPage || '1', 10);
+    return Number.isFinite(pg) && pg > 0 ? pg : 1;
+  });
+  const [pageSize, setPageSize] = useState(() => {
+    const ps = parseInt(initPageSize || '10', 10);
+    return [10,20,50].includes(ps) ? ps : 10;
+  });
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [copyDialogOpen, setCopyDialogOpen] = useState(false);
+  const [copySource, setCopySource] = useState<{ id: string; quote_number: string; customer_id?: string } | null>(null);
 
   useEffect(() => {
     const fetchQuotes = async () => {
@@ -99,9 +118,13 @@ export default function QuotesPage() {
     fetchQuotes();
   }, []);
 
-  // Initialize state from query params (re-runs when URL changes, e.g., on back navigation)
+  // Sync state from URL when searchParams change (e.g., browser back/forward navigation)
   const searchParamsString = searchParams.toString();
+  const prevParamsRef = useRef(searchParamsString);
   useEffect(() => {
+    // Only run when URL actually changed externally (back/forward), not from our own replace
+    if (prevParamsRef.current === searchParamsString) return;
+    prevParamsRef.current = searchParamsString;
     const p = new URLSearchParams(searchParamsString);
     const s = p.get('q') || '';
     const st = p.get('status') || 'all';
@@ -125,6 +148,8 @@ export default function QuotesPage() {
     if (page !== 1) params.set('page', String(page));
     if (pageSize !== 10) params.set('pageSize', String(pageSize));
     const qs = params.toString();
+    // Track what we're writing so the read-effect doesn't echo it back
+    prevParamsRef.current = qs;
     routerNav.replace(`${pathname}${qs ? `?${qs}` : ''}`);
   }, [search, status, sort, page, pageSize, routerNav, pathname]);
 

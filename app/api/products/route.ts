@@ -15,6 +15,7 @@ type ProductPayload = {
   internal_code?: string;
   name?: string;
   description?: string | null;
+  bullet_points?: string | null;
   categories?: number[];
   images?: ProductImageInput[];
 };
@@ -72,6 +73,7 @@ export async function POST(request: NextRequest) {
     const internalCode = (body.internal_code ?? '').trim();
     const name = (body.name ?? '').trim();
     const description = typeof body.description === 'string' ? body.description.trim() : '';
+    const bulletPoints = typeof body.bullet_points === 'string' ? body.bullet_points.trim() : '';
     const categories = normalizeCategories(body.categories);
     const images = normalizeImages(body.images);
 
@@ -104,9 +106,10 @@ export async function POST(request: NextRequest) {
         internal_code: internalCode,
         name,
         description: description || null,
+        bullet_points: bulletPoints || null,
         org_id: auth.orgId,
       })
-      .select('product_id, internal_code, name, description')
+      .select('product_id, internal_code, name, description, bullet_points')
       .single();
 
     if (productError || !product) {
@@ -169,7 +172,7 @@ export async function GET(request: NextRequest) {
   try {
     const { data: products, error } = await supabaseAdmin
       .from('products')
-      .select('product_id, internal_code, name, description')
+      .select('product_id, internal_code, name, description, bullet_points')
       .eq('org_id', auth.orgId)
       .order('name');
 

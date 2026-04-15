@@ -744,6 +744,7 @@ export default function QuoteItemsTable({
     include_overhead,
     attach_image,
     selected_options,
+    bullet_points,
   }: {
     product_id: number;
     name: string;
@@ -753,6 +754,7 @@ export default function QuoteItemsTable({
     include_overhead?: boolean;
     attach_image?: boolean;
     selected_options?: ProductOptionSelection;
+    bullet_points?: string | null;
   }) => {
     try {
       const optionSelections = selected_options ?? {};
@@ -765,6 +767,7 @@ export default function QuoteItemsTable({
         qty,
         unit_price: 0,
         selected_options: optionPayload,
+        bullet_points: bullet_points || null,
       });
 
       let newItemWithCluster = { ...newItem } as QuoteItem;
