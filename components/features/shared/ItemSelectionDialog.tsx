@@ -123,7 +123,7 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
   const [includeLabor, setIncludeLabor] = useState(true);
 
   // BOM Product mode (apply/attach)
-  const [bomMode, setBomMode] = useState<'apply' | 'attach'>('apply');
+  const [bomMode, setBomMode] = useState<'apply' | 'attach'>(productBomMode?.enableAttach ? 'attach' : 'apply');
   const [bomPreview, setBomPreview] = useState<Array<{ component_id: number; quantity_required: number; components?: { internal_code: string; description: string | null } }> | null>(null);
 
   // By Supplier tab state
@@ -409,7 +409,7 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
     setProductQty('1');
     setExplodeProduct(true);
     setIncludeLabor(true);
-    setBomMode('apply');
+    setBomMode(productBomMode?.enableAttach ? 'attach' : 'apply');
     setBomPreview(null);
     setOverrideUnitCost(false);
     // Reset browse state
