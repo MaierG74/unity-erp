@@ -12,7 +12,7 @@ import {
   fetchSupplierComponentsBySupplier, SupplierComponentWithMaster,
   formatCurrency,
 } from '@/lib/db/quotes';
-import { Building2, FileText, Database, Package, Layers, Search } from 'lucide-react';
+import { Building2, FileText, Database, Package, Layers, Search, Loader2 } from 'lucide-react';
 
 export type TabId = 'manual' | 'component' | 'product' | 'cluster' | 'supplier';
 
@@ -62,7 +62,7 @@ interface ProductBomMode {
 export interface ItemSelectionDialogProps {
   open: boolean;
   onClose: () => void;
-  onAddComponent: (item: SelectedItem) => void;
+  onAddComponent: (item: SelectedItem) => void | Promise<void>;
   /** Which tabs to show. Defaults to all tabs. */
   tabs?: TabId[];
   /** Which tab to open by default. Defaults to first tab in `tabs`. */
@@ -121,6 +121,9 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
   const [productQty, setProductQty] = useState<string>('1');
   const [explodeProduct, setExplodeProduct] = useState(true);
   const [includeLabor, setIncludeLabor] = useState(true);
+
+  // Submit loading state
+  const [submitting, setSubmitting] = useState(false);
 
   // BOM Product mode (apply/attach)
   const [bomMode, setBomMode] = useState<'apply' | 'attach'>(productBomMode?.enableAttach ? 'attach' : 'apply');
@@ -330,70 +333,75 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
     }
   };
 
-  const handleSubmit = () => {
-    if (entryType === 'manual') {
-      if (!description.trim()) return;
-      onAddComponent({
-        type: 'manual',
-        description: description.trim(),
-        qty: Number(qty) || 1,
-        unit_cost: Math.round((Number(unitCost) || 0) * 100) / 100,
-      });
-    } else if (entryType === 'database') {
-      if (!selectedComponent) return;
-      const supplierComponent = requireSupplier ? selectedSupplierComponent : selectedSupplierComponent ?? null;
-      if (requireSupplier && !supplierComponent) return;
-      const effectiveUnitCost = Math.round((Number(unitCost) || 0) * 100) / 100;
-      onAddComponent({
-        type: 'database',
-        description: supplierComponent
-          ? `${selectedComponent.description} (${supplierComponent.supplier?.name})`
-          : selectedComponent.description || selectedComponent.internal_code || 'Component',
-        qty: Number(qty) || 1,
-        unit_cost: effectiveUnitCost,
-        component_id: selectedComponent.component_id,
-        supplier_component_id: supplierComponent?.supplier_component_id,
-      });
-    } else if (entryType === 'product') {
-      if (!selectedProduct) return;
-
-      if (productBomMode) {
-        // BOM mode: return product with apply/attach info
-        onAddComponent({
-          type: 'product',
-          product_id: selectedProduct.product_id,
-          qty: Number(productQty) || 1,
-          description: selectedProduct.name,
-          unit_cost: 0,
-          bom_product_mode: bomMode,
-          bom_product_quantity: Number(productQty) || 1,
+  const handleSubmit = async () => {
+    setSubmitting(true);
+    try {
+      if (entryType === 'manual') {
+        if (!description.trim()) return;
+        await onAddComponent({
+          type: 'manual',
+          description: description.trim(),
+          qty: Number(qty) || 1,
+          unit_cost: Math.round((Number(unitCost) || 0) * 100) / 100,
         });
-      } else {
-        // Quote mode: return product with explode/labour info
-        onAddComponent({
-          type: 'product',
-          product_id: selectedProduct.product_id,
-          qty: Number(productQty) || 1,
-          explode: explodeProduct,
-          include_labour: includeLabor,
-          description: selectedProduct.name,
+      } else if (entryType === 'database') {
+        if (!selectedComponent) return;
+        const supplierComponent = requireSupplier ? selectedSupplierComponent : selectedSupplierComponent ?? null;
+        if (requireSupplier && !supplierComponent) return;
+        const effectiveUnitCost = Math.round((Number(unitCost) || 0) * 100) / 100;
+        await onAddComponent({
+          type: 'database',
+          description: supplierComponent
+            ? `${selectedComponent.description} (${supplierComponent.supplier?.name})`
+            : selectedComponent.description || selectedComponent.internal_code || 'Component',
+          qty: Number(qty) || 1,
+          unit_cost: effectiveUnitCost,
+          component_id: selectedComponent.component_id,
+          supplier_component_id: supplierComponent?.supplier_component_id,
+        });
+      } else if (entryType === 'product') {
+        if (!selectedProduct) return;
+
+        if (productBomMode) {
+          // BOM mode: return product with apply/attach info
+          await onAddComponent({
+            type: 'product',
+            product_id: selectedProduct.product_id,
+            qty: Number(productQty) || 1,
+            description: selectedProduct.name,
+            unit_cost: 0,
+            bom_product_mode: bomMode,
+            bom_product_quantity: Number(productQty) || 1,
+          });
+        } else {
+          // Quote mode: return product with explode/labour info
+          await onAddComponent({
+            type: 'product',
+            product_id: selectedProduct.product_id,
+            qty: Number(productQty) || 1,
+            explode: explodeProduct,
+            include_labour: includeLabor,
+            description: selectedProduct.name,
+            unit_cost: 0,
+          });
+        }
+      } else if (entryType === 'collection') {
+        if (!selectedCollection) return;
+        await onAddComponent({
+          type: 'collection',
+          collection_id: selectedCollection,
+          qty: 1,
           unit_cost: 0,
+          description: 'Costing Cluster',
         });
       }
-    } else if (entryType === 'collection') {
-      if (!selectedCollection) return;
-      onAddComponent({
-        type: 'collection',
-        collection_id: selectedCollection,
-        qty: 1,
-        unit_cost: 0,
-        description: 'Costing Cluster',
-      });
-    }
 
-    // Reset form
-    resetForm();
-    onClose();
+      // Reset form
+      resetForm();
+      onClose();
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const resetForm = () => {
@@ -982,6 +990,7 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
             className="h-9"
             onClick={handleSubmit}
             disabled={
+              submitting ||
               entryType === 'supplier' ||
               (entryType === 'manual' && !description.trim()) ||
               (entryType === 'database' && (!selectedComponent || (requireSupplier && !selectedSupplierComponent))) ||
@@ -989,6 +998,7 @@ const ItemSelectionDialog: React.FC<ItemSelectionDialogProps> = ({
               (entryType === 'collection' && !selectedCollection)
             }
           >
+            {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {productBomMode
               ? (entryType === 'product' ? (bomMode === 'attach' ? 'Attach' : 'Apply') : 'Add to BOM')
               : 'Add Component'}
