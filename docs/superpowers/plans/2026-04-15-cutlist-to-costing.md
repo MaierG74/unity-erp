@@ -20,8 +20,8 @@
 | `app/api/products/[productId]/cutlist-costing-snapshot/route.ts` | Create | GET + PUT endpoints for snapshot CRUD |
 | `components/features/cutlist/primitives/EdgingOverrideRow.tsx` | Create | Edging override controls (padding %, fixed override, reset) |
 | `components/features/cutlist/CutlistCalculator.tsx` | Modify | Add edging override state, include overrides in `onDataChange`, add "Save to Costing" button on preview tab |
-| `app/products/[productId]/cutlist-builder/page.tsx` | Modify | Wire `onSummaryChange`, add snapshot save to `handleSave`, add standalone `handleSaveToCosting` |
-| `components/features/cutlist/adapters/useProductCutlistBuilderAdapter.ts` | Modify | Add `saveSnapshot()` method |
+| `app/products/[productId]/cutlist-builder/page.tsx` | Modify | Wire `onSummaryChange`, add snapshot save to `handleSave`, add standalone `handleSaveToCosting`, restore snapshot on load |
+| `components/features/cutlist/adapters/useProductCutlistBuilderAdapter.ts` | Modify | Add `saveSnapshot()` and `loadSnapshot()` methods |
 | `components/features/products/product-costing.tsx` | Modify | Add cutlist materials sub-section, staleness banner, no-snapshot banner |
 | `lib/cutlist/types.ts` | Modify | Add `EdgingBillingOverride` type |
 | Supabase migration | Create | `product_cutlist_costing_snapshots` table + RLS |
@@ -324,12 +324,13 @@ export function buildSnapshotFromCalculator(args: BuildSnapshotArgs): CutlistCos
       : null,
   }));
 
-  // Backer sheets
+  // Backer sheets — use default backer board for material identity
+  const defaultBacker = backerBoards.find(b => b.isDefault) || backerBoards[0];
   const backer_sheets: SnapshotSheet[] | null = backerResult
     ? backerResult.sheets.map(s => ({
         sheet_id: s.sheet_id,
-        material_id: '',
-        material_name: '',
+        material_id: defaultBacker?.id || '',
+        material_name: defaultBacker?.name || '',
         sheet_length_mm: s.stock_length_mm || 0,
         sheet_width_mm: s.stock_width_mm || 0,
         used_area_mm2: s.used_area_mm2 || 0,
@@ -396,8 +397,6 @@ export function buildSnapshotFromCalculator(args: BuildSnapshotArgs): CutlistCos
     total_waste_area_mm2: result.stats.waste_area_mm2,
     total_cuts: result.stats.cuts,
   };
-
-  const defaultBacker = backerBoards.find(b => b.isDefault) || backerBoards[0];
 
   return {
     sheets,
@@ -928,7 +927,161 @@ git commit -m "feat: wire snapshot save into cutlist builder — Save button and
 
 ---
 
-### Task 7: Costing Tab — Cutlist Materials Sub-Section
+### Task 7: Restore Snapshot into Cutlist Builder (Layout Survives Navigation)
+
+**Files:**
+- Modify: `components/features/cutlist/adapters/useProductCutlistBuilderAdapter.ts`
+- Modify: `app/products/[productId]/cutlist-builder/page.tsx`
+- Modify: `components/features/cutlist/CutlistCalculator.tsx`
+
+The spec's Goal 1 says the layout result should survive page navigation. Currently the builder loads parts from `product_cutlist_groups` but doesn't restore the saved layout result, sheet overrides, or edging overrides. This task adds that read path.
+
+- [ ] **Step 1: Add `loadSnapshot` to the adapter**
+
+In `useProductCutlistBuilderAdapter.ts`, add a method to fetch the saved snapshot:
+
+```typescript
+import type { CutlistCostingSnapshot } from '@/lib/cutlist/costingSnapshot';
+
+const loadSnapshot = useCallback(async (): Promise<CutlistCostingSnapshot | null> => {
+  if (!productId || Number.isNaN(productId)) return null;
+
+  const res = await authorizedFetch(
+    `/api/products/${productId}/cutlist-costing-snapshot?module=${MODULE_KEYS.CUTLIST_OPTIMIZER}`
+  );
+  if (!res.ok) return null;
+
+  const json = (await res.json()) as { snapshot: { snapshot_data: CutlistCostingSnapshot } | null };
+  return json.snapshot?.snapshot_data ?? null;
+}, [productId]);
+```
+
+Add `loadSnapshot` to the return object.
+
+- [ ] **Step 2: Extend `CutlistCalculatorData` to include saved snapshot for restoration**
+
+In `CutlistCalculator.tsx`, extend the `CutlistCalculatorProps` interface to accept an optional saved snapshot:
+
+```typescript
+/** Previously saved costing snapshot — used to restore sheet overrides and edging overrides on load */
+savedSnapshot?: CutlistCostingSnapshot | null;
+```
+
+Import the type:
+
+```typescript
+import type { CutlistCostingSnapshot } from '@/lib/cutlist/costingSnapshot';
+```
+
+In the component body, when `savedSnapshot` is provided and the calculator initialises, restore:
+- `sheetOverrides` from `savedSnapshot.sheets` (reconstruct `Record<string, SheetBillingOverride>` from per-sheet `billing_override`)
+- `globalFullBoard` from `savedSnapshot.global_full_board`
+- `backerSheetOverrides` from `savedSnapshot.backer_sheets`
+- `backerGlobalFullBoard` from `savedSnapshot.backer_global_full_board`
+- `edgingOverrides` from `savedSnapshot.edging` (reconstruct `Record<string, EdgingBillingOverride>` from per-edging entries)
+
+Add a `useEffect` that runs once when `savedSnapshot` is provided:
+
+```typescript
+React.useEffect(() => {
+  if (!savedSnapshot) return;
+
+  // Restore sheet billing overrides
+  const restoredSheetOverrides: Record<string, SheetBillingOverride> = {};
+  for (const sheet of savedSnapshot.sheets) {
+    if (sheet.billing_override) {
+      restoredSheetOverrides[sheet.sheet_id] = {
+        mode: sheet.billing_override.mode,
+        manualPct: sheet.billing_override.manualPct,
+      };
+    }
+  }
+  setSheetOverrides(restoredSheetOverrides);
+  setGlobalFullBoard(savedSnapshot.global_full_board);
+
+  // Restore backer overrides
+  if (savedSnapshot.backer_sheets) {
+    const restoredBackerOverrides: Record<string, SheetBillingOverride> = {};
+    for (const sheet of savedSnapshot.backer_sheets) {
+      if (sheet.billing_override) {
+        restoredBackerOverrides[sheet.sheet_id] = {
+          mode: sheet.billing_override.mode,
+          manualPct: sheet.billing_override.manualPct,
+        };
+      }
+    }
+    setBackerSheetOverrides(restoredBackerOverrides);
+  }
+  setBackerGlobalFullBoard(savedSnapshot.backer_global_full_board);
+
+  // Restore edging overrides
+  const restoredEdgingOverrides: Record<string, EdgingBillingOverride> = {};
+  for (const e of savedSnapshot.edging) {
+    if (e.meters_override !== null || e.pct_override !== null) {
+      restoredEdgingOverrides[e.material_id] = {
+        metersOverride: e.meters_override,
+        pctOverride: e.pct_override,
+      };
+    }
+  }
+  setEdgingOverrides(restoredEdgingOverrides);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []); // Run once on mount — savedSnapshot is a prop, not state
+```
+
+- [ ] **Step 3: Load snapshot in the builder page and pass to calculator**
+
+In `cutlist-builder/page.tsx`, load the snapshot alongside the parts:
+
+```typescript
+const [savedSnapshot, setSavedSnapshot] = useState<CutlistCostingSnapshot | null>(null);
+```
+
+In the existing `loadGroups` effect, add:
+
+```typescript
+// After loading parts, also load saved snapshot
+const snapshot = await adapter.loadSnapshot();
+if (!cancelled && snapshot) {
+  setSavedSnapshot(snapshot);
+}
+```
+
+Pass to the calculator:
+
+```tsx
+<CutlistCalculator
+  key={calculatorKey}
+  initialData={initialData}
+  savedSnapshot={savedSnapshot}
+  onDataChange={handleDataChange}
+  onSummaryChange={handleSummaryChange}
+  onSaveToCosting={handleSaveToCosting}
+  savingToCosting={savingToCosting}
+  loadMaterialDefaults={true}
+  saveMaterialDefaults={true}
+/>
+```
+
+- [ ] **Step 4: Verify in the browser**
+
+1. Open cutlist builder, calculate layout, set a sheet to "manual 80%", set edging +10%, click "Save to Costing"
+2. Navigate away (e.g. back to product page)
+3. Return to cutlist builder
+4. Verify: sheet overrides and edging overrides are restored from the saved snapshot
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add components/features/cutlist/adapters/useProductCutlistBuilderAdapter.ts \
+      components/features/cutlist/CutlistCalculator.tsx \
+      app/products/\[productId\]/cutlist-builder/page.tsx
+git commit -m "feat: restore saved snapshot overrides when reopening cutlist builder"
+```
+
+---
+
+### Task 8: Costing Tab — Cutlist Materials Sub-Section
 
 **Files:**
 - Modify: `components/features/products/product-costing.tsx`
@@ -966,7 +1119,42 @@ const { data: cutlistGroups } = useQuery({
 });
 ```
 
-- [ ] **Step 2: Compute staleness**
+- [ ] **Step 2: Add `is_cutlist_item` to `EffectiveItem` type and filter cutlist BOM rows**
+
+The existing `EffectiveItem` type (around line 76) doesn't include `is_cutlist_item`. Add it:
+
+```typescript
+type EffectiveItem = {
+  component_id: number
+  quantity_required: number
+  supplier_component_id: number | null
+  suppliercomponents?: { price?: number | null } | null
+  _source?: 'direct' | 'link'
+  _sub_product_id?: number
+  is_cutlist_item?: boolean | null  // ← add this
+}
+```
+
+The effective-bom API already returns this field. When a cutlist snapshot exists, filter cutlist BOM rows out of the materials list to prevent double-counting. Find where `materials` is computed from `effective.items` or `bom` (around line 159) and add:
+
+```typescript
+// When cutlist snapshot exists, exclude cutlist BOM items from hardware materials
+const filteredEffectiveItems = snapshot
+  ? (effective.items || []).filter(it => !it.is_cutlist_item)
+  : (effective.items || []);
+```
+
+Use `filteredEffectiveItems` instead of `effective.items` in the materials mapping. For the legacy `bom` fallback path, add the same filter using a join to check `is_cutlist_item` on the BOM row (add `is_cutlist_item` to the BOM select query).
+
+- [ ] **Step 3: Compute staleness**
+
+Add `useMemo` to the existing `import { useState } from 'react'` at the top of the file:
+
+```typescript
+import { useState, useMemo } from 'react'
+```
+
+Then add the staleness computation:
 
 ```typescript
 const snapshot = snapshotResponse?.snapshot?.snapshot_data ?? null;
@@ -974,7 +1162,7 @@ const storedHash = snapshotResponse?.snapshot?.parts_hash ?? null;
 const hasCutlistGroups = (cutlistGroups?.groups?.length ?? 0) > 0;
 
 // Compute current parts hash for staleness check
-const currentPartsHash = React.useMemo(() => {
+const currentPartsHash = useMemo(() => {
   if (!cutlistGroups?.groups?.length) return null;
   const parts = flattenGroupsToCompactParts(cutlistGroups.groups as never[]);
   return computePartsHash(parts);
@@ -983,7 +1171,7 @@ const currentPartsHash = React.useMemo(() => {
 const isStale = storedHash !== null && currentPartsHash !== null && storedHash !== currentPartsHash;
 ```
 
-- [ ] **Step 3: Add helper to derive per-material totals from snapshot**
+- [ ] **Step 4: Add helper to derive per-material totals from snapshot**
 
 ```typescript
 interface CutlistMaterialCostLine {
@@ -1084,7 +1272,7 @@ function deriveCutlistCostLines(snapshot: CutlistCostingSnapshot): CutlistMateri
 }
 ```
 
-- [ ] **Step 4: Render the cutlist materials sub-section**
+- [ ] **Step 5: Render the cutlist materials sub-section**
 
 In the materials section of the costing tab (where `materials` array is rendered in the table), add a conditional block for the cutlist sub-section:
 
@@ -1172,27 +1360,31 @@ In the materials section of the costing tab (where `materials` array is rendered
 })()}
 ```
 
-- [ ] **Step 5: Update total materials calculation**
+- [ ] **Step 6: Update total materials calculation**
 
-Ensure the total materials cost includes the cutlist padded subtotal. Find where `materialTotal` is computed and add the cutlist contribution:
+The existing `materialTotal` is computed from BOM line totals. Since Step 2 already filters out cutlist BOM items when a snapshot exists, `materialTotal` now represents hardware-only cost. Add the cutlist padded subtotal on top:
 
 ```typescript
-const cutlistPaddedTotal = snapshot
-  ? deriveCutlistCostLines(snapshot).reduce((s, l) => s + (l.paddedCost ?? 0), 0)
-  : 0;
+const cutlistCostLines = snapshot ? deriveCutlistCostLines(snapshot) : [];
+const cutlistPaddedTotal = cutlistCostLines.reduce((s, l) => s + (l.paddedCost ?? 0), 0);
+const cutlistActualTotal = cutlistCostLines.reduce((s, l) => s + (l.actualCost ?? 0), 0);
 
-// In the total: materialTotal + cutlistPaddedTotal
+// materialTotal already excludes cutlist items (filtered in Step 2), so no double-count
+const totalMaterials = materialTotal + cutlistPaddedTotal;
 ```
 
-- [ ] **Step 6: Verify in the browser**
+Update the "Total Materials" display row to use `totalMaterials`. Show the actual total (hardware + cutlist actual) in muted text as a secondary line.
+
+- [ ] **Step 7: Verify in the browser**
 
 Navigate to the product costing tab for a product with a saved snapshot. Confirm:
 - Cutlist Materials sub-section renders with correct data
 - Actual and Padded columns show the right numbers
-- Total materials includes cutlist contribution
+- Hardware BOM items with `is_cutlist_item = true` are NOT shown in the Hardware & Components section (no double-counting)
+- Total materials = hardware subtotal + cutlist padded subtotal
 - Products without cutlist show unchanged behavior
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add components/features/products/product-costing.tsx
@@ -1201,7 +1393,7 @@ git commit -m "feat: display cutlist materials in product costing tab with actua
 
 ---
 
-### Task 8: End-to-End Verification
+### Task 9: End-to-End Verification
 
 **Files:** None — this is a test/verification task.
 
@@ -1265,7 +1457,8 @@ git add -A && git commit -m "fix: address lint/type issues from cutlist-to-costi
 | 4 | Adapter `saveSnapshot()` | Task 2, 3 |
 | 5 | Edging override controls | Task 2 |
 | 6 | Wire snapshot save into builder page | Task 4, 5 |
-| 7 | Costing tab cutlist materials section | Task 2, 3 |
-| 8 | End-to-end verification | All above |
+| 7 | Restore snapshot into cutlist builder | Task 3, 4 |
+| 8 | Costing tab cutlist materials section | Task 2, 3 |
+| 9 | End-to-end verification | All above |
 
-Tasks 1 and 2 can run in parallel. Tasks 3, 5, and 7 can partially overlap. Task 8 is the final verification.
+Tasks 1 and 2 can run in parallel. Tasks 3, 5 can partially overlap. Task 7 (restore) and Task 8 (costing tab) are independent of each other. Task 9 is the final verification.
