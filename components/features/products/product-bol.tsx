@@ -802,7 +802,8 @@ export function ProductBOL({ productId }: ProductBOLProps) {
                                   itemCount={items.length}
                                   totalCost={groupTotal}
                                   scaleQty={link ? Number(link.scale) : 1}
-                                  colSpan={9}
+                                  labelColSpan={7}
+                                  trailingCols={1}
                                 >
                                   {items.map((it, childIdx) =>
                                     renderBolRow(it, 1000 + subProductId * 100 + childIdx, true)

@@ -943,14 +943,20 @@ export function ProductBOM({ productId }: ProductBOMProps) {
       if (!response.ok) throw new Error(json?.error || 'Failed to delete BOM row');
     },
     onMutate: async (bomId: number) => {
-      // Optimistic update: remove row from cache immediately
+      // Optimistic update: remove row from both caches immediately
       await queryClient.cancelQueries({ queryKey: ['productBOM', productId, supplierFeatureAvailable] });
-      const previous = queryClient.getQueryData(['productBOM', productId, supplierFeatureAvailable]);
+      await queryClient.cancelQueries({ queryKey: ['effectiveBOM', productId] });
+      const previousBom = queryClient.getQueryData(['productBOM', productId, supplierFeatureAvailable]);
+      const previousEffective = queryClient.getQueryData(['effectiveBOM', productId]);
       queryClient.setQueryData(
         ['productBOM', productId, supplierFeatureAvailable],
         (old: any) => old?.filter((item: any) => item.bom_id !== bomId) ?? []
       );
-      return { previous };
+      queryClient.setQueryData(
+        ['effectiveBOM', productId],
+        (old: any) => old ? { ...old, items: (old.items || []).filter((item: any) => item.bom_id !== bomId) } : old
+      );
+      return { previousBom, previousEffective };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['productBOM', productId] });
@@ -963,9 +969,12 @@ export function ProductBOM({ productId }: ProductBOMProps) {
       });
     },
     onError: (error, _bomId, context) => {
-      // Roll back optimistic update on failure
-      if (context?.previous) {
-        queryClient.setQueryData(['productBOM', productId, supplierFeatureAvailable], context.previous);
+      // Roll back optimistic updates on failure
+      if (context?.previousBom) {
+        queryClient.setQueryData(['productBOM', productId, supplierFeatureAvailable], context.previousBom);
+      }
+      if (context?.previousEffective) {
+        queryClient.setQueryData(['effectiveBOM', productId], context.previousEffective);
       }
       toast({
         title: 'Error',
@@ -1681,6 +1690,8 @@ const renderCutlistEditor = () => {
       }
     } catch (e) {
       console.error('Add item to BOM failed', e)
+      toast({ title: 'Error', description: 'Failed to add item to BOM', variant: 'destructive' })
+      throw e // re-throw so the dialog stays open
     }
   }
 
@@ -2023,7 +2034,8 @@ const renderCutlistEditor = () => {
                                 itemCount={items.length}
                                 totalCost={groupTotal}
                                 scaleQty={link ? Number(link.scale) : 1}
-                                colSpan={colSpan}
+                                labelColSpan={supplierFeatureAvailable ? 5 : 3}
+                                trailingCols={supplierFeatureAvailable ? 3 : 2}
                               >
                                 {items.map((it, childIdx) =>
                                   renderBomRow(it, 1000 + subProductId * 100 + childIdx, true)
