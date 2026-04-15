@@ -150,6 +150,10 @@ export interface CutlistCalculatorProps {
   onDataChange?: (data: CutlistCalculatorData) => void;
   /** Called when calculation completes with summary data (for export) */
   onSummaryChange?: (summary: CutlistSummary | null) => void;
+  /** Called when user clicks "Save to Costing" on preview tab */
+  onSaveToCosting?: () => void;
+  /** Whether a costing save is in progress */
+  savingToCosting?: boolean;
   /** Whether to load pinned material defaults on mount (default: true) */
   loadMaterialDefaults?: boolean;
   /** Whether to persist material changes to database (default: true) */
@@ -189,6 +193,8 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   initialData,
   onDataChange,
   onSummaryChange,
+  onSaveToCosting,
+  savingToCosting,
   loadMaterialDefaults: shouldLoadDefaults = true,
   saveMaterialDefaults: shouldSaveDefaults = true,
   partsStorageKey = null,
@@ -1759,6 +1765,26 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                           }}
                         />
                       ))}
+                    </div>
+                  )}
+
+                  {onSaveToCosting && result && (
+                    <div className="mt-4">
+                      <Button
+                        size="sm"
+                        onClick={onSaveToCosting}
+                        disabled={savingToCosting}
+                        className="gap-1.5"
+                      >
+                        {savingToCosting ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Saving...
+                          </>
+                        ) : (
+                          'Save to Costing'
+                        )}
+                      </Button>
                     </div>
                   )}
                 </div>

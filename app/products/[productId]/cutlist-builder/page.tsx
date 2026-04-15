@@ -8,6 +8,8 @@ import { toast } from 'sonner';
 import dynamic from 'next/dynamic';
 import type { CutlistCalculatorData } from '@/components/features/cutlist/CutlistCalculator';
 import { useProductCutlistBuilderAdapter } from '@/components/features/cutlist/adapters';
+import type { CutlistSummary } from '@/lib/cutlist/types';
+import { buildSnapshotFromCalculator, computePartsHash } from '@/lib/cutlist/costingSnapshot';
 
 // Dynamic import to avoid SSR issues
 const CutlistCalculator = dynamic(
@@ -36,6 +38,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
   const [saving, setSaving] = useState(false);
   const [calculatorKey, setCalculatorKey] = useState(0);
   const dataRef = useRef<CutlistCalculatorData | null>(null);
+  const summaryRef = useRef<CutlistSummary | null>(null);
   const adapter = useProductCutlistBuilderAdapter(productId);
 
   // Load product cutlist groups on mount
@@ -64,6 +67,10 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
     };
   }, [productId]);
 
+  const handleSummaryChange = useCallback((summary: CutlistSummary | null) => {
+    summaryRef.current = summary;
+  }, []);
+
   // Auto-save with 2s debounce on data change
   const handleDataChange = useCallback(
     (data: CutlistCalculatorData) => {
@@ -88,12 +95,72 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
 
     setSaving(true);
     try {
+      // 1. Save parts groups (existing behavior)
       await adapter.save(data);
+
+      // 2. If a layout result exists, also save the costing snapshot
+      const summary = summaryRef.current;
+      if (summary?.result) {
+        const snapshot = buildSnapshotFromCalculator({
+          result: summary.result,
+          backerResult: summary.backerResult,
+          parts: data.parts,
+          primaryBoards: data.primaryBoards,
+          backerBoards: data.backerBoards,
+          edgingMaterials: data.edging,
+          kerf: data.kerf,
+          optimizationPriority: data.optimizationPriority,
+          sheetOverrides: data.sheetOverrides,
+          globalFullBoard: data.globalFullBoard,
+          backerSheetOverrides: data.backerSheetOverrides,
+          backerGlobalFullBoard: data.backerGlobalFullBoard,
+          edgingByMaterial: summary.edgingByMaterial ?? [],
+          edgingOverrides: data.edgingOverrides,
+        });
+        const partsHash = computePartsHash(data.parts);
+        await adapter.saveSnapshot(snapshot, partsHash);
+      }
+
       toast.success('Cutlist saved to product');
     } catch {
       toast.error('Failed to save cutlist');
     } finally {
       setSaving(false);
+    }
+  }, [adapter]);
+
+  const [savingToCosting, setSavingToCosting] = useState(false);
+
+  const handleSaveToCosting = useCallback(async () => {
+    const data = dataRef.current;
+    const summary = summaryRef.current;
+    if (!data || !summary?.result) return;
+
+    setSavingToCosting(true);
+    try {
+      const snapshot = buildSnapshotFromCalculator({
+        result: summary.result,
+        backerResult: summary.backerResult,
+        parts: data.parts,
+        primaryBoards: data.primaryBoards,
+        backerBoards: data.backerBoards,
+        edgingMaterials: data.edging,
+        kerf: data.kerf,
+        optimizationPriority: data.optimizationPriority,
+        sheetOverrides: data.sheetOverrides,
+        globalFullBoard: data.globalFullBoard,
+        backerSheetOverrides: data.backerSheetOverrides,
+        backerGlobalFullBoard: data.backerGlobalFullBoard,
+        edgingByMaterial: summary.edgingByMaterial ?? [],
+        edgingOverrides: data.edgingOverrides,
+      });
+      const partsHash = computePartsHash(data.parts);
+      await adapter.saveSnapshot(snapshot, partsHash);
+      toast.success('Costing snapshot saved');
+    } catch {
+      toast.error('Failed to save costing snapshot');
+    } finally {
+      setSavingToCosting(false);
     }
   }, [adapter]);
 
@@ -141,6 +208,9 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
             key={calculatorKey}
             initialData={initialData}
             onDataChange={handleDataChange}
+            onSummaryChange={handleSummaryChange}
+            onSaveToCosting={handleSaveToCosting}
+            savingToCosting={savingToCosting}
             loadMaterialDefaults={true}
             saveMaterialDefaults={true}
           />
