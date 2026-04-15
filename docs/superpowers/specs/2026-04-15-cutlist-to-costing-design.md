@@ -38,7 +38,7 @@ CREATE TABLE product_cutlist_costing_snapshots (
 
   -- Full layout snapshot (see JSONB structure below)
   snapshot_data JSONB NOT NULL,
-  -- Hash of the full layout input contract at calculation time (for staleness detection)
+  -- Hash of the product-scoped parts at calculation time (for staleness detection)
   parts_hash TEXT NOT NULL,
 
   -- Timestamps
@@ -184,7 +184,7 @@ function computePartsHash(parts: CompactPart[]): string {
 }
 ```
 
-The DB column is renamed from `parts_hash` to `parts_hash` to reflect this scope.
+The DB column is named `parts_hash` (not `inputs_hash`) to reflect this narrowed scope.
 
 **When the costing tab loads:** It fetches the snapshot and the current `product_cutlist_groups`. It reconstructs `CompactPart[]` from the groups (using `flattenGroupsToCompactParts`), computes the parts hash, and compares to `parts_hash`. If they differ → "parts have changed" stale banner.
 
