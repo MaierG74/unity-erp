@@ -48,6 +48,7 @@ import { useDebounce } from '@/hooks/use-debounce';
 import { useEffect, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { Badge } from '@/components/ui/badge';
+import { SubProductGroupHeader } from './SubProductGroupHeader';
 
 // dialogs
 const AddJobDialog = dynamic(() => import('./AddJobDialog'), { ssr: false });
@@ -539,224 +540,279 @@ export function ProductBOL({ productId }: ProductBOLProps) {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      unifiedRows.map((it, idx) => {
-                        const direct = (it._editable && typeof it.bol_id === 'number') ? bolById.get(Number(it.bol_id)) : undefined
-                        const pay = (it.pay_type || (direct?.pay_type || 'hourly')) as 'hourly' | 'piece'
-                        const qty = Number(it.quantity || direct?.quantity || 1)
-                        const timeReq = pay === 'piece' ? null : (it.time_required ?? direct?.time_required ?? 0)
-                        const unit = pay === 'piece' ? 'hours' : (it.time_unit ?? direct?.time_unit ?? 'hours')
-                        const rate = pay === 'piece' ? (it.piece_rate ?? direct?.piece_rate?.rate ?? null) : (it.hourly_rate ?? direct?.hourly_rate?.hourly_rate ?? direct?.rate?.hourly_rate ?? direct?.job?.category?.current_hourly_rate ?? null)
-                        const totalHrs = pay === 'piece' ? null : ((unit === 'hours' ? (timeReq || 0) : unit === 'minutes' ? (timeReq || 0)/60 : (timeReq || 0)/3600) * qty)
-                        const totalCost = pay === 'piece' ? ((rate || 0) * qty) : ((rate || 0) * (totalHrs || 0))
-                        const fromCode = typeof it._sub_product_id === 'number' ? linkProductMap.get(Number(it._sub_product_id))?.internal_code : undefined
+                      (() => {
+                        // Partition into direct rows and linked groups
+                        const directBolRows = unifiedRows.filter((r) => r._source !== 'link')
+                        const linkedBolGroups = new Map<number, typeof unifiedRows>()
+                        for (const r of unifiedRows) {
+                          if (r._source === 'link' && typeof r._sub_product_id === 'number') {
+                            const group = linkedBolGroups.get(r._sub_product_id) || []
+                            group.push(r)
+                            linkedBolGroups.set(r._sub_product_id, group)
+                          }
+                        }
 
-                        if (direct && editingId === direct.bol_id) {
-                          return (
-                        <TableRow key={`bol-${idx}`}>
-                          <Form {...form}>
-                            <>
-                              <TableCell>
-                                <Select
-                                  value={form.watch('job_category_id')}
-                                  onValueChange={(value) => {
-                                    form.setValue('job_category_id', value);
-                                    form.setValue('job_id', '');
-                                    setSelectedCategoryId(value ? parseInt(value) : null);
-                                  }}
-                                >
-                                  <SelectTrigger className="w-[180px]">
-                                    <SelectValue placeholder="Select category" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {jobCategories.map((category) => (
-                                      <SelectItem
-                                        key={category.category_id}
-                                        value={category.category_id.toString()}
-                                      >
-                                        {category.name}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </TableCell>
-                              <TableCell>
-                                <Select
-                                  value={form.watch('job_id')}
-                                  onValueChange={(value) => {
-                                    console.log('Editing job selected:', value);
-                                    form.setValue('job_id', value);
-                                    
-                                    // Auto-select job category if needed
-                                    if (!form.watch('job_category_id')) {
-                                      const selectedJob = jobs.find(j => j.job_id.toString() === value);
-                                      if (selectedJob) {
-                                        form.setValue('job_category_id', selectedJob.category_id.toString());
-                                        setSelectedCategoryId(selectedJob.category_id);
-                                      }
-                                    }
-                                  }}
-                                  disabled={!form.watch('job_category_id')}
-                                >
-                                  <SelectTrigger className="w-[180px]">
-                                    <SelectValue placeholder="Select job" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {jobs
-                                      .filter(job => 
-                                        !selectedCategoryId || 
-                                        job.category_id === selectedCategoryId
-                                      )
-                                      .map((job) => (
+                        // Helper: compute cost for a single BOL row
+                        const computeBolRowCost = (it: any) => {
+                          const direct = (it._editable && typeof it.bol_id === 'number') ? bolById.get(Number(it.bol_id)) : undefined
+                          const pay = (it.pay_type || (direct?.pay_type || 'hourly')) as 'hourly' | 'piece'
+                          const qty = Number(it.quantity || direct?.quantity || 1)
+                          const timeReq = pay === 'piece' ? null : (it.time_required ?? direct?.time_required ?? 0)
+                          const unit = pay === 'piece' ? 'hours' : (it.time_unit ?? direct?.time_unit ?? 'hours')
+                          const rate = pay === 'piece' ? (it.piece_rate ?? direct?.piece_rate?.rate ?? null) : (it.hourly_rate ?? direct?.hourly_rate?.hourly_rate ?? direct?.rate?.hourly_rate ?? direct?.job?.category?.current_hourly_rate ?? null)
+                          const totalHrs = pay === 'piece' ? null : ((unit === 'hours' ? (timeReq || 0) : unit === 'minutes' ? (timeReq || 0)/60 : (timeReq || 0)/3600) * qty)
+                          return pay === 'piece' ? ((rate || 0) * qty) : ((rate || 0) * (totalHrs || 0))
+                        }
+
+                        // Helper: render a single BOL row (read-only or edit mode)
+                        const renderBolRow = (it: any, idx: number, isChild = false) => {
+                          const direct = (it._editable && typeof it.bol_id === 'number') ? bolById.get(Number(it.bol_id)) : undefined
+                          const pay = (it.pay_type || (direct?.pay_type || 'hourly')) as 'hourly' | 'piece'
+                          const qty = Number(it.quantity || direct?.quantity || 1)
+                          const timeReq = pay === 'piece' ? null : (it.time_required ?? direct?.time_required ?? 0)
+                          const unit = pay === 'piece' ? 'hours' : (it.time_unit ?? direct?.time_unit ?? 'hours')
+                          const rate = pay === 'piece' ? (it.piece_rate ?? direct?.piece_rate?.rate ?? null) : (it.hourly_rate ?? direct?.hourly_rate?.hourly_rate ?? direct?.rate?.hourly_rate ?? direct?.job?.category?.current_hourly_rate ?? null)
+                          const totalHrs = pay === 'piece' ? null : ((unit === 'hours' ? (timeReq || 0) : unit === 'minutes' ? (timeReq || 0)/60 : (timeReq || 0)/3600) * qty)
+                          const totalCost = pay === 'piece' ? ((rate || 0) * qty) : ((rate || 0) * (totalHrs || 0))
+
+                          if (direct && editingId === direct.bol_id) {
+                            return (
+                          <TableRow key={`bol-${idx}`}>
+                            <Form {...form}>
+                              <>
+                                <TableCell>
+                                  <Select
+                                    value={form.watch('job_category_id')}
+                                    onValueChange={(value) => {
+                                      form.setValue('job_category_id', value);
+                                      form.setValue('job_id', '');
+                                      setSelectedCategoryId(value ? parseInt(value) : null);
+                                    }}
+                                  >
+                                    <SelectTrigger className="w-[180px]">
+                                      <SelectValue placeholder="Select category" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {jobCategories.map((category) => (
                                         <SelectItem
-                                          key={job.job_id}
-                                          value={job.job_id.toString()}
+                                          key={category.category_id}
+                                          value={category.category_id.toString()}
                                         >
-                                          {job.name}
+                                          {category.name}
                                         </SelectItem>
                                       ))}
-                                  </SelectContent>
-                                </Select>
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex items-center space-x-2">
-                                  <Select
-                                    value={form.watch('pay_type') || 'hourly'}
-                                    onValueChange={(value: 'hourly' | 'piece') => form.setValue('pay_type', value)}
-                                  >
-                                    <SelectTrigger className="w-[120px]">
-                                      <SelectValue placeholder="Pay Type" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="hourly">Hourly</SelectItem>
-                                      <SelectItem value="piece">Piecework</SelectItem>
                                     </SelectContent>
                                   </Select>
+                                </TableCell>
+                                <TableCell>
+                                  <Select
+                                    value={form.watch('job_id')}
+                                    onValueChange={(value) => {
+                                      console.log('Editing job selected:', value);
+                                      form.setValue('job_id', value);
+
+                                      // Auto-select job category if needed
+                                      if (!form.watch('job_category_id')) {
+                                        const selectedJob = jobs.find(j => j.job_id.toString() === value);
+                                        if (selectedJob) {
+                                          form.setValue('job_category_id', selectedJob.category_id.toString());
+                                          setSelectedCategoryId(selectedJob.category_id);
+                                        }
+                                      }
+                                    }}
+                                    disabled={!form.watch('job_category_id')}
+                                  >
+                                    <SelectTrigger className="w-[180px]">
+                                      <SelectValue placeholder="Select job" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {jobs
+                                        .filter(job =>
+                                          !selectedCategoryId ||
+                                          job.category_id === selectedCategoryId
+                                        )
+                                        .map((job) => (
+                                          <SelectItem
+                                            key={job.job_id}
+                                            value={job.job_id.toString()}
+                                          >
+                                            {job.name}
+                                          </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                  </Select>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex items-center space-x-2">
+                                    <Select
+                                      value={form.watch('pay_type') || 'hourly'}
+                                      onValueChange={(value: 'hourly' | 'piece') => form.setValue('pay_type', value)}
+                                    >
+                                      <SelectTrigger className="w-[120px]">
+                                        <SelectValue placeholder="Pay Type" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="hourly">Hourly</SelectItem>
+                                        <SelectItem value="piece">Piecework</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                    <Input
+                                      type="number"
+                                      min="0.01"
+                                      step="0.01"
+                                      value={form.watch('time_required')}
+                                      onChange={(e) => form.setValue('time_required', parseFloat(e.target.value))}
+                                      className="w-20"
+                                      disabled={form.watch('pay_type') === 'piece'}
+                                    />
+                                    <Select
+                                      value={form.watch('time_unit')}
+                                      onValueChange={(value: 'hours' | 'minutes' | 'seconds') => form.setValue('time_unit', value)}
+                                      disabled={form.watch('pay_type') === 'piece'}
+                                    >
+                                      <SelectTrigger className="w-[100px]">
+                                        <SelectValue placeholder="Select unit" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="hours">Hours</SelectItem>
+                                        <SelectItem value="minutes">Minutes</SelectItem>
+                                        <SelectItem value="seconds">Seconds</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                </TableCell>
+                                <TableCell>
                                   <Input
                                     type="number"
-                                    min="0.01"
-                                    step="0.01"
-                                    value={form.watch('time_required')}
-                                    onChange={(e) => form.setValue('time_required', parseFloat(e.target.value))}
+                                    min="1"
+                                    step="1"
+                                    value={form.watch('quantity')}
+                                    onChange={(e) =>
+                                      form.setValue('quantity', parseInt(e.target.value))
+                                    }
                                     className="w-20"
-                                    disabled={form.watch('pay_type') === 'piece'}
                                   />
-                                  <Select
-                                    value={form.watch('time_unit')}
-                                    onValueChange={(value: 'hours' | 'minutes' | 'seconds') => form.setValue('time_unit', value)}
-                                    disabled={form.watch('pay_type') === 'piece'}
-                                  >
-                                    <SelectTrigger className="w-[100px]">
-                                      <SelectValue placeholder="Select unit" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="hours">Hours</SelectItem>
-                                      <SelectItem value="minutes">Minutes</SelectItem>
-                                      <SelectItem value="seconds">Seconds</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              </TableCell>
+                                </TableCell>
+                                <TableCell>
+                                  {(() => {
+                                    const categoryId = form.watch('job_category_id');
+                                    const category = jobCategories.find(c => c.category_id.toString() === categoryId);
+                                    if (form.watch('pay_type') === 'piece') {
+                                      return 'Piece rate (as of today)';
+                                    }
+                                    return category ? `R${category.current_hourly_rate.toFixed(2)}/hr` : 'N/A';
+                                  })()}
+                                </TableCell>
+                                <TableCell>
+                                  {(() => {
+                                    if (form.watch('pay_type') === 'piece') return '—';
+                                    const time = form.watch('time_required') || 0;
+                                    const unit = form.watch('time_unit') || 'hours';
+                                    const quantity = form.watch('quantity') || 1;
+                                    return (convertToHours(time, unit) * quantity).toFixed(2);
+                                  })()}
+                                </TableCell>
+                                <TableCell>
+                                  {(() => {
+                                    const categoryId = form.watch('job_category_id');
+                                    const category = jobCategories.find(c => c.category_id.toString() === categoryId);
+                                    const quantity = form.watch('quantity') || 1;
+                                    if (form.watch('pay_type') === 'piece') {
+                                      return `R—`;
+                                    }
+                                    const hourlyRate = category?.current_hourly_rate || 0;
+                                    const time = form.watch('time_required') || 0;
+                                    const unit = form.watch('time_unit') || 'hours';
+                                    return `R${(hourlyRate * convertToHours(time, unit) * quantity).toFixed(2)}`;
+                                  })()}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => saveEdit(direct.bol_id)}
+                                    >
+                                      <Save className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={cancelEditing}
+                                    >
+                                      <X className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </>
+                              </Form>
+                            </TableRow>
+                            )
+                          }
+
+                          return (
+                            <TableRow key={`bol-${idx}`} className={isChild ? 'border-l-2 border-l-teal-500/50' : undefined}>
+                              <TableCell className={isChild ? 'pl-7 text-muted-foreground' : undefined}>{it.category_name || direct?.job?.category?.name || ''}</TableCell>
+                              <TableCell className={isChild ? 'text-muted-foreground' : undefined}>{it.job_name || direct?.job?.name || ''}</TableCell>
+                              <TableCell className={`capitalize${isChild ? ' text-muted-foreground' : ''}`}>{pay}</TableCell>
+                              <TableCell className={isChild ? 'text-muted-foreground' : undefined}>{pay === 'piece' ? '—' : `${timeReq ?? 0} ${unit}`}</TableCell>
+                              <TableCell className={isChild ? 'text-muted-foreground' : undefined}>{qty}</TableCell>
+                              <TableCell className={isChild ? 'text-muted-foreground' : undefined}>{pay === 'piece' ? (rate != null ? `R${Number(rate).toFixed(2)}/pc` : 'R—/pc') : (rate != null ? `R${Number(rate).toFixed(2)}/hr` : 'R—/hr')}</TableCell>
+                              <TableCell className={isChild ? 'text-muted-foreground' : undefined}>{totalHrs == null ? '—' : totalHrs.toFixed(2)}</TableCell>
+                              <TableCell className={isChild ? 'text-muted-foreground' : undefined}>R{Number(totalCost || 0).toFixed(2)}</TableCell>
                               <TableCell>
-                                <Input
-                                  type="number"
-                                  min="1"
-                                  step="1"
-                                  value={form.watch('quantity')}
-                                  onChange={(e) =>
-                                    form.setValue('quantity', parseInt(e.target.value))
-                                  }
-                                  className="w-20"
-                                />
+                                {direct ? (
+                                  <div className="flex items-center gap-2">
+                                    <Button variant="ghost" size="icon" onClick={() => startEditing(direct)}>
+                                      <Edit className="h-4 w-4" />
+                                    </Button>
+                                    <Button variant="destructiveSoft" size="icon" onClick={() => deleteBOLItem.mutate(direct.bol_id)} aria-label="Delete job">
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                ) : isChild ? (
+                                  <span className="text-xs text-muted-foreground">—</span>
+                                ) : (
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant="outline">Linked</Badge>
+                                  </div>
+                                )}
                               </TableCell>
-                              <TableCell>
-                                {(() => {
-                                  const categoryId = form.watch('job_category_id');
-                                  const category = jobCategories.find(c => c.category_id.toString() === categoryId);
-                                  if (form.watch('pay_type') === 'piece') {
-                                    return 'Piece rate (as of today)';
-                                  }
-                                  // During edit we don't fetch job_hourly_rates live; display category fallback only
-                                  return category ? `R${category.current_hourly_rate.toFixed(2)}/hr` : 'N/A';
-                                })()}
-                              </TableCell>
-                              <TableCell>
-                                {(() => {
-                                  if (form.watch('pay_type') === 'piece') return '—';
-                                  const time = form.watch('time_required') || 0;
-                                  const unit = form.watch('time_unit') || 'hours';
-                                  const quantity = form.watch('quantity') || 1;
-                                  return (convertToHours(time, unit) * quantity).toFixed(2);
-                                })()}
-                              </TableCell>
-                              <TableCell>
-                                {(() => {
-                                  const categoryId = form.watch('job_category_id');
-                                  const category = jobCategories.find(c => c.category_id.toString() === categoryId);
-                                  const quantity = form.watch('quantity') || 1;
-                                  if (form.watch('pay_type') === 'piece') {
-                                    // We don't fetch piece rate here; just show qty placeholder total
-                                    return `R—`;
-                                  }
-                                  const hourlyRate = category?.current_hourly_rate || 0;
-                                  const time = form.watch('time_required') || 0;
-                                  const unit = form.watch('time_unit') || 'hours';
-                                  return `R${(hourlyRate * convertToHours(time, unit) * quantity).toFixed(2)}`;
-                                })()}
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex items-center gap-2">
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => saveEdit(direct.bol_id)}
-                                  >
-                                    <Save className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={cancelEditing}
-                                  >
-                                    <X className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              </TableCell>
-                            </>
-                            </Form>
-                          </TableRow>
+                            </TableRow>
                           )
                         }
 
                         return (
-                          <TableRow key={`bol-${idx}`}>
-                            <TableCell>{it.category_name || direct?.job?.category?.name || ''}</TableCell>
-                            <TableCell>{it.job_name || direct?.job?.name || ''}</TableCell>
-                            <TableCell className="capitalize">{pay}</TableCell>
-                            <TableCell>{pay === 'piece' ? '—' : `${timeReq ?? 0} ${unit}`}</TableCell>
-                            <TableCell>{qty}</TableCell>
-                            <TableCell>{pay === 'piece' ? (rate != null ? `R${Number(rate).toFixed(2)}/pc` : 'R—/pc') : (rate != null ? `R${Number(rate).toFixed(2)}/hr` : 'R—/hr')}</TableCell>
-                            <TableCell>{totalHrs == null ? '—' : totalHrs.toFixed(2)}</TableCell>
-                            <TableCell>R{Number(totalCost || 0).toFixed(2)}</TableCell>
-                            <TableCell>
-                              {direct ? (
-                                <div className="flex items-center gap-2">
-                                  <Button variant="ghost" size="icon" onClick={() => startEditing(direct)}>
-                                    <Edit className="h-4 w-4" />
-                                  </Button>
-                                  <Button variant="destructiveSoft" size="icon" onClick={() => deleteBOLItem.mutate(direct.bol_id)} aria-label="Delete job">
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-2">
-                                  <Badge variant="outline">Linked</Badge>
-                                  {fromCode && <Badge variant="secondary">{fromCode}</Badge>}
-                                </div>
-                              )}
-                            </TableCell>
-                          </TableRow>
+                          <>
+                            {/* Direct rows */}
+                            {directBolRows.map((it, idx) => renderBolRow(it, idx))}
+
+                            {/* Linked sub-product groups */}
+                            {Array.from(linkedBolGroups.entries()).map(([subProductId, items]) => {
+                              const subProduct = linkProductMap.get(subProductId)
+                              const link = productLinks?.find((l: any) => l.sub_product_id === subProductId)
+                              const groupTotal = items.reduce((sum, it) => sum + computeBolRowCost(it), 0)
+
+                              return (
+                                <SubProductGroupHeader
+                                  key={`bol-group-${subProductId}`}
+                                  productId={subProductId}
+                                  productName={subProduct?.name || ''}
+                                  productCode={subProduct?.internal_code || String(subProductId)}
+                                  itemCount={items.length}
+                                  totalCost={groupTotal}
+                                  scaleQty={link ? Number(link.scale) : 1}
+                                  colSpan={9}
+                                >
+                                  {items.map((it, childIdx) =>
+                                    renderBolRow(it, 1000 + subProductId * 100 + childIdx, true)
+                                  )}
+                                </SubProductGroupHeader>
+                              )
+                            })}
+                          </>
                         )
-                      })
+                      })()
                     )}
                   </TableBody>
                 </Table>

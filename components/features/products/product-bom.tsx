@@ -58,6 +58,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Plus, Trash2, Edit, Save, X, Search, Loader2, Building2, SlidersHorizontal, XCircle, Upload, ArrowLeftRight } from 'lucide-react';
+import { SubProductGroupHeader } from './SubProductGroupHeader';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -1821,18 +1822,29 @@ const renderCutlistEditor = () => {
                         )
                       }
 
-                      return filteredRows.map((it, idx) => {
+                      // Partition into direct rows and linked groups
+                      const directRows = filteredRows.filter((r) => r._source !== 'link')
+                      const linkedGroups = new Map<number, EffectiveBOMItem[]>()
+                      for (const r of filteredRows) {
+                        if (r._source === 'link' && typeof r._sub_product_id === 'number') {
+                          const group = linkedGroups.get(r._sub_product_id) || []
+                          group.push(r)
+                          linkedGroups.set(r._sub_product_id, group)
+                        }
+                      }
+                      const colSpan = supplierFeatureAvailable ? 9 : 6
+
+                      // Helper to render a single BOM row
+                      const renderBomRow = (it: EffectiveBOMItem, idx: number, isChild = false) => {
                         const comp = componentsById.get(Number(it.component_id))
                         const code = comp?.internal_code || String(it.component_id)
                         const desc = comp?.description || ''
                         const direct = (it._editable && typeof it.bom_id === 'number') ? bomById.get(Number(it.bom_id)) : undefined
-                        // Price resolution
                         const linkedPrice = (it as any)?.suppliercomponents?.price
                         const directUnitPrice = direct?.supplierComponent ? Number(direct.supplierComponent.price) : null
                         const qty = Number(it.quantity_required || direct?.quantity_required || 0)
                         const unitPrice = (directUnitPrice != null ? directUnitPrice : (linkedPrice != null ? Number(linkedPrice) : null))
                         const total = unitPrice != null ? unitPrice * qty : null
-                        const fromCode = typeof it._sub_product_id === 'number' ? linkProductMap.get(Number(it._sub_product_id))?.internal_code : undefined
                         const resolvedCutlistDimensions = cloneCutlistDimensions(
                           direct?.cutlist_dimensions ?? (it as any)?.cutlist_dimensions ?? null
                         );
@@ -1844,29 +1856,28 @@ const renderCutlistEditor = () => {
                         const hasCutlistDetails =
                           resolvedCutlistDimensions != null && Object.keys(resolvedCutlistDimensions).length > 0;
 
-                        // Read-only row (either direct not editing or linked)
                         return (
-                          <TableRow key={`row-${idx}`}>
-                            <TableCell>
+                          <TableRow key={`row-${idx}`} className={isChild ? 'border-l-2 border-l-teal-500/50' : undefined}>
+                            <TableCell className={isChild ? 'pl-7' : undefined}>
                               <a
                                 href={`/inventory/components/${it.component_id}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-primary hover:underline"
+                                className={`hover:underline ${isChild ? 'text-muted-foreground' : 'text-primary'}`}
                               >
                                 {code}
                               </a>
                             </TableCell>
-                            <TableCell>{desc}</TableCell>
+                            <TableCell className={isChild ? 'text-muted-foreground' : undefined}>{desc}</TableCell>
                             {supplierFeatureAvailable && (
                               <>
-                                <TableCell>{direct?.supplierComponent?.supplier?.name || '-'}</TableCell>
-                                <TableCell>{unitPrice != null ? `R${unitPrice.toFixed(2)}` : '-'}</TableCell>
+                                <TableCell className={isChild ? 'text-muted-foreground' : undefined}>{direct?.supplierComponent?.supplier?.name || '-'}</TableCell>
+                                <TableCell className={isChild ? 'text-muted-foreground' : undefined}>{unitPrice != null ? `R${unitPrice.toFixed(2)}` : '-'}</TableCell>
                               </>
                             )}
-                            <TableCell>{qty.toFixed(2)}</TableCell>
+                            <TableCell className={isChild ? 'text-muted-foreground' : undefined}>{qty.toFixed(2)}</TableCell>
                             {supplierFeatureAvailable && (
-                              <TableCell>{total != null ? `R${total.toFixed(2)}` : '-'}</TableCell>
+                              <TableCell className={isChild ? 'text-muted-foreground' : undefined}>{total != null ? `R${total.toFixed(2)}` : '-'}</TableCell>
                             )}
                             <TableCell className="align-top">
                               {resolvedIsCutlist ? (
@@ -1910,15 +1921,10 @@ const renderCutlistEditor = () => {
                               )}
                             </TableCell>
                             <TableCell>
-                              {it._source === 'link' ? (
-                                <div className="flex items-center gap-2">
-                                  <Badge variant="outline">Linked</Badge>
-                                  {fromCode && (
-                                    <button onClick={() => openQuickView(Number(it._sub_product_id))}>
-                                      <Badge variant="secondary" className="cursor-pointer">{fromCode}</Badge>
-                                    </button>
-                                  )}
-                                </div>
+                              {isChild ? (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              ) : it._source === 'link' ? (
+                                <Badge variant="outline">Linked</Badge>
                               ) : (
                                 <span className="text-xs text-muted-foreground">Direct</span>
                               )}
@@ -1976,7 +1982,43 @@ const renderCutlistEditor = () => {
                             </TableCell>
                           </TableRow>
                         )
-                      })
+                      }
+
+                      return (
+                        <>
+                          {/* Direct rows */}
+                          {directRows.map((it, idx) => renderBomRow(it, idx))}
+
+                          {/* Linked sub-product groups */}
+                          {Array.from(linkedGroups.entries()).map(([subProductId, items]) => {
+                            const subProduct = linkProductMap.get(subProductId)
+                            const link = productLinks?.find((l) => l.sub_product_id === subProductId)
+                            const groupTotal = items.reduce((sum, it) => {
+                              const lp = (it as any)?.suppliercomponents?.price
+                              const qty = Number(it.quantity_required || 0)
+                              const price = lp != null ? Number(lp) : 0
+                              return sum + price * qty
+                            }, 0)
+
+                            return (
+                              <SubProductGroupHeader
+                                key={`group-${subProductId}`}
+                                productId={subProductId}
+                                productName={subProduct?.name || ''}
+                                productCode={subProduct?.internal_code || String(subProductId)}
+                                itemCount={items.length}
+                                totalCost={groupTotal}
+                                scaleQty={link ? Number(link.scale) : 1}
+                                colSpan={colSpan}
+                              >
+                                {items.map((it, childIdx) =>
+                                  renderBomRow(it, 1000 + subProductId * 100 + childIdx, true)
+                                )}
+                              </SubProductGroupHeader>
+                            )
+                          })}
+                        </>
+                      )
                     })()}
                   </TableBody>
                 </Table>
