@@ -569,6 +569,10 @@ export function NewPurchaseOrderForm() {
   const prefillAppliedRef = useRef<string | null>(null);
   const draftPersistChainRef = useRef<Promise<void>>(Promise.resolve());
   const draftSessionKeyRef = useRef(0);
+  // Live-read refs for the visibilitychange/pagehide flush: lets that effect
+  // pull current values without re-registering listeners on every keystroke.
+  const draftTitleRef = useRef('');
+  const currentUserIdRef = useRef<string | null>(null);
 
   const persistDraftSelection = useCallback((draftId: number | null) => {
     if (typeof window === 'undefined') return;
@@ -597,12 +601,23 @@ export function NewPurchaseOrderForm() {
   }, []);
 
   const writeLocalBackup = useCallback(
-    (title: string, formData: PurchaseOrderFormData) => {
+    (
+      title: string,
+      formData: PurchaseOrderFormData,
+      userId: string | null,
+      draftId: number | null
+    ) => {
       if (typeof window === 'undefined') return;
       try {
         window.localStorage.setItem(
           PURCHASE_ORDER_DRAFT_LOCAL_BACKUP_KEY,
-          JSON.stringify({ title, formData, savedAt: new Date().toISOString() })
+          JSON.stringify({
+            title,
+            formData,
+            userId,
+            draftId,
+            savedAt: new Date().toISOString(),
+          })
         );
       } catch {
         // Storage full or unavailable — not critical
@@ -617,7 +632,13 @@ export function NewPurchaseOrderForm() {
   }, []);
 
   const readLocalBackup = useCallback(():
-    | { title: string; formData: PurchaseOrderFormData; savedAt: string }
+    | {
+        title: string;
+        formData: PurchaseOrderFormData;
+        userId: string | null;
+        draftId: number | null;
+        savedAt: string;
+      }
     | null => {
     if (typeof window === 'undefined') return null;
     try {
@@ -627,7 +648,16 @@ export function NewPurchaseOrderForm() {
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       if (parsed && parsed.formData && Array.isArray(parsed.formData.items)) {
-        return parsed;
+        return {
+          title: parsed.title ?? '',
+          formData: parsed.formData,
+          userId: typeof parsed.userId === 'string' ? parsed.userId : null,
+          draftId:
+            typeof parsed.draftId === 'number' && Number.isFinite(parsed.draftId)
+              ? parsed.draftId
+              : null,
+          savedAt: typeof parsed.savedAt === 'string' ? parsed.savedAt : '',
+        };
       }
     } catch {
       // Corrupt data — ignore
@@ -810,8 +840,17 @@ export function NewPurchaseOrderForm() {
       const localBackup = readLocalBackup();
       const dbUpdatedAt = draft.updated_at ? Date.parse(draft.updated_at) : 0;
       const localSavedAt = localBackup ? Date.parse(localBackup.savedAt) : 0;
+      // Provenance check: only honor a local backup whose user AND draft id
+      // match the draft we're about to restore. Prevents shared-browser,
+      // cross-org, and cross-draft bleed where an older localStorage entry
+      // from a different context would overwrite the correct DB state.
+      const provenanceMatches =
+        localBackup !== null &&
+        localBackup.userId === (currentUserId ?? null) &&
+        localBackup.draftId === draft.draft_id;
       const localIsFresher =
         localBackup !== null &&
+        provenanceMatches &&
         Number.isFinite(localSavedAt) &&
         localSavedAt > dbUpdatedAt &&
         hasMeaningfulPurchaseOrderDraftContent(
@@ -827,6 +866,28 @@ export function NewPurchaseOrderForm() {
         applyDraftSelection(draft, { clearLocal: false });
         reset(localBackup.formData);
         setDraftTitle(localBackup.title);
+        // Recompute per-row UI state from the RESTORED form data, not the
+        // stale DB shape that applyDraftSelection seeded. Otherwise
+        // split-allocation and note-expansion flags point at the wrong
+        // indices and hidden allocations can leak into the next save.
+        setExpandedNotes(
+          new Set(
+            (localBackup.formData.items ?? [])
+              .map((item, index) => (item.notes?.trim() ? index : -1))
+              .filter((index) => index >= 0)
+          )
+        );
+        setSplitModeItems(
+          new Set(
+            (localBackup.formData.items ?? [])
+              .map((item, index) =>
+                Array.isArray(item.allocations) && item.allocations.length > 0
+                  ? index
+                  : -1
+              )
+              .filter((index) => index >= 0)
+          )
+        );
         setAutosaveState('error');
         setAutosaveMessage('Local changes restored — saving to server');
         toast.warning(
@@ -834,6 +895,11 @@ export function NewPurchaseOrderForm() {
           { duration: 6000 }
         );
       } else {
+        // If a backup exists but doesn't belong to this user/draft, drop it
+        // so it can't be resurrected by a later bootstrap path.
+        if (localBackup && !provenanceMatches) {
+          clearLocalBackup();
+        }
         applyDraftSelection(draft);
         toast.info('Restored your shared purchase-order draft');
       }
@@ -850,13 +916,23 @@ export function NewPurchaseOrderForm() {
         // Top-20 fallback: the draft list is capped, so a session-pinned draft
         // older than the 20 most-recently-updated rows will be missing here.
         // Fetch it directly by id to avoid silently restoring a different draft.
+        let pinnedFetchFailed = false;
         if (persistedDraftId !== null && !persistedDraft) {
           try {
             persistedDraft = await fetchPurchaseOrderDraftById(persistedDraftId);
-          } catch {
+          } catch (fetchError) {
+            // Distinguish a definite "not found / no longer editable" (null
+            // return) from a transient failure. A network blip must NOT
+            // clear the session pin — the user would silently lose their
+            // place and the next autosave could create a stray new draft.
+            console.error(
+              'Failed to fetch pinned purchase-order draft:',
+              fetchError
+            );
+            pinnedFetchFailed = true;
             persistedDraft = null;
           }
-          if (!persistedDraft) {
+          if (!persistedDraft && !pinnedFetchFailed) {
             // Pinned draft no longer exists (converted/archived elsewhere) —
             // clear the stale selection so we don't re-try on every reload.
             persistDraftSelection(null);
@@ -865,6 +941,49 @@ export function NewPurchaseOrderForm() {
 
         if (persistedDraft) {
           applyWithLocalOverride(persistedDraft);
+          setDraftBootstrapComplete(true);
+          return;
+        }
+
+        // If the direct fetch threw (vs. definitively returned null), the
+        // pinned draft may still exist but be temporarily unreachable. Do
+        // NOT fall through to ownDraft — that could silently open a
+        // different draft. If a matching local backup exists we can still
+        // show the user's in-progress work; otherwise present a clean form
+        // with an error and keep the session pin so reload can retry.
+        if (pinnedFetchFailed) {
+          const offlineBackup = readLocalBackup();
+          const offlineBackupMatches =
+            offlineBackup !== null &&
+            offlineBackup.userId === (currentUserId ?? null) &&
+            offlineBackup.draftId === persistedDraftId &&
+            hasMeaningfulPurchaseOrderDraftContent(
+              offlineBackup.title,
+              offlineBackup.formData
+            );
+
+          if (offlineBackupMatches && offlineBackup) {
+            reset(offlineBackup.formData);
+            setDraftTitle(offlineBackup.title);
+            setAutosaveState('error');
+            setAutosaveMessage(
+              'Offline — editing from your local backup. Reconnect to sync.'
+            );
+            toast.warning(
+              'Could not reach the draft server. Showing your local backup.',
+              { duration: 8000 }
+            );
+          } else {
+            applyDraftSelection(null, { clearLocal: false });
+            setAutosaveState('error');
+            setAutosaveMessage(
+              'Could not reach the draft server. Reload when online to restore your draft.'
+            );
+            toast.error(
+              'Your saved draft could not be loaded. Check your connection and reload.',
+              { duration: 8000 }
+            );
+          }
           setDraftBootstrapComplete(true);
           return;
         }
@@ -928,6 +1047,15 @@ export function NewPurchaseOrderForm() {
       setDraftBootstrapComplete(true);
     }
   }, [currentUserLoading, draftsLoading]);
+
+  // Keep live-read refs in sync so the visibility flush can read current
+  // values at fire time without having to list them in its own dep array.
+  useEffect(() => {
+    draftTitleRef.current = draftTitle;
+  }, [draftTitle]);
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId ?? null;
+  }, [currentUserId]);
 
   const watchedItems = watch('items');
   const watchedNotes = watch('notes');
@@ -1027,8 +1155,15 @@ export function NewPurchaseOrderForm() {
       },
     };
 
-    // Write local backup immediately so data survives crashes/network loss
-    writeLocalBackup(snapshot.title, snapshot.formData);
+    // Write local backup immediately so data survives crashes/network loss.
+    // Scoped to user + draft so a shared browser or org switch can't bleed
+    // one user's unsaved lines into another user's draft on reload.
+    writeLocalBackup(
+      snapshot.title,
+      snapshot.formData,
+      currentUserId ?? null,
+      currentDraftIdRef.current
+    );
 
     clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
@@ -1049,6 +1184,7 @@ export function NewPurchaseOrderForm() {
     return () => clearTimeout(saveTimerRef.current);
   }, [
     clearLocalBackup,
+    currentUserId,
     currentUserLoading,
     draftsLoading,
     draftTitle,
@@ -1090,20 +1226,37 @@ export function NewPurchaseOrderForm() {
   // Flush the debounced autosave the moment the tab is hidden or backgrounded.
   // Covers the common "switched tabs / minimized / closed tab" exit path where
   // the 1500 ms timer would otherwise never fire. localStorage already holds
-  // the latest state (written synchronously on each render) as the backstop.
+  // the latest state (written synchronously on each render) as the backstop,
+  // so if the network call can't complete during unload the next mount still
+  // reconciles via the freshness check.
+  //
+  // Dependencies are intentionally narrow (no watched* fields) so this effect
+  // does NOT tear down and re-register both listeners on every keystroke.
+  // The handler reads live form state via getValues() at fire time instead.
   useEffect(() => {
     const flush = () => {
       if (document.visibilityState !== 'hidden') return;
+      const live = getValues();
+      const title = draftTitleRef.current;
       const snapshot: DraftPersistSnapshot = {
         sessionKey: draftSessionKeyRef.current,
-        title: draftTitle,
+        title,
         formData: {
           order_date:
-            watchedOrderDate ?? createEmptyPurchaseOrderFormData().order_date,
-          notes: watchedNotes ?? '',
-          items: watchedItems ?? [],
+            live.order_date ?? createEmptyPurchaseOrderFormData().order_date,
+          notes: live.notes ?? '',
+          items: live.items ?? [],
         },
       };
+      // Refresh localStorage from the live state before we try the RPC —
+      // this is the one guaranteed leg if the browser kills the fetch on
+      // unload.
+      writeLocalBackup(
+        snapshot.title,
+        snapshot.formData,
+        currentUserIdRef.current,
+        currentDraftIdRef.current
+      );
       const signature = buildPurchaseOrderDraftSignature(
         snapshot.title,
         snapshot.formData
@@ -1111,8 +1264,7 @@ export function NewPurchaseOrderForm() {
       if (signature === lastSavedSignatureRef.current) return;
       clearTimeout(saveTimerRef.current);
       void enqueueDraftPersist(snapshot).catch(() => {
-        // Swallow — localStorage backup is the guaranteed safety net and the
-        // next mount will reconcile on reload via the freshness check.
+        // Swallow — localStorage write above is the guaranteed safety net.
       });
     };
 
@@ -1122,13 +1274,7 @@ export function NewPurchaseOrderForm() {
       document.removeEventListener('visibilitychange', flush);
       window.removeEventListener('pagehide', flush);
     };
-  }, [
-    draftTitle,
-    enqueueDraftPersist,
-    watchedItems,
-    watchedNotes,
-    watchedOrderDate,
-  ]);
+  }, [enqueueDraftPersist, getValues, writeLocalBackup]);
 
   const setCurrentDraftStatus = useCallback(
     async (status: 'archived' | 'converted', purchaseOrderIds?: number[]) => {
