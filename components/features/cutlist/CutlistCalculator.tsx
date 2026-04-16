@@ -395,8 +395,10 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     [parts]
   );
   const defaultPrimary = primaryBoards.find((b) => b.isDefault) || primaryBoards[0];
-  const defaultEdging16 = edging.find((e) => e.thickness_mm === 16 && e.isDefaultForThickness);
-  const defaultEdging32 = edging.find((e) => e.thickness_mm === 32 && e.isDefaultForThickness);
+  // Edging defaults: first try exact board-thickness match, then fall back to any default
+  const defaultEdgingFallback = edging.find((e) => e.isDefaultForThickness);
+  const defaultEdging16 = edging.find((e) => e.thickness_mm === 16 && e.isDefaultForThickness) || defaultEdgingFallback;
+  const defaultEdging32 = edging.find((e) => e.thickness_mm === 32 && e.isDefaultForThickness) || defaultEdgingFallback;
   const defaultSheetArea = sheet.length_mm * sheet.width_mm;
 
   const usedArea = result?.stats.used_area_mm2 || 0;
@@ -724,8 +726,9 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     const defaultBacker = backerBoards.find((b) => b.isDefault) || backerBoards[0];
     const backerPriceNumeric = defaultBacker?.cost || 0;
 
-    const edging16 = edging.find((e) => e.thickness_mm === 16 && e.isDefaultForThickness);
-    const edging32 = edging.find((e) => e.thickness_mm === 32 && e.isDefaultForThickness);
+    const edgingFallback = edging.find((e) => e.isDefaultForThickness);
+    const edging16 = edging.find((e) => e.thickness_mm === 16 && e.isDefaultForThickness) || edgingFallback;
+    const edging32 = edging.find((e) => e.thickness_mm === 32 && e.isDefaultForThickness) || edgingFallback;
 
     const materialStats = new Map<string, { band16: number; band32: number }>();
     const materialEdgingCosts = new Map<string, MaterialEdgingCostRollup>();
@@ -1208,8 +1211,9 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
       const customEdging = new Map<number, number>();
       // Per-edging-material accumulation for export
       const edgingPerMaterial = new Map<string, number>();
-      const defaultEdging16 = edging.find((e) => e.thickness_mm === 16 && e.isDefaultForThickness);
-      const defaultEdging32 = edging.find((e) => e.thickness_mm === 32 && e.isDefaultForThickness);
+      const edgingDefault = edging.find((e) => e.isDefaultForThickness);
+      const defaultEdging16 = edging.find((e) => e.thickness_mm === 16 && e.isDefaultForThickness) || edgingDefault;
+      const defaultEdging32 = edging.find((e) => e.thickness_mm === 32 && e.isDefaultForThickness) || edgingDefault;
 
       const laminationGroups = new Map<string, typeof partsToUse>();
       const ungroupedParts: typeof partsToUse = [];
