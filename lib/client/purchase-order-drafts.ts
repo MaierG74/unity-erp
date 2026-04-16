@@ -8,6 +8,7 @@ import type {
 
 type PurchaseOrderDraftRow = {
   draft_id: number;
+  org_id: string | null;
   title: string | null;
   order_date: string | null;
   notes: string | null;
@@ -195,6 +196,7 @@ function mapDraftRowToDraft(row: PurchaseOrderDraftRow): PurchaseOrderDraft {
 
   return {
     draft_id: row.draft_id,
+    org_id: row.org_id ?? null,
     title: row.title,
     order_date: row.order_date,
     notes: row.notes ?? '',
@@ -214,6 +216,7 @@ function mapDraftRowToDraft(row: PurchaseOrderDraftRow): PurchaseOrderDraft {
 
 const DRAFT_SELECT_COLUMNS = `
   draft_id,
+  org_id,
   title,
   order_date,
   notes,

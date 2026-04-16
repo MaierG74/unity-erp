@@ -573,6 +573,11 @@ export function NewPurchaseOrderForm() {
   // pull current values without re-registering listeners on every keystroke.
   const draftTitleRef = useRef('');
   const currentUserIdRef = useRef<string | null>(null);
+  // Tracks the org_id of whichever draft is currently loaded, so we can
+  // stamp localStorage backups with org provenance and refuse to restore
+  // a backup from a different org on reload (e.g., user switched orgs mid
+  // session). Seeded from draft.org_id whenever a DB draft is applied.
+  const currentOrgIdRef = useRef<string | null>(null);
 
   const persistDraftSelection = useCallback((draftId: number | null) => {
     if (typeof window === 'undefined') return;
@@ -605,7 +610,8 @@ export function NewPurchaseOrderForm() {
       title: string,
       formData: PurchaseOrderFormData,
       userId: string | null,
-      draftId: number | null
+      draftId: number | null,
+      orgId: string | null
     ) => {
       if (typeof window === 'undefined') return;
       try {
@@ -616,6 +622,7 @@ export function NewPurchaseOrderForm() {
             formData,
             userId,
             draftId,
+            orgId,
             savedAt: new Date().toISOString(),
           })
         );
@@ -637,6 +644,7 @@ export function NewPurchaseOrderForm() {
         formData: PurchaseOrderFormData;
         userId: string | null;
         draftId: number | null;
+        orgId: string | null;
         savedAt: string;
       }
     | null => {
@@ -656,6 +664,7 @@ export function NewPurchaseOrderForm() {
             typeof parsed.draftId === 'number' && Number.isFinite(parsed.draftId)
               ? parsed.draftId
               : null,
+          orgId: typeof parsed.orgId === 'string' ? parsed.orgId : null,
           savedAt: typeof parsed.savedAt === 'string' ? parsed.savedAt : '',
         };
       }
@@ -798,6 +807,7 @@ export function NewPurchaseOrderForm() {
       setDraftVersion(draft?.version ?? null);
       currentDraftIdRef.current = draft?.draft_id ?? null;
       draftVersionRef.current = draft?.version ?? null;
+      currentOrgIdRef.current = draft?.org_id ?? currentOrgIdRef.current;
       setAutosaveState(draft ? 'saved' : 'idle');
       setAutosaveMessage(null);
       setLastSavedAt(draft?.updated_at ?? null);
@@ -836,21 +846,70 @@ export function NewPurchaseOrderForm() {
     if (draftBootstrapRef.current || draftsLoading || currentUserLoading) return;
     draftBootstrapRef.current = true;
 
+    // Rebuild per-row UI state (split mode, note expansion) from whichever
+    // item list the user will actually see. Called from every code path
+    // that restores form state from a local backup so hidden allocations
+    // can't leak into the next save and note badges point at real rows.
+    const rebuildRowStateFromItems = (
+      items: PurchaseOrderFormData['items']
+    ) => {
+      setExpandedNotes(
+        new Set(
+          (items ?? [])
+            .map((item, index) => (item.notes?.trim() ? index : -1))
+            .filter((index) => index >= 0)
+        )
+      );
+      setSplitModeItems(
+        new Set(
+          (items ?? [])
+            .map((item, index) =>
+              Array.isArray(item.allocations) && item.allocations.length > 0
+                ? index
+                : -1
+            )
+            .filter((index) => index >= 0)
+        )
+      );
+    };
+
+    // Provenance: same user AND (when the backup has an org stamp) same org.
+    // draftId equality is enforced at the call site because some restore
+    // paths allow draftId=null (fresh unsaved work) while others require a
+    // specific draft match.
+    const backupBelongsToCurrentContext = (
+      backup: ReturnType<typeof readLocalBackup>
+    ): boolean => {
+      if (!backup) return false;
+      if (backup.userId !== (currentUserId ?? null)) return false;
+      // If backup has an org stamp, it must match. null means "unknown
+      // provenance" (fresh-session edits before any draft existed) —
+      // tolerated on user match.
+      if (backup.orgId !== null && currentOrgIdRef.current !== null) {
+        if (backup.orgId !== currentOrgIdRef.current) return false;
+      }
+      return true;
+    };
+
     const applyWithLocalOverride = (draft: PurchaseOrderDraft) => {
+      // Record the draft's org so subsequent backup writes and provenance
+      // checks know which org this session is attached to.
+      currentOrgIdRef.current = draft.org_id ?? currentOrgIdRef.current;
+
       const localBackup = readLocalBackup();
       const dbUpdatedAt = draft.updated_at ? Date.parse(draft.updated_at) : 0;
       const localSavedAt = localBackup ? Date.parse(localBackup.savedAt) : 0;
-      // Provenance check: only honor a local backup whose user AND draft id
-      // match the draft we're about to restore. Prevents shared-browser,
-      // cross-org, and cross-draft bleed where an older localStorage entry
-      // from a different context would overwrite the correct DB state.
-      const provenanceMatches =
-        localBackup !== null &&
-        localBackup.userId === (currentUserId ?? null) &&
-        localBackup.draftId === draft.draft_id;
+      const contextMatches = backupBelongsToCurrentContext(localBackup);
+      // A backup is "for this draft" when its draftId matches. A null
+      // draftId means "unsaved fresh work with no draft assigned yet" —
+      // legitimate recovery material, but it should NOT override the
+      // specific draft we're opening here.
+      const draftIdMatches =
+        localBackup !== null && localBackup.draftId === draft.draft_id;
       const localIsFresher =
         localBackup !== null &&
-        provenanceMatches &&
+        contextMatches &&
+        draftIdMatches &&
         Number.isFinite(localSavedAt) &&
         localSavedAt > dbUpdatedAt &&
         hasMeaningfulPurchaseOrderDraftContent(
@@ -859,35 +918,10 @@ export function NewPurchaseOrderForm() {
         );
 
       if (localIsFresher && localBackup) {
-        // Seed metadata (draft_id, version) from the DB row so the next save
-        // updates the same draft, but keep the form content from the fresher
-        // local backup. The autosave effect will detect the delta and push it
-        // back to Supabase on the next debounce tick.
         applyDraftSelection(draft, { clearLocal: false });
         reset(localBackup.formData);
         setDraftTitle(localBackup.title);
-        // Recompute per-row UI state from the RESTORED form data, not the
-        // stale DB shape that applyDraftSelection seeded. Otherwise
-        // split-allocation and note-expansion flags point at the wrong
-        // indices and hidden allocations can leak into the next save.
-        setExpandedNotes(
-          new Set(
-            (localBackup.formData.items ?? [])
-              .map((item, index) => (item.notes?.trim() ? index : -1))
-              .filter((index) => index >= 0)
-          )
-        );
-        setSplitModeItems(
-          new Set(
-            (localBackup.formData.items ?? [])
-              .map((item, index) =>
-                Array.isArray(item.allocations) && item.allocations.length > 0
-                  ? index
-                  : -1
-              )
-              .filter((index) => index >= 0)
-          )
-        );
+        rebuildRowStateFromItems(localBackup.formData.items);
         setAutosaveState('error');
         setAutosaveMessage('Local changes restored — saving to server');
         toast.warning(
@@ -895,9 +929,16 @@ export function NewPurchaseOrderForm() {
           { duration: 6000 }
         );
       } else {
-        // If a backup exists but doesn't belong to this user/draft, drop it
-        // so it can't be resurrected by a later bootstrap path.
-        if (localBackup && !provenanceMatches) {
+        // Only drop the backup if it's foreign (different user/org) or
+        // attached to a DIFFERENT draft. Same-user same-org backups with
+        // draftId=null are legitimate fresh-work recovery material and
+        // must be preserved so the user can get them back via the
+        // last-resort path if they later discard/archive this draft.
+        const backupIsForeignOrDifferentDraft =
+          localBackup !== null &&
+          (!contextMatches ||
+            (localBackup.draftId !== null && !draftIdMatches));
+        if (backupIsForeignOrDifferentDraft) {
           clearLocalBackup();
         }
         applyDraftSelection(draft);
@@ -955,16 +996,33 @@ export function NewPurchaseOrderForm() {
           const offlineBackup = readLocalBackup();
           const offlineBackupMatches =
             offlineBackup !== null &&
-            offlineBackup.userId === (currentUserId ?? null) &&
+            backupBelongsToCurrentContext(offlineBackup) &&
             offlineBackup.draftId === persistedDraftId &&
             hasMeaningfulPurchaseOrderDraftContent(
               offlineBackup.title,
               offlineBackup.formData
             );
 
-          if (offlineBackupMatches && offlineBackup) {
+          if (offlineBackupMatches && offlineBackup && persistedDraftId !== null) {
+            // Reattach to the pinned draft_id so the NEXT autosave updates
+            // that existing row rather than forking a brand-new draft.
+            // Version is unknown (server unreachable); pass null so the RPC
+            // skips the expected_version guard. This is last-write-wins for
+            // the offline recovery scenario — acceptable given the
+            // alternative is losing the user's work.
+            currentDraftIdRef.current = persistedDraftId;
+            setCurrentDraftId(persistedDraftId);
+            draftVersionRef.current = null;
+            setDraftVersion(null);
+            if (offlineBackup.orgId !== null) {
+              currentOrgIdRef.current = offlineBackup.orgId;
+            }
+            persistDraftSelection(persistedDraftId);
+
             reset(offlineBackup.formData);
             setDraftTitle(offlineBackup.title);
+            rebuildRowStateFromItems(offlineBackup.formData.items);
+            lastSavedSignatureRef.current = null;
             setAutosaveState('error');
             setAutosaveMessage(
               'Offline — editing from your local backup. Reconnect to sync.'
@@ -1001,17 +1059,40 @@ export function NewPurchaseOrderForm() {
           return;
         }
 
-        // Last resort: recover from local backup (crash/network-loss recovery)
+        // Last resort: recover from local backup (crash/network-loss
+        // recovery). Require same-user same-org provenance before auto-
+        // restoring — otherwise a shared browser or cross-org switch could
+        // surface the wrong user/org's unsaved lines and the very first
+        // autosave would persist them as a brand-new draft in the current
+        // org. A foreign backup is cleared rather than silently restored.
         const localBackup = readLocalBackup();
-        if (
-          localBackup &&
+        const localBackupMeaningful =
+          localBackup !== null &&
           hasMeaningfulPurchaseOrderDraftContent(
             localBackup.title,
             localBackup.formData
-          )
+          );
+        if (
+          localBackup &&
+          localBackupMeaningful &&
+          backupBelongsToCurrentContext(localBackup)
         ) {
           reset(localBackup.formData);
           setDraftTitle(localBackup.title);
+          rebuildRowStateFromItems(localBackup.formData.items);
+          // If the backup was already pinned to a specific draft, reattach
+          // so the autosave updates the existing row instead of forking.
+          if (localBackup.draftId !== null) {
+            currentDraftIdRef.current = localBackup.draftId;
+            setCurrentDraftId(localBackup.draftId);
+            draftVersionRef.current = null;
+            setDraftVersion(null);
+            persistDraftSelection(localBackup.draftId);
+          }
+          if (localBackup.orgId !== null) {
+            currentOrgIdRef.current = localBackup.orgId;
+          }
+          lastSavedSignatureRef.current = null;
           setAutosaveState('error');
           setAutosaveMessage('Recovered from local backup — not yet saved to server');
           toast.warning(
@@ -1020,6 +1101,12 @@ export function NewPurchaseOrderForm() {
           );
           setDraftBootstrapComplete(true);
           return;
+        }
+
+        // Backup exists but belongs to a different user or org — drop it
+        // rather than leave it for a later session to resurface.
+        if (localBackup && !backupBelongsToCurrentContext(localBackup)) {
+          clearLocalBackup();
         }
 
         applyDraftSelection(null);
@@ -1143,6 +1230,12 @@ export function NewPurchaseOrderForm() {
 
   useEffect(() => {
     if (draftsLoading || currentUserLoading) return;
+    // Block autosave and local-backup writes until bootstrap has decided
+    // which draft (if any) this session is attached to. Otherwise the
+    // initial render could stamp a draftId=null backup over a valid
+    // non-null one from a previous session, and the provenance check on
+    // next reload would then reject the downgraded backup.
+    if (!draftBootstrapComplete) return;
 
     const snapshot: DraftPersistSnapshot = {
       sessionKey: draftSessionKeyRef.current,
@@ -1156,13 +1249,15 @@ export function NewPurchaseOrderForm() {
     };
 
     // Write local backup immediately so data survives crashes/network loss.
-    // Scoped to user + draft so a shared browser or org switch can't bleed
-    // one user's unsaved lines into another user's draft on reload.
+    // Scoped to user + draft + org so a shared browser, cross-draft, or
+    // cross-org switch can't bleed one context's unsaved lines into another
+    // on reload.
     writeLocalBackup(
       snapshot.title,
       snapshot.formData,
       currentUserId ?? null,
-      currentDraftIdRef.current
+      currentDraftIdRef.current,
+      currentOrgIdRef.current
     );
 
     clearTimeout(saveTimerRef.current);
@@ -1186,6 +1281,7 @@ export function NewPurchaseOrderForm() {
     clearLocalBackup,
     currentUserId,
     currentUserLoading,
+    draftBootstrapComplete,
     draftsLoading,
     draftTitle,
     enqueueDraftPersist,
@@ -1255,7 +1351,8 @@ export function NewPurchaseOrderForm() {
         snapshot.title,
         snapshot.formData,
         currentUserIdRef.current,
-        currentDraftIdRef.current
+        currentDraftIdRef.current,
+        currentOrgIdRef.current
       );
       const signature = buildPurchaseOrderDraftSignature(
         snapshot.title,
