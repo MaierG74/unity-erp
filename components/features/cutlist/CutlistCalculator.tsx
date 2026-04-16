@@ -1107,6 +1107,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
 
     setIsCalculating(true);
     setSaProgress(null);
+    setActiveTab('preview');
     // Yield to let UI update state immediately
     await new Promise(resolve => setTimeout(resolve, 0));
 
@@ -1344,8 +1345,6 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
       } else {
         setBackerResult(null);
       }
-
-      setActiveTab('preview');
     } finally {
       setIsCalculating(false);
       setSaProgress(null);
