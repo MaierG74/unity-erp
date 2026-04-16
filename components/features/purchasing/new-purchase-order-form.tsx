@@ -50,6 +50,7 @@ import {
 import {
   buildPurchaseOrderDraftSignature,
   createEmptyPurchaseOrderFormData,
+  fetchPurchaseOrderDraftById,
   fetchPurchaseOrderDrafts,
   hasMeaningfulPurchaseOrderDraftContent,
   mapPurchaseOrderDraftToFormData,
@@ -748,7 +749,10 @@ export function NewPurchaseOrderForm() {
   }, []);
 
   const applyDraftSelection = useCallback(
-    (draft: PurchaseOrderDraft | null, options?: { newSession?: boolean }) => {
+    (
+      draft: PurchaseOrderDraft | null,
+      options?: { newSession?: boolean; clearLocal?: boolean }
+    ) => {
       clearTimeout(saveTimerRef.current);
       if (options?.newSession !== false) {
         draftSessionKeyRef.current += 1;
@@ -782,7 +786,9 @@ export function NewPurchaseOrderForm() {
         )
       );
       persistDraftSelection(draft?.draft_id ?? null);
-      clearLocalBackup();
+      if (options?.clearLocal !== false) {
+        clearLocalBackup();
+      }
 
       lastSavedSignatureRef.current = buildPurchaseOrderDraftSignature(
         draft?.title ?? '',
@@ -800,58 +806,117 @@ export function NewPurchaseOrderForm() {
     if (draftBootstrapRef.current || draftsLoading || currentUserLoading) return;
     draftBootstrapRef.current = true;
 
-    const persistedDraftId = readPersistedDraftSelection();
-    const persistedDraft =
-      persistedDraftId === null
-        ? null
-        : sharedDrafts.find((draft) => draft.draft_id === persistedDraftId) ?? null;
+    const applyWithLocalOverride = (draft: PurchaseOrderDraft) => {
+      const localBackup = readLocalBackup();
+      const dbUpdatedAt = draft.updated_at ? Date.parse(draft.updated_at) : 0;
+      const localSavedAt = localBackup ? Date.parse(localBackup.savedAt) : 0;
+      const localIsFresher =
+        localBackup !== null &&
+        Number.isFinite(localSavedAt) &&
+        localSavedAt > dbUpdatedAt &&
+        hasMeaningfulPurchaseOrderDraftContent(
+          localBackup.title,
+          localBackup.formData
+        );
 
-    if (persistedDraft) {
-      applyDraftSelection(persistedDraft);
-      toast.info('Restored your shared purchase-order draft');
-      return;
-    }
+      if (localIsFresher && localBackup) {
+        // Seed metadata (draft_id, version) from the DB row so the next save
+        // updates the same draft, but keep the form content from the fresher
+        // local backup. The autosave effect will detect the delta and push it
+        // back to Supabase on the next debounce tick.
+        applyDraftSelection(draft, { clearLocal: false });
+        reset(localBackup.formData);
+        setDraftTitle(localBackup.title);
+        setAutosaveState('error');
+        setAutosaveMessage('Local changes restored — saving to server');
+        toast.warning(
+          'Restored unsaved changes from your local backup. Saving now.',
+          { duration: 6000 }
+        );
+      } else {
+        applyDraftSelection(draft);
+        toast.info('Restored your shared purchase-order draft');
+      }
+    };
 
-    const ownDraft =
-      sharedDrafts.find(
-        (draft) =>
-          draft.updated_by === currentUserId || draft.created_by === currentUserId
-      ) ?? null;
+    void (async () => {
+      try {
+        const persistedDraftId = readPersistedDraftSelection();
+        let persistedDraft: PurchaseOrderDraft | null =
+          persistedDraftId === null
+            ? null
+            : sharedDrafts.find((d) => d.draft_id === persistedDraftId) ?? null;
 
-    if (ownDraft) {
-      applyDraftSelection(ownDraft);
-      toast.info('Restored your shared purchase-order draft');
-      return;
-    }
+        // Top-20 fallback: the draft list is capped, so a session-pinned draft
+        // older than the 20 most-recently-updated rows will be missing here.
+        // Fetch it directly by id to avoid silently restoring a different draft.
+        if (persistedDraftId !== null && !persistedDraft) {
+          try {
+            persistedDraft = await fetchPurchaseOrderDraftById(persistedDraftId);
+          } catch {
+            persistedDraft = null;
+          }
+          if (!persistedDraft) {
+            // Pinned draft no longer exists (converted/archived elsewhere) —
+            // clear the stale selection so we don't re-try on every reload.
+            persistDraftSelection(null);
+          }
+        }
 
-    // Last resort: recover from local backup (crash/network-loss recovery)
-    const localBackup = readLocalBackup();
-    if (
-      localBackup &&
-      hasMeaningfulPurchaseOrderDraftContent(
-        localBackup.title,
-        localBackup.formData
-      )
-    ) {
-      reset(localBackup.formData);
-      setDraftTitle(localBackup.title);
-      setAutosaveState('error');
-      setAutosaveMessage('Recovered from local backup — not yet saved to server');
-      toast.warning(
-        'Recovered unsaved draft from local backup. Please review and save.',
-        { duration: 8000 }
-      );
-      setDraftBootstrapComplete(true);
-      return;
-    }
+        if (persistedDraft) {
+          applyWithLocalOverride(persistedDraft);
+          setDraftBootstrapComplete(true);
+          return;
+        }
 
-    applyDraftSelection(null);
-    setDraftBootstrapComplete(true);
+        const ownDraft =
+          sharedDrafts.find(
+            (draft) =>
+              draft.updated_by === currentUserId ||
+              draft.created_by === currentUserId
+          ) ?? null;
+
+        if (ownDraft) {
+          applyWithLocalOverride(ownDraft);
+          setDraftBootstrapComplete(true);
+          return;
+        }
+
+        // Last resort: recover from local backup (crash/network-loss recovery)
+        const localBackup = readLocalBackup();
+        if (
+          localBackup &&
+          hasMeaningfulPurchaseOrderDraftContent(
+            localBackup.title,
+            localBackup.formData
+          )
+        ) {
+          reset(localBackup.formData);
+          setDraftTitle(localBackup.title);
+          setAutosaveState('error');
+          setAutosaveMessage('Recovered from local backup — not yet saved to server');
+          toast.warning(
+            'Recovered unsaved draft from local backup. Please review and save.',
+            { duration: 8000 }
+          );
+          setDraftBootstrapComplete(true);
+          return;
+        }
+
+        applyDraftSelection(null);
+        setDraftBootstrapComplete(true);
+      } catch (bootstrapError) {
+        console.error('Purchase-order draft bootstrap failed:', bootstrapError);
+        applyDraftSelection(null);
+        setDraftBootstrapComplete(true);
+      }
+    })();
   }, [
     applyDraftSelection,
     currentUserId,
     currentUserLoading,
     draftsLoading,
+    persistDraftSelection,
     readLocalBackup,
     readPersistedDraftSelection,
     reset,
@@ -1021,6 +1086,49 @@ export function NewPurchaseOrderForm() {
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
   }, [draftTitle, watchedItems, watchedNotes, watchedOrderDate]);
+
+  // Flush the debounced autosave the moment the tab is hidden or backgrounded.
+  // Covers the common "switched tabs / minimized / closed tab" exit path where
+  // the 1500 ms timer would otherwise never fire. localStorage already holds
+  // the latest state (written synchronously on each render) as the backstop.
+  useEffect(() => {
+    const flush = () => {
+      if (document.visibilityState !== 'hidden') return;
+      const snapshot: DraftPersistSnapshot = {
+        sessionKey: draftSessionKeyRef.current,
+        title: draftTitle,
+        formData: {
+          order_date:
+            watchedOrderDate ?? createEmptyPurchaseOrderFormData().order_date,
+          notes: watchedNotes ?? '',
+          items: watchedItems ?? [],
+        },
+      };
+      const signature = buildPurchaseOrderDraftSignature(
+        snapshot.title,
+        snapshot.formData
+      );
+      if (signature === lastSavedSignatureRef.current) return;
+      clearTimeout(saveTimerRef.current);
+      void enqueueDraftPersist(snapshot).catch(() => {
+        // Swallow — localStorage backup is the guaranteed safety net and the
+        // next mount will reconcile on reload via the freshness check.
+      });
+    };
+
+    document.addEventListener('visibilitychange', flush);
+    window.addEventListener('pagehide', flush);
+    return () => {
+      document.removeEventListener('visibilitychange', flush);
+      window.removeEventListener('pagehide', flush);
+    };
+  }, [
+    draftTitle,
+    enqueueDraftPersist,
+    watchedItems,
+    watchedNotes,
+    watchedOrderDate,
+  ]);
 
   const setCurrentDraftStatus = useCallback(
     async (status: 'archived' | 'converted', purchaseOrderIds?: number[]) => {
@@ -1437,13 +1545,28 @@ export function NewPurchaseOrderForm() {
     clearTimeout(saveTimerRef.current);
 
     try {
-      await enqueueDraftPersist({
-        sessionKey: draftSessionKeyRef.current,
-        title: draftTitle,
-        formData: data,
-      }).catch((draftError) => {
-        console.error('Failed to persist draft before create:', draftError);
-      });
+      // Must succeed: if we can't persist the current form state to the draft,
+      // we also can't trust the conversion step that follows. Surfacing the
+      // error is far better than creating a PO from stale/partial data.
+      try {
+        await enqueueDraftPersist({
+          sessionKey: draftSessionKeyRef.current,
+          title: draftTitle,
+          formData: data,
+        });
+      } catch (draftError) {
+        const message =
+          draftError instanceof Error
+            ? draftError.message
+            : 'Failed to save draft before creating the purchase order';
+        setError(message);
+        toast.error(
+          `Draft could not be saved — purchase order not created. ${message}`,
+          { duration: 8000 }
+        );
+        return;
+      }
+
       const drafts = await checkForExistingDrafts(data);
 
       if (drafts.length > 0) {

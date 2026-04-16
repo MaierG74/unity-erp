@@ -212,37 +212,37 @@ function mapDraftRowToDraft(row: PurchaseOrderDraftRow): PurchaseOrderDraft {
   };
 }
 
+const DRAFT_SELECT_COLUMNS = `
+  draft_id,
+  title,
+  order_date,
+  notes,
+  status,
+  version,
+  created_by,
+  updated_by,
+  locked_by,
+  locked_at,
+  converted_at,
+  converted_purchase_order_ids,
+  created_at,
+  updated_at,
+  purchase_order_draft_lines (
+    draft_line_id,
+    sort_order,
+    component_id,
+    supplier_component_id,
+    quantity,
+    customer_order_id,
+    allocations,
+    notes
+  )
+`;
+
 export async function fetchPurchaseOrderDrafts(): Promise<PurchaseOrderDraft[]> {
   const { data, error } = await supabase
     .from('purchase_order_drafts')
-    .select(
-      `
-      draft_id,
-      title,
-      order_date,
-      notes,
-      status,
-      version,
-      created_by,
-      updated_by,
-      locked_by,
-      locked_at,
-      converted_at,
-      converted_purchase_order_ids,
-      created_at,
-      updated_at,
-      purchase_order_draft_lines (
-        draft_line_id,
-        sort_order,
-        component_id,
-        supplier_component_id,
-        quantity,
-        customer_order_id,
-        allocations,
-        notes
-      )
-      `
-    )
+    .select(DRAFT_SELECT_COLUMNS)
     .eq('status', 'draft')
     .order('updated_at', { ascending: false })
     .limit(20);
@@ -252,6 +252,25 @@ export async function fetchPurchaseOrderDrafts(): Promise<PurchaseOrderDraft[]> 
   }
 
   return ((data ?? []) as PurchaseOrderDraftRow[]).map(mapDraftRowToDraft);
+}
+
+export async function fetchPurchaseOrderDraftById(
+  draftId: number
+): Promise<PurchaseOrderDraft | null> {
+  const { data, error } = await supabase
+    .from('purchase_order_drafts')
+    .select(DRAFT_SELECT_COLUMNS)
+    .eq('draft_id', draftId)
+    .eq('status', 'draft')
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data) return null;
+
+  return mapDraftRowToDraft(data as PurchaseOrderDraftRow);
 }
 
 export function mapPurchaseOrderDraftToFormData(
