@@ -121,11 +121,14 @@ export function buildSnapshotFromCalculator(args: BuildSnapshotArgs): CutlistCos
     backerSheetOverrides, backerGlobalFullBoard, edgingByMaterial, edgingOverrides,
   } = args;
 
+  // Fallback material for sheets where placements don't carry material_id
+  const defaultBoard = primaryBoards.find(b => b.isDefault) || primaryBoards[0];
+
   // Map sheets with their billing overrides
   const sheets: SnapshotSheet[] = result.sheets.map(s => ({
     sheet_id: s.sheet_id,
-    material_id: s.placements.find(p => p.material_id)?.material_id || '',
-    material_name: s.material_label || '',
+    material_id: s.placements.find(p => p.material_id)?.material_id || defaultBoard?.id || '',
+    material_name: s.material_label || defaultBoard?.name || '',
     sheet_length_mm: s.stock_length_mm || 0,
     sheet_width_mm: s.stock_width_mm || 0,
     used_area_mm2: s.used_area_mm2 || 0,
