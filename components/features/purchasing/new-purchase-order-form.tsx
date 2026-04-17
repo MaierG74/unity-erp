@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useForm, Controller, useFieldArray } from 'react-hook-form';
+import { useForm, Controller, useFieldArray, FieldErrors } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { Resolver } from 'react-hook-form';
 import { z } from 'zod';
@@ -50,6 +50,7 @@ import {
 import {
   buildPurchaseOrderDraftSignature,
   createEmptyPurchaseOrderFormData,
+  fetchPurchaseOrderDraftById,
   fetchPurchaseOrderDrafts,
   hasMeaningfulPurchaseOrderDraftContent,
   mapPurchaseOrderDraftToFormData,
@@ -132,6 +133,12 @@ type PurchaseOrderCreationResult = {
   supplier_order_ids: number[] | null;
 };
 
+type DraftPersistSnapshot = {
+  sessionKey: number;
+  title: string;
+  formData: PurchaseOrderFormData;
+};
+
 // Selected component info (stored alongside form data for display)
 type SelectedComponentInfo = {
   internal_code: string;
@@ -140,6 +147,11 @@ type SelectedComponentInfo = {
   stock_on_hand: number | null;
   suppliers: ModalSupplierComponent[];
 };
+
+const PURCHASE_ORDER_DRAFT_SESSION_KEY =
+  'unity-erp.current-purchase-order-draft-id';
+const PURCHASE_ORDER_DRAFT_LOCAL_BACKUP_KEY =
+  'unity-erp.purchase-order-draft-local-backup';
 
 // Fetch supplier components for a specific component
 async function fetchSupplierComponentsForComponent(
@@ -536,6 +548,7 @@ export function NewPurchaseOrderForm() {
     getValues,
     reset,
     formState: { errors },
+    setFocus,
   } = useForm<PurchaseOrderFormData>({
     resolver: zodResolver(formSchema) as Resolver<PurchaseOrderFormData>,
     defaultValues: createEmptyPurchaseOrderFormData(),
@@ -554,6 +567,112 @@ export function NewPurchaseOrderForm() {
   const currentDraftIdRef = useRef<number | null>(null);
   const draftVersionRef = useRef<number | null>(null);
   const prefillAppliedRef = useRef<string | null>(null);
+  const draftPersistChainRef = useRef<Promise<void>>(Promise.resolve());
+  const draftSessionKeyRef = useRef(0);
+  // Live-read refs for the visibilitychange/pagehide flush: lets that effect
+  // pull current values without re-registering listeners on every keystroke.
+  const draftTitleRef = useRef('');
+  const currentUserIdRef = useRef<string | null>(null);
+  // Tracks the org_id of whichever draft is currently loaded, so we can
+  // stamp localStorage backups with org provenance and refuse to restore
+  // a backup from a different org on reload (e.g., user switched orgs mid
+  // session). Seeded from draft.org_id whenever a DB draft is applied.
+  const currentOrgIdRef = useRef<string | null>(null);
+
+  const persistDraftSelection = useCallback((draftId: number | null) => {
+    if (typeof window === 'undefined') return;
+
+    if (draftId === null) {
+      window.sessionStorage.removeItem(PURCHASE_ORDER_DRAFT_SESSION_KEY);
+      return;
+    }
+
+    window.sessionStorage.setItem(
+      PURCHASE_ORDER_DRAFT_SESSION_KEY,
+      String(draftId)
+    );
+  }, []);
+
+  const readPersistedDraftSelection = useCallback(() => {
+    if (typeof window === 'undefined') return null;
+
+    const rawValue = window.sessionStorage.getItem(
+      PURCHASE_ORDER_DRAFT_SESSION_KEY
+    );
+    if (!rawValue) return null;
+
+    const parsed = Number.parseInt(rawValue, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }, []);
+
+  const writeLocalBackup = useCallback(
+    (
+      title: string,
+      formData: PurchaseOrderFormData,
+      userId: string | null,
+      draftId: number | null,
+      orgId: string | null
+    ) => {
+      if (typeof window === 'undefined') return;
+      try {
+        window.localStorage.setItem(
+          PURCHASE_ORDER_DRAFT_LOCAL_BACKUP_KEY,
+          JSON.stringify({
+            title,
+            formData,
+            userId,
+            draftId,
+            orgId,
+            savedAt: new Date().toISOString(),
+          })
+        );
+      } catch {
+        // Storage full or unavailable — not critical
+      }
+    },
+    []
+  );
+
+  const clearLocalBackup = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.removeItem(PURCHASE_ORDER_DRAFT_LOCAL_BACKUP_KEY);
+  }, []);
+
+  const readLocalBackup = useCallback(():
+    | {
+        title: string;
+        formData: PurchaseOrderFormData;
+        userId: string | null;
+        draftId: number | null;
+        orgId: string | null;
+        savedAt: string;
+      }
+    | null => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = window.localStorage.getItem(
+        PURCHASE_ORDER_DRAFT_LOCAL_BACKUP_KEY
+      );
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.formData && Array.isArray(parsed.formData.items)) {
+        return {
+          title: parsed.title ?? '',
+          formData: parsed.formData,
+          userId: typeof parsed.userId === 'string' ? parsed.userId : null,
+          draftId:
+            typeof parsed.draftId === 'number' && Number.isFinite(parsed.draftId)
+              ? parsed.draftId
+              : null,
+          orgId: typeof parsed.orgId === 'string' ? parsed.orgId : null,
+          savedAt: typeof parsed.savedAt === 'string' ? parsed.savedAt : '',
+        };
+      }
+    } catch {
+      // Corrupt data — ignore
+    }
+    return null;
+  }, []);
 
   const prefillComponentId = useMemo(() => {
     const rawValue = searchParams.get('componentId');
@@ -669,7 +788,15 @@ export function NewPurchaseOrderForm() {
   }, []);
 
   const applyDraftSelection = useCallback(
-    (draft: PurchaseOrderDraft | null) => {
+    (
+      draft: PurchaseOrderDraft | null,
+      options?: { newSession?: boolean; clearLocal?: boolean }
+    ) => {
+      clearTimeout(saveTimerRef.current);
+      if (options?.newSession !== false) {
+        draftSessionKeyRef.current += 1;
+      }
+
       const nextFormData = draft
         ? mapPurchaseOrderDraftToFormData(draft)
         : createEmptyPurchaseOrderFormData();
@@ -680,6 +807,7 @@ export function NewPurchaseOrderForm() {
       setDraftVersion(draft?.version ?? null);
       currentDraftIdRef.current = draft?.draft_id ?? null;
       draftVersionRef.current = draft?.version ?? null;
+      currentOrgIdRef.current = draft?.org_id ?? currentOrgIdRef.current;
       setAutosaveState(draft ? 'saved' : 'idle');
       setAutosaveMessage(null);
       setLastSavedAt(draft?.updated_at ?? null);
@@ -697,6 +825,10 @@ export function NewPurchaseOrderForm() {
             .filter((index) => index >= 0)
         )
       );
+      persistDraftSelection(draft?.draft_id ?? null);
+      if (options?.clearLocal !== false) {
+        clearLocalBackup();
+      }
 
       lastSavedSignatureRef.current = buildPurchaseOrderDraftSignature(
         draft?.title ?? '',
@@ -707,32 +839,293 @@ export function NewPurchaseOrderForm() {
         nextFormData.items.map((item) => item.component_id).filter((id) => id > 0)
       );
     },
-    [hydrateComponentInfo, reset]
+    [clearLocalBackup, hydrateComponentInfo, persistDraftSelection, reset]
   );
 
   useEffect(() => {
     if (draftBootstrapRef.current || draftsLoading || currentUserLoading) return;
     draftBootstrapRef.current = true;
 
-    const ownDraft =
-      sharedDrafts.find(
-        (draft) =>
-          draft.updated_by === currentUserId || draft.created_by === currentUserId
-      ) ?? null;
+    // Rebuild per-row UI state (split mode, note expansion) from whichever
+    // item list the user will actually see. Called from every code path
+    // that restores form state from a local backup so hidden allocations
+    // can't leak into the next save and note badges point at real rows.
+    const rebuildRowStateFromItems = (
+      items: PurchaseOrderFormData['items']
+    ) => {
+      setExpandedNotes(
+        new Set(
+          (items ?? [])
+            .map((item, index) => (item.notes?.trim() ? index : -1))
+            .filter((index) => index >= 0)
+        )
+      );
+      setSplitModeItems(
+        new Set(
+          (items ?? [])
+            .map((item, index) =>
+              Array.isArray(item.allocations) && item.allocations.length > 0
+                ? index
+                : -1
+            )
+            .filter((index) => index >= 0)
+        )
+      );
+    };
 
-    if (ownDraft) {
-      applyDraftSelection(ownDraft);
-      toast.info('Restored your shared purchase-order draft');
-      return;
-    }
+    // Provenance: same user AND (when the backup has an org stamp) same org.
+    // draftId equality is enforced at the call site because some restore
+    // paths allow draftId=null (fresh unsaved work) while others require a
+    // specific draft match.
+    const backupBelongsToCurrentContext = (
+      backup: ReturnType<typeof readLocalBackup>
+    ): boolean => {
+      if (!backup) return false;
+      if (backup.userId !== (currentUserId ?? null)) return false;
+      // If backup has an org stamp, it must match. null means "unknown
+      // provenance" (fresh-session edits before any draft existed) —
+      // tolerated on user match.
+      if (backup.orgId !== null && currentOrgIdRef.current !== null) {
+        if (backup.orgId !== currentOrgIdRef.current) return false;
+      }
+      return true;
+    };
 
-    applyDraftSelection(null);
-    setDraftBootstrapComplete(true);
+    const applyWithLocalOverride = (draft: PurchaseOrderDraft) => {
+      // Record the draft's org so subsequent backup writes and provenance
+      // checks know which org this session is attached to.
+      currentOrgIdRef.current = draft.org_id ?? currentOrgIdRef.current;
+
+      const localBackup = readLocalBackup();
+      const dbUpdatedAt = draft.updated_at ? Date.parse(draft.updated_at) : 0;
+      const localSavedAt = localBackup ? Date.parse(localBackup.savedAt) : 0;
+      const contextMatches = backupBelongsToCurrentContext(localBackup);
+      // A backup is "for this draft" when its draftId matches. A null
+      // draftId means "unsaved fresh work with no draft assigned yet" —
+      // legitimate recovery material, but it should NOT override the
+      // specific draft we're opening here.
+      const draftIdMatches =
+        localBackup !== null && localBackup.draftId === draft.draft_id;
+      const localIsFresher =
+        localBackup !== null &&
+        contextMatches &&
+        draftIdMatches &&
+        Number.isFinite(localSavedAt) &&
+        localSavedAt > dbUpdatedAt &&
+        hasMeaningfulPurchaseOrderDraftContent(
+          localBackup.title,
+          localBackup.formData
+        );
+
+      if (localIsFresher && localBackup) {
+        applyDraftSelection(draft, { clearLocal: false });
+        reset(localBackup.formData);
+        setDraftTitle(localBackup.title);
+        rebuildRowStateFromItems(localBackup.formData.items);
+        setAutosaveState('error');
+        setAutosaveMessage('Local changes restored — saving to server');
+        toast.warning(
+          'Restored unsaved changes from your local backup. Saving now.',
+          { duration: 6000 }
+        );
+      } else {
+        // Only drop the backup if it's foreign (different user/org) or
+        // attached to a DIFFERENT draft. Same-user same-org backups with
+        // draftId=null are legitimate fresh-work recovery material and
+        // must be preserved so the user can get them back via the
+        // last-resort path if they later discard/archive this draft.
+        const backupIsForeignOrDifferentDraft =
+          localBackup !== null &&
+          (!contextMatches ||
+            (localBackup.draftId !== null && !draftIdMatches));
+        if (backupIsForeignOrDifferentDraft) {
+          clearLocalBackup();
+        }
+        applyDraftSelection(draft);
+        toast.info('Restored your shared purchase-order draft');
+      }
+    };
+
+    void (async () => {
+      try {
+        const persistedDraftId = readPersistedDraftSelection();
+        let persistedDraft: PurchaseOrderDraft | null =
+          persistedDraftId === null
+            ? null
+            : sharedDrafts.find((d) => d.draft_id === persistedDraftId) ?? null;
+
+        // Top-20 fallback: the draft list is capped, so a session-pinned draft
+        // older than the 20 most-recently-updated rows will be missing here.
+        // Fetch it directly by id to avoid silently restoring a different draft.
+        let pinnedFetchFailed = false;
+        if (persistedDraftId !== null && !persistedDraft) {
+          try {
+            persistedDraft = await fetchPurchaseOrderDraftById(persistedDraftId);
+          } catch (fetchError) {
+            // Distinguish a definite "not found / no longer editable" (null
+            // return) from a transient failure. A network blip must NOT
+            // clear the session pin — the user would silently lose their
+            // place and the next autosave could create a stray new draft.
+            console.error(
+              'Failed to fetch pinned purchase-order draft:',
+              fetchError
+            );
+            pinnedFetchFailed = true;
+            persistedDraft = null;
+          }
+          if (!persistedDraft && !pinnedFetchFailed) {
+            // Pinned draft no longer exists (converted/archived elsewhere) —
+            // clear the stale selection so we don't re-try on every reload.
+            persistDraftSelection(null);
+          }
+        }
+
+        if (persistedDraft) {
+          applyWithLocalOverride(persistedDraft);
+          setDraftBootstrapComplete(true);
+          return;
+        }
+
+        // If the direct fetch threw (vs. definitively returned null), the
+        // pinned draft may still exist but be temporarily unreachable. Do
+        // NOT fall through to ownDraft — that could silently open a
+        // different draft. If a matching local backup exists we can still
+        // show the user's in-progress work; otherwise present a clean form
+        // with an error and keep the session pin so reload can retry.
+        if (pinnedFetchFailed) {
+          const offlineBackup = readLocalBackup();
+          const offlineBackupMatches =
+            offlineBackup !== null &&
+            backupBelongsToCurrentContext(offlineBackup) &&
+            offlineBackup.draftId === persistedDraftId &&
+            hasMeaningfulPurchaseOrderDraftContent(
+              offlineBackup.title,
+              offlineBackup.formData
+            );
+
+          if (offlineBackupMatches && offlineBackup && persistedDraftId !== null) {
+            // Reattach to the pinned draft_id so the NEXT autosave updates
+            // that existing row rather than forking a brand-new draft.
+            // Version is unknown (server unreachable); pass null so the RPC
+            // skips the expected_version guard. This is last-write-wins for
+            // the offline recovery scenario — acceptable given the
+            // alternative is losing the user's work.
+            currentDraftIdRef.current = persistedDraftId;
+            setCurrentDraftId(persistedDraftId);
+            draftVersionRef.current = null;
+            setDraftVersion(null);
+            if (offlineBackup.orgId !== null) {
+              currentOrgIdRef.current = offlineBackup.orgId;
+            }
+            persistDraftSelection(persistedDraftId);
+
+            reset(offlineBackup.formData);
+            setDraftTitle(offlineBackup.title);
+            rebuildRowStateFromItems(offlineBackup.formData.items);
+            lastSavedSignatureRef.current = null;
+            setAutosaveState('error');
+            setAutosaveMessage(
+              'Offline — editing from your local backup. Reconnect to sync.'
+            );
+            toast.warning(
+              'Could not reach the draft server. Showing your local backup.',
+              { duration: 8000 }
+            );
+          } else {
+            applyDraftSelection(null, { clearLocal: false });
+            setAutosaveState('error');
+            setAutosaveMessage(
+              'Could not reach the draft server. Reload when online to restore your draft.'
+            );
+            toast.error(
+              'Your saved draft could not be loaded. Check your connection and reload.',
+              { duration: 8000 }
+            );
+          }
+          setDraftBootstrapComplete(true);
+          return;
+        }
+
+        const ownDraft =
+          sharedDrafts.find(
+            (draft) =>
+              draft.updated_by === currentUserId ||
+              draft.created_by === currentUserId
+          ) ?? null;
+
+        if (ownDraft) {
+          applyWithLocalOverride(ownDraft);
+          setDraftBootstrapComplete(true);
+          return;
+        }
+
+        // Last resort: recover from local backup (crash/network-loss
+        // recovery). Require same-user same-org provenance before auto-
+        // restoring — otherwise a shared browser or cross-org switch could
+        // surface the wrong user/org's unsaved lines and the very first
+        // autosave would persist them as a brand-new draft in the current
+        // org. A foreign backup is cleared rather than silently restored.
+        const localBackup = readLocalBackup();
+        const localBackupMeaningful =
+          localBackup !== null &&
+          hasMeaningfulPurchaseOrderDraftContent(
+            localBackup.title,
+            localBackup.formData
+          );
+        if (
+          localBackup &&
+          localBackupMeaningful &&
+          backupBelongsToCurrentContext(localBackup)
+        ) {
+          reset(localBackup.formData);
+          setDraftTitle(localBackup.title);
+          rebuildRowStateFromItems(localBackup.formData.items);
+          // If the backup was already pinned to a specific draft, reattach
+          // so the autosave updates the existing row instead of forking.
+          if (localBackup.draftId !== null) {
+            currentDraftIdRef.current = localBackup.draftId;
+            setCurrentDraftId(localBackup.draftId);
+            draftVersionRef.current = null;
+            setDraftVersion(null);
+            persistDraftSelection(localBackup.draftId);
+          }
+          if (localBackup.orgId !== null) {
+            currentOrgIdRef.current = localBackup.orgId;
+          }
+          lastSavedSignatureRef.current = null;
+          setAutosaveState('error');
+          setAutosaveMessage('Recovered from local backup — not yet saved to server');
+          toast.warning(
+            'Recovered unsaved draft from local backup. Please review and save.',
+            { duration: 8000 }
+          );
+          setDraftBootstrapComplete(true);
+          return;
+        }
+
+        // Backup exists but belongs to a different user or org — drop it
+        // rather than leave it for a later session to resurface.
+        if (localBackup && !backupBelongsToCurrentContext(localBackup)) {
+          clearLocalBackup();
+        }
+
+        applyDraftSelection(null);
+        setDraftBootstrapComplete(true);
+      } catch (bootstrapError) {
+        console.error('Purchase-order draft bootstrap failed:', bootstrapError);
+        applyDraftSelection(null);
+        setDraftBootstrapComplete(true);
+      }
+    })();
   }, [
     applyDraftSelection,
     currentUserId,
     currentUserLoading,
     draftsLoading,
+    persistDraftSelection,
+    readLocalBackup,
+    readPersistedDraftSelection,
+    reset,
     sharedDrafts,
   ]);
 
@@ -742,18 +1135,31 @@ export function NewPurchaseOrderForm() {
     }
   }, [currentUserLoading, draftsLoading]);
 
+  // Keep live-read refs in sync so the visibility flush can read current
+  // values at fire time without having to list them in its own dep array.
+  useEffect(() => {
+    draftTitleRef.current = draftTitle;
+  }, [draftTitle]);
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId ?? null;
+  }, [currentUserId]);
+
   const watchedItems = watch('items');
   const watchedNotes = watch('notes');
   const watchedOrderDate = watch('order_date');
 
-  const persistDraftNow = useCallback(
-    async (formData: PurchaseOrderFormData) => {
+  const persistDraftSnapshot = useCallback(
+    async (snapshot: DraftPersistSnapshot) => {
+      if (snapshot.sessionKey !== draftSessionKeyRef.current) {
+        return;
+      }
+
       const hasContent = hasMeaningfulPurchaseOrderDraftContent(
-        draftTitle,
-        formData
+        snapshot.title,
+        snapshot.formData
       );
 
-      if (!hasContent && currentDraftId === null) {
+      if (!hasContent && currentDraftIdRef.current === null) {
         setAutosaveState('idle');
         setAutosaveMessage(null);
         setLastSavedAt(null);
@@ -761,69 +1167,216 @@ export function NewPurchaseOrderForm() {
         return null;
       }
 
-      const signature = buildPurchaseOrderDraftSignature(draftTitle, formData);
+      const signature = buildPurchaseOrderDraftSignature(
+        snapshot.title,
+        snapshot.formData
+      );
       if (signature === lastSavedSignatureRef.current) {
         return null;
       }
 
       setAutosaveState('saving');
       setAutosaveMessage(null);
+      try {
+        const meta = await savePurchaseOrderDraft({
+          draftId: currentDraftIdRef.current,
+          expectedVersion: draftVersionRef.current,
+          title: snapshot.title,
+          formData: snapshot.formData,
+        });
 
-      const meta = await savePurchaseOrderDraft({
-        draftId: currentDraftIdRef.current,
-        expectedVersion: draftVersionRef.current,
-        title: draftTitle,
-        formData,
-      });
+        if (snapshot.sessionKey !== draftSessionKeyRef.current) {
+          return null;
+        }
 
-      setCurrentDraftId(meta.draftId);
-      setDraftVersion(meta.version);
-      currentDraftIdRef.current = meta.draftId;
-      draftVersionRef.current = meta.version;
-      setAutosaveState('saved');
-      setLastSavedAt(meta.updatedAt);
-      lastSavedSignatureRef.current = signature;
-      await queryClient.invalidateQueries({ queryKey: ['purchaseOrderDrafts'] });
+        setCurrentDraftId(meta.draftId);
+        setDraftVersion(meta.version);
+        currentDraftIdRef.current = meta.draftId;
+        draftVersionRef.current = meta.version;
+        setAutosaveState('saved');
+        setLastSavedAt(meta.updatedAt);
+        lastSavedSignatureRef.current = signature;
+        persistDraftSelection(meta.draftId);
+        await queryClient.invalidateQueries({ queryKey: ['purchaseOrderDrafts'] });
 
-      return meta;
-    },
-    [currentDraftId, draftTitle, draftVersion, queryClient]
-  );
-
-  useEffect(() => {
-    if (draftsLoading || currentUserLoading) return;
-
-    const formData: PurchaseOrderFormData = {
-      order_date:
-        watchedOrderDate ?? createEmptyPurchaseOrderFormData().order_date,
-      notes: watchedNotes ?? '',
-      items: watchedItems ?? [],
-    };
-
-    clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      void persistDraftNow(formData).catch((draftError) => {
+        return meta;
+      } catch (draftError) {
         const message =
           draftError instanceof Error
             ? draftError.message
             : 'Failed to save purchase-order draft';
         setAutosaveState('error');
         setAutosaveMessage(message);
-      });
+        throw draftError;
+      }
+    },
+    [currentDraftId, persistDraftSelection, queryClient]
+  );
+
+  const enqueueDraftPersist = useCallback(
+    (snapshot: DraftPersistSnapshot) => {
+      const nextPersist = draftPersistChainRef.current
+        .catch(() => undefined)
+        .then(() => persistDraftSnapshot(snapshot));
+
+      draftPersistChainRef.current = nextPersist
+        .then(() => undefined)
+        .catch(() => undefined);
+
+      return nextPersist;
+    },
+    [persistDraftSnapshot]
+  );
+
+  useEffect(() => {
+    if (draftsLoading || currentUserLoading) return;
+    // Block autosave and local-backup writes until bootstrap has decided
+    // which draft (if any) this session is attached to. Otherwise the
+    // initial render could stamp a draftId=null backup over a valid
+    // non-null one from a previous session, and the provenance check on
+    // next reload would then reject the downgraded backup.
+    if (!draftBootstrapComplete) return;
+
+    const snapshot: DraftPersistSnapshot = {
+      sessionKey: draftSessionKeyRef.current,
+      title: draftTitle,
+      formData: {
+        order_date:
+          watchedOrderDate ?? createEmptyPurchaseOrderFormData().order_date,
+        notes: watchedNotes ?? '',
+        items: watchedItems ?? [],
+      },
+    };
+
+    // Write local backup immediately so data survives crashes/network loss.
+    // Scoped to user + draft + org so a shared browser, cross-draft, or
+    // cross-org switch can't bleed one context's unsaved lines into another
+    // on reload.
+    writeLocalBackup(
+      snapshot.title,
+      snapshot.formData,
+      currentUserId ?? null,
+      currentDraftIdRef.current,
+      currentOrgIdRef.current
+    );
+
+    clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      void enqueueDraftPersist(snapshot)
+        .then((meta) => {
+          if (meta) clearLocalBackup();
+        })
+        .catch((draftError) => {
+          const message =
+            draftError instanceof Error
+              ? draftError.message
+              : 'Failed to save purchase-order draft';
+          setAutosaveState('error');
+          setAutosaveMessage(message);
+        });
     }, 1500);
 
     return () => clearTimeout(saveTimerRef.current);
   }, [
+    clearLocalBackup,
+    currentUserId,
     currentUserLoading,
+    draftBootstrapComplete,
     draftsLoading,
-    persistDraftNow,
+    draftTitle,
+    enqueueDraftPersist,
     watchedItems,
     watchedNotes,
     watchedOrderDate,
+    writeLocalBackup,
   ]);
+
+  // Warn before leaving with unsaved changes
+  useEffect(() => {
+    const currentSignature = buildPurchaseOrderDraftSignature(draftTitle, {
+      order_date:
+        watchedOrderDate ?? createEmptyPurchaseOrderFormData().order_date,
+      notes: watchedNotes ?? '',
+      items: watchedItems ?? [],
+    });
+
+    const hasUnsavedChanges =
+      currentSignature !== lastSavedSignatureRef.current &&
+      hasMeaningfulPurchaseOrderDraftContent(draftTitle, {
+        order_date:
+          watchedOrderDate ?? createEmptyPurchaseOrderFormData().order_date,
+        notes: watchedNotes ?? '',
+        items: watchedItems ?? [],
+      });
+
+    if (!hasUnsavedChanges) return;
+
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [draftTitle, watchedItems, watchedNotes, watchedOrderDate]);
+
+  // Flush the debounced autosave the moment the tab is hidden or backgrounded.
+  // Covers the common "switched tabs / minimized / closed tab" exit path where
+  // the 1500 ms timer would otherwise never fire. localStorage already holds
+  // the latest state (written synchronously on each render) as the backstop,
+  // so if the network call can't complete during unload the next mount still
+  // reconciles via the freshness check.
+  //
+  // Dependencies are intentionally narrow (no watched* fields) so this effect
+  // does NOT tear down and re-register both listeners on every keystroke.
+  // The handler reads live form state via getValues() at fire time instead.
+  useEffect(() => {
+    const flush = () => {
+      if (document.visibilityState !== 'hidden') return;
+      const live = getValues();
+      const title = draftTitleRef.current;
+      const snapshot: DraftPersistSnapshot = {
+        sessionKey: draftSessionKeyRef.current,
+        title,
+        formData: {
+          order_date:
+            live.order_date ?? createEmptyPurchaseOrderFormData().order_date,
+          notes: live.notes ?? '',
+          items: live.items ?? [],
+        },
+      };
+      // Refresh localStorage from the live state before we try the RPC —
+      // this is the one guaranteed leg if the browser kills the fetch on
+      // unload.
+      writeLocalBackup(
+        snapshot.title,
+        snapshot.formData,
+        currentUserIdRef.current,
+        currentDraftIdRef.current,
+        currentOrgIdRef.current
+      );
+      const signature = buildPurchaseOrderDraftSignature(
+        snapshot.title,
+        snapshot.formData
+      );
+      if (signature === lastSavedSignatureRef.current) return;
+      clearTimeout(saveTimerRef.current);
+      void enqueueDraftPersist(snapshot).catch(() => {
+        // Swallow — localStorage write above is the guaranteed safety net.
+      });
+    };
+
+    document.addEventListener('visibilitychange', flush);
+    window.addEventListener('pagehide', flush);
+    return () => {
+      document.removeEventListener('visibilitychange', flush);
+      window.removeEventListener('pagehide', flush);
+    };
+  }, [enqueueDraftPersist, getValues, writeLocalBackup]);
 
   const setCurrentDraftStatus = useCallback(
     async (status: 'archived' | 'converted', purchaseOrderIds?: number[]) => {
+      clearTimeout(saveTimerRef.current);
+      await draftPersistChainRef.current.catch(() => undefined);
       const draftId = currentDraftIdRef.current;
       if (!draftId) return;
 
@@ -834,9 +1387,10 @@ export function NewPurchaseOrderForm() {
       });
 
       await queryClient.invalidateQueries({ queryKey: ['purchaseOrderDrafts'] });
+      clearLocalBackup();
       applyDraftSelection(null);
     },
-    [applyDraftSelection, queryClient]
+    [applyDraftSelection, clearLocalBackup, queryClient]
   );
 
   const startNewDraft = useCallback(() => {
@@ -932,6 +1486,9 @@ export function NewPurchaseOrderForm() {
     },
     onError: (error: Error) => {
       setError(error.message);
+      toast.error(`Failed to create purchase order: ${error.message}`, {
+        duration: 8000,
+      });
     },
   });
 
@@ -995,6 +1552,7 @@ export function NewPurchaseOrderForm() {
     decisions: Record<number, number | 'new'>
   ) => {
     setConsolidateDialogOpen(false);
+    clearTimeout(saveTimerRef.current);
 
     if (!pendingFormData || !draftStatusId) return;
 
@@ -1152,14 +1710,106 @@ export function NewPurchaseOrderForm() {
     setPendingFormData(null);
   };
 
+  const onValidationError = useCallback(
+    (fieldErrors: FieldErrors<PurchaseOrderFormData>) => {
+      // Build a human-readable summary of what's wrong
+      const problems: string[] = [];
+
+      if (fieldErrors.order_date) {
+        problems.push('Order date is invalid');
+      }
+
+      if (fieldErrors.items && !Array.isArray(fieldErrors.items)) {
+        problems.push(
+          fieldErrors.items.message || 'Please add at least one item'
+        );
+      }
+
+      if (Array.isArray(fieldErrors.items)) {
+        fieldErrors.items.forEach((itemError, idx) => {
+          if (!itemError) return;
+          const itemNum = idx + 1;
+          if (itemError.component_id) {
+            problems.push(`Item ${itemNum}: select a component`);
+          }
+          if (itemError.supplier_component_id) {
+            problems.push(`Item ${itemNum}: select a supplier`);
+          }
+          if (itemError.quantity) {
+            problems.push(
+              `Item ${itemNum}: ${itemError.quantity.message || 'enter a valid quantity'}`
+            );
+          }
+          if (itemError.allocations) {
+            problems.push(`Item ${itemNum}: check allocation quantities`);
+          }
+        });
+      }
+
+      const summary =
+        problems.length > 0
+          ? problems.slice(0, 3).join('. ') +
+            (problems.length > 3
+              ? `. And ${problems.length - 3} more issue${problems.length - 3 > 1 ? 's' : ''}.`
+              : '.')
+          : 'Please fix the highlighted fields and try again.';
+
+      toast.error(summary, { duration: 6000 });
+
+      // Try to focus the first errored field so it scrolls into view
+      try {
+        if (Array.isArray(fieldErrors.items)) {
+          const firstIdx = fieldErrors.items.findIndex((e) => e);
+          if (firstIdx >= 0) {
+            const itemErr = fieldErrors.items[firstIdx];
+            if (itemErr?.component_id) {
+              setFocus(`items.${firstIdx}.component_id`);
+            } else if (itemErr?.supplier_component_id) {
+              setFocus(`items.${firstIdx}.supplier_component_id`);
+            } else if (itemErr?.quantity) {
+              setFocus(`items.${firstIdx}.quantity`);
+            }
+          }
+        } else if (fieldErrors.order_date) {
+          setFocus('order_date');
+        }
+      } catch {
+        // setFocus can fail on non-focusable fields — fall back to scroll
+        const firstError = document.querySelector('[class*="border-destructive"]');
+        firstError?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    },
+    [setFocus]
+  );
+
   const onSubmit = async (data: PurchaseOrderFormData) => {
     setError(null);
     setIsCheckingDrafts(true);
+    clearTimeout(saveTimerRef.current);
 
     try {
-      await persistDraftNow(data).catch((draftError) => {
-        console.error('Failed to persist draft before create:', draftError);
-      });
+      // Must succeed: if we can't persist the current form state to the draft,
+      // we also can't trust the conversion step that follows. Surfacing the
+      // error is far better than creating a PO from stale/partial data.
+      try {
+        await enqueueDraftPersist({
+          sessionKey: draftSessionKeyRef.current,
+          title: draftTitle,
+          formData: data,
+        });
+      } catch (draftError) {
+        const message =
+          draftError instanceof Error
+            ? draftError.message
+            : 'Failed to save draft before creating the purchase order';
+        setError(message);
+        toast.error(
+          `Draft could not be saved — purchase order not created. ${message}`,
+          { duration: 8000 }
+        );
+        return;
+      }
+
       const drafts = await checkForExistingDrafts(data);
 
       if (drafts.length > 0) {
@@ -1501,7 +2151,7 @@ export function NewPurchaseOrderForm() {
   );
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+    <form onSubmit={handleSubmit(onSubmit, onValidationError)} className="space-y-6">
       {error && (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />

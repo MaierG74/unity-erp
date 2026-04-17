@@ -110,6 +110,7 @@ export type PurchaseOrderDraftLine = {
 
 export type PurchaseOrderDraft = {
   draft_id: number;
+  org_id: string | null;
   title: string | null;
   order_date: string | null;
   notes: string;
