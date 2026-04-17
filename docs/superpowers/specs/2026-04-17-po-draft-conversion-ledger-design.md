@@ -88,9 +88,9 @@ CREATE INDEX po_draft_conversions_org_idx
 - **`mode`** distinguishes create-new from append-to-existing for audit and UX copy.
 - **`org_id`** default via `public.current_org_id()`, FK via the composite `(draft_id, org_id)` pair against `purchase_order_drafts` — matches the existing house pattern.
 
-### 3.2 RLS
+### 3.2 RLS + write path
 
-Match the `purchase_order_drafts` pattern exactly — subquery against `organization_members` — not the shorter `org_id = public.current_org_id()` form. This keeps the ledger's row-access semantics aligned with its parent table (active membership, ban check included).
+**SELECT policy** matches the `purchase_order_drafts` pattern exactly — subquery against `organization_members` — not the shorter `org_id = public.current_org_id()` form. This keeps ledger reads aligned with the parent draft's read policy (active membership, ban check included).
 
 ```sql
 ALTER TABLE public.purchase_order_draft_conversions ENABLE ROW LEVEL SECURITY;
@@ -109,30 +109,91 @@ CREATE POLICY po_draft_conversions_select_org_member
     )
   );
 
-CREATE POLICY po_draft_conversions_insert_org_member
-  ON public.purchase_order_draft_conversions
-  FOR INSERT TO authenticated
-  WITH CHECK (
-    EXISTS (
-      SELECT 1
-      FROM public.organization_members m
-      WHERE m.user_id = auth.uid()
-        AND m.org_id = purchase_order_draft_conversions.org_id
-        AND m.is_active = true
-        AND (m.banned_until IS NULL OR m.banned_until <= now())
-    )
-  );
-
--- No UPDATE policy. No DELETE policy. Ledger is append-only.
+-- No INSERT, UPDATE, or DELETE policy. Direct client writes are revoked
+-- (see below). All writes go through the SECURITY DEFINER helper.
 ```
 
-**Write path — main RPCs stay `SECURITY INVOKER`.** The existing `create_purchase_order_with_lines` and `add_lines_to_purchase_order` are invoker; this design keeps them that way. No `SECURITY DEFINER` helper needed for the ledger write. Three things combine to make this safe:
+**Writes are not directly client-accessible.** An INSERT RLS policy was considered and rejected: even matched to the org-member EXISTS pattern, it would let any authenticated org member craft a PostgREST insert against `purchase_order_draft_conversions` — forging an `operation_key`, using any PO they can read, and pushing another user's draft into `P0003` / Needs-review state. That turns the ledger into a client-writable signalling channel, which it must not be.
 
-1. **RLS INSERT policy** (above) requires the caller to be an active member of `ledger.org_id`.
-2. **FK constraint `(draft_id, org_id) → purchase_order_drafts(draft_id, org_id)`** ensures the draft actually belongs to the org the ledger row claims.
-3. **`FOR UPDATE` lock on the draft row** (§4.2) confirms the caller already had read/lock-level access to that draft before any ledger write runs.
+Instead:
 
-A forged write trying to claim a different org's draft fails at the FK. A write from a user who isn't a member of the stated org fails at the RLS check. A concurrent submit from a second user is serialized by the draft-row lock. None of these protections depend on elevated privilege — they're structural.
+```sql
+-- Revoke direct write access from all client-facing roles.
+REVOKE INSERT, UPDATE, DELETE
+  ON public.purchase_order_draft_conversions
+  FROM authenticated, anon;
+```
+
+**SECURITY DEFINER helper owns every ledger insert.** The main PO RPCs (`create_purchase_order_with_lines`, `add_lines_to_purchase_order`) stay `SECURITY INVOKER` — they keep touching `purchase_orders`, `supplier_orders`, draft rows, etc. under the caller's RLS. When they need to record a ledger row they call this helper:
+
+```plpgsql
+CREATE FUNCTION public.record_draft_conversion(
+    p_draft_id            bigint,
+    p_operation_key       text,
+    p_purchase_order_id   integer,
+    p_conversion_token    uuid,
+    p_mode                text,          -- 'created' | 'appended'
+    p_supplier_order_ids  integer[]
+) RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+#variable_conflict use_column
+DECLARE
+    v_org_id uuid := public.current_org_id();
+BEGIN
+    -- 1. Caller must be an active member of the current org.
+    --    (Mirrors the org_member EXISTS check used everywhere else.)
+    IF NOT EXISTS (
+        SELECT 1 FROM public.organization_members m
+        WHERE m.user_id = auth.uid()
+          AND m.org_id = v_org_id
+          AND m.is_active = true
+          AND (m.banned_until IS NULL OR m.banned_until <= now())
+    ) THEN
+        RAISE EXCEPTION 'Not an active member of current org'
+          USING ERRCODE = '42501';
+    END IF;
+
+    -- 2. Draft must belong to caller's current org.
+    IF NOT EXISTS (
+        SELECT 1 FROM public.purchase_order_drafts
+         WHERE draft_id = p_draft_id AND org_id = v_org_id
+    ) THEN
+        RAISE EXCEPTION 'Draft % not in current org', p_draft_id
+          USING ERRCODE = 'P0002';
+    END IF;
+
+    -- 3. PO must belong to caller's current org (closes the plain-FK gap).
+    IF NOT EXISTS (
+        SELECT 1 FROM public.purchase_orders
+         WHERE purchase_order_id = p_purchase_order_id AND org_id = v_org_id
+    ) THEN
+        RAISE EXCEPTION 'Purchase order % not in current org', p_purchase_order_id
+          USING ERRCODE = 'P0002';
+    END IF;
+
+    INSERT INTO public.purchase_order_draft_conversions
+        (draft_id, operation_key, purchase_order_id, conversion_token,
+         mode, supplier_order_ids, org_id)
+    VALUES
+        (p_draft_id, p_operation_key, p_purchase_order_id, p_conversion_token,
+         p_mode, p_supplier_order_ids, v_org_id);
+END;
+$$;
+
+REVOKE ALL    ON FUNCTION public.record_draft_conversion(bigint, text, integer, uuid, text, integer[]) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.record_draft_conversion(bigint, text, integer, uuid, text, integer[]) TO authenticated;
+```
+
+Three structural protections combine:
+
+1. **Direct INSERT revoked** — PostgREST / client roles cannot touch the table.
+2. **Helper re-validates both FK endpoints against `current_org_id()`** — a forged call claiming a different org's draft or PO fails at the explicit check, not just the simple FK. The composite `(draft_id, org_id)` FK is still present as belt-and-braces for the draft side.
+3. **`FOR UPDATE` lock on the draft row** (§4.2) runs before the helper is called, so a concurrent submit from a second user serialises.
+
+This gives the forged-row attack nothing to grab: the ledger is only writable through a function whose signature requires a draft + PO the caller legitimately owns. `operation_key` values the helper will accept are still only the ones the calling RPC constructs (`create:supplier:<id>` or `append:po:<id>`), and those are built from inputs that themselves had to pass the main RPC's invoker-level RLS.
 
 **Note on embedded reads:** the frontend fetches drafts via nested relation (`purchase_order_drafts.select('*, purchase_order_draft_conversions(...)')`). The SELECT policy above covers the embed; per house convention (`CLAUDE.md`), nested relations can still come back `null` under RLS denial. Client normalizes `conv ?? []`.
 
@@ -146,10 +207,11 @@ A forged write trying to claim a different org's draft fails at the FK. A write 
 
 | RPC | Change |
 |---|---|
-| `create_purchase_order_with_lines` | Add optional `p_draft_id bigint`, `p_conversion_token uuid`. Guard + ledger insert. |
-| `add_lines_to_purchase_order` | Same additions. |
+| `create_purchase_order_with_lines` | Add optional `p_draft_id bigint`, `p_conversion_token uuid`. Guard + ledger insert via helper. Stays `SECURITY INVOKER`. |
+| `add_lines_to_purchase_order` | Same additions. Stays `SECURITY INVOKER`. |
 | `set_purchase_order_draft_status` | Unchanged. |
-| `reconcile_draft_conversion` (new) | Reads ledger; calls status flip with its po_ids. `SECURITY INVOKER`. |
+| `record_draft_conversion` (new) | Owns all ledger INSERTs. `SECURITY DEFINER`; re-validates org membership + both FK endpoints. Direct client INSERT on the table is revoked. |
+| `reconcile_draft_conversion` (new) | Reads ledger (current-org scoped); calls status flip with its po_ids. `SECURITY INVOKER`. |
 
 ### 4.2 Guard block (inserted near the top of both modified RPCs)
 
@@ -204,16 +266,20 @@ END IF;
 
 -- ... existing PO creation / line append logic runs here ...
 
--- Ledger insert AFTER successful business writes.
+-- Ledger insert AFTER successful business writes. Goes through the
+-- SECURITY DEFINER helper (§3.2) because direct INSERT is revoked from
+-- client roles. Helper re-validates org membership and both FK endpoints.
 IF p_draft_id IS NOT NULL THEN
-    INSERT INTO public.purchase_order_draft_conversions
-        (draft_id, operation_key, purchase_order_id, conversion_token,
-         mode, supplier_order_ids, org_id)
-    VALUES (p_draft_id, computed_operation_key, new_purchase_order_id,
-            p_conversion_token, <'created'|'appended'>, inserted_supplier_order_ids,
-            public.current_org_id());
-    -- PK enforces uniqueness; no ON CONFLICT needed because the early return above
-    -- catches replay before we reach here.
+    PERFORM public.record_draft_conversion(
+        p_draft_id          => p_draft_id,
+        p_operation_key     => computed_operation_key,
+        p_purchase_order_id => new_purchase_order_id,
+        p_conversion_token  => p_conversion_token,
+        p_mode              => <'created'|'appended'>,
+        p_supplier_order_ids => inserted_supplier_order_ids
+    );
+    -- Helper performs the INSERT; PK enforces uniqueness; replay is already
+    -- caught earlier in step 3 so we never hit a duplicate here.
 END IF;
 ```
 
@@ -380,6 +446,7 @@ Autosave is suppressed when the form is read-only (guard against save races on a
   - `isAlreadyConvertedError(error)` — checks `error.code === 'P0003'`.
   - `extractPoIdsFromConversionError(error)` — parses `error.details` JSON.
   - `reconcileDraftConversion(draftId)` — thin wrapper over the new RPC.
+  - **Scope `fetchPurchaseOrderDrafts` (and the direct-by-id fetch added in the recovery release) to `org_id = currentOrgId()`.** Today the query relies on org-member RLS, which is broader than the action-path's `current_org_id()` guard. Without tightening this, a multi-org user can see a draft or Needs-review row that the server will then refuse to finalize with `P0002`. Apply the same filter everywhere drafts are listed in the PO form (active section, Needs review section, direct-by-id fallback).
 - `lib/queries/order-components.ts` `createPurchaseOrder`:
   - Accept `{ draftId, conversionToken }` options; pass to both `create_purchase_order_with_lines` and `add_lines_to_purchase_order` call sites.
 - `components/features/purchasing/new-purchase-order-form.tsx`:
@@ -398,12 +465,14 @@ Single date-stamped migration file (e.g. `YYYYMMDDHHMMSS_po_draft_conversion_led
 
 1. `CREATE TABLE purchase_order_draft_conversions` + indexes.
 2. `ALTER TABLE ... ENABLE ROW LEVEL SECURITY;` + SELECT policy.
-3. `DROP FUNCTION IF EXISTS public.create_purchase_order_with_lines(integer, jsonb, integer, timestamptz, text);` (exact old signature) + `CREATE OR REPLACE FUNCTION ...` new signature with guard + ledger.
-4. `DROP FUNCTION IF EXISTS public.add_lines_to_purchase_order(integer, jsonb);` + `CREATE OR REPLACE ...` new signature.
-5. `CREATE FUNCTION public.reconcile_draft_conversion(bigint) ...`.
-6. `GRANT EXECUTE ... TO authenticated, service_role` for all three.
+3. `REVOKE INSERT, UPDATE, DELETE ON public.purchase_order_draft_conversions FROM authenticated, anon;` — lock down direct client writes (§3.2).
+4. `CREATE FUNCTION public.record_draft_conversion(...) SECURITY DEFINER ...` + `REVOKE ALL FROM PUBLIC` + `GRANT EXECUTE ... TO authenticated` (§3.2).
+5. `DROP FUNCTION IF EXISTS public.create_purchase_order_with_lines(integer, jsonb, integer, timestamptz, text);` (exact old signature) + `CREATE OR REPLACE FUNCTION ...` new signature with guard + ledger insert via helper.
+6. `DROP FUNCTION IF EXISTS public.add_lines_to_purchase_order(integer, jsonb);` + `CREATE OR REPLACE ...` new signature.
+7. `CREATE FUNCTION public.reconcile_draft_conversion(bigint) ...`.
+8. `GRANT EXECUTE ... TO authenticated, service_role` for the two modified RPCs + `reconcile_draft_conversion`.
 
-**Explicitly DROP old signatures** before CREATE to prevent PostgREST resolving against a stale overload.
+**Explicitly DROP old signatures** before CREATE to prevent PostgREST resolving against a stale overload. The helper (`record_draft_conversion`) is a new name, so no DROP needed — but confirm the name isn't already taken.
 
 ### 6.2 Deploy sequencing
 
@@ -488,3 +557,5 @@ Drafts that were created during the original swallow bug (pre-migration, POs cre
 - Chose "token distinct across submits, operation_key idempotent within a submit."
 - Rejected bootstrap auto-reconcile on ledger presence alone — ledger presence only proves materialization, not completion; auto-reconciling a partial submit strands the remaining supplier's work.
 - Chose narrow behavior (option b) with Needs review state for cross-reload recovery; durable completion metadata deferred to v2 if the state surfaces often.
+- Rejected ledger INSERT RLS policy (even the org-member EXISTS form) — would let any authenticated org member PostgREST-insert a forged `operation_key` and push another user's draft into `P0003` / Needs review. Chose SECURITY DEFINER helper `record_draft_conversion` as the sole write path, with direct INSERT revoked from client roles. Main PO RPCs stay `SECURITY INVOKER`.
+- Chose to explicitly scope `fetchPurchaseOrderDrafts` (and the direct-by-id fallback) to `current_org_id()` in this branch rather than relying on the broader org-member RLS. Action paths (`create_purchase_order_with_lines`, `reconcile_draft_conversion`, `set_purchase_order_draft_status`) all filter on `current_org_id()`, so the read path must match or a multi-org user sees drafts the server will then refuse to operate on.
