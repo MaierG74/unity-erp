@@ -14,7 +14,13 @@ const styles = StyleSheet.create({
   page: {
     flexDirection: 'column',
     backgroundColor: '#FFFFFF',
-    padding: 30,
+    paddingTop: 30,
+    paddingLeft: 30,
+    paddingRight: 30,
+    // Reserve space at the bottom so flowing content doesn't collide with the
+    // fixed footer (positioned at bottom: 20, ~15pt tall). 50pt gives comfortable
+    // clearance and keeps the last row of items readable on multi-page quotes.
+    paddingBottom: 50,
     fontFamily: 'Helvetica',
   },
   header: {
@@ -70,7 +76,11 @@ const styles = StyleSheet.create({
     lineHeight: 1.4,
   },
   itemsTable: {
-    marginBottom: 20,
+    // marginBottom removed — was causing react-pdf to measure the entire
+    // items block plus trailing gap as a unit, and if the measured block
+    // barely exceeded remaining page space the whole table would move to
+    // the next page (leaving page 1 empty). Spacing to totals is provided
+    // by `totalsSection.marginTop: 20`.
   },
   tableHeader: {
     flexDirection: 'row',
@@ -516,7 +526,14 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
               );
             }
 
-            // Render priced items - Photo first, then item name/qty/price, then details
+            // Render priced items - Photo first, then item name/qty/price, then details.
+            //
+            // Pagination policy: a quote item stays together on one page (wrap=false).
+            // Caveat: if an item has many large images, the resulting block can
+            // exceed one page and fail to render. Users should split such items
+            // into separate line items, or prefer small-size images. This was
+            // preferred over letting the image row split away from its pricing
+            // row, which produced orphaned images in practice.
             const rowBase = index % 2 === 0 ? styles.tableRow : styles.tableRowAlt;
             const hasBullets = bulletLines.length > 0;
 
@@ -538,6 +555,7 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
                                 objectFit: 'contain' as const,
                                 marginTop: 1,
                                 marginBottom: 1,
+                                marginRight: 4,
                               }}
                               src={img.file_url}
                             />
@@ -601,9 +619,11 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
             <Text style={styles.sectionTitle}>Reference Images</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
               {referenceImages.map((img, index) => (
-                <View key={index}>
-                  <Image 
-                    style={styles.referenceImage} 
+                // Each image+caption stays atomic — never split across pages —
+                // but the overall grid can paginate when there are many images.
+                <View key={index} wrap={false}>
+                  <Image
+                    style={styles.referenceImage}
                     src={img.file_url}
                   />
                   <Text style={styles.referenceImageTitle}>
