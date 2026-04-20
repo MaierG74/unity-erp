@@ -8,6 +8,9 @@ import { toast } from 'sonner';
 import dynamic from 'next/dynamic';
 import type { CutlistCalculatorData } from '@/components/features/cutlist/CutlistCalculator';
 import { useProductCutlistBuilderAdapter } from '@/components/features/cutlist/adapters';
+import type { CutlistSummary } from '@/lib/cutlist/types';
+import { buildSnapshotFromCalculator, computePartsHash } from '@/lib/cutlist/costingSnapshot';
+import type { CutlistCostingSnapshot } from '@/lib/cutlist/costingSnapshot';
 
 // Dynamic import to avoid SSR issues
 const CutlistCalculator = dynamic(
@@ -32,10 +35,12 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
   const [initialData, setInitialData] = useState<
     Partial<CutlistCalculatorData> | undefined
   >(undefined);
+  const [savedSnapshot, setSavedSnapshot] = useState<CutlistCostingSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [calculatorKey, setCalculatorKey] = useState(0);
   const dataRef = useRef<CutlistCalculatorData | null>(null);
+  const summaryRef = useRef<CutlistSummary | null>(null);
   const adapter = useProductCutlistBuilderAdapter(productId);
 
   // Load product cutlist groups on mount
@@ -51,6 +56,12 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
           setInitialData(loaded);
           setCalculatorKey((k) => k + 1);
         }
+
+        // After loading parts, also load saved snapshot
+        const snapshot = await adapter.loadSnapshot();
+        if (!cancelled && snapshot) {
+          setSavedSnapshot(snapshot);
+        }
       } catch (err) {
         console.warn('[CutlistBuilder] Failed to load product groups:', err);
       } finally {
@@ -63,6 +74,10 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
       cancelled = true;
     };
   }, [productId]);
+
+  const handleSummaryChange = useCallback((summary: CutlistSummary | null) => {
+    summaryRef.current = summary;
+  }, []);
 
   // Auto-save with 2s debounce on data change
   const handleDataChange = useCallback(
@@ -81,7 +96,31 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
     };
   }, [adapter]);
 
-  // Manual save
+  const persistSnapshot = useCallback(async () => {
+    const data = dataRef.current;
+    const summary = summaryRef.current;
+    if (!data || !summary?.result) return;
+
+    const snapshot = buildSnapshotFromCalculator({
+      result: summary.result,
+      backerResult: summary.backerResult,
+      parts: data.parts,
+      primaryBoards: data.primaryBoards,
+      backerBoards: data.backerBoards,
+      edgingMaterials: data.edging,
+      kerf: data.kerf,
+      optimizationPriority: data.optimizationPriority,
+      sheetOverrides: data.sheetOverrides,
+      globalFullBoard: data.globalFullBoard,
+      backerSheetOverrides: data.backerSheetOverrides,
+      backerGlobalFullBoard: data.backerGlobalFullBoard,
+      edgingByMaterial: summary.edgingByMaterial ?? [],
+      edgingOverrides: data.edgingOverrides,
+    });
+    const partsHash = computePartsHash(data.parts);
+    await adapter.saveSnapshot(snapshot, partsHash);
+  }, [adapter]);
+
   const handleSave = useCallback(async () => {
     const data = dataRef.current;
     if (!data || !data.parts.length) return;
@@ -89,13 +128,30 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
     setSaving(true);
     try {
       await adapter.save(data);
+      if (summaryRef.current?.result) await persistSnapshot();
       toast.success('Cutlist saved to product');
     } catch {
       toast.error('Failed to save cutlist');
     } finally {
       setSaving(false);
     }
-  }, [adapter]);
+  }, [adapter, persistSnapshot]);
+
+  const [savingToCosting, setSavingToCosting] = useState(false);
+
+  const handleSaveToCosting = useCallback(async () => {
+    if (!dataRef.current || !summaryRef.current?.result) return;
+
+    setSavingToCosting(true);
+    try {
+      await persistSnapshot();
+      toast.success('Costing snapshot saved');
+    } catch {
+      toast.error('Failed to save costing snapshot');
+    } finally {
+      setSavingToCosting(false);
+    }
+  }, [persistSnapshot]);
 
   if (isNaN(productId)) {
     return (
@@ -140,7 +196,11 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
           <CutlistCalculator
             key={calculatorKey}
             initialData={initialData}
+            savedSnapshot={savedSnapshot}
             onDataChange={handleDataChange}
+            onSummaryChange={handleSummaryChange}
+            onSaveToCosting={handleSaveToCosting}
+            savingToCosting={savingToCosting}
             loadMaterialDefaults={true}
             saveMaterialDefaults={true}
           />

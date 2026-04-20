@@ -64,8 +64,12 @@ import type {
   CutlistMaterialSummary,
   EdgingSummaryEntry,
   SheetBillingOverride,
+  EdgingBillingOverride,
   CutlistPart,
 } from '@/lib/cutlist/types';
+
+import { EdgingOverrideRow } from './primitives/EdgingOverrideRow';
+import type { CutlistCostingSnapshot } from '@/lib/cutlist/costingSnapshot';
 
 // Import packing
 import { packPartsSmartOptimized, type SAProgressInfo } from '@/components/features/cutlist/packing';
@@ -137,6 +141,7 @@ export interface CutlistCalculatorData {
   globalFullBoard: boolean;
   backerSheetOverrides: Record<string, SheetBillingOverride>;
   backerGlobalFullBoard: boolean;
+  edgingOverrides: Record<string, EdgingBillingOverride>;
 }
 
 export interface CutlistCalculatorProps {
@@ -146,6 +151,10 @@ export interface CutlistCalculatorProps {
   onDataChange?: (data: CutlistCalculatorData) => void;
   /** Called when calculation completes with summary data (for export) */
   onSummaryChange?: (summary: CutlistSummary | null) => void;
+  /** Called when user clicks "Save to Costing" on preview tab */
+  onSaveToCosting?: () => void;
+  /** Whether a costing save is in progress */
+  savingToCosting?: boolean;
   /** Whether to load pinned material defaults on mount (default: true) */
   loadMaterialDefaults?: boolean;
   /** Whether to persist material changes to database (default: true) */
@@ -156,6 +165,8 @@ export interface CutlistCalculatorProps {
   optimizationStorageKey?: string | null;
   /** Extra content rendered in the card header actions area */
   headerRight?: React.ReactNode;
+  /** Previously saved costing snapshot — used to restore sheet/edging overrides on load */
+  savedSnapshot?: CutlistCostingSnapshot | null;
   /** Additional class name */
   className?: string;
 }
@@ -185,10 +196,13 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   initialData,
   onDataChange,
   onSummaryChange,
+  onSaveToCosting,
+  savingToCosting,
   loadMaterialDefaults: shouldLoadDefaults = true,
   saveMaterialDefaults: shouldSaveDefaults = true,
   partsStorageKey = null,
   optimizationStorageKey = null,
+  savedSnapshot,
   headerRight,
   className,
 }: CutlistCalculatorProps, ref) {
@@ -296,6 +310,54 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   const [backerGlobalFullBoard, setBackerGlobalFullBoard] = React.useState(
     () => initialData?.backerGlobalFullBoard ?? false
   );
+  const [edgingOverrides, setEdgingOverrides] = React.useState<Record<string, EdgingBillingOverride>>({});
+
+  // Restore billing overrides from saved snapshot (if any)
+  React.useEffect(() => {
+    if (!savedSnapshot) return;
+
+    // Restore sheet billing overrides
+    const restoredSheetOverrides: Record<string, SheetBillingOverride> = {};
+    for (const sheet of savedSnapshot.sheets) {
+      if (sheet.billing_override) {
+        restoredSheetOverrides[sheet.sheet_id] = {
+          mode: sheet.billing_override.mode,
+          manualPct: sheet.billing_override.manualPct,
+        };
+      }
+    }
+    setSheetOverrides(restoredSheetOverrides);
+    setGlobalFullBoard(savedSnapshot.global_full_board);
+
+    // Restore backer overrides
+    if (savedSnapshot.backer_sheets) {
+      const restoredBackerOverrides: Record<string, SheetBillingOverride> = {};
+      for (const sheet of savedSnapshot.backer_sheets) {
+        if (sheet.billing_override) {
+          restoredBackerOverrides[sheet.sheet_id] = {
+            mode: sheet.billing_override.mode,
+            manualPct: sheet.billing_override.manualPct,
+          };
+        }
+      }
+      setBackerSheetOverrides(restoredBackerOverrides);
+    }
+    setBackerGlobalFullBoard(savedSnapshot.backer_global_full_board);
+
+    // Restore edging overrides
+    const restoredEdgingOverrides: Record<string, EdgingBillingOverride> = {};
+    for (const e of savedSnapshot.edging) {
+      if (e.meters_override !== null || e.pct_override !== null) {
+        restoredEdgingOverrides[e.material_id] = {
+          metersOverride: e.meters_override,
+          pctOverride: e.pct_override,
+        };
+      }
+    }
+    setEdgingOverrides(restoredEdgingOverrides);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run once on mount — savedSnapshot is a prop, not state
+
   const packingConfig = React.useMemo(
     () => ({
       minUsableDimension: cutlistDefaults.minReusableOffcutDimensionMm,
@@ -333,8 +395,10 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     [parts]
   );
   const defaultPrimary = primaryBoards.find((b) => b.isDefault) || primaryBoards[0];
-  const defaultEdging16 = edging.find((e) => e.thickness_mm === 16 && e.isDefaultForThickness);
-  const defaultEdging32 = edging.find((e) => e.thickness_mm === 32 && e.isDefaultForThickness);
+  // Edging defaults: first try exact board-thickness match, then fall back to any default
+  const defaultEdgingFallback = edging.find((e) => e.isDefaultForThickness);
+  const defaultEdging16 = edging.find((e) => e.thickness_mm === 16 && e.isDefaultForThickness) || defaultEdgingFallback;
+  const defaultEdging32 = edging.find((e) => e.thickness_mm === 32 && e.isDefaultForThickness) || defaultEdgingFallback;
   const defaultSheetArea = sheet.length_mm * sheet.width_mm;
 
   const usedArea = result?.stats.used_area_mm2 || 0;
@@ -625,6 +689,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
         globalFullBoard,
         backerSheetOverrides,
         backerGlobalFullBoard,
+        edgingOverrides,
       });
     }, 300);
 
@@ -644,6 +709,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     globalFullBoard,
     backerSheetOverrides,
     backerGlobalFullBoard,
+    edgingOverrides,
     onDataChange,
   ]);
 
@@ -660,8 +726,9 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     const defaultBacker = backerBoards.find((b) => b.isDefault) || backerBoards[0];
     const backerPriceNumeric = defaultBacker?.cost || 0;
 
-    const edging16 = edging.find((e) => e.thickness_mm === 16 && e.isDefaultForThickness);
-    const edging32 = edging.find((e) => e.thickness_mm === 32 && e.isDefaultForThickness);
+    const edgingFallback = edging.find((e) => e.isDefaultForThickness);
+    const edging16 = edging.find((e) => e.thickness_mm === 16 && e.isDefaultForThickness) || edgingFallback;
+    const edging32 = edging.find((e) => e.thickness_mm === 32 && e.isDefaultForThickness) || edgingFallback;
 
     const materialStats = new Map<string, { band16: number; band32: number }>();
     const materialEdgingCosts = new Map<string, MaterialEdgingCostRollup>();
@@ -1040,6 +1107,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
 
     setIsCalculating(true);
     setSaProgress(null);
+    setActiveTab('preview');
     // Yield to let UI update state immediately
     await new Promise(resolve => setTimeout(resolve, 0));
 
@@ -1144,8 +1212,9 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
       const customEdging = new Map<number, number>();
       // Per-edging-material accumulation for export
       const edgingPerMaterial = new Map<string, number>();
-      const defaultEdging16 = edging.find((e) => e.thickness_mm === 16 && e.isDefaultForThickness);
-      const defaultEdging32 = edging.find((e) => e.thickness_mm === 32 && e.isDefaultForThickness);
+      const edgingDefault = edging.find((e) => e.isDefaultForThickness);
+      const defaultEdging16 = edging.find((e) => e.thickness_mm === 16 && e.isDefaultForThickness) || edgingDefault;
+      const defaultEdging32 = edging.find((e) => e.thickness_mm === 32 && e.isDefaultForThickness) || edgingDefault;
 
       const laminationGroups = new Map<string, typeof partsToUse>();
       const ungroupedParts: typeof partsToUse = [];
@@ -1276,8 +1345,6 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
       } else {
         setBackerResult(null);
       }
-
-      setActiveTab('preview');
     } finally {
       setIsCalculating(false);
       setSaProgress(null);
@@ -1341,6 +1408,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     globalFullBoard,
     backerSheetOverrides,
     backerGlobalFullBoard,
+    edgingOverrides,
   });
 
   // ============== Render ==============
@@ -1714,7 +1782,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                       <div className="flex items-center justify-between">
                         <div>
                           <div className="text-sm font-semibold text-foreground">Backer Board Cutlist</div>
-                          <div className="text-xs text-muted-foreground">Sheets for parts with “With Backer” lamination.</div>
+                          <div className="text-xs text-muted-foreground">Sheets for parts with "With Backer" lamination.</div>
                         </div>
                       </div>
                       <SheetLayoutGrid
@@ -1725,6 +1793,52 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                         sheetOverrides={backerSheetOverrides}
                         onSheetOverridesChange={setBackerSheetOverrides}
                       />
+                    </div>
+                  )}
+
+                  {summary?.edgingByMaterial && summary.edgingByMaterial.length > 0 && (
+                    <div className="space-y-2 mt-4">
+                      <h4 className="text-xs font-medium text-muted-foreground uppercase">Edging Overrides (for Costing)</h4>
+                      {summary.edgingByMaterial.map(e => (
+                        <EdgingOverrideRow
+                          key={e.materialId}
+                          name={e.name}
+                          thickness_mm={e.thickness_mm}
+                          metersActual={e.length_mm / 1000}
+                          override={edgingOverrides[e.materialId]}
+                          onOverrideChange={(override) => {
+                            setEdgingOverrides(prev => {
+                              const next = { ...prev };
+                              if (override) {
+                                next[e.materialId] = override;
+                              } else {
+                                delete next[e.materialId];
+                              }
+                              return next;
+                            });
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  {onSaveToCosting && result && (
+                    <div className="mt-4">
+                      <Button
+                        size="sm"
+                        onClick={onSaveToCosting}
+                        disabled={savingToCosting}
+                        className="gap-1.5"
+                      >
+                        {savingToCosting ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Saving...
+                          </>
+                        ) : (
+                          'Save to Costing'
+                        )}
+                      </Button>
                     </div>
                   )}
                 </div>

@@ -556,6 +556,16 @@ export interface SheetBillingOverride {
   manualPct: number;
 }
 
+/**
+ * Billing override for a single edging material (for costing padding).
+ */
+export interface EdgingBillingOverride {
+  /** Fixed meter override — if set, overrides actual + percentage */
+  metersOverride: number | null;
+  /** Percentage padding (e.g. 10 = +10%) — if set, padded = actual × (1 + pct/100) */
+  pctOverride: number | null;
+}
+
 // =============================================================================
 // Persistence Types
 // =============================================================================
