@@ -65,7 +65,12 @@ export function useOrderCuttingPlan(orderId: number) {
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ['order-cutting-plan', orderId] }),
           queryClient.invalidateQueries({ queryKey: ['order-components', orderId] }),
-          queryClient.invalidateQueries({ queryKey: ['component-suppliers', orderId] }),
+          // NOTE: component-suppliers is keyed by String(orderId) at the subscriber
+          // site (OrderComponentsDialog.tsx:88 uses the dialog's string prop; see
+          // app/orders/[orderId]/page.tsx:598 for the other matching writer). React
+          // Query matches key elements with strict equality, so we must stringify
+          // or the invalidation is a silent no-op.
+          queryClient.invalidateQueries({ queryKey: ['component-suppliers', String(orderId)] }),
           queryClient.invalidateQueries({ queryKey: ['order-line-material-cost', orderId] }),
         ]);
       } finally {

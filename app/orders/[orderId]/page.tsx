@@ -336,6 +336,10 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
       queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] });
       queryClient.invalidateQueries({ queryKey: ['order-cutting-plan', orderId] });
+      // Line material cost is derived from cutting_plan.line_allocations — editing
+      // a line quantity staled the plan on the server; refetch badges now rather
+      // than wait 30s for staleTime.
+      queryClient.invalidateQueries({ queryKey: ['order-line-material-cost', orderId] });
       toast.success('Product updated successfully');
       setEditingDetailId(null);
     },
@@ -361,6 +365,10 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
       queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] });
       queryClient.invalidateQueries({ queryKey: ['order-cutting-plan', orderId] });
+      // Line material cost is derived from cutting_plan.line_allocations — removing
+      // a line staled the plan on the server; refetch badges now rather than wait
+      // 30s for staleTime.
+      queryClient.invalidateQueries({ queryKey: ['order-line-material-cost', orderId] });
       toast.success('Product removed from order');
     },
     onError: (error: Error) => {
