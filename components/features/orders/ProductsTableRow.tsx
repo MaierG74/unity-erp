@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { formatCurrency, formatQuantity } from '@/lib/format-utils';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { LineMaterialCostBadge } from './LineMaterialCostBadge';
 import type { LineMaterialCost } from '@/lib/orders/line-material-cost';
 
@@ -63,10 +64,13 @@ export function ProductsTableRow({
     const metrics = computeComponentMetrics(comp, detail.product_id);
     return metrics.real > 0.0001;
   });
+  // NOTE: use authorizedFetch — the material-cost route calls getRouteClient()
+  // which requires a Bearer token or sb-*-auth-token cookie. The Supabase client
+  // persists sessions in localStorage by default, so plain fetch would 401.
   const materialCostQuery = useQuery<LineMaterialCost>({
     queryKey: ['order-line-material-cost', orderId, detail.order_detail_id],
     queryFn: async () => {
-      const res = await fetch(
+      const res = await authorizedFetch(
         `/api/orders/${orderId}/details/${detail.order_detail_id}/material-cost`
       );
       if (!res.ok) throw new Error('Failed to fetch material cost');
