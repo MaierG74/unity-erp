@@ -39,16 +39,21 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
     .maybeSingle();
 
   if (orderErr) return NextResponse.json({ error: orderErr.message }, { status: 500 });
+  // Note: `order` may be null if RLS hides the parent `orders` row even though the detail
+  // row is visible (policies can diverge between tables). Gracefully degrade to no-plan.
   const cutting_plan: CuttingPlan | null = (order?.cutting_plan as CuttingPlan) ?? null;
 
-  // 3. Fetch the product's cutlist snapshot (may be null for non-cutlist products)
+  // 3. Fetch the product's cutlist snapshot (may be null for non-cutlist products).
+  // A real PostgREST error here must bail with 500 — silently falling through to a
+  // padded result would produce materially incorrect user-visible costs.
   let snapshot: CutlistCostingSnapshot | null = null;
   if (detail.product_id != null) {
-    const { data: snap } = await auth.supabase
+    const { data: snap, error: snapErr } = await auth.supabase
       .from('product_cutlist_costing_snapshots')
       .select('snapshot_data')
       .eq('product_id', detail.product_id)
       .maybeSingle();
+    if (snapErr) return NextResponse.json({ error: snapErr.message }, { status: 500 });
     if (snap?.snapshot_data) {
       snapshot = snap.snapshot_data as CutlistCostingSnapshot;
     }

@@ -94,6 +94,23 @@ test('nested_real with non-finite line_share_amount falls back to 0', () => {
   assert.equal(result.non_cutlist_portion, 100);
 });
 
+test('malformed plan with missing line_allocations array → padded + stale', () => {
+  // Simulates an old-revision JSONB row where line_allocations is undefined/null.
+  // The defensive guard in pickLineMaterialCost should treat it as "no allocation".
+  const malformed = {
+    ...freshPlan,
+    line_allocations: undefined as unknown as CuttingPlan['line_allocations'],
+  } as CuttingPlan;
+  const result = pickLineMaterialCost({
+    order_detail_id: 1,
+    cutting_plan: malformed,
+    padded: { padded_cost: 400, cutlist_portion: 400, non_cutlist_portion: 0 },
+  });
+  assert.equal(result.basis, 'padded');
+  assert.equal(result.stale, true);
+  assert.equal(result.amount, 400);
+});
+
 test('nested_real with non-finite non_cutlist_portion falls back to 0', () => {
   const result = pickLineMaterialCost({
     order_detail_id: 1,

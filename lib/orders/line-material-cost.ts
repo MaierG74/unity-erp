@@ -54,9 +54,12 @@ export function pickLineMaterialCost(input: PickLineMaterialCostInput): LineMate
     };
   }
 
-  const allocation = cutting_plan.line_allocations.find(
-    (a) => a.order_detail_id === order_detail_id,
-  );
+  // Defensive: malformed JSONB (e.g. old revision missing this field) shouldn't 500
+  // downstream routes — treat a missing array the same as a missing allocation.
+  const allocations = Array.isArray(cutting_plan.line_allocations)
+    ? cutting_plan.line_allocations
+    : [];
+  const allocation = allocations.find((a) => a.order_detail_id === order_detail_id);
   if (!allocation) {
     return {
       amount: padded.padded_cost,
