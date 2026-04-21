@@ -48,7 +48,8 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
       order_detail_id: d.order_detail_id,
       quantity: d.quantity ?? 1,
       cutlist_snapshot: d.cutlist_snapshot,
-    }))
+    })),
+    assignments,
   );
 
   const aggregateDetails: AggregateDetail[] = details.map((d) => ({

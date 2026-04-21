@@ -36,22 +36,33 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
   }
   // total_nested_cost and line_allocations are server-computed; client values are ignored.
 
-  // Verify source revision — reject if order details changed since aggregation
-  const { data: details, error: detailsError } = await supabaseAdmin
-    .from('order_details')
-    .select('order_detail_id, quantity, cutlist_snapshot')
-    .eq('order_id', orderId);
+  // Verify source revision — reject if order details OR material_assignments changed
+  const [{ data: details, error: detailsError }, { data: orderRow, error: orderRowError }] = await Promise.all([
+    supabaseAdmin
+      .from('order_details')
+      .select('order_detail_id, quantity, cutlist_snapshot')
+      .eq('order_id', orderId),
+    supabaseAdmin
+      .from('orders')
+      .select('material_assignments')
+      .eq('order_id', orderId)
+      .maybeSingle(),
+  ]);
 
-  if (detailsError) {
+  if (detailsError || orderRowError) {
     return NextResponse.json({ error: 'Failed to verify order state' }, { status: 500 });
   }
+
+  const currentAssignments =
+    (orderRow?.material_assignments as import('@/lib/orders/material-assignment-types').MaterialAssignments | null) ?? null;
 
   const currentRevision = computeSourceRevision(
     (details ?? []).map((d) => ({
       order_detail_id: d.order_detail_id,
       quantity: d.quantity ?? 1,
       cutlist_snapshot: d.cutlist_snapshot,
-    }))
+    })),
+    currentAssignments,
   );
 
   if (currentRevision !== body.source_revision) {
