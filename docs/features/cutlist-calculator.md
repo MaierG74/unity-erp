@@ -2,7 +2,7 @@
 
 > **Status**: Active development
 > **Location**: `/app/cutlist/page.tsx`
-> **Last Updated**: 2026-03-07
+> **Last Updated**: 2026-04-21
 
 ---
 
@@ -29,6 +29,7 @@ Product cutlist builder behavior:
 - Both active embedded flows now use explicit persistence bridges:
   - quote cutlists use `useQuoteCutlistAdapterV2`
   - product cutlists use `useProductCutlistBuilderAdapter`
+- Product cutlist costing snapshots persist the calculated primary and backer layouts inside `snapshot_data` and restore them on load when the row `parts_hash` still matches the current parts. Older snapshots without stored layouts still behave like no saved layout, and parts-hash mismatches show a stale-layout banner until the user recalculates and saves.
 
 ---
 
@@ -162,6 +163,7 @@ Click the **Edge** indicator to open the visual edge banding selector:
 
 Shows the optimized cutting layout after clicking **Calculate Layout**:
 - Visual board layouts with parts positioned
+- Product cutlist builder pages restore the saved sheet layout from the costing snapshot when the saved `parts_hash` matches the current parts, so reopening the Preview tab does not rerun the optimizer just to show the last saved layout.
 - Waste calculation and efficiency percentage
 - Material costs breakdown
   - Primary board costing is derived from the actual packed sheets per material, not a proportional estimate from raw part area.

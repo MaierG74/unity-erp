@@ -14,6 +14,11 @@ function makeSnapshot(overrides: Partial<CutlistCostingSnapshot> = {}): CutlistC
       },
     ],
     global_full_board: false,
+    primary_layout: {
+      sheets: [],
+      stats: { used_area_mm2: 0, waste_area_mm2: 0, cuts: 0, cut_length_mm: 0 },
+    },
+    backer_layout: null,
     edging: [
       {
         material_id: 'e1', material_name: 'White 1mm edging',

@@ -9,8 +9,14 @@ import dynamic from 'next/dynamic';
 import type { CutlistCalculatorData } from '@/components/features/cutlist/CutlistCalculator';
 import { useProductCutlistBuilderAdapter } from '@/components/features/cutlist/adapters';
 import type { CutlistSummary } from '@/lib/cutlist/types';
-import { buildSnapshotFromCalculator, computePartsHash } from '@/lib/cutlist/costingSnapshot';
-import type { CutlistCostingSnapshot } from '@/lib/cutlist/costingSnapshot';
+import {
+  buildSnapshotFromCalculator,
+  computePartsHash,
+  type CutlistCostingSnapshot,
+  type RestoredCutlistCostingSnapshot,
+} from '@/lib/cutlist/costingSnapshot';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
+import { MODULE_KEYS } from '@/lib/modules/keys';
 
 // Dynamic import to avoid SSR issues
 const CutlistCalculator = dynamic(
@@ -27,6 +33,30 @@ interface CutlistBuilderPageProps {
   }>;
 }
 
+interface ProductCutlistSnapshotResponse {
+  snapshot: {
+    snapshot_data: CutlistCostingSnapshot;
+    parts_hash: string | null;
+  } | null;
+}
+
+async function loadProductCostingSnapshot(
+  productId: number
+): Promise<RestoredCutlistCostingSnapshot | null> {
+  const res = await authorizedFetch(
+    `/api/products/${productId}/cutlist-costing-snapshot?module=${MODULE_KEYS.CUTLIST_OPTIMIZER}`
+  );
+  if (!res.ok) return null;
+
+  const json = (await res.json()) as ProductCutlistSnapshotResponse;
+  if (!json.snapshot?.snapshot_data) return null;
+
+  return {
+    ...json.snapshot.snapshot_data,
+    parts_hash: json.snapshot.parts_hash ?? undefined,
+  };
+}
+
 export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) {
   const { productId: productIdParam } = use(params);
   const productId = parseInt(productIdParam, 10);
@@ -35,7 +65,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
   const [initialData, setInitialData] = useState<
     Partial<CutlistCalculatorData> | undefined
   >(undefined);
-  const [savedSnapshot, setSavedSnapshot] = useState<CutlistCostingSnapshot | null>(null);
+  const [savedSnapshot, setSavedSnapshot] = useState<RestoredCutlistCostingSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [calculatorKey, setCalculatorKey] = useState(0);
@@ -58,7 +88,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
         }
 
         // After loading parts, also load saved snapshot
-        const snapshot = await adapter.loadSnapshot();
+        const snapshot = await loadProductCostingSnapshot(productId);
         if (!cancelled && snapshot) {
           setSavedSnapshot(snapshot);
         }
