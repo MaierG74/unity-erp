@@ -953,6 +953,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                         <TableHead className="text-right">Reserved</TableHead>
                         <TableHead className="text-right">To Build</TableHead>
                         <TableHead className="text-right">Unit Price</TableHead>
+                        <TableHead className="text-right">Material</TableHead>
                         <TableHead className="text-right">Total</TableHead>
                         <TableHead className="text-right w-[100px]"></TableHead>
                       </TableRow>
@@ -977,11 +978,12 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                           <React.Fragment key={`frag-${detail.order_detail_id}`}>
                           {idx > 0 && (
                             <tr className="border-0 hover:bg-transparent">
-                              <td colSpan={7} className="h-5 p-0 border-0" />
+                              <td colSpan={8} className="h-5 p-0 border-0" />
                             </tr>
                           )}
                           <ProductsTableRow
                             key={detail.order_detail_id}
+                            orderId={orderId}
                             detail={detail}
                             coverage={coverage}
                             isEditing={isEditing}
@@ -1008,7 +1010,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                     </TableBody>
                     <TableFooter>
                       <TableRow>
-                        <TableCell colSpan={5}>Total</TableCell>
+                        <TableCell colSpan={6}>Total</TableCell>
                         <TableCell className="text-right">{formatCurrency(order.total_amount || 0)}</TableCell>
                         <TableCell />
                       </TableRow>
