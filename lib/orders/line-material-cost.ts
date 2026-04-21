@@ -68,15 +68,24 @@ export function pickLineMaterialCost(input: PickLineMaterialCostInput): LineMate
     };
   }
 
-  // Nested cutlist share + padded non-cutlist (non-cutlist never gets nested)
-  const amount = Math.round((allocation.line_share_amount + padded.non_cutlist_portion) * 100) / 100;
+  // Nested cutlist share + padded non-cutlist (non-cutlist never gets nested).
+  // Defensive: non-finite inputs (NaN/Infinity from upstream corruption) fall back to 0
+  // rather than silently propagating as `null` via JSON serialization. Same pattern as
+  // computePaddedLineCost and allocateLinesByArea.
+  const safeShare = Number.isFinite(allocation.line_share_amount)
+    ? Math.max(0, allocation.line_share_amount)
+    : 0;
+  const safeNonCutlist = Number.isFinite(padded.non_cutlist_portion)
+    ? Math.max(0, padded.non_cutlist_portion)
+    : 0;
+  const amount = Math.round((safeShare + safeNonCutlist) * 100) / 100;
 
   return {
     amount,
     basis: 'nested_real',
     stale: false,
-    cutlist_portion: allocation.line_share_amount,
-    non_cutlist_portion: padded.non_cutlist_portion,
+    cutlist_portion: Math.round(safeShare * 100) / 100,
+    non_cutlist_portion: safeNonCutlist,
     source_cutting_plan_revision: cutting_plan.source_revision,
   };
 }

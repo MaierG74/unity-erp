@@ -40,6 +40,7 @@ test('branch 2: stale plan → padded + stale flag', () => {
   assert.equal(result.basis, 'padded');
   assert.equal(result.amount, 400);
   assert.equal(result.stale, true);
+  assert.equal(result.source_cutting_plan_revision, 'abc123');
 });
 
 test('branch 3: no plan → padded fresh', () => {
@@ -62,6 +63,47 @@ test('fresh plan but no allocation for this detail → padded + stale flag', () 
   // Plan exists and is "fresh" by flag, but this line isn't covered — treat as stale
   assert.equal(result.basis, 'padded');
   assert.equal(result.stale, true);
+  assert.equal(result.source_cutting_plan_revision, 'abc123');
+});
+
+test('no-plan branch omits source_cutting_plan_revision', () => {
+  const result = pickLineMaterialCost({
+    order_detail_id: 1,
+    cutting_plan: null,
+    padded: { padded_cost: 400, cutlist_portion: 400, non_cutlist_portion: 0 },
+  });
+  assert.equal(result.source_cutting_plan_revision, undefined);
+});
+
+test('nested_real with non-finite line_share_amount falls back to 0', () => {
+  const broken: CuttingPlan = {
+    ...freshPlan,
+    line_allocations: [
+      { order_detail_id: 1, area_mm2: 0, line_share_amount: Number.NaN, allocation_pct: 0 },
+    ],
+  };
+  const result = pickLineMaterialCost({
+    order_detail_id: 1,
+    cutting_plan: broken,
+    padded: { padded_cost: 400, cutlist_portion: 400, non_cutlist_portion: 100 },
+  });
+  assert.ok(Number.isFinite(result.amount));
+  // NaN share coerced to 0, non_cutlist_portion preserved → amount = 100
+  assert.equal(result.amount, 100);
+  assert.equal(result.cutlist_portion, 0);
+  assert.equal(result.non_cutlist_portion, 100);
+});
+
+test('nested_real with non-finite non_cutlist_portion falls back to 0', () => {
+  const result = pickLineMaterialCost({
+    order_detail_id: 1,
+    cutting_plan: freshPlan,
+    padded: { padded_cost: 400, cutlist_portion: 400, non_cutlist_portion: Number.POSITIVE_INFINITY },
+  });
+  assert.ok(Number.isFinite(result.amount));
+  // Infinite non-cutlist coerced to 0 → amount = allocation.line_share_amount = 320
+  assert.equal(result.amount, 320);
+  assert.equal(result.non_cutlist_portion, 0);
 });
 
 test('nested_real preserves non-cutlist portion from padded input', () => {
