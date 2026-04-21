@@ -34,6 +34,19 @@ export type CuttingPlanMaterialGroup = {
   stock_sheet_spec: { length_mm: number; width_mm: number };
 };
 
+// ─── Line-level cost allocation (area-weighted, substitution-safe) ────────
+export type CuttingPlanLineAllocation = {
+  order_detail_id: number;
+  /** Sum of (length_mm × width_mm × quantity) for this line's cutlist parts.
+   *  Used as the allocation weight. Non-cutlist-only lines have area_mm2 = 0
+   *  and are excluded from nested allocation (share = 0). */
+  area_mm2: number;
+  /** Share of total nested cost allocated to this line */
+  line_share_amount: number;
+  /** Allocation percentage (0-100) — `area_mm2 / sum(area_mm2) * 100` */
+  allocation_pct: number;
+};
+
 export type CuttingPlan = {
   version: 1;
   generated_at: string;
@@ -42,6 +55,10 @@ export type CuttingPlan = {
   source_revision: string;
   material_groups: CuttingPlanMaterialGroup[];
   component_overrides: CuttingPlanOverride[];
+  /** Total nested cost across all material groups, in the org's currency */
+  total_nested_cost: number;
+  /** Per-line allocation of the total nested cost */
+  line_allocations: CuttingPlanLineAllocation[];
 };
 
 // ─── Aggregate endpoint response ─────────────────────────────────────────
