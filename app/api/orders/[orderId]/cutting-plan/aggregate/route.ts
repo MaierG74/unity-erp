@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRouteClient } from '@/lib/supabase-route';
 import { computeSourceRevision } from '@/lib/orders/cutting-plan-utils';
+import { roleFingerprint } from '@/lib/orders/material-assignment-types';
+import type { MaterialAssignments } from '@/lib/orders/material-assignment-types';
 import type {
   AggregatedPart,
   AggregatedPartGroup,
@@ -47,15 +49,41 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
     return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
   }
 
-  const { data: details, error } = await auth.supabase
-    .from('order_details')
-    .select('order_detail_id, product_id, quantity, cutlist_snapshot, products(name)')
-    .eq('order_id', orderIdNum);
+  const [detailsRes, orderRes] = await Promise.all([
+    auth.supabase
+      .from('order_details')
+      .select('order_detail_id, product_id, quantity, cutlist_snapshot, products(name)')
+      .eq('order_id', orderIdNum),
+    auth.supabase
+      .from('orders')
+      .select('material_assignments')
+      .eq('order_id', orderIdNum)
+      .maybeSingle(),
+  ]);
+
+  const { data: details, error } = detailsRes;
+  const assignments = (orderRes.data?.material_assignments as MaterialAssignments | null) ?? null;
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (orderRes.error) return NextResponse.json({ error: orderRes.error.message }, { status: 500 });
   if (!details || details.length === 0) {
     return NextResponse.json({ error: 'No order details found' }, { status: 404 });
   }
+
+  // Index per-role primary assignments by 5-tuple fingerprint
+  const assignmentIndex = new Map<string, { component_id: number; component_name: string }>();
+  for (const a of assignments?.assignments ?? []) {
+    const fp = roleFingerprint(a.order_detail_id, a.board_type, a.part_name, a.length_mm, a.width_mm);
+    assignmentIndex.set(fp, { component_id: a.component_id, component_name: a.component_name });
+  }
+
+  // Order-level backer override (applies to every group that HAS a backer)
+  const backerOverride = assignments?.backer_default
+    ? {
+        component_id: assignments.backer_default.component_id,
+        component_name: assignments.backer_default.component_name,
+      }
+    : null;
 
   const sourceRevision = computeSourceRevision(
     details.map((d) => ({
@@ -79,21 +107,46 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
     const productName = (detail.products as any)?.name ?? '';
 
     for (const group of groups) {
-      const key = `${group.board_type}|${group.primary_material_id ?? 'none'}|${group.backer_material_id ?? 'none'}`;
+      // Resolve backer once per group — order-level override applies only if this
+      // group has a backer at all (nominal backer_material_id != null).
+      const resolved_backer_id =
+        group.backer_material_id != null && backerOverride
+          ? backerOverride.component_id
+          : group.backer_material_id;
+      const resolved_backer_name =
+        group.backer_material_id != null && backerOverride
+          ? backerOverride.component_name
+          : group.backer_material_name;
 
-      if (!groupMap.has(key)) {
-        groupMap.set(key, {
-          board_type: group.board_type,
-          primary_material_id: group.primary_material_id,
-          primary_material_name: group.primary_material_name,
-          backer_material_id: group.backer_material_id,
-          backer_material_name: group.backer_material_name,
-          parts: [],
-        });
-      }
-
-      const target = groupMap.get(key)!;
       for (const part of group.parts) {
+        const fp = roleFingerprint(
+          detail.order_detail_id,
+          group.board_type,
+          part.name,
+          part.length_mm,
+          part.width_mm,
+        );
+        const assignment = assignmentIndex.get(fp);
+
+        // Resolved primary: per-role assignment wins over nominal product default
+        const resolved_primary_id = assignment?.component_id ?? group.primary_material_id;
+        const resolved_primary_name = assignment?.component_name ?? group.primary_material_name;
+
+        // Key on resolved primary AND resolved backer
+        const key = `${group.board_type}|${resolved_primary_id ?? 'none'}|${resolved_backer_id ?? 'none'}`;
+
+        if (!groupMap.has(key)) {
+          groupMap.set(key, {
+            board_type: group.board_type,
+            primary_material_id: resolved_primary_id,
+            primary_material_name: resolved_primary_name,
+            backer_material_id: resolved_backer_id,
+            backer_material_name: resolved_backer_name,
+            parts: [],
+          });
+        }
+
+        const target = groupMap.get(key)!;
         const aggregatedPart: AggregatedPart = {
           id: `${detail.order_detail_id}-${part.id}`,
           original_id: part.id,
