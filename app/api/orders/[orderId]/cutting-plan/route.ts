@@ -5,6 +5,7 @@ import { supabaseAdmin } from '@/lib/supabase-admin';
 import { computeSourceRevision } from '@/lib/orders/cutting-plan-utils';
 import type { CuttingPlan } from '@/lib/orders/cutting-plan-types';
 import { allocateLinesByArea, type LineAllocationInput } from '@/lib/orders/line-allocation';
+import type { MaterialAssignments } from '@/lib/orders/material-assignment-types';
 
 type RouteParams = { orderId: string };
 
@@ -53,8 +54,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
     return NextResponse.json({ error: 'Failed to verify order state' }, { status: 500 });
   }
 
-  const currentAssignments =
-    (orderRow?.material_assignments as import('@/lib/orders/material-assignment-types').MaterialAssignments | null) ?? null;
+  const currentAssignments = (orderRow?.material_assignments as MaterialAssignments | null) ?? null;
 
   const currentRevision = computeSourceRevision(
     (details ?? []).map((d) => ({

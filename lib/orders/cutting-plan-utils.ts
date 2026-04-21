@@ -36,19 +36,17 @@ export function computeSourceRevision(
   const rawEdgingDefaults = Array.isArray(a.edging_defaults) ? a.edging_defaults : [];
   const rawEdgingOverrides = Array.isArray(a.edging_overrides) ? a.edging_overrides : [];
 
-  const sortedAssignments = [...rawAssignments].sort((x, y) =>
-    `${x.order_detail_id}|${x.board_type}|${x.part_name}|${x.length_mm}|${x.width_mm}`.localeCompare(
-      `${y.order_detail_id}|${y.board_type}|${y.part_name}|${y.length_mm}|${y.width_mm}`,
-    ),
-  );
+  // Use plain `<`/`>` comparison (not localeCompare) for locale-independent determinism —
+  // ICU locale variation could otherwise produce different hashes across environments.
+  const fpCompare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+  const roleKey = (r: { order_detail_id: number; board_type: string; part_name: string; length_mm: number; width_mm: number }) =>
+    `${r.order_detail_id}|${r.board_type}|${r.part_name}|${r.length_mm}|${r.width_mm}`;
+
+  const sortedAssignments = [...rawAssignments].sort((x, y) => fpCompare(roleKey(x), roleKey(y)));
   const sortedEdgingDefaults = [...rawEdgingDefaults].sort(
     (x, y) => x.board_component_id - y.board_component_id,
   );
-  const sortedEdgingOverrides = [...rawEdgingOverrides].sort((x, y) =>
-    `${x.order_detail_id}|${x.board_type}|${x.part_name}|${x.length_mm}|${x.width_mm}`.localeCompare(
-      `${y.order_detail_id}|${y.board_type}|${y.part_name}|${y.length_mm}|${y.width_mm}`,
-    ),
-  );
+  const sortedEdgingOverrides = [...rawEdgingOverrides].sort((x, y) => fpCompare(roleKey(x), roleKey(y)));
 
   const assignmentsPayload = JSON.stringify({
     assignments: sortedAssignments,

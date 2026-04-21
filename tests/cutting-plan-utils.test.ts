@@ -68,3 +68,41 @@ test('backer_default change produces a different hash', () => {
   });
   assert.notEqual(a, b);
 });
+
+test('reordering edging_defaults does not change hash (canonicalised)', () => {
+  const ed1 = { board_component_id: 100, edging_component_id: 500, edging_component_name: 'White 22mm' };
+  const ed2 = { board_component_id: 200, edging_component_id: 501, edging_component_name: 'Oak 22mm' };
+  const a = computeSourceRevision([detailA], { ...emptyAssignments, edging_defaults: [ed1, ed2] });
+  const b = computeSourceRevision([detailA], { ...emptyAssignments, edging_defaults: [ed2, ed1] });
+  assert.equal(a, b);
+});
+
+test('reordering edging_overrides does not change hash (canonicalised)', () => {
+  const eo1 = {
+    order_detail_id: 1, board_type: 'c', part_name: 'Top',
+    length_mm: 100, width_mm: 50,
+    edging_component_id: 500, edging_component_name: 'Black 22mm',
+  };
+  const eo2 = {
+    order_detail_id: 2, board_type: 'c', part_name: 'Side',
+    length_mm: 200, width_mm: 50,
+    edging_component_id: 501, edging_component_name: 'White 22mm',
+  };
+  const a = computeSourceRevision([detailA], { ...emptyAssignments, edging_overrides: [eo1, eo2] });
+  const b = computeSourceRevision([detailA], { ...emptyAssignments, edging_overrides: [eo2, eo1] });
+  assert.equal(a, b);
+});
+
+test('malformed non-array assignments fields hash identically to empty', () => {
+  // Simulates corrupt JSONB — Array.isArray guards should coerce to empty.
+  const malformed = {
+    version: 1,
+    assignments: 'not an array' as unknown,
+    backer_default: null,
+    edging_defaults: { nope: true } as unknown,
+    edging_overrides: null as unknown,
+  } as unknown as MaterialAssignments;
+  const a = computeSourceRevision([detailA], malformed);
+  const b = computeSourceRevision([detailA], emptyAssignments);
+  assert.equal(a, b, 'malformed arrays should be treated as empty');
+});
