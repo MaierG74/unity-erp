@@ -1600,14 +1600,18 @@ At the top of `ProductsTableRow.tsx`, inside the component, add:
 
 ```typescript
 import { useQuery } from '@tanstack/react-query';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { LineMaterialCostBadge } from './LineMaterialCostBadge';
 import type { LineMaterialCost } from '@/lib/orders/line-material-cost';
 
 // Inside the component body, after existing hooks:
+// Use authorizedFetch — the material-cost route calls getRouteClient()
+// which needs a Bearer token (Supabase persists the session in localStorage
+// by default, so plain fetch would 401).
 const materialCostQuery = useQuery<LineMaterialCost>({
   queryKey: ['order-line-material-cost', orderId, detail.order_detail_id],
   queryFn: async () => {
-    const res = await fetch(`/api/orders/${orderId}/details/${detail.order_detail_id}/material-cost`);
+    const res = await authorizedFetch(`/api/orders/${orderId}/details/${detail.order_detail_id}/material-cost`);
     if (!res.ok) throw new Error('Failed to fetch material cost');
     return res.json();
   },
