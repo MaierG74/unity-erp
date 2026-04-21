@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import {
@@ -17,7 +18,7 @@ import type {
   SupplierOrderCreationFailure,
   SupplierOrderCreationSummary,
 } from '@/lib/queries/order-components';
-import type { CuttingPlan } from '@/lib/orders/cutting-plan-types';
+import { useOrderCuttingPlan } from '@/hooks/useOrderCuttingPlan';
 import { formatCurrency } from '@/lib/format-utils';
 import { ConsolidatePODialog, SupplierWithDrafts, ExistingDraftPO } from '@/components/features/purchasing/ConsolidatePODialog';
 
@@ -59,6 +60,7 @@ export const OrderComponentsDialog = ({
   const [pendingConsolidationPayload, setPendingConsolidationPayload] = useState<any>(null);
   const [includeInStock, setIncludeInStock] = useState(false);
   const queryClient = useQueryClient();
+  const router = useRouter();
 
   const buildDefaultComponentState = (supplierGroups: SupplierGroup[]) => {
     const quantities: Record<number, number> = {};
@@ -91,22 +93,8 @@ export const OrderComponentsDialog = ({
     enabled: open, // Only fetch when dialog is open
   });
 
-  const { data: cuttingPlan } = useQuery<CuttingPlan | null>({
-    queryKey: ['order-cutting-plan', orderId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('cutting_plan')
-        .eq('order_id', Number(orderId))
-        .maybeSingle();
-      if (error) throw new Error('Failed to fetch cutting plan');
-      return (data?.cutting_plan ?? null) as CuttingPlan | null;
-    },
-    enabled: open,
-    staleTime: 30_000,
-  });
-
-  const planIsStale = Boolean(cuttingPlan && cuttingPlan.stale);
+  const { plan } = useOrderCuttingPlan(Number(orderId));
+  const planIsStale = Boolean(plan?.stale);
 
   // Force refetch when dialog opens
   useEffect(() => {
@@ -661,10 +649,10 @@ export const OrderComponentsDialog = ({
         )}
 
         {planIsStale && (
-          <Alert className="mb-4 border-amber-500/40 bg-amber-500/10">
-            <AlertCircle className="h-4 w-4 text-amber-400" />
-            <AlertTitle className="text-amber-200">Cutting plan is stale</AlertTitle>
-            <AlertDescription className="text-amber-200/80">
+          <Alert className="mb-4 border-yellow-500/50 bg-yellow-500/10">
+            <AlertCircle className="h-4 w-4 text-yellow-500" />
+            <AlertTitle className="text-yellow-500">Cutting plan is stale</AlertTitle>
+            <AlertDescription className="text-yellow-500">
               Component costs below reflect padded per-product estimates, not cross-product nested amounts.
               Regenerate the cutting plan to lock in nested pricing before creating POs.
               <div className="mt-2">
@@ -672,12 +660,8 @@ export const OrderComponentsDialog = ({
                   size="sm"
                   variant="outline"
                   onClick={() => {
+                    router.replace('?tab=cutting-plan', { scroll: false });
                     onOpenChange(false);
-                    // Navigate to cutting-plan tab via query param
-                    const url = new URL(window.location.href);
-                    url.searchParams.set('tab', 'cutting-plan');
-                    window.history.pushState({}, '', url.toString());
-                    window.dispatchEvent(new PopStateEvent('popstate'));
                   }}
                 >
                   Open cutting plan
