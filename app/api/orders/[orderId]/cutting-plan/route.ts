@@ -37,16 +37,21 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
   }
   // total_nested_cost and line_allocations are server-computed; client values are ignored.
 
-  // Verify source revision — reject if order details OR material_assignments changed
+  // Verify source revision — reject if order details OR material_assignments changed.
+  // Both reads are org-scoped because supabaseAdmin bypasses RLS — without the org_id
+  // filter a caller from another org could obtain a revision hash for an order that
+  // doesn't belong to them via the 409 path.
   const [{ data: details, error: detailsError }, { data: orderRow, error: orderRowError }] = await Promise.all([
     supabaseAdmin
       .from('order_details')
       .select('order_detail_id, quantity, cutlist_snapshot')
-      .eq('order_id', orderId),
+      .eq('order_id', orderId)
+      .eq('org_id', access.orgId),
     supabaseAdmin
       .from('orders')
       .select('material_assignments')
       .eq('order_id', orderId)
+      .eq('org_id', access.orgId)
       .maybeSingle(),
   ]);
 
@@ -54,7 +59,13 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
     return NextResponse.json({ error: 'Failed to verify order state' }, { status: 500 });
   }
 
-  const currentAssignments = (orderRow?.material_assignments as MaterialAssignments | null) ?? null;
+  // Bail before computing any hash if the order doesn't belong to this org
+  // (or doesn't exist) — otherwise a 409 would leak the current revision.
+  if (!orderRow) {
+    return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+  }
+
+  const currentAssignments = (orderRow.material_assignments as MaterialAssignments | null) ?? null;
 
   const currentRevision = computeSourceRevision(
     (details ?? []).map((d) => ({
@@ -178,14 +189,21 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
     line_allocations,
   };
 
-  const { error: updateError } = await supabaseAdmin
+  // .select('order_id') forces PostgREST to return affected rows so we can
+  // detect zero-row updates (e.g. if RLS or org_id filter excluded the row
+  // after our earlier existence check).
+  const { data: updated, error: updateError } = await supabaseAdmin
     .from('orders')
     .update({ cutting_plan: planToSave })
     .eq('order_id', orderId)
-    .eq('org_id', access.orgId);
+    .eq('org_id', access.orgId)
+    .select('order_id');
 
   if (updateError) {
     return NextResponse.json({ error: 'Failed to save cutting plan' }, { status: 500 });
+  }
+  if (!updated || updated.length === 0) {
+    return NextResponse.json({ error: 'Order not found' }, { status: 404 });
   }
 
   return NextResponse.json({ success: true });
@@ -202,14 +220,18 @@ export async function DELETE(request: NextRequest, context: { params: Promise<Ro
   const orderId = parseOrderId(orderIdParam);
   if (!orderId) return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
 
-  const { error } = await supabaseAdmin
+  const { data: updated, error } = await supabaseAdmin
     .from('orders')
     .update({ cutting_plan: null })
     .eq('order_id', orderId)
-    .eq('org_id', access.orgId);
+    .eq('org_id', access.orgId)
+    .select('order_id');
 
   if (error) {
     return NextResponse.json({ error: 'Failed to clear cutting plan' }, { status: 500 });
+  }
+  if (!updated || updated.length === 0) {
+    return NextResponse.json({ error: 'Order not found' }, { status: 404 });
   }
 
   return NextResponse.json({ success: true });
