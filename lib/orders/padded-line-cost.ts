@@ -1,4 +1,5 @@
 import type { CutlistCostingSnapshot, SnapshotSheet } from '@/lib/cutlist/costingSnapshot';
+import { round2 } from './cutting-plan-utils';
 
 export type BomSnapshotEntry = {
   is_cutlist_item?: boolean;
@@ -31,17 +32,17 @@ export function computePaddedLineCost(input: PaddedLineCostInput): PaddedLineCos
   const qty = Math.max(0, input.quantity || 0);
 
   const cutlistPerUnit = input.snapshot ? paddedCutlistCostPerUnit(input.snapshot) : 0;
-  const cutlist_portion = Math.round(cutlistPerUnit * qty * 100) / 100;
+  const cutlist_portion = round2(cutlistPerUnit * qty);
 
   const nonCutlistPerUnit = (input.bom_snapshot ?? [])
     .filter((e) => !e.is_cutlist_item)
     .reduce((s, e) => s + (e.line_total ?? 0), 0);
-  const non_cutlist_portion = Math.round(nonCutlistPerUnit * qty * 100) / 100;
+  const non_cutlist_portion = round2(nonCutlistPerUnit * qty);
 
   return {
     cutlist_portion,
     non_cutlist_portion,
-    padded_cost: Math.round((cutlist_portion + non_cutlist_portion) * 100) / 100,
+    padded_cost: round2(cutlist_portion + non_cutlist_portion),
   };
 }
 

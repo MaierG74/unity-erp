@@ -8,6 +8,7 @@ import {
   fetchOrderComponentRequirements,
   fetchComponentSuppliers,
   createComponentPurchaseOrders,
+  componentSuppliersKey,
   SupplierOrderCreationError,
 } from '@/lib/queries/order-components';
 import type {
@@ -85,7 +86,7 @@ export const OrderComponentsDialog = ({
 
   // Group components by supplier
   const { data, isLoading, isError, error, refetch } = useQuery<SupplierGroup[]>({
-    queryKey: ['component-suppliers', orderId, includeInStock],
+    queryKey: [...componentSuppliersKey(orderId), includeInStock],
     queryFn: () => fetchComponentSuppliers(Number(orderId), includeInStock),
     // Refetch when dialog opens to ensure fresh data
     refetchOnMount: true,
@@ -296,7 +297,7 @@ export const OrderComponentsDialog = ({
       if (onCreated) onCreated();
 
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['component-suppliers', orderId] }),
+        queryClient.invalidateQueries({ queryKey: componentSuppliersKey(orderId) }),
         queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] }),
         queryClient.invalidateQueries({ queryKey: ['order', orderId] }),
         // Invalidate all purchase order queries to ensure the new order appears everywhere
@@ -548,7 +549,7 @@ export const OrderComponentsDialog = ({
       if (onCreated) onCreated();
 
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['component-suppliers', orderId] }),
+        queryClient.invalidateQueries({ queryKey: componentSuppliersKey(orderId) }),
         queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] }),
         queryClient.invalidateQueries({ queryKey: ['order', orderId] }),
         queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] }),

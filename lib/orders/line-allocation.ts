@@ -1,4 +1,5 @@
 import type { CuttingPlanLineAllocation } from './cutting-plan-types';
+import { round2, safeNonNegativeFinite } from './cutting-plan-utils';
 
 export type LineAllocationInput = {
   order_detail_id: number;
@@ -33,10 +34,7 @@ export function allocateLinesByArea(
 ): CuttingPlanLineAllocation[] {
   if (lines.length === 0) return [];
 
-  const sumArea = lines.reduce(
-    (s, l) => s + (Number.isFinite(l.area_mm2) ? Math.max(0, l.area_mm2) : 0),
-    0,
-  );
+  const sumArea = lines.reduce((s, l) => s + safeNonNegativeFinite(l.area_mm2), 0);
 
   // Defensive all-zero: return zero shares (not even split — if there are no
   // cutlist parts anywhere there should be no nested cost to allocate).
@@ -59,7 +57,7 @@ export function allocateLinesByArea(
   let allocatedSoFar = 0;
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
-    const area = Number.isFinite(l.area_mm2) ? Math.max(0, l.area_mm2) : 0;
+    const area = safeNonNegativeFinite(l.area_mm2);
 
     if (area === 0) {
       out.push({
@@ -75,14 +73,14 @@ export function allocateLinesByArea(
     const share = i === lastNonZeroIdx
       ? total_nested_cost - allocatedSoFar
       : (area / sumArea) * total_nested_cost;
-    const rounded = Math.round(share * 100) / 100;
+    const rounded = round2(share);
     allocatedSoFar += rounded;
 
     out.push({
       order_detail_id: l.order_detail_id,
       area_mm2: area,
       line_share_amount: rounded,
-      allocation_pct: Math.round(pct * 100) / 100,
+      allocation_pct: round2(pct),
     });
   }
   return out;

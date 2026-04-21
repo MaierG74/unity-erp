@@ -2,8 +2,7 @@ import { roleFingerprint } from './material-assignment-types';
 import type { MaterialAssignments } from './material-assignment-types';
 import type { AggregatedPart, AggregatedPartGroup } from './cutting-plan-types';
 
-// Local reflection of the snapshot shapes already used by the aggregate route.
-// Keep these in sync with the aggregate route's SnapshotPart / SnapshotGroup.
+// Shape of the JSONB `cutlist_snapshot` rows persisted on `order_details`.
 export type AggregateSnapshotPart = {
   id: string;
   name: string;
@@ -60,7 +59,7 @@ export function resolveAggregatedGroups(
   details: AggregateDetail[],
   assignments: MaterialAssignments | null,
 ): ResolveAggregatedGroupsResult {
-  // Defensive guards against malformed JSONB (matches line-material-cost.ts pattern).
+  // Defensive guards against malformed JSONB.
   const rawAssignments = Array.isArray(assignments?.assignments)
     ? assignments!.assignments
     : [];

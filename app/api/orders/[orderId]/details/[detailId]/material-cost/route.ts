@@ -20,32 +20,32 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
     return NextResponse.json({ error: 'Invalid parameters' }, { status: 400 });
   }
 
-  // 1. Fetch the order detail + its product id and bom snapshot (scoped to order_id for auth)
-  const { data: detail, error: detailErr } = await auth.supabase
-    .from('order_details')
-    .select('order_detail_id, order_id, product_id, quantity, bom_snapshot')
-    .eq('order_detail_id', detailIdNum)
-    .eq('order_id', orderIdNum)
-    .maybeSingle();
+  // Phase 1: detail + order in parallel (both only need the URL params).
+  const [detailRes, orderRes] = await Promise.all([
+    auth.supabase
+      .from('order_details')
+      .select('order_detail_id, order_id, product_id, quantity, bom_snapshot')
+      .eq('order_detail_id', detailIdNum)
+      .eq('order_id', orderIdNum)
+      .maybeSingle(),
+    auth.supabase
+      .from('orders')
+      .select('cutting_plan')
+      .eq('order_id', orderIdNum)
+      .maybeSingle(),
+  ]);
 
-  if (detailErr) return NextResponse.json({ error: detailErr.message }, { status: 500 });
-  if (!detail) return NextResponse.json({ error: 'Order detail not found' }, { status: 404 });
+  if (detailRes.error) return NextResponse.json({ error: detailRes.error.message }, { status: 500 });
+  if (!detailRes.data) return NextResponse.json({ error: 'Order detail not found' }, { status: 404 });
+  if (orderRes.error) return NextResponse.json({ error: orderRes.error.message }, { status: 500 });
 
-  // 2. Fetch the order's cutting_plan (may be null)
-  const { data: order, error: orderErr } = await auth.supabase
-    .from('orders')
-    .select('cutting_plan')
-    .eq('order_id', orderIdNum)
-    .maybeSingle();
+  const detail = detailRes.data;
+  // `order` may be null if RLS hides the parent row even though the detail is visible
+  // (policies can diverge between tables). Gracefully degrade to no-plan.
+  const cutting_plan: CuttingPlan | null = (orderRes.data?.cutting_plan as CuttingPlan) ?? null;
 
-  if (orderErr) return NextResponse.json({ error: orderErr.message }, { status: 500 });
-  // Note: `order` may be null if RLS hides the parent `orders` row even though the detail
-  // row is visible (policies can diverge between tables). Gracefully degrade to no-plan.
-  const cutting_plan: CuttingPlan | null = (order?.cutting_plan as CuttingPlan) ?? null;
-
-  // 3. Fetch the product's cutlist snapshot (may be null for non-cutlist products).
-  // A real PostgREST error here must bail with 500 — silently falling through to a
-  // padded result would produce materially incorrect user-visible costs.
+  // Phase 2: snapshot depends on product_id. A real PostgREST error must bail with 500 —
+  // silently falling through to a padded result would produce materially incorrect costs.
   let snapshot: CutlistCostingSnapshot | null = null;
   if (detail.product_id != null) {
     const { data: snap, error: snapErr } = await auth.supabase
@@ -59,14 +59,12 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
     }
   }
 
-  // 4. Compute padded baseline
   const padded = computePaddedLineCost({
     quantity: detail.quantity ?? 1,
     snapshot,
     bom_snapshot: Array.isArray(detail.bom_snapshot) ? detail.bom_snapshot : [],
   });
 
-  // 5. Branch on cutting plan
   const result = pickLineMaterialCost({
     order_detail_id: detailIdNum,
     cutting_plan,

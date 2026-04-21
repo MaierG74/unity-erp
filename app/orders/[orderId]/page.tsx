@@ -37,7 +37,7 @@ import {
   updateOrderStatus,
   deleteAttachment,
 } from '@/lib/queries/order-queries';
-import { fetchOrderComponentRequirements, reserveOrderComponents, releaseOrderComponents } from '@/lib/queries/order-components';
+import { fetchOrderComponentRequirements, reserveOrderComponents, releaseOrderComponents, componentSuppliersKey } from '@/lib/queries/order-components';
 import { OrderComponentsDialog } from '@/components/features/orders/OrderComponentsDialog';
 import { AddProductsDialog } from '@/components/features/orders/AddProductsDialog';
 
@@ -603,7 +603,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
         queryClient.invalidateQueries({ queryKey: ['order', orderId] }),
       ]);
       // Also refresh supplier group data if dialog is open
-      queryClient.invalidateQueries({ queryKey: ['component-suppliers', String(orderId)] });
+      queryClient.invalidateQueries({ queryKey: componentSuppliersKey(orderId) });
     },
     onError: (error: any) => {
       console.error('[release-fg] mutation error', error);
@@ -944,7 +944,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                 onSuccess={() => {
                   queryClient.invalidateQueries({ queryKey: ['order', orderId] });
                   queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
-                  queryClient.invalidateQueries({ queryKey: ['component-suppliers', orderId] });
+                  queryClient.invalidateQueries({ queryKey: componentSuppliersKey(orderId) });
                   toast.success("Products added successfully");
                 }}
               />

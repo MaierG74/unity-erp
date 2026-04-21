@@ -1,5 +1,6 @@
 import type { CuttingPlan } from './cutting-plan-types';
 import type { PaddedLineCost } from './padded-line-cost';
+import { round2, safeNonNegativeFinite } from './cutting-plan-utils';
 
 export type LineMaterialCostBasis = 'padded' | 'nested_real';
 
@@ -72,22 +73,14 @@ export function pickLineMaterialCost(input: PickLineMaterialCostInput): LineMate
   }
 
   // Nested cutlist share + padded non-cutlist (non-cutlist never gets nested).
-  // Defensive: non-finite inputs (NaN/Infinity from upstream corruption) fall back to 0
-  // rather than silently propagating as `null` via JSON serialization. Same pattern as
-  // computePaddedLineCost and allocateLinesByArea.
-  const safeShare = Number.isFinite(allocation.line_share_amount)
-    ? Math.max(0, allocation.line_share_amount)
-    : 0;
-  const safeNonCutlist = Number.isFinite(padded.non_cutlist_portion)
-    ? Math.max(0, padded.non_cutlist_portion)
-    : 0;
-  const amount = Math.round((safeShare + safeNonCutlist) * 100) / 100;
+  const safeShare = safeNonNegativeFinite(allocation.line_share_amount);
+  const safeNonCutlist = safeNonNegativeFinite(padded.non_cutlist_portion);
 
   return {
-    amount,
+    amount: round2(safeShare + safeNonCutlist),
     basis: 'nested_real',
     stale: false,
-    cutlist_portion: Math.round(safeShare * 100) / 100,
+    cutlist_portion: round2(safeShare),
     non_cutlist_portion: safeNonCutlist,
     source_cutting_plan_revision: cutting_plan.source_revision,
   };

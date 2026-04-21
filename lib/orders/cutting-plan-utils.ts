@@ -1,6 +1,16 @@
 import crypto from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { MaterialAssignments } from './material-assignment-types';
+import { roleFingerprint, type MaterialAssignments } from './material-assignment-types';
+
+/**
+ * Clamp to a non-negative finite number. Non-numbers, NaN, and ±Infinity → 0.
+ * Use for any JSONB-derived numeric field that must not propagate as null/NaN.
+ */
+export const safeNonNegativeFinite = (x: unknown): number =>
+  typeof x === 'number' && Number.isFinite(x) ? Math.max(0, x) : 0;
+
+/** Round to 2 decimal places (cents). */
+export const round2 = (x: number): number => Math.round(x * 100) / 100;
 
 /**
  * Compute a hash of order details + material assignments state for stale-save detection.
@@ -30,23 +40,21 @@ export function computeSourceRevision(
     edging_overrides: [],
   };
 
-  // Guard against malformed JSONB — match the Array.isArray pattern used in
-  // line-material-cost.ts and cutting-plan-aggregate.ts.
   const rawAssignments = Array.isArray(a.assignments) ? a.assignments : [];
   const rawEdgingDefaults = Array.isArray(a.edging_defaults) ? a.edging_defaults : [];
   const rawEdgingOverrides = Array.isArray(a.edging_overrides) ? a.edging_overrides : [];
 
-  // Use plain `<`/`>` comparison (not localeCompare) for locale-independent determinism —
-  // ICU locale variation could otherwise produce different hashes across environments.
+  // Plain `<`/`>` (not localeCompare) — ICU locale variation could otherwise
+  // produce different hashes across environments.
   const fpCompare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-  const roleKey = (r: { order_detail_id: number; board_type: string; part_name: string; length_mm: number; width_mm: number }) =>
-    `${r.order_detail_id}|${r.board_type}|${r.part_name}|${r.length_mm}|${r.width_mm}`;
+  const fp = (r: { order_detail_id: number; board_type: string; part_name: string; length_mm: number; width_mm: number }) =>
+    roleFingerprint(r.order_detail_id, r.board_type, r.part_name, r.length_mm, r.width_mm);
 
-  const sortedAssignments = [...rawAssignments].sort((x, y) => fpCompare(roleKey(x), roleKey(y)));
+  const sortedAssignments = [...rawAssignments].sort((x, y) => fpCompare(fp(x), fp(y)));
   const sortedEdgingDefaults = [...rawEdgingDefaults].sort(
     (x, y) => x.board_component_id - y.board_component_id,
   );
-  const sortedEdgingOverrides = [...rawEdgingOverrides].sort((x, y) => fpCompare(roleKey(x), roleKey(y)));
+  const sortedEdgingOverrides = [...rawEdgingOverrides].sort((x, y) => fpCompare(fp(x), fp(y)));
 
   const assignmentsPayload = JSON.stringify({
     assignments: sortedAssignments,

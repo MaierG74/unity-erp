@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireModuleAccess } from '@/lib/api/module-access';
 import { MODULE_KEYS } from '@/lib/modules/keys';
 import { supabaseAdmin } from '@/lib/supabase-admin';
-import { computeSourceRevision } from '@/lib/orders/cutting-plan-utils';
+import { computeSourceRevision, round2, safeNonNegativeFinite } from '@/lib/orders/cutting-plan-utils';
 import type { CuttingPlan } from '@/lib/orders/cutting-plan-types';
 import { allocateLinesByArea, type LineAllocationInput } from '@/lib/orders/line-allocation';
 import type { MaterialAssignments } from '@/lib/orders/material-assignment-types';
@@ -127,26 +127,21 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
     );
   }
 
-  // Defensive coercion — corrupt inputs (NaN/Infinity) must not poison total_nested_cost,
-  // which would persist as `null` in JSONB and silently break the UI. Matches the
-  // Number.isFinite pattern used in padded-line-cost.ts and line-allocation.ts.
-  const safeNum = (x: unknown): number =>
-    Number.isFinite(x as number) ? Math.max(0, x as number) : 0;
-
   // Server-authoritative total_nested_cost: recomputed from prices, not from body.
+  // Defensive coercion ensures NaN/Infinity can't persist as null in JSONB.
   const total_nested_cost_raw = body.material_groups.reduce((sum, g) => {
     const primary = g.primary_material_id != null
-      ? safeNum(g.sheets_required) * (priceByComponentId.get(g.primary_material_id) ?? 0)
+      ? safeNonNegativeFinite(g.sheets_required) * (priceByComponentId.get(g.primary_material_id) ?? 0)
       : 0;
     const backer = g.backer_material_id != null
-      ? safeNum(g.backer_sheets_required) * (priceByComponentId.get(g.backer_material_id) ?? 0)
+      ? safeNonNegativeFinite(g.backer_sheets_required) * (priceByComponentId.get(g.backer_material_id) ?? 0)
       : 0;
     const edging = (g.edging_by_material ?? []).reduce((s, e) =>
-      s + (safeNum(e.length_mm) / 1000) * (priceByComponentId.get(e.component_id) ?? 0),
+      s + (safeNonNegativeFinite(e.length_mm) / 1000) * (priceByComponentId.get(e.component_id) ?? 0),
     0);
     return sum + primary + backer + edging;
   }, 0);
-  const total_nested_cost = Math.round(total_nested_cost_raw * 100) / 100;
+  const total_nested_cost = round2(total_nested_cost_raw);
 
   // Per-line area from cutlist_snapshot → area-based allocation of nested cost.
   const lineAreaInputs: LineAllocationInput[] = (details ?? []).map((d) => {
