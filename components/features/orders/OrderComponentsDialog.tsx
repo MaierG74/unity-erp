@@ -17,6 +17,7 @@ import type {
   SupplierOrderCreationFailure,
   SupplierOrderCreationSummary,
 } from '@/lib/queries/order-components';
+import type { CuttingPlan } from '@/lib/orders/cutting-plan-types';
 import { formatCurrency } from '@/lib/format-utils';
 import { ConsolidatePODialog, SupplierWithDrafts, ExistingDraftPO } from '@/components/features/purchasing/ConsolidatePODialog';
 
@@ -89,6 +90,23 @@ export const OrderComponentsDialog = ({
     staleTime: 0, // Always consider data stale so it refetches when dialog opens
     enabled: open, // Only fetch when dialog is open
   });
+
+  const { data: cuttingPlan } = useQuery<CuttingPlan | null>({
+    queryKey: ['order-cutting-plan', orderId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('cutting_plan')
+        .eq('order_id', Number(orderId))
+        .maybeSingle();
+      if (error) throw new Error('Failed to fetch cutting plan');
+      return (data?.cutting_plan ?? null) as CuttingPlan | null;
+    },
+    enabled: open,
+    staleTime: 30_000,
+  });
+
+  const planIsStale = Boolean(cuttingPlan && cuttingPlan.stale);
 
   // Force refetch when dialog opens
   useEffect(() => {
@@ -637,6 +655,33 @@ export const OrderComponentsDialog = ({
                     <span>{failure.reason}</span>
                   </div>
                 ))}
+              </div>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {planIsStale && (
+          <Alert className="mb-4 border-amber-500/40 bg-amber-500/10">
+            <AlertCircle className="h-4 w-4 text-amber-400" />
+            <AlertTitle className="text-amber-200">Cutting plan is stale</AlertTitle>
+            <AlertDescription className="text-amber-200/80">
+              Component costs below reflect padded per-product estimates, not cross-product nested amounts.
+              Regenerate the cutting plan to lock in nested pricing before creating POs.
+              <div className="mt-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    onOpenChange(false);
+                    // Navigate to cutting-plan tab via query param
+                    const url = new URL(window.location.href);
+                    url.searchParams.set('tab', 'cutting-plan');
+                    window.history.pushState({}, '', url.toString());
+                    window.dispatchEvent(new PopStateEvent('popstate'));
+                  }}
+                >
+                  Open cutting plan
+                </Button>
               </div>
             </AlertDescription>
           </Alert>
