@@ -102,16 +102,36 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
     }
   }
 
+  // Warn (don't fail) when components we were asked to price don't exist in
+  // suppliercomponents for this org. The reduce below falls back to 0, which
+  // silently under-reports nested cost — logging lets ops grep for it.
+  const missingPrices: number[] = [];
+  for (const id of componentIds) {
+    if (!priceByComponentId.has(id)) missingPrices.push(id);
+  }
+  if (missingPrices.length > 0) {
+    console.warn(
+      `[cutting-plan:PUT] order ${orderId}: missing suppliercomponents.price for component_ids`,
+      missingPrices,
+    );
+  }
+
+  // Defensive coercion — corrupt inputs (NaN/Infinity) must not poison total_nested_cost,
+  // which would persist as `null` in JSONB and silently break the UI. Matches the
+  // Number.isFinite pattern used in padded-line-cost.ts and line-allocation.ts.
+  const safeNum = (x: unknown): number =>
+    Number.isFinite(x as number) ? Math.max(0, x as number) : 0;
+
   // Server-authoritative total_nested_cost: recomputed from prices, not from body.
   const total_nested_cost_raw = body.material_groups.reduce((sum, g) => {
     const primary = g.primary_material_id != null
-      ? (g.sheets_required ?? 0) * (priceByComponentId.get(g.primary_material_id) ?? 0)
+      ? safeNum(g.sheets_required) * (priceByComponentId.get(g.primary_material_id) ?? 0)
       : 0;
     const backer = g.backer_material_id != null
-      ? (g.backer_sheets_required ?? 0) * (priceByComponentId.get(g.backer_material_id) ?? 0)
+      ? safeNum(g.backer_sheets_required) * (priceByComponentId.get(g.backer_material_id) ?? 0)
       : 0;
     const edging = (g.edging_by_material ?? []).reduce((s, e) =>
-      s + ((e.length_mm ?? 0) / 1000) * (priceByComponentId.get(e.component_id) ?? 0),
+      s + (safeNum(e.length_mm) / 1000) * (priceByComponentId.get(e.component_id) ?? 0),
     0);
     return sum + primary + backer + edging;
   }, 0);
@@ -133,9 +153,20 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
 
   const line_allocations = allocateLinesByArea(lineAreaInputs, total_nested_cost);
 
-  // Persist with stale = false, plus server-authoritative cost + allocations.
+  // Pre-strip server-computed fields from the body so the structural shape
+  // encodes "client can't set these" — safer than relying on spread order.
+  const {
+    total_nested_cost: _ignoredClientTotal,
+    line_allocations: _ignoredClientAllocations,
+    stale: _ignoredClientStale,
+    ...clientPlan
+  } = body;
+  void _ignoredClientTotal;
+  void _ignoredClientAllocations;
+  void _ignoredClientStale;
+
   const planToSave: CuttingPlan = {
-    ...body,
+    ...clientPlan,
     stale: false,
     total_nested_cost,
     line_allocations,
