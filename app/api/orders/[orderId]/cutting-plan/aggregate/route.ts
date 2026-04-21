@@ -1,39 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRouteClient } from '@/lib/supabase-route';
 import { computeSourceRevision } from '@/lib/orders/cutting-plan-utils';
-import type {
-  AggregatedPart,
-  AggregatedPartGroup,
-  AggregateResponse,
-} from '@/lib/orders/cutting-plan-types';
+import type { MaterialAssignments } from '@/lib/orders/material-assignment-types';
+import {
+  resolveAggregatedGroups,
+  type AggregateDetail,
+} from '@/lib/orders/cutting-plan-aggregate';
+import type { AggregateResponse } from '@/lib/orders/cutting-plan-types';
 
 type RouteParams = { orderId: string };
-
-type SnapshotPart = {
-  id: string;
-  name: string;
-  grain: string;
-  quantity: number;
-  width_mm: number;
-  length_mm: number;
-  band_edges: Record<string, boolean>;
-  lamination_type: string;
-  lamination_config?: unknown;
-  material_thickness?: number;
-  edging_material_id?: string;
-  material_label?: string;
-};
-
-type SnapshotGroup = {
-  source_group_id: number;
-  name: string;
-  board_type: string;
-  primary_material_id: number | null;
-  primary_material_name: string | null;
-  backer_material_id: number | null;
-  backer_material_name: string | null;
-  parts: SnapshotPart[];
-};
 
 export async function GET(request: NextRequest, context: { params: Promise<RouteParams> }) {
   const auth = await getRouteClient(request);
@@ -47,12 +22,23 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
     return NextResponse.json({ error: 'Invalid order ID' }, { status: 400 });
   }
 
-  const { data: details, error } = await auth.supabase
-    .from('order_details')
-    .select('order_detail_id, product_id, quantity, cutlist_snapshot, products(name)')
-    .eq('order_id', orderIdNum);
+  const [detailsRes, orderRes] = await Promise.all([
+    auth.supabase
+      .from('order_details')
+      .select('order_detail_id, product_id, quantity, cutlist_snapshot, products(name)')
+      .eq('order_id', orderIdNum),
+    auth.supabase
+      .from('orders')
+      .select('material_assignments')
+      .eq('order_id', orderIdNum)
+      .maybeSingle(),
+  ]);
+
+  const { data: details, error } = detailsRes;
+  const assignments = (orderRes.data?.material_assignments as MaterialAssignments | null) ?? null;
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (orderRes.error) return NextResponse.json({ error: orderRes.error.message }, { status: 500 });
   if (!details || details.length === 0) {
     return NextResponse.json({ error: 'No order details found' }, { status: 404 });
   }
@@ -62,67 +48,28 @@ export async function GET(request: NextRequest, context: { params: Promise<Route
       order_detail_id: d.order_detail_id,
       quantity: d.quantity ?? 1,
       cutlist_snapshot: d.cutlist_snapshot,
-    }))
+    })),
+    assignments,
   );
 
-  // Three-part grouping key: board_type + primary_material_id + backer_material_id
-  const groupMap = new Map<string, AggregatedPartGroup>();
-  let totalParts = 0;
-  let hasCutlistItems = false;
+  const aggregateDetails: AggregateDetail[] = details.map((d) => ({
+    order_detail_id: d.order_detail_id,
+    quantity: d.quantity,
+    cutlist_snapshot: d.cutlist_snapshot ?? null,
+    product_name: (d.products as any)?.name ?? '',
+  }));
 
-  for (const detail of details) {
-    const groups: SnapshotGroup[] = detail.cutlist_snapshot ?? [];
-    if (groups.length === 0) continue;
-    hasCutlistItems = true;
-
-    const lineQty = detail.quantity ?? 1;
-    const productName = (detail.products as any)?.name ?? '';
-
-    for (const group of groups) {
-      const key = `${group.board_type}|${group.primary_material_id ?? 'none'}|${group.backer_material_id ?? 'none'}`;
-
-      if (!groupMap.has(key)) {
-        groupMap.set(key, {
-          board_type: group.board_type,
-          primary_material_id: group.primary_material_id,
-          primary_material_name: group.primary_material_name,
-          backer_material_id: group.backer_material_id,
-          backer_material_name: group.backer_material_name,
-          parts: [],
-        });
-      }
-
-      const target = groupMap.get(key)!;
-      for (const part of group.parts) {
-        const aggregatedPart: AggregatedPart = {
-          id: `${detail.order_detail_id}-${part.id}`,
-          original_id: part.id,
-          order_detail_id: detail.order_detail_id,
-          product_name: productName,
-          name: part.name,
-          grain: part.grain,
-          quantity: part.quantity * lineQty,
-          width_mm: part.width_mm,
-          length_mm: part.length_mm,
-          band_edges: part.band_edges,
-          lamination_type: part.lamination_type,
-          lamination_config: part.lamination_config,
-          material_thickness: part.material_thickness,
-          edging_material_id: part.edging_material_id,
-          material_label: part.material_label,
-        };
-        target.parts.push(aggregatedPart);
-        totalParts++;
-      }
-    }
-  }
+  const { material_groups, total_parts, has_cutlist_items } = resolveAggregatedGroups(
+    aggregateDetails,
+    assignments,
+  );
 
   const response: AggregateResponse = {
     order_id: orderIdNum,
     source_revision: sourceRevision,
-    material_groups: Array.from(groupMap.values()),
-    total_parts: totalParts,
-    has_cutlist_items: hasCutlistItems,
+    material_groups,
+    total_parts,
+    has_cutlist_items,
   };
 
   return NextResponse.json(response);

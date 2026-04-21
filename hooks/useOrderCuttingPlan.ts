@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
+import { componentSuppliersKey } from '@/lib/queries/order-components';
 import type {
   AggregateResponse,
   CuttingPlan,
@@ -60,11 +61,13 @@ export function useOrderCuttingPlan(orderId: number) {
           }
           throw new Error(body.error || 'Failed to save cutting plan');
         }
-        // Invalidate related queries
+        // line-material-cost badges depend on cutting_plan.line_allocations,
+        // so they must refetch after a new plan is saved.
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ['order-cutting-plan', orderId] }),
           queryClient.invalidateQueries({ queryKey: ['order-components', orderId] }),
-          queryClient.invalidateQueries({ queryKey: ['component-suppliers', orderId] }),
+          queryClient.invalidateQueries({ queryKey: componentSuppliersKey(orderId) }),
+          queryClient.invalidateQueries({ queryKey: ['order-line-material-cost', orderId] }),
         ]);
       } finally {
         setIsSaving(false);
@@ -80,7 +83,10 @@ export function useOrderCuttingPlan(orderId: number) {
       { method: 'DELETE' }
     );
     if (!res.ok) throw new Error('Failed to clear cutting plan');
-    await queryClient.invalidateQueries({ queryKey: ['order-cutting-plan', orderId] });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['order-cutting-plan', orderId] }),
+      queryClient.invalidateQueries({ queryKey: ['order-line-material-cost', orderId] }),
+    ]);
   }, [orderId, queryClient]);
 
   return {

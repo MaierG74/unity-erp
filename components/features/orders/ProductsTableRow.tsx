@@ -3,6 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { ChevronRight, ChevronDown, Edit, Trash, Check, X, Loader2 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { TableCell, TableRow } from '@/components/ui/table';
@@ -10,8 +11,12 @@ import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { formatCurrency, formatQuantity } from '@/lib/format-utils';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
+import { LineMaterialCostBadge } from './LineMaterialCostBadge';
+import type { LineMaterialCost } from '@/lib/orders/line-material-cost';
 
 interface ProductsTableRowProps {
+  orderId: number;
   detail: any;
   coverage: { ordered: number; reserved: number; remain: number; factor: number };
   isEditing: boolean;
@@ -34,6 +39,7 @@ interface ProductsTableRowProps {
 }
 
 export function ProductsTableRow({
+  orderId,
   detail,
   coverage,
   isEditing,
@@ -57,6 +63,20 @@ export function ProductsTableRow({
   const hasShortfall = bomComponents.some((comp) => {
     const metrics = computeComponentMetrics(comp, detail.product_id);
     return metrics.real > 0.0001;
+  });
+  // NOTE: use authorizedFetch — the material-cost route calls getRouteClient()
+  // which requires a Bearer token or sb-*-auth-token cookie. The Supabase client
+  // persists sessions in localStorage by default, so plain fetch would 401.
+  const materialCostQuery = useQuery<LineMaterialCost>({
+    queryKey: ['order-line-material-cost', orderId, detail.order_detail_id],
+    queryFn: async () => {
+      const res = await authorizedFetch(
+        `/api/orders/${orderId}/details/${detail.order_detail_id}/material-cost`
+      );
+      if (!res.ok) throw new Error('Failed to fetch material cost');
+      return res.json();
+    },
+    staleTime: 30_000,
   });
   const bomGridClass = showGlobalContext
     ? 'grid grid-cols-[minmax(180px,1fr)_65px_65px_65px_65px_65px_65px_65px] items-center gap-x-4'
@@ -136,6 +156,14 @@ export function ProductsTableRow({
           )}
         </TableCell>
 
+        {/* Material */}
+        <TableCell className="text-right tabular-nums">
+          <LineMaterialCostBadge
+            cost={materialCostQuery.data ?? null}
+            loading={materialCostQuery.isLoading}
+          />
+        </TableCell>
+
         {/* Total */}
         <TableCell className="text-right tabular-nums">
           {isEditing
@@ -197,7 +225,7 @@ export function ProductsTableRow({
         <>
           {/* BOM header row */}
           <TableRow className="hover:bg-transparent">
-            <TableCell colSpan={7} className="py-1.5 px-4 pl-12 border-l-2 border-l-primary/20">
+            <TableCell colSpan={8} className="py-1.5 px-4 pl-12 border-l-2 border-l-primary/20">
               <div className={cn(bomGridClass, 'text-xs font-medium text-muted-foreground uppercase tracking-wider')}>
                 <span className="min-w-[180px]">Component</span>
                 <span className="block text-right tabular-nums">Required</span>
@@ -226,7 +254,7 @@ export function ProductsTableRow({
                   idx % 2 === 0 ? 'bg-transparent' : 'bg-muted/10'
                 )}
               >
-                <TableCell colSpan={7} className="py-1.5 px-4 pl-12">
+                <TableCell colSpan={8} className="py-1.5 px-4 pl-12">
                   <div className={cn(bomGridClass, 'text-sm')}>
                     <div className="min-w-[180px] min-w-0">
                       {component.component_id ? (

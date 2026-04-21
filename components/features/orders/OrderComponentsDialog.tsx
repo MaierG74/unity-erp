@@ -1,12 +1,14 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import {
   fetchOrderComponentRequirements,
   fetchComponentSuppliers,
   createComponentPurchaseOrders,
+  componentSuppliersKey,
   SupplierOrderCreationError,
 } from '@/lib/queries/order-components';
 import type {
@@ -17,6 +19,7 @@ import type {
   SupplierOrderCreationFailure,
   SupplierOrderCreationSummary,
 } from '@/lib/queries/order-components';
+import { useOrderCuttingPlan } from '@/hooks/useOrderCuttingPlan';
 import { formatCurrency } from '@/lib/format-utils';
 import { ConsolidatePODialog, SupplierWithDrafts, ExistingDraftPO } from '@/components/features/purchasing/ConsolidatePODialog';
 
@@ -58,6 +61,7 @@ export const OrderComponentsDialog = ({
   const [pendingConsolidationPayload, setPendingConsolidationPayload] = useState<any>(null);
   const [includeInStock, setIncludeInStock] = useState(false);
   const queryClient = useQueryClient();
+  const router = useRouter();
 
   const buildDefaultComponentState = (supplierGroups: SupplierGroup[]) => {
     const quantities: Record<number, number> = {};
@@ -82,13 +86,16 @@ export const OrderComponentsDialog = ({
 
   // Group components by supplier
   const { data, isLoading, isError, error, refetch } = useQuery<SupplierGroup[]>({
-    queryKey: ['component-suppliers', orderId, includeInStock],
+    queryKey: [...componentSuppliersKey(orderId), includeInStock],
     queryFn: () => fetchComponentSuppliers(Number(orderId), includeInStock),
     // Refetch when dialog opens to ensure fresh data
     refetchOnMount: true,
     staleTime: 0, // Always consider data stale so it refetches when dialog opens
     enabled: open, // Only fetch when dialog is open
   });
+
+  const { plan } = useOrderCuttingPlan(Number(orderId));
+  const planIsStale = Boolean(plan?.stale);
 
   // Force refetch when dialog opens
   useEffect(() => {
@@ -290,7 +297,7 @@ export const OrderComponentsDialog = ({
       if (onCreated) onCreated();
 
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['component-suppliers', orderId] }),
+        queryClient.invalidateQueries({ queryKey: componentSuppliersKey(orderId) }),
         queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] }),
         queryClient.invalidateQueries({ queryKey: ['order', orderId] }),
         // Invalidate all purchase order queries to ensure the new order appears everywhere
@@ -542,7 +549,7 @@ export const OrderComponentsDialog = ({
       if (onCreated) onCreated();
 
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['component-suppliers', orderId] }),
+        queryClient.invalidateQueries({ queryKey: componentSuppliersKey(orderId) }),
         queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] }),
         queryClient.invalidateQueries({ queryKey: ['order', orderId] }),
         queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] }),
@@ -637,6 +644,29 @@ export const OrderComponentsDialog = ({
                     <span>{failure.reason}</span>
                   </div>
                 ))}
+              </div>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {planIsStale && (
+          <Alert className="mb-4 border-yellow-500/50 bg-yellow-500/10">
+            <AlertCircle className="h-4 w-4 text-yellow-500" />
+            <AlertTitle className="text-yellow-500">Cutting plan is stale</AlertTitle>
+            <AlertDescription className="text-yellow-500">
+              Component costs below reflect padded per-product estimates, not cross-product nested amounts.
+              Regenerate the cutting plan to lock in nested pricing before creating POs.
+              <div className="mt-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    router.replace('?tab=cutting-plan', { scroll: false });
+                    onOpenChange(false);
+                  }}
+                >
+                  Open cutting plan
+                </Button>
               </div>
             </AlertDescription>
           </Alert>

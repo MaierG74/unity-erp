@@ -282,6 +282,8 @@ export function useCuttingPlanBuilder(orderId: number) {
         source_revision: agg.source_revision,
         material_groups: materialGroups,
         component_overrides: overrides,
+        total_nested_cost: 0,
+        line_allocations: [],
       };
 
       setPendingPlan(newPlan);

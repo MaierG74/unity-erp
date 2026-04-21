@@ -37,7 +37,7 @@ import {
   updateOrderStatus,
   deleteAttachment,
 } from '@/lib/queries/order-queries';
-import { fetchOrderComponentRequirements, reserveOrderComponents, releaseOrderComponents } from '@/lib/queries/order-components';
+import { fetchOrderComponentRequirements, reserveOrderComponents, releaseOrderComponents, componentSuppliersKey } from '@/lib/queries/order-components';
 import { OrderComponentsDialog } from '@/components/features/orders/OrderComponentsDialog';
 import { AddProductsDialog } from '@/components/features/orders/AddProductsDialog';
 
@@ -336,6 +336,10 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
       queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] });
       queryClient.invalidateQueries({ queryKey: ['order-cutting-plan', orderId] });
+      // Line material cost is derived from cutting_plan.line_allocations — editing
+      // a line quantity staled the plan on the server; refetch badges now rather
+      // than wait 30s for staleTime.
+      queryClient.invalidateQueries({ queryKey: ['order-line-material-cost', orderId] });
       toast.success('Product updated successfully');
       setEditingDetailId(null);
     },
@@ -361,6 +365,10 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
       queryClient.invalidateQueries({ queryKey: ['fgReservations', orderId] });
       queryClient.invalidateQueries({ queryKey: ['order-cutting-plan', orderId] });
+      // Line material cost is derived from cutting_plan.line_allocations — removing
+      // a line staled the plan on the server; refetch badges now rather than wait
+      // 30s for staleTime.
+      queryClient.invalidateQueries({ queryKey: ['order-line-material-cost', orderId] });
       toast.success('Product removed from order');
     },
     onError: (error: Error) => {
@@ -595,7 +603,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
         queryClient.invalidateQueries({ queryKey: ['order', orderId] }),
       ]);
       // Also refresh supplier group data if dialog is open
-      queryClient.invalidateQueries({ queryKey: ['component-suppliers', String(orderId)] });
+      queryClient.invalidateQueries({ queryKey: componentSuppliersKey(orderId) });
     },
     onError: (error: any) => {
       console.error('[release-fg] mutation error', error);
@@ -936,7 +944,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                 onSuccess={() => {
                   queryClient.invalidateQueries({ queryKey: ['order', orderId] });
                   queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
-                  queryClient.invalidateQueries({ queryKey: ['component-suppliers', orderId] });
+                  queryClient.invalidateQueries({ queryKey: componentSuppliersKey(orderId) });
                   toast.success("Products added successfully");
                 }}
               />
@@ -953,6 +961,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                         <TableHead className="text-right">Reserved</TableHead>
                         <TableHead className="text-right">To Build</TableHead>
                         <TableHead className="text-right">Unit Price</TableHead>
+                        <TableHead className="text-right">Material</TableHead>
                         <TableHead className="text-right">Total</TableHead>
                         <TableHead className="text-right w-[100px]"></TableHead>
                       </TableRow>
@@ -977,11 +986,12 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                           <React.Fragment key={`frag-${detail.order_detail_id}`}>
                           {idx > 0 && (
                             <tr className="border-0 hover:bg-transparent">
-                              <td colSpan={7} className="h-5 p-0 border-0" />
+                              <td colSpan={8} className="h-5 p-0 border-0" />
                             </tr>
                           )}
                           <ProductsTableRow
                             key={detail.order_detail_id}
+                            orderId={orderId}
                             detail={detail}
                             coverage={coverage}
                             isEditing={isEditing}
@@ -1008,7 +1018,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                     </TableBody>
                     <TableFooter>
                       <TableRow>
-                        <TableCell colSpan={5}>Total</TableCell>
+                        <TableCell colSpan={6}>Total</TableCell>
                         <TableCell className="text-right">{formatCurrency(order.total_amount || 0)}</TableCell>
                         <TableCell />
                       </TableRow>

@@ -8,6 +8,19 @@ import {
 } from '@/types/components';
 
 // ---------------------------------------------------------------------------
+// React Query keys
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical React Query key for the component-suppliers query used by
+ * OrderComponentsDialog. Always coerces orderId to string so invalidators
+ * (which may pass number) and the subscriber (which passes string) agree —
+ * React Query compares key elements with strict equality.
+ */
+export const componentSuppliersKey = (orderId: number | string) =>
+  ['component-suppliers', String(orderId)] as const;
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
