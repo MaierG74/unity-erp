@@ -29,9 +29,9 @@ function makeAssignments(overrides: Partial<MaterialAssignments> = {}): Material
   };
 }
 
-test('computeEdging: edgingOverrides quantity is in meters, unit is "m"', () => {
-  // 1000mm × 500mm part, quantity 2, edge on top only
-  // edgingLength = length_mm (1000) × qty (2) = 2000mm = 2m
+test('computeEdging: top-only edge uses width_mm (short edge)', () => {
+  // 1000mm × 500mm part, qty 2, top edge only
+  // Top is a "width edge" so it spans width_mm (500) × qty (2) = 1000mm = 1m
   const group = makeGroup({
     parts: [
       {
@@ -62,13 +62,68 @@ test('computeEdging: edgingOverrides quantity is in meters, unit is "m"', () => 
   );
   assert.equal(
     result!.edgingOverrides[0].quantity,
-    2,
-    '2000mm of edging should be 2 meters of purchasing demand',
+    1,
+    '1000mm of edging should be 1 meter of purchasing demand',
   );
 });
 
+test('computeEdging: left-only edge uses length_mm (long edge)', () => {
+  // 1000mm × 500mm part, qty 1, left edge only
+  // Left is a "length edge" so it spans length_mm (1000) × qty (1) = 1000mm = 1m
+  const group = makeGroup({
+    parts: [
+      {
+        id: '1-left',
+        original_id: 'left',
+        order_detail_id: 1,
+        product_name: 'Cupboard',
+        name: 'Side',
+        grain: 'none',
+        quantity: 1,
+        width_mm: 500,
+        length_mm: 1000,
+        band_edges: { top: false, bottom: false, left: true, right: false },
+        lamination_type: 'none',
+      },
+    ],
+  });
+
+  const result = computeEdging([group], makeAssignments());
+  assert.ok(result);
+  assert.equal(result!.edgingOverrides[0].quantity, 1);
+});
+
+test('computeEdging: full-perimeter banding sums all four edges correctly', () => {
+  // 1000mm × 500mm part, qty 2, ALL four edges
+  // per-part perimeter = 2×length_mm + 2×width_mm = 2000 + 1000 = 3000mm
+  // × qty 2 = 6000mm = 6m
+  const group = makeGroup({
+    parts: [
+      {
+        id: '1-full',
+        original_id: 'full',
+        order_detail_id: 1,
+        product_name: 'Cupboard',
+        name: 'Door',
+        grain: 'none',
+        quantity: 2,
+        width_mm: 500,
+        length_mm: 1000,
+        band_edges: { top: true, bottom: true, left: true, right: true },
+        lamination_type: 'none',
+      },
+    ],
+  });
+
+  const result = computeEdging([group], makeAssignments());
+  assert.ok(result);
+  assert.equal(result!.edgingOverrides.length, 1);
+  assert.equal(result!.edgingOverrides[0].unit, 'm');
+  assert.equal(result!.edgingOverrides[0].quantity, 6);
+});
+
 test('computeEdging: sub-meter edging lengths are preserved as fractional meters', () => {
-  // 1234mm length × qty 1, edge top only → 1234mm = 1.234m
+  // 1234mm × 400mm, qty 1, top edge only — top spans width_mm = 400mm = 0.4m
   const group = makeGroup({
     parts: [
       {
@@ -91,12 +146,13 @@ test('computeEdging: sub-meter edging lengths are preserved as fractional meters
   assert.ok(result);
   assert.equal(result!.edgingOverrides.length, 1);
   assert.equal(result!.edgingOverrides[0].unit, 'm');
-  assert.equal(result!.edgingOverrides[0].quantity, 1.234);
+  assert.equal(result!.edgingOverrides[0].quantity, 0.4);
 });
 
 test('computeEdging: groupEdging display entries stay in mm (display unit)', () => {
   // The per-group display entries keep mm for the UI — only the
   // purchasing-facing edgingOverrides need to be in meters.
+  // 1000 × 500 qty 2, top only → width_mm (500) × 2 = 1000mm
   const group = makeGroup({
     parts: [
       {
@@ -121,5 +177,5 @@ test('computeEdging: groupEdging display entries stay in mm (display unit)', () 
   assert.ok(entries);
   assert.equal(entries!.length, 1);
   assert.equal(entries![0].unit, 'mm');
-  assert.equal(entries![0].length_mm, 2000);
+  assert.equal(entries![0].length_mm, 1000);
 });
