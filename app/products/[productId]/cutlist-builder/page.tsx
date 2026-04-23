@@ -161,7 +161,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
       edgingByMaterial: summary.edgingByMaterial ?? [],
       edgingOverrides: data.edgingOverrides,
     });
-    await adapter.saveSnapshot(snapshot, decision.partsHash);
+    await adapter.saveSnapshot(snapshot, decision.partsHash, data.parts);
   }, [adapter]);
 
   const handleSave = useCallback(async () => {
@@ -196,10 +196,18 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
   const [savingToCosting, setSavingToCosting] = useState(false);
 
   const handleSaveToCosting = useCallback(async () => {
-    if (!dataRef.current || !summaryRef.current?.result) return;
+    const data = dataRef.current;
+    if (!data || !summaryRef.current?.result) return;
 
     setSavingToCosting(true);
     try {
+      // Flush any pending debouncedSave and force the groups write to
+      // complete before the snapshot PUT. Without this the snapshot can
+      // describe parts that differ from what product_cutlist_groups
+      // currently holds, and the product-costing tab would read back
+      // inconsistent data.
+      adapter.cancelPendingSave();
+      await adapter.save(data);
       await persistSnapshot();
       toast.success('Costing snapshot saved');
     } catch (err) {
@@ -208,7 +216,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
     } finally {
       setSavingToCosting(false);
     }
-  }, [persistSnapshot]);
+  }, [adapter, persistSnapshot]);
 
   if (isNaN(productId)) {
     return (
