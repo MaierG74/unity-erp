@@ -39,8 +39,9 @@ type BolRow = {
   quantity: number
   jobs: {
     name: string
-    job_categories: { name: string; current_hourly_rate: number }
+    job_categories: { name: string }
   }
+  job_category_rates?: { hourly_rate: number } | null
   job_hourly_rates?: { hourly_rate: number } | null
   piece_work_rates?: { rate: number } | null
 }
@@ -342,8 +343,9 @@ export function ProductCosting({ productId }: { productId: number }) {
           quantity,
           jobs(
             name,
-            job_categories(name, current_hourly_rate)
+            job_categories(name)
           ),
+          job_category_rates(hourly_rate),
           job_hourly_rates(hourly_rate),
           piece_work_rates(rate)
         `)
@@ -388,7 +390,7 @@ export function ProductCosting({ productId }: { productId: number }) {
       const hours = toHours(Number(r.time_required), r.time_unit)
       const rate = usingEffectiveBol
         ? Number(r.hourly_rate ?? 0)
-        : Number(r.job_hourly_rates?.hourly_rate ?? r.jobs?.job_categories?.current_hourly_rate ?? 0)
+        : Number(r.job_hourly_rates?.hourly_rate ?? r.job_category_rates?.hourly_rate ?? 0)
       const line = hours * qty * rate
       return {
         category: usingEffectiveBol ? (r.category_name || '') : (r.jobs?.job_categories?.name || ''),

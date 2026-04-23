@@ -4,6 +4,10 @@ import { useState, useEffect } from 'react';
 import React from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import {
+  fetchJobCategories,
+  type JobCategoryWithRate,
+} from '@/lib/client/job-categories';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -64,12 +68,7 @@ import {
 } from '@/components/ui/dialog';
 
 // Define types
-interface JobCategory {
-  category_id: number;
-  name: string;
-  description: string | null;
-  current_hourly_rate: number;
-}
+type JobCategory = JobCategoryWithRate;
 
 interface LaborRole {
   role_id: number;
@@ -118,19 +117,15 @@ export function JobsManager() {
   // Fetch job categories
   const { data: categories = [], isLoading: categoriesLoading } = useQuery({
     queryKey: ['jobCategories'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('job_categories')
-        .select('*')
-        .order('name');
-        
-      if (error) throw error;
-      return data as JobCategory[];
-    },
+    queryFn: fetchJobCategories,
   });
+
+  const categoryById = React.useMemo(() => {
+    return new Map(categories.map((category) => [category.category_id, category]));
+  }, [categories]);
   
   // Fetch all jobs (no pagination)
-  const { data: allJobs = [], isLoading: jobsLoading, error: jobsError } = useQuery({
+  const { data: rawJobs = [], isLoading: jobsLoading, error: jobsError } = useQuery({
     queryKey: ['jobs'],
     queryFn: async () => {
       // Try full query with role_id first, fall back if column doesn't exist
@@ -142,12 +137,12 @@ export function JobsManager() {
           description,
           category_id,
           role_id,
-          job_categories (
-            category_id,
-            name,
-            description,
-            current_hourly_rate
-          ),
+            job_categories (
+              category_id,
+              name,
+              description,
+              parent_category_id
+            ),
           labor_roles (
             role_id,
             name,
@@ -166,12 +161,12 @@ export function JobsManager() {
             name,
             description,
             category_id,
-            job_categories (
-              category_id,
-              name,
-              description,
-              current_hourly_rate
-            )
+              job_categories (
+                category_id,
+                name,
+                description,
+                parent_category_id
+              )
           `)
           .order('name');
 
@@ -194,6 +189,14 @@ export function JobsManager() {
       })) as Job[];
     },
   });
+
+  const allJobs = React.useMemo(() => {
+    return rawJobs.map((job) => ({
+      ...job,
+      category: categoryById.get(job.category_id) ??
+        (job.category ? { ...job.category, rate_id: null, hourly_rate: 0 } : undefined),
+    }));
+  }, [rawJobs, categoryById]);
   
   // Filter and search jobs client-side
   const filteredJobs = React.useMemo(() => {
@@ -223,7 +226,7 @@ export function JobsManager() {
       return { total: 0, avgRate: 0, categoriesUsed: 0 };
     }
     
-    const rates = allJobs.map(j => j.category?.current_hourly_rate || 0).filter(r => r > 0);
+    const rates = allJobs.map(j => j.category?.hourly_rate || 0).filter(r => r > 0);
     const avgRate = rates.length > 0 ? rates.reduce((sum, r) => sum + r, 0) / rates.length : 0;
     const uniqueCategories = new Set(allJobs.map(j => j.category_id)).size;
     
@@ -500,7 +503,7 @@ export function JobsManager() {
                               </Badge>
                             )}
                             <span className="text-sm font-semibold text-primary">
-                              {job.category ? `R${job.category.current_hourly_rate.toFixed(2)}/hr` : 'N/A'}
+                              {job.category ? `R${job.category.hourly_rate.toFixed(2)}/hr` : 'N/A'}
                             </span>
                           </div>
                           {job.description && !isExpanded && (
@@ -593,7 +596,7 @@ export function JobsManager() {
                             key={category.category_id}
                             value={category.category_id.toString()}
                           >
-                            {category.name} - R{category.current_hourly_rate.toFixed(2)}/hr
+                            {category.name} - R{category.hourly_rate.toFixed(2)}/hr
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -697,7 +700,7 @@ export function JobsManager() {
                             key={category.category_id}
                             value={category.category_id.toString()}
                           >
-                            {category.name} - R{category.current_hourly_rate.toFixed(2)}/hr
+                            {category.name} - R{category.hourly_rate.toFixed(2)}/hr
                           </SelectItem>
                         ))}
                       </SelectContent>

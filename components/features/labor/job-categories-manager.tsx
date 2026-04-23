@@ -3,6 +3,10 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import {
+  fetchJobCategories,
+  type JobCategoryWithRate,
+} from '@/lib/client/job-categories';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -55,13 +59,7 @@ import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 
 // Define types
-interface JobCategory {
-  category_id: number;
-  name: string;
-  description: string | null;
-  current_hourly_rate: number;
-  parent_category_id: number | null;
-}
+type JobCategory = JobCategoryWithRate;
 
 interface JobCategoryRate {
   rate_id: number;
@@ -75,7 +73,7 @@ interface JobCategoryRate {
 const categorySchema = z.object({
   name: z.string().min(1, 'Name is required'),
   description: z.string().optional(),
-  current_hourly_rate: z.coerce.number().min(0, 'Hourly rate must be a positive number'),
+  hourly_rate: z.coerce.number().min(0, 'Hourly rate must be a positive number'),
   parent_category_id: z.string().optional(),
 });
 
@@ -109,7 +107,7 @@ export function JobCategoriesManager() {
     defaultValues: {
       name: '',
       description: '',
-      current_hourly_rate: 0,
+      hourly_rate: 0,
       parent_category_id: '',
     },
   });
@@ -126,14 +124,7 @@ export function JobCategoriesManager() {
   // Fetch job categories with job counts
   const { data: categories = [], isLoading: categoriesLoading } = useQuery({
     queryKey: ['jobCategories'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('job_categories')
-        .select('*');
-
-      if (error) throw error;
-      return data as JobCategory[];
-    },
+    queryFn: fetchJobCategories,
   });
 
   // Fetch job counts per category
@@ -224,8 +215,8 @@ export function JobCategoriesManager() {
       switch (sortBy) {
         case 'name-asc': return a.name.localeCompare(b.name);
         case 'name-desc': return b.name.localeCompare(a.name);
-        case 'rate-asc': return a.current_hourly_rate - b.current_hourly_rate;
-        case 'rate-desc': return b.current_hourly_rate - a.current_hourly_rate;
+        case 'rate-asc': return a.hourly_rate - b.hourly_rate;
+        case 'rate-desc': return b.hourly_rate - a.hourly_rate;
         case 'jobs-desc': return (jobCounts[b.category_id] || 0) - (jobCounts[a.category_id] || 0);
         default: return a.name.localeCompare(b.name);
       }
@@ -274,7 +265,7 @@ export function JobCategoriesManager() {
       return { parentCount: 0, subcategoryCount: 0, avgRate: 0, totalJobs: 0 };
     }
 
-    const rates = categories.map(c => c.current_hourly_rate);
+    const rates = categories.map(c => c.hourly_rate);
     const parentCount = parentCategories.length;
     const subcategoryCount = categories.length - parentCount;
     const avgRate = rates.reduce((sum, r) => sum + r, 0) / categories.length;
@@ -326,7 +317,6 @@ export function JobCategoriesManager() {
         .insert({
           name: values.name,
           description: values.description || null,
-          current_hourly_rate: values.current_hourly_rate,
           parent_category_id: values.parent_category_id ? parseInt(values.parent_category_id) : null,
         })
         .select();
@@ -338,7 +328,7 @@ export function JobCategoriesManager() {
         .from('job_category_rates')
         .insert({
           category_id: categoryId,
-          hourly_rate: values.current_hourly_rate,
+          hourly_rate: values.hourly_rate,
           effective_date: new Date().toISOString().split('T')[0],
         });
 
@@ -375,7 +365,6 @@ export function JobCategoriesManager() {
         .update({
           name: values.name,
           description: values.description || null,
-          current_hourly_rate: values.current_hourly_rate,
           parent_category_id: values.parent_category_id ? parseInt(values.parent_category_id) : null,
         })
         .eq('category_id', values.category_id)
@@ -388,7 +377,7 @@ export function JobCategoriesManager() {
       queryClient.invalidateQueries({ queryKey: ['jobCategories'] });
       setEditingId(null);
       setIsEditCategoryOpen(false);
-      categoryForm.reset({ name: '', description: '', current_hourly_rate: 0, parent_category_id: '' });
+      categoryForm.reset({ name: '', description: '', hourly_rate: 0, parent_category_id: '' });
       toast({
         title: 'Success',
         description: 'Job category updated',
@@ -456,7 +445,7 @@ export function JobCategoriesManager() {
 
       if (checkError) throw checkError;
 
-      let endDate = null;
+      let endDate: Date | null = null;
       if (laterRates && laterRates.length > 0) {
         endDate = new Date(laterRates[0].effective_date);
         endDate.setDate(endDate.getDate() - 1);
@@ -496,20 +485,6 @@ export function JobCategoriesManager() {
           .eq('rate_id', earlierRates[0].rate_id);
 
         if (updateError) throw updateError;
-      }
-
-      const today = new Date().toISOString().split('T')[0];
-      const effectiveDate = rateValues.effective_date.toISOString().split('T')[0];
-
-      if (effectiveDate <= today && (!endDate || endDate.toISOString().split('T')[0] >= today)) {
-        const { error: updateCategoryError } = await supabase
-          .from('job_categories')
-          .update({
-            current_hourly_rate: rateValues.hourly_rate,
-          })
-          .eq('category_id', categoryId);
-
-        if (updateCategoryError) throw updateCategoryError;
       }
 
       return data;
@@ -557,7 +532,7 @@ export function JobCategoriesManager() {
     categoryForm.reset({
       name: category.name,
       description: category.description || '',
-      current_hourly_rate: category.current_hourly_rate,
+      hourly_rate: category.hourly_rate,
       parent_category_id: category.parent_category_id?.toString() || '',
     });
     setIsEditCategoryOpen(true);
@@ -594,7 +569,7 @@ export function JobCategoriesManager() {
                 if (!isEdit && newVal) {
                   const parent = parentCategories.find(p => p.category_id === parseInt(newVal));
                   if (parent) {
-                    categoryForm.setValue('current_hourly_rate', parent.current_hourly_rate);
+                    categoryForm.setValue('hourly_rate', parent.hourly_rate);
                   }
                 }
               }}
@@ -663,7 +638,7 @@ export function JobCategoriesManager() {
                 )}
                 <h3 className="font-medium">{category.name}</h3>
                 <span className="text-sm font-semibold text-primary">
-                  R{category.current_hourly_rate.toFixed(2)}/hr
+                  R{category.hourly_rate.toFixed(2)}/hr
                 </span>
                 <Badge variant="secondary" className="text-xs">
                   {jobCount} {jobCount === 1 ? 'job' : 'jobs'}
@@ -698,7 +673,7 @@ export function JobCategoriesManager() {
                   categoryForm.reset({
                     name: '',
                     description: '',
-                    current_hourly_rate: category.current_hourly_rate,
+                    hourly_rate: category.hourly_rate,
                     parent_category_id: category.category_id.toString(),
                   });
                   setIsAddCategoryOpen(true);
@@ -1101,7 +1076,7 @@ export function JobCategoriesManager() {
 
               <FormField
                 control={categoryForm.control}
-                name="current_hourly_rate"
+                name="hourly_rate"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Initial Hourly Rate (R)</FormLabel>
@@ -1163,7 +1138,7 @@ export function JobCategoriesManager() {
           <DialogHeader>
             <DialogTitle>Edit Job Category</DialogTitle>
             <DialogDescription>
-              Update the category details and current rate
+              Update the category details. Manage hourly rates in Rate History.
             </DialogDescription>
           </DialogHeader>
           <Form {...categoryForm}>
@@ -1192,26 +1167,6 @@ export function JobCategoriesManager() {
                     <FormLabel>Description</FormLabel>
                     <FormControl>
                       <Textarea {...field} rows={3} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={categoryForm.control}
-                name="current_hourly_rate"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Current Hourly Rate (R)</FormLabel>
-                    <FormControl>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        className="h-9"
-                        {...field}
-                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

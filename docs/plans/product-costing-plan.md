@@ -12,7 +12,7 @@ Purpose: Provide a single place to see a product’s full unit cost combining ma
   - Use `suppliercomponents.price` when `supplier_component_id` is set; otherwise show `—` and treat as 0 with a warning.
   - Note: no currency conversion in v1; assumes one currency.
 - Labor cost: sum over BOL rows using mixed pay types.
-  - Hourly lines: `(time_required in hours) * quantity * hourly_rate` with rate from `job_category_rates` effective today (or `job_categories.current_hourly_rate` fallback).
+  - Hourly lines: `(time_required in hours) * quantity * hourly_rate` with rate from the saved `job_category_rates` row, falling back to the active category rate only for legacy rows without a saved `rate_id`.
   - Piecework lines (planned): `quantity * piece_rate` with rate from `piece_work_rates` effective today using `(job_id, product_id)` or job default.
 - Unit cost: `materials_cost + labor_cost`.
 - Optional fields (later): overhead %, scrap %, freight, margin %, and target price.
