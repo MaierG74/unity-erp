@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, Loader2, Edit, Trash2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Edit, Trash2, Ban, RotateCcw } from 'lucide-react';
 import { OverviewTab } from '@/components/features/inventory/component-detail/OverviewTab';
 import { SuppliersTab } from '@/components/features/inventory/component-detail/SuppliersTab';
 import { TransactionsTab as ComponentTransactionsTab } from '@/components/features/inventory/component-detail/TransactionsTab';
@@ -14,7 +14,9 @@ import { OrdersTab } from '@/components/features/inventory/component-detail/Orde
 import { AnalyticsTab } from '@/components/features/inventory/component-detail/AnalyticsTab';
 import { EditComponentDialog } from '@/components/features/inventory/component-detail/EditComponentDialog';
 import { DeleteComponentDialog } from '@/components/features/inventory/component-detail/DeleteComponentDialog';
+import { ToggleActiveDialog } from '@/components/features/inventory/component-detail/ToggleActiveDialog';
 import { ComponentSidebar } from '@/components/features/inventory/component-detail/ComponentSidebar';
+import { DisabledStamp } from '@/components/ui/disabled-stamp';
 
 export default function ComponentDetailPage() {
   const params = useParams();
@@ -22,6 +24,7 @@ export default function ComponentDetailPage() {
   const componentId = parseInt(params.id as string);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [toggleActiveDialogOpen, setToggleActiveDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
 
   // Fetch component data
@@ -195,12 +198,26 @@ export default function ComponentDetailPage() {
                 <ArrowLeft className="h-4 w-4" />
               </Button>
               <h1 className="text-3xl font-bold">{component.internal_code}</h1>
+              {component.is_active === false && <DisabledStamp />}
             </div>
 
             <div className="flex space-x-2">
               <Button variant="outline" onClick={() => setEditDialogOpen(true)}>
                 <Edit className="mr-2 h-4 w-4" />
                 Edit
+              </Button>
+              <Button variant="outline" onClick={() => setToggleActiveDialogOpen(true)}>
+                {component.is_active === false ? (
+                  <>
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    Enable
+                  </>
+                ) : (
+                  <>
+                    <Ban className="mr-2 h-4 w-4" />
+                    Disable
+                  </>
+                )}
               </Button>
               <Button variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
                 <Trash2 className="mr-2 h-4 w-4" />
@@ -279,6 +296,13 @@ export default function ComponentDetailPage() {
         onOpenChange={setDeleteDialogOpen}
         componentId={componentId}
         componentName={component.internal_code}
+      />
+      <ToggleActiveDialog
+        open={toggleActiveDialogOpen}
+        onOpenChange={setToggleActiveDialogOpen}
+        componentId={componentId}
+        componentName={component.internal_code}
+        isActive={component.is_active !== false}
       />
     </div>
   );

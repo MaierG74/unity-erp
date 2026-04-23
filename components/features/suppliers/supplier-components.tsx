@@ -16,6 +16,7 @@ import { useDebounce } from '@/hooks/use-debounce';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { CreateSupplierInventoryItemDialog } from '@/components/features/suppliers/create-supplier-inventory-item-dialog';
+import { DisabledStamp } from '@/components/ui/disabled-stamp';
 
 type OptionType = {
   value: string;
@@ -735,7 +736,13 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
               </tr>
             )}
             {paginatedComponents.map((component) => (
-              <tr key={component.supplier_component_id} className="border-b">
+              <tr
+                key={component.supplier_component_id}
+                className={cn(
+                  'border-b',
+                  component.component?.is_active === false && 'opacity-50'
+                )}
+              >
                 {editingId === component.supplier_component_id ? (
                   <>
                     <td className="p-4" colSpan={2}>
@@ -909,13 +916,16 @@ export function SupplierComponents({ supplier }: SupplierComponentsProps) {
                 ) : (
                   <>
                     <td className="p-4">
-                      <Link
-                        href={`/inventory/components/${component.component_id}`}
-                        className="text-primary hover:underline"
-                        title="View in master components"
-                      >
-                        {component.component.internal_code}
-                      </Link>
+                      <span className="inline-flex items-center gap-2">
+                        <Link
+                          href={`/inventory/components/${component.component_id}`}
+                          className="text-primary hover:underline"
+                          title="View in master components"
+                        >
+                          {component.component.internal_code}
+                        </Link>
+                        {component.component?.is_active === false && <DisabledStamp size="sm" />}
+                      </span>
                     </td>
                     <td className="p-4">{component.component.description}</td>
                     <td className="p-4">{component.supplier_code}</td>

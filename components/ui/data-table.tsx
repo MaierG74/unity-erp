@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { ChevronDown, ChevronUp } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { EditableCell } from '@/components/features/inventory/EditableCell'
 import { CategoryCell } from '@/components/features/inventory/CategoryCell'
 import { useUpdateComponent } from '@/hooks/use-update-component'
@@ -30,6 +31,7 @@ interface DataTableProps<T> {
     accessorKey: string
     header: string
     cell?: (row: T) => React.ReactNode
+    renderSuffix?: (row: T) => React.ReactNode
     enableFiltering?: boolean
     editable?: boolean
     filterValue?: (row: T) => string
@@ -38,6 +40,7 @@ interface DataTableProps<T> {
   onRowClick?: (row: T) => void
   selectedId?: string | number
   hideFilters?: boolean
+  rowClassName?: (row: T) => string | undefined
   // Controlled pagination (optional)
   pageIndex?: number
   pageSize?: number
@@ -55,6 +58,7 @@ export function DataTable<T extends { [key: string]: any }>({
   onRowClick,
   selectedId,
   hideFilters = false,
+  rowClassName,
   pageIndex: controlledPageIndex,
   pageSize: controlledPageSize,
   onPageChange,
@@ -220,18 +224,24 @@ export function DataTable<T extends { [key: string]: any }>({
 
   // Helper for rendering cell content
   const renderCellContent = (row: T, column: typeof columns[0], accessorKey: string) => {
-    // If the column has a custom cell renderer, use it
+    const suffix = column.renderSuffix?.(row)
+    const wrapWithSuffix = (node: React.ReactNode) =>
+      suffix ? (
+        <div className="flex items-center gap-2">
+          {node}
+          {suffix}
+        </div>
+      ) : node
+
     if (column.cell) {
-      return column.cell(row)
+      return wrapWithSuffix(column.cell(row))
     }
 
     const value = getValue(row, accessorKey)
-    
-    // Handle editable cells
+
     if (column.editable) {
-      // Handle different types of editable cells based on accessorKey
       if (accessorKey === 'internal_code' || accessorKey === 'description') {
-        return (
+        return wrapWithSuffix(
           <EditableCell
             value={value != null ? String(value) : ''}
             onSave={async (newValue) => {
@@ -383,9 +393,11 @@ export function DataTable<T extends { [key: string]: any }>({
             {paginatedData.map((row, rowIndex) => (
               <TableRow
                 key={rowIndex}
-                className={`cursor-pointer hover:bg-muted/50 ${
-                  selectedId !== undefined && row.component_id === selectedId ? 'bg-muted' : ''
-                }`}
+                className={cn(
+                  'cursor-pointer hover:bg-muted/50',
+                  selectedId !== undefined && row.component_id === selectedId && 'bg-muted',
+                  rowClassName?.(row)
+                )}
                 onClick={(e) => {
                   // Only prevent row selection if clicking on an actual interactive element
                   // like input, select, or button - not the entire editable cell

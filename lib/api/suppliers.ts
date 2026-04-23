@@ -8,6 +8,7 @@ export type SupplierComponentWithDetails = SupplierComponent & {
   component: {
     internal_code: string;
     description: string | null;
+    is_active: boolean | null;
     category: {
       cat_id: number;
       categoryname: string;
@@ -87,8 +88,9 @@ export async function getSupplierComponents(supplierId: number) {
     .select(`
       *,
       component:components(
-        internal_code, 
+        internal_code,
         description,
+        is_active,
         category:component_categories(cat_id, categoryname)
       )
     `)
