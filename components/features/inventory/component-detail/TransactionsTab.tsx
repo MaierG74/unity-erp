@@ -76,6 +76,11 @@ type User = {
   username: string;
 };
 
+type TransferCounterpart = {
+  component_id: number;
+  internal_code: string;
+};
+
 type InventoryTransaction = {
   transaction_id: number;
   quantity: number;
@@ -84,11 +89,13 @@ type InventoryTransaction = {
   purchase_order_id: number | null;
   user_id: string | null;
   reason: string | null;
+  transfer_ref: string | null;
   transaction_type: TransactionType | null;
   purchase_order: PurchaseOrder | null;
   order: Order | null;
   user: User | null;
   balance?: number; // Running balance after this transaction
+  transfer_counterpart?: TransferCounterpart | null;
 };
 
 type TransactionsTabProps = {
@@ -171,6 +178,12 @@ function getTransactionTypeStyle(typeName: string) {
         badgeClass: 'bg-blue-100 text-blue-800 hover:bg-blue-200 border-blue-200',
         iconClass: 'text-blue-600'
       };
+    case 'TRANSFER':
+      return {
+        icon: ArrowRightLeft,
+        badgeClass: 'bg-sky-100 text-sky-800 hover:bg-sky-200 border-sky-200',
+        iconClass: 'text-sky-600'
+      };
     default:
       return {
         icon: FileText,
@@ -233,6 +246,7 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
           purchase_order_id,
           user_id,
           reason,
+          transfer_ref,
           transaction_type:transaction_types (
             transaction_type_id,
             type_name
@@ -286,6 +300,48 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
     return map;
   }, [userProfiles]);
 
+  const transferRefs = useMemo(() => {
+    const refs = transactions
+      .map((t) => t.transfer_ref)
+      .filter((ref): ref is string => !!ref);
+    return [...new Set(refs)].sort();
+  }, [transactions]);
+
+  const transferRefsKey = transferRefs.join(',');
+
+  type CounterpartRow = {
+    transfer_ref: string | null;
+    component: { component_id: number; internal_code: string } | null;
+  };
+
+  const { data: transferCounterparts = [] } = useQuery<CounterpartRow[]>({
+    queryKey: ['component', componentId, 'transfer-counterparts', transferRefsKey],
+    queryFn: async () => {
+      if (transferRefs.length === 0) return [];
+      const { data, error } = await supabase
+        .from('inventory_transactions')
+        .select('transfer_ref, component:components ( component_id, internal_code )')
+        .in('transfer_ref', transferRefs)
+        .neq('component_id', componentId);
+      if (error) throw error;
+      return (data || []) as unknown as CounterpartRow[];
+    },
+    enabled: transferRefs.length > 0,
+  });
+
+  const counterpartMap = useMemo(() => {
+    const map = new Map<string, TransferCounterpart>();
+    transferCounterparts.forEach((row) => {
+      if (row.transfer_ref && row.component) {
+        map.set(row.transfer_ref, {
+          component_id: row.component.component_id,
+          internal_code: row.component.internal_code,
+        });
+      }
+    });
+    return map;
+  }, [transferCounterparts]);
+
   // Calculate running balance for each transaction
   const transactionsWithBalance: InventoryTransaction[] = transactions.reduce((acc, transaction, index) => {
     let balance: number;
@@ -297,7 +353,10 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
       const previousTransaction = acc[index - 1];
       balance = (previousTransaction.balance ?? 0) - (transactions[index - 1].quantity || 0);
     }
-    acc.push({ ...transaction, balance });
+    const transfer_counterpart = transaction.transfer_ref
+      ? counterpartMap.get(transaction.transfer_ref) ?? null
+      : null;
+    acc.push({ ...transaction, balance, transfer_counterpart });
     return acc;
   }, [] as InventoryTransaction[]);
 
@@ -857,6 +916,17 @@ export function TransactionsTab({ componentId, componentName = 'Component', supp
                           <Badge variant="secondary" className="cursor-pointer hover:bg-secondary/80">
                             <ShoppingCart className="h-3 w-3 mr-1" />
                             PO {transaction.purchase_order?.q_number || `#${transaction.purchase_order_id}`}
+                          </Badge>
+                        </Link>
+                      ) : transaction.transfer_counterpart ? (
+                        <Link
+                          href={`/inventory/components/${transaction.transfer_counterpart.component_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <Badge variant="secondary" className="cursor-pointer hover:bg-secondary/80">
+                            <ArrowRightLeft className="h-3 w-3 mr-1" />
+                            {quantity < 0 ? 'To' : 'From'} {transaction.transfer_counterpart.internal_code}
                           </Badge>
                         </Link>
                       ) : (

@@ -14,12 +14,14 @@ import {
   Calendar
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { DisabledStamp } from '@/components/ui/disabled-stamp';
 
 type ComponentData = {
   component_id: number;
   internal_code: string;
   description: string | null;
   image_url: string | null;
+  is_active: boolean | null;
   category: {
     cat_id: number;
     categoryname: string;
@@ -108,9 +110,12 @@ export function OverviewTab({ component }: OverviewTabProps) {
             </div>
 
             {/* Details */}
-            <div className="flex-1 space-y-4">
+            <div className={cn('flex-1 space-y-4', component.is_active === false && 'opacity-60')}>
               <div>
-                <h2 className="text-2xl font-bold">{component.internal_code || 'Unnamed Component'}</h2>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <h2 className="text-2xl font-bold">{component.internal_code || 'Unnamed Component'}</h2>
+                  {component.is_active === false && <DisabledStamp />}
+                </div>
                 <p className="text-muted-foreground mt-1">
                   {component.description || 'No description available'}
                 </p>

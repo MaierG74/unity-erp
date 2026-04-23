@@ -14,11 +14,13 @@ import { useAuth } from '@/components/common/auth-provider';
 import { cn } from "@/lib/utils";
 import { Plus, RefreshCw, Search, X, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { DisabledStamp } from '@/components/ui/disabled-stamp';
 
 type Component = {
   component_id: number;
   internal_code: string;
   description: string | null;
+  is_active: boolean | null;
   image_url: string | null;
   category: {
     cat_id: number;
@@ -62,7 +64,9 @@ const columns = [
   {
     accessorKey: 'internal_code',
     header: 'Code',
-    editable: true
+    editable: true,
+    renderSuffix: (row: Component) =>
+      row.is_active === false ? <DisabledStamp size="sm" /> : null,
   },
   {
     accessorKey: 'description',
@@ -677,6 +681,9 @@ export function ComponentsTab() {
             router.push(`/inventory/components/${component.component_id}`);
           }}
           hideFilters={true}
+          rowClassName={(component: Component) =>
+            component.is_active === false ? 'opacity-50' : undefined
+          }
           pageIndex={currentPage}
           pageSize={pageSize}
           onPageChange={handlePageChange}
