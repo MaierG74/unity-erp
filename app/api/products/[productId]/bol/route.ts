@@ -29,6 +29,29 @@ async function resolveHourlyRateId(jobId: number, today: string): Promise<number
   return data && data.length > 0 ? Number(data[0].rate_id) : null;
 }
 
+async function resolveCategoryRateId(jobId: number, today: string): Promise<number | null> {
+  const { data: job, error: jobError } = await supabaseAdmin
+    .from('jobs')
+    .select('category_id')
+    .eq('job_id', jobId)
+    .maybeSingle();
+
+  if (jobError) throw jobError;
+  if (!job?.category_id) return null;
+
+  const { data, error } = await supabaseAdmin
+    .from('job_category_rates')
+    .select('rate_id')
+    .eq('category_id', job.category_id)
+    .lte('effective_date', today)
+    .or(`end_date.is.null,end_date.gte.${today}`)
+    .order('effective_date', { ascending: false })
+    .limit(1);
+
+  if (error) throw error;
+  return data && data.length > 0 ? Number(data[0].rate_id) : null;
+}
+
 async function resolvePieceRateId(jobId: number, productId: number, today: string): Promise<number | null> {
   const { data, error } = await supabaseAdmin
     .from('piece_work_rates')
@@ -106,10 +129,18 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
       if (!validTimeUnits.includes(timeUnit)) {
         return NextResponse.json({ error: `time_unit must be one of: ${validTimeUnits.join(', ')}` }, { status: 400 });
       }
+      const categoryRateId = await resolveCategoryRateId(jobId, today);
+      if (!categoryRateId) {
+        return NextResponse.json(
+          { error: "No active hourly rate for this job's category" },
+          { status: 400 },
+        );
+      }
       insertData.pay_type = 'hourly';
       insertData.time_required = timeRequired;
       insertData.time_unit = timeUnit;
       insertData.hourly_rate_id = await resolveHourlyRateId(jobId, today);
+      insertData.rate_id = categoryRateId;
       insertData.piece_rate_id = null;
     }
 
