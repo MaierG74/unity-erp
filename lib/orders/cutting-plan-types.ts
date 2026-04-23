@@ -5,7 +5,10 @@ import type { SheetLayout } from '@/lib/cutlist/types';
 export type CuttingPlanOverride = {
   component_id: number;
   quantity: number;
-  unit: 'sheets' | 'mm';
+  // 'sheets' for primary/backer boards, 'm' for edging (purchasing unit).
+  // 'mm' is legacy — historic plans may still carry it; readers that honor
+  // unit must convert mm → m when computing purchasing demand.
+  unit: 'sheets' | 'm' | 'mm';
   source: 'cutlist_primary' | 'cutlist_backer' | 'cutlist_edging';
 };
 

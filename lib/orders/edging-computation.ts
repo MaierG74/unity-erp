@@ -143,8 +143,10 @@ export function computeEdging(
     globalTotals.entries(),
   ).map(([componentId, { length_mm }]) => ({
     component_id: componentId,
-    quantity: Math.round(length_mm),
-    unit: 'mm' as const,
+    // Edging is sold and purchased by the meter; convert from the mm
+    // accumulator so downstream purchasing demand is in the right unit.
+    quantity: Math.round(length_mm) / 1000,
+    unit: 'm' as const,
     source: 'cutlist_edging' as const,
   }));
 
