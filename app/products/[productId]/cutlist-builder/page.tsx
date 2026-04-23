@@ -201,11 +201,8 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
 
     setSavingToCosting(true);
     try {
-      // Flush any pending debouncedSave and force the groups write to
-      // complete before the snapshot PUT. Without this the snapshot can
-      // describe parts that differ from what product_cutlist_groups
-      // currently holds, and the product-costing tab would read back
-      // inconsistent data.
+      // Flush groups before the snapshot PUT so the snapshot can't describe
+      // parts that product_cutlist_groups doesn't yet know about.
       adapter.cancelPendingSave();
       await adapter.save(data);
       await persistSnapshot();

@@ -52,11 +52,8 @@ function resolveEdgingForPart(
 /**
  * Compute edging lengths per edging component from regrouped material groups.
  *
- * For each part with band_edges, calculates total edging length from
- * top/bottom (part.width_mm — the short edges) and left/right
- * (part.length_mm — the long edges) × quantity. This mirrors the UI in
- * PartsInputTable ("Edge width" → top/bottom; "Edge length" → left/right)
- * and the edging cost calc in CutlistCalculator.
+ * Axis convention: top/bottom edges span part.width_mm (short edges);
+ * left/right edges span part.length_mm (long edges). Total is × quantity.
  *
  * Returns null if any part with edges is missing an edging assignment.
  */

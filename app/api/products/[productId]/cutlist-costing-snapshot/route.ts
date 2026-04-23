@@ -67,10 +67,7 @@ export async function PUT(
     );
   }
 
-  // Recompute the hash server-side so the client can't fabricate a hash
-  // that doesn't actually describe the parts it's committing. This closes
-  // the stale-tab window where a snapshot written under an old hash would
-  // silently land next to newer product_cutlist_groups.
+  // Authenticate parts_hash by recomputing from the supplied parts.
   const serverHash = computePartsHash(body.parts);
   if (serverHash !== body.parts_hash) {
     return NextResponse.json(

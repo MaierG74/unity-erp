@@ -1163,15 +1163,11 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     setIsCalculating(true);
     setSaProgress(null);
     setActiveTab('preview');
-    // Close the save gate for the duration of the calc. Clearing the hash
-    // and flipping stale=true forces the Save button disabled state (see
-    // runCalculation's hash set + Save to Costing disabled prop) so a click
-    // mid-calc can't commit a mixed primary+stale-backer snapshot.
+    // Close the save gate while the calc runs.
     setResultPartsHash(undefined);
     setLayoutIsStale(true);
-    // Hash of the exact parts this calculation is running against. Captured
-    // up front so we don't read a newer parts closure if the user edits
-    // during the async pack(s) — round-1 stale-closure regression.
+    // Hash partsToUse (not the closed-over parts state) so a mid-calc edit
+    // can't be silently saved under this run's hash.
     const calculationPartsHash = computePartsHash(partsToUse);
     // Yield to let UI update state immediately
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -1391,14 +1387,12 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
         res.stats.edgebanding_32mm_mm = edging32mm;
       }
 
-      // Drop primary result if a newer calc has taken over.
       if (abortController.signal.aborted) return;
 
       setResult(res);
       setEdgingByMaterialMap(edgingPerMaterial);
-      // NOTE: Do NOT reset sheetOverrides/globalFullBoard here.
-      // layoutIsStale stays true until AFTER the backer pack finishes, so
-      // the Save gate sees the layout as in-flight and refuses to commit.
+      // Intentionally keep layoutIsStale=true across the primary publish —
+      // the Save gate must stay closed until the backer pack finishes.
 
       const backerParts: PartSpec[] = partSpecs
         .filter((p) => p.lamination_type === 'with-backer')
@@ -1416,25 +1410,16 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
         });
       }
 
-      // If a newer calc has taken over (abort() is called on the prior
-      // controller when runCalculation re-enters), don't stomp its staged
-      // state with our stale result.
       if (abortController.signal.aborted) return;
 
-      // Publish backer, clear the stale flag, and commit the hash atomically.
-      // Doing this in one place — after BOTH packs finish — closes the window
-      // where a Save to Costing click could commit a new-primary + stale-backer
-      // snapshot. The hash is the one captured from partsToUse at the start
-      // of this run (not the closed-over parts state) so if the user edited
-      // parts mid-calc, layoutIsStale will immediately re-trip via the hash-
-      // compare effect.
+      // Commit backer + stale flag + hash atomically so Save can never see
+      // a new-primary + stale-backer snapshot between the two packs.
       setBackerResult(stagedBackerResult);
       setLayoutIsStale(false);
       setResultPartsHash(calculationPartsHash);
     } finally {
-      // Only clear the calc-in-flight flag if we're still the current run.
-      // A newer call will have replaced abortControllerRef.current; in that
-      // case the new run owns the flag and we must not reset it.
+      // Only clear in-flight state if we're still the current run — a newer
+      // call will have replaced abortControllerRef.current, and it owns the flag.
       if (abortControllerRef.current === abortController) {
         setIsCalculating(false);
         setSaProgress(null);
