@@ -1383,7 +1383,6 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
 
       setResult(res);
       setLayoutIsStale(false);
-      setResultPartsHash(computePartsHash(parts));
       setEdgingByMaterialMap(edgingPerMaterial);
       // NOTE: Do NOT reset sheetOverrides/globalFullBoard here.
 
@@ -1404,6 +1403,13 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
       } else {
         setBackerResult(null);
       }
+
+      // Mark the hash ONLY after BOTH primary and backer packs have completed.
+      // Doing this earlier (between the two) opens a window where the save
+      // gate thinks the layout is fresh but backerResult is still stale/null
+      // from a prior calc, so a Save to Costing click in that window would
+      // commit a mismatched layout.
+      setResultPartsHash(computePartsHash(parts));
     } finally {
       setIsCalculating(false);
       setSaProgress(null);
