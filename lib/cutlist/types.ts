@@ -527,6 +527,10 @@ export interface CutlistSummary {
   materials?: CutlistMaterialSummary[];
   /** Per-edging-material breakdown for export (one entry per unique edging material used) */
   edgingByMaterial?: EdgingSummaryEntry[];
+  /** Hash of the parts that produced `result`. Undefined if never calculated.
+   *  Used to detect staleness: if current parts hash differs from this,
+   *  the layout is out of date and must not be persisted as a costing snapshot. */
+  resultPartsHash?: string;
 }
 
 /** Summary entry for a single edging material used across parts */

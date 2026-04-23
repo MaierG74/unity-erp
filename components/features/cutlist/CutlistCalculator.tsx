@@ -298,6 +298,10 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   const [result, setResult] = React.useState<LayoutResult | null>(null);
   const [backerResult, setBackerResult] = React.useState<LayoutResult | null>(null);
   const [layoutIsStale, setLayoutIsStale] = React.useState(false);
+  // Hash of parts that produced the current `result`. Used to detect when
+  // the user edited parts after calculating, so Save to Costing can refuse
+  // to persist a stale layout as fresh.
+  const [resultPartsHash, setResultPartsHash] = React.useState<string | undefined>(undefined);
   // Per-edging-material length accumulation from last calculation
   const [edgingByMaterialMap, setEdgingByMaterialMap] = React.useState<Map<string, number>>(new Map());
 
@@ -384,6 +388,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     setResult(savedLayout);
     setBackerResult(snapshotWithLegacyShape.backer_layout ?? null);
     setLayoutIsStale(false);
+    setResultPartsHash(savedPartsHash);
 
     const restoredEdgingByMaterial = new Map<string, number>();
     for (const e of savedSnapshot.edging) {
@@ -395,6 +400,16 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     setEdgingByMaterialMap(restoredEdgingByMaterial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run once on mount — savedSnapshot is a prop, not state
+
+  // Watch parts after a successful calculation: if the user edits parts,
+  // the current result becomes stale. The next recalc clears the flag
+  // (by setting resultPartsHash to the fresh hash).
+  React.useEffect(() => {
+    if (!resultPartsHash) return;
+    if (computePartsHash(parts) !== resultPartsHash) {
+      setLayoutIsStale(true);
+    }
+  }, [parts, resultPartsHash]);
 
   const packingConfig = React.useMemo(
     () => ({
@@ -989,6 +1004,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
       totalCost,
       materials: materialSummaries,
       edgingByMaterial: edgingByMaterial.length > 0 ? edgingByMaterial : undefined,
+      resultPartsHash,
     };
 
     setSummary(newSummary);
@@ -1014,6 +1030,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     backerSheetOverrides,
     backerGlobalFullBoard,
     edgingByMaterialMap,
+    resultPartsHash,
     onSummaryChange,
   ]);
 
@@ -1169,6 +1186,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
         setResult(null);
         setBackerResult(null);
         setLayoutIsStale(false);
+        setResultPartsHash(undefined);
         return;
       }
 
@@ -1365,6 +1383,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
 
       setResult(res);
       setLayoutIsStale(false);
+      setResultPartsHash(computePartsHash(parts));
       setEdgingByMaterialMap(edgingPerMaterial);
       // NOTE: Do NOT reset sheetOverrides/globalFullBoard here.
 
@@ -1431,6 +1450,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     setBackerSheetOverrides({});
     setBackerGlobalFullBoard(false);
     setLayoutIsStale(false);
+    setResultPartsHash(undefined);
     setSummary(null);
   };
 
