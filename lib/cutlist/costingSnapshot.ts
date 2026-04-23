@@ -52,6 +52,8 @@ export interface SnapshotCalculatorInputs {
 export interface CutlistCostingSnapshot {
   sheets: SnapshotSheet[];
   global_full_board: boolean;
+  primary_layout: LayoutResult;
+  backer_layout: LayoutResult | null;
   edging: SnapshotEdging[];
   board_prices: SnapshotBoardPrice[];
   backer_sheets: SnapshotSheet[] | null;
@@ -66,6 +68,10 @@ export interface CutlistCostingSnapshot {
     total_cuts: number;
   };
 }
+
+export type RestoredCutlistCostingSnapshot = CutlistCostingSnapshot & {
+  parts_hash?: string;
+};
 
 // =============================================================================
 // Parts Hash
@@ -214,6 +220,8 @@ export function buildSnapshotFromCalculator(args: BuildSnapshotArgs): CutlistCos
   return {
     sheets,
     global_full_board: globalFullBoard,
+    primary_layout: result,
+    backer_layout: backerResult ?? null,
     edging,
     board_prices,
     backer_sheets,

@@ -69,7 +69,10 @@ import type {
 } from '@/lib/cutlist/types';
 
 import { EdgingOverrideRow } from './primitives/EdgingOverrideRow';
-import type { CutlistCostingSnapshot } from '@/lib/cutlist/costingSnapshot';
+import {
+  computePartsHash,
+  type RestoredCutlistCostingSnapshot,
+} from '@/lib/cutlist/costingSnapshot';
 
 // Import packing
 import { packPartsSmartOptimized, type SAProgressInfo } from '@/components/features/cutlist/packing';
@@ -166,7 +169,7 @@ export interface CutlistCalculatorProps {
   /** Extra content rendered in the card header actions area */
   headerRight?: React.ReactNode;
   /** Previously saved costing snapshot — used to restore sheet/edging overrides on load */
-  savedSnapshot?: CutlistCostingSnapshot | null;
+  savedSnapshot?: RestoredCutlistCostingSnapshot | null;
   /** Additional class name */
   className?: string;
 }
@@ -294,6 +297,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   // ============== Results ==============
   const [result, setResult] = React.useState<LayoutResult | null>(null);
   const [backerResult, setBackerResult] = React.useState<LayoutResult | null>(null);
+  const [layoutIsStale, setLayoutIsStale] = React.useState(false);
   // Per-edging-material length accumulation from last calculation
   const [edgingByMaterialMap, setEdgingByMaterialMap] = React.useState<Map<string, number>>(new Map());
 
@@ -355,6 +359,40 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
       }
     }
     setEdgingOverrides(restoredEdgingOverrides);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run once on mount — savedSnapshot is a prop, not state
+
+  // Restore saved layout from snapshot when it matches the current parts.
+  React.useEffect(() => {
+    if (!savedSnapshot) return;
+
+    const snapshotWithLegacyShape = savedSnapshot as RestoredCutlistCostingSnapshot & {
+      primary_layout?: LayoutResult;
+      backer_layout?: LayoutResult | null;
+    };
+    const savedLayout = snapshotWithLegacyShape.primary_layout;
+    if (!savedLayout) return;
+
+    const savedPartsHash = savedSnapshot.parts_hash;
+    if (!savedPartsHash) return;
+
+    if (computePartsHash(parts) !== savedPartsHash) {
+      setLayoutIsStale(true);
+      return;
+    }
+
+    setResult(savedLayout);
+    setBackerResult(snapshotWithLegacyShape.backer_layout ?? null);
+    setLayoutIsStale(false);
+
+    const restoredEdgingByMaterial = new Map<string, number>();
+    for (const e of savedSnapshot.edging) {
+      const lengthMm = e.meters_actual * 1000;
+      if (e.material_id && Number.isFinite(lengthMm) && lengthMm > 0) {
+        restoredEdgingByMaterial.set(e.material_id, lengthMm);
+      }
+    }
+    setEdgingByMaterialMap(restoredEdgingByMaterial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run once on mount — savedSnapshot is a prop, not state
 
@@ -1130,6 +1168,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
       if (partSpecs.length === 0) {
         setResult(null);
         setBackerResult(null);
+        setLayoutIsStale(false);
         return;
       }
 
@@ -1325,6 +1364,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
       }
 
       setResult(res);
+      setLayoutIsStale(false);
       setEdgingByMaterialMap(edgingPerMaterial);
       // NOTE: Do NOT reset sheetOverrides/globalFullBoard here.
 
@@ -1390,6 +1430,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     setGlobalFullBoard(false);
     setBackerSheetOverrides({});
     setBackerGlobalFullBoard(false);
+    setLayoutIsStale(false);
     setSummary(null);
   };
 
@@ -1656,15 +1697,24 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
               )}
 
               {!result && !saProgress ? (
-                <div className="text-muted-foreground py-8 text-center">
-                  {isCalculating ? (
-                    <div className="flex flex-col items-center gap-2">
-                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                      <p>Optimizing layout...</p>
-                    </div>
-                  ) : (
-                    'No results yet. Add parts and click Calculate Layout.'
+                <div className="space-y-3">
+                  {layoutIsStale && !isCalculating && (
+                    <Alert className="border-amber-400/70 bg-amber-50 py-2 dark:bg-amber-950/30">
+                      <AlertDescription className="text-sm">
+                        ⚠️ Parts have changed since the last layout was saved. Click Recalculate to refresh.
+                      </AlertDescription>
+                    </Alert>
                   )}
+                  <div className="text-muted-foreground py-8 text-center">
+                    {isCalculating ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                        <p>Optimizing layout...</p>
+                      </div>
+                    ) : (
+                      'No results yet. Add parts and click Calculate Layout.'
+                    )}
+                  </div>
                 </div>
               ) : result ? (
                 <div className="space-y-4">
