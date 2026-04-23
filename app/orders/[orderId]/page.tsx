@@ -1463,7 +1463,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
 
       {/* ── Order Components Dialog ── */}
       <OrderComponentsDialog
-        orderId={orderId.toString()}
+        orderId={orderId}
         open={orderComponentsOpen}
         onOpenChange={setOrderComponentsOpen}
         onCreated={() => refetchComponentRequirements()}
