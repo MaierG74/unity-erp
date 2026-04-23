@@ -144,7 +144,8 @@ export default function AddJobDialog({
       onApplied?.();
     } catch (e) {
       console.error("Add job failed", e);
-      alert("Failed to add job");
+      const message = e instanceof Error && e.message ? e.message : "Failed to add job";
+      alert(message);
     }
   }
 
