@@ -942,9 +942,15 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
               <AddProductsDialog
                 orderId={orderId}
                 onSuccess={() => {
+                  // The server marks any existing cutting plan stale when
+                  // lines change, but the client still needs to refetch the
+                  // plan (so the stale flag surfaces) and the per-line
+                  // material-cost badges (so they drop their nested basis).
                   queryClient.invalidateQueries({ queryKey: ['order', orderId] });
                   queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] });
                   queryClient.invalidateQueries({ queryKey: componentSuppliersKey(orderId) });
+                  queryClient.invalidateQueries({ queryKey: ['order-cutting-plan', orderId] });
+                  queryClient.invalidateQueries({ queryKey: ['order-line-material-cost', orderId] });
                   toast.success("Products added successfully");
                 }}
               />
