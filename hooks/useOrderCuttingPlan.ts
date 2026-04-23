@@ -65,7 +65,7 @@ export function useOrderCuttingPlan(orderId: number) {
         // so they must refetch after a new plan is saved.
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ['order-cutting-plan', orderId] }),
-          queryClient.invalidateQueries({ queryKey: ['order-components', orderId] }),
+          queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] }),
           queryClient.invalidateQueries({ queryKey: componentSuppliersKey(orderId) }),
           queryClient.invalidateQueries({ queryKey: ['order-line-material-cost', orderId] }),
         ]);
@@ -83,8 +83,13 @@ export function useOrderCuttingPlan(orderId: number) {
       { method: 'DELETE' }
     );
     if (!res.ok) throw new Error('Failed to clear cutting plan');
+    // Mirror the confirm fan-out: clearing the plan makes the Order Components
+    // dialog and supplier lookups stale too (cutlist overrides disappear and
+    // non-cutlist demand reshapes).
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['order-cutting-plan', orderId] }),
+      queryClient.invalidateQueries({ queryKey: ['orderComponentRequirements', orderId] }),
+      queryClient.invalidateQueries({ queryKey: componentSuppliersKey(orderId) }),
       queryClient.invalidateQueries({ queryKey: ['order-line-material-cost', orderId] }),
     ]);
   }, [orderId, queryClient]);

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireProductsAccess, parsePositiveInt } from '@/lib/api/products-access';
 import { supabaseAdmin } from '@/lib/supabase-admin';
+import { computePartsHash } from '@/lib/cutlist/costingSnapshot';
+import type { CompactPart } from '@/components/features/cutlist/primitives/CompactPartsTable';
 
 /**
  * GET /api/products/[productId]/cutlist-costing-snapshot
@@ -51,15 +53,33 @@ export async function PUT(
     return NextResponse.json({ error: 'Invalid product ID' }, { status: 400 });
   }
 
-  let body: { snapshot_data?: unknown; parts_hash?: string };
+  let body: { snapshot_data?: unknown; parts_hash?: string; parts?: CompactPart[] };
   try {
     body = (await request.json()) as typeof body;
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  if (!body.snapshot_data || typeof body.parts_hash !== 'string') {
-    return NextResponse.json({ error: 'snapshot_data and parts_hash are required' }, { status: 400 });
+  if (!body.snapshot_data || typeof body.parts_hash !== 'string' || !Array.isArray(body.parts)) {
+    return NextResponse.json(
+      { error: 'snapshot_data, parts_hash, and parts are required' },
+      { status: 400 },
+    );
+  }
+
+  // Recompute the hash server-side so the client can't fabricate a hash
+  // that doesn't actually describe the parts it's committing. This closes
+  // the stale-tab window where a snapshot written under an old hash would
+  // silently land next to newer product_cutlist_groups.
+  const serverHash = computePartsHash(body.parts);
+  if (serverHash !== body.parts_hash) {
+    return NextResponse.json(
+      {
+        error: 'Snapshot parts_hash does not match the supplied parts. Recalculate and try again.',
+        code: 'PARTS_HASH_MISMATCH',
+      },
+      { status: 409 },
+    );
   }
 
   // Verify product exists and belongs to org

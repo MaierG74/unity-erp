@@ -442,7 +442,7 @@ export async function createComponentPurchaseOrders(
   notes: Record<number, string>,
   orderQuantities: Record<number, number>,
   allocation: Record<number, { forThisOrder: number; forStock: number }>,
-  orderId: string
+  orderId: number
 ) {
   try {
     // Get the draft status ID
@@ -487,7 +487,7 @@ export async function createComponentPurchaseOrders(
             component_id: component.component.component_id,
             quantity_for_order: componentAllocation.forThisOrder,
             quantity_for_stock: componentAllocation.forStock,
-            customer_order_id: parseInt(orderId, 10)
+            customer_order_id: orderId
           };
         });
 

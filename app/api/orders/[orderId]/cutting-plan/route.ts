@@ -35,6 +35,28 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
   if (!body.source_revision || !Array.isArray(body.material_groups)) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
   }
+
+  // Reject legacy mm-denominated edging overrides. The RPCs that consume
+  // component_overrides read `quantity` directly with no unit awareness
+  // (see 20260401000001_cutting_plan_aware_rpcs.sql), so a stray unit='mm'
+  // entry causes a 1000x blow-up on edging purchasing demand. The client
+  // has emitted meters since commit 80638df; any mm we see now is a stale
+  // tab, a replay, or a hand-crafted write — reject rather than silently
+  // normalize so the user is forced to regenerate the plan.
+  if (Array.isArray(body.component_overrides)) {
+    const offender = body.component_overrides.find(
+      (o) => o?.source === 'cutlist_edging' && o?.unit === 'mm',
+    );
+    if (offender) {
+      return NextResponse.json(
+        {
+          error: 'Legacy mm-denominated edging override rejected. Regenerate the cutting plan.',
+          code: 'LEGACY_MM_EDGING_OVERRIDE',
+        },
+        { status: 400 },
+      );
+    }
+  }
   // total_nested_cost and line_allocations are server-computed; client values are ignored.
 
   // Verify source revision — reject if order details OR material_assignments changed.

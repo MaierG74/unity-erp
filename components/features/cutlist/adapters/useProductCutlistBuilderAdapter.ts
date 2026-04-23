@@ -4,6 +4,7 @@ import { useCallback } from 'react';
 
 import type { CutlistCalculatorData } from '@/components/features/cutlist/CutlistCalculator';
 import type { CutlistCostingSnapshot } from '@/lib/cutlist/costingSnapshot';
+import type { CompactPart } from '@/components/features/cutlist/primitives/CompactPartsTable';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { MODULE_KEYS } from '@/lib/modules/keys';
 import { effectiveBomItemsToSeedRows, type CutlistCalculatorInitialData } from '@/lib/cutlist/calculatorData';
@@ -81,15 +82,18 @@ export function useProductCutlistBuilderAdapter(productId: number | null | undef
   const saveSnapshot = useCallback(async (
     snapshotData: CutlistCostingSnapshot,
     partsHash: string,
+    parts: CompactPart[],
   ): Promise<void> => {
     if (!productId || Number.isNaN(productId)) return;
 
+    // Send the parts array alongside parts_hash so the server can
+    // recompute the hash and reject fabricated or stale-tab values.
     const res = await authorizedFetch(
       `/api/products/${productId}/cutlist-costing-snapshot?module=${MODULE_KEYS.CUTLIST_OPTIMIZER}`,
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ snapshot_data: snapshotData, parts_hash: partsHash }),
+        body: JSON.stringify({ snapshot_data: snapshotData, parts_hash: partsHash, parts }),
       }
     );
 

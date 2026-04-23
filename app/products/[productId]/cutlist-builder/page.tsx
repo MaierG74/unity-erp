@@ -15,6 +15,7 @@ import {
   type CutlistCostingSnapshot,
   type RestoredCutlistCostingSnapshot,
 } from '@/lib/cutlist/costingSnapshot';
+import { decideSnapshotSave } from '@/lib/cutlist/snapshot-freshness';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { MODULE_KEYS } from '@/lib/modules/keys';
 
@@ -131,6 +132,19 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
     const summary = summaryRef.current;
     if (!data || !summary?.result) return;
 
+    // Gate: the snapshot must be saved with the hash of the parts that
+    // produced the current layout, and those parts must still match what
+    // the user sees. Otherwise we'd persist a stale layout under a fresh
+    // hash, silently misleading the product costing tab.
+    const currentPartsHash = computePartsHash(data.parts);
+    const decision = decideSnapshotSave({
+      resultPartsHash: summary.resultPartsHash,
+      currentPartsHash,
+    });
+    if (!decision.canSave) {
+      throw new Error(decision.reason);
+    }
+
     const snapshot = buildSnapshotFromCalculator({
       result: summary.result,
       backerResult: summary.backerResult,
@@ -147,8 +161,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
       edgingByMaterial: summary.edgingByMaterial ?? [],
       edgingOverrides: data.edgingOverrides,
     });
-    const partsHash = computePartsHash(data.parts);
-    await adapter.saveSnapshot(snapshot, partsHash);
+    await adapter.saveSnapshot(snapshot, decision.partsHash, data.parts);
   }, [adapter]);
 
   const handleSave = useCallback(async () => {
@@ -158,7 +171,20 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
     setSaving(true);
     try {
       await adapter.save(data);
-      if (summaryRef.current?.result) await persistSnapshot();
+      // Snapshot save is best-effort here — the main intent of Save is to
+      // persist parts. If the layout is stale (parts edited after calc),
+      // skip the snapshot silently; the user can explicitly recalculate
+      // and use Save to Costing to commit a fresh snapshot.
+      const summary = summaryRef.current;
+      if (summary?.result) {
+        const decision = decideSnapshotSave({
+          resultPartsHash: summary.resultPartsHash,
+          currentPartsHash: computePartsHash(data.parts),
+        });
+        if (decision.canSave) {
+          await persistSnapshot();
+        }
+      }
       toast.success('Cutlist saved to product');
     } catch {
       toast.error('Failed to save cutlist');
@@ -170,18 +196,27 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
   const [savingToCosting, setSavingToCosting] = useState(false);
 
   const handleSaveToCosting = useCallback(async () => {
-    if (!dataRef.current || !summaryRef.current?.result) return;
+    const data = dataRef.current;
+    if (!data || !summaryRef.current?.result) return;
 
     setSavingToCosting(true);
     try {
+      // Flush any pending debouncedSave and force the groups write to
+      // complete before the snapshot PUT. Without this the snapshot can
+      // describe parts that differ from what product_cutlist_groups
+      // currently holds, and the product-costing tab would read back
+      // inconsistent data.
+      adapter.cancelPendingSave();
+      await adapter.save(data);
       await persistSnapshot();
       toast.success('Costing snapshot saved');
-    } catch {
-      toast.error('Failed to save costing snapshot');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to save costing snapshot';
+      toast.error(message);
     } finally {
       setSavingToCosting(false);
     }
-  }, [persistSnapshot]);
+  }, [adapter, persistSnapshot]);
 
   if (isNaN(productId)) {
     return (

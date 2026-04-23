@@ -43,7 +43,7 @@ export const OrderComponentsDialog = ({
   onOpenChange,
   onCreated
 }: {
-  orderId: string;
+  orderId: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated?: () => void;
@@ -87,14 +87,14 @@ export const OrderComponentsDialog = ({
   // Group components by supplier
   const { data, isLoading, isError, error, refetch } = useQuery<SupplierGroup[]>({
     queryKey: [...componentSuppliersKey(orderId), includeInStock],
-    queryFn: () => fetchComponentSuppliers(Number(orderId), includeInStock),
+    queryFn: () => fetchComponentSuppliers(orderId, includeInStock),
     // Refetch when dialog opens to ensure fresh data
     refetchOnMount: true,
     staleTime: 0, // Always consider data stale so it refetches when dialog opens
     enabled: open, // Only fetch when dialog is open
   });
 
-  const { plan } = useOrderCuttingPlan(Number(orderId));
+  const { plan } = useOrderCuttingPlan(orderId);
   const planIsStale = Boolean(plan?.stale);
 
   // Force refetch when dialog opens
@@ -109,7 +109,7 @@ export const OrderComponentsDialog = ({
       // Check if there are components with apparent shortfall but no real shortfall
       const checkApparentShortfall = async () => {
         try {
-          const requirements = await fetchOrderComponentRequirements(Number(orderId));
+          const requirements = await fetchOrderComponentRequirements(orderId);
           const hasApparentShortfall = requirements.some(req =>
             req.components.some(comp => comp.apparent_shortfall > 0 && comp.real_shortfall === 0)
           );
@@ -453,7 +453,7 @@ export const OrderComponentsDialog = ({
               component_id: component.component.component_id,
               quantity_for_order: componentAllocation.forThisOrder,
               quantity_for_stock: componentAllocation.forStock,
-              customer_order_id: parseInt(pendingConsolidationPayload.orderId, 10)
+              customer_order_id: pendingConsolidationPayload.orderId
             };
           });
 
