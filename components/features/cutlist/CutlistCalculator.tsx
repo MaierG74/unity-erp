@@ -1163,6 +1163,16 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     setIsCalculating(true);
     setSaProgress(null);
     setActiveTab('preview');
+    // Close the save gate for the duration of the calc. Clearing the hash
+    // and flipping stale=true forces the Save button disabled state (see
+    // runCalculation's hash set + Save to Costing disabled prop) so a click
+    // mid-calc can't commit a mixed primary+stale-backer snapshot.
+    setResultPartsHash(undefined);
+    setLayoutIsStale(true);
+    // Hash of the exact parts this calculation is running against. Captured
+    // up front so we don't read a newer parts closure if the user edits
+    // during the async pack(s) — round-1 stale-closure regression.
+    const calculationPartsHash = computePartsHash(partsToUse);
     // Yield to let UI update state immediately
     await new Promise(resolve => setTimeout(resolve, 0));
 
@@ -1381,39 +1391,55 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
         res.stats.edgebanding_32mm_mm = edging32mm;
       }
 
+      // Drop primary result if a newer calc has taken over.
+      if (abortController.signal.aborted) return;
+
       setResult(res);
-      setLayoutIsStale(false);
       setEdgingByMaterialMap(edgingPerMaterial);
       // NOTE: Do NOT reset sheetOverrides/globalFullBoard here.
+      // layoutIsStale stays true until AFTER the backer pack finishes, so
+      // the Save gate sees the layout as in-flight and refuses to commit.
 
       const backerParts: PartSpec[] = partSpecs
         .filter((p) => p.lamination_type === 'with-backer')
         .map((p) => ({ ...p, grain: 'any', require_grain: undefined, band_edges: undefined } as PartSpec));
 
+      let stagedBackerResult: LayoutResult | null = null;
       if (backerParts.length > 0) {
         const backerStockWithKerf: StockSheetSpec[] = [{ ...backerStock[0], kerf_mm: Math.max(0, kerf) }];
-        const resBacker = await packPartsSmartOptimized(backerParts, backerStockWithKerf, {
+        stagedBackerResult = await packPartsSmartOptimized(backerParts, backerStockWithKerf, {
           allowRotation: true,
           singleSheetOnly,
           algorithm,
           packingConfig,
           timeBudgetMs: algorithm === 'deep' ? deepTimeBudget * 1000 : 2000,
         });
-        setBackerResult(resBacker);
-      } else {
-        setBackerResult(null);
       }
 
-      // Mark the hash ONLY after BOTH primary and backer packs have completed.
-      // Doing this earlier (between the two) opens a window where the save
-      // gate thinks the layout is fresh but backerResult is still stale/null
-      // from a prior calc, so a Save to Costing click in that window would
-      // commit a mismatched layout.
-      setResultPartsHash(computePartsHash(parts));
+      // If a newer calc has taken over (abort() is called on the prior
+      // controller when runCalculation re-enters), don't stomp its staged
+      // state with our stale result.
+      if (abortController.signal.aborted) return;
+
+      // Publish backer, clear the stale flag, and commit the hash atomically.
+      // Doing this in one place — after BOTH packs finish — closes the window
+      // where a Save to Costing click could commit a new-primary + stale-backer
+      // snapshot. The hash is the one captured from partsToUse at the start
+      // of this run (not the closed-over parts state) so if the user edited
+      // parts mid-calc, layoutIsStale will immediately re-trip via the hash-
+      // compare effect.
+      setBackerResult(stagedBackerResult);
+      setLayoutIsStale(false);
+      setResultPartsHash(calculationPartsHash);
     } finally {
-      setIsCalculating(false);
-      setSaProgress(null);
-      abortControllerRef.current = null;
+      // Only clear the calc-in-flight flag if we're still the current run.
+      // A newer call will have replaced abortControllerRef.current; in that
+      // case the new run owns the flag and we must not reset it.
+      if (abortControllerRef.current === abortController) {
+        setIsCalculating(false);
+        setSaProgress(null);
+        abortControllerRef.current = null;
+      }
     }
   }, [stock, backerStock, kerf, allowRotation, singleSheetOnly, optimizationPriority, deepTimeBudget, primaryBoards, edging, packingConfig]);
 
@@ -1903,7 +1929,12 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                       <Button
                         size="sm"
                         onClick={onSaveToCosting}
-                        disabled={savingToCosting}
+                        disabled={
+                          savingToCosting ||
+                          isCalculating ||
+                          layoutIsStale ||
+                          !resultPartsHash
+                        }
                         className="gap-1.5"
                       >
                         {savingToCosting ? (
