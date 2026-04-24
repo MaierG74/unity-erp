@@ -3,6 +3,29 @@ import { requireModuleAccess } from '@/lib/api/module-access'
 import { MODULE_KEYS } from '@/lib/modules/keys'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 
+async function resolveCategoryRateId(jobId: number, today: string): Promise<number | null> {
+  const { data: job, error: jobError } = await supabaseAdmin
+    .from('jobs')
+    .select('category_id')
+    .eq('job_id', jobId)
+    .maybeSingle()
+
+  if (jobError) throw jobError
+  if (!job?.category_id) return null
+
+  const { data, error } = await supabaseAdmin
+    .from('job_category_rates')
+    .select('rate_id')
+    .eq('category_id', job.category_id)
+    .lte('effective_date', today)
+    .or(`end_date.is.null,end_date.gte.${today}`)
+    .order('effective_date', { ascending: false })
+    .limit(1)
+
+  if (error) throw error
+  return data && data.length > 0 ? Number(data[0].rate_id) : null
+}
+
 async function requireProductsAccess(request: NextRequest) {
   const access = await requireModuleAccess(request, MODULE_KEYS.PRODUCTS_BOM, {
     forbiddenMessage: 'Products module access is disabled for your organization',
@@ -96,10 +119,6 @@ export async function POST(req: NextRequest, context: { params: Promise<{ produc
       supplier_component_id: row.supplier_component_id ?? null,
     }))
 
-    // Insert all BOM rows
-    const { error: insBomErr } = await supabaseAdmin.from('billofmaterials').insert(rows)
-    if (insBomErr) throw insBomErr
-
     // Fetch the sub-product's BOL rows
     const { data: childBol, error: bolErr } = await supabaseAdmin
       .from('billoflabour')
@@ -109,14 +128,18 @@ export async function POST(req: NextRequest, context: { params: Promise<{ produc
 
     if (bolErr) throw bolErr
 
-    let bolAdded = 0
+    // Resolve rates and build BOL insert rows BEFORE any writes, so a 400 on
+    // rate resolution cannot leave partial state (e.g. inserted BOM rows with
+    // no matching BOL). See billoflabour_pay_pairing_chk: hourly rows must
+    // have a non-null legacy rate_id.
+    const bolInsertRows: any[] = []
     if (childBol && childBol.length > 0) {
       const today = new Date().toISOString().split('T')[0]
 
-      const resultRows: any[] = []
       for (const row of childBol) {
         let pieceRateId: number | null = row.piece_rate_id ?? null
         let hourlyRateId: number | null = row.hourly_rate_id ?? null
+        let categoryRateId: number | null = null
         const payType = (row.pay_type || 'hourly') as 'hourly' | 'piece'
 
         if (payType === 'piece') {
@@ -143,27 +166,40 @@ export async function POST(req: NextRequest, context: { params: Promise<{ produc
             .limit(1)
           if (hErr) throw hErr
           hourlyRateId = hrates && hrates.length > 0 ? hrates[0].rate_id : null
+          // Legacy rate_id is required by billoflabour_pay_pairing_chk for hourly rows.
+          categoryRateId = await resolveCategoryRateId(row.job_id, today)
+          if (!categoryRateId) {
+            return NextResponse.json(
+              { error: `No active hourly rate for job ${row.job_id}'s category` },
+              { status: 400 },
+            )
+          }
         }
 
-        resultRows.push({
+        bolInsertRows.push({
           product_id: parentProductId,
           job_id: row.job_id,
           time_required: row.time_required,
           time_unit: row.time_unit || 'hours',
           quantity: Number(row.quantity || 1) * scale,
-          rate_id: row.rate_id ?? null, // legacy fallback
+          rate_id: payType === 'hourly' ? categoryRateId : null,
           pay_type: payType,
           piece_rate_id: pieceRateId,
           hourly_rate_id: hourlyRateId,
           org_id: auth.orgId,
         })
       }
+    }
 
-      if (resultRows.length > 0) {
-        const { error: insBolErr } = await supabaseAdmin.from('billoflabour').insert(resultRows)
-        if (insBolErr) throw insBolErr
-        bolAdded = resultRows.length
-      }
+    // All resolution succeeded — safe to write. Insert BOM then BOL.
+    const { error: insBomErr } = await supabaseAdmin.from('billofmaterials').insert(rows)
+    if (insBomErr) throw insBomErr
+
+    let bolAdded = 0
+    if (bolInsertRows.length > 0) {
+      const { error: insBolErr } = await supabaseAdmin.from('billoflabour').insert(bolInsertRows)
+      if (insBolErr) throw insBolErr
+      bolAdded = bolInsertRows.length
     }
 
     return NextResponse.json({ addedBom: rows.length, addedBol: bolAdded })
