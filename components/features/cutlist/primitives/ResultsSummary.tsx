@@ -105,8 +105,7 @@ export interface ResultsSummaryProps {
 
 /**
  * Displays a summary of cutlist calculation results including:
- * - Sheets used and billable
- * - Board utilization percentage
+ * - Primary sheets used, utilization, and billable sheets
  * - Edgebanding totals (16mm and 32mm)
  * - Lamination status
  * - Optional backer sheet stats when lamination is enabled
@@ -160,9 +159,9 @@ export function ResultsSummary({
           showBackerStats ? 'md:grid-cols-6' : 'md:grid-cols-5'
         )}
       >
-        <Stat label="Sheets used" value={primarySheetsUsed.toFixed(3)} />
+        <Stat label="Primary sheets used" value={primarySheetsUsed.toFixed(3)} />
+        <Stat label="Primary used %" value={`${usedPercent.toFixed(1)}%`} />
         <Stat label="Billable sheets" value={primarySheetsBillable.toFixed(3)} />
-        <Stat label="Board used %" value={`${usedPercent.toFixed(1)}%`} />
         <EdgeStat
           label="Edge 16mm"
           value={`${edgebanding16mFormatted}m`}
