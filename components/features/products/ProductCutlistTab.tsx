@@ -29,6 +29,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Popover,
   PopoverContent,
@@ -117,6 +118,7 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
   const [showLinked, setShowLinked] = useState(false);
   const [activePickerKey, setActivePickerKey] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState('');
   const [deleteDialogRow, setDeleteDialogRow] = useState<CutlistRow | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -174,6 +176,16 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
         component.category?.categoryname?.toLowerCase() === MELAMINE_CATEGORY.toLowerCase()
     );
   }, [componentsList]);
+
+  const filteredPalette = useMemo(() => {
+    const q = paletteQuery.trim().toLowerCase();
+    if (!q) return melamineComponents;
+    return melamineComponents.filter((component) => {
+      const code = component.internal_code?.toLowerCase() ?? '';
+      const desc = component.description?.toLowerCase() ?? '';
+      return code.includes(q) || desc.includes(q);
+    });
+  }, [melamineComponents, paletteQuery]);
 
   const allCutlistRows: CutlistRow[] = useMemo(() => {
     if (dataSource === 'groups') {
@@ -755,7 +767,7 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
           </Button>
         </CardHeader>
         {paletteOpen ? (
-          <CardContent>
+          <CardContent className="space-y-3">
             {componentsLoading ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <RefreshCw className="h-4 w-4 animate-spin" />
@@ -767,21 +779,36 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
                 category yet. Add them in the Components catalogue to make them available here.
               </p>
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {melamineComponents.map((component) => (
-                  <div
-                    key={component.component_id}
-                    className="rounded-md border bg-muted/30 p-3 text-sm"
-                  >
-                    <div className="font-semibold text-foreground">
-                      {component.internal_code ?? `Component #${component.component_id}`}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {component.description ?? 'No description'}
-                    </div>
+              <>
+                <Input
+                  type="search"
+                  placeholder="Search by code or description…"
+                  value={paletteQuery}
+                  onChange={(event) => setPaletteQuery(event.target.value)}
+                  className="max-w-sm"
+                />
+                {filteredPalette.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No boards match “{paletteQuery}”.
+                  </p>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {filteredPalette.map((component) => (
+                      <div
+                        key={component.component_id}
+                        className="rounded-md border bg-muted/30 p-3 text-sm"
+                      >
+                        <div className="font-semibold text-foreground">
+                          {component.internal_code ?? `Component #${component.component_id}`}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {component.description ?? 'No description'}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             )}
           </CardContent>
         ) : null}
