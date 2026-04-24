@@ -763,11 +763,6 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
                 Configurator Locked
               </Button>
             )}
-            <Link href={`/products/${product.product_id}/cutlist-builder`}>
-              <Button variant="outline" size="sm" className="gap-1.5">
-                Cutlist Builder
-              </Button>
-            </Link>
           </div>
           <ProductCutlistTab productId={product.product_id} />
         </TabsContent>
