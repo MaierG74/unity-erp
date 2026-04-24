@@ -4,7 +4,7 @@ import * as React from 'react';
 import { cn } from '@/lib/utils';
 import { useOrgSettings } from '@/hooks/use-org-settings';
 import { BarChart3, Info, Calculator, Trash2, HelpCircle } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -1498,10 +1498,6 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <CardTitle>Layout & Inputs</CardTitle>
-              <CardDescription>
-                Configure materials, add parts, and preview optimized sheet layouts. Material settings are saved
-                automatically.
-              </CardDescription>
             </div>
             <div className="flex gap-2 self-end lg:self-auto">
               {headerRight}
