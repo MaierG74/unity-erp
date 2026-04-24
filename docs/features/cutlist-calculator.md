@@ -21,7 +21,8 @@ The `CutlistCalculator` component is now the canonical cutlist experience inside
 Product cutlist builder behavior:
 - When saved `product_cutlist_groups` exist, the builder loads those first.
 - When no saved groups exist, the builder seeds the calculator from the product's effective BOM cutlist rows so the product Cutlist tab and the builder page start from the same manufacturing data.
-- The product Cutlist tab's **Generate Cutlist** action routes into the builder page instead of opening the legacy product-specific calculator dialog.
+- The product Cutlist tab reads the same `product_cutlist_groups` first, falls back to effective BOM cutlist rows only when no saved groups exist, and shows saved layout snapshot stats when available.
+- The product Cutlist tab's cutlist action routes into the builder page instead of opening the legacy product-specific calculator dialog, including when the product has no cutlist parts yet.
 - The quote cutlist API routes now follow the quoting module/org access pattern before reading or mutating quote cutlist snapshots and costing lines.
 - Quote cutlist client requests now send the signed-in session token, and the calculator falls back cleanly when no saved cutlist material defaults row exists yet.
 - Duplicating a quote line or an entire quote now copies saved `quote_item_cutlists` snapshots and rewires embedded `lineRefs` to the duplicated costing lines, so copied quote items open with the same cutlist state instead of an empty builder.

@@ -9,19 +9,12 @@ import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { MODULE_KEYS } from '@/lib/modules/keys';
 import { effectiveBomItemsToSeedRows, type CutlistCalculatorInitialData } from '@/lib/cutlist/calculatorData';
 import { effectiveBomRowsToCompactParts } from '@/lib/cutlist/effectiveBomSeed';
+import { loadProductCutlistData } from '@/lib/cutlist/productCutlistLoader';
 import {
   flattenGroupsToCompactParts,
   regroupPartsToApiGroups,
 } from '@/lib/configurator/cutlistGroupConversion';
 import { useDebouncedAsyncCallback } from './shared';
-
-interface ProductCutlistGroupsResponse {
-  groups?: unknown[];
-}
-
-interface EffectiveBomResponse {
-  items?: Record<string, unknown>[];
-}
 
 export function useProductCutlistBuilderAdapter(productId: number | null | undefined) {
   const load = useCallback(async (): Promise<CutlistCalculatorInitialData | null> => {
@@ -29,31 +22,19 @@ export function useProductCutlistBuilderAdapter(productId: number | null | undef
       return null;
     }
 
-    const groupsRes = await authorizedFetch(
-      `/api/products/${productId}/cutlist-groups?module=${MODULE_KEYS.CUTLIST_OPTIMIZER}`
-    );
-    if (!groupsRes.ok) {
-      throw new Error('Failed to load product cutlist groups');
+    const data = await loadProductCutlistData(productId);
+
+    if (data.source === 'groups') {
+      return { parts: flattenGroupsToCompactParts(data.groups as never[]) };
     }
 
-    const groupsJson = (await groupsRes.json()) as ProductCutlistGroupsResponse;
-    const groups = Array.isArray(groupsJson?.groups) ? groupsJson.groups : [];
-
-    if (groups.length > 0) {
-      return { parts: flattenGroupsToCompactParts(groups as never[]) };
+    if (data.source === 'bom') {
+      const bomSeedRows = effectiveBomItemsToSeedRows(data.bomItems as unknown as Record<string, unknown>[]);
+      const parts = effectiveBomRowsToCompactParts(bomSeedRows);
+      return parts.length > 0 ? { parts } : null;
     }
 
-    const bomRes = await authorizedFetch(`/api/products/${productId}/effective-bom`);
-    if (!bomRes.ok) {
-      throw new Error('Failed to load effective BOM');
-    }
-
-    const bomJson = (await bomRes.json()) as EffectiveBomResponse;
-    const items = Array.isArray(bomJson?.items) ? bomJson.items : [];
-    const bomSeedRows = effectiveBomItemsToSeedRows(items);
-    const parts = effectiveBomRowsToCompactParts(bomSeedRows);
-
-    return parts.length > 0 ? { parts } : null;
+    return null;
   }, [productId]);
 
   const save = useCallback(async (data: CutlistCalculatorData): Promise<void> => {

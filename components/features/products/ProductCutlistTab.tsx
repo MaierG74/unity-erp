@@ -6,6 +6,11 @@ import { useRouter } from 'next/navigation';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { supabase } from '@/lib/supabase';
 import {
+  productCutlistDataKey,
+  useProductCutlistData,
+} from '@/hooks/useProductCutlistData';
+import { useProductCutlistSnapshot } from '@/hooks/useProductCutlistSnapshot';
+import {
   Card,
   CardContent,
   CardDescription,
@@ -43,6 +48,12 @@ import {
   summariseCutlistDimensions,
   CutlistDimensions,
 } from '@/lib/cutlist/cutlistDimensions';
+import type { CutlistCostingSnapshot } from '@/lib/cutlist/costingSnapshot';
+import { groupsToCutlistRows } from '@/lib/cutlist/groupsToCutlistRows';
+import type {
+  CutlistDataSource,
+  EffectiveBomItem,
+} from '@/lib/cutlist/productCutlistLoader';
 import { cn } from '@/lib/utils';
 import { Calculator, Loader2, Palette, RefreshCw, Trash2 } from 'lucide-react';
 import {
@@ -60,21 +71,6 @@ interface ProductCutlistTabProps {
   productId: number;
 }
 
-interface EffectiveBOMItem {
-  bom_id?: number | null;
-  component_id: number;
-  quantity_required: number;
-  supplier_component_id: number | null;
-  suppliercomponents?: { price?: number } | null;
-  _source?: 'direct' | 'link' | 'rpc';
-  _sub_product_id?: number | null;
-  _editable?: boolean;
-  component_description?: string | null;
-  is_cutlist_item?: boolean | null;
-  cutlist_category?: string | null;
-  cutlist_dimensions?: CutlistDimensions | null;
-}
-
 interface ComponentRecord {
   component_id: number;
   internal_code: string | null;
@@ -84,17 +80,13 @@ interface ComponentRecord {
   } | null;
 }
 
-interface EffectiveBomResponse {
-  items: EffectiveBOMItem[];
-}
-
 interface CutlistRow {
   key: string;
   bomId: number | null;
   componentId: number;
   componentCode: string;
   componentDescription: string | null;
-  source: EffectiveBOMItem['_source'];
+  source: EffectiveBomItem['_source'];
   isEditable: boolean;
   category: string | null;
   dimensions: CutlistDimensions | null;
@@ -104,6 +96,19 @@ interface CutlistRow {
 }
 
 const MELAMINE_CATEGORY = 'Melamine';
+
+function snapshotSheetsUsed(snapshot: CutlistCostingSnapshot): string {
+  const used = snapshot.primary_layout?.sheets?.length ?? 0;
+  const backer = snapshot.backer_layout?.sheets?.length ?? 0;
+  return backer > 0 ? `${used} + ${backer} backer` : String(used);
+}
+
+function snapshotBoardUsedPct(snapshot: CutlistCostingSnapshot): string {
+  const used = snapshot.stats?.total_used_area_mm2 ?? 0;
+  const total = used + (snapshot.stats?.total_waste_area_mm2 ?? 0);
+  if (total <= 0) return '—';
+  return `${((used / total) * 100).toFixed(1)}%`;
+}
 
 export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
   const [showLinked, setShowLinked] = useState(false);
@@ -115,22 +120,16 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
   const router = useRouter();
 
   const {
-    data: effectiveBom,
-    isLoading: bomLoading,
-    isRefetching: bomRefetching,
-    error: bomError,
-    refetch: refetchBom,
-  } = useQuery<EffectiveBomResponse>({
-    queryKey: ['cutlist-effective-bom', productId],
-    queryFn: async () => {
-      const res = await authorizedFetch(`/api/products/${productId}/effective-bom`);
-      if (!res.ok) {
-        throw new Error('Failed to load cutlist data');
-      }
-      return res.json();
-    },
-    retry: 1,
-  });
+    data: cutlistData,
+    isLoading: cutlistLoading,
+    isRefetching: cutlistRefetching,
+    error: cutlistError,
+    refetch: refetchCutlist,
+  } = useProductCutlistData(productId);
+
+  const { data: snapshot } = useProductCutlistSnapshot(productId);
+
+  const dataSource: CutlistDataSource = cutlistData?.source ?? 'empty';
 
   const {
     data: componentsList = [],
@@ -174,35 +173,44 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
   }, [componentsList]);
 
   const allCutlistRows: CutlistRow[] = useMemo(() => {
-    const items = effectiveBom?.items ?? [];
-    return items
-      .filter((item) => {
-        const hasCutlistFlag = Boolean(item.is_cutlist_item);
-        const hasDimensions = item.cutlist_dimensions && Object.keys(item.cutlist_dimensions).length > 0;
-        return hasCutlistFlag || hasDimensions;
-      })
-      .map((item, index) => {
-        const component = componentById.get(item.component_id);
-        const dimensions = cloneCutlistDimensions(item.cutlist_dimensions) ?? null;
-        const quantityRequired = Number(item.quantity_required ?? 0) || 0;
-        const quantityPer = Number(dimensions?.quantity_per ?? 1) || 1;
-        const totalParts = quantityRequired * quantityPer;
-        return {
-          key: item.bom_id ? `bom:${item.bom_id}` : `computed:${item.component_id}:${index}`,
-          bomId: item.bom_id ?? null,
-          componentId: item.component_id,
-          componentCode: component?.internal_code ?? `Component #${item.component_id}`,
-          componentDescription: item.component_description ?? component?.description ?? null,
-          source: item._source ?? 'direct',
-          isEditable: Boolean(item._editable) && Boolean(item.bom_id),
-          category: item.cutlist_category ?? null,
-          dimensions,
-          quantityRequired,
-          quantityPer,
-          totalParts,
-        };
-      });
-  }, [effectiveBom?.items, componentById]);
+    if (dataSource === 'groups') {
+      return groupsToCutlistRows(cutlistData?.groups ?? []);
+    }
+
+    if (dataSource === 'bom') {
+      const items = cutlistData?.bomItems ?? [];
+      return items
+        .filter((item) => {
+          const hasCutlistFlag = Boolean(item.is_cutlist_item);
+          const hasDimensions =
+            item.cutlist_dimensions && Object.keys(item.cutlist_dimensions).length > 0;
+          return hasCutlistFlag || hasDimensions;
+        })
+        .map((item, index) => {
+          const component = componentById.get(item.component_id);
+          const dimensions = cloneCutlistDimensions(item.cutlist_dimensions) ?? null;
+          const quantityRequired = Number(item.quantity_required ?? 0) || 0;
+          const quantityPer = Number(dimensions?.quantity_per ?? 1) || 1;
+          const totalParts = quantityRequired * quantityPer;
+          return {
+            key: item.bom_id ? `bom:${item.bom_id}` : `computed:${item.component_id}:${index}`,
+            bomId: item.bom_id ?? null,
+            componentId: item.component_id,
+            componentCode: component?.internal_code ?? `Component #${item.component_id}`,
+            componentDescription: item.component_description ?? component?.description ?? null,
+            source: item._source ?? 'direct',
+            isEditable: Boolean(item._editable) && Boolean(item.bom_id),
+            category: item.cutlist_category ?? null,
+            dimensions,
+            quantityRequired,
+            quantityPer,
+            totalParts,
+          };
+        });
+    }
+
+    return [];
+  }, [dataSource, cutlistData, componentById]);
 
   const displayRows = useMemo(() => {
     return showLinked ? allCutlistRows : allCutlistRows.filter((row) => row.source !== 'link');
@@ -304,6 +312,7 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] });
+      queryClient.invalidateQueries({ queryKey: productCutlistDataKey(productId) });
       queryClient.invalidateQueries({ queryKey: ['productBOM', productId] });
       queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
       setActivePickerKey(null);
@@ -341,6 +350,7 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] });
+      queryClient.invalidateQueries({ queryKey: productCutlistDataKey(productId) });
       queryClient.invalidateQueries({ queryKey: ['productBOM', productId] });
       queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
       toast({
@@ -358,9 +368,9 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
   });
 
   const isBusy =
-    bomLoading ||
+    cutlistLoading ||
     componentsLoading ||
-    bomRefetching ||
+    cutlistRefetching ||
     componentsRefetching ||
     updateMaterialMutation.isPending ||
     deleteRowMutation.isPending;
@@ -381,38 +391,67 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
               <div className="text-xs text-muted-foreground">Total parts</div>
               <div className="text-sm font-semibold text-foreground">{totalParts}</div>
             </div>
-            <div className="rounded-md border bg-muted/40 px-3 py-2">
-              <div className="text-xs text-muted-foreground">Direct rows</div>
-              <div className="text-sm font-semibold text-foreground">{directCount}</div>
-            </div>
-            <div className="rounded-md border bg-muted/40 px-3 py-2">
-              <div className="text-xs text-muted-foreground">Linked rows</div>
-              <div className="text-sm font-semibold text-foreground">{linkedCount}</div>
-            </div>
-            <div className="ml-auto flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="cutlist-show-linked"
-                  checked={showLinked}
-                  onCheckedChange={setShowLinked}
-                />
-                <Label htmlFor="cutlist-show-linked" className="text-sm text-muted-foreground">
-                  Show linked parts
-                </Label>
+            {dataSource === 'groups' ? (
+              <div className="rounded-md border bg-muted/40 px-3 py-2">
+                <div className="text-xs text-muted-foreground">Groups</div>
+                <div className="text-sm font-semibold text-foreground">
+                  {cutlistData?.groups.length ?? 0}
+                </div>
               </div>
+            ) : (
+              <>
+                <div className="rounded-md border bg-muted/40 px-3 py-2">
+                  <div className="text-xs text-muted-foreground">Direct rows</div>
+                  <div className="text-sm font-semibold text-foreground">{directCount}</div>
+                </div>
+                <div className="rounded-md border bg-muted/40 px-3 py-2">
+                  <div className="text-xs text-muted-foreground">Linked rows</div>
+                  <div className="text-sm font-semibold text-foreground">{linkedCount}</div>
+                </div>
+              </>
+            )}
+            {snapshot ? (
+              <>
+                <div className="rounded-md border bg-muted/40 px-3 py-2">
+                  <div className="text-xs text-muted-foreground">Sheets used</div>
+                  <div className="text-sm font-semibold text-foreground">
+                    {snapshotSheetsUsed(snapshot)}
+                  </div>
+                </div>
+                <div className="rounded-md border bg-muted/40 px-3 py-2">
+                  <div className="text-xs text-muted-foreground">Board used %</div>
+                  <div className="text-sm font-semibold text-foreground">
+                    {snapshotBoardUsedPct(snapshot)}
+                  </div>
+                </div>
+              </>
+            ) : null}
+            <div className="ml-auto flex items-center gap-4">
+              {dataSource === 'bom' ? (
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="cutlist-show-linked"
+                    checked={showLinked}
+                    onCheckedChange={setShowLinked}
+                  />
+                  <Label htmlFor="cutlist-show-linked" className="text-sm text-muted-foreground">
+                    Show linked parts
+                  </Label>
+                </div>
+              ) : null}
               <Button
                 onClick={() => router.push(`/products/${productId}/cutlist-builder`)}
-                disabled={allCutlistRows.length === 0 || isBusy}
+                disabled={isBusy}
               >
                 <Calculator className="h-4 w-4 mr-2" />
-                Generate Cutlist
+                {dataSource === 'empty' ? 'Open Cutlist Builder' : 'Open in Cutlist Builder'}
               </Button>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {bomError ? (
+      {cutlistError ? (
         <Card>
           <CardContent className="py-6 space-y-3">
             <p className="text-sm text-destructive">
@@ -422,10 +461,10 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => refetchBom()}
-              disabled={bomRefetching}
+              onClick={() => refetchCutlist()}
+              disabled={cutlistRefetching}
             >
-              {bomRefetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {cutlistRefetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Retry
             </Button>
           </CardContent>
@@ -470,8 +509,15 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
 
           {!isBusy && groupedByMaterial.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No cutlist rows captured yet. Add dimensions on the Bill of Materials tab to seed this
-              view.
+              No cutlist parts yet. Open the Cutlist Builder to enter parts manually, or use
+              &ldquo;Design with Configurator&rdquo; for parametric products. You can also seed parts
+              by filling <span className="font-medium">Cutlist dimensions</span> on Bill of Materials rows.
+            </p>
+          ) : null}
+
+          {!isBusy && groupedByMaterial.length > 0 && dataSource === 'groups' ? (
+            <p className="text-xs text-muted-foreground">
+              These parts were saved from the Cutlist Builder. Edit dimensions or materials there.
             </p>
           ) : null}
 
@@ -521,13 +567,13 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
                         </TableCell>
                         <TableCell>
                           {summary.headline ? (
-                            <div className="text-sm font-medium text-foreground">
+                            <div className="text-sm font-medium text-foreground whitespace-nowrap">
                               {summary.headline}
                             </div>
                           ) : (
                             <div className="text-sm text-muted-foreground">No dimensions</div>
                           )}
-                          {summary.details.length > 0 ? (
+                          {summary.details.length > 0 && dataSource !== 'groups' ? (
                             <div className="text-xs text-muted-foreground">
                               {summary.details.join(' · ')}
                             </div>
@@ -637,7 +683,7 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
                               <span className="sr-only">Delete row</span>
                             </Button>
                           </div>
-                          {!row.isEditable ? (
+                          {!row.isEditable && dataSource !== 'groups' ? (
                             <div className="mt-2 text-[11px] text-muted-foreground">
                               Linked BOM rows are read-only here. Edit the source product instead.
                             </div>
