@@ -9,6 +9,17 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   Tooltip,
@@ -437,6 +448,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   const [activeTab, setActiveTab] = React.useState<'materials' | 'parts' | 'preview'>('parts');
   const [snapshotOpen, setSnapshotOpen] = React.useState(false);
   const [tipsOpen, setTipsOpen] = React.useState(false);
+  const [clearConfirmOpen, setClearConfirmOpen] = React.useState(false);
 
   // ============== Summary ==============
   const [summary, setSummary] = React.useState<CutlistSummary | null>(null);
@@ -1501,16 +1513,34 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
             </div>
             <div className="flex gap-2 self-end lg:self-auto">
               {headerRight}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleClearAll}
-                className="gap-1.5"
-              >
-                <Trash2 className="h-4 w-4" />
-                Clear All
-              </Button>
+              <AlertDialog open={clearConfirmOpen} onOpenChange={setClearConfirmOpen}>
+                <AlertDialogTrigger asChild>
+                  <Button type="button" variant="outline" size="sm" className="gap-1.5">
+                    <Trash2 className="h-4 w-4" />
+                    Clear All
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Clear the entire cutlist?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This removes all parts, sheet overrides, and the current layout. This action cannot be
+                      undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => {
+                        handleClearAll();
+                        setClearConfirmOpen(false);
+                      }}
+                    >
+                      Clear everything
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
               <Button
                 type="button"
                 variant="outline"
