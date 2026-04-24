@@ -28,7 +28,9 @@ export function groupsToCutlistRows(
       ? String(group.primary_material_id)
       : null;
 
-    for (const part of group.parts ?? []) {
+    const groupParts = group.parts ?? [];
+    for (let partIndex = 0; partIndex < groupParts.length; partIndex++) {
+      const part = groupParts[partIndex];
       const length = Number(part.length_mm) || 0;
       const width = Number(part.width_mm) || 0;
       const qty = Number(part.quantity) || 0;
@@ -45,7 +47,7 @@ export function groupsToCutlistRows(
       };
 
       rows.push({
-        key: `group:${group.id}:${part.id}`,
+        key: `group:${group.id}:${part.id}:${partIndex}`,
         bomId: null,
         componentId: -1,
         componentCode: part.name || 'Part',
