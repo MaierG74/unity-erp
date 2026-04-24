@@ -97,17 +97,17 @@ interface CutlistRow {
 
 const MELAMINE_CATEGORY = 'Melamine';
 
-function snapshotSheetsUsed(snapshot: CutlistCostingSnapshot): string {
-  const used = snapshot.primary_layout?.sheets?.length ?? 0;
-  const backer = snapshot.backer_layout?.sheets?.length ?? 0;
-  return backer > 0 ? `${used} + ${backer} backer` : String(used);
-}
-
 function snapshotBoardUsedPct(snapshot: CutlistCostingSnapshot): string {
   const used = snapshot.stats?.total_used_area_mm2 ?? 0;
   const total = used + (snapshot.stats?.total_waste_area_mm2 ?? 0);
   if (total <= 0) return '—';
   return `${((used / total) * 100).toFixed(1)}%`;
+}
+
+function snapshotEdgingMeters(
+  entry: CutlistCostingSnapshot['edging'][number]
+): number {
+  return entry.meters_override ?? entry.meters_actual ?? 0;
 }
 
 export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
@@ -413,17 +413,40 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
             {snapshot ? (
               <>
                 <div className="rounded-md border bg-muted/40 px-3 py-2">
-                  <div className="text-xs text-muted-foreground">Sheets used</div>
+                  <div className="text-xs text-muted-foreground">Primary sheets</div>
                   <div className="text-sm font-semibold text-foreground">
-                    {snapshotSheetsUsed(snapshot)}
+                    {snapshot.primary_layout?.sheets?.length ?? 0}
                   </div>
                 </div>
+                {(snapshot.backer_layout?.sheets?.length ?? 0) > 0 ? (
+                  <div className="rounded-md border bg-muted/40 px-3 py-2">
+                    <div className="text-xs text-muted-foreground">Backer sheets</div>
+                    <div className="text-sm font-semibold text-foreground">
+                      {snapshot.backer_layout?.sheets?.length ?? 0}
+                    </div>
+                  </div>
+                ) : null}
                 <div className="rounded-md border bg-muted/40 px-3 py-2">
                   <div className="text-xs text-muted-foreground">Board used %</div>
                   <div className="text-sm font-semibold text-foreground">
                     {snapshotBoardUsedPct(snapshot)}
                   </div>
                 </div>
+                {(snapshot.edging ?? [])
+                  .filter((entry) => snapshotEdgingMeters(entry) > 0)
+                  .map((entry) => (
+                    <div
+                      key={`edge-${entry.material_id}`}
+                      className="rounded-md border bg-muted/40 px-3 py-2"
+                    >
+                      <div className="text-xs text-muted-foreground">
+                        Edge {entry.thickness_mm}mm
+                      </div>
+                      <div className="text-sm font-semibold text-foreground">
+                        {snapshotEdgingMeters(entry).toFixed(2)}m
+                      </div>
+                    </div>
+                  ))}
               </>
             ) : null}
             <div className="ml-auto flex items-center gap-4">
