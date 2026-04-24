@@ -43,8 +43,8 @@ This document consolidates how the Labor section of the app works today across U
 Tables involved and their key columns and relationships. Source: Supabase MCP queries and existing docs.
 
 - **`job_categories`**
-  - Columns: `category_id serial PK`, `name text unique`, `description text`, `current_hourly_rate numeric not null default 0.00`.
-  - Purpose: Defines categories of labor. `current_hourly_rate` mirrors the most recent effective rate for convenience.
+  - Columns: `category_id serial PK`, `name text unique`, `description text`, `parent_category_id int null`.
+  - Purpose: Defines categories of labor. Categories are taxonomy only; hourly rates live in `job_category_rates`.
   - Indexes: `job_categories_pkey`, `job_categories_name_key`.
 
 - **`job_category_rates`**
@@ -83,6 +83,7 @@ Tables involved and their key columns and relationships. Source: Supabase MCP qu
 ## APIs
 
 - `GET /api/products/:id/effective-bol` — effective BOL (explicit + linked). Scales sub‑product rows by `product_bom_links.scale` and resolves rates as of today (piece → product‑specific then default; hourly → job hourly).
+- `GET /api/job-categories` — authenticated category list for UI selectors. Returns `{ category_id, name, parent_category_id, hourly_rate, rate_id }`, where the rate fields come from the active `job_category_rates` row as of today.
 
 ## RLS and Policies
 
@@ -108,19 +109,18 @@ Tables involved and their key columns and relationships. Source: Supabase MCP qu
 - Features:
   - List, search, filter, sort, create, edit, delete categories.
   - Collapsible rate history per category with expand/collapse chevron icons.
-  - Add Rate Version flow automatically maintains date ranges and updates `job_categories.current_hourly_rate` when the new version covers "today".
+  - Add Rate Version flow automatically maintains date ranges in `job_category_rates`; current labels are derived from the active rate row.
   - Visual indicators for active rates with "Active" badge.
   - Responsive design optimized for both desktop and mobile.
 - Supabase interactions:
-  - Read categories: `from('job_categories').select('*')`.
+  - Read categories: `GET /api/job-categories`, backed by `job_categories` plus active `job_category_rates`.
   - Read all rates: `from('job_category_rates').select('*').order('effective_date desc')` (filtered client-side per category).
   - Create category: insert into `job_categories`, then insert initial rate row into `job_category_rates` with today's date.
-  - Update category: update fields including `current_hourly_rate`.
+  - Update category: update taxonomy fields (`name`, `description`, `parent_category_id`) only.
   - Delete category: delete all `job_category_rates` for the category, then delete the category.
   - Add rate version:
     - Determines the next `end_date` by looking for the first later `effective_date`.
     - Sets the previous version's `end_date` to the day before the new `effective_date`.
-    - If new version is effective "today", updates `job_categories.current_hourly_rate`.
 
 ### Jobs Manager
 
@@ -141,7 +141,7 @@ Tables involved and their key columns and relationships. Source: Supabase MCP qu
   - Visual category badges and rate display per job.
   - Responsive design optimized for both desktop and mobile.
 - Supabase interactions:
-  - Read categories: `from('job_categories').select('*').order('name')`.
+  - Read categories: `GET /api/job-categories`.
   - Read all jobs: `from('jobs').select('job_id, name, description, category_id, job_categories(...)').order('name')` (filtered client-side).
   - Insert/update/delete into `jobs`.
 
@@ -151,10 +151,10 @@ Tables involved and their key columns and relationships. Source: Supabase MCP qu
 - Features:
   - Display BOL items with Category, Job, Time, Qty, Hourly Rate, Total Time (hrs), Total Cost; edit inline or remove.
   - Add new item with category and job pickers; supports quick job creation via modal `CreateJobModal`.
-  - Client-side cost computation: hourly rate × time (converted to hours) × quantity, preferring `job_category_rates.hourly_rate` when `rate_id` is set, otherwise falling back to `job_categories.current_hourly_rate`.
+  - Client-side cost computation: hourly rate × time (converted to hours) × quantity, preferring the saved `job_category_rates.hourly_rate` when `rate_id` is set and falling back to the active category rate from `/api/job-categories` only for legacy rows without a saved rate.
 - Supabase interactions:
   - Read product BOL: `from('billoflabour').select(... jobs(... job_categories(...)), job_category_rates(...))`.
-  - Read job categories: `from('job_categories').select('*')`.
+  - Read job categories: `GET /api/job-categories`.
   - Read jobs (optionally filtered by selected category or search): `from('jobs').select(... job_categories(...))`.
   - Add/Update BOL item:
     - Looks up the current effective rate for the selected category as of today by querying `job_category_rates` with `effective_date <= today` and `(end_date is null or end_date >= today)` (ordered desc, limit 1).
@@ -210,7 +210,7 @@ Tables involved and their key columns and relationships. Source: Supabase MCP qu
 - DB-level:
   - FK constraints between `jobs` ↔ `job_categories`, `billoflabour` ↔ (`jobs`, `products`, `job_category_rates`).
   - Unique index `(category_id, effective_date)` prevents duplicate rate versions on the same start date.
-  - No triggers on these tables; the UI maintains `end_date` consistency and `current_hourly_rate` updates.
+  - No triggers on these tables; the UI maintains `end_date` consistency for `job_category_rates`.
   - RLS disabled on core labor tables (note: consider enabling and adding policies before multi-tenant or shared deployments).
 
   (Planned)
@@ -224,7 +224,6 @@ Tables involved and their key columns and relationships. Source: Supabase MCP qu
 
 - Data integrity:
   - Consider a CHECK constraint for `time_unit in ('hours','minutes','seconds')`.
-  - Optional trigger to auto-update `job_categories.current_hourly_rate` whenever a new rate becomes current, removing the need for client logic.
   - Optional exclusion constraint to prevent overlapping `[effective_date, end_date]` ranges per `category_id`.
 
 - UX/Workflow:

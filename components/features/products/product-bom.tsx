@@ -450,7 +450,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
       const pieceRate = item.piece_rate?.rate || 0
       return pieceRate * (item.quantity || 1)
     }
-    const hourlyRate = item.rate?.hourly_rate || item.job?.category?.current_hourly_rate || 0
+    const hourlyRate = item.rate?.hourly_rate || 0
     const hours = convertToHoursQuick(item.time_required, item.time_unit)
     return hourlyRate * hours * (item.quantity || 1)
   }
@@ -495,8 +495,7 @@ export function ProductBOM({ productId }: ProductBOMProps) {
             job_categories (
               category_id,
               name,
-              description,
-              current_hourly_rate
+              description
             )
           ),
           job_category_rates (
@@ -2451,7 +2450,7 @@ const renderCutlistEditor = () => {
                       ) : (
                         quickBOL.map((item: any) => {
                           const category = item.job?.category
-                          const rate = (item.pay_type || 'hourly') === 'piece' ? item.piece_rate?.rate : (item.rate?.hourly_rate || category?.current_hourly_rate)
+                          const rate = (item.pay_type || 'hourly') === 'piece' ? item.piece_rate?.rate : item.rate?.hourly_rate
                           const totalHrs = (item.pay_type || 'hourly') === 'piece' ? null : convertToHoursQuick(item.time_required, item.time_unit) * (item.quantity || 1)
                           const totalCost = calcBOLCostQuick(item)
                           return (

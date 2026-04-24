@@ -45,6 +45,10 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from '@/lib/utils';
 import { useDebounce } from '@/hooks/use-debounce';
+import {
+  fetchJobCategories,
+  type JobCategoryWithRate,
+} from '@/lib/client/job-categories';
 import { useEffect, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { Badge } from '@/components/ui/badge';
@@ -54,12 +58,7 @@ import { SubProductGroupHeader } from './SubProductGroupHeader';
 const AddJobDialog = dynamic(() => import('./AddJobDialog'), { ssr: false });
 
 // Define types
-interface JobCategory {
-  category_id: number;
-  name: string;
-  description: string | null;
-  current_hourly_rate: number;
-}
+type JobCategory = JobCategoryWithRate;
 
 interface Job {
   job_id: number;
@@ -219,7 +218,7 @@ export function ProductBOL({ productId }: ProductBOLProps) {
               category_id,
               name,
               description,
-              current_hourly_rate
+              parent_category_id
             )
           ),
           job_category_rates (
@@ -270,15 +269,12 @@ export function ProductBOL({ productId }: ProductBOLProps) {
   // Fetch job categories
   const { data: jobCategories = [], isLoading: categoriesLoading } = useQuery({
     queryKey: ['jobCategories'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('job_categories')
-        .select('*');
-        
-      if (error) throw error;
-      return data as JobCategory[];
-    },
+    queryFn: fetchJobCategories,
   });
+
+  const categoryRateById = useMemo(() => {
+    return new Map(jobCategories.map((category) => [category.category_id, category.hourly_rate]));
+  }, [jobCategories]);
   
   // Fetch jobs (filtered by selected category if applicable)
   const { data: jobs = [], isLoading: jobsLoading } = useQuery({
@@ -291,12 +287,12 @@ export function ProductBOL({ productId }: ProductBOLProps) {
           name,
           description,
           category_id,
-          job_categories (
-            category_id,
-            name,
-            description,
-            current_hourly_rate
-          )
+            job_categories (
+              category_id,
+              name,
+              description,
+              parent_category_id
+            )
         `);
         
       if (selectedCategoryId) {
@@ -342,12 +338,12 @@ export function ProductBOL({ productId }: ProductBOLProps) {
       time_required: b.time_required,
       time_unit: b.time_unit,
       quantity: b.quantity,
-      hourly_rate: b.hourly_rate?.hourly_rate ?? b.rate?.hourly_rate ?? b.job.category.current_hourly_rate,
+      hourly_rate: b.hourly_rate?.hourly_rate ?? b.rate?.hourly_rate ?? categoryRateById.get(b.job.category_id) ?? 0,
       piece_rate: b.piece_rate?.rate,
       _source: 'direct',
       _editable: true,
     })) as any[];
-  }, [effectiveBOL, bolItems]);
+  }, [effectiveBOL, bolItems, categoryRateById]);
 
   // Job search handler (debounced via useDebounce)
   const handleJobSearchChange = (value: string) => {
@@ -475,7 +471,7 @@ export function ProductBOL({ productId }: ProductBOLProps) {
       const pieceRate = item.piece_rate?.rate || 0;
       return pieceRate * item.quantity;
     }
-    const hourlyRate = (item.hourly_rate?.hourly_rate ?? item.rate?.hourly_rate ?? item.job.category.current_hourly_rate) || 0;
+    const hourlyRate = (item.hourly_rate?.hourly_rate ?? item.rate?.hourly_rate ?? categoryRateById.get(item.job.category_id)) || 0;
     const timeInHours = convertToHours(item.time_required, item.time_unit);
     return hourlyRate * timeInHours * item.quantity;
   };
@@ -559,7 +555,8 @@ export function ProductBOL({ productId }: ProductBOLProps) {
                           const qty = Number(it.quantity || direct?.quantity || 1)
                           const timeReq = pay === 'piece' ? null : (it.time_required ?? direct?.time_required ?? 0)
                           const unit = pay === 'piece' ? 'hours' : (it.time_unit ?? direct?.time_unit ?? 'hours')
-                          const rate = pay === 'piece' ? (it.piece_rate ?? direct?.piece_rate?.rate ?? null) : (it.hourly_rate ?? direct?.hourly_rate?.hourly_rate ?? direct?.rate?.hourly_rate ?? direct?.job?.category?.current_hourly_rate ?? null)
+                          const fallbackCategoryRate = direct?.job?.category?.category_id == null ? null : categoryRateById.get(direct.job.category.category_id)
+                          const rate = pay === 'piece' ? (it.piece_rate ?? direct?.piece_rate?.rate ?? null) : (it.hourly_rate ?? direct?.hourly_rate?.hourly_rate ?? direct?.rate?.hourly_rate ?? fallbackCategoryRate ?? null)
                           const totalHrs = pay === 'piece' ? null : ((unit === 'hours' ? (timeReq || 0) : unit === 'minutes' ? (timeReq || 0)/60 : (timeReq || 0)/3600) * qty)
                           return pay === 'piece' ? ((rate || 0) * qty) : ((rate || 0) * (totalHrs || 0))
                         }
@@ -571,7 +568,8 @@ export function ProductBOL({ productId }: ProductBOLProps) {
                           const qty = Number(it.quantity || direct?.quantity || 1)
                           const timeReq = pay === 'piece' ? null : (it.time_required ?? direct?.time_required ?? 0)
                           const unit = pay === 'piece' ? 'hours' : (it.time_unit ?? direct?.time_unit ?? 'hours')
-                          const rate = pay === 'piece' ? (it.piece_rate ?? direct?.piece_rate?.rate ?? null) : (it.hourly_rate ?? direct?.hourly_rate?.hourly_rate ?? direct?.rate?.hourly_rate ?? direct?.job?.category?.current_hourly_rate ?? null)
+                          const fallbackCategoryRate = direct?.job?.category?.category_id == null ? null : categoryRateById.get(direct.job.category.category_id)
+                          const rate = pay === 'piece' ? (it.piece_rate ?? direct?.piece_rate?.rate ?? null) : (it.hourly_rate ?? direct?.hourly_rate?.hourly_rate ?? direct?.rate?.hourly_rate ?? fallbackCategoryRate ?? null)
                           const totalHrs = pay === 'piece' ? null : ((unit === 'hours' ? (timeReq || 0) : unit === 'minutes' ? (timeReq || 0)/60 : (timeReq || 0)/3600) * qty)
                           const totalCost = pay === 'piece' ? ((rate || 0) * qty) : ((rate || 0) * (totalHrs || 0))
 
@@ -700,7 +698,7 @@ export function ProductBOL({ productId }: ProductBOLProps) {
                                     if (form.watch('pay_type') === 'piece') {
                                       return 'Piece rate (as of today)';
                                     }
-                                    return category ? `R${category.current_hourly_rate.toFixed(2)}/hr` : 'N/A';
+                                    return category ? `R${category.hourly_rate.toFixed(2)}/hr` : 'N/A';
                                   })()}
                                 </TableCell>
                                 <TableCell>
@@ -720,7 +718,7 @@ export function ProductBOL({ productId }: ProductBOLProps) {
                                     if (form.watch('pay_type') === 'piece') {
                                       return `R—`;
                                     }
-                                    const hourlyRate = category?.current_hourly_rate || 0;
+                                    const hourlyRate = category?.hourly_rate || 0;
                                     const time = form.watch('time_required') || 0;
                                     const unit = form.watch('time_unit') || 'hours';
                                     return `R${(hourlyRate * convertToHours(time, unit) * quantity).toFixed(2)}`;
