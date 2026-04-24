@@ -97,10 +97,13 @@ interface CutlistRow {
 
 const MELAMINE_CATEGORY = 'Melamine';
 
-function snapshotBoardUsedPct(snapshot: CutlistCostingSnapshot): string {
-  const used = snapshot.stats?.total_used_area_mm2 ?? 0;
-  const total = used + (snapshot.stats?.total_waste_area_mm2 ?? 0);
-  if (total <= 0) return '—';
+function layoutUsedPct(
+  layout: CutlistCostingSnapshot['primary_layout'] | null | undefined
+): string | null {
+  if (!layout) return null;
+  const used = layout.stats?.used_area_mm2 ?? 0;
+  const total = used + (layout.stats?.waste_area_mm2 ?? 0);
+  if (total <= 0) return null;
   return `${((used / total) * 100).toFixed(1)}%`;
 }
 
@@ -418,6 +421,14 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
                     {snapshot.primary_layout?.sheets?.length ?? 0}
                   </div>
                 </div>
+                {layoutUsedPct(snapshot.primary_layout) ? (
+                  <div className="rounded-md border bg-muted/40 px-3 py-2">
+                    <div className="text-xs text-muted-foreground">Primary used %</div>
+                    <div className="text-sm font-semibold text-foreground">
+                      {layoutUsedPct(snapshot.primary_layout)}
+                    </div>
+                  </div>
+                ) : null}
                 {(snapshot.backer_layout?.sheets?.length ?? 0) > 0 ? (
                   <div className="rounded-md border bg-muted/40 px-3 py-2">
                     <div className="text-xs text-muted-foreground">Backer sheets</div>
@@ -426,12 +437,14 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
                     </div>
                   </div>
                 ) : null}
-                <div className="rounded-md border bg-muted/40 px-3 py-2">
-                  <div className="text-xs text-muted-foreground">Board used %</div>
-                  <div className="text-sm font-semibold text-foreground">
-                    {snapshotBoardUsedPct(snapshot)}
+                {layoutUsedPct(snapshot.backer_layout) ? (
+                  <div className="rounded-md border bg-muted/40 px-3 py-2">
+                    <div className="text-xs text-muted-foreground">Backer used %</div>
+                    <div className="text-sm font-semibold text-foreground">
+                      {layoutUsedPct(snapshot.backer_layout)}
+                    </div>
                   </div>
-                </div>
+                ) : null}
                 {(snapshot.edging ?? [])
                   .filter((entry) => snapshotEdgingMeters(entry) > 0)
                   .map((entry) => (
@@ -440,7 +453,7 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
                       className="rounded-md border bg-muted/40 px-3 py-2"
                     >
                       <div className="text-xs text-muted-foreground">
-                        Edge {entry.thickness_mm}mm
+                        {entry.material_name || `Edge ${entry.thickness_mm}mm`}
                       </div>
                       <div className="text-sm font-semibold text-foreground">
                         {snapshotEdgingMeters(entry).toFixed(2)}m
