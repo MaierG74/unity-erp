@@ -3,6 +3,10 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import {
+  fetchJobCategories,
+  type JobCategoryWithRate,
+} from '@/lib/client/job-categories';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -37,12 +41,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { Plus } from 'lucide-react';
 import { InlineCategoryForm } from './inline-category-form';
 
-interface JobCategory {
-  category_id: number;
-  name: string;
-  current_hourly_rate: number;
-  parent_category_id: number | null;
-}
+type JobCategory = JobCategoryWithRate;
 
 interface CreatedJob {
   job_id: number;
@@ -95,15 +94,7 @@ export function CreateJobModal({
   // Fetch job categories
   const { data: categories = [], isLoading: categoriesLoading } = useQuery({
     queryKey: ['jobCategories'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('job_categories')
-        .select('category_id, name, current_hourly_rate, parent_category_id')
-        .order('name');
-
-      if (error) throw error;
-      return data as JobCategory[];
-    },
+    queryFn: fetchJobCategories,
   });
 
   // Build parent/child maps
@@ -346,7 +337,7 @@ export function CreateJobModal({
                           key={category.category_id}
                           value={category.category_id.toString()}
                         >
-                          {category.name} - R{category.current_hourly_rate.toFixed(2)}/hr
+                          {category.name} - R{category.hourly_rate.toFixed(2)}/hr
                         </SelectItem>
                       ))}
                       <SelectSeparator />
@@ -392,7 +383,7 @@ export function CreateJobModal({
                             key={sub.category_id}
                             value={sub.category_id.toString()}
                           >
-                            {sub.name} - R{sub.current_hourly_rate.toFixed(2)}/hr
+                            {sub.name} - R{sub.hourly_rate.toFixed(2)}/hr
                           </SelectItem>
                         ))}
                         {subcategoriesForParent.length > 0 && <SelectSeparator />}
@@ -570,7 +561,7 @@ export function CreateJobModal({
       onOpenChange={setIsNewSubcategoryOpen}
       parentId={selectedParentId ? parseInt(selectedParentId) : undefined}
       parentName={parentCategories.find((c) => c.category_id.toString() === selectedParentId)?.name}
-      defaultRate={parentCategories.find((c) => c.category_id.toString() === selectedParentId)?.current_hourly_rate}
+      defaultRate={parentCategories.find((c) => c.category_id.toString() === selectedParentId)?.hourly_rate}
       onCreated={(cat) => {
         queryClient.setQueryData<JobCategory[]>(['jobCategories'], (old = []) => [...old, cat]);
         requestAnimationFrame(() => {

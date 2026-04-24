@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { supabase } from '@/lib/supabase';
+import type { JobCategoryWithRate } from '@/lib/client/job-categories';
 import {
   Dialog,
   DialogContent,
@@ -25,12 +26,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 
-interface JobCategory {
-  category_id: number;
-  name: string;
-  current_hourly_rate: number;
-  parent_category_id: number | null;
-}
+type JobCategory = JobCategoryWithRate;
 
 const schema = z.object({
   name: z.string().trim().min(1, 'Name is required'),
@@ -82,7 +78,6 @@ export function InlineCategoryForm({
         .from('job_categories')
         .insert({
           name: values.name,
-          current_hourly_rate: values.hourly_rate,
           parent_category_id: parentId ?? null,
         })
         .select()
@@ -91,20 +86,26 @@ export function InlineCategoryForm({
       if (error) throw error;
 
       // Insert initial rate row
-      const { error: rateError } = await supabase
+      const { data: rateData, error: rateError } = await supabase
         .from('job_category_rates')
         .insert({
           category_id: data.category_id,
           hourly_rate: values.hourly_rate,
           effective_date: new Date().toISOString().split('T')[0],
-        });
+        })
+        .select('rate_id, hourly_rate')
+        .single();
 
       if (rateError) {
         console.error('Failed to insert initial rate row:', rateError);
         // Non-fatal — category was created, rate can be added later
       }
 
-      return data as JobCategory;
+      return {
+        ...data,
+        rate_id: rateData ? Number(rateData.rate_id) : null,
+        hourly_rate: rateData ? Number(rateData.hourly_rate) : values.hourly_rate,
+      } as JobCategory;
     },
     onSuccess: (category) => {
       queryClient.invalidateQueries({ queryKey: ['jobCategories'] });

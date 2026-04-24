@@ -5,11 +5,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/lib/supabase";
 import { authorizedFetch } from "@/lib/client/auth-fetch";
+import {
+  fetchJobCategories,
+  type JobCategoryWithRate,
+} from "@/lib/client/job-categories";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus } from "lucide-react";
 import { CreateJobModal } from "@/components/features/labor/create-job-modal";
 
-type JobCategory = { category_id: number; name: string; description: string | null; current_hourly_rate: number; parent_category_id: number | null };
+type JobCategory = JobCategoryWithRate;
 type Job = { job_id: number; name: string; description: string | null; category_id: number };
 
 export default function AddJobDialog({
@@ -89,8 +93,8 @@ export default function AddJobDialog({
   }, [selectedCategoryId]);
 
   async function loadCategories() {
-    const { data } = await supabase.from("job_categories").select("*").order("name");
-    setCategories((data as JobCategory[]) || []);
+    const data = await fetchJobCategories();
+    setCategories(data);
   }
 
   async function loadJobs(categoryId: number) {
@@ -172,7 +176,7 @@ export default function AddJobDialog({
                     <SelectContent>
                       {parentCategories.map(c => (
                         <SelectItem key={c.category_id} value={String(c.category_id)}>
-                          {c.name} - R{c.current_hourly_rate.toFixed(2)}/hr
+                          {c.name} - R{c.hourly_rate.toFixed(2)}/hr
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -196,7 +200,7 @@ export default function AddJobDialog({
                         <SelectItem value="all">All subcategories</SelectItem>
                         {subcategories.map(c => (
                           <SelectItem key={c.category_id} value={String(c.category_id)}>
-                            {c.name} - R{c.current_hourly_rate.toFixed(2)}/hr
+                            {c.name} - R{c.hourly_rate.toFixed(2)}/hr
                           </SelectItem>
                         ))}
                       </SelectContent>

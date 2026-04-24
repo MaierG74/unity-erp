@@ -20,7 +20,7 @@ This document records the plan to finalize Labor Management with explicit suppor
 - DB
   - `piece_work_rates` exists.
   - `billoflabour` currently lacks `pay_type` and `piece_rate_id` (must apply migration).
-  - Category hourly rates exist via `job_category_rates` and `job_categories.current_hourly_rate` (legacy approach).
+  - Category hourly rates exist via `job_category_rates`; `job_categories` is taxonomy only.
 
 ## Target Model
 
@@ -61,9 +61,7 @@ create index if not exists idx_job_hourly_rates_lookup on public.job_hourly_rate
 - Optional: exclusion or trigger to prevent overlapping date ranges per job.
 
 3) Backward compatibility bridge (optional, transitional)
-- While UI still references `job_categories.current_hourly_rate`, we can:
-  - Keep category rate fields untouched for now, or
-  - Create a view later when we switch to job‑level rates.
+- Category rate display now reads from `job_category_rates`; future job-level hourly rates can be introduced without another denormalized category-rate column.
 
 4) Integrity & enums
 - Add CHECK on `billoflabour.time_unit in ('hours','minutes','seconds')`.

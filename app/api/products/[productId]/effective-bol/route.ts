@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getActiveCategoryRate } from '@/lib/api/job-category-rate'
 import { requireModuleAccess } from '@/lib/api/module-access'
 import { MODULE_KEYS } from '@/lib/modules/keys'
 import { supabaseAdmin } from '@/lib/supabase-admin'
@@ -92,14 +93,26 @@ export async function GET(req: NextRequest, context: { params: Promise<{ product
       if (error) throw error
       if (data && data.length > 0) return Number(data[0].hourly_rate)
 
-      // Fallback: use the job category's current_hourly_rate
+      // Fallback: use the active category rate when no job-specific rate exists.
       const { data: jobRow } = await supabaseAdmin
         .from('jobs')
-        .select('job_categories(current_hourly_rate)')
+        .select('category_id')
         .eq('job_id', jobId)
         .maybeSingle()
-      const catRate = (jobRow as any)?.job_categories?.current_hourly_rate
-      return catRate != null ? Number(catRate) : null
+      const categoryId = Number((jobRow as any)?.category_id)
+      if (!Number.isFinite(categoryId)) return null
+      const categoryRate = await getActiveCategoryRate(categoryId, today)
+      return categoryRate?.hourly_rate ?? null
+    }
+
+    async function resolveCategoryRate(rateId: number, jobId: number): Promise<number | null> {
+      const { data, error } = await supabaseAdmin
+        .from('job_category_rates')
+        .select('hourly_rate')
+        .eq('rate_id', rateId)
+        .maybeSingle()
+      if (error) throw error
+      return data ? Number((data as any).hourly_rate) : await resolveHourlyRate(jobId)
     }
 
     async function inflateDirect(rows: DirectBolRow[], source: 'direct' | 'link', scale = 1, subProductId?: number) {
@@ -120,6 +133,8 @@ export async function GET(req: NextRequest, context: { params: Promise<{ product
           if (r.hourly_rate_id) {
             const { data } = await supabaseAdmin.from('job_hourly_rates').select('hourly_rate').eq('rate_id', r.hourly_rate_id).maybeSingle()
             hourlyRate = data ? Number((data as any).hourly_rate) : await resolveHourlyRate(r.job_id)
+          } else if (r.rate_id) {
+            hourlyRate = await resolveCategoryRate(r.rate_id, r.job_id)
           } else {
             hourlyRate = await resolveHourlyRate(r.job_id)
           }
@@ -173,7 +188,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ product
     for (const link of links || []) {
       const { data: subBol, error: subErr } = await supabaseAdmin
         .from('billoflabour')
-        .select('job_id, time_required, time_unit, quantity, pay_type')
+        .select('job_id, time_required, time_unit, quantity, pay_type, rate_id, piece_rate_id, hourly_rate_id')
         .eq('product_id', link.sub_product_id)
         .eq('org_id', auth.orgId)
       if (subErr) throw subErr
