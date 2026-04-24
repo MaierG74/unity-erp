@@ -1,0 +1,2 @@
+-- No-op migration recorded during Supabase MCP project routing verification.
+-- Intentionally contains no schema changes.
