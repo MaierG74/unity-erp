@@ -3,6 +3,10 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import {
+  fetchJobCategories,
+  type JobCategoryWithRate,
+} from '@/lib/client/job-categories';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -89,13 +93,7 @@ import { JobTimeAnalysis } from './job-time-analysis';
 import { cn } from '@/lib/utils';
 
 // Types
-interface JobCategory {
-  category_id: number;
-  name: string;
-  description: string | null;
-  current_hourly_rate: number;
-  parent_category_id: number | null;
-}
+type JobCategory = JobCategoryWithRate;
 
 interface Job {
   job_id: number;
@@ -194,14 +192,14 @@ export function JobDetail({ jobId }: JobDetailProps) {
   });
 
   // Fetch job details
-  const { data: job, isLoading: jobLoading, error: jobError } = useQuery({
+  const { data: jobData, isLoading: jobLoading, error: jobError } = useQuery({
     queryKey: ['job', jobId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('jobs')
         .select(`
           *,
-          job_categories (*),
+          job_categories (category_id, name, description, parent_category_id),
           labor_roles (*)
         `)
         .eq('job_id', jobId)
@@ -218,15 +216,17 @@ export function JobDetail({ jobId }: JobDetailProps) {
   // Fetch categories for edit form
   const { data: categories = [] } = useQuery({
     queryKey: ['jobCategories'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('job_categories')
-        .select('*')
-        .order('name');
-      if (error) throw error;
-      return data as JobCategory[];
-    },
+    queryFn: fetchJobCategories,
   });
+
+  const job = useMemo(() => {
+    if (!jobData) return undefined;
+    const category = categories.find((cat) => cat.category_id === jobData.category_id);
+    return {
+      ...jobData,
+      category: category ?? (jobData.category ? { ...jobData.category, rate_id: null, hourly_rate: 0 } : undefined),
+    };
+  }, [jobData, categories]);
 
   // Build parent/children maps for cascading category selects
   const { editParentCategories, editChildrenByParent } = useMemo(() => {
@@ -763,7 +763,7 @@ export function JobDetail({ jobId }: JobDetailProps) {
                             <SelectContent>
                               {editParentCategories.map((cat) => (
                                 <SelectItem key={cat.category_id} value={cat.category_id.toString()}>
-                                  {cat.name} - R{cat.current_hourly_rate.toFixed(2)}/hr
+                                  {cat.name} - R{cat.hourly_rate.toFixed(2)}/hr
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -795,7 +795,7 @@ export function JobDetail({ jobId }: JobDetailProps) {
                                 <SelectItem value="_none">None (use parent category)</SelectItem>
                                 {(editChildrenByParent.get(parseInt(editParentId)) || []).map((sub) => (
                                   <SelectItem key={sub.category_id} value={sub.category_id.toString()}>
-                                    {sub.name} - R{sub.current_hourly_rate.toFixed(2)}/hr
+                                    {sub.name} - R{sub.hourly_rate.toFixed(2)}/hr
                                   </SelectItem>
                                 ))}
                               </SelectContent>
@@ -885,7 +885,7 @@ export function JobDetail({ jobId }: JobDetailProps) {
                     </div>
                     <div>
                       <p className="text-sm font-medium text-muted-foreground">Category Rate</p>
-                      <p className="font-medium">R{job.category?.current_hourly_rate?.toFixed(2) || '0.00'}/hr</p>
+                      <p className="font-medium">R{job.category?.hourly_rate?.toFixed(2) || '0.00'}/hr</p>
                     </div>
                     <div>
                       <p className="text-sm font-medium text-muted-foreground">Role</p>
@@ -947,7 +947,7 @@ export function JobDetail({ jobId }: JobDetailProps) {
                 <div className="mb-4 p-3 rounded-lg border bg-muted/30">
                   <p className="text-sm text-muted-foreground">No job-specific rate</p>
                   <p className="text-lg font-medium">
-                    Using category rate: R{job.category?.current_hourly_rate?.toFixed(2) || '0.00'}/hr
+                    Using category rate: R{job.category?.hourly_rate?.toFixed(2) || '0.00'}/hr
                   </p>
                 </div>
               )}

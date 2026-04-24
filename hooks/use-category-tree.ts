@@ -2,27 +2,17 @@
 
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import {
+  fetchJobCategories,
+  type JobCategoryWithRate,
+} from '@/lib/client/job-categories';
 
-export interface JobCategory {
-  category_id: number;
-  name: string;
-  description: string | null;
-  current_hourly_rate: number;
-  parent_category_id: number | null;
-}
+export type JobCategory = JobCategoryWithRate;
 
 export function useCategoryTree() {
   const { data: allCategories = [], isLoading } = useQuery({
     queryKey: ['jobCategories'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('job_categories')
-        .select('*')
-        .order('name');
-      if (error) throw error;
-      return (data ?? []) as JobCategory[];
-    },
+    queryFn: fetchJobCategories,
   });
 
   const { parentCategories, childrenByParent } = useMemo(() => {

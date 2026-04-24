@@ -28,11 +28,17 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260330083217
-- Latest applied migration name: fix_timekeeper_summary_null_buckets
-- Applied at (UTC): 2026-03-30 08:32:17 UTC
+- Latest applied migration version: 20260423134334
+- Latest applied migration name: stale_legacy_mm_edging_plans_harden
+- Applied at (UTC): Verified current via MCP on 2026-04-24 06:33 UTC
 - Applied by: Codex via Supabase MCP
 - Verification notes:
+  - Current batch (2026-04-24, Codex):
+    1. `drop_job_categories_current_hourly_rate` (20260423120000): dropped the stale denormalized `public.job_categories.current_hourly_rate` column so category hourly display and costing readers resolve rates from `public.job_category_rates`.
+    2. Verified with MCP `list_migrations`: production history includes `20260423120000`; MCP history also shows later previously-applied migrations through `20260423134334`.
+    3. Verified with MCP SQL: `information_schema.columns` returns no `current_hourly_rate` column for `public.job_categories`.
+    4. Verified with MCP SQL: the active Quality Control category rate resolves from `job_category_rates` as `rate_id = 4`, `hourly_rate = 50.00`.
+    5. Ran Supabase security advisors after apply; findings remain broad pre-existing RLS/security-definer warnings, including `job_category_rates` policy-exists/RLS-disabled, with no finding caused by the dropped column.
   - Current batch (2026-03-30, Codex):
     1. `fix_timekeeper_summary_null_buckets` (20260330083217): hardened `before_insert_or_update_time_daily_summary()` to coalesce missing totals to zero instead of deriving `NULL` payroll buckets, and updated `update_daily_work_summary()` so legacy timekeeper inserts/upserts carry safe minute totals/break totals while keeping Sunday rows in the double-time bucket only.
     2. Verified with MCP `list_migrations`: production history now includes `20260330083217`.
