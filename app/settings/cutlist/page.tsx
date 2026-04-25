@@ -80,6 +80,11 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
 
         <rect x="20" y="20" width="440" height="290" rx="6" fill="url(#cutlist-grid)" stroke="rgb(71 85 105)" />
         <rect x="34" y="34" width="412" height="260" rx="3" fill="rgb(15 23 42)" opacity="0.55" />
+        <g opacity="0.18" stroke="rgb(203 213 225)" strokeWidth="1">
+          {[72, 108, 144, 180, 216, 252, 288, 324, 360, 396].map((x) => (
+            <line key={x} x1={x} y1="42" x2={x} y2="286" />
+          ))}
+        </g>
 
         {classified.map((rect) => (
           <g key={rect.key}>
