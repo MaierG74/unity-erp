@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { isReusableOffcut } from '@/lib/cutlist/offcuts';
 import type { GrainOrientation } from '@/lib/cutlist/types';
 
 const GRAIN_OPTIONS: { value: GrainOrientation; icon: string; label: string }[] = [
@@ -26,6 +27,106 @@ function nextGrain(current: GrainOrientation): GrainOrientation {
 
 function getGrainOption(value: GrainOrientation) {
   return GRAIN_OPTIONS.find((o) => o.value === value) ?? GRAIN_OPTIONS[0];
+}
+
+function asPositiveNumber(value: number | undefined, fallback: number) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
+  const minLength = asPositiveNumber(defaults.minReusableOffcutLengthMm, 300);
+  const minWidth = asPositiveNumber(defaults.minReusableOffcutWidthMm, 300);
+  const preferred = asPositiveNumber(defaults.preferredOffcutDimensionMm, 300);
+  const grain = defaults.minReusableOffcutGrain ?? 'any';
+  const cfg = {
+    minUsableLength: minLength,
+    minUsableWidth: minWidth,
+    minUsableGrain: grain,
+  };
+
+  const cleanLength = Math.max(minLength, preferred);
+  const cleanWidth = Math.max(minWidth, preferred);
+  const narrowWidth = Math.max(60, Math.round(minWidth * 0.55));
+  const sampleRects = [
+    { key: 'pass', label: 'Reusable', x: 58, y: 58, w: 142, h: 116, actualW: minWidth, actualH: minLength },
+    { key: 'preferred', label: 'Preferred', x: 222, y: 52, w: 168, h: 128, actualW: cleanWidth, actualH: cleanLength },
+    { key: 'fail', label: 'Too narrow', x: 58, y: 210, w: 142, h: 70, actualW: narrowWidth, actualH: Math.max(minLength, preferred) },
+  ];
+  const classified = sampleRects.map((rect) => ({
+    ...rect,
+    reusable: isReusableOffcut({ w: rect.actualW, h: rect.actualH }, cfg),
+  }));
+
+  return (
+    <div className="max-w-3xl">
+      <svg
+        viewBox="0 0 650 330"
+        role="img"
+        aria-label="Reusable offcut rule examples"
+        className="w-full rounded-md border border-border bg-slate-950/40"
+      >
+        <defs>
+          <pattern id="cutlist-grid" width="18" height="18" patternUnits="userSpaceOnUse">
+            <path d="M 18 0 L 0 0 0 18" fill="none" stroke="rgb(51 65 85)" strokeWidth="0.6" opacity="0.35" />
+          </pattern>
+          <marker id="arrow-teal" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+            <path d="M 0 0 L 8 4 L 0 8 z" fill="rgb(45 212 191)" />
+          </marker>
+          <marker id="arrow-muted" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+            <path d="M 0 0 L 8 4 L 0 8 z" fill="rgb(148 163 184)" />
+          </marker>
+        </defs>
+
+        <rect x="20" y="20" width="400" height="290" rx="6" fill="url(#cutlist-grid)" stroke="rgb(71 85 105)" />
+        <rect x="34" y="34" width="372" height="260" rx="3" fill="rgb(15 23 42)" opacity="0.55" />
+
+        {classified.map((rect) => (
+          <g key={rect.key}>
+            <rect
+              x={rect.x}
+              y={rect.y}
+              width={rect.w}
+              height={rect.h}
+              rx="4"
+              fill={rect.key === 'preferred' ? 'rgb(20 184 166)' : rect.reusable ? 'rgb(34 197 94)' : 'rgb(100 116 139)'}
+              fillOpacity={rect.key === 'preferred' ? 0.32 : rect.reusable ? 0.26 : 0.18}
+              stroke={rect.key === 'preferred' ? 'rgb(45 212 191)' : rect.reusable ? 'rgb(74 222 128)' : 'rgb(148 163 184)'}
+              strokeWidth={rect.key === 'preferred' ? 2.5 : 2}
+              strokeDasharray={rect.key === 'preferred' ? '7 5' : undefined}
+            />
+            <text x={rect.x + 10} y={rect.y + 24} fill="rgb(226 232 240)" fontSize="15" fontWeight="700">{rect.label}</text>
+            <text x={rect.x + 10} y={rect.y + 45} fill="rgb(203 213 225)" fontSize="13">
+              {rect.actualH} x {rect.actualW} mm
+            </text>
+            <text x={rect.x + 10} y={rect.y + rect.h - 12} fill={rect.reusable ? 'rgb(134 239 172)' : 'rgb(203 213 225)'} fontSize="12">
+              {rect.reusable ? 'counts as stock' : 'counts as scrap'}
+            </text>
+          </g>
+        ))}
+
+        <line x1="58" y1="42" x2="200" y2="42" stroke="rgb(45 212 191)" strokeWidth="2" markerStart="url(#arrow-teal)" markerEnd="url(#arrow-teal)" />
+        <text x="88" y="34" fill="rgb(153 246 228)" fontSize="13">Minimum width {minWidth} mm</text>
+        <line x1="44" y1="58" x2="44" y2="174" stroke="rgb(45 212 191)" strokeWidth="2" markerStart="url(#arrow-teal)" markerEnd="url(#arrow-teal)" />
+        <text x="30" y="156" fill="rgb(153 246 228)" fontSize="13" transform="rotate(-90 30 156)">Minimum length {minLength} mm</text>
+        <path d="M 390 188 C 365 215, 325 230, 275 232" fill="none" stroke="rgb(45 212 191)" strokeWidth="2" markerEnd="url(#arrow-teal)" />
+        <text x="272" y="216" fill="rgb(153 246 228)" fontSize="13">Preferred guide {preferred} mm</text>
+
+        <g>
+          <line x1="425" y1="52" x2="425" y2="286" stroke="rgb(71 85 105)" />
+          <text x="450" y="62" fill="rgb(226 232 240)" fontSize="17" fontWeight="700">How the rule reads</text>
+          <text x="450" y="94" fill="rgb(203 213 225)" fontSize="13">Both minimums are hard gates.</text>
+          <text x="450" y="116" fill="rgb(203 213 225)" fontSize="13">Skinny strips stay out of stock.</text>
+          <text x="450" y="150" fill="rgb(153 246 228)" fontSize="13">Preferred offcut dimension</text>
+          <text x="450" y="170" fill="rgb(203 213 225)" fontSize="13">nudges the optimizer toward</text>
+          <text x="450" y="190" fill="rgb(203 213 225)" fontSize="13">cleaner leftovers.</text>
+          <text x="450" y="228" fill="rgb(226 232 240)" fontSize="13">Grain: {getGrainOption(grain).label}</text>
+          <line x1="450" y1="250" x2="450" y2="286" stroke="rgb(148 163 184)" strokeWidth="2" markerStart="url(#arrow-muted)" markerEnd="url(#arrow-muted)" />
+          <text x="466" y="273" fill="rgb(148 163 184)" fontSize="12">sheet grain</text>
+        </g>
+      </svg>
+    </div>
+  );
 }
 
 export default function CutlistSettingsPage() {
@@ -154,6 +255,8 @@ export default function CutlistSettingsPage() {
             />
           </div>
         </div>
+
+        <OffcutRuleDiagram defaults={defaults} />
 
         <div className="flex justify-end">
           <Button onClick={handleSave} disabled={saving}>
