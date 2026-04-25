@@ -526,7 +526,11 @@ export async function packPartsSmartOptimized(
         algorithm: 'strip',
       };
     }
-    const result = packWithStrips(parts, sheet);
+    const result = packWithStrips(parts, sheet, {
+      minUsableLength: opts.packingConfig?.minUsableLength,
+      minUsableWidth: opts.packingConfig?.minUsableWidth,
+      minUsableGrain: opts.packingConfig?.minUsableGrain,
+    });
     return {
       ...result,
       strategyUsed: 'vertical-first',
@@ -549,7 +553,11 @@ export async function packPartsSmartOptimized(
     // Run strip packer as a baseline for post-run comparison.
     // Strip packer produces compact corner-packing layouts that are
     // ideal for small jobs. SA should never produce worse results.
-    const stripBaseline = packWithStrips(parts, sheet);
+    const stripBaseline = packWithStrips(parts, sheet, {
+      minUsableLength: opts.packingConfig?.minUsableLength,
+      minUsableWidth: opts.packingConfig?.minUsableWidth,
+      minUsableGrain: opts.packingConfig?.minUsableGrain,
+    });
 
     let saLayout: LayoutResult & { strategyUsed: string };
 
