@@ -45,9 +45,10 @@ const DEFAULT_COLOR: ColorEntry = {
 
 const EDGE_BAND_COLOR = '#f97316'; // orange-500
 const EDGE_BAND_THICKNESS = 3;
-const REUSABLE_FILL = 'rgba(16, 185, 129, 0.32)';
+const REUSABLE_FILL = 'rgb(226, 232, 240)';
 const REUSABLE_STROKE = 'rgb(16, 185, 129)';
 const REUSABLE_LABEL_COLOR = 'rgb(52, 211, 153)';
+const REUSABLE_GRAIN_STROKE = 'rgb(15, 23, 42)';
 
 /** Approximate width of a character at a given font size (SVG units). */
 const CHAR_WIDTH_RATIO = 0.6;
@@ -162,6 +163,24 @@ export function SheetPreview({
             y2="6"
             stroke="#000"
             strokeOpacity="0.12"
+            strokeWidth="0.5"
+          />
+        </pattern>
+
+        {/* Reusable offcuts: sheet-grain vertical stripes over gray leftover stock */}
+        <pattern
+          id={`${pid}-offcut-grain`}
+          width="6"
+          height="6"
+          patternUnits="userSpaceOnUse"
+        >
+          <line
+            x1="3"
+            y1="0"
+            x2="3"
+            y2="6"
+            stroke={REUSABLE_GRAIN_STROKE}
+            strokeOpacity="0.18"
             strokeWidth="0.5"
           />
         </pattern>
@@ -493,8 +512,19 @@ export function SheetPreview({
                   rx={1}
                   ry={1}
                   fill={REUSABLE_FILL}
+                  fillOpacity={0.85}
                   stroke={REUSABLE_STROKE}
                   strokeWidth={1.5}
+                />
+                <rect
+                  x={x}
+                  y={y}
+                  width={w}
+                  height={h}
+                  rx={1}
+                  ry={1}
+                  fill={`url(#${pid}-offcut-grain)`}
+                  pointerEvents="none"
                 />
                 {fitsTwoLine ? (
                   <text
