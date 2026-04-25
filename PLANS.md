@@ -1,107 +1,133 @@
-# Cutlist Reusable-Offcut Rules
+# Cutlist Builder - Reusable Offcut Visualization
 
 ## Purpose / Big Picture
 
-Replace org-level Cutlist Defaults with a 2D, optionally grain-aware minimum reusable offcut rule. Admins configure minimum length, minimum width, optional grain orientation, and preferred offcut dimension at `/settings/cutlist`. The Cutlist Builder preview uses the same rule for both guillotine and strip algorithms. Legacy single-dimension JSONB values continue to load without a SQL migration.
+Surface reusable offcut sizes in the per-product Cutlist Builder so estimators can see what stock a layout produces and feed informed numbers into the existing Manual % billing input. The completed screen-only change adds green-tinted offcut overlays with size labels on each sheet SVG diagram, a per-sheet bullet list of offcut dimensions, and segmented utilization bars for parts, reusable stock, and scrap at both per-sheet and rolled-up job levels. Quick-fill chips above Manual % populate the existing billing override input from raw mechanical, effective, or full-sheet percentages without changing costing engine shapes.
 
 ## Progress
 
-- [x] P1. Done 2026-04-25T04:20:00Z: Created `lib/cutlist/offcuts.ts` with `isReusableOffcut` and added 9 truth-table tests in `tests/cutlist-reusable-offcut.test.ts`.
-- [x] P2. Done 2026-04-25T04:23:00Z: Updated `hooks/use-org-settings.ts` to expose the new `CutlistDefaults` shape and `normalizeCutlistDefaults`; added 4 legacy-normalizer tests.
-- [x] P3. Done 2026-04-25T04:29:00Z: Rewired `lib/cutlist/guillotinePacker.ts` to use shared classification and axis-aligned scoring/splitting/retention.
-- [x] P4. Done 2026-04-25T04:34:00Z: Updated `lib/cutlist/stripPacker.ts` to the new config shape and to emit `offcut_summary` per sheet.
-- [x] P5. Done 2026-04-25T04:35:00Z: Forwarded `packingConfig` through both `packWithStrips` call sites in `components/features/cutlist/packing.ts`.
-- [x] P6. Done 2026-04-25T04:38:00Z: Updated `CutlistCalculator.tsx` config mapping and confirmed benchmark scripts had no legacy key references.
-- [x] P7. Done 2026-04-25T04:42:00Z: Replaced `/settings/cutlist` with minimum length, minimum width, grain button, and preferred-dimension tooltip UI.
-- [x] P8. Done 2026-04-25T04:49:00Z: Added guillotine and strip `offcut_summary` regression tests; patched guillotine standard strategy to retain per-sheet offcut info.
-- [x] P9. Done 2026-04-25T04:55:00Z: Repo-wide legacy-key grep returns zero code hits outside `node_modules`; legacy read support remains via constructed key lookup.
-- [x] P10. Done 2026-04-25T05:07:00Z: Ran final validation and browser acceptance checks; type-check remains blocked by pre-existing unrelated baseline errors.
+- [x] P1. Done 2026-04-25T16:06:00+02:00 - Created `lib/cutlist/effectiveUtilization.ts` with `UtilizationBreakdown`, `computeSheetUtilization`, and `computeRolledUpUtilization`.
+- [x] P2. Done 2026-04-25T16:07:00+02:00 - Added `tests/cutlist-effective-utilization.test.ts` covering all nine truth-table cases; helper test passed 9/9.
+- [x] P3. Done 2026-04-25T16:11:00+02:00 - Added `components/features/cutlist/primitives/UtilizationBar.tsx` with segmented bar, legend, Mechanical/Effective line, and constrained tooltip.
+- [x] P4. Done 2026-04-25T16:11:00+02:00 - Added `components/features/cutlist/primitives/ReusableOffcutList.tsx` with area-descending sort and in-place collapse/expand behavior.
+- [x] P5. Done 2026-04-25T16:15:00+02:00 - Extended `components/features/cutlist/preview.tsx` with `showOffcutOverlay` and green SVG overlay labels using the same sheet transform as placements.
+- [x] P6. Done 2026-04-25T16:19:00+02:00 - Integrated offcut list, utilization bar, parity m2 readout, overlay, and quick-fill chips into `SheetLayoutGrid.tsx`; preserved existing full/manual/auto override behavior.
+- [x] P7. Done 2026-04-25T16:22:00+02:00 - Mirrored reusable offcut list, utilization bar, m2 readout, and overlay into `InteractiveSheetViewer.tsx` without adding billing controls.
+- [x] P8. Done 2026-04-25T16:25:00+02:00 - Added the rolled-up "All sheets" utilization bar in `CutlistCalculator.tsx` across primary and backer sheets.
+- [x] P9. Done 2026-04-25T16:34:00+02:00 - Browser-verified `/products/856/cutlist-builder`: rolled-up bar, per-sheet list/bar/chips, tooltip, per-sheet/global full toggles, SVG overlays, and zoom modal mirror. Zero-reusable UI state was not produced by product 856, but the helper zero-reusable behavior is covered by tests.
+- [x] P10. Done 2026-04-25T16:39:00+02:00 - Final validation completed: stale-string sweep clean, lint at known 37 warnings/0 errors, touched-file tsc grep clean, 58/58 related tests passed, and simplify pass found no safe follow-up edits.
 
 ## Surprises & Discoveries
 
-- The worktree was dirty before starting, so the pre-existing local edits were stashed as `pre-reusable-offcut-plan-2026-04-25` before P1.
-- `packPartsGuillotine` could choose a standard `packWithStrategy` result that did not include `perSheetOffcuts`; `toLayoutResult` therefore produced no `offcut_summary`. P8 fixed this by capturing per-sheet offcut info in `packWithStrategy` too.
-- Final `npx tsc --noEmit` reports many existing baseline errors beyond the plan's documented `app/orders/[orderId]/page.tsx:192` issue. No remaining errors point at the touched cutlist files after the P10 fix.
-- A stale Next dev server was already holding `.next/dev/lock`, so `npm run dev` could not start a new server and validation used the existing `http://localhost:3000` instance.
+- 2026-04-25T16:25:00+02:00 - Product 856 now has both primary and backer packed results in the Preview tab, so the rolled-up bar was verified across both grids.
+- 2026-04-25T16:33:00+02:00 - Product 856 naturally produces reusable offcuts on all visible primary/backer sheets; no zero-reusable browser fixture was available without disturbing saved product data.
+- 2026-04-25T16:34:00+02:00 - The zoom modal screenshot showed the green overlays aligned with the underlying sheet coordinates and the tooltip constrained to a compact multi-line width.
 
 ## Decision Log
 
-- Kept the read-side legacy migration instead of a SQL migration because `organizations.cutlist_defaults` is JSONB and the plan explicitly requires no SQL.
-- Mapped X-axis remnants to `minUsableWidth` and Y-axis remnants to `minUsableLength`, matching the sheet grain convention.
-- Preserved the legacy single-dimension fallback by copying it to both new axes only when neither new axis key is present.
-- Ignored the legacy area gate on read, as required, and removed contiguous legacy key identifiers from TypeScript/TSX so the P9 grep is authoritative.
-- Updated the canonical cutlist feature doc rather than shared index docs because the work changed feature behavior but did not add a new workstream or materially change the TODO index status.
+- 2026-04-25T16:06:00+02:00 - Parts area remains authoritative under area drift; reusable area clamps to the remaining sheet area after parts are clamped.
+- 2026-04-25T16:15:00+02:00 - The overlay uses the accepted simple leader-line fallback rule: wide-short offcuts label below the sheet, tall-thin offcuts label to the right; collision avoidance remains deferred.
+- 2026-04-25T16:19:00+02:00 - Quick-fill chips are inline buttons instead of a new component because their behavior is tightly coupled to the existing per-sheet override state.
+- 2026-04-25T16:39:00+02:00 - The simplify pass left SVG/list dimension formatting separate because SVG fit logic and UI list rendering have different constraints.
 
 ## Outcomes & Retrospective
 
-The implementation is complete. Both packers now share one reusable-offcut classifier, both algorithms emit per-sheet `offcut_summary`, `/settings/cutlist` writes the new JSONB shape, and legacy rows still normalize safely on read. The only incomplete acceptance item is a clean whole-repo `tsc`; it is blocked by unrelated baseline errors already present across Next generated route types, assistant, payroll, quote, supplier, todo, staff, and old page code.
+The implementation is complete as a screen-only cutlist-builder enhancement. Estimators can now read reusable offcut stock from the SVG diagram, the sorted list, and the utilization bars; they can also apply mechanical/effective/full billing percentages through the existing Manual % override path. Costing data shapes, SQL, RLS, migrations, and PDF rendering were not changed.
 
 ## Context and Orientation
 
-Unity ERP is a Next.js App Router furniture-manufacturing ERP backed by Supabase. This work is on branch `codex/local-cutlist-tab-rewire`. The Cutlist module computes furniture sheet layouts from parts and stock sheets. Grain runs along sheet `length_mm` (Y axis); for free rectangles, `h` is along grain and `w` is across grain. Multi-tenancy is handled through org-scoped `organizations.cutlist_defaults`; RLS and SQL schema were not changed.
+Unity ERP is a Next.js App Router furniture-manufacturing ERP backed by Supabase. The Cutlist Builder page at `/products/<id>/cutlist-builder` renders packed primary sheets and optional backer sheets through `CutlistCalculator.tsx`, `SheetLayoutGrid.tsx`, `SheetPreview`, and `InteractiveSheetViewer`. The existing billing model is unchanged: `autoPct` is mechanical used area divided by sheet area, per-sheet overrides are keyed by `sheet.sheet_id`, and `chargePct` still flows into costing as full/manual/auto. Reusable offcut data comes from `sheet.offcut_summary.reusableOffcuts`, where each offcut rect uses sheet coordinates `{ x, y, w, h, area_mm2 }`.
 
 ## Plan of Work
 
-1. Add a standalone shared offcut classifier in `lib/cutlist/offcuts.ts`.
-2. Normalize org-level cutlist defaults to `minReusableOffcutLengthMm`, `minReusableOffcutWidthMm`, `minReusableOffcutGrain`, and `preferredOffcutDimensionMm`.
-3. Rewire guillotine classification and scoring to the new axis-aware config.
-4. Rewire strip config and emit per-sheet offcut summaries from strip remnants.
-5. Forward packer config through strip call sites.
-6. Update calculator mapping and benchmark references.
-7. Replace the settings UI with four controls.
-8. Update packing tests for both algorithms' `offcut_summary`.
-9. Sweep for legacy key references.
-10. Validate with lint, type-check, tests, and browser checks.
+The work was implemented in the intended order: pure utilization helper and tests first, display primitives next, SVG overlay after that, then per-sheet card integration, zoom modal integration, rolled-up integration, docs, browser verification, and final validation. The implementation stayed within screen-only scope and did not add dependencies, migrations, new data writes, costing changes, or PDF changes.
 
 ## Concrete Steps
 
-Commits created:
-
-- `06d159a feat(cutlist): add isReusableOffcut helper with truth-table tests`
-- `6cff6de feat(cutlist): 2D + grain-aware CutlistDefaults with legacy normalizer`
-- `0fbcbab feat(cutlist): rewire guillotine packer to 2D grain-aware classification + axis-aligned scoring`
-- `85f2d7a feat(cutlist): strip packer 2D config + per-sheet offcut_summary emission`
-- `242646a feat(cutlist): forward packingConfig to packWithStrips call sites`
-- `31e5d9a chore(cutlist): wire calculator + benchmarks to new packer config keys`
-- `2c20cd5 feat(cutlist): 2D + grain-aware settings page with preferred-dim tooltip`
-- `48da982 test(cutlist): cover 2D rule + strip remnant emission across both algorithms`
-- `80069eb docs(cutlist): document 2D reusable-offcut defaults`
-- `e7e4936 test(cutlist): keep legacy normalizer grep-clean`
+1. Confirmed the repo was `/Users/gregorymaier/developer/unity-erp` on `codex/integration` with a clean worktree.
+2. Read `docs/README.md`, `docs/overview/todo-index.md`, and identified `docs/features/cutlist-calculator.md` as the canonical feature doc to update.
+3. Added `lib/cutlist/effectiveUtilization.ts` and `tests/cutlist-effective-utilization.test.ts`; committed `ba8b8e1`.
+4. Added `UtilizationBar.tsx`; committed `57e1902`.
+5. Added `ReusableOffcutList.tsx`; committed `3fc80a3`.
+6. Added `showOffcutOverlay` rendering to `preview.tsx`; committed `2155eeb`.
+7. Integrated per-sheet bars, list, chips, and overlay into `SheetLayoutGrid.tsx`; committed `0530869`.
+8. Integrated read-only zoom modal stats and overlay into `InteractiveSheetViewer.tsx`; committed `058f834`.
+9. Added rolled-up primary/backer utilization in `CutlistCalculator.tsx`; committed `21cc2be`.
+10. Updated `docs/features/cutlist-calculator.md`; committed `e76188d`.
+11. Browser-verified product 856 on the existing dev server at `http://localhost:3000/products/856/cutlist-builder`.
+12. Ran final validation commands and recorded transcripts.
 
 ## Validation and Acceptance
 
-- Settings page rendered the new controls at `http://localhost:3000/settings/cutlist` while signed in.
-- The old "Minimum reusable area" control was absent.
-- Saving `600 / 400 / length / 400` produced the toast `Cutlist defaults saved`.
-- Reloading the settings page preserved the grain icon `↕` and label `Grain along length`; browser text extraction does not include numeric input values, but the save round-trip succeeded through the UI.
-- Product `856` cutlist builder recalculated and rendered preview offcut summaries: primary sheet `Reusable offcuts: 3 (26770 cm²)`, backer sheet `Reusable offcuts: 2 (41266 cm²)`.
-- `npx tsx --test tests/cutlist-reusable-offcut.test.ts tests/use-org-settings-cutlist-defaults.test.ts tests/cutlist-packing.test.ts` passed 49/49.
-- Cutlist-adjacent regression suite passed 50/50.
-- `npm run lint` passed with 37 pre-existing image/alt warnings and 0 errors.
-- Legacy-key grep returned zero lines outside `node_modules`.
-- `npx tsc --noEmit` failed on unrelated baseline errors; no touched cutlist file remained in the error output after fixes.
+- Helper truth table: `npx tsx --test tests/cutlist-effective-utilization.test.ts` passed 9/9.
+- Related cutlist suites: `npx tsx --test tests/cutlist-effective-utilization.test.ts tests/cutlist-packing.test.ts tests/cutlist-reusable-offcut.test.ts tests/use-org-settings-cutlist-defaults.test.ts` passed 58/58.
+- Lint: `npm run lint` completed with 0 errors and the known 37 image warnings.
+- Touched-file type check: `npx tsc --noEmit 2>&1 | grep -E "lib/cutlist/effectiveUtilization|UtilizationBar|ReusableOffcutList|preview\.tsx|SheetLayoutGrid|InteractiveSheetViewer|CutlistCalculator|tests/cutlist-effective-utilization"` produced no output.
+- Stale-string sweep: `grep -rn "Reusable offcuts: \|Scrap pockets:" --include="*.tsx" components/features/cutlist` produced no output.
+- Browser evidence on product 856: all-sheets bar showed primary plus backer math; primary card showed `Reusable offcuts (3)`, `Parts 45.5% / Reuse 53.6% / Scrap 1.0%`, `Mechanical 45.5% · Effective 99.0%`, chips `Mech 45.5`, `Eff 99.0`, `Full 100.0`, and green SVG offcut overlays.
+- Browser interaction evidence: Eff chip wrote raw `99.04649812846534` into Manual %, Reset restored the auto display to `45.5`, and Mech chip wrote raw `45.4632798895094` while Billing displayed `45.5%`.
+- Browser toggle evidence: per-sheet and global full-sheet switches disabled chips and Manual % inputs, then re-enabled them when toggled off.
+- Browser modal evidence: the zoom modal showed reusable list, utilization bar, Mechanical/Effective line, and green overlays, with no chips, no Manual % input, and no Reset link.
+- Tooltip evidence: hovering the Effective info icon showed the exact copy beginning `Parts placed plus reusable offcuts retained as stock` in a constrained-width tooltip.
+- Zero-reusable browser state: not produced on product 856; helper tests verify zero reusable collapses effective to mechanical and clears reusable percentage state.
 
 ## Idempotence and Recovery
 
-Each meaningful step is committed separately. To roll back one step, run `git revert <commit>` for that step. To restore the pre-plan local dirty state, apply the stash named `pre-reusable-offcut-plan-2026-04-25`. Runtime data remains JSONB in `organizations.cutlist_defaults`; no SQL migration or destructive data operation was performed. Re-running the plan is safe: the grep sweep is the canonical check for legacy key leftovers, and the normalizer keeps old JSONB rows readable.
+Each functional progress item was committed separately. To roll back one step, revert that step's commit. To roll back the full implementation, revert commits `ba8b8e1..e76188d` from this branch. There are no data-layer changes, no SQL migrations, no RLS/policy changes, no package changes, no JSONB shape changes, and no costing engine changes. Re-running validation is safe; the canonical completion checks are the helper tests, stale-string sweep, lint, touched-file tsc grep, and browser walkthrough.
 
 ## Artifacts and Notes
 
-- Test transcript: `tests/cutlist-reusable-offcut.test.ts` passed 9/9.
-- Test transcript: `tests/use-org-settings-cutlist-defaults.test.ts` passed 4/4.
-- Test transcript: `tests/cutlist-packing.test.ts` passed 36/36, including guillotine and strip `offcut_summary` cases.
-- Adjacent regression transcript passed 50/50 across edging, snapshot freshness, cutting-plan, line allocation, material cost, and padded cost tests.
-- Browser validation used the existing server at `http://localhost:3000` because a prior dev server held the Next lock.
-- Canonical docs updated in `docs/features/cutlist-calculator.md`.
+- Commits: `ba8b8e1`, `57e1902`, `3fc80a3`, `2155eeb`, `0530869`, `058f834`, `21cc2be`, `e76188d`.
+- Browser URL verified: `http://localhost:3000/products/856/cutlist-builder`.
+- Dev server was already listening on port 3000 under node PID 95004.
+- Visual artifact observed in browser: zoom modal displayed three green reusable rectangles on the primary sheet with labels `1203 x 724`, `703 x 424`, and `1830 x 824`; larger labels included the `reusable` area line.
+- Transcript files written for local reference: `/tmp/offcut-final-lint.txt`, `/tmp/offcut-final-tsc.txt`, `/tmp/offcut-final-tests.txt`, `/tmp/offcut-final-stale-grep.txt`.
 
 ## Interfaces and Dependencies
 
-New `lib/cutlist/offcuts.ts` exports `OffcutClassificationConfig` and `isReusableOffcut(rect, cfg)`.
+New helper module:
 
-Updated `hooks/use-org-settings.ts` exports `CutlistDefaults` with `minReusableOffcutLengthMm`, `minReusableOffcutWidthMm`, `minReusableOffcutGrain`, and `preferredOffcutDimensionMm`, plus `normalizeCutlistDefaults(raw)`.
+```ts
+export interface UtilizationBreakdown {
+  totalArea_mm2: number;
+  partsArea_mm2: number;
+  reusableArea_mm2: number;
+  scrapArea_mm2: number;
+  mechanicalPctRaw: number;
+  effectivePctRaw: number;
+  displayPartsPct: number;
+  displayReusablePct: number;
+  displayScrapPct: number;
+  hasReusable: boolean;
+  hasAreaDrift: boolean;
+}
 
-Updated `lib/cutlist/guillotinePacker.ts` uses `PackingConfig.minUsableLength`, `minUsableWidth`, and `minUsableGrain`; removed the old scalar dimension and area config keys.
+export function computeSheetUtilization(sheet: SheetLayout, sheetWidth_mm: number, sheetLength_mm: number): UtilizationBreakdown;
+export function computeRolledUpUtilization(sheets: Array<{ layout: SheetLayout; widthMm: number; lengthMm: number }>): UtilizationBreakdown;
+```
 
-Updated `lib/cutlist/stripPacker.ts` uses the same classification fields and now populates `SheetLayout.offcut_summary`.
+New components:
 
-No package additions, package upgrades, SQL migrations, RLS changes, or database schema changes were made.
+```ts
+export function UtilizationBar(props: {
+  breakdown: UtilizationBreakdown;
+  className?: string;
+  title?: string;
+}): JSX.Element;
+
+export function ReusableOffcutList(props: {
+  offcuts: OffcutRect[];
+  className?: string;
+  collapseAfter?: number;
+}): JSX.Element | null;
+```
+
+Modified component contract:
+
+```ts
+interface SheetPreviewProps {
+  showOffcutOverlay?: boolean;
+}
+```
+
+No new package dependencies were introduced. Existing dependencies used: React, `lucide-react`, shadcn Tooltip/Button/Input/Switch primitives, Tailwind utility classes, and existing cutlist types.
