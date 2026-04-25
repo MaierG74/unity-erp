@@ -34,6 +34,19 @@ function asPositiveNumber(value: number | undefined, fallback: number) {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+function scaleDiagramRect(
+  actualW: number,
+  actualH: number,
+  scale: number,
+  minW = 0,
+  minH = 0,
+) {
+  return {
+    w: Math.max(minW, Math.round(actualW * scale)),
+    h: Math.max(minH, Math.round(actualH * scale)),
+  };
+}
+
 function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
   const minLength = asPositiveNumber(defaults.minReusableOffcutLengthMm, 300);
   const minWidth = asPositiveNumber(defaults.minReusableOffcutWidthMm, 300);
@@ -50,15 +63,23 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
   const cleanLength = Math.max(minLength, preferred);
   const cleanWidth = Math.max(minWidth, preferred);
   const narrowWidth = Math.max(60, Math.round(minWidth * 0.55));
+  const narrowLength = Math.max(minLength, preferred);
+  const topScale = Math.min(126 / Math.max(minWidth, cleanWidth), 154 / Math.max(minLength, cleanLength));
+  const narrowScale = Math.min(64 / narrowWidth, 86 / narrowLength, topScale);
+  const reusableSize = scaleDiagramRect(minWidth, minLength, topScale, 82, 82);
+  const preferredSize = scaleDiagramRect(cleanWidth, cleanLength, topScale, 82, 82);
+  const narrowSize = scaleDiagramRect(narrowWidth, narrowLength, narrowScale, 40, 70);
   const sampleRects = [
-    { key: 'pass', label: 'Reusable', x: 84, y: 58, w: 142, h: 116, actualW: minWidth, actualH: minLength },
-    { key: 'preferred', label: 'Preferred', x: 252, y: 52, w: 168, h: 128, actualW: cleanWidth, actualH: cleanLength },
-    { key: 'fail', label: 'Too narrow', x: 84, y: 210, w: 142, h: 70, actualW: narrowWidth, actualH: Math.max(minLength, preferred) },
+    { key: 'pass', label: 'Reusable', x: 84, y: 58, w: reusableSize.w, h: reusableSize.h, actualW: minWidth, actualH: minLength, labelOutside: false },
+    { key: 'preferred', label: 'Preferred', x: 252, y: 58, w: preferredSize.w, h: preferredSize.h, actualW: cleanWidth, actualH: cleanLength, labelOutside: false },
+    { key: 'fail', label: 'Too narrow', x: 84, y: 214, w: narrowSize.w, h: narrowSize.h, actualW: narrowWidth, actualH: narrowLength, labelOutside: true },
   ];
   const classified = sampleRects.map((rect) => ({
     ...rect,
     reusable: isReusableOffcut({ w: rect.actualW, h: rect.actualH }, cfg),
   }));
+  const reusableRect = classified[0]!;
+  const preferredRect = classified[1]!;
 
   return (
     <div className="max-w-3xl">
@@ -76,9 +97,6 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
           ))}
           <marker id="arrow-teal" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
             <path d="M 0 0 L 8 4 L 0 8 z" fill="rgb(45 212 191)" />
-          </marker>
-          <marker id="arrow-muted" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
-            <path d="M 0 0 L 8 4 L 0 8 z" fill="rgb(148 163 184)" />
           </marker>
         </defs>
 
@@ -111,21 +129,21 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
                   : null
               ))}
             </g>
-            <text x={rect.x + 10} y={rect.y + 24} fill="rgb(226 232 240)" fontSize="15" fontWeight="700">{rect.label}</text>
-            <text x={rect.x + 10} y={rect.y + 45} fill="rgb(203 213 225)" fontSize="13">
+            <text x={rect.labelOutside ? rect.x + rect.w + 12 : rect.x + 10} y={rect.y + 24} fill="rgb(226 232 240)" fontSize="15" fontWeight="700">{rect.label}</text>
+            <text x={rect.labelOutside ? rect.x + rect.w + 12 : rect.x + 10} y={rect.y + 45} fill="rgb(203 213 225)" fontSize="13">
               {rect.actualH} x {rect.actualW} mm
             </text>
-            <text x={rect.x + 10} y={rect.y + rect.h - 12} fill={rect.reusable ? 'rgb(134 239 172)' : 'rgb(203 213 225)'} fontSize="12">
+            <text x={rect.labelOutside ? rect.x + rect.w + 12 : rect.x + 10} y={rect.labelOutside ? rect.y + 66 : rect.y + rect.h - 12} fill={rect.reusable ? 'rgb(134 239 172)' : 'rgb(203 213 225)'} fontSize="12">
               {rect.reusable ? 'counts as stock' : 'counts as scrap'}
             </text>
           </g>
         ))}
 
-        <line x1="84" y1="42" x2="226" y2="42" stroke="rgb(45 212 191)" strokeWidth="2" markerStart="url(#arrow-teal)" markerEnd="url(#arrow-teal)" />
-        <text x="122" y="34" fill="rgb(153 246 228)" fontSize="13">Min width {minWidth} mm</text>
-        <line x1="56" y1="58" x2="56" y2="174" stroke="rgb(45 212 191)" strokeWidth="2" markerStart="url(#arrow-teal)" markerEnd="url(#arrow-teal)" />
-        <text x="40" y="151" fill="rgb(153 246 228)" fontSize="13" transform="rotate(-90 40 151)">Min length {minLength} mm</text>
-        <path d="M 420 188 C 390 215, 355 230, 305 232" fill="none" stroke="rgb(45 212 191)" strokeWidth="2" markerEnd="url(#arrow-teal)" />
+        <line x1={reusableRect.x} y1="42" x2={reusableRect.x + reusableRect.w} y2="42" stroke="rgb(45 212 191)" strokeWidth="2" markerStart="url(#arrow-teal)" markerEnd="url(#arrow-teal)" />
+        <text x={reusableRect.x + reusableRect.w / 2} y="34" fill="rgb(153 246 228)" fontSize="13" textAnchor="middle">Min width {minWidth} mm</text>
+        <line x1="56" y1={reusableRect.y} x2="56" y2={reusableRect.y + reusableRect.h} stroke="rgb(45 212 191)" strokeWidth="2" markerStart="url(#arrow-teal)" markerEnd="url(#arrow-teal)" />
+        <text x="40" y={reusableRect.y + reusableRect.h / 2 + 22} fill="rgb(153 246 228)" fontSize="13" transform={`rotate(-90 40 ${reusableRect.y + reusableRect.h / 2 + 22})`}>Min length {minLength} mm</text>
+        <path d={`M ${preferredRect.x + preferredRect.w + 8} ${preferredRect.y + preferredRect.h + 8} C 390 225, 355 230, 305 232`} fill="none" stroke="rgb(45 212 191)" strokeWidth="2" markerEnd="url(#arrow-teal)" />
         <text x="302" y="216" fill="rgb(153 246 228)" fontSize="13">Preferred guide {preferred} mm</text>
 
         <g>
