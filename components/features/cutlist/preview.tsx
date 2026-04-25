@@ -131,27 +131,9 @@ export function SheetPreview({
           }
           .part-highlighted { animation: pulse-stroke 1.5s ease-in-out infinite; }
         `}</style>
-        {/* Grain direction: horizontal lines (grain along length / x-axis) */}
+        {/* Grain along length axis (Y) - vertical stripes */}
         <pattern
           id={`${pid}-grain-length`}
-          width="6"
-          height="6"
-          patternUnits="userSpaceOnUse"
-        >
-          <line
-            x1="0"
-            y1="3"
-            x2="6"
-            y2="3"
-            stroke="#000"
-            strokeOpacity="0.12"
-            strokeWidth="0.5"
-          />
-        </pattern>
-
-        {/* Grain direction: vertical lines (grain along width / y-axis) */}
-        <pattern
-          id={`${pid}-grain-width`}
           width="6"
           height="6"
           patternUnits="userSpaceOnUse"
@@ -161,6 +143,24 @@ export function SheetPreview({
             y1="0"
             x2="3"
             y2="6"
+            stroke="#000"
+            strokeOpacity="0.12"
+            strokeWidth="0.5"
+          />
+        </pattern>
+
+        {/* Grain along width axis (X) - horizontal stripes */}
+        <pattern
+          id={`${pid}-grain-width`}
+          width="6"
+          height="6"
+          patternUnits="userSpaceOnUse"
+        >
+          <line
+            x1="0"
+            y1="3"
+            x2="6"
+            y2="3"
             stroke="#000"
             strokeOpacity="0.12"
             strokeWidth="0.5"
