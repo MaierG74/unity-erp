@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { requireProductsAccess } from '@/lib/api/products-access';
@@ -95,6 +96,25 @@ export async function GET(
   }
 }
 
+function dedupePartIds(parts: CutlistGroup['parts']): CutlistGroup['parts'] {
+  if (!Array.isArray(parts)) return [];
+
+  const seen = new Set<string>();
+
+  return parts.map((part) => {
+    const rawId = typeof part?.id === 'string' && part.id.length > 0 ? part.id : null;
+
+    if (rawId && !seen.has(rawId)) {
+      seen.add(rawId);
+      return part;
+    }
+
+    const fresh = randomUUID();
+    seen.add(fresh);
+    return { ...part, id: fresh };
+  });
+}
+
 /**
  * POST /api/products/[productId]/cutlist-groups
  * Save cutlist groups for a product (replaces all existing groups)
@@ -152,7 +172,7 @@ export async function POST(
         primary_material_name: group.primary_material_name || null,
         backer_material_id: group.backer_material_id ? Number.parseInt(group.backer_material_id, 10) : null,
         backer_material_name: group.backer_material_name || null,
-        parts: group.parts || [],
+        parts: dedupePartIds(group.parts ?? []),
         sort_order: typeof group.sort_order === 'number' ? group.sort_order : index,
       }));
 

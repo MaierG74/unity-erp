@@ -29,6 +29,7 @@ import type {
   BandEdges,
   SheetOffcutSummary,
 } from './types';
+import { isReusableOffcut } from './offcuts';
 
 // =============================================================================
 // Configuration
@@ -38,12 +39,11 @@ import type {
  * Configuration for waste-aware packing behavior.
  */
 export interface PackingConfig {
-  /** Minimum dimension (mm) for an offcut to be usable. Default: 150 */
-  minUsableDimension: number;
+  minUsableLength: number;
+  minUsableWidth: number;
+  minUsableGrain: GrainOrientation;
   /** Preferred minimum dimension (mm) for a good offcut. Default: 300 */
   preferredMinDimension: number;
-  /** Minimum area (mm²) for an offcut to be usable. Default: 100,000 */
-  minUsableArea: number;
   /** Penalty score for creating unusable slivers. Default: 10,000 */
   sliverPenalty: number;
   /** Penalty for a small terminal trim when the other dimension is an exact fit. Default: 500 */
@@ -64,9 +64,10 @@ export interface PackingConfig {
  * Default configuration optimized for furniture manufacturing.
  */
 export const DEFAULT_PACKING_CONFIG: PackingConfig = {
-  minUsableDimension: 150,
+  minUsableLength: 300,
+  minUsableWidth: 300,
+  minUsableGrain: 'any',
   preferredMinDimension: 300,
-  minUsableArea: 100_000,
   sliverPenalty: 10_000,
   exactFitTrimPenalty: 500,
   subOptimalPenalty: 2_000,
@@ -243,7 +244,8 @@ function simulateSplit(
   freeRect: FreeRect,
   partW: number,
   partH: number,
-  minDimension: number,
+  minLength: number,
+  minWidth: number,
   splitHorizontal: boolean
 ): SplitSimulation {
   const remRightW = freeRect.w - partW;
@@ -252,7 +254,7 @@ function simulateSplit(
 
   if (splitHorizontal) {
     // Split horizontally - top remnant gets full width
-    if (remRightW > minDimension) {
+    if (remRightW > minWidth) { // X (across grain) -> minWidth
       rects.push({
         x: freeRect.x + partW,
         y: freeRect.y,
@@ -260,7 +262,7 @@ function simulateSplit(
         h: partH,
       });
     }
-    if (remTopH > minDimension) {
+    if (remTopH > minLength) { // Y (along grain) -> minLength
       rects.push({
         x: freeRect.x,
         y: freeRect.y + partH,
@@ -270,7 +272,7 @@ function simulateSplit(
     }
   } else {
     // Split vertically - right remnant gets full height
-    if (remTopH > minDimension) {
+    if (remTopH > minLength) { // Y (along grain) -> minLength
       rects.push({
         x: freeRect.x,
         y: freeRect.y + partH,
@@ -278,7 +280,7 @@ function simulateSplit(
         h: remTopH,
       });
     }
-    if (remRightW > minDimension) {
+    if (remRightW > minWidth) { // X (across grain) -> minWidth
       rects.push({
         x: freeRect.x + partW,
         y: freeRect.y,
@@ -309,10 +311,11 @@ function getBestSplit(
   freeRect: FreeRect,
   partW: number,
   partH: number,
-  minDimension: number
+  minLength: number,
+  minWidth: number
 ): { horizontal: boolean; simulation: SplitSimulation } {
-  const horizSim = simulateSplit(freeRect, partW, partH, minDimension, true);
-  const vertSim = simulateSplit(freeRect, partW, partH, minDimension, false);
+  const horizSim = simulateSplit(freeRect, partW, partH, minLength, minWidth, true);
+  const vertSim = simulateSplit(freeRect, partW, partH, minLength, minWidth, false);
 
   // Score each split: higher concentration is better, fewer fragments is better
   // Also prefer keeping larger areas (better for future placements)
@@ -351,18 +354,18 @@ function calculatePlacementScore(
   const exactHeightFit = remH === 0;
 
   // Sliver penalty: heavily penalize creating unusable strips
-  if (remW > 0 && remW < config.minUsableDimension) {
+  if (remW > 0 && remW < config.minUsableWidth) {
     score += exactHeightFit ? config.exactFitTrimPenalty : config.sliverPenalty;
   }
-  if (remH > 0 && remH < config.minUsableDimension) {
+  if (remH > 0 && remH < config.minUsableLength) {
     score += exactWidthFit ? config.exactFitTrimPenalty : config.sliverPenalty;
   }
 
   // Sub-optimal penalty: moderate penalty for usable but small strips
-  if (remW >= config.minUsableDimension && remW < config.preferredMinDimension) {
+  if (remW >= config.minUsableWidth && remW < config.preferredMinDimension) {
     score += exactHeightFit ? config.exactFitTrimPenalty : config.subOptimalPenalty;
   }
-  if (remH >= config.minUsableDimension && remH < config.preferredMinDimension) {
+  if (remH >= config.minUsableLength && remH < config.preferredMinDimension) {
     score += exactWidthFit ? config.exactFitTrimPenalty : config.subOptimalPenalty;
   }
 
@@ -375,7 +378,7 @@ function calculatePlacementScore(
 
   // === OFFCUT-AWARE SCORING ===
   // Simulate the best split and score based on waste consolidation
-  const { simulation } = getBestSplit(freeRect, partW, partH, config.minUsableDimension);
+  const { simulation } = getBestSplit(freeRect, partW, partH, config.minUsableLength, config.minUsableWidth);
 
   // Concentration bonus: prefer placements that keep waste consolidated
   // concentration of 1.0 means all remaining area is in one piece (ideal)
@@ -404,10 +407,11 @@ function splitFreeRect(
   partW: number,
   partH: number,
   kerf: number,
-  minDimension: number
+  minLength: number,
+  minWidth: number
 ): FreeRect[] {
   // Use the offcut-aware split selection
-  const { horizontal } = getBestSplit(freeRect, partW, partH, minDimension);
+  const { horizontal } = getBestSplit(freeRect, partW, partH, minLength, minWidth);
   const remRightW = freeRect.w - partW;
   const remTopH = freeRect.h - partH;
   const rects: FreeRect[] = [];
@@ -415,7 +419,7 @@ function splitFreeRect(
   const inheritedPadBottom = freeRect.padBottom ?? 0;
 
   if (horizontal) {
-    if (remRightW > minDimension) {
+    if (remRightW > minWidth) { // X (across grain) -> minWidth
       rects.push({
         x: freeRect.x + partW,
         y: freeRect.y,
@@ -425,7 +429,7 @@ function splitFreeRect(
         padBottom: kerf,
       });
     }
-    if (remTopH > minDimension) {
+    if (remTopH > minLength) { // Y (along grain) -> minLength
       rects.push({
         x: freeRect.x,
         y: freeRect.y + partH,
@@ -436,7 +440,7 @@ function splitFreeRect(
       });
     }
   } else {
-    if (remTopH > minDimension) {
+    if (remTopH > minLength) { // Y (along grain) -> minLength
       rects.push({
         x: freeRect.x,
         y: freeRect.y + partH,
@@ -446,7 +450,7 @@ function splitFreeRect(
         padBottom: inheritedPadBottom,
       });
     }
-    if (remRightW > minDimension) {
+    if (remRightW > minWidth) { // X (across grain) -> minWidth
       rects.push({
         x: freeRect.x + partW,
         y: freeRect.y,
@@ -562,10 +566,7 @@ function classifyOffcuts(freeRects: FreeRect[], config: PackingConfig): {
   const scrapRects: FreeRect[] = [];
 
   for (const rect of freeRects) {
-    const isUsable =
-      Math.min(rect.w, rect.h) >= config.minUsableDimension &&
-      rect.w * rect.h >= config.minUsableArea;
-    if (isUsable) {
+    if (isReusableOffcut(rect, config)) {
       usableRects.push(rect);
     } else {
       scrapRects.push(rect);
@@ -854,7 +855,8 @@ export class GuillotinePacker {
       freeRect,
       orientation.w,
       orientation.h,
-      this.config.minUsableDimension
+      this.config.minUsableLength,
+      this.config.minUsableWidth
     );
 
     // Record placement (store actual part dimensions, not inflated)
@@ -897,7 +899,8 @@ export class GuillotinePacker {
       orientation.w,
       orientation.h,
       this.kerf,
-      this.config.minUsableDimension
+      this.config.minUsableLength,
+      this.config.minUsableWidth
     );
 
     // Update free rectangles list
@@ -984,11 +987,7 @@ export class GuillotinePacker {
    * Get usable offcuts (above minimum thresholds).
    */
   getUsableOffcuts(): FreeRect[] {
-    return this.freeRects.filter(
-      (r) =>
-        Math.min(r.w, r.h) >= this.config.minUsableDimension &&
-        r.w * r.h >= this.config.minUsableArea
-    );
+    return this.freeRects.filter((r) => isReusableOffcut(r, this.config));
   }
 }
 
@@ -1036,6 +1035,7 @@ export function packWithStrategy(
   let totalCuts = 0;
   let totalCutLength = 0;
   let lastSheetFreeRects: FreeRect[] = [];
+  const perSheetOffcuts: SheetOffcutInfo[] = [];
 
   while (remaining.length > 0 && sheetIndex < maxSheets) {
     const packer = new GuillotinePacker(stock.width_mm, stock.length_mm, kerf, fullConfig);
@@ -1053,6 +1053,22 @@ export function packWithStrategy(
       break;
     }
 
+    const sheetFreeRects = packer.getFreeRects();
+    const { usableRects, scrapRects } = classifyOffcuts(sheetFreeRects, fullConfig);
+    const sheetOffcutAreas = sheetFreeRects.map((r) => r.w * r.h);
+    const sheetLargestOffcut = sheetOffcutAreas.length > 0 ? Math.max(...sheetOffcutAreas) : 0;
+    const sheetTotalOffcut = sheetOffcutAreas.reduce((sum, a) => sum + a, 0);
+    perSheetOffcuts.push({
+      sheetIndex,
+      freeRects: sheetFreeRects,
+      usableRects,
+      scrapRects,
+      largestOffcutArea: sheetLargestOffcut,
+      totalOffcutArea: sheetTotalOffcut,
+      concentration: sheetTotalOffcut > 0 ? sheetLargestOffcut / sheetTotalOffcut : 1,
+      fragmentCount: sheetFreeRects.length,
+    });
+
     sheets.push({
       sheet_id: `${stock.id}:${sheetIndex + 1}`,
       placements,
@@ -1062,7 +1078,7 @@ export function packWithStrategy(
     const cutMetrics = packer.getCutMetrics();
     totalCuts += cutMetrics.count;
     totalCutLength += cutMetrics.cutLength;
-    lastSheetFreeRects = packer.getFreeRects();
+    lastSheetFreeRects = sheetFreeRects;
 
     remaining = stillUnplaced;
     sheetIndex++;
@@ -1075,11 +1091,7 @@ export function packWithStrategy(
   const wasteArea = Math.max(0, totalSheetArea - usedArea);
 
   const freeRects = lastSheetFreeRects;
-  const usableOffcuts = freeRects.filter(
-    (r) =>
-      Math.min(r.w, r.h) >= fullConfig.minUsableDimension &&
-      r.w * r.h >= fullConfig.minUsableArea
-  );
+  const usableOffcuts = freeRects.filter((r) => isReusableOffcut(r, fullConfig));
   const allOffcutAreas = freeRects.map((r) => r.w * r.h);
   const largestOffcutArea = allOffcutAreas.length > 0 ? Math.max(...allOffcutAreas) : 0;
   const totalOffcutArea = allOffcutAreas.reduce((sum, a) => sum + a, 0);
@@ -1145,6 +1157,7 @@ export function packWithStrategy(
     largestOffcutArea,
     offcutConcentration,
     fragmentCount,
+    perSheetOffcuts,
   };
 }
 
@@ -1227,11 +1240,7 @@ export function packWithExpandedParts(
   // Aggregate offcut data from per-sheet tracking (last sheet for backwards compat)
   const lastSheetOffcuts = perSheetOffcuts.length > 0 ? perSheetOffcuts[perSheetOffcuts.length - 1] : null;
   const freeRects = lastSheetOffcuts?.freeRects ?? [];
-  const usableOffcuts = freeRects.filter(
-    (r) =>
-      Math.min(r.w, r.h) >= fullConfig.minUsableDimension &&
-      r.w * r.h >= fullConfig.minUsableArea
-  );
+  const usableOffcuts = freeRects.filter((r) => isReusableOffcut(r, fullConfig));
   const largestOffcutArea = lastSheetOffcuts?.largestOffcutArea ?? 0;
   const totalOffcutArea = lastSheetOffcuts?.totalOffcutArea ?? 0;
   const offcutConcentration = lastSheetOffcuts?.concentration ?? 1;

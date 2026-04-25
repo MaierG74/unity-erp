@@ -22,7 +22,10 @@ import type {
   LayoutStats,
   UnplacedPart,
   GrainOrientation,
+  SheetOffcutSummary,
+  OffcutRect,
 } from './types';
+import { isReusableOffcut } from './offcuts';
 
 // =============================================================================
 // Configuration
@@ -37,8 +40,9 @@ export interface StripPackerConfig {
   heightTolerance: number;
   /** Try to align vertical cuts across strips. Default: true */
   preferAlignedCuts: boolean;
-  /** Minimum dimension for usable offcut. Default: 150 */
-  minUsableDimension: number;
+  minUsableLength: number;
+  minUsableWidth: number;
+  minUsableGrain: GrainOrientation;
 }
 
 export const DEFAULT_STRIP_CONFIG: StripPackerConfig = {
@@ -46,7 +50,9 @@ export const DEFAULT_STRIP_CONFIG: StripPackerConfig = {
   minStripHeight_mm: 100,
   heightTolerance: 0.15,
   preferAlignedCuts: true,
-  minUsableDimension: 150,
+  minUsableLength: 300,
+  minUsableWidth: 300,
+  minUsableGrain: 'any',
 };
 
 // =============================================================================
@@ -102,6 +108,53 @@ export interface StripPackResult extends LayoutResult {
 // =============================================================================
 // Helper Functions
 // =============================================================================
+
+function computeStripRemnants(
+  strips: Strip[],
+  sheetWidth: number,
+  sheetHeight: number,
+): { x: number; y: number; w: number; h: number }[] {
+  const rects: { x: number; y: number; w: number; h: number }[] = [];
+  let bottomOfStack = 0;
+  for (const strip of strips) {
+    const rightRem = sheetWidth - strip.usedWidth;
+    if (rightRem > 0 && strip.height > 0) {
+      rects.push({ x: strip.usedWidth, y: strip.y, w: rightRem, h: strip.height });
+    }
+    bottomOfStack = Math.max(bottomOfStack, strip.y + strip.height);
+  }
+  const bottomH = sheetHeight - bottomOfStack;
+  if (bottomH > 0 && sheetWidth > 0) {
+    rects.push({ x: 0, y: bottomOfStack, w: sheetWidth, h: bottomH });
+  }
+  return rects;
+}
+
+function summarizeOffcuts(
+  rects: { x: number; y: number; w: number; h: number }[],
+  cfg: { minUsableLength: number; minUsableWidth: number; minUsableGrain: GrainOrientation },
+): SheetOffcutSummary {
+  const reusable: OffcutRect[] = [];
+  const scrap: OffcutRect[] = [];
+  for (const r of rects) {
+    const out: OffcutRect = { x: r.x, y: r.y, w: r.w, h: r.h, area_mm2: r.w * r.h };
+    if (isReusableOffcut(r, cfg)) reusable.push(out);
+    else scrap.push(out);
+  }
+  const reusableArea = reusable.reduce((s, o) => s + o.area_mm2, 0);
+  const scrapArea = scrap.reduce((s, o) => s + o.area_mm2, 0);
+  const largestReusableArea = reusable.reduce((m, o) => Math.max(m, o.area_mm2), 0);
+  return {
+    fragments: reusable.length + scrap.length,
+    reusableCount: reusable.length,
+    scrapCount: scrap.length,
+    reusableArea_mm2: reusableArea,
+    scrapArea_mm2: scrapArea,
+    largestReusableArea_mm2: largestReusableArea,
+    reusableOffcuts: reusable,
+    scrapOffcuts: scrap,
+  };
+}
 
 /**
  * Expand parts by quantity into individual instances.
@@ -1028,6 +1081,10 @@ export function packWithStrips(
       sheet_id: `${stock.id}:${i + 1}`,
       placements,
       used_area_mm2: usedArea,
+      offcut_summary: summarizeOffcuts(
+        computeStripRemnants(sheetStrips, sheetWidth, sheetHeight),
+        fullConfig,
+      ),
     });
 
     totalCutCount += cutSummary.count;

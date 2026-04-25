@@ -4,11 +4,22 @@ import * as React from 'react';
 import { cn } from '@/lib/utils';
 import { useOrgSettings } from '@/hooks/use-org-settings';
 import { BarChart3, Info, Calculator, Trash2, HelpCircle } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   Tooltip,
@@ -413,14 +424,16 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
 
   const packingConfig = React.useMemo(
     () => ({
-      minUsableDimension: cutlistDefaults.minReusableOffcutDimensionMm,
+      minUsableLength: cutlistDefaults.minReusableOffcutLengthMm,
+      minUsableWidth: cutlistDefaults.minReusableOffcutWidthMm,
+      minUsableGrain: cutlistDefaults.minReusableOffcutGrain,
       preferredMinDimension: cutlistDefaults.preferredOffcutDimensionMm,
-      minUsableArea: cutlistDefaults.minReusableOffcutAreaMm2,
     }),
     [
-      cutlistDefaults.minReusableOffcutDimensionMm,
+      cutlistDefaults.minReusableOffcutLengthMm,
+      cutlistDefaults.minReusableOffcutWidthMm,
+      cutlistDefaults.minReusableOffcutGrain,
       cutlistDefaults.preferredOffcutDimensionMm,
-      cutlistDefaults.minReusableOffcutAreaMm2,
     ]
   );
 
@@ -437,6 +450,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
   const [activeTab, setActiveTab] = React.useState<'materials' | 'parts' | 'preview'>('parts');
   const [snapshotOpen, setSnapshotOpen] = React.useState(false);
   const [tipsOpen, setTipsOpen] = React.useState(false);
+  const [clearConfirmOpen, setClearConfirmOpen] = React.useState(false);
 
   // ============== Summary ==============
   const [summary, setSummary] = React.useState<CutlistSummary | null>(null);
@@ -1498,23 +1512,37 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <CardTitle>Layout & Inputs</CardTitle>
-              <CardDescription>
-                Configure materials, add parts, and preview optimized sheet layouts. Material settings are saved
-                automatically.
-              </CardDescription>
             </div>
             <div className="flex gap-2 self-end lg:self-auto">
               {headerRight}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleClearAll}
-                className="gap-1.5"
-              >
-                <Trash2 className="h-4 w-4" />
-                Clear All
-              </Button>
+              <AlertDialog open={clearConfirmOpen} onOpenChange={setClearConfirmOpen}>
+                <AlertDialogTrigger asChild>
+                  <Button type="button" variant="outline" size="sm" className="gap-1.5">
+                    <Trash2 className="h-4 w-4" />
+                    Clear All
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Clear the entire cutlist?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This removes all parts, sheet overrides, and the current layout. This action cannot be
+                      undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => {
+                        handleClearAll();
+                        setClearConfirmOpen(false);
+                      }}
+                    >
+                      Clear everything
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
               <Button
                 type="button"
                 variant="outline"

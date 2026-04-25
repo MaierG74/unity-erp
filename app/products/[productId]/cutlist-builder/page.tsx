@@ -69,6 +69,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
   const [savedSnapshot, setSavedSnapshot] = useState<RestoredCutlistCostingSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [calculatorKey, setCalculatorKey] = useState(0);
   const dataRef = useRef<CutlistCalculatorData | null>(null);
   const summaryRef = useRef<CutlistSummary | null>(null);
@@ -115,6 +116,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
     (data: CutlistCalculatorData) => {
       dataRef.current = data;
       if (!data.parts.length) return;
+      setDirty(true);
       adapter.debouncedSave(data);
     },
     [adapter]
@@ -186,6 +188,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
         }
       }
       toast.success('Cutlist saved to product');
+      setDirty(false);
     } catch {
       toast.error('Failed to save cutlist');
     } finally {
@@ -207,6 +210,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
       await adapter.save(data);
       await persistSnapshot();
       toast.success('Costing snapshot saved');
+      setDirty(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save costing snapshot';
       toast.error(message);
@@ -246,7 +250,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
           className="gap-1.5"
         >
           <Save className="h-4 w-4" />
-          {saving ? 'Saving...' : 'Save'}
+          {saving ? 'Saving...' : dirty ? 'Save *' : 'Saved'}
         </Button>
       </div>
 
