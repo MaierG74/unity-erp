@@ -11,6 +11,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { SheetPreview } from '../preview';
+import { ReusableOffcutList } from './ReusableOffcutList';
+import { UtilizationBar } from './UtilizationBar';
+import { computeSheetUtilization } from '@/lib/cutlist/effectiveUtilization';
 import type { SheetLayout, Placement } from '@/lib/cutlist/types';
 import type { ColorEntry } from '@/lib/cutlist/colorAssignment';
 import {
@@ -263,13 +266,11 @@ export function InteractiveSheetViewer({
     return edges.length > 0 ? edges.join('+') : 'None';
   };
 
-  const usagePct = sheetLayout.used_area_mm2 != null
-    ? ((sheetLayout.used_area_mm2 / (sheetWidth * sheetLength)) * 100).toFixed(1)
-    : null;
-  const formatAreaCm2 = (areaMm2: number) => {
-    const areaCm2 = areaMm2 / 100;
-    return `${areaCm2.toFixed(areaCm2 >= 1000 ? 0 : 1)} cm²`;
-  };
+  const breakdown = useMemo(
+    () => computeSheetUtilization(sheetLayout, sheetWidth, sheetLength),
+    [sheetLayout, sheetWidth, sheetLength],
+  );
+  const usagePct = `${breakdown.mechanicalPctRaw.toFixed(1)}`;
 
   const title = sheetIndex != null
     ? `Sheet ${sheetIndex + 1}${sheetLayout.material_label ? ` — ${sheetLayout.material_label}` : ''}`
@@ -364,6 +365,7 @@ export function InteractiveSheetViewer({
                   onPartClick={handlePartClick}
                   showGrainDirection
                   showEdgeBanding
+                  showOffcutOverlay
                   interactive
                 />
               </div>
@@ -451,28 +453,17 @@ export function InteractiveSheetViewer({
               <div>
                 Sheet: {Math.round(sheetWidth)} x {Math.round(sheetLength)} mm
               </div>
-              {sheetLayout.used_area_mm2 != null && (
-                <div>
-                  Used:{' '}
-                  {(
-                    (sheetLayout.used_area_mm2 / (sheetWidth * sheetLength)) *
-                    100
-                  ).toFixed(1)}
-                  %
-                </div>
+              {breakdown.hasReusable && sheetLayout.offcut_summary && (
+                <ReusableOffcutList
+                  offcuts={sheetLayout.offcut_summary.reusableOffcuts}
+                  className="rounded border bg-muted/30 px-2 py-1.5"
+                />
               )}
-              {sheetLayout.offcut_summary && (
-                <>
-                  <div>
-                    Reusable offcuts: {sheetLayout.offcut_summary.reusableCount} (
-                    {formatAreaCm2(sheetLayout.offcut_summary.reusableArea_mm2)})
-                  </div>
-                  <div>
-                    Scrap pockets: {sheetLayout.offcut_summary.scrapCount} (
-                    {formatAreaCm2(sheetLayout.offcut_summary.scrapArea_mm2)})
-                  </div>
-                </>
-              )}
+              <UtilizationBar breakdown={breakdown} className="rounded border bg-muted/30 px-2 py-1.5" />
+              <div className="font-mono text-xs text-muted-foreground">
+                {(breakdown.partsArea_mm2 / 1_000_000).toFixed(2)} m² of{' '}
+                {(breakdown.totalArea_mm2 / 1_000_000).toFixed(2)} m²
+              </div>
             </div>
           </div>
         </div>
