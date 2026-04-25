@@ -98,7 +98,7 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
               height={rect.h}
               rx="4"
               fill={rect.key === 'preferred' ? 'rgb(20 184 166)' : rect.reusable ? 'rgb(34 197 94)' : 'rgb(100 116 139)'}
-              fillOpacity={rect.key === 'preferred' ? 0.32 : rect.reusable ? 0.26 : 0.18}
+              fillOpacity={rect.key === 'preferred' ? 0.88 : rect.reusable ? 0.88 : 0.92}
               stroke={rect.key === 'preferred' ? 'rgb(45 212 191)' : rect.reusable ? 'rgb(74 222 128)' : 'rgb(148 163 184)'}
               strokeWidth={rect.key === 'preferred' ? 2.5 : 2}
               strokeDasharray={rect.key === 'preferred' ? '7 5' : undefined}
