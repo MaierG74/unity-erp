@@ -70,46 +70,59 @@ export interface CutlistDefaults {
 
 Removed keys: `minReusableOffcutDimensionMm`, `minReusableOffcutAreaMm2`.
 
-`organizations.cutlist_defaults` is a JSONB column; no SQL migration is required. `useOrgSettings` normalizes reads:
+`organizations.cutlist_defaults` is a JSONB column; no SQL migration is required. `useOrgSettings` normalizes reads using a precedence rule that avoids accidental hybrids on partially-migrated rows:
 
 ```ts
 const raw = (data.cutlist_defaults as Partial<CutlistDefaults & LegacyShape>) ?? {};
+const hasNewKey = raw.minReusableOffcutLengthMm !== undefined
+  || raw.minReusableOffcutWidthMm !== undefined;
 const legacyDim = raw.minReusableOffcutDimensionMm; // may be present on old rows
+
+// If any new key exists, missing new keys default to 300 — never fall back to the legacy scalar.
+// Only fall back to legacyDim when neither new key is present (pure-legacy row).
+const lengthFallback = hasNewKey ? 300 : (legacyDim ?? 300);
+const widthFallback  = hasNewKey ? 300 : (legacyDim ?? 300);
+
 return {
-  minReusableOffcutLengthMm: raw.minReusableOffcutLengthMm ?? legacyDim ?? 300,
-  minReusableOffcutWidthMm: raw.minReusableOffcutWidthMm ?? legacyDim ?? 300,
+  minReusableOffcutLengthMm: raw.minReusableOffcutLengthMm ?? lengthFallback,
+  minReusableOffcutWidthMm: raw.minReusableOffcutWidthMm ?? widthFallback,
   minReusableOffcutGrain: raw.minReusableOffcutGrain ?? 'any',
   preferredOffcutDimensionMm: raw.preferredOffcutDimensionMm ?? 300,
   // raw.minReusableOffcutAreaMm2 ignored
 };
 ```
 
-Why seed both new mins from the legacy `minReusableOffcutDimensionMm`: the legacy value gated only the short side, alongside the area gate we are dropping. Carrying it forward into both length and width preserves the legacy short-side floor for both axes. Be aware of one direction-of-change: dropping the area gate makes legacy rows **more permissive** (a 200 × 200 = 40 000 mm² rect was scrap under `area ≥ 100 000`, becomes reusable under `min ≥ 150` on both sides). Operators who want a stricter rule explicitly visit the settings page and pick the new defaults (300 × 300). This is acceptable: the area gate was the source of the confusion this spec is removing, and orgs that care about classification will configure the page intentionally.
+**Three legacy cases, three behaviours:**
+
+| Source row state | New `minLength × minWidth` | Direction of change vs. today |
+|---|---|---|
+| `null` / missing JSONB (implicit defaults today: 150 + area 100 000) | 300 × 300 (new defaults) | **Stricter.** Today's implicit default classified e.g. 200 × 200 as scrap (area gate) and 150 × 5000 as reusable; new default classifies the 5000-strip as scrap (long-side gate) and the 200 × 200 as scrap (below 300). |
+| Pure-legacy JSON `{ minReusableOffcutDimensionMm: 150, minReusableOffcutAreaMm2: 100 000 }` | 150 × 150 (legacy scalar carried forward to both axes) | **More permissive.** Area gate is dropped: a 200 × 200 = 40 000 mm² rect was scrap under `area ≥ 100 000`, becomes reusable under `min ≥ 150` on both sides. |
+| Mixed JSON (any new key present) | New keys win; missing new keys → 300 | Behaves as "operator partially configured the new shape." Legacy scalar is ignored entirely once any new key is set. |
+
+This is acceptable: the area gate is the source of the confusion this spec is removing, and orgs that care will configure the page intentionally. Rollout note for QA: do not assume "no change for rows with default settings" — implicit-default orgs will see stricter classification of long thin strips, which is the bug we are fixing.
 
 ### 3. Packer config + classification rule
 
-`PackerConfig` in [lib/cutlist/guillotinePacker.ts](../../../lib/cutlist/guillotinePacker.ts) changes match the data model:
+The classification helper lives in a new module so both packers and the test suite can import it without reaching into packer-private internals:
+
+**New file: `lib/cutlist/offcuts.ts`**
 
 ```ts
-interface PackerConfig {
-  // …
-  minUsableLength: number;   // was minUsableDimension
-  minUsableWidth: number;    // (new — same default)
-  minUsableGrain: GrainOrientation; // (new)
-  preferredMinDimension: number; // unchanged
-  // minUsableArea: removed
+import type { GrainOrientation } from './types';
+
+export interface OffcutClassificationConfig {
+  minUsableLength: number;
+  minUsableWidth: number;
+  minUsableGrain: GrainOrientation;
 }
-```
 
-A single pure helper centralises the rule:
-
-```ts
-function isReusableOffcut(
+export function isReusableOffcut(
   rect: { w: number; h: number },
-  cfg: Pick<PackerConfig, 'minUsableLength' | 'minUsableWidth' | 'minUsableGrain'>,
+  cfg: OffcutClassificationConfig,
 ): boolean {
-  const ag = rect.h; // along grain (Y axis, convention)
-  const cg = rect.w; // across grain (X axis)
+  const ag = rect.h; // along grain — Y axis, by sheet-grain convention (§1)
+  const cg = rect.w; // across grain — X axis
   switch (cfg.minUsableGrain) {
     case 'length':
       return ag >= cfg.minUsableLength && cg >= cfg.minUsableWidth;
@@ -117,45 +130,91 @@ function isReusableOffcut(
       return cg >= cfg.minUsableLength && ag >= cfg.minUsableWidth;
     case 'any':
     default:
-      return Math.max(ag, cg) >= cfg.minUsableLength && Math.min(ag, cg) >= cfg.minUsableWidth;
+      return Math.max(ag, cg) >= cfg.minUsableLength
+          && Math.min(ag, cg) >= cfg.minUsableWidth;
   }
 }
 ```
 
-All current reusability checks in `guillotinePacker.ts` become calls to this helper:
+Both `PackerConfig` (in [lib/cutlist/guillotinePacker.ts](../../../lib/cutlist/guillotinePacker.ts)) and `StripPackerConfig` (in [lib/cutlist/stripPacker.ts](../../../lib/cutlist/stripPacker.ts)) change shape:
+
+```ts
+// Removed: minUsableDimension, minUsableArea
+// Added:
+minUsableLength: number;
+minUsableWidth: number;
+minUsableGrain: GrainOrientation;
+// Unchanged: preferredMinDimension (guillotine only)
+```
+
+**Guillotine packer call sites that now consume `isReusableOffcut`:**
+
+Reusability classification (the "is this offcut counted as stock?" rule):
 - `classifyOffcuts` (~line 565)
 - `getUsableOffcuts` method (~line 989)
 - The two `usableOffcuts` filters (~lines 1078, 1230)
 
-The single call site that hands org settings into the packer config is in [CutlistCalculator.tsx:422](../../../components/features/cutlist/CutlistCalculator.tsx#L422). It currently maps:
+The placement-scoring and split paths use scalar dimensions today — they are addressed in §4 with axis-aligned mapping; they do **not** call `isReusableOffcut`. Classification (§3) and steering (§4) are deliberately separate concerns.
+
+**Strip packer scope:**
+
+`packing.ts` defaults to `algorithm: 'strip'` ([packing.ts:510](../../../components/features/cutlist/packing.ts#L510)) and `packWithStrips(parts, sheet)` is currently called *without* the org `packingConfig` ([packing.ts:529](../../../components/features/cutlist/packing.ts#L529)); the deep-mode baseline at [packing.ts:552](../../../components/features/cutlist/packing.ts#L552) follows the same path. If we don't update strip too, an admin who changes `/settings/cutlist` will see no effect under the default algorithm.
+
+Implementation must:
+1. Thread the full `packingConfig` through `packWithStrips` (signature change).
+2. Apply `isReusableOffcut` to strip-packer remnants. If strip currently emits no remnant classification, add it: emit `reusableOffcuts` and `reusableArea_mm2` on the strip result with the same shape guillotine uses, so downstream stats render consistently regardless of algorithm.
+3. Rename `StripPackerConfig.minUsableDimension` → `minUsableLength` / `minUsableWidth` to match guillotine. The strip algorithm's *internal* sliver heuristics (if any) become axis-aligned per §4; if no internal heuristics consume the scalar today, the rename is purely a config-shape alignment.
+
+**The single call site that hands org settings into packer config** is [CutlistCalculator.tsx:422](../../../components/features/cutlist/CutlistCalculator.tsx#L422):
 
 ```ts
+// Before
 minUsableDimension: cutlistDefaults.minReusableOffcutDimensionMm,
 preferredMinDimension: cutlistDefaults.preferredOffcutDimensionMm,
 minUsableArea: cutlistDefaults.minReusableOffcutAreaMm2,
-```
 
-Becomes:
-
-```ts
+// After
 minUsableLength: cutlistDefaults.minReusableOffcutLengthMm,
 minUsableWidth:  cutlistDefaults.minReusableOffcutWidthMm,
 minUsableGrain:  cutlistDefaults.minReusableOffcutGrain,
 preferredMinDimension: cutlistDefaults.preferredOffcutDimensionMm,
 ```
 
-The dependency array on the surrounding `useMemo` updates accordingly.
+The surrounding `useMemo` dependency array updates accordingly. Implementation must also sweep the benchmark scripts ([scripts/cutlist-benchmark.ts](../../../scripts/cutlist-benchmark.ts), [scripts/cutlist-deep-benchmark.ts](../../../scripts/cutlist-deep-benchmark.ts)) for hardcoded legacy keys — silent failures here are easy to miss.
 
-### 4. Sliver penalty
+### 4. Placement scoring, split decision, and free-rect retention
 
-The sliver penalty inside `getBestSplit` (`remW < config.minUsableDimension`, `remH < config.minUsableDimension`) is the closest analogue of "this dimension is too small to keep" and gates the optimizer's placement scoring per axis. It becomes:
+The legacy scalar `minUsableDimension` flows into more than just the sliver penalty. Implementing only the classification rule from §3 while leaving the scoring/split paths on a single scalar would produce inconsistent layouts (offcuts classified 2D, but the optimizer still steered by a 1D rule). All scalar consumers become axis-aligned, with the rule that **X-axis remnants compare against `minUsableWidth` and Y-axis remnants compare against `minUsableLength`** — matching the AG/CG convention from §1.
+
+**Scoring sliver / sub-optimal penalties** ([guillotinePacker.ts](../../../lib/cutlist/guillotinePacker.ts) ~lines 354-365 inside `calculatePlacementScore`):
 
 ```ts
+// Sliver penalty
 if (remW > 0 && remW < config.minUsableWidth)  score += SLIVER_PENALTY;
 if (remH > 0 && remH < config.minUsableLength) score += SLIVER_PENALTY;
+
+// Sub-optimal (between min and preferred) penalty — preferred stays 1D and applies to either axis
+if (remW >= config.minUsableWidth  && remW < config.preferredMinDimension) score += SUB_OPT_PENALTY;
+if (remH >= config.minUsableLength && remH < config.preferredMinDimension) score += SUB_OPT_PENALTY;
 ```
 
-Rationale for asymmetric mapping: `remW` is the across-grain (X) leftover; `remH` is the along-grain (Y) leftover. Penalising each against its own axis-specific minimum keeps the steering aligned with the new 2D classification. The grain-direction filter is *not* applied to the sliver penalty — it only affects classification of "did we keep it as stock?"
+**Split decision** ([guillotinePacker.ts:378](../../../lib/cutlist/guillotinePacker.ts#L378)) — `getBestSplit(freeRect, partW, partH, config.minUsableDimension)` currently takes a single scalar. Signature change:
+
+```ts
+function getBestSplit(
+  freeRect: FreeRect,
+  partW: number,
+  partH: number,
+  minUsableLength: number,
+  minUsableWidth: number,
+): SplitResult { /* X remnant compared to width, Y remnant compared to length */ }
+```
+
+**Free-rect retention** during actual splits ([guillotinePacker.ts:853, 895](../../../lib/cutlist/guillotinePacker.ts#L853)) — these decide whether a freshly-cut sub-rect is worth keeping in the free-list. Same axis-aligned mapping: X-rect retention vs. `minUsableWidth`, Y-rect vs. `minUsableLength`.
+
+**Why grain direction does NOT apply to scoring/split/retention:** the steering decisions are about whether the optimizer should treat a remnant as a useful-strip-to-leave-behind, which is purely a size question. The grain filter from §3 governs **classification** ("does this remnant count as stock when we report reusable offcuts?"), not steering. Keeping these separate concerns prevents grain-direction changes on the settings page from silently shifting layout decisions.
+
+**Alternative considered (rejected):** define a single `scoringMinDimension = min(minUsableLength, minUsableWidth)` and keep all scoring/split scalar. Rejected because it loses the per-axis information the user explicitly configured — a long thin remnant would score as if both axes were equally constrained.
 
 ### 5. Settings page UX
 
@@ -169,20 +228,47 @@ Preferred offcut dimension
   [ 300 ] mm   (i)
 ```
 
-Layout: the three minimum-reusable controls sit on one row (3-column grid on `md+`, stacked on mobile). Preferred sits on its own row.
+**Layout grid** (verified at 768px, 1024px, and full-width settings shell):
 
-**Grain picker:** click-to-cycle button mirroring [CompactPartsTable.tsx:103-117](../../../components/features/cutlist/primitives/CompactPartsTable.tsx#L103). Same icons (`○ / ↕ / ↔`), same enum, same tooltip strings:
-- `any` — Any grain direction
-- `length` — Grain along Length
-- `width` — Grain along Width
+```tsx
+<div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[minmax(10rem,1fr)_minmax(10rem,1fr)_auto]">
+  {/* Min length, Min width, Grain picker */}
+</div>
+```
 
-**Preferred-dimension info tooltip** copy:
+`auto` on the grain column lets the icon-button hug its content; `minmax(10rem,1fr)` keeps the two number inputs from collapsing under their labels at narrow widths. Stacked single-column on phone widths is fine — settings are not a hot path on mobile.
 
-> Nudge the optimizer toward larger, cleaner leftover strips. Strips between the minimum reusable size and this value are treated as 'usable but awkward' and mildly penalised during packing. This is a quality preference, not a hard rule.
+**Numeric inputs:** follow the project's numeric-input convention — `value={x ?? ''}` with `placeholder="0"`, and an `onBlur` handler that resets empty fields back to the default. (See MEMORY.md "Numeric Input UX Pattern".)
 
-**Section help text** on the minimum row:
+**Grain picker:** click-to-cycle button using the same `GrainOrientation` enum and icon set (`○ / ↕ / ↔`) as [CompactPartsTable.tsx:102-118](../../../components/features/cutlist/primitives/CompactPartsTable.tsx#L102), but **implemented locally to the settings page** — do not import the table-row's private helpers (`handleGrainKeyDown`, `nextGrainOrientation`, focus state). The settings-local control:
 
-> A leftover counts as reusable stock only if it meets both minimums. Pick a grain direction to require a specific grain orientation; leave on Any to accept either.
+- Click cycles `any → length → width → any`.
+- Tooltip shows the current label (see below).
+- Arrow-key cycling is **out of scope** for the settings control; it's a low-frequency edit context where keyboard navigation isn't a priority. (Document this asymmetry in a code comment.)
+
+**Tooltip labels** (adapted from `GRAIN_OPTIONS` for a settings context — the table's `"Any direction (solid color)"` references the icon, which is unnecessary here):
+
+| value | tooltip |
+|---|---|
+| `any` | Any direction |
+| `length` | Grain along length |
+| `width` | Grain along width |
+
+**Preferred-dimension info tooltip:**
+
+```tsx
+<TooltipContent className="max-w-xs text-xs leading-snug">
+  Nudge the optimizer toward larger, cleaner leftover strips.
+  Sizes between the minimum reusable and this value are mildly penalised
+  during packing — a quality preference, not a hard rule.
+</TooltipContent>
+```
+
+`max-w-xs` is critical: the shared `TooltipContent` ([components/ui/tooltip.tsx:22](../../../components/ui/tooltip.tsx#L22)) has no default max width, and the verbose copy would render as a single comically-wide line.
+
+**Section help text** on the minimum row (small muted `<p>` below the grid):
+
+> A leftover counts as reusable stock only if it meets both minimums. Pick a grain direction to require a specific orientation; leave on Any to accept either.
 
 ### 6. Forward compatibility
 
@@ -196,7 +282,7 @@ Layout: the three minimum-reusable controls sit on one row (3-column grid on `md
 
 ### Unit (new file: `tests/cutlist-reusable-offcut.test.ts`)
 
-Truth-table coverage of `isReusableOffcut`:
+Imports `isReusableOffcut` from `lib/cutlist/offcuts.ts` (per §3 — exported helper, not a packer-private function). Truth-table coverage of `isReusableOffcut`:
 
 | Case | grain | rect (w × h) | min L × W | Expected |
 |---|---|---|---|---|
@@ -211,8 +297,8 @@ Truth-table coverage of `isReusableOffcut`:
 
 ### Existing test surface
 
-- Extend [tests/cutlist-packing.test.ts](../../../tests/cutlist-packing.test.ts) with one end-to-end case where the new rule changes the reusable count vs. the legacy rule (e.g. a layout that historically reported 1 reusable offcut and now reports 0).
-- `useOrgSettings` normalizer: a small inline test for the legacy-key fallback path.
+- Extend [tests/cutlist-packing.test.ts](../../../tests/cutlist-packing.test.ts) with end-to-end cases under both algorithms (`'guillotine'` and `'strip'`) where the new rule changes the reusable count vs. the legacy rule (e.g. a layout that historically reported 1 reusable offcut and now reports 0). Required because §3 brings strip into scope.
+- `useOrgSettings` normalizer: inline tests for all three migration paths from §2 — null/missing JSON (→ stricter 300×300), pure-legacy JSON (→ 150×150 from scalar carry), mixed JSON (→ new keys win, legacy ignored).
 
 ### Manual
 
@@ -224,4 +310,14 @@ Truth-table coverage of `isReusableOffcut`:
 
 ## Open Questions
 
-None blocking. Convention-pinning of "grain runs along sheet `length_mm`" will be confirmed during implementation by reading `getValidOrientations` and `getBestSplit`; if the convention turns out to be inverted from the assumption above, the AG/CG mapping in `isReusableOffcut` flips but the spec shape stands.
+None blocking. Sheet grain convention (`length_mm` = Y = along grain) was independently verified during spec review by tracing `getValidOrientations` and the placement code in both `guillotinePacker.ts` and `stripPacker.ts`; the AG/CG mapping in `isReusableOffcut` is correct as written.
+
+## Spec revision history
+
+- **2026-04-25 r1** — initial draft.
+- **2026-04-25 r2** — Codex review pass incorporated:
+  - §2 split into three legacy cases (null-default vs. pure-legacy vs. mixed); precedence rule tightened so partially-migrated rows no longer hybridise.
+  - §3 helper relocated to `lib/cutlist/offcuts.ts`; strip packer brought into scope (rename, threading `packingConfig` through `packWithStrips`, optional remnant emission); benchmark scripts called out.
+  - §4 expanded to cover all scalar consumers — placement scoring, `getBestSplit` signature, free-rect retention — with axis-aligned mapping rule; alternative scalar approach considered and rejected with rationale.
+  - §5 grain picker scoped as settings-local; tooltip labels and copy aligned with reality; explicit layout grid-template and tooltip max-width specified; numeric input convention referenced.
+  - Test surface expanded to cover both algorithms and all three migration paths.
