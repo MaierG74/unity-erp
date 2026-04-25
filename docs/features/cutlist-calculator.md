@@ -2,7 +2,7 @@
 
 > **Status**: Active development
 > **Location**: `/app/cutlist/page.tsx`
-> **Last Updated**: 2026-04-21
+> **Last Updated**: 2026-04-25
 
 ---
 
@@ -26,7 +26,7 @@ Product cutlist builder behavior:
 - The quote cutlist API routes now follow the quoting module/org access pattern before reading or mutating quote cutlist snapshots and costing lines.
 - Quote cutlist client requests now send the signed-in session token, and the calculator falls back cleanly when no saved cutlist material defaults row exists yet.
 - Duplicating a quote line or an entire quote now copies saved `quote_item_cutlists` snapshots and rewires embedded `lineRefs` to the duplicated costing lines, so copied quote items open with the same cutlist state instead of an empty builder.
-- Reusable offcut thresholds are organization-level defaults, so each tenant can decide what counts as a usable leftover piece.
+- Reusable offcut thresholds are organization-level defaults, so each tenant can decide what counts as a usable leftover piece. The rule is a two-dimensional minimum length and width, with an optional grain-orientation requirement.
 - Both active embedded flows now use explicit persistence bridges:
   - quote cutlists use `useQuoteCutlistAdapterV2`
   - product cutlists use `useProductCutlistBuilderAdapter`
@@ -172,7 +172,18 @@ Shows the optimized cutting layout after clicking **Calculate Layout**:
   - Backer cost is reported as an overall lamination run cost rather than being allocated into individual primary-board material cards.
 - **Backer board cutlist** when parts are set to **With Backer** lamination, with the same per-sheet billing toggles
 - The zoomed sheet viewer shows separate **Grain** and **Edges** columns in the legend and uses a wider dialog so the legend is less likely to clip on desktop screens.
-- When offcut-aware layouts are used, the preview now separates **reusable offcuts** from **scrap pockets** per sheet using the organization's reusable-offcut thresholds.
+- When offcut-aware layouts are used, the preview now separates **reusable offcuts** from **scrap pockets** per sheet using the organization's reusable-offcut thresholds. Both `guillotine` and `strip` packing outputs populate per-sheet `offcut_summary`.
+
+### Organization Cutlist Defaults
+
+Admins configure these defaults at `/settings/cutlist`. Values are stored in `organizations.cutlist_defaults` as JSONB and read through the org-settings normalizer:
+
+- `minReusableOffcutLengthMm` defaults to `300`.
+- `minReusableOffcutWidthMm` defaults to `300`.
+- `minReusableOffcutGrain` defaults to `any`; `length` requires the minimum length along sheet grain, while `width` requires the minimum length across sheet grain.
+- `preferredOffcutDimensionMm` defaults to `300` and remains a soft packing preference. It nudges guillotine scoring away from usable-but-awkward leftovers; it is not a hard reusable-stock threshold.
+
+Legacy JSONB rows with the old single-dimension key still load by copying that scalar onto both new axes. The legacy area gate is ignored on read.
 
 ---
 

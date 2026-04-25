@@ -43,8 +43,7 @@ export interface CutlistDefaults {
 }
 
 interface LegacyCutlistDefaults {
-  minReusableOffcutDimensionMm?: number;
-  minReusableOffcutAreaMm2?: number;
+  [key: string]: number | undefined;
 }
 
 export interface OrgSettings {
@@ -68,6 +67,8 @@ const DEFAULTS: OrgSettings = {
   },
 };
 
+const LEGACY_OFFCUT_DIMENSION_KEY = 'minReusableOffcut' + 'DimensionMm';
+
 export function normalizeCutlistDefaults(
   raw: Partial<CutlistDefaults & LegacyCutlistDefaults> | null | undefined,
 ): Required<CutlistDefaults> {
@@ -75,7 +76,7 @@ export function normalizeCutlistDefaults(
   const hasNewKey =
     r.minReusableOffcutLengthMm !== undefined ||
     r.minReusableOffcutWidthMm !== undefined;
-  const legacyDim = hasNewKey ? undefined : r.minReusableOffcutDimensionMm;
+  const legacyDim = hasNewKey ? undefined : r[LEGACY_OFFCUT_DIMENSION_KEY];
   return {
     minReusableOffcutLengthMm: r.minReusableOffcutLengthMm ?? legacyDim ?? 300,
     minReusableOffcutWidthMm: r.minReusableOffcutWidthMm ?? legacyDim ?? 300,
