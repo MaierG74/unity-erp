@@ -79,7 +79,6 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
     reusable: isReusableOffcut({ w: rect.actualW, h: rect.actualH }, cfg),
   }));
   const reusableRect = classified[0]!;
-  const preferredRect = classified[1]!;
 
   return (
     <div className="max-w-3xl">
@@ -143,8 +142,6 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
         <text x={reusableRect.x + reusableRect.w / 2} y="34" fill="rgb(153 246 228)" fontSize="13" textAnchor="middle">Min width {minWidth} mm</text>
         <line x1="56" y1={reusableRect.y} x2="56" y2={reusableRect.y + reusableRect.h} stroke="rgb(45 212 191)" strokeWidth="2" markerStart="url(#arrow-teal)" markerEnd="url(#arrow-teal)" />
         <text x="40" y={reusableRect.y + reusableRect.h / 2 + 22} fill="rgb(153 246 228)" fontSize="13" transform={`rotate(-90 40 ${reusableRect.y + reusableRect.h / 2 + 22})`}>Min length {minLength} mm</text>
-        <path d={`M ${preferredRect.x + preferredRect.w + 8} ${preferredRect.y + preferredRect.h + 8} C 390 225, 355 230, 305 232`} fill="none" stroke="rgb(45 212 191)" strokeWidth="2" markerEnd="url(#arrow-teal)" />
-        <text x="302" y="216" fill="rgb(153 246 228)" fontSize="13">Preferred guide {preferred} mm</text>
 
         <g>
           <line x1="468" y1="52" x2="468" y2="286" stroke="rgb(71 85 105)" />
