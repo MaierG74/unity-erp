@@ -39,6 +39,8 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
   const minWidth = asPositiveNumber(defaults.minReusableOffcutWidthMm, 300);
   const preferred = asPositiveNumber(defaults.preferredOffcutDimensionMm, 300);
   const grain = defaults.minReusableOffcutGrain ?? 'any';
+  const grainLegendIcon = grain === 'any' ? '↕  ↔' : getGrainOption(grain).icon;
+  const grainLegendLabel = grain === 'any' ? 'either direction' : 'sheet grain';
   const cfg = {
     minUsableLength: minLength,
     minUsableWidth: minWidth,
@@ -135,23 +137,8 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
           <text x="493" y="170" fill="rgb(203 213 225)" fontSize="13">nudges the optimizer toward</text>
           <text x="493" y="190" fill="rgb(203 213 225)" fontSize="13">cleaner leftovers.</text>
           <text x="493" y="228" fill="rgb(226 232 240)" fontSize="13">Grain: {getGrainOption(grain).label}</text>
-          {grain === 'width' ? (
-            <>
-              <line x1="493" y1="266" x2="535" y2="266" stroke="rgb(148 163 184)" strokeWidth="2" markerStart="url(#arrow-muted)" markerEnd="url(#arrow-muted)" />
-              <text x="493" y="288" fill="rgb(148 163 184)" fontSize="12">sheet grain</text>
-            </>
-          ) : grain === 'length' ? (
-            <>
-              <line x1="493" y1="250" x2="493" y2="286" stroke="rgb(148 163 184)" strokeWidth="2" markerStart="url(#arrow-muted)" markerEnd="url(#arrow-muted)" />
-              <text x="509" y="273" fill="rgb(148 163 184)" fontSize="12">sheet grain</text>
-            </>
-          ) : (
-            <>
-              <line x1="493" y1="250" x2="493" y2="286" stroke="rgb(148 163 184)" strokeWidth="2" markerStart="url(#arrow-muted)" markerEnd="url(#arrow-muted)" />
-              <line x1="479" y1="268" x2="521" y2="268" stroke="rgb(148 163 184)" strokeWidth="2" markerStart="url(#arrow-muted)" markerEnd="url(#arrow-muted)" />
-              <text x="530" y="273" fill="rgb(148 163 184)" fontSize="12">either</text>
-            </>
-          )}
+          <text x="493" y="263" fill="rgb(148 163 184)" fontSize="22" fontWeight="700">{grainLegendIcon}</text>
+          <text x="493" y="288" fill="rgb(148 163 184)" fontSize="12">{grainLegendLabel}</text>
         </g>
       </svg>
     </div>
