@@ -43,7 +43,7 @@ export interface CutlistDefaults {
 }
 
 interface LegacyCutlistDefaults {
-  [key: string]: number | undefined;
+  [key: string]: unknown;
 }
 
 export interface OrgSettings {
@@ -76,7 +76,8 @@ export function normalizeCutlistDefaults(
   const hasNewKey =
     r.minReusableOffcutLengthMm !== undefined ||
     r.minReusableOffcutWidthMm !== undefined;
-  const legacyDim = hasNewKey ? undefined : r[LEGACY_OFFCUT_DIMENSION_KEY];
+  const legacyValue = r[LEGACY_OFFCUT_DIMENSION_KEY];
+  const legacyDim = !hasNewKey && typeof legacyValue === 'number' ? legacyValue : undefined;
   return {
     minReusableOffcutLengthMm: r.minReusableOffcutLengthMm ?? legacyDim ?? 300,
     minReusableOffcutWidthMm: r.minReusableOffcutWidthMm ?? legacyDim ?? 300,

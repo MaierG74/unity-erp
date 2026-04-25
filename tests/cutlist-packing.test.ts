@@ -1038,7 +1038,7 @@ test('guillotine: offcut_summary populated with new 2D rule', async () => {
   const parts: PartSpec[] = [
     { id: 'p1', length_mm: 600, width_mm: 1830, qty: 1, grain: 'any' },
   ];
-  const stock: StockSheetSpec[] = [{ id: 's1', length_mm: 2750, width_mm: 1830, qty: 1 }];
+  const stock: StockSheetSpec[] = [{ id: 's1', length_mm: 2750, width_mm: 1830, qty: 1, kerf_mm: 3 }];
   const result = await mod.packPartsSmartOptimized(parts, stock, {
     algorithm: 'guillotine',
     packingConfig: { minUsableLength: 300, minUsableWidth: 300, minUsableGrain: 'any' },
@@ -1052,7 +1052,7 @@ test('strip: offcut_summary populated (P4 emission regression)', async () => {
   const parts: PartSpec[] = [
     { id: 'p1', length_mm: 600, width_mm: 1830, qty: 1, grain: 'any' },
   ];
-  const stock: StockSheetSpec[] = [{ id: 's1', length_mm: 2750, width_mm: 1830, qty: 1 }];
+  const stock: StockSheetSpec[] = [{ id: 's1', length_mm: 2750, width_mm: 1830, qty: 1, kerf_mm: 3 }];
   const result = await mod.packPartsSmartOptimized(parts, stock, {
     algorithm: 'strip',
     packingConfig: { minUsableLength: 300, minUsableWidth: 300, minUsableGrain: 'any' },
