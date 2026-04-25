@@ -9,7 +9,10 @@ import { Switch } from '@/components/ui/switch';
 import { SheetPreview } from '../preview';
 import { CuttingDiagramButton } from './CuttingDiagramButton';
 import { InteractiveSheetViewer } from './InteractiveSheetViewer';
+import { ReusableOffcutList } from './ReusableOffcutList';
+import { UtilizationBar } from './UtilizationBar';
 import { getPartColorMap } from '@/lib/cutlist/colorAssignment';
+import { computeSheetUtilization } from '@/lib/cutlist/effectiveUtilization';
 import type {
   LayoutResult,
   StockSheetSpec,
@@ -56,11 +59,6 @@ export function SheetLayoutGrid({
       setActivePage(0);
     }
   }, [activePage, totalPages]);
-
-  const formatAreaCm2 = React.useCallback((areaMm2: number) => {
-    const areaCm2 = areaMm2 / 100;
-    return `${areaCm2.toFixed(areaCm2 >= 1000 ? 0 : 1)} cm²`;
-  }, []);
 
   return (
     <div className="space-y-3">
@@ -114,12 +112,19 @@ export function SheetLayoutGrid({
             const sheetW = sheetLayout.stock_width_mm || stockSheet.width_mm;
             const sheetL = sheetLayout.stock_length_mm || stockSheet.length_mm;
             const sheetArea = sheetW * sheetL;
+            const breakdown = computeSheetUtilization(sheetLayout, sheetW, sheetL);
             const autoPct =
               sheetArea > 0 ? ((sheetLayout.used_area_mm2 || 0) / sheetArea) * 100 : 0;
             const override = sheetOverrides[sheetLayout.sheet_id];
             const mode = globalFullBoard ? 'full' : (override?.mode ?? 'auto');
             const manualPct = override?.manualPct ?? autoPct;
             const chargePct = mode === 'full' ? 100 : mode === 'manual' ? manualPct : autoPct;
+            const chipsDisabled = globalFullBoard || mode === 'full';
+            const quickFillChips = [
+              { label: 'Mech', value: breakdown.mechanicalPctRaw, visible: true },
+              { label: 'Eff', value: breakdown.effectivePctRaw, visible: breakdown.hasReusable },
+              { label: 'Full', value: 100, visible: true },
+            ];
 
             return (
               <motion.div
@@ -159,26 +164,20 @@ export function SheetLayoutGrid({
                     maxHeight={200}
                     colorMap={allColorMap}
                     showEdgeBanding
+                    showOffcutOverlay
                   />
                 </div>
 
-                <div className="text-xs text-muted-foreground">
-                  Used {autoPct.toFixed(1)}% (
-                  {((sheetLayout.used_area_mm2 || 0) / 1_000_000).toFixed(2)} m² of{' '}
-                  {(sheetArea / 1_000_000).toFixed(2)} m²)
-                </div>
-                {sheetLayout.offcut_summary && (
-                  <div className="rounded border bg-muted/30 px-2 py-1.5 text-[11px] text-muted-foreground space-y-1">
-                    <div>
-                      Reusable offcuts: {sheetLayout.offcut_summary.reusableCount} (
-                      {formatAreaCm2(sheetLayout.offcut_summary.reusableArea_mm2)})
-                    </div>
-                    <div>
-                      Scrap pockets: {sheetLayout.offcut_summary.scrapCount} (
-                      {formatAreaCm2(sheetLayout.offcut_summary.scrapArea_mm2)})
-                    </div>
+                <div className="rounded border bg-muted/30 px-2 py-1.5 space-y-2">
+                  {breakdown.hasReusable && sheetLayout.offcut_summary && (
+                    <ReusableOffcutList offcuts={sheetLayout.offcut_summary.reusableOffcuts} />
+                  )}
+                  <UtilizationBar breakdown={breakdown} />
+                  <div className="font-mono text-[11px] text-muted-foreground">
+                    {(breakdown.partsArea_mm2 / 1_000_000).toFixed(2)} m² of{' '}
+                    {(breakdown.totalArea_mm2 / 1_000_000).toFixed(2)} m²
                   </div>
-                )}
+                </div>
 
                 <div className="space-y-2">
                   {/* Charge full sheet toggle */}
@@ -211,6 +210,32 @@ export function SheetLayoutGrid({
                     <Label htmlFor={`full-${sheetLayout.sheet_id}`} className="text-xs">
                       Charge full sheet
                     </Label>
+                  </div>
+
+                  {/* Quick-fill chips */}
+                  <div className="grid grid-cols-3 gap-1">
+                    {quickFillChips.map((chip) => (
+                      chip.visible ? (
+                        <button
+                          key={chip.label}
+                          type="button"
+                          className="rounded border bg-background px-1.5 py-1 text-[11px] leading-tight hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                          disabled={chipsDisabled}
+                          onClick={() => {
+                            onSheetOverridesChange({
+                              ...sheetOverrides,
+                              [sheetLayout.sheet_id]: {
+                                mode: 'manual',
+                                manualPct: chip.value,
+                              },
+                            });
+                          }}
+                        >
+                          <span className="block font-medium">{chip.label}</span>
+                          <span className="block font-mono">{chip.value.toFixed(1)}</span>
+                        </button>
+                      ) : null
+                    ))}
                   </div>
 
                   {/* Manual percentage input */}
