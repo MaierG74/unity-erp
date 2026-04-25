@@ -719,17 +719,18 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
                                 </Command>
                               </PopoverContent>
                             </Popover>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              disabled={!row.isEditable}
-                              title="Delete cutlist row"
-                              onClick={() => setDeleteDialogRow(row)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                              <span className="sr-only">Delete row</span>
-                            </Button>
+                            {row.isEditable ? (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                title="Delete cutlist row"
+                                onClick={() => setDeleteDialogRow(row)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                <span className="sr-only">Delete row</span>
+                              </Button>
+                            ) : null}
                           </div>
                           {!row.isEditable && dataSource !== 'groups' ? (
                             <div className="mt-2 text-[11px] text-muted-foreground">
