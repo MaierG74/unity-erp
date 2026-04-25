@@ -424,14 +424,16 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
 
   const packingConfig = React.useMemo(
     () => ({
-      minUsableDimension: cutlistDefaults.minReusableOffcutDimensionMm,
+      minUsableLength: cutlistDefaults.minReusableOffcutLengthMm,
+      minUsableWidth: cutlistDefaults.minReusableOffcutWidthMm,
+      minUsableGrain: cutlistDefaults.minReusableOffcutGrain,
       preferredMinDimension: cutlistDefaults.preferredOffcutDimensionMm,
-      minUsableArea: cutlistDefaults.minReusableOffcutAreaMm2,
     }),
     [
-      cutlistDefaults.minReusableOffcutDimensionMm,
+      cutlistDefaults.minReusableOffcutLengthMm,
+      cutlistDefaults.minReusableOffcutWidthMm,
+      cutlistDefaults.minReusableOffcutGrain,
       cutlistDefaults.preferredOffcutDimensionMm,
-      cutlistDefaults.minReusableOffcutAreaMm2,
     ]
   );
 
