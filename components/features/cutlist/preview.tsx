@@ -31,6 +31,8 @@ interface SheetPreviewProps {
   showGrainDirection?: boolean;
   /** Show edge banding ticks on part edges */
   showEdgeBanding?: boolean;
+  /** Show reusable offcut overlays and labels */
+  showOffcutOverlay?: boolean;
   /** When false, skip hover/click handlers (for thumbnail cards) */
   interactive?: boolean;
 }
@@ -43,6 +45,9 @@ const DEFAULT_COLOR: ColorEntry = {
 
 const EDGE_BAND_COLOR = '#f97316'; // orange-500
 const EDGE_BAND_THICKNESS = 3;
+const REUSABLE_FILL = 'rgba(16, 185, 129, 0.32)';
+const REUSABLE_STROKE = 'rgb(16, 185, 129)';
+const REUSABLE_LABEL_COLOR = 'rgb(52, 211, 153)';
 
 /** Approximate width of a character at a given font size (SVG units). */
 const CHAR_WIDTH_RATIO = 0.6;
@@ -66,6 +71,7 @@ export function SheetPreview({
   onPartClick,
   showGrainDirection = false,
   showEdgeBanding = false,
+  showOffcutOverlay = false,
   interactive = false,
 }: SheetPreviewProps) {
   // Extra padding in fillContainer mode for dimension labels that need room
@@ -96,6 +102,9 @@ export function SheetPreview({
 
   const hasHighlight = highlightedPartId != null && highlightedPartId !== '';
   const highlightBase = hasHighlight ? getBasePartName(highlightedPartId!) : null;
+  const reusableOffcuts = showOffcutOverlay
+    ? (layout.offcut_summary?.reusableOffcuts ?? [])
+    : [];
 
   return (
     <svg
@@ -441,6 +450,121 @@ export function SheetPreview({
           </g>
         );
       })}
+
+      {/* Reusable offcut overlay */}
+      {reusableOffcuts.length > 0 && (
+        <g pointerEvents="none">
+          {reusableOffcuts.map((rect, index) => {
+            const x = sheetX + rect.x * scale;
+            const y = sheetY + rect.y * scale;
+            const w = rect.w * scale;
+            const h = rect.h * scale;
+            const centerX = x + w / 2;
+            const centerY = y + h / 2;
+            const long = Math.max(rect.w, rect.h);
+            const short = Math.min(rect.w, rect.h);
+            const dimLabel = `${Math.round(long)} × ${Math.round(short)}`;
+            const areaLabel = `reusable · ${Math.round(rect.area_mm2 / 100)} cm²`;
+            const labelFont = Math.max(MIN_LABEL_FONT, dimFont);
+            const areaFont = Math.max(MIN_LABEL_FONT, dimFont * 0.85);
+            const lineHeight = labelFont * 1.15;
+            const dimWidthEst = labelFont * CHAR_WIDTH_RATIO * dimLabel.length;
+            const areaWidthEst = areaFont * CHAR_WIDTH_RATIO * areaLabel.length;
+            const fitsTwoLine =
+              w >= dimWidthEst + 8 &&
+              w >= areaWidthEst + 8 &&
+              h >= 2 * lineHeight + 4;
+            const fitsOneLine = w >= dimWidthEst + 4 && h >= lineHeight + 2;
+            const leaderBelow = w >= h;
+            const leaderStartX = centerX;
+            const leaderStartY = centerY;
+            const leaderEndX = leaderBelow ? centerX : sheetX + sheetW + 12;
+            const leaderEndY = leaderBelow ? sheetY + sheetH + 12 : centerY;
+            const leaderAnchor = leaderBelow ? 'middle' : 'start';
+            const leaderDy = leaderBelow ? labelFont : labelFont / 2;
+
+            return (
+              <g key={`${rect.x}:${rect.y}:${rect.w}:${rect.h}:${index}`}>
+                <rect
+                  x={x}
+                  y={y}
+                  width={w}
+                  height={h}
+                  rx={1}
+                  ry={1}
+                  fill={REUSABLE_FILL}
+                  stroke={REUSABLE_STROKE}
+                  strokeWidth={1.5}
+                />
+                {fitsTwoLine ? (
+                  <text
+                    x={centerX}
+                    y={centerY - lineHeight / 2}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fontFamily="monospace"
+                    pointerEvents="none"
+                  >
+                    <tspan
+                      x={centerX}
+                      fontSize={labelFont}
+                      fontWeight={600}
+                      fill={REUSABLE_LABEL_COLOR}
+                    >
+                      {dimLabel}
+                    </tspan>
+                    <tspan
+                      x={centerX}
+                      dy={lineHeight}
+                      fontSize={areaFont}
+                      fill={REUSABLE_LABEL_COLOR}
+                      opacity={0.9}
+                    >
+                      {areaLabel}
+                    </tspan>
+                  </text>
+                ) : fitsOneLine ? (
+                  <text
+                    x={centerX}
+                    y={centerY}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fontFamily="monospace"
+                    fontSize={labelFont}
+                    fontWeight={600}
+                    fill={REUSABLE_LABEL_COLOR}
+                    pointerEvents="none"
+                  >
+                    {dimLabel}
+                  </text>
+                ) : (
+                  <>
+                    <line
+                      x1={leaderStartX}
+                      y1={leaderStartY}
+                      x2={leaderEndX}
+                      y2={leaderEndY}
+                      stroke={REUSABLE_STROKE}
+                      strokeWidth={1}
+                    />
+                    <text
+                      x={leaderEndX + (leaderBelow ? 0 : 3)}
+                      y={leaderEndY + leaderDy}
+                      textAnchor={leaderAnchor}
+                      fontFamily="monospace"
+                      fontSize={labelFont}
+                      fontWeight={600}
+                      fill={REUSABLE_LABEL_COLOR}
+                    >
+                      {dimLabel}
+                    </text>
+                  </>
+                )}
+              </g>
+            );
+          })}
+        </g>
+      )}
     </svg>
   );
 }
