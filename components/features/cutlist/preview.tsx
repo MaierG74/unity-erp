@@ -45,9 +45,10 @@ const DEFAULT_COLOR: ColorEntry = {
 
 const EDGE_BAND_COLOR = '#f97316'; // orange-500
 const EDGE_BAND_THICKNESS = 3;
-const REUSABLE_FILL = 'rgba(16, 185, 129, 0.32)';
+const REUSABLE_FILL = 'rgb(226, 232, 240)';
 const REUSABLE_STROKE = 'rgb(16, 185, 129)';
 const REUSABLE_LABEL_COLOR = 'rgb(52, 211, 153)';
+const REUSABLE_GRAIN_STROKE = 'rgb(15, 23, 42)';
 
 /** Approximate width of a character at a given font size (SVG units). */
 const CHAR_WIDTH_RATIO = 0.6;
@@ -166,7 +167,7 @@ export function SheetPreview({
           />
         </pattern>
 
-        {/* Reusable offcuts: sheet-grain stripes over retained stock */}
+        {/* Reusable offcuts: sheet-grain vertical stripes over gray leftover stock */}
         <pattern
           id={`${pid}-offcut-grain`}
           width="6"
@@ -178,8 +179,8 @@ export function SheetPreview({
             y1="0"
             x2="3"
             y2="6"
-            stroke={REUSABLE_STROKE}
-            strokeOpacity="0.22"
+            stroke={REUSABLE_GRAIN_STROKE}
+            strokeOpacity="0.18"
             strokeWidth="0.5"
           />
         </pattern>
