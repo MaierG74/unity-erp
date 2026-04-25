@@ -173,6 +173,9 @@ Shows the optimized cutting layout after clicking **Calculate Layout**:
 - **Backer board cutlist** when parts are set to **With Backer** lamination, with the same per-sheet billing toggles
 - The zoomed sheet viewer shows separate **Grain** and **Edges** columns in the legend and uses a wider dialog so the legend is less likely to clip on desktop screens.
 - When offcut-aware layouts are used, the preview now separates **reusable offcuts** from **scrap pockets** per sheet using the organization's reusable-offcut thresholds. Both `guillotine` and `strip` packing outputs populate per-sheet `offcut_summary`.
+- Product cutlist builder sheet cards and the zoomed sheet viewer render reusable offcuts as green SVG overlays with dimension labels, list reusable offcut sizes sorted largest-first, and show a segmented utilization bar for parts, reusable stock, and scrap.
+- The per-sheet **Manual %** input keeps its existing costing behavior. Quick-fill chips above it can populate mechanical utilization, effective utilization (parts plus reusable offcuts), or full-sheet billing through the same per-sheet override state.
+- The preview also shows one rolled-up **All sheets** utilization bar across primary and backer sheets so estimators can compare whole-job mechanical and effective utilization without averaging sheet percentages by hand.
 
 ### Organization Cutlist Defaults
 
