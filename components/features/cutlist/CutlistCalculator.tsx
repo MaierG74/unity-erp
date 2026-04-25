@@ -50,6 +50,7 @@ import {
   ResultsSummary,
   SheetLayoutGrid,
 } from '@/components/features/cutlist/primitives';
+import { UtilizationBar } from '@/components/features/cutlist/primitives/UtilizationBar';
 
 // Import component picker
 import {
@@ -63,6 +64,7 @@ import {
   loadMaterialDefaults,
   saveMaterialDefaults,
 } from '@/lib/cutlist/materialsDefaults';
+import { computeRolledUpUtilization } from '@/lib/cutlist/effectiveUtilization';
 
 // Import types
 import type {
@@ -1485,6 +1487,26 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
     setSummary(null);
   };
 
+  const allSheetsForRollup = React.useMemo(() => {
+    if (!result) return [];
+    const primary = result.sheets.map((layout) => ({
+      layout,
+      widthMm: layout.stock_width_mm || sheet.width_mm,
+      lengthMm: layout.stock_length_mm || sheet.length_mm,
+    }));
+    const backer = (backerResult?.sheets ?? []).map((layout) => ({
+      layout,
+      widthMm: layout.stock_width_mm || backerSheet.width_mm,
+      lengthMm: layout.stock_length_mm || backerSheet.length_mm,
+    }));
+    return [...primary, ...backer];
+  }, [result, backerResult, sheet, backerSheet]);
+
+  const rolledUpBreakdown = React.useMemo(
+    () => allSheetsForRollup.length > 0 ? computeRolledUpUtilization(allSheetsForRollup) : null,
+    [allSheetsForRollup],
+  );
+
   // ============== Public methods via ref ==============
 
   // Expose methods for parent components to access data
@@ -1883,6 +1905,11 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
                   )}
 
                   {/* Sheet Layout Grid */}
+                  {rolledUpBreakdown && (
+                    <div className="rounded border bg-muted/30 px-3 py-2.5">
+                      <UtilizationBar breakdown={rolledUpBreakdown} title="All sheets" />
+                    </div>
+                  )}
                   <SheetLayoutGrid
                     result={result}
                     stockSheet={sheet}
