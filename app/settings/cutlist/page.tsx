@@ -49,9 +49,9 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
   const cleanWidth = Math.max(minWidth, preferred);
   const narrowWidth = Math.max(60, Math.round(minWidth * 0.55));
   const sampleRects = [
-    { key: 'pass', label: 'Reusable', x: 58, y: 58, w: 142, h: 116, actualW: minWidth, actualH: minLength },
-    { key: 'preferred', label: 'Preferred', x: 222, y: 52, w: 168, h: 128, actualW: cleanWidth, actualH: cleanLength },
-    { key: 'fail', label: 'Too narrow', x: 58, y: 210, w: 142, h: 70, actualW: narrowWidth, actualH: Math.max(minLength, preferred) },
+    { key: 'pass', label: 'Reusable', x: 84, y: 58, w: 142, h: 116, actualW: minWidth, actualH: minLength },
+    { key: 'preferred', label: 'Preferred', x: 252, y: 52, w: 168, h: 128, actualW: cleanWidth, actualH: cleanLength },
+    { key: 'fail', label: 'Too narrow', x: 84, y: 210, w: 142, h: 70, actualW: narrowWidth, actualH: Math.max(minLength, preferred) },
   ];
   const classified = sampleRects.map((rect) => ({
     ...rect,
@@ -61,7 +61,7 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
   return (
     <div className="max-w-3xl">
       <svg
-        viewBox="0 0 650 330"
+        viewBox="0 0 700 330"
         role="img"
         aria-label="Reusable offcut rule examples"
         className="w-full rounded-md border border-border bg-slate-950/40"
@@ -78,8 +78,8 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
           </marker>
         </defs>
 
-        <rect x="20" y="20" width="400" height="290" rx="6" fill="url(#cutlist-grid)" stroke="rgb(71 85 105)" />
-        <rect x="34" y="34" width="372" height="260" rx="3" fill="rgb(15 23 42)" opacity="0.55" />
+        <rect x="20" y="20" width="440" height="290" rx="6" fill="url(#cutlist-grid)" stroke="rgb(71 85 105)" />
+        <rect x="34" y="34" width="412" height="260" rx="3" fill="rgb(15 23 42)" opacity="0.55" />
 
         {classified.map((rect) => (
           <g key={rect.key}>
@@ -105,24 +105,24 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
           </g>
         ))}
 
-        <line x1="58" y1="42" x2="200" y2="42" stroke="rgb(45 212 191)" strokeWidth="2" markerStart="url(#arrow-teal)" markerEnd="url(#arrow-teal)" />
-        <text x="88" y="34" fill="rgb(153 246 228)" fontSize="13">Minimum width {minWidth} mm</text>
-        <line x1="44" y1="58" x2="44" y2="174" stroke="rgb(45 212 191)" strokeWidth="2" markerStart="url(#arrow-teal)" markerEnd="url(#arrow-teal)" />
-        <text x="30" y="156" fill="rgb(153 246 228)" fontSize="13" transform="rotate(-90 30 156)">Minimum length {minLength} mm</text>
-        <path d="M 390 188 C 365 215, 325 230, 275 232" fill="none" stroke="rgb(45 212 191)" strokeWidth="2" markerEnd="url(#arrow-teal)" />
-        <text x="272" y="216" fill="rgb(153 246 228)" fontSize="13">Preferred guide {preferred} mm</text>
+        <line x1="84" y1="42" x2="226" y2="42" stroke="rgb(45 212 191)" strokeWidth="2" markerStart="url(#arrow-teal)" markerEnd="url(#arrow-teal)" />
+        <text x="122" y="34" fill="rgb(153 246 228)" fontSize="13">Min width {minWidth} mm</text>
+        <line x1="56" y1="58" x2="56" y2="174" stroke="rgb(45 212 191)" strokeWidth="2" markerStart="url(#arrow-teal)" markerEnd="url(#arrow-teal)" />
+        <text x="40" y="151" fill="rgb(153 246 228)" fontSize="13" transform="rotate(-90 40 151)">Min length {minLength} mm</text>
+        <path d="M 420 188 C 390 215, 355 230, 305 232" fill="none" stroke="rgb(45 212 191)" strokeWidth="2" markerEnd="url(#arrow-teal)" />
+        <text x="302" y="216" fill="rgb(153 246 228)" fontSize="13">Preferred guide {preferred} mm</text>
 
         <g>
-          <line x1="425" y1="52" x2="425" y2="286" stroke="rgb(71 85 105)" />
-          <text x="450" y="62" fill="rgb(226 232 240)" fontSize="17" fontWeight="700">How the rule reads</text>
-          <text x="450" y="94" fill="rgb(203 213 225)" fontSize="13">Both minimums are hard gates.</text>
-          <text x="450" y="116" fill="rgb(203 213 225)" fontSize="13">Skinny strips stay out of stock.</text>
-          <text x="450" y="150" fill="rgb(153 246 228)" fontSize="13">Preferred offcut dimension</text>
-          <text x="450" y="170" fill="rgb(203 213 225)" fontSize="13">nudges the optimizer toward</text>
-          <text x="450" y="190" fill="rgb(203 213 225)" fontSize="13">cleaner leftovers.</text>
-          <text x="450" y="228" fill="rgb(226 232 240)" fontSize="13">Grain: {getGrainOption(grain).label}</text>
-          <line x1="450" y1="250" x2="450" y2="286" stroke="rgb(148 163 184)" strokeWidth="2" markerStart="url(#arrow-muted)" markerEnd="url(#arrow-muted)" />
-          <text x="466" y="273" fill="rgb(148 163 184)" fontSize="12">sheet grain</text>
+          <line x1="468" y1="52" x2="468" y2="286" stroke="rgb(71 85 105)" />
+          <text x="493" y="62" fill="rgb(226 232 240)" fontSize="17" fontWeight="700">How the rule reads</text>
+          <text x="493" y="94" fill="rgb(203 213 225)" fontSize="13">Both minimums are hard gates.</text>
+          <text x="493" y="116" fill="rgb(203 213 225)" fontSize="13">Skinny strips stay out of stock.</text>
+          <text x="493" y="150" fill="rgb(153 246 228)" fontSize="13">Preferred offcut dimension</text>
+          <text x="493" y="170" fill="rgb(203 213 225)" fontSize="13">nudges the optimizer toward</text>
+          <text x="493" y="190" fill="rgb(203 213 225)" fontSize="13">cleaner leftovers.</text>
+          <text x="493" y="228" fill="rgb(226 232 240)" fontSize="13">Grain: {getGrainOption(grain).label}</text>
+          <line x1="493" y1="250" x2="493" y2="286" stroke="rgb(148 163 184)" strokeWidth="2" markerStart="url(#arrow-muted)" markerEnd="url(#arrow-muted)" />
+          <text x="509" y="273" fill="rgb(148 163 184)" fontSize="12">sheet grain</text>
         </g>
       </svg>
     </div>
