@@ -53,21 +53,29 @@ import type { SheetLayout, SheetOffcutSummary } from './types';
 export interface UtilizationBreakdown {
   /** Total area considered (sheet area for per-sheet, sum of sheet areas for rolled-up). */
   totalArea_mm2: number;
-  /** Area covered by placed parts. */
+  /** Area covered by placed parts (clamped to [0, totalArea]). */
   partsArea_mm2: number;
-  /** Area classified as reusable offcuts (sum of SheetOffcutSummary.reusableArea_mm2). */
+  /** Area classified as reusable offcuts, clamped to [0, totalArea − partsArea]. */
   reusableArea_mm2: number;
   /** Remainder: totalArea − partsArea − reusableArea. Always ≥ 0. */
   scrapArea_mm2: number;
-  /** Percentages, summing to 100 (sub-percent rounding compensated on the largest segment). */
-  partsPct: number;
-  reusablePct: number;
-  scrapPct: number;
-  /** Mechanical = partsPct. Effective = partsPct + reusablePct. */
-  mechanicalPct: number;
-  effectivePct: number;
+
+  // ─── Raw percentages (use for chip values, "Reset to auto" parity, billing labels) ───
+  /** parts ÷ total × 100, no rounding compensation. Matches the existing autoPct exactly. */
+  mechanicalPctRaw: number;
+  /** (parts + reusable) ÷ total × 100, no rounding compensation. Drives the Eff chip. */
+  effectivePctRaw: number;
+
+  // ─── Display percentages (use for bar segments + legend numbers; sum to exactly 100) ───
+  /** Rounded, compensated to sum to 100 across the three segments. */
+  displayPartsPct: number;
+  displayReusablePct: number;
+  displayScrapPct: number;
+
   /** True when reusableArea_mm2 === 0 — UI hides the Eff chip and the Effective line. */
   hasReusable: boolean;
+  /** Diagnostic flag: true when the original (parts + reusable) overflowed total before clamping. */
+  hasAreaDrift: boolean;
 }
 
 export function computeSheetUtilization(
@@ -82,11 +90,16 @@ export function computeRolledUpUtilization(
 ```
 
 Implementation notes:
-- `partsArea_mm2 = sheet.used_area_mm2 ?? sum of placement w*h`.
-- `reusableArea_mm2 = sheet.offcut_summary?.reusableArea_mm2 ?? 0`.
-- `scrapArea_mm2 = max(0, totalArea − parts − reusable)` — guard against floating-point negatives from rounding.
-- Percentages use the rule: round each to one decimal, then add the rounding delta to whichever segment has the largest unrounded value so the three sum to exactly 100.
-- The rolled-up function sums areas across sheets first, then computes percentages from the sums (do not average per-sheet percentages).
+
+- **Parts area is trusted; reusable yields to drift.** Compute in this order:
+  1. `partsArea_mm2 = clamp(sheet.used_area_mm2 ?? sum of placement w*h, 0, totalArea)`
+  2. `reusableArea_mm2 = clamp(sheet.offcut_summary?.reusableArea_mm2 ?? 0, 0, totalArea − partsArea)`
+  3. `scrapArea_mm2 = totalArea − partsArea − reusableArea` (guaranteed ≥ 0 after the above)
+  4. `hasAreaDrift = (rawParts + rawReusable) > totalArea` — set before clamping reusable, used only for diagnostics
+- **Why this order:** parts area comes from packer placements (the most physically meaningful number). Reusable area is computed by classifying free rects, which can drift due to kerf accounting. If we clamped parts first to make room for reusable, a drift-y job would silently understate the placed-parts percentage — visible as "Used 70%" suddenly reading "Used 65%" with no operator action.
+- **Chip values use the raw percentages**: `mechanicalPctRaw` matches the existing `autoPct` (`used_area_mm2 / sheetArea`) used at [SheetLayoutGrid.tsx:116](../../../components/features/cutlist/primitives/SheetLayoutGrid.tsx#L116) and [CutlistCalculator.tsx:508](../../../components/features/cutlist/CutlistCalculator.tsx#L508), so the Mech chip and "Reset to auto" produce identical numbers.
+- **Bar segments use the display percentages**: round each to one decimal, then add the rounding delta to whichever segment has the largest unrounded value so the three sum to exactly 100.
+- **Rolled-up function sums areas across sheets first**, then computes percentages from the sums (do not average per-sheet percentages). Example: sheet1 has 4 m² parts / 1 m² reusable / 5 m² total; sheet2 has 0 / 0 / 5 m² total. Rolled-up = 40% / 10% / 50% — never the average of (80/20/0) and (0/0/100).
 
 ### 3. Per-sheet stats card layout
 
@@ -116,30 +129,37 @@ Visual order top to bottom inside the card:
 
 **Bar legend specifics:**
 - Three columns side by side: `■ Parts 45.5%`, `■ Reuse 30.0%`, `■ Scrap 24.5%`. Color swatch matches the bar segment.
-- When `reusablePct === 0`: the green segment isn't rendered, the legend collapses to two columns.
+- When `displayReusablePct === 0`: the green segment isn't rendered, the legend collapses to two columns.
 
 **"Effective" tooltip copy** (on the small `(i)` icon):
 
 > Parts placed plus reusable offcuts retained as stock. This is informational — costing uses Manual % below.
 
 **Chip behaviour:**
-- Three `<button>` elements: `Mech 45.5` (gray), `Eff 75.5` (green-tinted), `Full 100` (gray).
-- Click → set Manual % to that value AND set the chargeMode to `'manual'` (so "Charge full sheet" stays off and the typed value is honoured).
+- Three `<button>` elements: `Mech 45.5` (gray), `Eff 75.5` (green-tinted), `Full 100` (gray). Values use the **raw** percentages (`mechanicalPctRaw`, `effectivePctRaw`) so the Mech chip and the existing "Reset to auto" link produce identical numbers.
+- Click → write the per-sheet override `{ mode: 'manual', manualPct: nextPct }` (the existing `mode` field on the override, see [types.ts:558](../../../lib/cutlist/types.ts#L558) — **not** `chargeMode`). This is the same shape the Manual % input writes today at [SheetLayoutGrid.tsx:240](../../../components/features/cutlist/primitives/SheetLayoutGrid.tsx#L240).
 - Disabled (visually muted, click no-op) when **either** the per-sheet "Charge full sheet" toggle is on **or** the global "Charge full sheet for every used board" toggle (above the page selector) is on. The chips can't usefully fill an input that isn't honoured.
-- `Eff` chip hidden entirely when `reusablePct === 0`.
+- `Eff` chip hidden entirely when `reusableArea_mm2 === 0`.
 - Chip layout: 3-column grid `gap-1`, full width of the card. Each button shows the label on top line, the percentage on the bottom line in monospace, both inside a 28-32px button.
 
 ### 4. SVG sheet diagram — C treatment
 
-In `SheetPreview` ([preview.tsx](../../../components/features/cutlist/preview.tsx)), after rendering placements (~line 188-210), add a new render pass for `layout.offcut_summary?.reusableOffcuts`. Each `OffcutRect { x, y, w, h, area_mm2 }` becomes:
+In `SheetPreview` ([preview.tsx](../../../components/features/cutlist/preview.tsx)), after rendering placements (~lines 244-275), add a new render pass for `layout.offcut_summary?.reusableOffcuts`. Gate it behind a new optional prop `showOffcutOverlay?: boolean` (default `true` for both grid card and zoom modal; the legend is rendered separately by the parent — see below).
+
+**Coordinate transform — must mirror the existing placement renderer.** `SheetPreview` computes a scale factor and `sheetX` / `sheetY` padding offsets ([preview.tsx:71](../../../components/features/cutlist/preview.tsx#L71)). Placements render via `sheetX + pl.x * scale` ([preview.tsx:245](../../../components/features/cutlist/preview.tsx#L245)). Reusable offcut rects must use the identical transform:
 
 ```tsx
+const cx = sheetX + rect.x * scale;
+const cy = sheetY + rect.y * scale;
+const cw = rect.w * scale;
+const ch = rect.h * scale;
+
 <g key={`reusable-${i}`}>
   <rect
-    x={rect.x}
-    y={rect.y}
-    width={rect.w}
-    height={rect.h}
+    x={cx}
+    y={cy}
+    width={cw}
+    height={ch}
     fill="rgb(16 185 129 / 0.32)"
     stroke="rgb(16 185 129)"
     strokeWidth={1.5}
@@ -148,36 +168,28 @@ In `SheetPreview` ([preview.tsx](../../../components/features/cutlist/preview.ts
 </g>
 ```
 
-**Label placement decision tree:**
+**Label format and styling.** `{maxDim} × {minDim}` mm (e.g. `680 × 320`) — bigger dimension first, matching the B list convention. Color `rgb(52 211 153)` (Tailwind emerald-400), monospace, font-weight 600. Optional second smaller line `reusable · {area_cm2} cm²` in a muted green, font-weight 400, only shown when the rect is large enough.
 
-The label format is `{maxDim} × {minDim}` (e.g. `680 × 320`) — bigger dimension first, matching the B list convention. Render it in a green that reads on dark and light: `rgb(52 211 153)` (Tailwind emerald-400), monospace, font-weight 600. A second smaller line below it reads `reusable · {area_cm2} cm²` in a muted green, font-weight 400.
+**Label fit — mirror the existing adaptive logic.** `SheetPreview` already does adaptive label sizing for placements ([preview.tsx:262](../../../components/features/cutlist/preview.tsx#L262)) — estimating text width and minimum legible font size from the post-scale rendered pixel dimensions (`wPx`, `hPx`). Reusable-offcut labels reuse the same approach:
 
-To handle small offcuts:
+1. Compute `wPx = cw` and `hPx = ch` (already in scaled pixel coordinates).
+2. Estimate `dimensionLabelWidth_px` for the chosen font size using the same heuristic as the existing label code.
+3. Branch on what fits:
+   - **Two-line inside label** (dimensions + `reusable · cm²`) — when `wPx ≥ dimensionLabelWidth_px + 8` AND `hPx ≥ 2 × lineHeight_px + 4`.
+   - **Single-line inside label** (dimensions only) — when `wPx ≥ dimensionLabelWidth_px + 4` AND `hPx ≥ lineHeight_px + 2`.
+   - **Outside leader-line label** — when neither fits. Draw a 1px green line from the rect's center to a point 12px (in scaled pixels) outside the nearest sheet edge; place a single-line label at the leader endpoint anchored away from the sheet.
 
-```
-if (rect.w >= 80 mm AND rect.h >= 40 mm in SVG units):
-  → label centered inside the rect (two lines)
-else if (rect.w >= 60 mm OR rect.h >= 30 mm in SVG units):
-  → label centered inside the rect, single line, dimensions only
-else:
-  → label rendered outside the rect via a leader line
-  → leader: 1px green line from rect center to a point 12 SVG-units outside the nearest sheet edge
-  → label sits at the leader endpoint, anchored toward sheet exterior
-```
+The minimum legible font size and line-height constants should match what the existing placement label logic uses (read them from the same module if exported, or duplicate the constants with a comment cross-reference).
 
-The "SVG units" thresholds above assume the sheet is rendered with its mm-coordinates as the SVG viewBox (which is the existing convention). If `SheetPreview` scales, the thresholds compare against the post-scale rendered size — implementation may need a tiny `useEffect` measuring the actual rendered scale to pick the right branch.
+**Leader-line collision avoidance** is acknowledged as a gap but deliberately not solved in v1 — when multiple tiny reusable rects cluster near the same edge, labels may overlap. Operators can use the zoom modal to inspect; the B size list in the stats sidebar provides the reliable canonical list. If clustering proves to be a real problem in practice, a follow-up spec adds simple vertical-stacking of leader endpoints along the same edge.
 
-**Inline legend at the bottom of the SVG container** (small, 10px, monospace):
-
-```
-■ parts placed   ■ reusable offcut   ▦ scrap
-```
-
-Same colors as the bar legend. Rendered as a `<div>` underneath the SVG, not inside it (so it doesn't get part of the diagram's coordinate system). Hidden when the parent prop says compact-mode.
+**Legend lives in the parent stats card, not in `SheetPreview`.** `SheetPreview` stays a pure renderer of the SVG itself. The legend (`■ parts placed   ■ reusable offcut   ▦ scrap`) is rendered as part of the per-sheet stats card in `SheetLayoutGrid.tsx` and the modal stats panel in `InteractiveSheetViewer.tsx`. This avoids inventing a "compact mode" prop on `SheetPreview` and keeps the SVG component focused.
 
 ### 5. Rolled-up bar at the top of the Builder
 
-In `CutlistCalculator.tsx` near the existing summary metrics row (the "Used %", "Sheets", "Cuts" cards), insert a new wide segmented bar with the same legend treatment, computed via `computeRolledUpUtilization` over all sheets in the result. No chips up there — the operator workflow is per-sheet (per the user's clarification: *"the user should work through sheet by sheet and give the amount to charge"*) so the rolled-up bar is read-only context, not an action surface.
+In `CutlistCalculator.tsx` near the existing summary metrics row (the "Used %", "Sheets", "Cuts" cards), insert a new wide segmented bar with the same legend treatment. No chips up there — the operator workflow is per-sheet (per the user's clarification: *"the user should work through sheet by sheet and give the amount to charge"*) so the rolled-up bar is read-only context, not an action surface.
+
+**Backer-aware rollup.** The Builder renders primary and (optional) backer results separately ([CutlistCalculator.tsx:1886](../../../components/features/cutlist/CutlistCalculator.tsx#L1886) and [:1903](../../../components/features/cutlist/CutlistCalculator.tsx#L1903)) — `result.sheets` carries only the primary set. `computeRolledUpUtilization` must accept both: the call site at the top of the Builder passes `[...result.sheets, ...(backerResult?.sheets ?? [])]` paired with each sheet's own dimensions (primary and backer can differ in stock size). The label on the rolled-up bar reads "All sheets" — generic, covers both cases. If only primary exists, the math reduces to primary-only with no labelling change.
 
 The rolled-up bar shows `Mechanical X% · Effective Y%` underneath but **does not** show a "Manual %", chips, or the "Charge full sheet" toggle — billing is per-sheet, and the rolled-up surface is read-only context.
 
@@ -192,8 +204,8 @@ The Manual % input and chips do **not** appear in the zoom modal — they only l
 - **Sheet with no `offcut_summary`** (legacy/strip output before the prior P4 work landed): bar shows only Parts + Scrap (no green segment), B list hidden, `hasReusable: false`, Eff chip hidden. Mechanical and Effective collapse to one number.
 - **Sheet 100% used** (placements fill the whole sheet): bar is full blue, no green or gray, all three legend columns hide except Parts.
 - **Sheet 0% used** (impossible in practice but defensively): bar is full gray, no Parts/Reuse columns; this should never happen because such a sheet wouldn't be in the result, but guard against divide-by-zero in the percentage helper.
-- **Floating-point rounding**: `partsArea + reusableArea > totalArea` by a few mm² is possible due to kerf accounting drift. Cap `partsPct + reusablePct ≤ 100` and assign the leftover to scrap; never show negative percentages.
-- **Existing "Reset to auto"** sets Manual % to `autoPct` (= mechanical). Behaviour preserved exactly. The chips are an additional convenience; the link continues to work.
+- **Floating-point rounding / area drift**: `partsArea + reusableArea > totalArea` by a few mm² is possible due to kerf accounting. The clamp rule from §2 applies — parts area is preserved, reusable area is reduced to fit. The `hasAreaDrift` flag is set for diagnostics if needed (e.g. a future "Layout drift" warning). Never show negative percentages or sums above 100.
+- **Existing "Reset to auto"** *deletes* the per-sheet override (see [SheetLayoutGrid.tsx:254](../../../components/features/cutlist/primitives/SheetLayoutGrid.tsx#L254)) — it does not write a value to Manual %. With the override gone, the card falls back to displaying `autoPct` (= `mechanicalPctRaw`). Behaviour preserved exactly. The chips are an additional convenience; the link continues to work.
 
 ---
 
@@ -222,3 +234,16 @@ None blocking. Implementation will pick reasonable defaults for:
 - Exact emerald shade and opacity (spec says ~32% on `rgb(16 185 129)`; final visual tuning is implementation-time).
 - Bar segment height (suggest 18-22px — dial in during build).
 - Tooltip primitive — reuse the shadcn Tooltip already used on the settings page.
+
+## Spec revision history
+
+- **2026-04-25 r1** — initial draft.
+- **2026-04-25 r2** — Codex review pass incorporated:
+  - §2 split percentages into raw (chip values, billing parity with `autoPct`) and display (segment math, sums to 100). Added `hasAreaDrift` diagnostic flag.
+  - §2 + §7 rewrote the clamp rule: parts area is preserved (clamped to total), reusable yields to drift. Prevents silent under-reporting of placed-parts %.
+  - §4 corrected the SVG transform to mirror the existing placement renderer (`sheetX + rect.x * scale`). Raw mm coordinates would have rendered offcuts off-position.
+  - §4 replaced the "80mm/40mm" mm-based label thresholds with a reuse of the existing adaptive label logic (post-scale `wPx`/`hPx` + estimated text width). Acknowledged leader-line collision avoidance as a deferred v1 limitation.
+  - §4 lifted the legend out of `SheetPreview` into the parent stats card; added `showOffcutOverlay?: boolean` prop instead of inventing a "compact mode".
+  - §5 made the rolled-up bar backer-aware: combines `result.sheets + backerResult.sheets` instead of primary-only.
+  - §3 corrected the chip click semantics: writes `{ mode: 'manual', manualPct: nextPct }` (existing `mode` field, not `chargeMode`).
+  - §7 corrected the "Reset to auto" semantics: it deletes the override; it does not write `autoPct` to the input.
