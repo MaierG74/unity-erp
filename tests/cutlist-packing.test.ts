@@ -1033,4 +1033,32 @@ test('SA optimizer can be cancelled via shouldCancel', async () => {
   assert.ok(result.sheets.length > 0, 'Should still have a result from baseline');
 });
 
+test('guillotine: offcut_summary populated with new 2D rule', async () => {
+  const mod = await importPacking();
+  const parts: PartSpec[] = [
+    { id: 'p1', length_mm: 600, width_mm: 1830, qty: 1, grain: 'any' },
+  ];
+  const stock: StockSheetSpec[] = [{ id: 's1', length_mm: 2750, width_mm: 1830, qty: 1 }];
+  const result = await mod.packPartsSmartOptimized(parts, stock, {
+    algorithm: 'guillotine',
+    packingConfig: { minUsableLength: 300, minUsableWidth: 300, minUsableGrain: 'any' },
+  });
+  assert.ok(result.sheets[0]?.offcut_summary !== undefined,
+    'guillotine algorithm must emit offcut_summary');
+});
+
+test('strip: offcut_summary populated (P4 emission regression)', async () => {
+  const mod = await importPacking();
+  const parts: PartSpec[] = [
+    { id: 'p1', length_mm: 600, width_mm: 1830, qty: 1, grain: 'any' },
+  ];
+  const stock: StockSheetSpec[] = [{ id: 's1', length_mm: 2750, width_mm: 1830, qty: 1 }];
+  const result = await mod.packPartsSmartOptimized(parts, stock, {
+    algorithm: 'strip',
+    packingConfig: { minUsableLength: 300, minUsableWidth: 300, minUsableGrain: 'any' },
+  });
+  assert.ok(result.sheets[0]?.offcut_summary !== undefined,
+    'strip algorithm must emit offcut_summary after P4');
+});
+
 console.log('\n=== Cutlist Packing Algorithm Tests ===\n');

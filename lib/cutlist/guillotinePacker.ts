@@ -1035,6 +1035,7 @@ export function packWithStrategy(
   let totalCuts = 0;
   let totalCutLength = 0;
   let lastSheetFreeRects: FreeRect[] = [];
+  const perSheetOffcuts: SheetOffcutInfo[] = [];
 
   while (remaining.length > 0 && sheetIndex < maxSheets) {
     const packer = new GuillotinePacker(stock.width_mm, stock.length_mm, kerf, fullConfig);
@@ -1052,6 +1053,22 @@ export function packWithStrategy(
       break;
     }
 
+    const sheetFreeRects = packer.getFreeRects();
+    const { usableRects, scrapRects } = classifyOffcuts(sheetFreeRects, fullConfig);
+    const sheetOffcutAreas = sheetFreeRects.map((r) => r.w * r.h);
+    const sheetLargestOffcut = sheetOffcutAreas.length > 0 ? Math.max(...sheetOffcutAreas) : 0;
+    const sheetTotalOffcut = sheetOffcutAreas.reduce((sum, a) => sum + a, 0);
+    perSheetOffcuts.push({
+      sheetIndex,
+      freeRects: sheetFreeRects,
+      usableRects,
+      scrapRects,
+      largestOffcutArea: sheetLargestOffcut,
+      totalOffcutArea: sheetTotalOffcut,
+      concentration: sheetTotalOffcut > 0 ? sheetLargestOffcut / sheetTotalOffcut : 1,
+      fragmentCount: sheetFreeRects.length,
+    });
+
     sheets.push({
       sheet_id: `${stock.id}:${sheetIndex + 1}`,
       placements,
@@ -1061,7 +1078,7 @@ export function packWithStrategy(
     const cutMetrics = packer.getCutMetrics();
     totalCuts += cutMetrics.count;
     totalCutLength += cutMetrics.cutLength;
-    lastSheetFreeRects = packer.getFreeRects();
+    lastSheetFreeRects = sheetFreeRects;
 
     remaining = stillUnplaced;
     sheetIndex++;
@@ -1140,6 +1157,7 @@ export function packWithStrategy(
     largestOffcutArea,
     offcutConcentration,
     fragmentCount,
+    perSheetOffcuts,
   };
 }
 
