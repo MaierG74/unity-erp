@@ -64,15 +64,15 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
   const cleanWidth = Math.max(minWidth, preferred);
   const narrowWidth = Math.max(60, Math.round(minWidth * 0.55));
   const narrowLength = Math.max(minLength, preferred);
-  const topScale = Math.min(126 / Math.max(minWidth, cleanWidth), 154 / Math.max(minLength, cleanLength));
+  const topScale = Math.min(132 / Math.max(minWidth, cleanWidth), 164 / Math.max(minLength, cleanLength));
   const narrowScale = Math.min(64 / narrowWidth, 86 / narrowLength, topScale);
   const reusableSize = scaleDiagramRect(minWidth, minLength, topScale, 82, 82);
   const preferredSize = scaleDiagramRect(cleanWidth, cleanLength, topScale, 82, 82);
   const narrowSize = scaleDiagramRect(narrowWidth, narrowLength, narrowScale, 40, 70);
   const sampleRects = [
-    { key: 'pass', label: 'Reusable', x: 84, y: 58, w: reusableSize.w, h: reusableSize.h, actualW: minWidth, actualH: minLength, labelOutside: false },
-    { key: 'preferred', label: 'Preferred', x: 252, y: 58, w: preferredSize.w, h: preferredSize.h, actualW: cleanWidth, actualH: cleanLength, labelOutside: false },
-    { key: 'fail', label: 'Too narrow', x: 84, y: 214, w: narrowSize.w, h: narrowSize.h, actualW: narrowWidth, actualH: narrowLength, labelOutside: true },
+    { key: 'pass', label: 'Reusable', x: 96, y: 70, w: reusableSize.w, h: reusableSize.h, actualW: minWidth, actualH: minLength, labelOutside: false },
+    { key: 'preferred', label: 'Preferred', x: 268, y: 70, w: preferredSize.w, h: preferredSize.h, actualW: cleanWidth, actualH: cleanLength, labelOutside: false },
+    { key: 'fail', label: 'Too narrow', x: 96, y: 266, w: narrowSize.w, h: narrowSize.h, actualW: narrowWidth, actualH: narrowLength, labelOutside: true },
   ];
   const classified = sampleRects.map((rect) => ({
     ...rect,
@@ -81,9 +81,9 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
   const reusableRect = classified[0]!;
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-4xl">
       <svg
-        viewBox="0 0 700 330"
+        viewBox="0 0 700 390"
         role="img"
         aria-label="Reusable offcut rule examples"
         className="w-full rounded-md border border-border bg-slate-950/40"
@@ -99,8 +99,8 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
           </marker>
         </defs>
 
-        <rect x="20" y="20" width="440" height="290" rx="6" fill="rgb(2 6 23)" stroke="rgb(71 85 105)" />
-        <rect x="34" y="34" width="412" height="260" rx="3" fill="rgb(15 23 42)" opacity="0.55" />
+        <rect x="20" y="20" width="440" height="350" rx="6" fill="rgb(2 6 23)" stroke="rgb(71 85 105)" />
+        <rect x="34" y="34" width="412" height="320" rx="3" fill="rgb(15 23 42)" opacity="0.55" />
 
         {classified.map((rect) => (
           <g key={rect.key}>
@@ -138,13 +138,13 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
           </g>
         ))}
 
-        <line x1={reusableRect.x} y1="42" x2={reusableRect.x + reusableRect.w} y2="42" stroke="rgb(45 212 191)" strokeWidth="2" markerStart="url(#arrow-teal)" markerEnd="url(#arrow-teal)" />
-        <text x={reusableRect.x + reusableRect.w / 2} y="34" fill="rgb(153 246 228)" fontSize="13" textAnchor="middle">Min width {minWidth} mm</text>
+        <line x1={reusableRect.x} y1="52" x2={reusableRect.x + reusableRect.w} y2="52" stroke="rgb(45 212 191)" strokeWidth="2" markerStart="url(#arrow-teal)" markerEnd="url(#arrow-teal)" />
+        <text x={reusableRect.x + reusableRect.w / 2} y="44" fill="rgb(153 246 228)" fontSize="13" textAnchor="middle">Min width {minWidth} mm</text>
         <line x1="56" y1={reusableRect.y} x2="56" y2={reusableRect.y + reusableRect.h} stroke="rgb(45 212 191)" strokeWidth="2" markerStart="url(#arrow-teal)" markerEnd="url(#arrow-teal)" />
         <text x="40" y={reusableRect.y + reusableRect.h / 2 + 22} fill="rgb(153 246 228)" fontSize="13" transform={`rotate(-90 40 ${reusableRect.y + reusableRect.h / 2 + 22})`}>Min length {minLength} mm</text>
 
         <g>
-          <line x1="468" y1="52" x2="468" y2="286" stroke="rgb(71 85 105)" />
+          <line x1="468" y1="52" x2="468" y2="338" stroke="rgb(71 85 105)" />
           <text x="493" y="62" fill="rgb(226 232 240)" fontSize="17" fontWeight="700">How the rule reads</text>
           <text x="493" y="94" fill="rgb(203 213 225)" fontSize="13">Both minimums are hard gates.</text>
           <text x="493" y="116" fill="rgb(203 213 225)" fontSize="13">Skinny strips stay out of stock.</text>
