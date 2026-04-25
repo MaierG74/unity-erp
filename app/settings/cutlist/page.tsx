@@ -67,12 +67,11 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
         className="w-full rounded-md border border-border bg-slate-950/40"
       >
         <defs>
-          <pattern id="cutlist-grid" width="18" height="18" patternUnits="userSpaceOnUse">
-            <path d="M 18 0 L 0 0 0 18" fill="none" stroke="rgb(51 65 85)" strokeWidth="0.6" opacity="0.35" />
-          </pattern>
-          <clipPath id="cutlist-board-face">
-            <rect x="34" y="34" width="412" height="260" rx="3" />
-          </clipPath>
+          {classified.map((rect) => (
+            <clipPath key={rect.key} id={`cutlist-grain-${rect.key}`}>
+              <rect x={rect.x} y={rect.y} width={rect.w} height={rect.h} rx="4" />
+            </clipPath>
+          ))}
           <marker id="arrow-teal" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
             <path d="M 0 0 L 8 4 L 0 8 z" fill="rgb(45 212 191)" />
           </marker>
@@ -81,13 +80,8 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
           </marker>
         </defs>
 
-        <rect x="20" y="20" width="440" height="290" rx="6" fill="url(#cutlist-grid)" stroke="rgb(71 85 105)" />
+        <rect x="20" y="20" width="440" height="290" rx="6" fill="rgb(2 6 23)" stroke="rgb(71 85 105)" />
         <rect x="34" y="34" width="412" height="260" rx="3" fill="rgb(15 23 42)" opacity="0.55" />
-        <g clipPath="url(#cutlist-board-face)" opacity="0.18" stroke="rgb(203 213 225)" strokeWidth="1">
-          {[72, 108, 144, 180, 216, 252, 288, 324, 360, 396].map((x) => (
-            <line key={x} x1={x} y1="42" x2={x} y2="286" />
-          ))}
-        </g>
 
         {classified.map((rect) => (
           <g key={rect.key}>
@@ -103,6 +97,18 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
               strokeWidth={rect.key === 'preferred' ? 2.5 : 2}
               strokeDasharray={rect.key === 'preferred' ? '7 5' : undefined}
             />
+            <g clipPath={`url(#cutlist-grain-${rect.key})`} opacity="0.22" stroke="rgb(226 232 240)" strokeWidth="1" pointerEvents="none">
+              {grain !== 'width' && [18, 40, 62, 84, 106, 128, 150].map((offset) => (
+                offset < rect.w - 6
+                  ? <line key={`v-${offset}`} x1={rect.x + offset} y1={rect.y + 6} x2={rect.x + offset} y2={rect.y + rect.h - 6} />
+                  : null
+              ))}
+              {grain !== 'length' && [18, 40, 62, 84, 106, 128, 150].map((offset) => (
+                offset < rect.h - 6
+                  ? <line key={`h-${offset}`} x1={rect.x + 6} y1={rect.y + offset} x2={rect.x + rect.w - 6} y2={rect.y + offset} />
+                  : null
+              ))}
+            </g>
             <text x={rect.x + 10} y={rect.y + 24} fill="rgb(226 232 240)" fontSize="15" fontWeight="700">{rect.label}</text>
             <text x={rect.x + 10} y={rect.y + 45} fill="rgb(203 213 225)" fontSize="13">
               {rect.actualH} x {rect.actualW} mm
@@ -129,8 +135,23 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
           <text x="493" y="170" fill="rgb(203 213 225)" fontSize="13">nudges the optimizer toward</text>
           <text x="493" y="190" fill="rgb(203 213 225)" fontSize="13">cleaner leftovers.</text>
           <text x="493" y="228" fill="rgb(226 232 240)" fontSize="13">Grain: {getGrainOption(grain).label}</text>
-          <line x1="493" y1="250" x2="493" y2="286" stroke="rgb(148 163 184)" strokeWidth="2" markerStart="url(#arrow-muted)" markerEnd="url(#arrow-muted)" />
-          <text x="509" y="273" fill="rgb(148 163 184)" fontSize="12">sheet grain</text>
+          {grain === 'width' ? (
+            <>
+              <line x1="493" y1="266" x2="535" y2="266" stroke="rgb(148 163 184)" strokeWidth="2" markerStart="url(#arrow-muted)" markerEnd="url(#arrow-muted)" />
+              <text x="493" y="288" fill="rgb(148 163 184)" fontSize="12">sheet grain</text>
+            </>
+          ) : grain === 'length' ? (
+            <>
+              <line x1="493" y1="250" x2="493" y2="286" stroke="rgb(148 163 184)" strokeWidth="2" markerStart="url(#arrow-muted)" markerEnd="url(#arrow-muted)" />
+              <text x="509" y="273" fill="rgb(148 163 184)" fontSize="12">sheet grain</text>
+            </>
+          ) : (
+            <>
+              <line x1="493" y1="250" x2="493" y2="286" stroke="rgb(148 163 184)" strokeWidth="2" markerStart="url(#arrow-muted)" markerEnd="url(#arrow-muted)" />
+              <line x1="479" y1="268" x2="521" y2="268" stroke="rgb(148 163 184)" strokeWidth="2" markerStart="url(#arrow-muted)" markerEnd="url(#arrow-muted)" />
+              <text x="530" y="273" fill="rgb(148 163 184)" fontSize="12">either</text>
+            </>
+          )}
         </g>
       </svg>
     </div>
