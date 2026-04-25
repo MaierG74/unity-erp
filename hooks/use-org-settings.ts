@@ -8,6 +8,7 @@ import type {
   CupboardBaseConstruction,
   CupboardTopConstruction,
 } from '@/lib/configurator/templates/types';
+import type { GrainOrientation } from '@/lib/cutlist/types';
 
 /**
  * Org-level configurator defaults.
@@ -35,8 +36,14 @@ export interface ConfiguratorDefaults {
 }
 
 export interface CutlistDefaults {
-  minReusableOffcutDimensionMm?: number;
+  minReusableOffcutLengthMm?: number;
+  minReusableOffcutWidthMm?: number;
+  minReusableOffcutGrain?: GrainOrientation;
   preferredOffcutDimensionMm?: number;
+}
+
+interface LegacyCutlistDefaults {
+  minReusableOffcutDimensionMm?: number;
   minReusableOffcutAreaMm2?: number;
 }
 
@@ -54,11 +61,28 @@ const DEFAULTS: OrgSettings = {
   otThresholdMinutes: 30,
   configuratorDefaults: {},
   cutlistDefaults: {
-    minReusableOffcutDimensionMm: 150,
+    minReusableOffcutLengthMm: 300,
+    minReusableOffcutWidthMm: 300,
+    minReusableOffcutGrain: 'any',
     preferredOffcutDimensionMm: 300,
-    minReusableOffcutAreaMm2: 100000,
   },
 };
+
+export function normalizeCutlistDefaults(
+  raw: Partial<CutlistDefaults & LegacyCutlistDefaults> | null | undefined,
+): Required<CutlistDefaults> {
+  const r = raw ?? {};
+  const hasNewKey =
+    r.minReusableOffcutLengthMm !== undefined ||
+    r.minReusableOffcutWidthMm !== undefined;
+  const legacyDim = hasNewKey ? undefined : r.minReusableOffcutDimensionMm;
+  return {
+    minReusableOffcutLengthMm: r.minReusableOffcutLengthMm ?? legacyDim ?? 300,
+    minReusableOffcutWidthMm: r.minReusableOffcutWidthMm ?? legacyDim ?? 300,
+    minReusableOffcutGrain: r.minReusableOffcutGrain ?? 'any',
+    preferredOffcutDimensionMm: r.preferredOffcutDimensionMm ?? 300,
+  };
+}
 
 export function useOrgSettings(): OrgSettings & { isLoading: boolean } {
   const { user } = useAuth();
@@ -74,21 +98,15 @@ export function useOrgSettings(): OrgSettings & { isLoading: boolean } {
         .eq('id', orgId)
         .single();
       if (error || !data) return DEFAULTS;
-      const cutlistDefaults = (data.cutlist_defaults as CutlistDefaults | null) ?? {};
       const standardWeekHours = Number(data.payroll_standard_week_hours);
       return {
         weekStartDay: data.week_start_day ?? DEFAULTS.weekStartDay,
         standardWeekHours: Number.isFinite(standardWeekHours) ? standardWeekHours : DEFAULTS.standardWeekHours,
         otThresholdMinutes: data.ot_threshold_minutes ?? DEFAULTS.otThresholdMinutes,
         configuratorDefaults: (data.configurator_defaults as ConfiguratorDefaults) ?? {},
-        cutlistDefaults: {
-          minReusableOffcutDimensionMm:
-            cutlistDefaults.minReusableOffcutDimensionMm ?? DEFAULTS.cutlistDefaults.minReusableOffcutDimensionMm,
-          preferredOffcutDimensionMm:
-            cutlistDefaults.preferredOffcutDimensionMm ?? DEFAULTS.cutlistDefaults.preferredOffcutDimensionMm,
-          minReusableOffcutAreaMm2:
-            cutlistDefaults.minReusableOffcutAreaMm2 ?? DEFAULTS.cutlistDefaults.minReusableOffcutAreaMm2,
-        },
+        cutlistDefaults: normalizeCutlistDefaults(
+          data.cutlist_defaults as Partial<CutlistDefaults & LegacyCutlistDefaults> | null,
+        ),
       };
     },
     enabled: !!orgId,
