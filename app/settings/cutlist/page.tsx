@@ -70,6 +70,9 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
           <pattern id="cutlist-grid" width="18" height="18" patternUnits="userSpaceOnUse">
             <path d="M 18 0 L 0 0 0 18" fill="none" stroke="rgb(51 65 85)" strokeWidth="0.6" opacity="0.35" />
           </pattern>
+          <clipPath id="cutlist-board-face">
+            <rect x="34" y="34" width="412" height="260" rx="3" />
+          </clipPath>
           <marker id="arrow-teal" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
             <path d="M 0 0 L 8 4 L 0 8 z" fill="rgb(45 212 191)" />
           </marker>
@@ -80,7 +83,7 @@ function OffcutRuleDiagram({ defaults }: { defaults: CutlistDefaults }) {
 
         <rect x="20" y="20" width="440" height="290" rx="6" fill="url(#cutlist-grid)" stroke="rgb(71 85 105)" />
         <rect x="34" y="34" width="412" height="260" rx="3" fill="rgb(15 23 42)" opacity="0.55" />
-        <g opacity="0.18" stroke="rgb(203 213 225)" strokeWidth="1">
+        <g clipPath="url(#cutlist-board-face)" opacity="0.18" stroke="rgb(203 213 225)" strokeWidth="1">
           {[72, 108, 144, 180, 216, 252, 288, 324, 360, 396].map((x) => (
             <line key={x} x1={x} y1="42" x2={x} y2="286" />
           ))}
