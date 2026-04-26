@@ -1448,12 +1448,9 @@ export function packPartsGuillotine(
   const fullConfig = { ...DEFAULT_PACKING_CONFIG, ...config };
 
   let bestResult: GuillotinePackResult | null = null;
-  let bestScore = -Infinity;
 
   const updateBest = (result: GuillotinePackResult) => {
-    const score = calculateResultScore(result, sheetArea);
-    if (score > bestScore) {
-      bestScore = score;
+    if (!bestResult || compareResults(result, bestResult, sheetArea) > 0) {
       bestResult = result;
     }
   };
