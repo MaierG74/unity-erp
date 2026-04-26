@@ -16,6 +16,7 @@
 
 import type { PartSpec, StockSheetSpec } from './types';
 import {
+  compareResults,
   countUnplacedPieces,
   expandParts,
   packWithExpandedParts,
@@ -420,8 +421,8 @@ export function runSimulatedAnnealing(
     if (accept) {
       currentScore = candidateScore;
 
-      // Track global best
-      if (candidateScore > bestScore) {
+      // Track global best - lexicographic so completeness always dominates.
+      if (compareResults(candidateResult, bestResult, sheetArea, calculateResultScoreV2) > 0) {
         bestScore = candidateScore;
         bestResult = candidateResult;
         improvementCount++;
