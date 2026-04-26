@@ -413,27 +413,35 @@ export function runSimulatedAnnealing(
     );
     const candidateScore = calculateResultScoreV2(candidateResult, sheetArea);
 
-    // SA acceptance criterion
+    // Track global best independent of metropolis acceptance. A lexicographically
+    // better candidate (e.g. complete with many sheets) can have a worse scalar
+    // score than currentScore (partial with few sheets) and would otherwise be
+    // rejected by metropolis before we record it as the best layout seen.
+    // Best-tracking and search-state movement are separate concerns.
+    const candidateIsBest =
+      compareResults(candidateResult, bestResult, sheetArea, calculateResultScoreV2) > 0;
+
+    if (candidateIsBest) {
+      bestScore = candidateScore;
+      bestResult = candidateResult;
+      improvementCount++;
+      itersSinceImprovement = 0;
+    } else {
+      itersSinceImprovement++;
+    }
+
+    // Metropolis acceptance criterion — moves the SA search state only.
+    // A candidate that improves the global best may still be rejected here on
+    // scalar grounds; that's intentional — the global best is captured above
+    // and the search state can roam independently.
     const delta = candidateScore - currentScore;
     const accept =
       delta > 0 || Math.random() < Math.exp(delta / temperature);
 
     if (accept) {
       currentScore = candidateScore;
-
-      // Track global best - lexicographic so completeness always dominates.
-      if (compareResults(candidateResult, bestResult, sheetArea, calculateResultScoreV2) > 0) {
-        bestScore = candidateScore;
-        bestResult = candidateResult;
-        improvementCount++;
-        itersSinceImprovement = 0;
-      } else {
-        itersSinceImprovement++;
-      }
     } else {
-      // Reject: undo the move
       undo();
-      itersSinceImprovement++;
     }
 
     // Cool down
