@@ -12,6 +12,11 @@ const importGuillotine = async () => {
   return mod;
 };
 
+const importSAOptimizer = async () => {
+  const mod = await import('../lib/cutlist/saOptimizer.js');
+  return mod;
+};
+
 test('countUnplacedPieces returns 0 when unplaced is undefined', async () => {
   const { countUnplacedPieces } = await importGuillotine();
   assert.equal(countUnplacedPieces({ unplaced: undefined } as any), 0);
@@ -109,5 +114,54 @@ test('calculateResultScore: fewer unplaced beats more unplaced even with worse o
   assert.ok(
     calculateResultScore(oneMissing, sheetArea) > calculateResultScore(threeMissing, sheetArea),
     'A layout missing 1 piece must outrank a layout missing 3 pieces',
+  );
+});
+
+test('calculateResultScoreV2: complete layout beats partial with better offcut', async () => {
+  const { calculateResultScoreV2 } = await importSAOptimizer();
+  const sheetArea = 2730 * 1830;
+
+  const partial = {
+    sheets: [{ placements: [{ x: 0, y: 0, w: 600, h: 1200 }] }],
+    stats: { used_area_mm2: 600 * 1200, waste_area_mm2: 0, cuts: 0, cut_length_mm: 0, edgebanding_length_mm: 0 },
+    unplaced: [{ part: { id: 'leg' }, count: 2, reason: 'insufficient_sheet_capacity' }],
+    largestOffcutArea: 0.85 * sheetArea,
+    offcutConcentration: 1,
+    fragmentCount: 1,
+  } as any;
+
+  const complete = {
+    sheets: [{ placements: [{ x: 0, y: 0, w: 600, h: 1200 }] }],
+    stats: { used_area_mm2: 600 * 1200, waste_area_mm2: 0, cuts: 0, cut_length_mm: 0, edgebanding_length_mm: 0 },
+    unplaced: undefined,
+    largestOffcutArea: 0.10 * sheetArea,
+    offcutConcentration: 0.3,
+    fragmentCount: 6,
+  } as any;
+
+  assert.ok(
+    calculateResultScoreV2(complete, sheetArea) > calculateResultScoreV2(partial, sheetArea),
+    'V2: complete layout must outrank partial layout regardless of offcut quality',
+  );
+});
+
+test('calculateResultScoreV2: among complete layouts, larger offcut still wins (V2 weighting preserved)', async () => {
+  const { calculateResultScoreV2 } = await importSAOptimizer();
+  const sheetArea = 2730 * 1830;
+
+  const big = {
+    sheets: [{ placements: [{ x: 0, y: 0, w: 600, h: 1200 }] }],
+    stats: { used_area_mm2: 600 * 1200, waste_area_mm2: 0, cuts: 0, cut_length_mm: 0, edgebanding_length_mm: 0 },
+    unplaced: undefined,
+    largestOffcutArea: 0.85 * sheetArea,
+    offcutConcentration: 1,
+    fragmentCount: 1,
+  } as any;
+
+  const small = { ...big, largestOffcutArea: 0.10 * sheetArea, offcutConcentration: 0.3, fragmentCount: 6 };
+
+  assert.ok(
+    calculateResultScoreV2(big, sheetArea) > calculateResultScoreV2(small, sheetArea),
+    'V2: among complete layouts, larger offcut must still win; V2 offcut weighting preserved',
   );
 });
