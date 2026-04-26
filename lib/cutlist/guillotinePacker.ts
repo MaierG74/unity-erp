@@ -1323,10 +1323,12 @@ export function countUnplacedPieces(
  * Higher score = better result.
  *
  * Scoring hierarchy (in order of importance):
- * 1. Fewer sheets (primary - sheet count dominates all other factors)
- * 2. Higher utilization (secondary - efficiency per sheet)
- * 3. Quality of offcuts (tertiary - larger, fewer offcuts are better)
- * 4. Offcut concentration (prefer waste in one contiguous piece)
+ * 1. Completeness - every unplaced piece is a 1,000,000 penalty (dominates everything)
+ * 2. Fewer sheets - 10,000 penalty per sheet
+ * 3. Higher utilization
+ * 4. Quality of offcuts (larger, fewer offcuts are better)
+ * 5. Offcut concentration (prefer waste in one contiguous piece)
+ * 6. Fragmentation penalty
  */
 export function calculateResultScore(result: GuillotinePackResult, sheetArea: number): number {
   const totalSheetArea = result.sheets.length * sheetArea;
@@ -1345,18 +1347,20 @@ export function calculateResultScore(result: GuillotinePackResult, sheetArea: nu
   // Fewer fragmented offcuts is better (penalty for fragmentation)
   const fragmentationPenalty = result.fragmentCount * 5;
 
-  // Score breakdown:
-  // - Sheet count: -10,000 per sheet (dominates all other factors)
-  // - Utilization: +0-100 points for efficiency
-  // - Offcut quality: +0-100 points for large offcuts (increased weight)
-  // - Concentration: +0-100 points for consolidated waste
-  // - Fragmentation: penalty per fragment
+  // Completeness gate: a layout that leaves parts unplaced must rank below
+  // any layout with fewer unplaced pieces, regardless of offcut quality or
+  // sheet count. The penalty (1,000,000 per piece) dominates the sheet term
+  // (10,000 per sheet) by two orders of magnitude.
+  const unplacedCount = countUnplacedPieces(result);
+  const completenessPenalty = unplacedCount * 1_000_000;
+
   return (
-    -result.sheets.length * 10_000 + // Fewer sheets (primary)
-    utilizationPct + // Higher utilization (secondary)
-    offcutQualityPct + // Larger offcuts (increased from 0.5 to 1.0)
-    concentrationBonus - // Consolidated waste bonus
-    fragmentationPenalty // Fragment penalty
+    -completenessPenalty + // Tier 1: completeness (mandatory)
+    -result.sheets.length * 10_000 + // Tier 2: fewer sheets
+    utilizationPct + // Tier 3: higher utilization
+    offcutQualityPct + // Tier 4: larger offcuts
+    concentrationBonus - // Tier 5: consolidated waste
+    fragmentationPenalty // Tier 6: fragmentation penalty
   );
 }
 
