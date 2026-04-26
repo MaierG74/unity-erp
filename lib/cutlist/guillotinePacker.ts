@@ -1547,7 +1547,6 @@ export async function packPartsGuillotineDeep(
 
   // Initial result using standard heuristics (baseline)
   let bestResult = packPartsGuillotine(parts, stock, config);
-  let bestScore = calculateResultScore(bestResult, sheetArea);
 
   // Expand parts once for reuse
   const expanded = expandParts(parts);
@@ -1592,11 +1591,9 @@ export async function packPartsGuillotineDeep(
     // Pack this variation
     const strategyName = `deep-${baseStrategy}-${seed}`;
     const result = packWithExpandedParts(shuffled, sheet, strategyName, parts, config);
-    const score = calculateResultScore(result, sheetArea);
 
-    // Keep if better
-    if (score > bestScore) {
-      bestScore = score;
+    // Keep if better - lexicographic so completeness always dominates.
+    if (compareResults(result, bestResult, sheetArea) > 0) {
       bestResult = result;
     }
   }
