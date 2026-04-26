@@ -1301,6 +1301,24 @@ export function packWithExpandedParts(
 }
 
 /**
+ * Total number of unplaced pieces across all unplaced entries.
+ *
+ * Unplaced entries are grouped by part id. Each entry carries a `count`,
+ * so two missing legs from the same part collapse into one entry with
+ * count=2. Use this helper instead of `result.unplaced?.length`.
+ */
+export function countUnplacedPieces(
+  result: Pick<GuillotinePackResult, 'unplaced'>
+): number {
+  if (!result.unplaced || result.unplaced.length === 0) return 0;
+  let total = 0;
+  for (const entry of result.unplaced) {
+    total += entry.count;
+  }
+  return total;
+}
+
+/**
  * Calculate a score for a packing result.
  * Higher score = better result.
  *
