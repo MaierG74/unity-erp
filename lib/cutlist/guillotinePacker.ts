@@ -1365,6 +1365,40 @@ export function calculateResultScore(result: GuillotinePackResult, sheetArea: nu
 }
 
 /**
+ * Lexicographic comparison of two packing results.
+ *
+ * Completeness comes first: a layout with fewer unplaced pieces always
+ * outranks a layout with more unplaced pieces, regardless of any scalar
+ * score difference. Among layouts with the same unplaced count, the
+ * scalar score breaks the tie.
+ *
+ * This guarantees the "complete always beats partial" invariant for
+ * arbitrarily large sheet counts - the scalar penalty in
+ * calculateResultScore alone is not strictly dominant once the sheet
+ * term grows past the penalty constant.
+ *
+ * Return value follows Array.prototype.sort convention:
+ *   > 0  means `a` is better than `b`
+ *   < 0  means `a` is worse than `b`
+ *   = 0  means `a` and `b` are equally ranked
+ *
+ * @param scoreFn Defaults to calculateResultScore. SA passes calculateResultScoreV2.
+ */
+export function compareResults(
+  a: GuillotinePackResult,
+  b: GuillotinePackResult,
+  sheetArea: number,
+  scoreFn: (result: GuillotinePackResult, sheetArea: number) => number = calculateResultScore,
+): number {
+  const aUnplaced = countUnplacedPieces(a);
+  const bUnplaced = countUnplacedPieces(b);
+  if (aUnplaced !== bUnplaced) {
+    return bUnplaced - aUnplaced;
+  }
+  return scoreFn(a, sheetArea) - scoreFn(b, sheetArea);
+}
+
+/**
  * Deterministic shuffle using a seed-based approach.
  * Produces consistent results for the same input.
  */
