@@ -206,7 +206,7 @@ The `/cutlist` page uses `packPartsSmartOptimized()` in `components/features/cut
 - **Exact-fit strip continuation**: When a part exactly matches the current strip width/height, the scorer treats the leftover end-trim as cheap terminal waste instead of a hard sliver penalty, which helps preserve full-height/full-width reusable offcuts on jobs like repeated `600 mm` rips.
 - **Exact cut stats**: Guillotine and Deep (SA) now track the actual split segments generated during packing, then merge collinear segments per sheet so `cuts` and `cut length` reflect the modeled guillotine sequence instead of a rough `2 cuts per part` estimate.
 - **Result metrics**: Tracks `offcutConcentration` (1.0 = all waste in one piece) and `fragmentCount`.
-- **Completeness gate**: Layouts that leave parts unplaced are ranked below any layout with fewer unplaced pieces, regardless of sheet count or offcut quality. Offcut metrics only break ties among layouts with the same unplaced count. This prevents the optimizer from choosing a partial 2-piece layout with a beautiful offcut when a complete 4-piece layout fits on the same sheet.
+- **Completeness ranking**: Layouts that leave parts unplaced are ranked below any layout with fewer unplaced pieces via lexicographic comparison - completeness is checked first, scalar offcut/utilization scores only break ties among layouts with the same unplaced count. This holds for arbitrarily large jobs; sheet count cannot drown out completeness.
 
 **Deep algorithm:** `simulated annealing` (iterative optimization)
 - Implemented in `lib/cutlist/saOptimizer.ts`, runs in a Web Worker (`lib/cutlist/saWorker.ts`).
@@ -217,14 +217,14 @@ The `/cutlist` page uses `packPartsSmartOptimized()` in `components/features/cut
 - **Acceptance**: Always accepts improvements; accepts worse solutions with probability `exp(delta/temperature)`.
 - **Reheating**: If stuck for 10% of estimated iterations, reheats to `T_START × 0.3`.
 - **Scoring (V2)**: Heavily weighted toward offcut quality, but completeness comes first:
-  - `-unplacedCount × 10,000,000` (completeness — dominates everything; never trade a placed part for a better offcut)
+  - **Lexicographic completeness gate** - comparison checks unplaced count before any scalar score; a complete layout always beats a partial layout regardless of sheet count or offcut quality. The scalar `-unplacedCount × 10,000,000` term remains in the score function as defensive depth, but the load-bearing guarantee is the comparator.
   - `-sheets × 100,000` (fewer sheets)
   - `+offcutQuality × 500` (largest offcut as % of sheet — user's #1 priority among complete layouts)
   - `+concentration × 300` (consolidated waste)
   - `-compactness × 50` (bounding box penalty — prefer parts packed in corner)
   - `+utilization × 1` (efficiency, weak signal)
   - `-fragments × 20` (fewer fragments better)
-- **Strip fallback safety net**: After SA completes, the orchestrator runs the strip packer and falls back to it when (a) strip places strictly more pieces than SA, or (b) both layouts have the same unplaced count but strip uses fewer sheets. SA is allowed to win on offcut quality only among layouts with the same unplaced count and sheet count. This guarantees Deep never returns a partial layout when strip found a complete one, and never regresses below the Fast algorithm on simple jobs.
+- **Strip fallback safety net**: After SA completes, the orchestrator runs the strip packer and falls back to it when (a) strip places strictly more pieces than SA, or (b) both layouts place every part but strip uses fewer sheets. Equivalent to the lexicographic comparator used inside the optimizers - completeness comes first, sheet count second.
 - **Progressive UI**: Shows live progress (elapsed time, iterations, improvements, % vs baseline) with a progress bar.
 - **Time budget**: User-selectable (10s / 30s / 60s), default 30s.
 - **Cancel**: "Stop & Keep Best" button aborts early and keeps the best result found so far.
@@ -414,3 +414,4 @@ Currently assumes 16mm boards (32mm when laminated). See `plans/cutlist-improvem
 *Updated: 2026-02-13 - World-class presentation: color system, interactive zoom, operator PDF, SA compactness fix, strip fallback, UX polish*
 *Updated: 2026-03-06 - Documented the canonical internal cutlist entry points and product BOM seeding into the builder page*
 *Updated: 2026-04-26 - Optimizer ranking now treats complete placement as mandatory; offcut quality only ranks among layouts with the same unplaced count*
+*Updated: 2026-04-26 - Optimizer ranking now uses lexicographic completeness comparison; scalar penalty constants remain as defensive depth*
