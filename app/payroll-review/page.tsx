@@ -51,6 +51,20 @@ function formatHours(hours: number): string {
   return hours.toFixed(2);
 }
 
+function PieceworkBreakdownLine({ row }: { row: PayrollRow }) {
+  if (row.pieceworkBreakdown.length === 0) return null;
+
+  return (
+    <div className="mt-1 text-[11px] leading-4 text-muted-foreground">
+      {row.pieceworkBreakdown.map((activity) => (
+        <span key={activity.activityId} className="ml-2 whitespace-nowrap">
+          {activity.label}: {formatRand(activity.gross)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function StatusBadge({ status }: { status: string }) {
   const variants: Record<string, { className: string; label: string }> = {
     new: { className: 'bg-gray-500/20 text-gray-400 border-gray-500/30', label: 'New' },
@@ -538,7 +552,10 @@ export default function PayrollReviewPage() {
                       <TableCell className={`text-right tabular-nums ${hourlyWins ? 'text-green-400 font-medium' : ''}`}>
                         {formatRand(row.hourlyTotal)}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">{formatRand(row.pieceworkGross)}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        <div>{formatRand(row.pieceworkGross)}</div>
+                        <PieceworkBreakdownLine row={row} />
+                      </TableCell>
                       <TableCell className="text-right tabular-nums text-muted-foreground">
                         {row.supportDeduction > 0 ? formatRand(row.supportDeduction) : '-'}
                       </TableCell>
@@ -599,7 +616,17 @@ function PayrollDetailPanel({ staffId, staffName, weekStart, weekEnd, standardWe
   const [excludedOtDays, setExcludedOtDays] = useState<Set<string>>(new Set());
   useEffect(() => { setExcludedOtDays(new Set()); }, [staffId]);
 
-  const { data: hoursData } = useQuery({
+  type PayrollDetailHour = {
+    date_worked: string;
+    first_clock_in: string | null;
+    last_clock_out: string | null;
+    total_hours_worked: number | null;
+    regular_minutes: number | null;
+    ot_minutes: number | null;
+    dt_minutes: number | null;
+  };
+
+  const { data: hoursData } = useQuery<PayrollDetailHour[]>({
     queryKey: ['payroll-detail-hours', staffId, weekStart],
     queryFn: async () => {
       const { data, error } = await supabase
