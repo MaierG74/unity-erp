@@ -32,3 +32,11 @@ The finalize hook groups saved cutting-plan layouts by material/color batch and 
 Re-finalizing is idempotent. Unchanged pool rows are left untouched, so `updated_at` does not move. Changed rows that have not been issued are updated in place. Changed rows that have already been issued are not silently mutated; they create or update an open `job_work_pool_exceptions` row with `exception_type='cutting_plan_issued_count_changed'` for supervisor reconciliation.
 
 Organizations with zero active `piecework_activities` rows keep the previous cutting-plan behavior and create no cutting-plan work-pool rows.
+
+## Printing Job Cards
+
+Cut and edge piecework job cards can be printed from the job card detail page when the card is linked to a `piecework_activity_id` with code `cut_pieces` or `edge_bundles`.
+
+The single-card PDF is a one-page A4 portrait shop-floor handout. It includes the card ID, CUT/EDGE type, company name/logo from Settings when available, issued date, order number, customer, due date, material/color label, expected count, assigned staff, configured piecework role, and cutting plan reference. The expected count is intentionally oversized so operators can reconcile against it quickly, and the lower third-plus of the page is reserved for handwritten notes and variances.
+
+PDF generation is client-triggered and lazy-loads `@react-pdf/renderer` together with the new cut/edge document component, matching the cutting-diagram PDF import pattern so the renderer stays out of the initial app bundle. Bulk print remains out of scope for the first pass; supervisors print one cut or edge card at a time from the card detail actions.

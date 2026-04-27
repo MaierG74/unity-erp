@@ -61,6 +61,8 @@ import {
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { JobCardPDFDownload, openJobCardPrintWindow } from '@/components/features/job-cards/JobCardPDFDownload';
+import { CutEdgeCardPdfButton } from '@/components/features/piecework/CutEdgeCardPdfButton';
+import type { CutEdgeCardPdfData } from '@/components/features/piecework/CutEdgeCardPdf';
 
 type JobCardStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
 type ItemStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
@@ -91,16 +93,27 @@ interface JobCardItem {
 interface JobCard {
   job_card_id: number;
   order_id: number | null;
-  staff_id: number;
+  staff_id: number | null;
   issue_date: string;
   due_date: string | null;
   completion_date: string | null;
   status: JobCardStatus;
   notes: string | null;
   created_at: string;
+  piecework_activity_id: string | null;
+  cutting_plan_run_id: number | null;
+  material_color_label: string | null;
+  expected_count: number | null;
   staff: {
     first_name: string;
     last_name: string;
+  } | null;
+  piecework_activities: {
+    code: 'cut_pieces' | 'edge_bundles' | string;
+    label: string;
+    labor_roles: {
+      name: string;
+    } | null;
   } | null;
   orders: {
     order_id: number;
@@ -170,6 +183,7 @@ export default function JobCardDetailPage() {
         .select(`
           *,
           staff:staff_id(first_name, last_name),
+          piecework_activities:piecework_activity_id(code, label, labor_roles:target_role_id(name)),
           orders:order_id(order_id, order_number, customers(name))
         `)
         .eq('job_card_id', jobCardId)
@@ -203,20 +217,28 @@ export default function JobCardDetailPage() {
   const { data: companyInfo } = useQuery({
     queryKey: ['companyInfo'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('settings')
-        .select('key, value')
-        .in('key', ['company_name', 'company_address', 'company_phone', 'company_email']);
-      if (error) throw error;
-      const settings: Record<string, string> = {};
-      data?.forEach((s) => {
-        settings[s.key] = s.value;
-      });
+      const res = await fetch('/api/settings', { headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new Error(`Failed to load company settings: HTTP ${res.status}`);
+      const json = await res.json();
+      const settings = json.settings ?? {};
+      const address = [
+        settings.address_line1,
+        settings.address_line2,
+        settings.city,
+        settings.postal_code,
+        settings.country,
+      ].filter(Boolean).join(', ');
+      let logoUrl: string | null = null;
+      if (settings.company_logo_path) {
+        const { data } = supabase.storage.from('QButton').getPublicUrl(settings.company_logo_path);
+        logoUrl = data.publicUrl;
+      }
       return {
         name: settings.company_name || 'Unity Manufacturing',
-        address: settings.company_address,
-        phone: settings.company_phone,
-        email: settings.company_email,
+        address,
+        phone: settings.phone,
+        email: settings.email,
+        logoUrl,
       };
     },
   });
@@ -585,6 +607,29 @@ export default function JobCardDetailPage() {
   const canComplete = jobCard.status === 'in_progress';
   const canCancel = jobCard.status !== 'completed' && jobCard.status !== 'cancelled';
   const isEditable = jobCard.status !== 'completed' && jobCard.status !== 'cancelled';
+  const pieceworkCode = jobCard.piecework_activities?.code;
+  const cutEdgeCardPdfData: CutEdgeCardPdfData | null =
+    pieceworkCode === 'cut_pieces' || pieceworkCode === 'edge_bundles'
+      ? {
+          id: String(jobCard.job_card_id),
+          cardType: pieceworkCode === 'edge_bundles' ? 'edge' : 'cut',
+          orgName: companyInfo?.name || 'Unity Manufacturing',
+          orgLogo: companyInfo?.logoUrl || null,
+          orderNumber: jobCard.orders?.order_number || null,
+          customerName: jobCard.orders?.customers?.name || null,
+          dueDate: jobCard.due_date,
+          materialColorLabel: jobCard.material_color_label,
+          expectedCount: jobCard.expected_count,
+          assignedStaffName: jobCard.staff
+            ? `${jobCard.staff.first_name} ${jobCard.staff.last_name}`
+            : null,
+          assignedStaffRole: jobCard.piecework_activities?.labor_roles?.name || null,
+          cuttingPlanRef: jobCard.cutting_plan_run_id
+            ? `Run ${jobCard.cutting_plan_run_id}`
+            : null,
+          issuedAt: jobCard.issue_date,
+        }
+      : null;
 
   return (
     <TooltipProvider>
@@ -672,6 +717,9 @@ export default function JobCardDetailPage() {
           </AlertDialog>
         )}
         <div className="flex-1" />
+        {cutEdgeCardPdfData && (
+          <CutEdgeCardPdfButton card={cutEdgeCardPdfData} />
+        )}
         <JobCardPDFDownload
           jobCard={{
             job_card_id: jobCard.job_card_id,
