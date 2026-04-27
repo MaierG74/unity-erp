@@ -114,7 +114,7 @@ chosen = first where product_id = $productId
 ## Open Decisions / Follow‑ups
 - Payroll: keep “higher of hourly vs piece” logic for job cards, or enforce chosen pay type? Current payroll code computes both and chooses higher; confirm desired behavior.
 - RLS: enable for `job_categories`, `job_category_rates`, `jobs`, `billoflabour`, and `piece_work_rates` before multi‑tenant use.
-- Triggers: optional trigger to sync `job_categories.current_hourly_rate` when a new rate becomes current.
+- Category hourly labels should be derived from active `job_category_rates`; do not reintroduce a denormalized category-rate column.
 - Overlap prevention on `piece_work_rates`: optional exclusion constraint by `(job_id, coalesce(product_id,-1))` and daterange.
 
 ## Next Steps (implementation)
@@ -126,4 +126,3 @@ chosen = first where product_id = $productId
 ---
 
 Last updated after implementing migration + UI changes on 2025‑09‑09.
-

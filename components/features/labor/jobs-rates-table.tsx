@@ -3,6 +3,10 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import {
+  fetchJobCategories,
+  type JobCategoryWithRate,
+} from '@/lib/client/job-categories';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Table,
@@ -56,13 +60,7 @@ import {
 } from '@/components/ui/alert-dialog';
 
 // Types
-interface JobCategory {
-  category_id: number;
-  name: string;
-  description: string | null;
-  current_hourly_rate: number;
-  parent_category_id: number | null;
-}
+type JobCategory = JobCategoryWithRate;
 
 interface LaborRole {
   role_id: number;
@@ -298,15 +296,12 @@ export function JobsRatesTable() {
   // Fetch categories
   const { data: categories = [] } = useQuery({
     queryKey: ['jobCategories'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('job_categories')
-        .select('*')
-        .order('name');
-      if (error) throw error;
-      return data as JobCategory[];
-    },
+    queryFn: fetchJobCategories,
   });
+
+  const categoryById = useMemo(() => {
+    return new Map(categories.map((category) => [category.category_id, category]));
+  }, [categories]);
 
   // Build parent/child maps from categories
   const { parentCategories, childrenByParent, childToParentMap } = useMemo(() => {
@@ -337,17 +332,19 @@ export function JobsRatesTable() {
         .select(`
           job_id, name, description, category_id, role_id,
           estimated_minutes, time_unit,
-          job_categories (category_id, name, description, current_hourly_rate, parent_category_id),
+          job_categories (category_id, name, description, parent_category_id),
           labor_roles (role_id, name, color)
         `)
         .order('name');
       if (error) throw error;
       return (data || []).map((job: any) => ({
         ...job,
-        category: job.job_categories,
+        category: categoryById.get(job.category_id) ??
+          (job.job_categories ? { ...job.job_categories, rate_id: null, hourly_rate: 0 } : undefined),
         labor_roles: job.labor_roles,
       }));
     },
+    enabled: categories.length > 0,
   });
 
   // Fetch current hourly rates (end_date IS NULL = current)
@@ -445,7 +442,7 @@ export function JobsRatesTable() {
         if (!groupMap.has(parentId)) {
           const parentCat = categories.find((c) => c.category_id === parentId);
           groupMap.set(parentId, {
-            category: parentCat || { category_id: parentId, name: 'Unknown', description: null, current_hourly_rate: 0, parent_category_id: null },
+            category: parentCat || { category_id: parentId, name: 'Unknown', description: null, rate_id: null, hourly_rate: 0, parent_category_id: null },
             directJobs: [],
             subcategories: [],
           });
@@ -455,7 +452,7 @@ export function JobsRatesTable() {
         if (!subGroup) {
           const subCat = categories.find((c) => c.category_id === catId);
           subGroup = {
-            category: subCat || { category_id: catId, name: 'Unknown', description: null, current_hourly_rate: 0, parent_category_id: parentId },
+            category: subCat || { category_id: catId, name: 'Unknown', description: null, rate_id: null, hourly_rate: 0, parent_category_id: parentId },
             jobs: [],
           };
           group.subcategories.push(subGroup);
@@ -465,7 +462,7 @@ export function JobsRatesTable() {
         // Job belongs directly to a top-level category
         if (!groupMap.has(catId)) {
           groupMap.set(catId, {
-            category: job.category || { category_id: catId, name: 'Uncategorized', description: null, current_hourly_rate: 0, parent_category_id: null },
+            category: job.category || { category_id: catId, name: 'Uncategorized', description: null, rate_id: null, hourly_rate: 0, parent_category_id: null },
             directJobs: [],
             subcategories: [],
           });
@@ -875,7 +872,7 @@ function GroupSection({
           </span>
         </TableCell>
         <TableCell className="py-2 text-sm text-muted-foreground" colSpan={4}>
-          Category rate: R{group.category.current_hourly_rate.toFixed(2)}/hr
+          Category rate: R{group.category.hourly_rate.toFixed(2)}/hr
         </TableCell>
       </TableRow>
 
@@ -964,7 +961,7 @@ function SubcategorySection({
           </span>
         </TableCell>
         <TableCell className="py-1.5 text-xs text-muted-foreground" colSpan={4}>
-          R{subcategory.category.current_hourly_rate.toFixed(2)}/hr
+          R{subcategory.category.hourly_rate.toFixed(2)}/hr
         </TableCell>
       </TableRow>
 

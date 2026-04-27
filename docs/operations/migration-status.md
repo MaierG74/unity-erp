@@ -28,11 +28,29 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260330083217
-- Latest applied migration name: fix_timekeeper_summary_null_buckets
-- Applied at (UTC): 2026-03-30 08:32:17 UTC
+- Latest applied migration version: 20260427135000
+- Latest applied migration name: piecework_foundation
+- Applied at (UTC): 2026-04-27 13:50 UTC
 - Applied by: Codex via Supabase MCP
 - Verification notes:
+  - Current batch (2026-04-27, Codex):
+    1. `piecework_foundation` (20260427135000): added org-scoped `piecework_activities` and `piecework_card_adjustments`, additive nullable piecework metadata on `job_cards` and `job_work_pool`, widened `job_work_pool.source` to include `cutting_plan`, and seeded QButton `cut_pieces`/`edge_bundles` activities.
+    2. Discovery evidence before writing the migration: `job_work_pool.source` is `text` with `job_work_pool_source_check`; finalized cutting plans currently persist on `orders.cutting_plan` with `orders.order_id` as the primary key; `staff_piecework_earnings.item_id`, `job_id`, and `product_id` are already nullable.
+    3. QButton seed roles resolved from live data: `Cut and Edge ` (trimmed match) is `labor_roles.role_id = 5`; `Edging` is `labor_roles.role_id = 8`.
+    4. Verified with Supabase MCP migration history and targeted SQL after apply; security/performance advisor results are recorded in the POL-60 PR and Linear delivery comment.
+  - Current batch (2026-04-24, Codex / Claude Code):
+    1. `billoflabour_drop_flex_pay_pairing` (20260424073702): dropped the redundant `billoflabour_pay_pairing_flex_chk` CHECK constraint on `public.billoflabour`. The stricter `billoflabour_pay_pairing_chk` now solely enforces `rate_id IS NOT NULL` for hourly rows, matching how every runtime writer resolves rates via `job_category_rates`.
+    2. `noop_project_probe_do_not_use` (20260424073603): empty placeholder recorded during Supabase MCP project routing verification. Contains no schema changes; committed to keep the local migrations directory aligned with the server's migration history.
+    3. Precheck (MCP SQL) confirmed both `billoflabour_pay_pairing_chk` and `billoflabour_pay_pairing_flex_chk` existed with their expected definitions, and that zero hourly rows had `rate_id IS NULL` before the drop.
+    4. Postcheck (MCP SQL) confirms only `billoflabour_pay_pairing_chk` remains.
+    5. Ran Supabase security advisors after apply; no new findings attributable to the constraint drop.
+    6. **Step-3 rollback note** — the `drop_job_categories_current_hourly_rate` migration (20260423120000, logged in the earlier batch below) was reverted in production by re-adding the column and backfilling it from `public.job_category_rates`. Reason: the migration applied via MCP hits the same Supabase project Netlify deploys to (`ttlyfhkrsjjrzxiagzpb`), but the corresponding code changes (which stop reading `current_hourly_rate`) live on `codex/integration` only, not on `main`. Production code still reads the column, so the drop caused `.toFixed` crashes on the Labor Management page. Recovery SQL (idempotent): `ALTER TABLE public.job_categories ADD COLUMN IF NOT EXISTS current_hourly_rate NUMERIC(10,2) NOT NULL DEFAULT 0;` followed by backfill from the active row in `job_category_rates`. Column is currently present in production; the step-3 migration file remains on `codex/integration` and will re-drop the column only after the step-3 UI code is deployed to `main`.
+  - Previous batch (2026-04-24, Codex):
+    1. `drop_job_categories_current_hourly_rate` (20260423120000): dropped the stale denormalized `public.job_categories.current_hourly_rate` column so category hourly display and costing readers resolve rates from `public.job_category_rates`. **Subsequently rolled back in production** — see the rollback note in the later 2026-04-24 batch above.
+    2. Verified with MCP `list_migrations`: production history includes `20260423120000`; MCP history also shows later previously-applied migrations through `20260423134334`.
+    3. Verified with MCP SQL (at apply time): `information_schema.columns` returned no `current_hourly_rate` column for `public.job_categories`.
+    4. Verified with MCP SQL (at apply time): the active Quality Control category rate resolved from `job_category_rates` as `rate_id = 4`, `hourly_rate = 50.00`.
+    5. Ran Supabase security advisors after apply; findings remain broad pre-existing RLS/security-definer warnings, including `job_category_rates` policy-exists/RLS-disabled, with no finding caused by the dropped column.
   - Current batch (2026-03-30, Codex):
     1. `fix_timekeeper_summary_null_buckets` (20260330083217): hardened `before_insert_or_update_time_daily_summary()` to coalesce missing totals to zero instead of deriving `NULL` payroll buckets, and updated `update_daily_work_summary()` so legacy timekeeper inserts/upserts carry safe minute totals/break totals while keeping Sunday rows in the double-time bucket only.
     2. Verified with MCP `list_migrations`: production history now includes `20260330083217`.

@@ -1061,4 +1061,70 @@ test('strip: offcut_summary populated (P4 emission regression)', async () => {
     'strip algorithm must emit offcut_summary after P4');
 });
 
+test('Deep mode falls back to strip when SA leaves parts unplaced and strip places them all', async () => {
+  // Screenshot case: 1 Top + 1 Modesty + 2 Legs on one 2730 x 1830 sheet, kerf 3.
+  // The full set fits; strip packs all 4 pieces. Even if SA returns a 2-piece
+  // partial layout with a larger offcut, the orchestrator must reject it.
+  const { packPartsSmartOptimized } = await importPacking();
+
+  const stock: StockSheetSpec = {
+    id: 'sheet',
+    length_mm: 2730,
+    width_mm: 1830,
+    qty: 1,
+    kerf_mm: 3,
+  };
+
+  const parts: PartSpec[] = [
+    { id: 'top', length_mm: 1200, width_mm: 750, qty: 1, grain: 'length' },
+    { id: 'modesty', length_mm: 1118, width_mm: 350, qty: 1, grain: 'length' },
+    { id: 'leg', length_mm: 700, width_mm: 700, qty: 2, grain: 'length' },
+  ];
+
+  const result = await packPartsSmartOptimized(parts, [stock], {
+    algorithm: 'deep',
+    timeBudgetMs: 250,
+  }) as LayoutResult & { algorithm: string; strategyUsed: string };
+
+  assert.equal(result.algorithm, 'deep', 'Should run the deep optimizer path');
+  assert.equal(result.unplaced, undefined, 'Deep mode must place every part when a complete layout exists');
+  assert.equal(result.sheets.length, 1, 'All 4 pieces fit on one 2730 x 1830 sheet');
+  assert.equal(
+    result.sheets[0].placements.length,
+    4,
+    'All 4 pieces (top + modesty + 2 legs) must be placed on the single sheet',
+  );
+});
+
+test('Guillotine mode places all 4 pieces for the leg/top/modesty case instead of choosing a 2-piece partial', async () => {
+  const { packPartsSmartOptimized } = await importPacking();
+
+  const stock: StockSheetSpec = {
+    id: 'sheet',
+    length_mm: 2730,
+    width_mm: 1830,
+    qty: 1,
+    kerf_mm: 3,
+  };
+
+  const parts: PartSpec[] = [
+    { id: 'top', length_mm: 1200, width_mm: 750, qty: 1, grain: 'length' },
+    { id: 'modesty', length_mm: 1118, width_mm: 350, qty: 1, grain: 'length' },
+    { id: 'leg', length_mm: 700, width_mm: 700, qty: 2, grain: 'length' },
+  ];
+
+  const result = await packPartsSmartOptimized(parts, [stock], {
+    algorithm: 'guillotine',
+  }) as LayoutResult & { algorithm: string; strategyUsed: string };
+
+  assert.equal(result.algorithm, 'guillotine', 'Should run the guillotine path');
+  assert.equal(result.unplaced, undefined, 'Guillotine must not leave parts unplaced when a complete layout exists');
+  assert.equal(result.sheets.length, 1, 'All 4 pieces fit on one 2730 x 1830 sheet');
+  assert.equal(
+    result.sheets[0].placements.length,
+    4,
+    'All 4 pieces (top + modesty + 2 legs) must be placed on the single sheet',
+  );
+});
+
 console.log('\n=== Cutlist Packing Algorithm Tests ===\n');

@@ -640,11 +640,20 @@ export async function packPartsSmartOptimized(
       };
     }
 
-    // Post-run safety net: only fall back to strip when it uses strictly
-    // fewer sheets. When sheet counts are equal SA's offcut-optimized
-    // layout should be preserved — scoreLayoutResult has no offcut terms
-    // so it would otherwise discard SA's better offcut consolidation.
-    if (stripBaseline.sheets.length < saLayout.sheets.length) {
+    // Post-run safety net: prefer the strip baseline when it is strictly
+    // more complete than SA's output, or when both layouts have the same
+    // unplaced count but strip uses fewer sheets. SA is allowed to win on
+    // offcut quality only among layouts with the same unplaced count and
+    // sheet count, since scoreLayoutResult below has no offcut terms.
+    const stripUnplaced = countUnplacedLayoutPieces(stripBaseline);
+    const saUnplaced = countUnplacedLayoutPieces(saLayout);
+
+    const stripIsMoreComplete = stripUnplaced < saUnplaced;
+    const stripUsesFewerSheets =
+      stripUnplaced === saUnplaced &&
+      stripBaseline.sheets.length < saLayout.sheets.length;
+
+    if (stripIsMoreComplete || stripUsesFewerSheets) {
       return {
         ...stripBaseline,
         strategyUsed: `strip-fallback (SA tried ${saLayout.strategyUsed})`,
@@ -687,6 +696,21 @@ export async function packPartsSmartOptimized(
 // ============================================================================
 // Layout Comparison (for post-run SA vs Strip safety net)
 // ============================================================================
+
+/**
+ * Total unplaced pieces in a LayoutResult. This has the same semantics as
+ * countUnplacedPieces in guillotinePacker.ts but is typed for LayoutResult.
+ * It sums the per-entry `count`; `unplaced.length` is wrong because entries
+ * are grouped by part id.
+ */
+function countUnplacedLayoutPieces(result: LayoutResult): number {
+  if (!result.unplaced || result.unplaced.length === 0) return 0;
+  let total = 0;
+  for (const entry of result.unplaced) {
+    total += entry.count;
+  }
+  return total;
+}
 
 /**
  * Score a LayoutResult for comparison between algorithms.

@@ -1310,14 +1310,34 @@ export function packWithExpandedParts(
 }
 
 /**
+ * Total number of unplaced pieces across all unplaced entries.
+ *
+ * Unplaced entries are grouped by part id. Each entry carries a `count`,
+ * so two missing legs from the same part collapse into one entry with
+ * count=2. Use this helper instead of `result.unplaced?.length`.
+ */
+export function countUnplacedPieces(
+  result: Pick<GuillotinePackResult, 'unplaced'>
+): number {
+  if (!result.unplaced || result.unplaced.length === 0) return 0;
+  let total = 0;
+  for (const entry of result.unplaced) {
+    total += entry.count;
+  }
+  return total;
+}
+
+/**
  * Calculate a score for a packing result.
  * Higher score = better result.
  *
  * Scoring hierarchy (in order of importance):
- * 1. Fewer sheets (primary - sheet count dominates all other factors)
- * 2. Higher utilization (secondary - efficiency per sheet)
- * 3. Quality of offcuts (tertiary - larger, fewer offcuts are better)
- * 4. Offcut concentration (prefer waste in one contiguous piece)
+ * 1. Completeness - every unplaced piece is a 1,000,000 penalty (dominates everything)
+ * 2. Fewer sheets - 10,000 penalty per sheet
+ * 3. Higher utilization
+ * 4. Quality of offcuts (larger, fewer offcuts are better)
+ * 5. Offcut concentration (prefer waste in one contiguous piece)
+ * 6. Fragmentation penalty
  */
 export function calculateResultScore(result: GuillotinePackResult, sheetArea: number): number {
   const totalSheetArea = result.sheets.length * sheetArea;
@@ -1336,19 +1356,55 @@ export function calculateResultScore(result: GuillotinePackResult, sheetArea: nu
   // Fewer fragmented offcuts is better (penalty for fragmentation)
   const fragmentationPenalty = result.fragmentCount * 5;
 
-  // Score breakdown:
-  // - Sheet count: -10,000 per sheet (dominates all other factors)
-  // - Utilization: +0-100 points for efficiency
-  // - Offcut quality: +0-100 points for large offcuts (increased weight)
-  // - Concentration: +0-100 points for consolidated waste
-  // - Fragmentation: penalty per fragment
+  // Completeness gate: a layout that leaves parts unplaced must rank below
+  // any layout with fewer unplaced pieces, regardless of offcut quality or
+  // sheet count. The penalty (1,000,000 per piece) dominates the sheet term
+  // (10,000 per sheet) by two orders of magnitude.
+  const unplacedCount = countUnplacedPieces(result);
+  const completenessPenalty = unplacedCount * 1_000_000;
+
   return (
-    -result.sheets.length * 10_000 + // Fewer sheets (primary)
-    utilizationPct + // Higher utilization (secondary)
-    offcutQualityPct + // Larger offcuts (increased from 0.5 to 1.0)
-    concentrationBonus - // Consolidated waste bonus
-    fragmentationPenalty // Fragment penalty
+    -completenessPenalty + // Tier 1: completeness (mandatory)
+    -result.sheets.length * 10_000 + // Tier 2: fewer sheets
+    utilizationPct + // Tier 3: higher utilization
+    offcutQualityPct + // Tier 4: larger offcuts
+    concentrationBonus - // Tier 5: consolidated waste
+    fragmentationPenalty // Tier 6: fragmentation penalty
   );
+}
+
+/**
+ * Lexicographic comparison of two packing results.
+ *
+ * Completeness comes first: a layout with fewer unplaced pieces always
+ * outranks a layout with more unplaced pieces, regardless of any scalar
+ * score difference. Among layouts with the same unplaced count, the
+ * scalar score breaks the tie.
+ *
+ * This guarantees the "complete always beats partial" invariant for
+ * arbitrarily large sheet counts - the scalar penalty in
+ * calculateResultScore alone is not strictly dominant once the sheet
+ * term grows past the penalty constant.
+ *
+ * Return value follows Array.prototype.sort convention:
+ *   > 0  means `a` is better than `b`
+ *   < 0  means `a` is worse than `b`
+ *   = 0  means `a` and `b` are equally ranked
+ *
+ * @param scoreFn Defaults to calculateResultScore. SA passes calculateResultScoreV2.
+ */
+export function compareResults(
+  a: GuillotinePackResult,
+  b: GuillotinePackResult,
+  sheetArea: number,
+  scoreFn: (result: GuillotinePackResult, sheetArea: number) => number = calculateResultScore,
+): number {
+  const aUnplaced = countUnplacedPieces(a);
+  const bUnplaced = countUnplacedPieces(b);
+  if (aUnplaced !== bUnplaced) {
+    return bUnplaced - aUnplaced;
+  }
+  return scoreFn(a, sheetArea) - scoreFn(b, sheetArea);
 }
 
 /**
@@ -1401,12 +1457,9 @@ export function packPartsGuillotine(
   const fullConfig = { ...DEFAULT_PACKING_CONFIG, ...config };
 
   let bestResult: GuillotinePackResult | null = null;
-  let bestScore = -Infinity;
 
   const updateBest = (result: GuillotinePackResult) => {
-    const score = calculateResultScore(result, sheetArea);
-    if (score > bestScore) {
-      bestScore = score;
+    if (!bestResult || compareResults(result, bestResult, sheetArea) > 0) {
       bestResult = result;
     }
   };
@@ -1503,7 +1556,6 @@ export async function packPartsGuillotineDeep(
 
   // Initial result using standard heuristics (baseline)
   let bestResult = packPartsGuillotine(parts, stock, config);
-  let bestScore = calculateResultScore(bestResult, sheetArea);
 
   // Expand parts once for reuse
   const expanded = expandParts(parts);
@@ -1548,11 +1600,9 @@ export async function packPartsGuillotineDeep(
     // Pack this variation
     const strategyName = `deep-${baseStrategy}-${seed}`;
     const result = packWithExpandedParts(shuffled, sheet, strategyName, parts, config);
-    const score = calculateResultScore(result, sheetArea);
 
-    // Keep if better
-    if (score > bestScore) {
-      bestScore = score;
+    // Keep if better - lexicographic so completeness always dominates.
+    if (compareResults(result, bestResult, sheetArea) > 0) {
       bestResult = result;
     }
   }
