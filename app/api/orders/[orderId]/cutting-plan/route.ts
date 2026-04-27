@@ -6,12 +6,92 @@ import { computeSourceRevision, round2, safeNonNegativeFinite } from '@/lib/orde
 import type { CuttingPlan } from '@/lib/orders/cutting-plan-types';
 import { allocateLinesByArea, type LineAllocationInput } from '@/lib/orders/line-allocation';
 import type { MaterialAssignments } from '@/lib/orders/material-assignment-types';
+import {
+  buildCuttingPlanWorkPoolCandidates,
+  reconcileCuttingPlanWorkPool,
+  type ExistingCuttingPlanPoolRow,
+} from '@/lib/piecework/cuttingPlanWorkPool';
 
 type RouteParams = { orderId: string };
 
 function parseOrderId(orderId: string): number | null {
   const parsed = Number.parseInt(orderId, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function syncCuttingPlanWorkPool(orderId: number, orgId: string, plan: CuttingPlan) {
+  const { data: activities, error: activitiesError } = await supabaseAdmin
+    .from('piecework_activities')
+    .select('id, code, label, default_rate, target_role_id')
+    .eq('org_id', orgId)
+    .eq('is_active', true);
+
+  if (activitiesError) throw activitiesError;
+
+  const candidates = buildCuttingPlanWorkPoolCandidates(orderId, plan, activities ?? []);
+  if (candidates.length === 0) return;
+
+  const { data: existingRows, error: existingError } = await supabaseAdmin
+    .from('job_work_pool_status')
+    .select('pool_id, piecework_activity_id, material_color_label, expected_count, required_qty, issued_qty, status')
+    .eq('org_id', orgId)
+    .eq('order_id', orderId)
+    .eq('source', 'cutting_plan')
+    .eq('cutting_plan_run_id', orderId);
+
+  if (existingError) throw existingError;
+
+  const reconcilePlan = reconcileCuttingPlanWorkPool(
+    candidates,
+    (existingRows ?? []) as ExistingCuttingPlanPoolRow[],
+  );
+
+  // The unique index that protects against duplicate cut/edge rows for the same
+  // (order, plan, activity, material) is partial (source='cutting_plan' and
+  // status='active'); PostgREST's onConflict argument can't carry that predicate,
+  // so a plain INSERT is used and 23505 is treated as a benign concurrent-finalize
+  // collision (both calls would have produced the same row).
+  for (const candidate of reconcilePlan.inserts) {
+    const { error } = await supabaseAdmin
+      .from('job_work_pool')
+      .insert({ ...candidate, org_id: orgId });
+    if (error && error.code !== '23505') throw error;
+  }
+
+  for (const update of reconcilePlan.updates) {
+    const { error } = await supabaseAdmin
+      .from('job_work_pool')
+      .update({
+        expected_count: update.expected_count,
+        required_qty: update.required_qty,
+        material_color_label: update.material_color_label,
+        piece_rate: update.piece_rate,
+      })
+      .eq('pool_id', update.pool_id)
+      .eq('org_id', orgId)
+      .eq('source', 'cutting_plan');
+    if (error) throw error;
+  }
+
+  for (const exception of reconcilePlan.exceptions) {
+    const { error } = await supabaseAdmin.rpc('upsert_job_work_pool_exception', {
+      p_org_id: orgId,
+      p_order_id: orderId,
+      p_work_pool_id: exception.pool_id,
+      p_exception_type: 'cutting_plan_issued_count_changed',
+      p_status: 'open',
+      p_required_qty_snapshot: exception.required_qty_snapshot,
+      p_issued_qty_snapshot: exception.issued_qty_snapshot,
+      p_variance_qty: exception.variance_qty,
+      p_trigger_source: 'cutting_plan_finalize',
+      p_trigger_context: {
+        material_color_label: exception.material_color_label,
+        expected_count: exception.expected_count,
+        previous_required_qty: exception.previous_required_qty,
+      },
+    });
+    if (error) throw error;
+  }
 }
 
 export async function PUT(request: NextRequest, context: { params: Promise<RouteParams> }) {
@@ -204,6 +284,13 @@ export async function PUT(request: NextRequest, context: { params: Promise<Route
   }
   if (!updated || updated.length === 0) {
     return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+  }
+
+  try {
+    await syncCuttingPlanWorkPool(orderId, access.orgId, planToSave);
+  } catch (error) {
+    console.error('[cutting-plan:PUT] failed to sync cutting-plan work pool', error);
+    return NextResponse.json({ error: 'Failed to sync cutting plan work pool' }, { status: 500 });
   }
 
   return NextResponse.json({ success: true });
