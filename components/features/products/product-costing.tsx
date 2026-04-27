@@ -87,6 +87,16 @@ type EffectiveItem = {
   _sub_product_id?: number
 }
 
+type PieceworkLaborLine = {
+  activityId: string
+  activityCode: string
+  activityLabel: string
+  unitLabel: string
+  count: number
+  rate: number
+  total: number
+}
+
 function toHours(value: number, unit: 'hours' | 'minutes' | 'seconds'): number {
   if (unit === 'hours') return value
   if (unit === 'minutes') return value / 60
@@ -402,7 +412,19 @@ export function ProductCosting({ productId }: { productId: number }) {
       }
     }
   })
-  const labourCost = labour.reduce((sum, l) => sum + l.lineTotal, 0)
+  const { data: pieceworkLaborData = { lines: [] as PieceworkLaborLine[], total: 0 }, isLoading: pieceworkLaborLoading } = useQuery({
+    queryKey: ['product-piecework-labor', productId],
+    queryFn: async () => {
+      const res = await authorizedFetch(`/api/products/${productId}/piecework-labor`)
+      if (!res.ok) return { lines: [] as PieceworkLaborLine[], total: 0 }
+      return (await res.json()) as { lines: PieceworkLaborLine[]; total: number }
+    },
+  })
+
+  const pieceworkLabor = Array.isArray(pieceworkLaborData.lines) ? pieceworkLaborData.lines : []
+  const pieceworkLaborCost = pieceworkLabor.reduce((sum, line) => sum + Number(line.total || 0), 0)
+  const manualLabourCost = labour.reduce((sum, l) => sum + l.lineTotal, 0)
+  const labourCost = manualLabourCost + pieceworkLaborCost
 
   // Overhead Costs
   const { data: overheadData = [], isLoading: overheadLoading } = useQuery({
@@ -475,7 +497,7 @@ export function ProductCosting({ productId }: { productId: number }) {
   const sections: { key: CostingSection; label: string; count?: number; cost?: number }[] = [
     { key: 'summary', label: 'Summary' },
     { key: 'materials', label: 'Materials', count: materials.length + cutlistCostLines.length, cost: totalMaterialsCost },
-    { key: 'labor', label: 'Labor', count: labour.length, cost: labourCost },
+    { key: 'labor', label: 'Labor', count: labour.length + pieceworkLabor.length, cost: labourCost },
     { key: 'overhead', label: 'Overhead', count: overhead.length, cost: overheadCost },
   ]
 
@@ -496,6 +518,11 @@ export function ProductCosting({ productId }: { productId: number }) {
       costDrivers.push({ name: l.job || l.category, category: 'Labor', amount: l.lineTotal })
     }
   })
+  pieceworkLabor.forEach((line) => {
+    if (line.total > 0) {
+      costDrivers.push({ name: line.activityLabel, category: 'Labor', amount: line.total })
+    }
+  })
   overhead.forEach((o) => {
     if (o.lineTotal > 0) {
       costDrivers.push({ name: o.name || o.code, category: 'Overhead', amount: o.lineTotal })
@@ -512,7 +539,7 @@ export function ProductCosting({ productId }: { productId: number }) {
     Overhead:  { color: 'text-amber-400', bg: 'bg-amber-500', icon: <Settings2 className="h-4 w-4" /> },
   }
 
-  const isAnyLoading = materialsLoading || (usingEffectiveBol ? effBolLoading : bolLoading) || overheadLoading
+  const isAnyLoading = materialsLoading || (usingEffectiveBol ? effBolLoading : bolLoading) || pieceworkLaborLoading || overheadLoading
 
   return (
     <div className="space-y-0">
@@ -626,7 +653,7 @@ export function ProductCosting({ productId }: { productId: number }) {
                 <div className="grid grid-cols-3 gap-3">
                   {[
                     { label: 'Materials', cost: totalMaterialsCost, count: materials.length + cutlistCostLines.length, section: 'materials' as CostingSection },
-                    { label: 'Labor', cost: labourCost, count: labour.length, section: 'labor' as CostingSection },
+                    { label: 'Labor', cost: labourCost, count: labour.length + pieceworkLabor.length, section: 'labor' as CostingSection },
                     { label: 'Overhead', cost: overheadCost, count: overhead.length, section: 'overhead' as CostingSection },
                   ].map((cat) => {
                     const meta = categoryMeta[cat.label]
@@ -798,7 +825,62 @@ export function ProductCosting({ productId }: { productId: number }) {
         )}
 
         {activeSection === 'labor' && (
-          <ProductBOL productId={productId} />
+          <div className="space-y-4">
+            {pieceworkLabor.length > 0 && (
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <h4 className="text-xs font-medium uppercase text-muted-foreground">Cutlist-derived piecework</h4>
+                  <span className="text-xs text-muted-foreground">
+                    Rates configured at Settings &rarr; Piecework Activities. Counts derived from cutlist.
+                  </span>
+                </div>
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Activity</TableHead>
+                        <TableHead className="text-right">Count</TableHead>
+                        <TableHead className="text-right">Rate</TableHead>
+                        <TableHead className="text-right">Line Total</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {pieceworkLabor.map((line) => (
+                        <TableRow key={line.activityId} className="bg-muted/20">
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium">{line.activityLabel}</span>
+                              <span className="rounded-sm border bg-background px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
+                                Auto
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-sm">
+                            {Number(line.count).toFixed(2).replace(/\.00$/, '')} {line.unitLabel}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-sm">
+                            {fmtMoney(Number(line.rate))}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-sm font-medium">
+                            {fmtMoney(Number(line.total))}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      <TableRow>
+                        <TableCell className="text-sm font-medium">Auto Piecework Subtotal</TableCell>
+                        <TableCell />
+                        <TableCell />
+                        <TableCell className="text-right tabular-nums text-sm font-medium">
+                          {fmtMoney(pieceworkLaborCost)}
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            )}
+            <ProductBOL productId={productId} />
+          </div>
         )}
 
         {activeSection === 'overhead' && (
