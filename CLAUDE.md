@@ -28,10 +28,11 @@
 
 ## MCP Tools
 
-Two MCP servers are available. For setup/troubleshooting, see `docs/technical/mcp-setup.md`.
+Three MCP servers are available. For setup/troubleshooting, see `docs/technical/mcp-setup.md`.
 
 - **Supabase MCP** - Use for database migrations (`apply_migration`), running SQL queries (`execute_sql`), storage operations, edge functions, and documentation lookups. Prefer this over raw SQL in scripts.
 - **Claude in Chrome** - Browser automation for the user's Chrome. Use `tabs_context_mcp` first, then navigate/interact. Uses an isolated profile — log in with the test account each session for authenticated pages.
+- **Linear MCP** - Canonical task tracker. Use for reading, planning, delegating, reviewing, and closing Linear issues. See "Task Tracking" and "Linear Workflow" below.
 
 ## Development Commands
 
@@ -39,9 +40,38 @@ Two MCP servers are available. For setup/troubleshooting, see `docs/technical/mc
 - `npm run seed` - Seed test data via `tsx scripts/seed-test-data.ts`
 - For database migrations and RLS work, use the `unity-erp-tenancy` skill.
 
+## Task Tracking
+
+Linear is the canonical tracker. Workspace: **polygon-dev**, team: **Polygon**
+(issue prefix `POL-`). Issues live in area-of-focus projects, not a loose team
+root backlog. The historical `docs/overview/todo-index.md` is reference only.
+
+## Linear Workflow
+
+Full workflow: [docs/workflow/linear-handoff.md](docs/workflow/linear-handoff.md).
+Codex always-loaded mirror: [AGENTS.md](AGENTS.md). Codex Cloud condensed
+guidance: [docs/workflow/linear-installed-agents-guidance.md](docs/workflow/linear-installed-agents-guidance.md).
+
+- Greg should stay out of routine handoffs; escalate only for business decisions,
+  ambiguous user-facing behavior, secrets/accounts/payment/admin access,
+  production deploys to `main`, high-risk DB ops, or plan-quality blockers.
+- Claude writes contract-shaped Linear plans: Scope, Acceptance Criteria,
+  Verification Commands, Decision Points, Rollback / Release Notes, and Docs.
+- Use Linear status as the baton: Backlog -> Todo -> In Progress -> In Review
+  -> Verifying -> Done.
+- `assignee` stays Greg; `delegate=@Codex` means Codex owns execution.
+- Review the actual diff against `codex/integration`; Codex's summary is
+  orientation, not evidence.
+- Re-run the plan's verification commands before approving.
+- Do not approve without Greg when guardrails fire: migrations/RLS/schema, auth,
+  payment/admin endpoints, major scope drift, blocked-Greg history, or
+  non-trivial unverified/deviated work.
+- If approved and no guardrail applies, Claude may merge the PR into
+  `codex/integration` and comment the merge SHA.
+
 ## Documentation
 
-- **TODO Overview**: Consult [docs/overview/todo-index.md](docs/overview/todo-index.md) for outstanding work.
+- **TODO Overview**: [docs/overview/todo-index.md](docs/overview/todo-index.md) is historical reference; Linear is the active tracker.
 - **Index**: [docs/README.md](docs/README.md) is the reference index for all documentation — consult before working on unfamiliar areas.
 
 ## Architecture

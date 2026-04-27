@@ -32,6 +32,25 @@ This repository is being actively migrated to **multi-tenant** (organization/ten
   - you are doing release or migration reconciliation
 - Prefer release-time reconciliation for shared index docs when multiple branches are active, to reduce merge conflicts.
 
+## Linear Workflow
+- Canonical workflow doc: `docs/workflow/linear-handoff.md`.
+- Claude mirror: `CLAUDE.md`.
+- Linear Installed Agents guidance for Codex Cloud: `docs/workflow/linear-installed-agents-guidance.md`.
+- Linear workspace: `polygon-dev`; team: `Polygon`; issue prefix: `POL-`.
+- Greg should stay out of routine handoffs. Escalate only for business decisions, ambiguous user-facing behavior, secrets/accounts/payment/admin access, production deploys to `main`, irreversible or high-risk DB ops, or plan-quality blockers.
+- Treat Linear status as the baton: `Backlog -> Todo -> In Progress -> In Review -> Verifying -> Done`.
+- `assignee` stays Greg for human accountability; `delegate=@Codex` means Codex owns implementation.
+- Pick up only issues that are `Todo` with `delegate=@Codex`, unless Greg explicitly asks otherwise.
+- Branch from `codex/integration` with `codex/<issue-id>-<short-slug>` and target PRs back to `codex/integration`, never directly to `main`.
+- The Linear description is the execution contract. It should include Scope, Acceptance Criteria, Verification Commands, Decision Points, Rollback / Release Notes, and Documentation Requirements.
+- If the plan is not executable, do not guess. Comment the gap, leave the issue for Claude plan revision, and avoid surprise implementation.
+- Before delivery, perform a lightweight self-review: inspect `git diff` against `codex/integration`, check scope creep, run the plan's verification commands, and report anything not verified.
+- Always include a `Deviations from plan` section in the delivery comment, even when it is `None.`
+- Delivery comment format: `Delivered on branch/PR: ... Changed: ... Verified: ... Not verified: ... Risks/open questions: ... Deviations from plan: ...`
+- Codex's delivery summary is orientation, not evidence; Claude reviews the actual diff and re-runs verification.
+- If you see unexpected Linear status, label, delegate, assignee, or description changes, sync before continuing.
+- For blockers, add `Workflow: blocked-greg`, keep `delegate=@Codex`, and comment the exact Greg question with options.
+
 ## Canonical Docs (start here)
 - Documentation index: `docs/README.md`
 - Tenant module entitlements (feature toggles per org): `docs/operations/tenant-module-entitlements-runbook.md`
