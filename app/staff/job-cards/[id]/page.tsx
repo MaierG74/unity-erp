@@ -367,6 +367,15 @@ export default function JobCardDetailPage() {
 
   const reopenMutation = useMutation({
     mutationFn: async () => {
+      if (jobCard?.piecework_activity_id) {
+        const { error } = await supabase.rpc('reopen_piecework_job_card', {
+          p_job_card_id: jobCardId,
+          p_reason: 'Supervisor reopened job card from job-card detail page',
+        });
+        if (error) throw error;
+        return;
+      }
+
       // 1. Reopen the job card
       const { error: cardErr } = await supabase
         .from('job_cards')
@@ -666,6 +675,7 @@ export default function JobCardDetailPage() {
                   <AlertDialogTitle>Reopen Job Card?</AlertDialogTitle>
                   <AlertDialogDescription>
                     This will return the job card to In Progress status. Completed quantities will be preserved.
+                    {jobCard.piecework_activity_id ? ' Piecework earnings from this completion will be reversed.' : ''}
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>

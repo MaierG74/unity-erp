@@ -18,6 +18,11 @@ interface CompleteParams {
   actualStart?: string;
   actualEnd?: string;
   notes?: string;
+  piecework?: {
+    actualCount: number;
+    attribution: { staff_id: number; count: number }[];
+    reason?: string;
+  };
 }
 
 interface PauseParams {
@@ -52,7 +57,21 @@ export function useJobActions() {
   };
 
   const completeJob = useMutation({
-    mutationFn: async ({ assignmentId, items, actualStart, actualEnd, notes }: CompleteParams) => {
+    mutationFn: async ({ assignmentId, items, actualStart, actualEnd, notes, piecework }: CompleteParams) => {
+      if (piecework) {
+        const { data, error } = await supabase.rpc('complete_piecework_assignment', {
+          p_assignment_id: assignmentId,
+          p_actual_count: piecework.actualCount,
+          p_attribution: piecework.attribution,
+          p_reason: piecework.reason ?? null,
+          p_actual_start: actualStart ?? null,
+          p_actual_end: actualEnd ?? null,
+          p_notes: notes ?? null,
+        });
+        if (error) throw error;
+        return data;
+      }
+
       const { data, error } = await supabase.rpc('complete_assignment_with_card_v2', {
         p_assignment_id: assignmentId,
         p_items: items,

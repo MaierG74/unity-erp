@@ -83,7 +83,7 @@ export function FactoryFloorPage() {
         job={selectedJob}
         open={completeDialogOpen}
         onOpenChange={setCompleteDialogOpen}
-        onComplete={({ items, actualStart, actualEnd, notes }) => {
+        onComplete={({ items, actualStart, actualEnd, notes, piecework }) => {
           if (!selectedJob) return;
           completeJob.mutate({
             assignmentId: selectedJob.assignment_id,
@@ -91,6 +91,7 @@ export function FactoryFloorPage() {
             actualStart,
             actualEnd,
             notes,
+            piecework,
           }, {
             onSuccess: () => {
               setCompleteDialogOpen(false);
