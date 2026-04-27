@@ -28,11 +28,16 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260424073702
-- Latest applied migration name: billoflabour_drop_flex_pay_pairing
-- Applied at (UTC): 2026-04-24 07:37 UTC
+- Latest applied migration version: 20260427135000
+- Latest applied migration name: piecework_foundation
+- Applied at (UTC): 2026-04-27 13:50 UTC
 - Applied by: Codex via Supabase MCP
 - Verification notes:
+  - Current batch (2026-04-27, Codex):
+    1. `piecework_foundation` (20260427135000): added org-scoped `piecework_activities` and `piecework_card_adjustments`, additive nullable piecework metadata on `job_cards` and `job_work_pool`, widened `job_work_pool.source` to include `cutting_plan`, and seeded QButton `cut_pieces`/`edge_bundles` activities.
+    2. Discovery evidence before writing the migration: `job_work_pool.source` is `text` with `job_work_pool_source_check`; finalized cutting plans currently persist on `orders.cutting_plan` with `orders.order_id` as the primary key; `staff_piecework_earnings.item_id`, `job_id`, and `product_id` are already nullable.
+    3. QButton seed roles resolved from live data: `Cut and Edge ` (trimmed match) is `labor_roles.role_id = 5`; `Edging` is `labor_roles.role_id = 8`.
+    4. Verified with Supabase MCP migration history and targeted SQL after apply; security/performance advisor results are recorded in the POL-60 PR and Linear delivery comment.
   - Current batch (2026-04-24, Codex / Claude Code):
     1. `billoflabour_drop_flex_pay_pairing` (20260424073702): dropped the redundant `billoflabour_pay_pairing_flex_chk` CHECK constraint on `public.billoflabour`. The stricter `billoflabour_pay_pairing_chk` now solely enforces `rate_id IS NOT NULL` for hourly rows, matching how every runtime writer resolves rates via `job_category_rates`.
     2. `noop_project_probe_do_not_use` (20260424073603): empty placeholder recorded during Supabase MCP project routing verification. Contains no schema changes; committed to keep the local migrations directory aligned with the server's migration history.
