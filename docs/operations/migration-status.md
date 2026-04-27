@@ -28,11 +28,15 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260427183852
-- Latest applied migration name: extend_job_work_pool_status_view
-- Applied at (UTC): 2026-04-27 18:38 UTC
-- Applied by: Claude via Supabase MCP (POL-62 follow-up after reviewer-found 500)
+- Latest applied migration version: 20260427205302
+- Latest applied migration name: piecework_completion_earnings_reopen
+- Applied at (UTC): 2026-04-27 20:53 UTC
+- Applied by: Codex via Supabase MCP namespace `supabase_kinetic` (POL-63)
 - Verification notes:
+  - Current batch (2026-04-27, Codex / POL-63):
+    1. `piecework_completion_earnings_reopen` (20260427205302; local file `20260427205302_piecework_completion_earnings_reopen.sql`): added the explicit `staff_piecework_earning_entries` ledger, preserved the existing `staff_piecework_earnings` reader shape with an insert-trigger-backed view, added `complete_piecework_assignment(...)`, and added `reopen_piecework_job_card(...)` with negating earnings rows.
+    2. Discovery evidence before writing/apply: production `staff_piecework_earnings` is a view, not a base table; its nullable `item_id`, `job_id`, and `product_id` columns remain present for cut/edge cards; `job_cards` already has nullable `piecework_activity_id`, `expected_count`, `actual_count`, and `rate_snapshot`.
+    3. Verified with Supabase MCP `list_migrations`; production history reports `20260427205302 piecework_completion_earnings_reopen`.
   - Current batch (2026-04-27, Claude follow-up to POL-62):
     1. `extend_job_work_pool_status_view` (20260427183852 via Supabase MCP; local file `20260427201500_extend_job_work_pool_status_view.sql`): updated `public.job_work_pool_status` to expose the four columns added by `piecework_foundation` (`piecework_activity_id`, `material_color_label`, `expected_count`, `cutting_plan_run_id`). Reviewer browser-smoke against `PUT /api/orders/<id>/cutting-plan` had 500'd with `42703 column job_work_pool_status.piecework_activity_id does not exist` because POL-60 added the columns to the base table only and did not propagate them to the view. Columns appended (not reordered) per Postgres `CREATE OR REPLACE VIEW` rules.
     2. Verified with Supabase MCP `list_migrations` and `information_schema.columns` after apply; the four new columns are present on the view.

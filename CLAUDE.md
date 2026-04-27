@@ -77,6 +77,7 @@ guidance: [docs/workflow/linear-installed-agents-guidance.md](docs/workflow/line
 ## Architecture
 
 - For staff/attendance pay logic and file storage paths, use the `unity-erp-business-rules` skill.
+- Piecework completion, earnings, and reopen behavior are documented in [docs/domains/payroll/piecework.md](docs/domains/payroll/piecework.md).
 - Dark theme is default; font is Inter
 - `@react-pdf/renderer` must be lazy/dynamically imported (causes build timeouts)
 

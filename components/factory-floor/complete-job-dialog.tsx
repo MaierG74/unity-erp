@@ -14,8 +14,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { FloorStaffJob } from './types';
-import { fetchJobCardItems } from '@/lib/queries/factoryFloor';
+import { fetchActiveStaff, fetchJobCardItems, fetchPieceworkCardCompletionMeta } from '@/lib/queries/factoryFloor';
 import { formatDuration } from '@/lib/shift-utils';
 import { supabase } from '@/lib/supabase';
 import { calculateWorkingMinutes } from '@/lib/working-hours';
@@ -29,6 +31,7 @@ import {
   type ItemCompletion,
   type CompletionItem,
 } from '@/components/features/completion/completion-items';
+import { Minus } from 'lucide-react';
 
 interface CompleteJobDialogProps {
   job: FloorStaffJob | null;
@@ -39,6 +42,11 @@ interface CompleteJobDialogProps {
     actualStart?: string;
     actualEnd?: string;
     notes?: string;
+    piecework?: {
+      actualCount: number;
+      attribution: { staff_id: number; count: number }[];
+      reason?: string;
+    };
   }) => void;
   isPending: boolean;
 }
@@ -77,6 +85,10 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
   const [endDate, setEndDate] = useState('');
   const [notes, setNotes] = useState('');
   const [completions, setCompletions] = useState<Record<number, ItemCompletion>>({});
+  const [actualCount, setActualCount] = useState('');
+  const [splitBetweenStaff, setSplitBetweenStaff] = useState(false);
+  const [splitRows, setSplitRows] = useState<{ staff_id: string; count: string }[]>([]);
+  const [countReason, setCountReason] = useState('');
 
   const {
     data: rawItems,
@@ -86,6 +98,18 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
     queryKey: ['job-card-items', job?.job_card_id],
     queryFn: () => fetchJobCardItems(job!.job_card_id!),
     enabled: open && !!job?.job_card_id,
+  });
+
+  const { data: pieceworkMeta } = useQuery({
+    queryKey: ['piecework-card-completion-meta', job?.job_card_id],
+    queryFn: () => fetchPieceworkCardCompletionMeta(job!.job_card_id!),
+    enabled: open && !!job?.job_card_id,
+  });
+
+  const { data: staffOptions = [] } = useQuery({
+    queryKey: ['active-staff'],
+    queryFn: fetchActiveStaff,
+    enabled: open && !!pieceworkMeta,
   });
 
   // Map to CompletionItem shape
@@ -174,8 +198,22 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
       setActualEnd(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`);
       setNotes('');
       setCompletions({});
+      setActualCount('');
+      setSplitBetweenStaff(false);
+      setSplitRows([]);
+      setCountReason('');
     }
   }, [open, job?.assignment_id]);
+
+  useEffect(() => {
+    if (!open || !job || !pieceworkMeta) return;
+    const initialCount = pieceworkMeta.actual_count ?? pieceworkMeta.expected_count;
+    setActualCount(String(initialCount));
+    setSplitRows([{
+      staff_id: String(pieceworkMeta.staff_id ?? job.staff_id),
+      count: String(initialCount),
+    }]);
+  }, [open, job?.assignment_id, pieceworkMeta]);
 
   // Initialize completions from items — uses functional updater to avoid stale closure
   useEffect(() => {
@@ -211,6 +249,17 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
   }, [actualStart, actualEnd, startDate, endDate, allSchedules, pauseEvents, shiftOverrides]);
 
   const isMultiDay = startDate !== endDate;
+  const parsedActualCount = Number(actualCount);
+  const splitTotal = splitRows.reduce((sum, row) => sum + (Number(row.count) || 0), 0);
+  const countChanged = !!pieceworkMeta && Number.isFinite(parsedActualCount) && parsedActualCount !== pieceworkMeta.expected_count;
+  const pieceworkValid = !pieceworkMeta || (
+    Number.isInteger(parsedActualCount) &&
+    parsedActualCount >= 0 &&
+    splitRows.length > 0 &&
+    splitRows.every((row) => row.staff_id && Number.isInteger(Number(row.count)) && Number(row.count) >= 0) &&
+    splitTotal === parsedActualCount &&
+    (!countChanged || countReason.trim().length > 0)
+  );
 
   const variance = useMemo(() => {
     if (!job?.estimated_minutes || workResult.totalMinutes <= 0) return null;
@@ -229,6 +278,14 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
       actualStart: actualStart && startDate ? new Date(`${startDate}T${actualStart}:00`).toISOString() : undefined,
       actualEnd: actualEnd && endDate ? new Date(`${endDate}T${actualEnd}:00`).toISOString() : undefined,
       notes: notes || undefined,
+      piecework: pieceworkMeta ? {
+        actualCount: parsedActualCount,
+        attribution: splitRows.map((row) => ({
+          staff_id: Number(row.staff_id),
+          count: Number(row.count),
+        })),
+        reason: countReason.trim() || undefined,
+      } : undefined,
     });
   };
 
@@ -322,6 +379,116 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
             )}
           </div>
 
+          {pieceworkMeta && (
+            <div className="space-y-3 rounded-md border p-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label>Expected count</Label>
+                  <Input value={pieceworkMeta.expected_count} readOnly />
+                </div>
+                <div className="space-y-1">
+                  <Label>Actual count</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={actualCount}
+                    onChange={(event) => {
+                      setActualCount(event.target.value);
+                      if (!splitBetweenStaff) {
+                        setSplitRows((rows) => [{ staff_id: rows[0]?.staff_id ?? String(pieceworkMeta.staff_id ?? job.staff_id), count: event.target.value }]);
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm">
+                  <div className="font-medium">Split between staff</div>
+                  <div className="text-xs text-muted-foreground">Total must equal the actual count.</div>
+                </div>
+                <Switch
+                  checked={splitBetweenStaff}
+                  onCheckedChange={(checked) => {
+                    setSplitBetweenStaff(checked);
+                    if (!checked) {
+                      setSplitRows([{ staff_id: String(pieceworkMeta.staff_id ?? job.staff_id), count: actualCount }]);
+                    }
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                {splitRows.map((row, index) => (
+                  <div key={index} className="grid grid-cols-[1fr_96px_32px] gap-2">
+                    <Select
+                      value={row.staff_id}
+                      onValueChange={(value) => {
+                        setSplitRows((rows) => rows.map((current, rowIndex) => rowIndex === index ? { ...current, staff_id: value } : current));
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Staff" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {staffOptions.map((staff) => (
+                          <SelectItem key={staff.staff_id} value={String(staff.staff_id)}>
+                            {staff.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={row.count}
+                      onChange={(event) => {
+                        setSplitRows((rows) => rows.map((current, rowIndex) => rowIndex === index ? { ...current, count: event.target.value } : current));
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Remove staff split row"
+                      disabled={!splitBetweenStaff || splitRows.length <= 1}
+                      onClick={() => setSplitRows((rows) => rows.filter((_, rowIndex) => rowIndex !== index))}
+                    >
+                      <Minus className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+                {splitBetweenStaff && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSplitRows((rows) => [...rows, { staff_id: '', count: '0' }])}
+                  >
+                    Add staff
+                  </Button>
+                )}
+                <p className={`text-xs ${splitTotal === parsedActualCount ? 'text-muted-foreground' : 'text-destructive'}`}>
+                  Split total: {splitTotal || 0} / {Number.isFinite(parsedActualCount) ? parsedActualCount : 0}
+                </p>
+              </div>
+              {countChanged && (
+                <div className="space-y-1">
+                  <Label>Reason</Label>
+                  <Textarea
+                    value={countReason}
+                    onChange={(event) => setCountReason(event.target.value)}
+                    placeholder="Reason for count adjustment..."
+                    rows={2}
+                  />
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Rate snapshot: R{pieceworkMeta.rate_snapshot.toFixed(2)}
+              </p>
+            </div>
+          )}
+
           {/* Job card items with remainder handling */}
           {itemsLoading ? (
             <p className="text-sm text-muted-foreground">Loading items...</p>
@@ -360,7 +527,7 @@ export function CompleteJobDialog({ job, open, onOpenChange, onComplete, isPendi
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={isPending || workResult.totalMinutes <= 0 || !itemsValid}
+            disabled={isPending || workResult.totalMinutes <= 0 || !itemsValid || !pieceworkValid}
             className="bg-emerald-600 hover:bg-emerald-700"
           >
             {isPending ? 'Completing...' : 'Complete Job'}
