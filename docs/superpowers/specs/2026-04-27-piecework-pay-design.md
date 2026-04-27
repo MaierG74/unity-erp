@@ -1,8 +1,12 @@
 # Piecework Pay — Multi-Tenant Cut & Edge Attribution Design
 
 **Date**: 2026-04-27
-**Status**: Draft (plan-review-requested)
+**Status**: Draft (post-plan-review revision 1)
 **Tenant of record**: QButton (initial); design must remain multi-tenant.
+
+**Revision history**
+- v1 (2026-04-27): initial draft from Claude × Greg brainstorming session.
+- v2 (2026-04-27): post-Codex-plan-review revisions — DP #1 resolved (R4 edge rate), four cross-cutting ACs added (idempotency, RLS-negative, reopen behavior, rate-snapshot precedence).
 
 ## Problem
 
@@ -84,9 +88,9 @@ create policy piecework_activities_org_write on piecework_activities
 
 **Seed for QButton (idempotent migration):**
 - `(org_id=QButton, code='cut_pieces', label='Cutting', default_rate=6.50, unit_label='piece', target_role_id=<Cut and Edge>)`
-- `(org_id=QButton, code='edge_bundles', label='Edging', default_rate=<TBD with Greg>, unit_label='bundle', target_role_id=<Edging>)`
+- `(org_id=QButton, code='edge_bundles', label='Edging', default_rate=4.00, unit_label='bundle', target_role_id=<Edging>)`
 
-The edge rate is a decision point — Greg has not stated a number.
+Both rates resolved with Greg on 2026-04-27.
 
 ### 2. Schema extensions to existing tables
 
@@ -324,6 +328,18 @@ The full feature is acceptable when, in production:
     - Activity rate change after card issuance, before completion → completion uses `rate_snapshot` from issuance, not the new default.
     - Card completed, then reopened, then re-completed → original earnings rows are reversed (not duplicated) before new ones are written.
 
+### Cross-cutting ACs (added post-plan-review per Codex feedback)
+
+These apply across the sub-issue tree and each must be enforced by the relevant phase:
+
+11. **Idempotency on cutting-plan re-finalize.** Re-running the finalize action for the same cutting plan does not duplicate work-pool rows. If the plan content is unchanged: no-op. If it changed: existing rows that haven't been issued yet have their `expected_count` and `material_color_label` updated; rows that have already been issued (work-pool row consumed into a `job_card`) are surfaced as a reconciliation exception (analogous to the existing work-pool exception model) rather than silently mutated. Belongs in 59.3.
+
+12. **RLS-negative cross-tenant test.** A user whose session belongs to org A cannot `select`, `insert`, `update`, or `delete` rows in `piecework_activities`, `piecework_card_adjustments`, `staff_piecework_earnings`, or any new piecework-related columns on `job_cards`/`job_work_pool` for any row whose `org_id` is not A. Verified by an integration test that authenticates as an org-A user and asserts zero rows visible for org-B fixtures. Belongs in 59.1.
+
+13. **Reopen / un-complete behavior is explicit.** The behavior chosen for DP #7 is documented and enforced. If "no in-app reopen" is chosen: the supervisor completion dialog has no reopen button, and any earnings correction requires admin SQL with a `piecework_card_adjustments` row recording the rationale. If "in-app reopen" is chosen: the reopen action reverses prior `staff_piecework_earnings` rows (writes negating rows or marks them void via a status column), recreates the card to a pre-completion state, and a re-complete writes new earnings rows referencing the reopen event. Belongs in 59.4.
+
+14. **Rate-snapshot precedence.** When a card is marked complete, the rate written to `staff_piecework_earnings.piece_rate` is `job_cards.rate_snapshot` as it stood at card issuance, not the activity's `default_rate` at completion time. Verified by: change the activity's rate after issuance, complete the card, observe the snapshotted (issuance-time) rate flows into earnings. Belongs in 59.4.
+
 ## Verification Commands
 
 To be re-run by Claude as reviewer of any sub-issue's PR, and by Codex as part of self-review:
@@ -349,7 +365,7 @@ Counting strategy unit tests must cover:
 
 ## Decision Points (stop and ask Greg)
 
-1. **Edge piecework rate for QButton.** Greg has not stated a number; the seed migration cannot run without one.
+1. **Edge piecework rate for QButton.** ~~Greg has not stated a number; the seed migration cannot run without one.~~ **Resolved 2026-04-27: R4.00/bundle.** Reflected in §1 seed.
 2. **Migration of `job_piecework_rates`.** Whether to keep historical rows by attaching them as `rate_snapshot` values, or to discard. Decide once we've inspected the data.
 3. **`item_id` / `job_id` / `product_id` nullability on `staff_piecework_earnings`.** Cut/edge cards are not product-scoped. If those columns are NOT NULL today, decide whether to relax them (preferred) or to attach a synthetic placeholder (rejected — pollutes historical reporting).
 4. **Activity↔batch join logic.** The MVP rule "every cut activity applies to every batch" is correct for QButton today. If a future tenant has a `cut_pieces` activity but only wants it to apply to certain materials, this needs a new mapping layer — flag if the constraint surfaces during implementation.
@@ -385,19 +401,18 @@ Counting strategy unit tests must cover:
 
 ---
 
-## Phasing (proposed; pending Codex plan-review feedback)
+## Phasing (post-plan-review v2)
 
-To be expanded into Linear sub-issues after Codex's plan-review feedback lands and Greg confirms.
+Adopted from Codex's 7-sub-issue recommendation. The schema-discovery and foundation work merge into a single first phase so Decision Points #3, #6, #9, #10 can be resolved in-flight against the live DB rather than spawning a separate discovery issue.
 
-| # | Sub-issue (working title) | Approx scope |
+| # | Sub-issue | Scope |
 |---|---|---|
-| 1 | `piecework_activities` schema + RLS + QButton seed + Settings admin UI | Foundation; unblocks rate config |
-| 2 | Extend `job_cards` + `job_work_pool.source='cutting_plan'` schema | Pure migration; no behavior change |
-| 3 | Counting strategies (`cut_pieces`, `edge_bundles`) in `lib/piecework/strategies/` | Pure functions, independently testable |
-| 4 | Auto-create work-pool rows on cutting plan finalize | Wires #3 into the existing flow |
-| 5 | Supervisor completion dialog: count adjust + staff split + earnings write + audit log | The pay-attribution moment |
-| 6 | Per-activity breakdown in payroll review | Read-side enhancement |
-| 7 | Printable cut/edge job card PDF | Reuses `@react-pdf/renderer` infra |
-| 8 | Migrate + drop `job_piecework_rates` | Runs after #5 is live |
+| 59.1 | Schema discovery + foundation migrations + RLS + seed + Settings admin UI | Resolves DPs #3, #9, #10. Creates `piecework_activities`, `piecework_card_adjustments`, additive columns on `job_cards`/`job_work_pool`, RLS, QButton seed (cut R6.50, edge R4), Settings UI for activity CRUD. AC #12 (RLS-negative test) lands here. |
+| 59.2 | Counting strategies + unit tests | Resolves DP #6. Implements `lib/piecework/strategies/{cutPieces,edgeBundles}.ts`, full coverage including the worked example. Pure functions, no DB. |
+| 59.3 | Cutting-plan finalize → cut/edge work-pool generation | Wires #59.2 strategies into the cutting-plan finalize action. Generates 2N work-pool rows (cut + edge per material/color batch). AC #11 (idempotency on re-finalize) lands here. |
+| 59.4 | Supervisor completion dialog + earnings + audit log + reopen behavior | Resolves DP #7. Count adjust, staff split, transactional earnings write, `piecework_card_adjustments` audit. ACs #13 (reopen behavior) and #14 (rate-snapshot precedence) land here. |
+| 59.5 | Payroll review per-activity breakdown | Extends `fetchWeeklyPiecework()` and `PayrollRow`; per-activity row in payroll review UI. |
+| 59.6 | Printable cut/edge job card PDF | Lazy-imports `@react-pdf/renderer`; one-page card with order ref, color/material, expected count, assigned staff. |
+| 59.7 | Migrate + drop `job_piecework_rates` (gated; DP #8) | Live data audit, migration policy decision with Greg, then drop and clean references. Runs only after 59.4 verified live. |
 
-Each sub-issue carries its own 6-section contract (Scope / Acceptance Criteria / Verification Commands / Decision Points / Rollback / Documentation Requirements), is delegated to `@Codex`, and is reviewed by Claude before merge to `codex/integration`.
+Each sub-issue carries its own 6-section contract (Scope / Acceptance Criteria / Verification Commands / Decision Points / Rollback / Documentation Requirements) **plus a Data Contract Appendix** detailing required columns, nullable rules, expected indexes, and RLS policy names. All sub-issues parent to POL-59, branch from `codex/integration` as `codex/<issue-id>-<slug>`, are delegated to `@Codex`, and are reviewed by Claude before merge.
