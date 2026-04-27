@@ -49,7 +49,31 @@ This repository is being actively migrated to **multi-tenant** (organization/ten
 - Delivery comment format: `Delivered on branch/PR: ... Changed: ... Verified: ... Not verified: ... Risks/open questions: ... Deviations from plan: ...`
 - Codex's delivery summary is orientation, not evidence; Claude reviews the actual diff and re-runs verification.
 - If you see unexpected Linear status, label, delegate, assignee, or description changes, sync before continuing.
-- For blockers, add `Workflow: blocked-greg`, keep `delegate=@Codex`, and comment the exact Greg question with options.
+- For blockers, add `Workflow: blocked-greg`, keep `delegate=@Codex` (or note the local-CLI executor), and comment the exact Greg question with options.
+
+## Pre-PR Self-Check (stale-base / broad-deletion tripwire)
+Before opening a PR, compare the task branch against `origin/codex/integration`:
+
+```bash
+git fetch origin codex/integration
+git diff origin/codex/integration --stat
+```
+
+If the diff shows broad unrelated deletions, unexpected churn outside the issue scope, or files removed because the branch was based on stale `main`, **stop**. Do not open or push the PR until the branch is rebased or recreated from current `origin/codex/integration`:
+
+```bash
+git rebase origin/codex/integration   # or recreate the branch from integration HEAD
+```
+
+This is a self-check for the executor (CLI or Cloud), not just for the reviewer. The "Able to merge" badge on GitHub only means no textual conflicts — it does not mean the diff is what you intended. A PR that silently deletes integration-only work would be catastrophic.
+
+## Execution Surfaces
+Codex can run against this repo from two surfaces:
+
+- **Local Codex CLI** (default for non-trivial work). The user invokes Codex from a clean checkout of `codex/integration`. Codex reads this `AGENTS.md` automatically as standing context, fetches the Linear issue body via Linear MCP, branches from current `origin/codex/integration`, implements, runs the Pre-PR Self-Check above, pushes, opens the PR against `codex/integration`, and posts the structured delivery comment back on Linear. The Linear issue's `delegate` is typically left null (or set to a non-Codex value) so Codex Cloud does not race the local execution.
+- **Codex Cloud** (only for trivial pure-code tasks). Allowed when there is no schema, no RLS, no auth, no admin/payment, no migration, no production data path, and no multi-file risky refactor. Cloud's environment repo map must be configured to default-branch `codex/integration`, otherwise the Pre-PR Self-Check will trip on stale-base divergence.
+
+When unsure which surface to use, default to local CLI.
 
 ## Canonical Docs (start here)
 - Documentation index: `docs/README.md`
