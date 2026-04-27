@@ -46,14 +46,16 @@ async function syncCuttingPlanWorkPool(orderId: number, orgId: string, plan: Cut
     (existingRows ?? []) as ExistingCuttingPlanPoolRow[],
   );
 
-  if (reconcilePlan.inserts.length > 0) {
+  // The unique index that protects against duplicate cut/edge rows for the same
+  // (order, plan, activity, material) is partial (source='cutting_plan' and
+  // status='active'); PostgREST's onConflict argument can't carry that predicate,
+  // so a plain INSERT is used and 23505 is treated as a benign concurrent-finalize
+  // collision (both calls would have produced the same row).
+  for (const candidate of reconcilePlan.inserts) {
     const { error } = await supabaseAdmin
       .from('job_work_pool')
-      .upsert(reconcilePlan.inserts.map((row) => ({ ...row, org_id: orgId })), {
-        onConflict: 'order_id,cutting_plan_run_id,piecework_activity_id,material_color_label',
-        ignoreDuplicates: true,
-      });
-    if (error) throw error;
+      .insert({ ...candidate, org_id: orgId });
+    if (error && error.code !== '23505') throw error;
   }
 
   for (const update of reconcilePlan.updates) {
