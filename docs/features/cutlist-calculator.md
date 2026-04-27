@@ -77,6 +77,11 @@ Located in the **Parts** tab. Compact table format (~40px per row).
 | **Grp** | Lamination group (A, B, C...) |
 | **Edge** | Edge banding indicator (clickable) |
 
+Planned labor/payroll metadata:
+- Product cutlist parts will also carry operation-level payable flags, for example `payable_operations.cut` and `payable_operations.edge`.
+- These flags affect piecework labor metrics only. A part can be excluded from payable cutting or payable edging while still remaining in the manufacturing cutlist, sheet layout, and material costing.
+- The product cutlist builder should expose compact per-row and bulk controls for these flags so tenants can decide which parts count toward piecework pay.
+
 #### Grain Direction Toggle
 
 Click the grain icon to cycle through options:
@@ -397,6 +402,25 @@ The quantity field always represents actual pieces to cut from sheet goods. Lami
 - Result: 4 pieces → 2 finished legs after assembly
 
 This model ensures CSV imports and manual entry work identically.
+
+## Cutlist Labor Metrics
+
+Planned piecework integration derives labor quantities from cutlist production metrics rather than from material costing totals.
+
+Initial metrics:
+
+| Metric | Counts |
+|--------|--------|
+| `cutlist_cut_piece_count` | Payable sheet pieces physically cut, including backer pieces |
+| `cutlist_edged_finished_item_count` | Payable finished assemblies that receive edging, counted once per item |
+| `cutlist_edging_meters` | Payable edging length in meters, for tenants that pay by length |
+
+Examples:
+- A single 16mm part with Qty 2 contributes 2 cut pieces and, if edged, 2 edged finished items.
+- A `With Backer` part with Qty 1 contributes 2 cut pieces (primary + backer) and, if edged, 1 edged finished item.
+- A `Same Board` part with Qty 4 contributes 4 cut pieces and, if edged, 2 edged finished items.
+
+Odd `Same Board` quantities require validation because two cut pieces form one finished laminated item. For example, Qty 3 means 3 pieces are cut, but only 1 complete pair can be edged and 1 piece remains unpaired. The default implementation should block this or require an explicit override before derived labor/payroll quantities are used.
 
 ---
 

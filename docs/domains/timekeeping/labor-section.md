@@ -198,6 +198,11 @@ Tables involved and their key columns and relationships. Source: Supabase MCP qu
 (Planned)
 - Piecework line total: `piece_rate × quantity`.
 - Mixed totals: Sum hourly and piece lines together; display rate source (category hourly vs piecework) per line.
+- Cutlist-derived piecework line total: `piece_rate × resolved cutlist driver quantity`.
+- Initial cutlist drivers:
+  - `cutlist_cut_piece_count`: payable sheet pieces physically cut, including backer pieces.
+  - `cutlist_edged_finished_item_count`: payable finished edged assemblies, counted once per item regardless of how many edges are banded.
+  - Future drivers can include edging meters, sheet count, or other org-specific production metrics.
 
 ## Scheduling Utilities
 
@@ -238,6 +243,15 @@ Tables involved and their key columns and relationships. Source: Supabase MCP qu
   - Features: list/search/filter, create/edit effective versions, choose “All products” (job default) or a specific product, view history.
 - BOL changes: Pay Type selector, conditional fields, automatic as‑of lookup and storage of `piece_rate_id`.
 - Costing: Include piece lines in product costing (qty × piece rate) alongside hourly lines.
+- Cutlist-derived quantities:
+  - BOL piece rows should support manual quantity or a cutlist quantity driver.
+  - Qbutton cutting uses `cutlist_cut_piece_count`; backer pieces are included in cutting pay.
+  - Qbutton edging uses `cutlist_edged_finished_item_count`; an edged assembly is paid once regardless of one-sided or four-sided edging.
+  - Product costing may derive the current quantity live from the product cutlist, but order/job-card issuance must snapshot the resolved quantity and numeric rate for payroll history.
+- Payable part inclusion:
+  - Cutlist parts need operation-level payable flags such as `payable_operations.cut` and `payable_operations.edge`.
+  - These flags affect labor/payroll metrics only. They must not remove the part from layout optimization or material costing.
+  - Users need per-row and bulk controls to exclude pieces from payable cutting/edging for tenants that do not pay piecework on every manufactured part.
 - Future: Add an “as of date” selector to recalculate with historical rates; support bulk apply to product groups (e.g., Cupboards category).
 
 ## Quick References (Files)
