@@ -28,11 +28,17 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260427135000
-- Latest applied migration name: piecework_foundation
-- Applied at (UTC): 2026-04-27 13:50 UTC
-- Applied by: Codex via Supabase MCP
+- Latest applied migration version: 20260427183852
+- Latest applied migration name: extend_job_work_pool_status_view
+- Applied at (UTC): 2026-04-27 18:38 UTC
+- Applied by: Claude via Supabase MCP (POL-62 follow-up after reviewer-found 500)
 - Verification notes:
+  - Current batch (2026-04-27, Claude follow-up to POL-62):
+    1. `extend_job_work_pool_status_view` (20260427183852 via Supabase MCP; local file `20260427201500_extend_job_work_pool_status_view.sql`): updated `public.job_work_pool_status` to expose the four columns added by `piecework_foundation` (`piecework_activity_id`, `material_color_label`, `expected_count`, `cutting_plan_run_id`). Reviewer browser-smoke against `PUT /api/orders/<id>/cutting-plan` had 500'd with `42703 column job_work_pool_status.piecework_activity_id does not exist` because POL-60 added the columns to the base table only and did not propagate them to the view. Columns appended (not reordered) per Postgres `CREATE OR REPLACE VIEW` rules.
+    2. Verified with Supabase MCP `list_migrations` and `information_schema.columns` after apply; the four new columns are present on the view.
+  - Current batch (2026-04-27, Codex):
+    1. `cutting_plan_piecework_pool_idempotency` (20260427181610 via Supabase MCP; local file `20260427152000_cutting_plan_piecework_pool_idempotency.sql`): added the unique partial index for active cutting-plan piecework pool rows and widened work-pool exception checks for `exception_type='cutting_plan_issued_count_changed'` and `trigger_source='cutting_plan_finalize'`.
+    2. Verified with Supabase MCP migration history after apply; `list_migrations` reports `20260427181610 cutting_plan_piecework_pool_idempotency`.
   - Current batch (2026-04-27, Codex):
     1. `piecework_foundation` (20260427135000): added org-scoped `piecework_activities` and `piecework_card_adjustments`, additive nullable piecework metadata on `job_cards` and `job_work_pool`, widened `job_work_pool.source` to include `cutting_plan`, and seeded QButton `cut_pieces`/`edge_bundles` activities.
     2. Discovery evidence before writing the migration: `job_work_pool.source` is `text` with `job_work_pool_source_check`; finalized cutting plans currently persist on `orders.cutting_plan` with `orders.order_id` as the primary key; `staff_piecework_earnings.item_id`, `job_id`, and `product_id` are already nullable.
