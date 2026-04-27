@@ -13,6 +13,7 @@ import {
   DollarSign,
   Clock,
   Package,
+  BadgeDollarSign,
 } from 'lucide-react';
 
 const NAV_GROUPS = [
@@ -40,6 +41,7 @@ const NAV_GROUPS = [
     label: 'WORKFORCE',
     items: [
       { href: '/settings/payroll', label: 'Payroll', icon: DollarSign },
+      { href: '/settings/piecework', label: 'Piecework', icon: BadgeDollarSign },
       { href: '/settings/schedules', label: 'Work Schedules', icon: Clock },
     ],
   },
