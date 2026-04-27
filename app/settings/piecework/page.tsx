@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 
 type PieceworkActivity = {
   id: string;
@@ -84,7 +85,7 @@ export default function PieceworkSettingsPage() {
 
   async function load() {
     setLoading(true);
-    const res = await fetch('/api/settings/piecework-activities');
+    const res = await authorizedFetch('/api/settings/piecework-activities');
     const json = await res.json();
     setLoading(false);
 
@@ -114,7 +115,7 @@ export default function PieceworkSettingsPage() {
 
   async function saveDraft(draft: DraftActivity) {
     setSavingId(draft.id ?? 'new');
-    const res = await fetch('/api/settings/piecework-activities', {
+    const res = await authorizedFetch('/api/settings/piecework-activities', {
       method: draft.id ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
