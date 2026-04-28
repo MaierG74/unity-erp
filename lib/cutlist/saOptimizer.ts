@@ -16,6 +16,8 @@
 
 import type { PartSpec, StockSheetSpec } from './types';
 import {
+  compareResults,
+  countUnplacedPieces,
   expandParts,
   packWithExpandedParts,
   packPartsGuillotine,
@@ -72,12 +74,13 @@ export interface SAProgress {
  * Calculate a score for a packing result with heavy offcut quality weighting.
  *
  * Score hierarchy:
- *   Tier 1: Sheet count (-100,000 per sheet) — unambiguous, dominates
- *   Tier 2: Offcut quality (×500) — user's #1 priority
- *   Tier 3: Waste concentration (×300) — consolidated waste
- *   Tier 4: Compactness (×50) — prefer parts packed in corner, not spread out
- *   Tier 5: Utilization (×1) — implied by sheet count
- *   Tier 6: Fragmentation penalty (×20) — fewer fragments better
+ *   Tier 0: Completeness (-10,000,000 per unplaced piece) - dominates everything
+ *   Tier 1: Sheet count (-100,000 per sheet) - unambiguous
+ *   Tier 2: Offcut quality (x500) - user's #1 priority among complete layouts
+ *   Tier 3: Waste concentration (x300) - consolidated waste
+ *   Tier 4: Compactness (x50) - prefer parts packed in corner, not spread out
+ *   Tier 5: Utilization (x1) - implied by sheet count
+ *   Tier 6: Fragmentation penalty (x20) - fewer fragments better
  *
  * Higher score = better result.
  */
@@ -121,11 +124,18 @@ export function calculateResultScoreV2(
     compactnessPenalty /= result.sheets.length;
   }
 
+  // Completeness gate: dominates the V2 sheet term (-100,000 per sheet) by
+  // two orders of magnitude, so any complete layout beats any partial one
+  // regardless of offcut quality, concentration, or compactness.
+  const unplacedCount = countUnplacedPieces(result);
+  const completenessPenalty = unplacedCount * 10_000_000;
+
   return (
-    -result.sheets.length * 100_000 +   // Tier 1: fewer sheets
-    offcutQualityPct * 500 +             // Tier 2: largest offcut (heavy weight)
+    -completenessPenalty +                // Tier 0: completeness (mandatory)
+    -result.sheets.length * 100_000 +     // Tier 1: fewer sheets
+    offcutQualityPct * 500 +              // Tier 2: largest offcut (heavy weight)
     concentration * 300 +                 // Tier 3: consolidated waste
-    -compactnessPenalty * 50 +            // Tier 4: compactness (prefer corner packing)
+    -compactnessPenalty * 50 +            // Tier 4: compactness
     utilizationPct * 1 -                  // Tier 5: efficiency (weak)
     fragments * 20                        // Tier 6: fragmentation penalty
   );
@@ -403,27 +413,35 @@ export function runSimulatedAnnealing(
     );
     const candidateScore = calculateResultScoreV2(candidateResult, sheetArea);
 
-    // SA acceptance criterion
+    // Track global best independent of metropolis acceptance. A lexicographically
+    // better candidate (e.g. complete with many sheets) can have a worse scalar
+    // score than currentScore (partial with few sheets) and would otherwise be
+    // rejected by metropolis before we record it as the best layout seen.
+    // Best-tracking and search-state movement are separate concerns.
+    const candidateIsBest =
+      compareResults(candidateResult, bestResult, sheetArea, calculateResultScoreV2) > 0;
+
+    if (candidateIsBest) {
+      bestScore = candidateScore;
+      bestResult = candidateResult;
+      improvementCount++;
+      itersSinceImprovement = 0;
+    } else {
+      itersSinceImprovement++;
+    }
+
+    // Metropolis acceptance criterion — moves the SA search state only.
+    // A candidate that improves the global best may still be rejected here on
+    // scalar grounds; that's intentional — the global best is captured above
+    // and the search state can roam independently.
     const delta = candidateScore - currentScore;
     const accept =
       delta > 0 || Math.random() < Math.exp(delta / temperature);
 
     if (accept) {
       currentScore = candidateScore;
-
-      // Track global best
-      if (candidateScore > bestScore) {
-        bestScore = candidateScore;
-        bestResult = candidateResult;
-        improvementCount++;
-        itersSinceImprovement = 0;
-      } else {
-        itersSinceImprovement++;
-      }
     } else {
-      // Reject: undo the move
       undo();
-      itersSinceImprovement++;
     }
 
     // Cool down

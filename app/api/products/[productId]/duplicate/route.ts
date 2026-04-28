@@ -3,6 +3,29 @@ import { NextRequest, NextResponse } from 'next/server';
 import { parsePositiveInt, requireProductsAccess } from '@/lib/api/products-access';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
+async function resolveCategoryRateId(jobId: number, today: string): Promise<number | null> {
+  const { data: job, error: jobError } = await supabaseAdmin
+    .from('jobs')
+    .select('category_id')
+    .eq('job_id', jobId)
+    .maybeSingle();
+
+  if (jobError) throw jobError;
+  if (!job?.category_id) return null;
+
+  const { data, error } = await supabaseAdmin
+    .from('job_category_rates')
+    .select('rate_id')
+    .eq('category_id', job.category_id)
+    .lte('effective_date', today)
+    .or(`end_date.is.null,end_date.gte.${today}`)
+    .order('effective_date', { ascending: false })
+    .limit(1);
+
+  if (error) throw error;
+  return data && data.length > 0 ? Number(data[0].rate_id) : null;
+}
+
 type RouteParams = {
   productId?: string;
 };
@@ -98,6 +121,45 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
       );
     }
 
+    // Pre-fetch and pre-resolve BOL rates BEFORE creating any rows, so a 400
+    // on missing rates cannot leave a partially-duplicated product behind
+    // (the catch-block cleanup only runs on throws, not direct returns).
+    // Legacy rate_id is required by billoflabour_pay_pairing_chk for hourly rows.
+    let bolResolved: Array<{ row: any; rateId: number | null }> | null = null;
+    if (copyBol) {
+      const { data: bolRows, error: bolRowsError } = await supabaseAdmin
+        .from('billoflabour')
+        .select(
+          'job_id, time_required, time_unit, quantity, rate_id, hourly_rate_id, pay_type, piece_rate_id'
+        )
+        .eq('product_id', sourceProductId)
+        .eq('org_id', auth.orgId);
+
+      if (bolRowsError) {
+        console.error('[product-duplicate] failed loading source BOL', bolRowsError);
+        return NextResponse.json({ error: 'Failed to load source BOL' }, { status: 500 });
+      }
+
+      const today = new Date().toISOString().split('T')[0];
+      bolResolved = [];
+      for (const row of bolRows ?? []) {
+        const payType = (row.pay_type ?? 'hourly') as 'hourly' | 'piece';
+        // Preserve the source row's rate_id when it has one (clone semantics);
+        // otherwise resolve a fresh rate from the job's category.
+        let rateId: number | null = row.rate_id ?? null;
+        if (payType === 'hourly' && rateId == null) {
+          rateId = await resolveCategoryRateId(row.job_id, today);
+          if (!rateId) {
+            return NextResponse.json(
+              { error: `No active hourly rate for job ${row.job_id}'s category` },
+              { status: 400 },
+            );
+          }
+        }
+        bolResolved.push({ row, rateId });
+      }
+    }
+
     const { data: newProduct, error: newProductError } = await supabaseAdmin
       .from('products')
       .insert({
@@ -174,38 +236,27 @@ export async function POST(request: NextRequest, context: { params: Promise<Rout
       }
     }
 
-    if (copyBol) {
-      const { data: bolRows, error: bolRowsError } = await supabaseAdmin
-        .from('billoflabour')
-        .select(
-          'job_id, time_required, time_unit, quantity, rate_id, hourly_rate_id, pay_type, piece_rate_id'
-        )
-        .eq('product_id', sourceProductId)
-        .eq('org_id', auth.orgId);
+    if (copyBol && bolResolved && bolResolved.length > 0) {
+      const insertRows = bolResolved.map(({ row, rateId }) => {
+        const payType = (row.pay_type ?? 'hourly') as 'hourly' | 'piece';
+        return {
+          product_id: newProductId,
+          job_id: row.job_id,
+          time_required: row.time_required,
+          time_unit: row.time_unit ?? 'hours',
+          quantity: row.quantity,
+          rate_id: payType === 'hourly' ? rateId : null,
+          hourly_rate_id: row.hourly_rate_id ?? null,
+          pay_type: payType,
+          piece_rate_id: row.piece_rate_id ?? null,
+          org_id: auth.orgId,
+        };
+      });
 
-      if (bolRowsError) {
-        throw bolRowsError;
-      }
+      const { error: insertBolError } = await supabaseAdmin.from('billoflabour').insert(insertRows);
 
-      if ((bolRows ?? []).length > 0) {
-        const { error: insertBolError } = await supabaseAdmin.from('billoflabour').insert(
-          (bolRows ?? []).map((row: any) => ({
-            product_id: newProductId,
-            job_id: row.job_id,
-            time_required: row.time_required,
-            time_unit: row.time_unit ?? 'hours',
-            quantity: row.quantity,
-            rate_id: row.rate_id ?? null,
-            hourly_rate_id: row.hourly_rate_id ?? null,
-            pay_type: row.pay_type ?? 'hourly',
-            piece_rate_id: row.piece_rate_id ?? null,
-            org_id: auth.orgId,
-          }))
-        );
-
-        if (insertBolError) {
-          throw insertBolError;
-        }
+      if (insertBolError) {
+        throw insertBolError;
       }
     }
 

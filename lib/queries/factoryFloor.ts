@@ -170,6 +170,15 @@ export interface StaffOption {
   name: string;
 }
 
+export interface PieceworkCardCompletionMeta {
+  job_card_id: number;
+  staff_id: number | null;
+  expected_count: number;
+  actual_count: number | null;
+  rate_snapshot: number;
+  piecework_activity_id: string;
+}
+
 export async function fetchActiveStaff(): Promise<StaffOption[]> {
   const { data, error } = await supabase
     .from('staff')
@@ -182,4 +191,27 @@ export async function fetchActiveStaff(): Promise<StaffOption[]> {
     staff_id: s.staff_id,
     name: `${s.first_name} ${s.last_name}`,
   }));
+}
+
+export async function fetchPieceworkCardCompletionMeta(jobCardId: number): Promise<PieceworkCardCompletionMeta | null> {
+  const { data, error } = await supabase
+    .from('job_cards')
+    .select('job_card_id, staff_id, expected_count, actual_count, rate_snapshot, piecework_activity_id')
+    .eq('job_card_id', jobCardId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data?.piecework_activity_id) return null;
+  if (data.expected_count == null || data.rate_snapshot == null) {
+    throw new Error('Piecework card is missing expected count or rate snapshot');
+  }
+
+  return {
+    job_card_id: data.job_card_id,
+    staff_id: data.staff_id,
+    expected_count: data.expected_count,
+    actual_count: data.actual_count,
+    rate_snapshot: Number(data.rate_snapshot),
+    piecework_activity_id: data.piecework_activity_id,
+  };
 }
