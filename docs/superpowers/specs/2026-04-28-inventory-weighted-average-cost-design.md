@@ -2,7 +2,9 @@
 date: 2026-04-28
 status: draft
 owner: greg@apexza.net
-linear: (filed at end of brainstorming)
+linear:
+  - POL-69 (Piece A — this spec): https://linear.app/polygon-dev/issue/POL-69
+  - POL-70 (Piece B — follow-up): https://linear.app/polygon-dev/issue/POL-70
 related:
   - app/api/inventory/snapshot/route.ts
   - components/features/inventory/ReportsSnapshotTab.tsx
