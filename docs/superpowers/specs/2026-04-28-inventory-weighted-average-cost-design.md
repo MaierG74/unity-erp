@@ -1,6 +1,6 @@
 ---
 date: 2026-04-28
-status: draft
+status: approved (Codex round 5 — ready for implementer handoff)
 owner: greg@apexza.net
 linear:
   - POL-69 (Piece A — this spec): https://linear.app/polygon-dev/issue/POL-69
@@ -360,7 +360,7 @@ Fourteen tests, no infrastructure changes (matches existing Vitest setup):
 
 1. **Migration A1**: add `inventory_transactions.unit_cost` and `inventory.average_cost` columns (nullable, no defaults).
 2. **Migration A2**: replace `process_supplier_order_receipt` with the WAC-aware version (signature unchanged; same nine parameters; `set search_path = public` added). Verify with a single-org receipt locally before applying to live.
-3. **Migration A3**: create `recompute_inventory_average_cost_from_history` function with the `is_org_member` guard and `set search_path = public`.
+3. **Migration A3**: create `recompute_inventory_average_cost_from_history` function with the `is_org_member` guard and `set search_path = public`. **In the same migration**, immediately after the `create function`, run the `REVOKE EXECUTE ... FROM public, anon, authenticated` and `GRANT EXECUTE ... TO service_role` from the "Privilege boundary — service_role only" subsection above. The function definition and its restricted EXECUTE grant must land atomically — a window where the function exists with the default `authenticated` grant would re-open the direct-RPC privilege escalation.
 4. **App code part 1 — fallback removal**: remove the manual fallback in [components/features/purchasing/order-detail.tsx:178](../../../components/features/purchasing/order-detail.tsx#L178). Replace with a clean error toast on RPC failure. Land in the same PR as the rest of the app changes.
 5. **Seed script**: `npx tsx scripts/seed-inventory-average-cost.ts` (defaults to all orgs). Idempotent; safe to re-run.
 6. **App code part 2**: snapshot API change, UI relabel and `Unit Cost` column, recompute button (admin-gated), tests.
