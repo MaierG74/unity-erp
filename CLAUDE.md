@@ -20,6 +20,10 @@
 - Always update the canonical doc for the feature or domain you changed.
 - Do **not** update shared summary/index docs (`docs/README.md`, `docs/overview/todo-index.md`) on every task. Only update them when status materially changes, a new workstream is introduced, or during release/reconciliation work.
 
+## End-of-Session Reconciliation
+
+Before closing any long session, run the five-step check documented in [AGENTS.md > End-of-Session Reconciliation](AGENTS.md). The TL;DR: `git status`, `git stash list`, `git branch --show-current`, `git log codex/integration..origin/codex/integration --oneline` AND the reverse, `git worktree list`. Surface any non-empty unexpected result before saying "done." This exists because a prior session built up 70 unpushed commits on local `codex/integration` without anyone noticing — the end-of-session check is the structural fix.
+
 ## Multi-Tenancy
 
 - Any new table holding org-specific data **must** include an `org_id` column with org-scoped RLS.
