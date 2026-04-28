@@ -117,7 +117,7 @@ Tables involved and their key columns and relationships. Source: Supabase MCP qu
   - Read categories: `GET /api/job-categories`, backed by `job_categories` plus active `job_category_rates`.
   - Read all rates: `from('job_category_rates').select('*').order('effective_date desc')` (filtered client-side per category).
   - Create category: insert into `job_categories`, then insert initial rate row into `job_category_rates` with today's date.
-  - Update category: update taxonomy fields (`name`, `description`, `parent_category_id`) only.
+  - Update category: update taxonomy fields (`name`, `description`, `parent_category_id`) and the current hourly rate. If the edited rate differs from the active `job_category_rates` row, the UI updates today's rate row or creates a new active rate version effective today.
   - Delete category: delete all `job_category_rates` for the category, then delete the category.
   - Add rate version:
     - Determines the next `end_date` by looking for the first later `effective_date`.
@@ -151,7 +151,7 @@ Tables involved and their key columns and relationships. Source: Supabase MCP qu
 - File: components/features/products/product-bol.tsx:1
 - Features:
   - Display BOL items with Category, Job, Time, Qty, Hourly Rate, Total Time (hrs), Total Cost; edit inline or remove.
-  - Add new item with category and job pickers; supports quick job creation via modal `CreateJobModal`.
+  - Add new item with category and job pickers, plus direct job search across job names, descriptions, parent categories, and subcategories for users who know the operation but not its category path; supports quick job creation via modal `CreateJobModal`.
   - Client-side cost computation: hourly rate × time (converted to hours) × quantity, preferring the saved `job_category_rates.hourly_rate` when `rate_id` is set and falling back to the active category rate from `/api/job-categories` only for legacy rows without a saved rate.
 - Supabase interactions:
   - Read product BOL: `from('billoflabour').select(... jobs(... job_categories(...)), job_category_rates(...))`.
@@ -160,7 +160,7 @@ Tables involved and their key columns and relationships. Source: Supabase MCP qu
   - Add/Update BOL item:
     - Looks up the current effective rate for the selected category as of today by querying `job_category_rates` with `effective_date <= today` and `(end_date is null or end_date >= today)` (ordered desc, limit 1).
     - Writes `rate_id` to `billoflabour` along with `job_id`, `time_required`, `time_unit`, `quantity`.
-  - Delete BOL item: `from('billoflabour').delete().eq('bol_id', ...)`.
+  - Delete BOL item: `DELETE /api/products/:id/bol/:bolId`; the UI removes the row from both direct and effective BOL caches immediately so deleted direct rows do not linger as read-only/linked rows while refetch completes.
   - Helper conversions: minutes/seconds → hours for totals and costing.
 
 (Implemented)

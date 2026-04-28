@@ -397,20 +397,51 @@ export function ProductBOL({ productId }: ProductBOLProps) {
       const json = await response.json().catch(() => null);
       if (!response.ok) throw new Error(json?.error || 'Failed to remove job from BOL');
     },
+    onMutate: async (bolId: number) => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: ['productBOL', productId] }),
+        queryClient.cancelQueries({ queryKey: ['effectiveBOL', productId] }),
+      ]);
+
+      const previousBOL = queryClient.getQueryData<BOLItem[]>(['productBOL', productId]);
+      const previousEffectiveBOL = queryClient.getQueryData<{ items: any[] }>(['effectiveBOL', productId]);
+
+      queryClient.setQueryData<BOLItem[]>(['productBOL', productId], (old = []) =>
+        old.filter((item) => Number(item.bol_id) !== Number(bolId))
+      );
+      queryClient.setQueryData<{ items: any[] }>(['effectiveBOL', productId], (old) => {
+        if (!old || !Array.isArray(old.items)) return old;
+        return {
+          ...old,
+          items: old.items.filter((item: any) => Number(item.bol_id) !== Number(bolId)),
+        };
+      });
+
+      return { previousBOL, previousEffectiveBOL };
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['productBOL', productId] });
       toast({
         title: 'Success',
         description: 'Job removed from BOL',
       });
     },
-    onError: (error) => {
+    onError: (error, _bolId, context) => {
+      if (context?.previousBOL) {
+        queryClient.setQueryData(['productBOL', productId], context.previousBOL);
+      }
+      if (context?.previousEffectiveBOL) {
+        queryClient.setQueryData(['effectiveBOL', productId], context.previousEffectiveBOL);
+      }
       toast({
         title: 'Error',
         description: 'Failed to remove job from BOL',
         variant: 'destructive',
       });
       console.error('Error deleting BOL item:', error);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['productBOL', productId] });
+      queryClient.invalidateQueries({ queryKey: ['effectiveBOL', productId] });
     },
   });
   
@@ -538,7 +569,13 @@ export function ProductBOL({ productId }: ProductBOLProps) {
                     ) : (
                       (() => {
                         // Partition into direct rows and linked groups
-                        const directBolRows = unifiedRows.filter((r) => r._source !== 'link')
+                        const directBolRows = unifiedRows.filter((r) => {
+                          if (r._source === 'link') return false
+                          if (r._editable && typeof r.bol_id === 'number') {
+                            return bolById.has(Number(r.bol_id))
+                          }
+                          return true
+                        })
                         const linkedBolGroups = new Map<number, typeof unifiedRows>()
                         for (const r of unifiedRows) {
                           if (r._source === 'link' && typeof r._sub_product_id === 'number') {
@@ -770,10 +807,12 @@ export function ProductBOL({ productId }: ProductBOLProps) {
                                   </div>
                                 ) : isChild ? (
                                   <span className="text-xs text-muted-foreground">—</span>
-                                ) : (
+                                ) : it._source === 'link' ? (
                                   <div className="flex items-center gap-2">
                                     <Badge variant="outline">Linked</Badge>
                                   </div>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">—</span>
                                 )}
                               </TableCell>
                             </TableRow>

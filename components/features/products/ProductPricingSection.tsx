@@ -11,6 +11,10 @@ function fmtMoney(v: number | null | undefined) {
   return `R${v.toFixed(2)}`
 }
 
+function roundCurrency(v: number) {
+  return Math.round(v * 100) / 100
+}
+
 interface ProductPricingSectionProps {
   productId: number
   unitCost: number
@@ -21,6 +25,8 @@ export function ProductPricingSection({ productId, unitCost }: ProductPricingSec
 
   const [markupType, setMarkupType] = useState<MarkupType>('percentage')
   const [markupValue, setMarkupValue] = useState<number>(0)
+  const [sellingPriceValue, setSellingPriceValue] = useState('')
+  const [sellingPriceEdited, setSellingPriceEdited] = useState(false)
   const [dirty, setDirty] = useState(false)
 
   // Sync from saved price when loaded
@@ -28,6 +34,8 @@ export function ProductPricingSection({ productId, unitCost }: ProductPricingSec
     if (price) {
       setMarkupType(price.markup_type)
       setMarkupValue(price.markup_value)
+      setSellingPriceValue(price.selling_price.toFixed(2))
+      setSellingPriceEdited(false)
       setDirty(false)
     }
   }, [price])
@@ -36,28 +44,59 @@ export function ProductPricingSection({ productId, unitCost }: ProductPricingSec
   const expectedMarkupAmount =
     markupType === 'percentage' ? unitCost * (markupValue / 100) : markupValue
   const expectedSellingPrice = unitCost + expectedMarkupAmount
+  const typedSellingPrice = Number.parseFloat(sellingPriceValue)
+  const manualSellingPrice =
+    Number.isFinite(typedSellingPrice) && typedSellingPrice >= 0
+      ? typedSellingPrice
+      : expectedSellingPrice
 
   // When editing (dirty) or no saved price, show live calculation
   // When saved and not editing, show the locked saved price
   const hasSavedPrice = !!price && !dirty
-  const displaySellingPrice = hasSavedPrice ? price.selling_price : expectedSellingPrice
+  const displaySellingPrice = hasSavedPrice
+    ? price.selling_price
+    : sellingPriceEdited
+      ? manualSellingPrice
+      : expectedSellingPrice
   const displayMarkupAmount = displaySellingPrice - unitCost
   const displayMargin = displaySellingPrice > 0
     ? (displayMarkupAmount / displaySellingPrice) * 100
     : 0
 
   // Detect margin erosion: cost has changed since price was saved
-  const marginEroded = hasSavedPrice && unitCost > 0 && expectedSellingPrice > price.selling_price
+  const currencyTolerance = 0.005
+  const marginEroded =
+    hasSavedPrice &&
+    unitCost > 0 &&
+    expectedSellingPrice > price.selling_price + currencyTolerance
   const effectiveMarkupPct = hasSavedPrice && unitCost > 0
     ? ((price.selling_price - unitCost) / unitCost) * 100
     : null
+  const savedPercentageTarget = price?.markup_type === 'percentage' ? price.markup_value : null
+  const displayMarkupPct = unitCost > 0 ? (displayMarkupAmount / unitCost) * 100 : null
+  const typedPriceBelowPercentageTarget =
+    sellingPriceEdited &&
+    savedPercentageTarget != null &&
+    displayMarkupPct != null &&
+    displayMarkupPct + 0.05 < savedPercentageTarget
+  const showMarkupWarning = marginEroded || typedPriceBelowPercentageTarget
 
   const handleSave = () => {
+    const sellingPrice = sellingPriceEdited ? manualSellingPrice : expectedSellingPrice
+    const nextMarkupType: MarkupType = sellingPriceEdited ? 'fixed' : markupType
+    const nextMarkupValue = sellingPriceEdited
+      ? roundCurrency(Math.max(0, sellingPrice - unitCost))
+      : markupValue
+
     savePrice({
-      markupType,
-      markupValue,
-      sellingPrice: expectedSellingPrice,
+      markupType: nextMarkupType,
+      markupValue: nextMarkupValue,
+      sellingPrice,
     })
+    setMarkupType(nextMarkupType)
+    setMarkupValue(nextMarkupValue)
+    setSellingPriceValue(sellingPrice.toFixed(2))
+    setSellingPriceEdited(false)
     setDirty(false)
   }
 
@@ -68,6 +107,8 @@ export function ProductPricingSection({ productId, unitCost }: ProductPricingSec
       markupValue,
       sellingPrice: expectedSellingPrice,
     })
+    setSellingPriceValue(expectedSellingPrice.toFixed(2))
+    setSellingPriceEdited(false)
   }
 
   if (isLoading) {
@@ -91,27 +132,37 @@ export function ProductPricingSection({ productId, unitCost }: ProductPricingSec
       </div>
 
       {/* Margin erosion warning */}
-      {marginEroded && (
+      {showMarkupWarning && (
         <div className="flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 mb-4">
           <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
           <div className="flex-1 min-w-0">
             <div className="text-sm font-medium text-amber-500">Markup below target</div>
             <div className="text-xs text-muted-foreground mt-0.5">
-              Costs have changed — effective markup is {effectiveMarkupPct!.toFixed(1)}%,
-              below your {markupType === 'percentage' ? `${markupValue}%` : fmtMoney(markupValue)} target.
-              Price list still shows {fmtMoney(price.selling_price)}.
+              {typedPriceBelowPercentageTarget
+                ? `Typed selling price gives ${displayMarkupPct!.toFixed(1)}% markup, below your ${savedPercentageTarget}% target.`
+                : markupType === 'fixed'
+                  ? `Costs have changed — profit is ${fmtMoney(displayMarkupAmount)}, below your ${fmtMoney(markupValue)} fixed markup target. Price list still shows ${fmtMoney(price.selling_price)}.`
+                : (
+                    <>
+                      Costs have changed — effective markup is {effectiveMarkupPct!.toFixed(1)}%,
+                      below your {markupValue}% target.
+                      Price list still shows {fmtMoney(price.selling_price)}.
+                    </>
+                  )}
             </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRecalculate}
-            disabled={isSaving}
-            className="shrink-0 border-amber-500/30 text-amber-500 hover:bg-amber-500/10"
-          >
-            <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-            Recalculate
-          </Button>
+          {marginEroded && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRecalculate}
+              disabled={isSaving}
+              className="shrink-0 border-amber-500/30 text-amber-500 hover:bg-amber-500/10"
+            >
+              <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+              Recalculate
+            </Button>
+          )}
         </div>
       )}
 
@@ -122,14 +173,15 @@ export function ProductPricingSection({ productId, unitCost }: ProductPricingSec
           <div className="text-xs uppercase text-muted-foreground tracking-wide mb-1.5">
             Markup Type
           </div>
-          <div className="flex rounded-md border bg-muted/30 p-0.5">
+          <div className="flex h-10 rounded-md border bg-muted/30 p-0.5">
             <button
               type="button"
               onClick={() => {
                 setMarkupType('percentage')
+                setSellingPriceEdited(false)
                 setDirty(true)
               }}
-              className={`flex-1 rounded-sm px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`flex-1 rounded-sm px-3 text-xs font-medium transition-colors ${
                 markupType === 'percentage'
                   ? 'bg-background text-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground'
@@ -141,9 +193,10 @@ export function ProductPricingSection({ productId, unitCost }: ProductPricingSec
               type="button"
               onClick={() => {
                 setMarkupType('fixed')
+                setSellingPriceEdited(false)
                 setDirty(true)
               }}
-              className={`flex-1 rounded-sm px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`flex-1 rounded-sm px-3 text-xs font-medium transition-colors ${
                 markupType === 'fixed'
                   ? 'bg-background text-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground'
@@ -169,9 +222,10 @@ export function ProductPricingSection({ productId, unitCost }: ProductPricingSec
               }}
               onChange={(e) => {
                 setMarkupValue(parseFloat(e.target.value) || 0)
+                setSellingPriceEdited(false)
                 setDirty(true)
               }}
-              className="pr-8"
+              className="h-10 pr-8"
             />
             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
               {markupType === 'percentage' ? '%' : 'R'}
@@ -206,19 +260,48 @@ export function ProductPricingSection({ productId, unitCost }: ProductPricingSec
 
         {/* Selling Price */}
         <div className={`rounded-lg border p-3 text-center ${
-          marginEroded
+          showMarkupWarning
             ? 'border-amber-500/30 bg-amber-500/5'
             : 'border-emerald-500/30 bg-emerald-500/5'
         }`}>
           <div className={`text-[11px] uppercase tracking-wide mb-1 ${
-            marginEroded ? 'text-amber-400' : 'text-emerald-400'
+            showMarkupWarning ? 'text-amber-400' : 'text-emerald-400'
           }`}>
             Selling Price
           </div>
-          <div className={`text-lg font-bold tabular-nums ${
-            marginEroded ? 'text-amber-500' : 'text-emerald-500'
-          }`}>
-            {fmtMoney(displaySellingPrice)}
+          <div className="relative">
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={
+                hasSavedPrice && !sellingPriceEdited
+                  ? price.selling_price.toFixed(2)
+                  : sellingPriceEdited
+                    ? sellingPriceValue
+                    : expectedSellingPrice.toFixed(2)
+              }
+              onChange={(e) => {
+                const nextValue = e.target.value
+                const nextSellingPrice = Number.parseFloat(nextValue)
+                setSellingPriceValue(nextValue)
+                setMarkupType('fixed')
+                if (Number.isFinite(nextSellingPrice) && nextSellingPrice >= 0) {
+                  setMarkupValue(roundCurrency(Math.max(0, nextSellingPrice - unitCost)))
+                }
+                setSellingPriceEdited(true)
+                setDirty(true)
+              }}
+              onBlur={(e) => {
+                if (e.target.value === '') {
+                  setSellingPriceValue(displaySellingPrice.toFixed(2))
+                  setSellingPriceEdited(false)
+                }
+              }}
+              className={`h-8 border-0 bg-transparent p-0 text-center text-lg font-bold tabular-nums shadow-none focus-visible:ring-0 ${
+                showMarkupWarning ? 'text-amber-500' : 'text-emerald-500'
+              }`}
+            />
           </div>
         </div>
       </div>
@@ -227,6 +310,7 @@ export function ProductPricingSection({ productId, unitCost }: ProductPricingSec
       <div className="flex items-center justify-between mt-3">
         <div className="flex gap-3 text-[11px] text-muted-foreground">
           <span>Margin: {displayMargin.toFixed(1)}%</span>
+          <span>Markup: {displayMarkupPct != null ? `${displayMarkupPct.toFixed(1)}%` : '—'}</span>
           <span>Profit: {fmtMoney(displayMarkupAmount)} per unit</span>
         </div>
         <Button

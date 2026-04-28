@@ -88,6 +88,14 @@ const rateSchema = z.object({
 type CategoryFormValues = z.infer<typeof categorySchema>;
 type RateFormValues = z.infer<typeof rateSchema>;
 
+const formatDateForDb = (date: Date) => date.toISOString().split('T')[0];
+
+const getPreviousDateForDb = (date: Date) => {
+  const previousDate = new Date(date);
+  previousDate.setDate(previousDate.getDate() - 1);
+  return formatDateForDb(previousDate);
+};
+
 export function JobCategoriesManager() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [expandedCategories, setExpandedCategories] = useState<Set<number>>(new Set());
@@ -371,10 +379,57 @@ export function JobCategoriesManager() {
         .select();
 
       if (error) throw error;
+
+      const today = formatDateForDb(new Date());
+      const desiredRate = Number(values.hourly_rate);
+      const { data: activeRate, error: activeRateError } = await supabase
+        .from('job_category_rates')
+        .select('rate_id, hourly_rate, effective_date')
+        .eq('category_id', values.category_id)
+        .lte('effective_date', today)
+        .or(`end_date.is.null,end_date.gte.${today}`)
+        .order('effective_date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (activeRateError) throw activeRateError;
+
+      const currentRate = activeRate ? Number(activeRate.hourly_rate) : null;
+      if (currentRate !== desiredRate && (activeRate || desiredRate > 0)) {
+        if (activeRate?.effective_date === today) {
+          const { error: rateUpdateError } = await supabase
+            .from('job_category_rates')
+            .update({ hourly_rate: desiredRate })
+            .eq('rate_id', activeRate.rate_id);
+
+          if (rateUpdateError) throw rateUpdateError;
+        } else {
+          if (activeRate) {
+            const { error: closeRateError } = await supabase
+              .from('job_category_rates')
+              .update({ end_date: getPreviousDateForDb(new Date()) })
+              .eq('rate_id', activeRate.rate_id);
+
+            if (closeRateError) throw closeRateError;
+          }
+
+          const { error: rateInsertError } = await supabase
+            .from('job_category_rates')
+            .insert({
+              category_id: values.category_id,
+              hourly_rate: desiredRate,
+              effective_date: today,
+            });
+
+          if (rateInsertError) throw rateInsertError;
+        }
+      }
+
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobCategories'] });
+      queryClient.invalidateQueries({ queryKey: ['jobCategoryRates'] });
       setEditingId(null);
       setIsEditCategoryOpen(false);
       categoryForm.reset({ name: '', description: '', hourly_rate: 0, parent_category_id: '' });
@@ -1138,7 +1193,7 @@ export function JobCategoriesManager() {
           <DialogHeader>
             <DialogTitle>Edit Job Category</DialogTitle>
             <DialogDescription>
-              Update the category details. Manage hourly rates in Rate History.
+              Update the category details and current hourly rate.
             </DialogDescription>
           </DialogHeader>
           <Form {...categoryForm}>
@@ -1168,6 +1223,29 @@ export function JobCategoriesManager() {
                     <FormControl>
                       <Textarea {...field} rows={3} />
                     </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={categoryForm.control}
+                name="hourly_rate"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Current Hourly Rate (R)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="h-9"
+                        {...field}
+                      />
+                    </FormControl>
+                    <p className="text-xs text-muted-foreground">
+                      Saving a different rate creates today&apos;s active rate version.
+                    </p>
                     <FormMessage />
                   </FormItem>
                 )}

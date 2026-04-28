@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import {
@@ -17,6 +17,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Search, X, Plus } from 'lucide-react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -57,7 +64,15 @@ export function AddOverheadDialog({
   const [quantity, setQuantity] = useState('1');
   const [overrideValue, setOverrideValue] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [createMode, setCreateMode] = useState(false);
+  const [newCode, setNewCode] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newCostType, setNewCostType] = useState<'fixed' | 'percentage'>('fixed');
+  const [newDefaultValue, setNewDefaultValue] = useState('');
+  const [newPercentageBasis, setNewPercentageBasis] = useState<'materials' | 'labor' | 'total'>('total');
+  const [isCreating, setIsCreating] = useState(false);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   // Fetch available overhead elements
   const { data: elements = [], isLoading } = useQuery({
@@ -98,8 +113,85 @@ export function AddOverheadDialog({
 
   const handleSelect = (element: OverheadElement) => {
     setSelectedElement(element);
+    setCreateMode(false);
     setQuantity('1');
     setOverrideValue('');
+  };
+
+  const resetNewElementForm = () => {
+    setNewCode('');
+    setNewName('');
+    setNewCostType('fixed');
+    setNewDefaultValue('');
+    setNewPercentageBasis('total');
+  };
+
+  const handleCreateElement = async () => {
+    const code = newCode.trim();
+    const name = newName.trim();
+    const defaultValue = Number(newDefaultValue);
+
+    if (!code || !name) {
+      toast({
+        title: 'Missing overhead details',
+        description: 'Code and name are required.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!Number.isFinite(defaultValue) || defaultValue < 0) {
+      toast({
+        title: 'Invalid value',
+        description: 'Enter a value of 0 or more.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsCreating(true);
+    try {
+      const res = await authorizedFetch('/api/overhead-cost-elements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code,
+          name,
+          description: null,
+          cost_type: newCostType,
+          default_value: defaultValue,
+          percentage_basis: newCostType === 'percentage' ? newPercentageBasis : null,
+          is_active: true,
+          category_id: null,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to create overhead element');
+      }
+
+      const json = (await res.json()) as { element: OverheadElement };
+      const created = json.element;
+      await queryClient.invalidateQueries({ queryKey: ['overhead-cost-elements'] });
+      setSelectedElement(created);
+      setCreateMode(false);
+      setQuantity('1');
+      setOverrideValue('');
+      resetNewElementForm();
+      toast({
+        title: 'Overhead element created',
+        description: `"${created.name}" is ready to add to this product.`,
+      });
+    } catch (err) {
+      toast({
+        title: 'Failed to create overhead element',
+        description: err instanceof Error ? err.message : 'An error occurred',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   const handleAdd = async () => {
@@ -150,8 +242,10 @@ export function AddOverheadDialog({
     onOpenChange(false);
     setSelectedElement(null);
     setSearchText('');
+    setCreateMode(false);
     setQuantity('1');
     setOverrideValue('');
+    resetNewElementForm();
   };
 
   return (
@@ -208,11 +302,30 @@ export function AddOverheadDialog({
                   ) : filteredElements.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={3} className="text-center py-8 text-muted-foreground">
-                        {searchText
-                          ? 'No matching elements found.'
-                          : availableElements.length === 0
-                            ? 'All overhead elements are already assigned.'
-                            : 'No overhead elements available.'}
+                        <div className="space-y-3">
+                          <div>
+                            {searchText
+                              ? 'No matching elements found.'
+                              : availableElements.length === 0
+                                ? 'All overhead elements are already assigned.'
+                                : 'No overhead elements available.'}
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setCreateMode(true);
+                              setSelectedElement(null);
+                              if (searchText.trim() && !newName.trim()) {
+                                setNewName(searchText.trim());
+                              }
+                            }}
+                          >
+                            <Plus className="mr-1.5 h-3.5 w-3.5" />
+                            Create new overhead
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -256,11 +369,123 @@ export function AddOverheadDialog({
 
             {/* Selection details */}
             <div className="border rounded-md p-4 space-y-4">
-              <div className="font-medium">Selection</div>
-              {!selectedElement ? (
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-medium">{createMode ? 'New overhead' : 'Selection'}</div>
+                {!createMode && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setCreateMode(true);
+                      setSelectedElement(null);
+                      if (searchText.trim() && !newName.trim()) {
+                        setNewName(searchText.trim());
+                      }
+                    }}
+                  >
+                    <Plus className="mr-1.5 h-3.5 w-3.5" />
+                    New
+                  </Button>
+                )}
+              </div>
+              {createMode ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label htmlFor="new-overhead-code">Code</Label>
+                      <Input
+                        id="new-overhead-code"
+                        value={newCode}
+                        onChange={(e) => setNewCode(e.target.value.toUpperCase())}
+                        placeholder="WRAP"
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="new-overhead-name">Name</Label>
+                      <Input
+                        id="new-overhead-name"
+                        value={newName}
+                        onChange={(e) => setNewName(e.target.value)}
+                        placeholder="Wrapping"
+                        className="mt-1"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label>Type</Label>
+                      <Select
+                        value={newCostType}
+                        onValueChange={(value) => setNewCostType(value as 'fixed' | 'percentage')}
+                      >
+                        <SelectTrigger className="mt-1">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="fixed">Fixed Amount</SelectItem>
+                          <SelectItem value="percentage">Percentage</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label htmlFor="new-overhead-value">
+                        {newCostType === 'fixed' ? 'Amount (R)' : 'Percentage (%)'}
+                      </Label>
+                      <Input
+                        id="new-overhead-value"
+                        type="number"
+                        min="0"
+                        step={newCostType === 'fixed' ? '0.01' : '0.1'}
+                        value={newDefaultValue}
+                        onChange={(e) => setNewDefaultValue(e.target.value)}
+                        placeholder={newCostType === 'fixed' ? '20.00' : '5'}
+                        className="mt-1"
+                      />
+                    </div>
+                  </div>
+
+                  {newCostType === 'percentage' && (
+                    <div>
+                      <Label>Calculate percentage of</Label>
+                      <Select
+                        value={newPercentageBasis}
+                        onValueChange={(value) => setNewPercentageBasis(value as 'materials' | 'labor' | 'total')}
+                      >
+                        <SelectTrigger className="mt-1">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="materials">Materials Cost</SelectItem>
+                          <SelectItem value="labor">Labor Cost</SelectItem>
+                          <SelectItem value="total">Total (Materials + Labor)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setCreateMode(false);
+                        resetNewElementForm();
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button type="button" onClick={handleCreateElement} disabled={isCreating}>
+                      {isCreating ? 'Creating...' : 'Create overhead'}
+                    </Button>
+                  </div>
+                </div>
+              ) : !selectedElement ? (
                 <div className="text-sm text-muted-foreground">
                   Select an overhead element from the list to configure its quantity and optional
-                  value override.
+                  value override, or create a new one without leaving costing.
                 </div>
               ) : (
                 <>
@@ -324,7 +549,7 @@ export function AddOverheadDialog({
           <Button variant="outline" onClick={handleClose}>
             Cancel
           </Button>
-          <Button onClick={handleAdd} disabled={!selectedElement || isSubmitting}>
+          <Button onClick={handleAdd} disabled={!selectedElement || isSubmitting || createMode}>
             <Plus className="h-4 w-4 mr-2" />
             {isSubmitting ? 'Adding...' : 'Add Overhead'}
           </Button>

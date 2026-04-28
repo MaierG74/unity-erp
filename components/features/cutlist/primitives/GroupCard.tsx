@@ -298,9 +298,9 @@ export const GroupCard = memo(function GroupCard({
               Drop parts here...
             </div>
           ) : (
-            group.parts.map((part) => (
+            group.parts.map((part, index) => (
               <PartCard
-                key={part.id}
+                key={`${part.id}:${index}`}
                 part={part}
                 showRemove
                 onRemove={() => onRemovePart(part.id)}

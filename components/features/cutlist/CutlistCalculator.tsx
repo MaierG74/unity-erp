@@ -84,6 +84,7 @@ import type {
 import { EdgingOverrideRow } from './primitives/EdgingOverrideRow';
 import {
   computePartsHash,
+  getLayoutSheetUsedArea,
   type RestoredCutlistCostingSnapshot,
 } from '@/lib/cutlist/costingSnapshot';
 
@@ -486,7 +487,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
           ? s.stock_length_mm * s.stock_width_mm
           : defaultSheetArea;
         if (area <= 0) return sum;
-        return sum + (s.used_area_mm2 ?? 0) / area;
+        return sum + getLayoutSheetUsedArea(s) / area;
       }, 0);
     },
     [defaultSheetArea]
@@ -507,7 +508,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
           ? s.stock_length_mm * s.stock_width_mm
           : defaultSheetArea;
         if (area <= 0) return sum;
-        const used = s.used_area_mm2 ?? 0;
+        const used = getLayoutSheetUsedArea(s);
         const autoPct = Math.min(100, Math.max(0, (used / area) * 100));
         const override = overrides[s.sheet_id];
         let pct = autoPct;
@@ -539,7 +540,7 @@ export const CutlistCalculator = React.forwardRef<CutlistCalculatorHandle, Cutli
           : defaultSheetArea;
         if (area <= 0) continue;
 
-        const usedArea = layoutSheet.used_area_mm2 ?? 0;
+        const usedArea = getLayoutSheetUsedArea(layoutSheet);
         const materialId =
           layoutSheet.placements.find((placement) => placement.material_id)?.material_id ??
           fallbackMaterialId;

@@ -25,7 +25,7 @@ import type {
   SheetOffcutSummary,
   OffcutRect,
 } from './types';
-import { isReusableOffcut } from './offcuts';
+import { isReusableOffcut, subtractOccupiedRects, type Rect } from './offcuts';
 
 // =============================================================================
 // Configuration
@@ -131,12 +131,22 @@ function computeStripRemnants(
 }
 
 function summarizeOffcuts(
-  rects: { x: number; y: number; w: number; h: number }[],
+  rects: Rect[],
   cfg: { minUsableLength: number; minUsableWidth: number; minUsableGrain: GrainOrientation },
+  placements: Placement[] = [],
 ): SheetOffcutSummary {
+  const cleanRects = subtractOccupiedRects(
+    rects,
+    placements.map((placement) => ({
+      x: placement.x,
+      y: placement.y,
+      w: placement.w,
+      h: placement.h,
+    })),
+  );
   const reusable: OffcutRect[] = [];
   const scrap: OffcutRect[] = [];
-  for (const r of rects) {
+  for (const r of cleanRects) {
     const out: OffcutRect = { x: r.x, y: r.y, w: r.w, h: r.h, area_mm2: r.w * r.h };
     if (isReusableOffcut(r, cfg)) reusable.push(out);
     else scrap.push(out);
@@ -1084,6 +1094,7 @@ export function packWithStrips(
       offcut_summary: summarizeOffcuts(
         computeStripRemnants(sheetStrips, sheetWidth, sheetHeight),
         fullConfig,
+        placements,
       ),
     });
 

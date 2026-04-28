@@ -19,9 +19,11 @@ import { ProductBOM } from './product-bom'
 import { ProductBOL } from './product-bol'
 import { useToast } from '@/components/ui/use-toast'
 import { ProductPricingSection } from './ProductPricingSection'
-import type { CutlistCostingSnapshot } from '@/lib/cutlist/costingSnapshot'
-import { computePartsHash } from '@/lib/cutlist/costingSnapshot'
+import { useProductPricing } from '@/hooks/useProductPricing'
+import type { CutlistCostingSnapshot, SnapshotSheet } from '@/lib/cutlist/costingSnapshot'
+import { computePartsHash, getLayoutSheetUsedArea } from '@/lib/cutlist/costingSnapshot'
 import { flattenGroupsToCompactParts } from '@/lib/configurator/cutlistGroupConversion'
+import type { LayoutResult } from '@/lib/cutlist/types'
 
 type BomRow = {
   bom_id: number
@@ -118,16 +120,54 @@ interface CutlistMaterialCostLine {
   paddedCost: number | null
 }
 
+function findLayoutSheet(layout: LayoutResult | null | undefined, sheet: SnapshotSheet, index: number) {
+  if (!layout) return null
+  return layout.sheets.find((layoutSheet) => layoutSheet.sheet_id === sheet.sheet_id) ?? layout.sheets[index] ?? null
+}
+
+function getSnapshotSheetUsedArea(
+  sheet: SnapshotSheet,
+  layout: LayoutResult | null | undefined,
+  index: number,
+): number {
+  const storedUsedArea = Number.isFinite(sheet.used_area_mm2) ? sheet.used_area_mm2 : 0
+  if (storedUsedArea > 0) return storedUsedArea
+  return getLayoutSheetUsedArea(findLayoutSheet(layout, sheet, index))
+}
+
+function getSnapshotSheetArea(
+  snap: CutlistCostingSnapshot,
+  sheet: SnapshotSheet,
+  layout: LayoutResult | null | undefined,
+  index: number,
+  kind: 'primary' | 'backer',
+): number {
+  if (sheet.sheet_length_mm > 0 && sheet.sheet_width_mm > 0) {
+    return sheet.sheet_length_mm * sheet.sheet_width_mm
+  }
+
+  const layoutSheet = findLayoutSheet(layout, sheet, index)
+  if ((layoutSheet?.stock_length_mm ?? 0) > 0 && (layoutSheet?.stock_width_mm ?? 0) > 0) {
+    return (layoutSheet?.stock_length_mm ?? 0) * (layoutSheet?.stock_width_mm ?? 0)
+  }
+
+  const material = kind === 'backer'
+    ? snap.calculator_inputs.backerBoards.find((board) => board.id === sheet.material_id) ?? snap.calculator_inputs.backerBoards[0]
+    : snap.calculator_inputs.primaryBoards.find((board) => board.id === sheet.material_id) ?? snap.calculator_inputs.primaryBoards[0]
+
+  return material ? material.length_mm * material.width_mm : 0
+}
+
 function deriveCutlistCostLines(snap: CutlistCostingSnapshot): CutlistMaterialCostLine[] {
   const lines: CutlistMaterialCostLine[] = []
 
   // Board lines — aggregate per material from per-sheet data
   const materialSheets = new Map<string, { actual: number; padded: number; name: string }>()
-  for (const sheet of snap.sheets) {
+  for (const [index, sheet] of snap.sheets.entries()) {
     const matId = sheet.material_id || 'unknown'
     const current = materialSheets.get(matId) ?? { actual: 0, padded: 0, name: sheet.material_name }
-    const sheetArea = sheet.sheet_length_mm * sheet.sheet_width_mm
-    const usedFrac = sheetArea > 0 ? sheet.used_area_mm2 / sheetArea : 0
+    const sheetArea = getSnapshotSheetArea(snap, sheet, snap.primary_layout, index, 'primary')
+    const usedFrac = sheetArea > 0 ? getSnapshotSheetUsedArea(sheet, snap.primary_layout, index) / sheetArea : 0
     current.actual += usedFrac
 
     let billedFrac = usedFrac
@@ -177,9 +217,9 @@ function deriveCutlistCostLines(snap: CutlistCostingSnapshot): CutlistMaterialCo
   if (snap.backer_sheets && snap.backer_sheets.length > 0) {
     let backerActual = 0
     let backerPadded = 0
-    for (const s of snap.backer_sheets) {
-      const area = s.sheet_length_mm * s.sheet_width_mm
-      const frac = area > 0 ? s.used_area_mm2 / area : 0
+    for (const [index, s] of snap.backer_sheets.entries()) {
+      const area = getSnapshotSheetArea(snap, s, snap.backer_layout, index, 'backer')
+      const frac = area > 0 ? getSnapshotSheetUsedArea(s, snap.backer_layout, index) / area : 0
       backerActual += frac
       let billed = frac
       if (snap.backer_global_full_board) {
@@ -212,6 +252,7 @@ export function ProductCosting({ productId }: { productId: number }) {
   const [activeSection, setActiveSection] = useState<CostingSection>('summary')
   const queryClient = useQueryClient()
   const { toast } = useToast()
+  const { price } = useProductPricing(productId)
 
   // Feature flag: include linked sub-products in Effective BOM
   const featureAttach = typeof process !== 'undefined' && process.env.NEXT_PUBLIC_FEATURE_ATTACH_BOM === 'true'
@@ -532,6 +573,11 @@ export function ProductCosting({ productId }: { productId: number }) {
   const topDrivers = costDrivers.slice(0, 8)
 
   const pctOf = (v: number) => (unitCost > 0 ? ((v / unitCost) * 100).toFixed(1) : '0.0')
+  const sellingPrice = price?.selling_price ?? 0
+  const profitAmount = Math.max(0, sellingPrice - unitCost)
+  const hasSellingPriceBreakdown = sellingPrice > 0 && profitAmount > 0
+  const summaryTotal = hasSellingPriceBreakdown ? sellingPrice : unitCost
+  const summaryPctOf = (v: number) => (summaryTotal > 0 ? ((v / summaryTotal) * 100).toFixed(1) : '0.0')
 
   const categoryMeta: Record<string, { color: string; bg: string; icon: React.ReactNode }> = {
     Materials: { color: 'text-blue-400', bg: 'bg-blue-500', icon: <Package className="h-4 w-4" /> },
@@ -588,12 +634,19 @@ export function ProductCosting({ productId }: { productId: number }) {
               <div className="py-8 text-center text-muted-foreground">Loading cost data...</div>
             ) : (
               <>
-                {/* Hero unit cost + composition bar */}
+                {/* Hero unit cost / selling price composition bar */}
                 <div className="rounded-lg border bg-card p-5">
                   <div className="flex items-baseline justify-between mb-4">
                     <div>
-                      <div className="text-sm font-medium text-muted-foreground mb-1">Total Unit Cost</div>
-                      <div className="text-3xl font-bold tracking-tight">{fmtMoney(unitCost)}</div>
+                      <div className="text-sm font-medium text-muted-foreground mb-1">
+                        {hasSellingPriceBreakdown ? 'Selling Price Breakdown' : 'Total Unit Cost'}
+                      </div>
+                      <div className="text-3xl font-bold tracking-tight">{fmtMoney(summaryTotal)}</div>
+                      {hasSellingPriceBreakdown && (
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          Unit cost {fmtMoney(unitCost)} · Profit {fmtMoney(profitAmount)}
+                        </div>
+                      )}
                     </div>
                     {missingPrices > 0 && (
                       <div className="flex items-center gap-1.5 text-amber-500 text-sm">
@@ -604,41 +657,65 @@ export function ProductCosting({ productId }: { productId: number }) {
                   </div>
 
                   {/* Composition bar */}
-                  {unitCost > 0 ? (
+                  {summaryTotal > 0 ? (
                     <div className="space-y-2">
                       <div className="flex h-3 w-full overflow-hidden rounded-full bg-muted/50">
                         {totalMaterialsCost > 0 && (
                           <div
-                            className="bg-blue-500 transition-all duration-500"
-                            style={{ width: `${pctOf(totalMaterialsCost)}%` }}
+                            className="origin-left animate-composition-segment bg-blue-500"
+                            style={{
+                              width: `${summaryPctOf(totalMaterialsCost)}%`,
+                              animationDelay: '0ms',
+                            }}
                           />
                         )}
                         {labourCost > 0 && (
                           <div
-                            className="bg-emerald-500 transition-all duration-500"
-                            style={{ width: `${pctOf(labourCost)}%` }}
+                            className="origin-left animate-composition-segment bg-emerald-500"
+                            style={{
+                              width: `${summaryPctOf(labourCost)}%`,
+                              animationDelay: '90ms',
+                            }}
                           />
                         )}
                         {overheadCost > 0 && (
                           <div
-                            className="bg-amber-500 transition-all duration-500"
-                            style={{ width: `${pctOf(overheadCost)}%` }}
+                            className="origin-left animate-composition-segment bg-amber-500"
+                            style={{
+                              width: `${summaryPctOf(overheadCost)}%`,
+                              animationDelay: '180ms',
+                            }}
+                          />
+                        )}
+                        {hasSellingPriceBreakdown && profitAmount > 0 && (
+                          <div
+                            className="origin-left animate-composition-segment bg-violet-500"
+                            style={{
+                              width: `${summaryPctOf(profitAmount)}%`,
+                              animationDelay: '270ms',
+                            }}
                           />
                         )}
                       </div>
                       <div className="flex items-center gap-4 text-xs text-muted-foreground">
                         <span className="flex items-center gap-1.5">
                           <span className="inline-block h-2.5 w-2.5 rounded-full bg-blue-500" />
-                          Materials {pctOf(totalMaterialsCost)}%
+                          Materials {summaryPctOf(totalMaterialsCost)}%
                         </span>
                         <span className="flex items-center gap-1.5">
                           <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                          Labor {pctOf(labourCost)}%
+                          Labor {summaryPctOf(labourCost)}%
                         </span>
                         <span className="flex items-center gap-1.5">
                           <span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-500" />
-                          Overhead {pctOf(overheadCost)}%
+                          Overhead {summaryPctOf(overheadCost)}%
                         </span>
+                        {hasSellingPriceBreakdown && (
+                          <span className="flex items-center gap-1.5">
+                            <span className="inline-block h-2.5 w-2.5 rounded-full bg-violet-500" />
+                            Profit {summaryPctOf(profitAmount)}%
+                          </span>
+                        )}
                       </div>
                     </div>
                   ) : (
@@ -784,13 +861,32 @@ export function ProductCosting({ productId }: { productId: number }) {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {cutlistCostLines.map((line, i) => (
-                      <TableRow key={i}>
-                        <TableCell className="text-sm">{line.label}</TableCell>
+                    {cutlistCostLines.map((line, i) => {
+                      const isUnderPadded = line.padded + 0.0005 < line.actual
+
+                      return (
+                      <TableRow key={i} className={isUnderPadded ? 'bg-yellow-500/5' : undefined}>
+                        <TableCell className="text-sm">
+                          <div className="flex flex-col gap-1">
+                            <span>{line.label}</span>
+                            {isUnderPadded && (
+                              <div className="flex items-center gap-2 text-xs text-yellow-200">
+                                <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+                                <span>Padded is below actual usage.</span>
+                                <a
+                                  href={`/products/${productId}/cutlist-builder`}
+                                  className="text-primary underline underline-offset-2"
+                                >
+                                  Adjust
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        </TableCell>
                         <TableCell className="text-right tabular-nums text-sm">
                           {line.actual.toFixed(3)} {line.unit}
                         </TableCell>
-                        <TableCell className="text-right tabular-nums text-sm font-medium">
+                        <TableCell className={`text-right tabular-nums text-sm font-medium ${isUnderPadded ? 'text-yellow-200' : ''}`}>
                           {line.padded.toFixed(3)} {line.unit}
                         </TableCell>
                         <TableCell className="text-right tabular-nums text-sm">
@@ -804,7 +900,8 @@ export function ProductCosting({ productId }: { productId: number }) {
                           {fmtMoney(line.paddedCost)}
                         </TableCell>
                       </TableRow>
-                    ))}
+                      )
+                    })}
                     <TableRow className="border-t-2">
                       <TableCell className="font-medium text-sm">Cutlist Subtotal</TableCell>
                       <TableCell />

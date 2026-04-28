@@ -130,6 +130,7 @@ Current tenancy note:
 - **Options** – Manage configurable attributes (option groups + values) and hook BOM overrides
 - **Costing** – Combined materials + labor unit cost summary (see `docs/plans/product-costing-plan.md`)
   - Product overhead load/add/remove actions now go through the authenticated `/api/products/:productId/overhead` route so organization-scoped product access checks receive the active Supabase bearer token.
+  - The Add Overhead dialog can create a new active overhead cost element inline and then assign it to the product, avoiding a detour through Inventory when the needed overhead element does not exist yet.
 - Options tab specifics:
   - Focuses on attaching **Option Sets** from the global library (see `docs/domains/components/bom-option-cut.md`).
   - Displays attached sets in order; each group shows usage badges indicating which BOM rows reference it.

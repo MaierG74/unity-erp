@@ -2,6 +2,7 @@
 
 import { use, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
@@ -62,6 +63,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
   const { productId: productIdParam } = use(params);
   const productId = parseInt(productIdParam, 10);
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   const [initialData, setInitialData] = useState<
     Partial<CutlistCalculatorData> | undefined
@@ -74,6 +76,14 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
   const dataRef = useRef<CutlistCalculatorData | null>(null);
   const summaryRef = useRef<CutlistSummary | null>(null);
   const adapter = useProductCutlistBuilderAdapter(productId);
+
+  const invalidateProductCostingQueries = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['cutlist-costing-snapshot', productId] }),
+      queryClient.invalidateQueries({ queryKey: ['cutlist-groups-costing', productId] }),
+      queryClient.invalidateQueries({ queryKey: ['product-piecework-labor', productId] }),
+    ]);
+  }, [productId, queryClient]);
 
   // Load product cutlist groups on mount
   useEffect(() => {
@@ -187,6 +197,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
           await persistSnapshot();
         }
       }
+      await invalidateProductCostingQueries();
       toast.success('Cutlist saved to product');
       setDirty(false);
     } catch {
@@ -194,7 +205,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
     } finally {
       setSaving(false);
     }
-  }, [adapter, persistSnapshot]);
+  }, [adapter, invalidateProductCostingQueries, persistSnapshot]);
 
   const [savingToCosting, setSavingToCosting] = useState(false);
 
@@ -209,6 +220,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
       adapter.cancelPendingSave();
       await adapter.save(data);
       await persistSnapshot();
+      await invalidateProductCostingQueries();
       toast.success('Costing snapshot saved');
       setDirty(false);
     } catch (err) {
@@ -217,7 +229,7 @@ export default function CutlistBuilderPage({ params }: CutlistBuilderPageProps) 
     } finally {
       setSavingToCosting(false);
     }
-  }, [adapter, persistSnapshot]);
+  }, [adapter, invalidateProductCostingQueries, persistSnapshot]);
 
   if (isNaN(productId)) {
     return (

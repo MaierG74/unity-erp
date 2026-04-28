@@ -73,6 +73,16 @@ export type RestoredCutlistCostingSnapshot = CutlistCostingSnapshot & {
   parts_hash?: string;
 };
 
+export function sumLayoutPlacementArea(sheet: { placements?: Array<{ w: number; h: number }> } | null | undefined): number {
+  return (sheet?.placements ?? []).reduce((sum, placement) => sum + placement.w * placement.h, 0);
+}
+
+export function getLayoutSheetUsedArea(sheet: { used_area_mm2?: number; placements?: Array<{ w: number; h: number }> } | null | undefined): number {
+  if (!sheet) return 0;
+  const storedUsedArea = Number.isFinite(sheet.used_area_mm2) ? sheet.used_area_mm2 ?? 0 : 0;
+  return storedUsedArea > 0 ? storedUsedArea : sumLayoutPlacementArea(sheet);
+}
+
 // =============================================================================
 // Parts Hash
 // =============================================================================
@@ -135,9 +145,9 @@ export function buildSnapshotFromCalculator(args: BuildSnapshotArgs): CutlistCos
     sheet_id: s.sheet_id,
     material_id: s.placements.find(p => p.material_id)?.material_id || defaultBoard?.id || '',
     material_name: s.material_label || defaultBoard?.name || '',
-    sheet_length_mm: s.stock_length_mm || 0,
-    sheet_width_mm: s.stock_width_mm || 0,
-    used_area_mm2: s.used_area_mm2 || 0,
+    sheet_length_mm: s.stock_length_mm || defaultBoard?.length_mm || 0,
+    sheet_width_mm: s.stock_width_mm || defaultBoard?.width_mm || 0,
+    used_area_mm2: getLayoutSheetUsedArea(s),
     billing_override: sheetOverrides[s.sheet_id]
       ? { mode: sheetOverrides[s.sheet_id].mode, manualPct: sheetOverrides[s.sheet_id].manualPct }
       : null,
@@ -150,9 +160,9 @@ export function buildSnapshotFromCalculator(args: BuildSnapshotArgs): CutlistCos
         sheet_id: s.sheet_id,
         material_id: defaultBacker?.id || '',
         material_name: defaultBacker?.name || '',
-        sheet_length_mm: s.stock_length_mm || 0,
-        sheet_width_mm: s.stock_width_mm || 0,
-        used_area_mm2: s.used_area_mm2 || 0,
+        sheet_length_mm: s.stock_length_mm || defaultBacker?.length_mm || 0,
+        sheet_width_mm: s.stock_width_mm || defaultBacker?.width_mm || 0,
+        used_area_mm2: getLayoutSheetUsedArea(s),
         billing_override: backerSheetOverrides[s.sheet_id]
           ? { mode: backerSheetOverrides[s.sheet_id].mode, manualPct: backerSheetOverrides[s.sheet_id].manualPct }
           : null,

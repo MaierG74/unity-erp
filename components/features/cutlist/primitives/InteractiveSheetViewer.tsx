@@ -2,11 +2,12 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Panzoom, { PanzoomObject } from '@panzoom/panzoom';
-import { Minus, Plus, RotateCcw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Minus, Plus, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -110,6 +111,9 @@ export interface InteractiveSheetViewerProps {
   sheetWidth: number;
   sheetLength: number;
   sheetIndex?: number;
+  totalSheets?: number;
+  onPreviousSheet?: () => void;
+  onNextSheet?: () => void;
 }
 
 export function InteractiveSheetViewer({
@@ -119,6 +123,9 @@ export function InteractiveSheetViewer({
   sheetWidth,
   sheetLength,
   sheetIndex,
+  totalSheets,
+  onPreviousSheet,
+  onNextSheet,
 }: InteractiveSheetViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const panzoomTargetRef = useRef<HTMLDivElement>(null);
@@ -128,6 +135,13 @@ export function InteractiveSheetViewer({
   const [highlightedPartId, setHighlightedPartId] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState<TooltipInfo | null>(null);
   const [panzoomReady, setPanzoomReady] = useState(false);
+  const sheetPosition = sheetIndex != null ? sheetIndex + 1 : undefined;
+  const canPagePrevious = sheetIndex != null && sheetIndex > 0 && Boolean(onPreviousSheet);
+  const canPageNext =
+    sheetIndex != null &&
+    totalSheets != null &&
+    sheetIndex < totalSheets - 1 &&
+    Boolean(onNextSheet);
 
   // Build color map from placements
   const colorMap = useMemo(
@@ -185,16 +199,40 @@ export function InteractiveSheetViewer({
   useEffect(() => {
     if (open) {
       setPanzoomReady(false);
+      setHighlightedPartId(null);
+      setTooltip(null);
       // Delay so the dialog content has rendered and has real dimensions
       const timer = setTimeout(initPanzoom, 150);
-      return () => clearTimeout(timer);
+      return () => {
+        clearTimeout(timer);
+        cleanupPanzoom();
+      };
     } else {
       cleanupPanzoom();
       setPanzoomReady(false);
       setHighlightedPartId(null);
       setTooltip(null);
     }
-  }, [open, initPanzoom, cleanupPanzoom]);
+  }, [open, sheetLayout.sheet_id, initPanzoom, cleanupPanzoom]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.key === 'ArrowLeft' && canPagePrevious) {
+        event.preventDefault();
+        onPreviousSheet?.();
+      }
+      if (event.key === 'ArrowRight' && canPageNext) {
+        event.preventDefault();
+        onNextSheet?.();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [open, canPagePrevious, canPageNext, onPreviousSheet, onNextSheet]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -272,8 +310,8 @@ export function InteractiveSheetViewer({
   );
   const usagePct = `${breakdown.mechanicalPctRaw.toFixed(1)}`;
 
-  const title = sheetIndex != null
-    ? `Sheet ${sheetIndex + 1}${sheetLayout.material_label ? ` — ${sheetLayout.material_label}` : ''}`
+  const title = sheetPosition != null
+    ? `Sheet ${sheetPosition}${totalSheets && totalSheets > 1 ? ` of ${totalSheets}` : ''}${sheetLayout.material_label ? ` — ${sheetLayout.material_label}` : ''}`
     : `Sheet preview${sheetLayout.material_label ? ` — ${sheetLayout.material_label}` : ''}`;
 
   return (
@@ -295,14 +333,47 @@ export function InteractiveSheetViewer({
           '[&>div:first-child]:h-full',
         ].join(' ')}
       >
-        <DialogHeader className="px-4 pt-4 pb-2 shrink-0">
-          <DialogTitle className="flex items-baseline gap-3">
-            <span>{title}</span>
-            <span className="text-sm font-normal text-muted-foreground">
-              {Math.round(sheetWidth)} x {Math.round(sheetLength)} mm
-              {usagePct && ` | ${usagePct}% used`}
-            </span>
-          </DialogTitle>
+        <DialogHeader className="px-4 pt-4 pr-12 pb-2 shrink-0">
+          <div className="flex items-center justify-between gap-3">
+            <DialogTitle className="flex min-w-0 items-baseline gap-3">
+              <span className="truncate">{title}</span>
+              <span className="shrink-0 text-sm font-normal text-muted-foreground">
+                {Math.round(sheetWidth)} x {Math.round(sheetLength)} mm
+                {usagePct && ` | ${usagePct}% used`}
+              </span>
+            </DialogTitle>
+            {totalSheets && totalSheets > 1 && (
+              <div className="flex shrink-0 items-center gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  aria-label="Previous sheet"
+                  title="Previous sheet"
+                  disabled={!canPagePrevious}
+                  onClick={onPreviousSheet}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  aria-label="Next sheet"
+                  title="Next sheet"
+                  disabled={!canPageNext}
+                  onClick={onNextSheet}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
+          </div>
+          <DialogDescription className="sr-only">
+            Zoomed cutlist sheet preview with placed parts, reusable offcuts, utilization, and part legend.
+          </DialogDescription>
         </DialogHeader>
 
         {/* Body: flex-1 min-h-0 ensures it takes remaining space without

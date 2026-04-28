@@ -31,6 +31,9 @@ Product cutlist builder behavior:
   - quote cutlists use `useQuoteCutlistAdapterV2`
   - product cutlists use `useProductCutlistBuilderAdapter`
 - Product cutlist costing snapshots persist the calculated primary and backer layouts inside `snapshot_data` and restore them on load when the row `parts_hash` still matches the current parts. Older snapshots without stored layouts still behave like no saved layout, and parts-hash mismatches show a stale-layout banner until the user recalculates and saves.
+- Snapshot costing derives sheet usage from `used_area_mm2` when present and falls back to summed sheet placements for legacy or optimizer outputs that did not populate the field. This keeps primary and backer **Actual** sheet usage in the product Materials tab aligned with the nesting preview's actual parts usage.
+- The Product Costing **Cutlist Materials** table warns when a row's padded quantity is lower than actual usage and links back to the Cutlist Builder so the estimator can correct the per-sheet manual percentage.
+- Product cutlist saves invalidate the Product Costing cutlist snapshot, cutlist-groups, and computed piecework-labor queries so returning to the Costing Labor tab does not show labor counts from a previously saved cutlist.
 
 ---
 
@@ -171,11 +174,13 @@ Shows the optimized cutting layout after clicking **Calculate Layout**:
   - Backer board costing follows the packed backer layout and the same per-sheet billing overrides used in the preview.
   - Backer cost is reported as an overall lamination run cost rather than being allocated into individual primary-board material cards.
 - **Backer board cutlist** when parts are set to **With Backer** lamination, with the same per-sheet billing toggles
-- The zoomed sheet viewer shows separate **Grain** and **Edges** columns in the legend and uses a wider dialog so the legend is less likely to clip on desktop screens.
+- The zoomed sheet viewer shows separate **Grain** and **Edges** columns in the legend, uses a wider dialog so the legend is less likely to clip on desktop screens, and can page between sheets with previous/next controls or the left/right arrow keys.
 - When offcut-aware layouts are used, the preview now separates **reusable offcuts** from **scrap pockets** per sheet using the organization's reusable-offcut thresholds. Both `guillotine` and `strip` packing outputs populate per-sheet `offcut_summary`.
+- Reusable-offcut rectangles are clipped against actual part placements before classification and rendering, so green leftover-stock overlays cannot overlap placed parts even when the strip packer creates broad remnant candidates.
 - Product cutlist builder sheet cards and the zoomed sheet viewer render reusable offcuts as green SVG overlays with dimension labels, list reusable offcut sizes sorted largest-first, and show a segmented utilization bar for parts, reusable stock, and scrap.
-- The per-sheet **Manual %** input keeps its existing costing behavior. Quick-fill chips above it can populate mechanical utilization, effective utilization (parts plus reusable offcuts), or full-sheet billing through the same per-sheet override state.
-- The preview also shows one rolled-up **All sheets** utilization bar across primary and backer sheets so estimators can compare whole-job mechanical and effective utilization without averaging sheet percentages by hand.
+- The per-sheet **Manual %** input keeps its existing costing behavior. Quick-fill chips above it can populate a **Suggested** billing percentage that rounds actual parts usage up to the nearest 10%, exact **Actual** parts usage, or **Full sheet** billing through the same per-sheet override state.
+- The preview also shows one rolled-up **All sheets** utilization bar across primary and backer sheets so estimators can compare whole-job parts, reusable offcut, and scrap percentages without averaging sheet percentages by hand.
+- Utilization bars use shop-floor language: **Parts**, **Reuse**, and **Scrap**. Parts-plus-reusable usage remains in the underlying math, but the UI avoids the older "mechanical" and "effective" labels and does not expose reusable-stock usage as a billing shortcut.
 
 ### Organization Cutlist Defaults
 

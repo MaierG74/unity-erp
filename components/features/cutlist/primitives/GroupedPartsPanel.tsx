@@ -256,8 +256,8 @@ export function GroupedPartsPanel({
                   {emptyUngroupedText}
                 </div>
               ) : (
-                ungroupedParts.map((part) => (
-                  <PartCard key={part.id} part={part} />
+                ungroupedParts.map((part, index) => (
+                  <PartCard key={`${part.id}:${index}`} part={part} />
                 ))
               )}
             </div>

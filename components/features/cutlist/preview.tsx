@@ -166,6 +166,24 @@ export function SheetPreview({
           />
         </pattern>
 
+        {/* Reusable offcuts: sheet-grain stripes over retained stock */}
+        <pattern
+          id={`${pid}-offcut-grain`}
+          width="6"
+          height="6"
+          patternUnits="userSpaceOnUse"
+        >
+          <line
+            x1="3"
+            y1="0"
+            x2="3"
+            y2="6"
+            stroke={REUSABLE_STROKE}
+            strokeOpacity="0.22"
+            strokeWidth="0.5"
+          />
+        </pattern>
+
         {/* Waste area: diagonal crosshatch */}
         <pattern
           id={`${pid}-waste`}
@@ -248,6 +266,132 @@ export function SheetPreview({
             {Math.round(sheetLength)} mm
           </text>
         </>
+      )}
+
+      {/* Reusable offcuts sit in the sheet background layer. Parts render above them. */}
+      {reusableOffcuts.length > 0 && (
+        <g pointerEvents="none">
+          {reusableOffcuts.map((rect, index) => {
+            const x = sheetX + rect.x * scale;
+            const y = sheetY + rect.y * scale;
+            const w = rect.w * scale;
+            const h = rect.h * scale;
+            const centerX = x + w / 2;
+            const centerY = y + h / 2;
+            const long = Math.max(rect.w, rect.h);
+            const short = Math.min(rect.w, rect.h);
+            const dimLabel = `${Math.round(long)} × ${Math.round(short)}`;
+            const areaLabel = `reusable · ${Math.round(rect.area_mm2 / 100)} cm²`;
+            const labelFont = Math.max(MIN_LABEL_FONT, dimFont);
+            const areaFont = Math.max(MIN_LABEL_FONT, dimFont * 0.85);
+            const lineHeight = labelFont * 1.15;
+            const dimWidthEst = labelFont * CHAR_WIDTH_RATIO * dimLabel.length;
+            const areaWidthEst = areaFont * CHAR_WIDTH_RATIO * areaLabel.length;
+            const fitsTwoLine =
+              w >= dimWidthEst + 8 &&
+              w >= areaWidthEst + 8 &&
+              h >= 2 * lineHeight + 4;
+            const fitsOneLine = w >= dimWidthEst + 4 && h >= lineHeight + 2;
+            const leaderBelow = w >= h;
+            const leaderStartX = centerX;
+            const leaderStartY = centerY;
+            const leaderEndX = leaderBelow ? centerX : sheetX + sheetW + 12;
+            const leaderEndY = leaderBelow ? sheetY + sheetH + 12 : centerY;
+            const leaderAnchor = leaderBelow ? 'middle' : 'start';
+            const leaderDy = leaderBelow ? labelFont : labelFont / 2;
+
+            return (
+              <g key={`${rect.x}:${rect.y}:${rect.w}:${rect.h}:${index}`}>
+                <rect
+                  x={x}
+                  y={y}
+                  width={w}
+                  height={h}
+                  rx={1}
+                  ry={1}
+                  fill={REUSABLE_FILL}
+                  fillOpacity={0.85}
+                  stroke={REUSABLE_STROKE}
+                  strokeWidth={1.5}
+                />
+                <rect
+                  x={x}
+                  y={y}
+                  width={w}
+                  height={h}
+                  rx={1}
+                  ry={1}
+                  fill={`url(#${pid}-offcut-grain)`}
+                  pointerEvents="none"
+                />
+                {fitsTwoLine ? (
+                  <text
+                    x={centerX}
+                    y={centerY - lineHeight / 2}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fontFamily="monospace"
+                    pointerEvents="none"
+                  >
+                    <tspan
+                      x={centerX}
+                      fontSize={labelFont}
+                      fontWeight={600}
+                      fill={REUSABLE_LABEL_COLOR}
+                    >
+                      {dimLabel}
+                    </tspan>
+                    <tspan
+                      x={centerX}
+                      dy={lineHeight}
+                      fontSize={areaFont}
+                      fill={REUSABLE_LABEL_COLOR}
+                      opacity={0.9}
+                    >
+                      {areaLabel}
+                    </tspan>
+                  </text>
+                ) : fitsOneLine ? (
+                  <text
+                    x={centerX}
+                    y={centerY}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fontFamily="monospace"
+                    fontSize={labelFont}
+                    fontWeight={600}
+                    fill={REUSABLE_LABEL_COLOR}
+                    pointerEvents="none"
+                  >
+                    {dimLabel}
+                  </text>
+                ) : (
+                  <>
+                    <line
+                      x1={leaderStartX}
+                      y1={leaderStartY}
+                      x2={leaderEndX}
+                      y2={leaderEndY}
+                      stroke={REUSABLE_STROKE}
+                      strokeWidth={1}
+                    />
+                    <text
+                      x={leaderEndX + (leaderBelow ? 0 : 3)}
+                      y={leaderEndY + leaderDy}
+                      textAnchor={leaderAnchor}
+                      fontFamily="monospace"
+                      fontSize={labelFont}
+                      fontWeight={600}
+                      fill={REUSABLE_LABEL_COLOR}
+                    >
+                      {dimLabel}
+                    </text>
+                  </>
+                )}
+              </g>
+            );
+          })}
+        </g>
       )}
 
       {/* Part placements */}
@@ -450,121 +594,6 @@ export function SheetPreview({
           </g>
         );
       })}
-
-      {/* Reusable offcut overlay */}
-      {reusableOffcuts.length > 0 && (
-        <g pointerEvents="none">
-          {reusableOffcuts.map((rect, index) => {
-            const x = sheetX + rect.x * scale;
-            const y = sheetY + rect.y * scale;
-            const w = rect.w * scale;
-            const h = rect.h * scale;
-            const centerX = x + w / 2;
-            const centerY = y + h / 2;
-            const long = Math.max(rect.w, rect.h);
-            const short = Math.min(rect.w, rect.h);
-            const dimLabel = `${Math.round(long)} × ${Math.round(short)}`;
-            const areaLabel = `reusable · ${Math.round(rect.area_mm2 / 100)} cm²`;
-            const labelFont = Math.max(MIN_LABEL_FONT, dimFont);
-            const areaFont = Math.max(MIN_LABEL_FONT, dimFont * 0.85);
-            const lineHeight = labelFont * 1.15;
-            const dimWidthEst = labelFont * CHAR_WIDTH_RATIO * dimLabel.length;
-            const areaWidthEst = areaFont * CHAR_WIDTH_RATIO * areaLabel.length;
-            const fitsTwoLine =
-              w >= dimWidthEst + 8 &&
-              w >= areaWidthEst + 8 &&
-              h >= 2 * lineHeight + 4;
-            const fitsOneLine = w >= dimWidthEst + 4 && h >= lineHeight + 2;
-            const leaderBelow = w >= h;
-            const leaderStartX = centerX;
-            const leaderStartY = centerY;
-            const leaderEndX = leaderBelow ? centerX : sheetX + sheetW + 12;
-            const leaderEndY = leaderBelow ? sheetY + sheetH + 12 : centerY;
-            const leaderAnchor = leaderBelow ? 'middle' : 'start';
-            const leaderDy = leaderBelow ? labelFont : labelFont / 2;
-
-            return (
-              <g key={`${rect.x}:${rect.y}:${rect.w}:${rect.h}:${index}`}>
-                <rect
-                  x={x}
-                  y={y}
-                  width={w}
-                  height={h}
-                  rx={1}
-                  ry={1}
-                  fill={REUSABLE_FILL}
-                  stroke={REUSABLE_STROKE}
-                  strokeWidth={1.5}
-                />
-                {fitsTwoLine ? (
-                  <text
-                    x={centerX}
-                    y={centerY - lineHeight / 2}
-                    textAnchor="middle"
-                    dominantBaseline="middle"
-                    fontFamily="monospace"
-                    pointerEvents="none"
-                  >
-                    <tspan
-                      x={centerX}
-                      fontSize={labelFont}
-                      fontWeight={600}
-                      fill={REUSABLE_LABEL_COLOR}
-                    >
-                      {dimLabel}
-                    </tspan>
-                    <tspan
-                      x={centerX}
-                      dy={lineHeight}
-                      fontSize={areaFont}
-                      fill={REUSABLE_LABEL_COLOR}
-                      opacity={0.9}
-                    >
-                      {areaLabel}
-                    </tspan>
-                  </text>
-                ) : fitsOneLine ? (
-                  <text
-                    x={centerX}
-                    y={centerY}
-                    textAnchor="middle"
-                    dominantBaseline="middle"
-                    fontFamily="monospace"
-                    fontSize={labelFont}
-                    fontWeight={600}
-                    fill={REUSABLE_LABEL_COLOR}
-                    pointerEvents="none"
-                  >
-                    {dimLabel}
-                  </text>
-                ) : (
-                  <>
-                    <line
-                      x1={leaderStartX}
-                      y1={leaderStartY}
-                      x2={leaderEndX}
-                      y2={leaderEndY}
-                      stroke={REUSABLE_STROKE}
-                      strokeWidth={1}
-                    />
-                    <text
-                      x={leaderEndX + (leaderBelow ? 0 : 3)}
-                      y={leaderEndY + leaderDy}
-                      textAnchor={leaderAnchor}
-                      fontFamily="monospace"
-                      fontSize={labelFont}
-                      fontWeight={600}
-                      fill={REUSABLE_LABEL_COLOR}
-                    >
-                      {dimLabel}
-                    </text>
-                  </>
-                )}
-              </g>
-            );
-          })}
-        </g>
-      )}
     </svg>
   );
 }

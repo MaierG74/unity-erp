@@ -24,23 +24,33 @@ Visual horizontal layout: **Unit Cost** + **Markup (amount)** = **Selling Price*
 
 - Unit Cost card — reads from the existing computed `unitCost` (materials + labor + overhead)
 - Markup card — shows the calculated markup amount (amber text), with the percentage/fixed label
-- Selling Price card — green-highlighted card showing the final price
+- Selling Price card — green-highlighted card showing the final price, with an editable amount so estimators can round or override the customer-facing price directly
 
 ### Footer Info
 
 - Margin percentage (profit / selling price × 100)
 - Profit per unit (selling price − unit cost)
 
+### Summary Composition
+
+- Before pricing exists, the Costing summary card shows **Total Unit Cost** with a stacked composition bar for materials, labor, and overhead.
+- Once a standard selling price exists with profit above unit cost, the same card becomes **Selling Price Breakdown** and uses selling price as the denominator.
+- The selling price breakdown bar includes materials, labor, overhead, and profit so the estimator can see where the customer-facing price goes.
+
 ### Save
 
 - "Save Price" button, right-aligned
 - Saves markup type, markup value, and computed selling price to the database
+- If the estimator edits the selling price directly, save it as a fixed-rand markup equal to `selling_price - unitCost`
 - Button disabled when no changes or when unit cost is zero
 
 ### Reactive Behaviour
 
 - Selling price recalculates live as the user types a markup value
+- Direct selling price edits recalculate the displayed profit and margin immediately
 - If unit cost changes (BOM/BOL/overhead edits), the pricing section recalculates based on the saved markup type and value
+- The "markup below target" warning should tolerate normal currency rounding so an effective markup that rounds to the saved target does not warn as below target
+- When a saved percentage target exists, direct selling price edits should keep the warning visible if the typed price would fall below that target
 - If no markup has been saved yet, the section shows empty/zero state with placeholder guidance
 
 ## Data Model

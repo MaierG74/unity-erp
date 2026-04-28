@@ -13,6 +13,7 @@ import { ReusableOffcutList } from './ReusableOffcutList';
 import { UtilizationBar } from './UtilizationBar';
 import { getPartColorMap } from '@/lib/cutlist/colorAssignment';
 import { computeSheetUtilization } from '@/lib/cutlist/effectiveUtilization';
+import { getLayoutSheetUsedArea } from '@/lib/cutlist/costingSnapshot';
 import type {
   LayoutResult,
   StockSheetSpec,
@@ -104,7 +105,7 @@ export function SheetLayoutGrid({
 
       {/* Sheet grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <AnimatePresence mode="wait">
+        <AnimatePresence>
         {result.sheets
           .slice(activePage * sheetsPerPage, activePage * sheetsPerPage + sheetsPerPage)
           .map((sheetLayout, idx) => {
@@ -113,17 +114,19 @@ export function SheetLayoutGrid({
             const sheetL = sheetLayout.stock_length_mm || stockSheet.length_mm;
             const sheetArea = sheetW * sheetL;
             const breakdown = computeSheetUtilization(sheetLayout, sheetW, sheetL);
+            const sheetUsedArea = getLayoutSheetUsedArea(sheetLayout);
             const autoPct =
-              sheetArea > 0 ? ((sheetLayout.used_area_mm2 || 0) / sheetArea) * 100 : 0;
+              sheetArea > 0 ? (sheetUsedArea / sheetArea) * 100 : 0;
             const override = sheetOverrides[sheetLayout.sheet_id];
             const mode = globalFullBoard ? 'full' : (override?.mode ?? 'auto');
             const manualPct = override?.manualPct ?? autoPct;
             const chargePct = mode === 'full' ? 100 : mode === 'manual' ? manualPct : autoPct;
             const chipsDisabled = globalFullBoard || mode === 'full';
+            const roundedActualPct = Math.min(100, Math.ceil(breakdown.mechanicalPctRaw / 10) * 10);
             const quickFillChips = [
-              { label: 'Mech', value: breakdown.mechanicalPctRaw, visible: true },
-              { label: 'Eff', value: breakdown.effectivePctRaw, visible: breakdown.hasReusable },
-              { label: 'Full', value: 100, visible: true },
+              { label: 'Suggested', value: roundedActualPct, visible: true },
+              { label: 'Actual', value: breakdown.mechanicalPctRaw, visible: true },
+              { label: 'Full sheet', value: 100, visible: true },
             ];
 
             return (
@@ -270,7 +273,7 @@ export function SheetLayoutGrid({
 
                   {/* Billing display and reset */}
                   <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                    <span>Billing {chargePct.toFixed(1)}%</span>
+                    <span>Billing {chargePct.toFixed(1)}%{mode === 'manual' ? ' manual' : ''}</span>
                     <Button
                       type="button"
                       variant="link"
@@ -297,6 +300,10 @@ export function SheetLayoutGrid({
         const zoomSheet = result.sheets.find((s) => s.sheet_id === zoomSheetId);
         if (!zoomSheet) return null;
         const zoomIdx = result.sheets.indexOf(zoomSheet);
+        const openZoomAt = (index: number) => {
+          const nextSheet = result.sheets[index];
+          if (nextSheet) setZoomSheetId(nextSheet.sheet_id);
+        };
         return (
           <InteractiveSheetViewer
             open
@@ -305,6 +312,9 @@ export function SheetLayoutGrid({
             sheetWidth={zoomSheet.stock_width_mm || stockSheet.width_mm}
             sheetLength={zoomSheet.stock_length_mm || stockSheet.length_mm}
             sheetIndex={zoomIdx >= 0 ? zoomIdx : undefined}
+            totalSheets={result.sheets.length}
+            onPreviousSheet={zoomIdx > 0 ? () => openZoomAt(zoomIdx - 1) : undefined}
+            onNextSheet={zoomIdx >= 0 && zoomIdx < result.sheets.length - 1 ? () => openZoomAt(zoomIdx + 1) : undefined}
           />
         );
       })()}

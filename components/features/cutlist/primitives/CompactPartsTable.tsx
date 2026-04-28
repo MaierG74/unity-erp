@@ -1039,7 +1039,7 @@ export const CompactPartsTable = memo(forwardRef<CompactPartsTableRef, CompactPa
           {/* Existing parts */}
           {parts.map((part, index) => (
             <PartRow
-              key={part.id}
+              key={`${part.id}:${index}`}
               part={part}
               index={index}
               materialOptions={materialOptions}

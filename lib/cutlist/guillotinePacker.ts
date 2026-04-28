@@ -29,7 +29,7 @@ import type {
   BandEdges,
   SheetOffcutSummary,
 } from './types';
-import { isReusableOffcut } from './offcuts';
+import { isReusableOffcut, subtractOccupiedRects } from './offcuts';
 
 // =============================================================================
 // Configuration
@@ -558,14 +558,23 @@ function pruneContainedRects(freeRects: FreeRect[]): void {
   }
 }
 
-function classifyOffcuts(freeRects: FreeRect[], config: PackingConfig): {
+function classifyOffcuts(freeRects: FreeRect[], config: PackingConfig, placements: Placement[] = []): {
   usableRects: FreeRect[];
   scrapRects: FreeRect[];
 } {
   const usableRects: FreeRect[] = [];
   const scrapRects: FreeRect[] = [];
+  const cleanRects = subtractOccupiedRects(
+    freeRects,
+    placements.map((placement) => ({
+      x: placement.x,
+      y: placement.y,
+      w: placement.w,
+      h: placement.h,
+    })),
+  );
 
-  for (const rect of freeRects) {
+  for (const rect of cleanRects) {
     if (isReusableOffcut(rect, config)) {
       usableRects.push(rect);
     } else {
@@ -1054,7 +1063,7 @@ export function packWithStrategy(
     }
 
     const sheetFreeRects = packer.getFreeRects();
-    const { usableRects, scrapRects } = classifyOffcuts(sheetFreeRects, fullConfig);
+    const { usableRects, scrapRects } = classifyOffcuts(sheetFreeRects, fullConfig, packer.getPlacements());
     const sheetOffcutAreas = sheetFreeRects.map((r) => r.w * r.h);
     const sheetLargestOffcut = sheetOffcutAreas.length > 0 ? Math.max(...sheetOffcutAreas) : 0;
     const sheetTotalOffcut = sheetOffcutAreas.reduce((sum, a) => sum + a, 0);
@@ -1202,7 +1211,7 @@ export function packWithExpandedParts(
 
     // Capture per-sheet offcut info directly from packer state
     const sheetFreeRects = packer.getFreeRects();
-    const { usableRects, scrapRects } = classifyOffcuts(sheetFreeRects, fullConfig);
+    const { usableRects, scrapRects } = classifyOffcuts(sheetFreeRects, fullConfig, packer.getPlacements());
     const sheetOffcutAreas = sheetFreeRects.map((r) => r.w * r.h);
     const sheetLargestOffcut = sheetOffcutAreas.length > 0 ? Math.max(...sheetOffcutAreas) : 0;
     const sheetTotalOffcut = sheetOffcutAreas.reduce((sum, a) => sum + a, 0);

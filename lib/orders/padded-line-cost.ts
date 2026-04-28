@@ -1,4 +1,6 @@
 import type { CutlistCostingSnapshot, SnapshotSheet } from '@/lib/cutlist/costingSnapshot';
+import { getLayoutSheetUsedArea } from '@/lib/cutlist/costingSnapshot';
+import type { LayoutResult } from '@/lib/cutlist/types';
 import { round2 } from './cutting-plan-utils';
 
 export type BomSnapshotEntry = {
@@ -50,14 +52,26 @@ function paddedCutlistCostPerUnit(snap: CutlistCostingSnapshot): number {
   let total = 0;
 
   // Primary sheets — apply billing override per sheet, or global_full_board, or auto (full sheet for now)
-  for (const sheet of snap.sheets) {
-    total += sheetChargeAmount(sheet, snap.board_prices, snap.global_full_board);
+  for (const [index, sheet] of snap.sheets.entries()) {
+    total += sheetChargeAmount(
+      sheet,
+      snap.board_prices,
+      snap.global_full_board,
+      sheetUsedArea(sheet, snap.primary_layout, index),
+      sheetArea(snap, sheet, snap.primary_layout, index, 'primary'),
+    );
   }
 
   // Backer sheets — use backer_price_per_sheet (single price for all backer sheets)
   if (snap.backer_sheets && snap.backer_price_per_sheet != null) {
-    for (const sheet of snap.backer_sheets) {
-      total += backerSheetCharge(sheet, snap.backer_price_per_sheet, snap.backer_global_full_board);
+    for (const [index, sheet] of snap.backer_sheets.entries()) {
+      total += backerSheetCharge(
+        sheet,
+        snap.backer_price_per_sheet,
+        snap.backer_global_full_board,
+        sheetUsedArea(sheet, snap.backer_layout, index),
+        sheetArea(snap, sheet, snap.backer_layout, index, 'backer'),
+      );
     }
   }
 
@@ -76,10 +90,45 @@ function paddedCutlistCostPerUnit(snap: CutlistCostingSnapshot): number {
   return total;
 }
 
+function sheetUsedArea(
+  sheet: SnapshotSheet,
+  layout: LayoutResult | null | undefined,
+  index: number,
+): number {
+  if (sheet.used_area_mm2 > 0) return sheet.used_area_mm2;
+  const layoutSheet = layout?.sheets.find((s) => s.sheet_id === sheet.sheet_id) ?? layout?.sheets[index] ?? null;
+  return getLayoutSheetUsedArea(layoutSheet);
+}
+
+function sheetArea(
+  snap: CutlistCostingSnapshot,
+  sheet: SnapshotSheet,
+  layout: LayoutResult | null | undefined,
+  index: number,
+  kind: 'primary' | 'backer',
+): number {
+  if (sheet.sheet_length_mm > 0 && sheet.sheet_width_mm > 0) {
+    return sheet.sheet_length_mm * sheet.sheet_width_mm;
+  }
+
+  const layoutSheet = layout?.sheets.find((s) => s.sheet_id === sheet.sheet_id) ?? layout?.sheets[index] ?? null;
+  if ((layoutSheet?.stock_length_mm ?? 0) > 0 && (layoutSheet?.stock_width_mm ?? 0) > 0) {
+    return (layoutSheet?.stock_length_mm ?? 0) * (layoutSheet?.stock_width_mm ?? 0);
+  }
+
+  const material = kind === 'backer'
+    ? snap.calculator_inputs.backerBoards.find((board) => board.id === sheet.material_id) ?? snap.calculator_inputs.backerBoards[0]
+    : snap.calculator_inputs.primaryBoards.find((board) => board.id === sheet.material_id) ?? snap.calculator_inputs.primaryBoards[0];
+
+  return material ? material.length_mm * material.width_mm : 0;
+}
+
 function sheetChargeAmount(
   sheet: SnapshotSheet,
   board_prices: { material_id: string; unit_price_per_sheet: number | null }[],
   global_full_board: boolean,
+  usedArea: number,
+  sheetArea: number,
 ): number {
   const price = board_prices.find((b) => b.material_id === sheet.material_id)?.unit_price_per_sheet ?? 0;
   if (price === 0) return 0;
@@ -97,9 +146,8 @@ function sheetChargeAmount(
   }
 
   // Auto: charge used-area proportion of the sheet.
-  const sheetArea = sheet.sheet_length_mm * sheet.sheet_width_mm;
   if (sheetArea === 0) return price; // defensive — fall back to full
-  const usedPct = sheet.used_area_mm2 / sheetArea;
+  const usedPct = usedArea / sheetArea;
   return price * usedPct;
 }
 
@@ -107,6 +155,8 @@ function backerSheetCharge(
   sheet: SnapshotSheet,
   backer_price: number,
   global_full_board: boolean,
+  usedArea: number,
+  sheetArea: number,
 ): number {
   // Same precedence as sheetChargeAmount — global_full_board wins first.
   if (global_full_board) return backer_price;
@@ -118,7 +168,6 @@ function backerSheetCharge(
     // ov.mode === 'auto' → fall through
   }
 
-  const sheetArea = sheet.sheet_length_mm * sheet.sheet_width_mm;
   if (sheetArea === 0) return backer_price;
-  return backer_price * (sheet.used_area_mm2 / sheetArea);
+  return backer_price * (usedArea / sheetArea);
 }
