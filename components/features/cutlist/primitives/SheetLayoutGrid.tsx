@@ -34,6 +34,10 @@ export interface SheetLayoutGridProps {
   sheetsPerPage?: number;
 }
 
+function formatBillingPercent(value: number) {
+  return Number.isFinite(value) ? value.toFixed(2) : '0.00';
+}
+
 export function SheetLayoutGrid({
   result,
   stockSheet,
@@ -235,7 +239,7 @@ export function SheetLayoutGrid({
                           }}
                         >
                           <span className="block font-medium">{chip.label}</span>
-                          <span className="block font-mono">{chip.value.toFixed(1)}</span>
+                          <span className="block font-mono">{formatBillingPercent(chip.value)}</span>
                         </button>
                       ) : null
                     ))}
@@ -249,14 +253,12 @@ export function SheetLayoutGrid({
                       type="number"
                       value={
                         mode === 'manual'
-                          ? Number.isFinite(manualPct)
-                            ? manualPct
-                            : autoPct
-                          : Number(chargePct.toFixed(1))
+                          ? formatBillingPercent(Number.isFinite(manualPct) ? manualPct : autoPct)
+                          : formatBillingPercent(chargePct)
                       }
                       min={0}
                       max={100}
-                      step={0.1}
+                      step={0.01}
                       disabled={globalFullBoard || mode === 'full'}
                       onChange={(e) => {
                         const nextPct = Math.max(
@@ -273,7 +275,7 @@ export function SheetLayoutGrid({
 
                   {/* Billing display and reset */}
                   <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                    <span>Billing {chargePct.toFixed(1)}%{mode === 'manual' ? ' manual' : ''}</span>
+                    <span>Billing {formatBillingPercent(chargePct)}%{mode === 'manual' ? ' manual' : ''}</span>
                     <Button
                       type="button"
                       variant="link"
