@@ -42,9 +42,26 @@ Three MCP servers are available. For setup/troubleshooting, see `docs/technical/
 
 ## Task Tracking
 
-Linear is the canonical tracker. Workspace: **polygon-dev**, team: **Polygon**
-(issue prefix `POL-`). Issues live in area-of-focus projects, not a loose team
-root backlog. The historical `docs/overview/todo-index.md` is reference only.
+Linear is the canonical tracker. Workspace: **polygon-dev**, team: **Polygon** (issue prefix `POL-`).
+
+Issues are organised by **area-of-focus projects**, not one flat backlog:
+
+- **Manufacturing** — production pipeline (BOL, Work Pool, Job Cards, scheduler, exceptions)
+- **Cutlist** — optimiser, cutting plan, material assignment, cut-diagram PDF
+- **Purchasing** — purchase orders, receipts, supplier returns, allocations
+- **Payroll & Timekeeping** — clock-ins, OT policies, payroll-review UI
+- **Auth & Tenancy** — RLS, user lifecycle, permissions, module entitlements, activity logging
+- **AI Assistant** — in-app NLQ + RAG (distinct from OpenClaw)
+- **Platform & UX** — navbar/sidebar, dev tooling, shared utilities
+- **OpenClaw Agents** — standalone autonomous-agents product
+- **Furniture Configurator** — sellable parametric module
+
+Rules of thumb:
+
+- Always file against an existing project; don't drop loose issues into the team root.
+- Use sub-issues for tightly-coupled phases of one feature (e.g. POL-26 Work Pool has 9 phase sub-issues).
+- Use Milestones inside a project when grouping otherwise-independent issues under a phase heading.
+- The historical `docs/overview/todo-index.md` is preserved as a reference but is no longer the source of truth.
 
 ## Linear Workflow
 
@@ -71,8 +88,8 @@ guidance: [docs/workflow/linear-installed-agents-guidance.md](docs/workflow/line
 
 ## Documentation
 
-- **TODO Overview**: [docs/overview/todo-index.md](docs/overview/todo-index.md) is historical reference; Linear is the active tracker.
 - **Index**: [docs/README.md](docs/README.md) is the reference index for all documentation — consult before working on unfamiliar areas.
+- **Plans / specs**: per-feature docs under `docs/plans/`, `docs/projects/`, `docs/domains/` are the canonical technical references; Linear issues link out to them rather than duplicating the content.
 
 ## Architecture
 

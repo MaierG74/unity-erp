@@ -11,6 +11,7 @@ This repository is being actively migrated to **multi-tenant** (organization/ten
 ## Branch Workflow
 - `main` is release-only. Do not use it as the default branch for ongoing feature work.
 - `codex/integration` is the shared working branch. It holds approved but not-yet-released work.
+- **Never commit directly to local `codex/integration` or local `main`.** These branches are write-only via PR merges. The repo enforces this via the pre-commit hook in `.githooks/pre-commit` (one-time install: `git config core.hooksPath .githooks`). If you ever find yourself with HEAD on `codex/integration` and uncommitted edits, branch off first: `git checkout -b codex/local-<task> origin/codex/integration` and redo the work there. This rule exists because direct commits to local `codex/integration` accumulate silently and diverge from the remote — a previous session built up 70 unpushed commits on local integration before being caught (2026-04-28 recovery).
 - Create each new task branch from `codex/integration` unless the user explicitly asks for a different base.
 - Use a dedicated short-lived branch for each meaningful task or session, not for every single message.
 - If local work, cloud Codex, and cloud Claude are running at the same time, each must use a different task branch.

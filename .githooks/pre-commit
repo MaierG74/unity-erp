@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Refuses commits when HEAD is on a protected branch.
+# Protected branches must only receive changes via PR merges.
+#
+# One-time install: git config core.hooksPath .githooks
+# Bypass for emergencies (rare): git commit --no-verify
+#
+# Background: previous Codex sessions accumulated 70 unpushed commits directly
+# on local codex/integration before being caught. The hook prevents this class
+# of drift at the source — Codex / Claude / a human on autopilot can't make
+# the same mistake even if they want to.
+
+set -e
+
+protected_branches=("codex/integration" "main")
+current_branch="$(git symbolic-ref --short HEAD 2>/dev/null || true)"
+
+for protected in "${protected_branches[@]}"; do
+  if [ "$current_branch" = "$protected" ]; then
+    cat >&2 <<EOF
+==============================================================================
+  REFUSED: direct commit to protected branch '$current_branch'
+
+  '$current_branch' is write-only via PR merges. To make this change:
+
+    git checkout -b codex/local-<task> origin/$current_branch
+    # redo the edits there, commit, push, open a PR
+
+  Or, to apply your current uncommitted changes to a fresh feature branch:
+
+    git stash push -m "wip moved off $current_branch"
+    git checkout -b codex/local-<task> origin/$current_branch
+    git stash pop
+
+  See AGENTS.md > Branch Workflow for details. Bypass (rarely needed):
+    git commit --no-verify
+==============================================================================
+EOF
+    exit 1
+  fi
+done
+
+exit 0
