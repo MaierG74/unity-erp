@@ -79,6 +79,7 @@
 **Order Detail & Purchasing Linkage**
 
 - Detail page `app/orders/[orderId]/page.tsx` loads header (`orders` with `order_statuses`, `customers`, and `quotes`) plus `order_details(product:products)`. For configurable products, extend the line editor to surface option selectors sourced from attached **Option Sets** (global + product overlays), persist `selected_options`, and call the shared resolver so FG reservations and purchasing respect the chosen configuration even when an order is created directly (no quote).
+- Product swap and surcharge support extends `order_details.bom_snapshot` with explicit effective fields, `swap_kind`, removed-row semantics, and per-row surcharge metadata. `order_details.surcharge_total` stores the summed commercial surcharge independently of base line price; order totals trigger work is tracked separately from the snapshot/schema phase.
 - The order-detail header tab counts now query live order totals for job cards, purchase-order lines, and stock issuances instead of rendering placeholder zeros. Finished-goods reservation reads and reserve/release/consume actions use authenticated order API requests so the detail page can load under the same organization-scoped access checks as other order mutations.
 - **Stock Issuance** (✅ Implemented January 2025):
   - "Issue Stock" tab on Order Detail page (`IssueStockTab` component)

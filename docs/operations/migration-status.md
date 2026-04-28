@@ -28,11 +28,19 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260427205302
-- Latest applied migration name: piecework_completion_earnings_reopen
-- Applied at (UTC): 2026-04-27 20:53 UTC
-- Applied by: Codex via Supabase MCP namespace `supabase_kinetic` (POL-63)
+- Latest applied migration version: 20260428145105
+- Latest applied migration name: swap_surcharge_view_drift
+- Applied at (UTC): 2026-04-28 14:51 UTC
+- Applied by: Codex via Supabase MCP namespace `supabase_kinetic` (POL-72; default `mcp__supabase__` namespace was unauthorized)
 - Verification notes:
+  - Current batch (2026-04-28, Codex / POL-72 Phase A1):
+    1. `swap_surcharge_snapshot_schema` (20260428144905; local file `20260428143000_swap_surcharge_snapshot_schema.sql`): added `quote_items.product_id`, `quote_items.bom_snapshot`, `quote_items.surcharge_total`, `order_details.surcharge_total`, `products(product_id, org_id)` unique constraint, and the `quote_items(product_id, org_id)` composite FK; backfilled existing `order_details.bom_snapshot` rows with explicit swap/effective/surcharge fields.
+    2. `bom_swap_exceptions` (20260428144937; local file `20260428143100_bom_swap_exceptions.sql`): added org-scoped `bom_swap_exceptions`, `bom_swap_exception_activity`, queue/open indexes, RLS policies, updated-at trigger, and `upsert_bom_swap_exception(...)`.
+    3. `snapshot_effective_field_rpcs` (20260428145035; local file `20260428143200_snapshot_effective_field_rpcs.sql`): superseded `get_detailed_component_status(p_order_id)` and `reserve_order_components(p_order_id, p_org_id)` so BOM snapshot demand uses `effective_component_id` / `effective_quantity_required` with legacy field fallback and drops zero-demand removed rows.
+    4. `swap_surcharge_view_drift` (20260428145105; local file `20260428143300_swap_surcharge_view_drift.sql`): appended `order_detail_surcharge_total` to `factory_floor_status` and `jobs_in_factory`.
+    5. Verified with Supabase MCP `list_migrations`; production history reports the four POL-72 migrations after the pre-existing `20260428120545 supplier_order_balance_closures` migration.
+    6. Verified with MCP SQL: new quote/order columns, composite FK, RLS-enabled exception tables/policies, helper RPC signatures, effective-field RPC signatures, and factory-floor view surcharge columns are present. SQL extraction test cases passed for no-swap parity, alternative swap, and removed swap (`demand_component_id = null` for removed rows).
+    7. Ran Supabase security advisors after apply; findings remain broad pre-existing RLS-disabled/security-definer/function-search-path warnings plus the intentional authenticated `SECURITY DEFINER` warning for `upsert_bom_swap_exception(...)`.
   - Current batch (2026-04-27, Codex / POL-63):
     1. `piecework_completion_earnings_reopen` (20260427205302; local file `20260427205302_piecework_completion_earnings_reopen.sql`): added the explicit `staff_piecework_earning_entries` ledger, preserved the existing `staff_piecework_earnings` reader shape with an insert-trigger-backed view, added `complete_piecework_assignment(...)`, and added `reopen_piecework_job_card(...)` with negating earnings rows.
     2. Discovery evidence before writing/apply: production `staff_piecework_earnings` is a view, not a base table; its nullable `item_id`, `job_id`, and `product_id` columns remain present for cut/edge cards; `job_cards` already has nullable `piecework_activity_id`, `expected_count`, `actual_count`, and `rate_snapshot`.

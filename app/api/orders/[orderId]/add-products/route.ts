@@ -5,11 +5,16 @@ import { supabaseAdmin } from '@/lib/supabase-admin';
 import { buildBomSnapshot } from '@/lib/orders/build-bom-snapshot';
 import { buildCutlistSnapshot } from '@/lib/orders/build-cutlist-snapshot';
 import { markCuttingPlanStale } from '@/lib/orders/cutting-plan-utils';
+import { calculateBomSnapshotSurchargeTotal } from '@/lib/orders/snapshot-utils';
 
 type Substitution = {
   bom_id: number;
-  component_id: number;
+  component_id?: number | null;
   supplier_component_id?: number | null;
+  swap_kind?: 'default' | 'alternative' | 'removed';
+  is_removed?: boolean;
+  surcharge_amount?: number | string | null;
+  surcharge_label?: string | null;
   note?: string;
 };
 
@@ -103,6 +108,7 @@ export async function POST(
       unit_price: number;
       bom_snapshot: unknown;
       cutlist_snapshot: unknown;
+      surcharge_total: number;
     }[] = [];
 
     for (const detail of products) {
@@ -126,6 +132,7 @@ export async function POST(
           // Build cutlist snapshot first (we need groupMap for BOM snapshot)
           // Derive materialOverrides from substitutions + BOM is_cutlist_item flags
           const materialOverrides = new Map<number, { component_id: number; name: string }>();
+          const removedMaterialIds = new Set<number>();
 
           if (substitutions.length > 0) {
             // Load BOM to identify cutlist items that were substituted
@@ -137,7 +144,14 @@ export async function POST(
             for (const bomRow of bomRows ?? []) {
               if (!bomRow.is_cutlist_item) continue;
               const sub = substitutions.find(s => s.bom_id === bomRow.bom_id);
-              if (sub && sub.component_id !== bomRow.component_id) {
+              if (sub?.swap_kind === 'removed' || sub?.is_removed) {
+                if (bomRow.component_id != null) {
+                  removedMaterialIds.add(bomRow.component_id);
+                }
+                continue;
+              }
+
+              if (sub?.component_id != null && sub.component_id !== bomRow.component_id) {
                 // Load the substitute component name
                 const { data: comp } = await supabaseAdmin
                   .from('components')
@@ -159,7 +173,8 @@ export async function POST(
           const { snapshot: cutlistSnap, groupMap } = await buildCutlistSnapshot(
             normalizedProductId,
             auth.orgId,
-            materialOverrides
+            materialOverrides,
+            removedMaterialIds
           );
           cutlistSnapshot = cutlistSnap;
 
@@ -184,6 +199,7 @@ export async function POST(
         unit_price: normalizedUnitPrice,
         bom_snapshot: bomSnapshot,
         cutlist_snapshot: cutlistSnapshot,
+        surcharge_total: calculateBomSnapshotSurchargeTotal(bomSnapshot),
       });
     }
 

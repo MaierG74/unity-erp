@@ -8,6 +8,7 @@ import {
   QuoteAttachment,
   QuoteItemType,
   QuoteItemTextAlign,
+  QuoteItemCutlist,
   createQuoteItem,
   updateQuoteItem,
   deleteQuoteItem,
@@ -1021,6 +1022,9 @@ export default function QuoteItemsTable({
           qty: originalItem.qty,
           unit_price: originalItem.unit_price,
           total: originalItem.total,
+          product_id: originalItem.product_id ?? null,
+          bom_snapshot: originalItem.bom_snapshot ?? null,
+          surcharge_total: originalItem.surcharge_total ?? 0,
           item_type: originalItem.item_type,
           text_align: originalItem.text_align,
           bullet_points: originalItem.bullet_points,
@@ -1088,7 +1092,7 @@ export default function QuoteItemsTable({
         }
       }
 
-      let duplicatedCutlistSnapshot = null;
+      let duplicatedCutlistSnapshot: QuoteItemCutlist | null = null;
       const originalCutlistSnapshot = await fetchQuoteItemCutlistSnapshot(id);
       if (originalCutlistSnapshot) {
         const duplicatedLineRefs = buildCutlistLineRefsFromLines(

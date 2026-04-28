@@ -3,6 +3,9 @@
 **Date:** 2026-03-29
 **Status:** Approved (v2 — addresses Codex design review findings)
 
+**v3 - extended for swap-on-quote, surcharge, removal target, and downstream exception.**
+See [`2026-04-28-product-swap-and-surcharge.md`](../../plans/2026-04-28-product-swap-and-surcharge.md) for the canonical phased implementation plan.
+
 ## Problem
 
 Two related problems when adding products to orders:

@@ -2,12 +2,21 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { requireModuleAccess } from '@/lib/api/module-access';
 import { MODULE_KEYS } from '@/lib/modules/keys';
+import { buildBomSnapshot } from '@/lib/orders/build-bom-snapshot';
+import { buildCutlistSnapshot } from '@/lib/orders/build-cutlist-snapshot';
+import {
+  calculateBomSnapshotSurchargeTotal,
+  deriveCutlistSwapEffectsFromBomSnapshot,
+} from '@/lib/orders/snapshot-utils';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
 type QuoteItemRow = {
   description: string | null;
   qty: number | null;
   unit_price: number | null;
+  product_id?: number | null;
+  bom_snapshot?: unknown;
+  surcharge_total?: number | string | null;
 };
 
 async function requireOrdersAccess(request: NextRequest) {
@@ -130,7 +139,7 @@ export async function POST(req: NextRequest) {
     try {
       const { data: items } = await supabaseAdmin
         .from('quote_items')
-        .select('description, qty, unit_price')
+        .select('description, qty, unit_price, product_id, bom_snapshot, surcharge_total')
         .eq('quote_id', quoteId);
 
       if (items && items.length > 0) {
@@ -141,7 +150,7 @@ export async function POST(req: NextRequest) {
               .filter(Boolean)
           )
         );
-        let productMap = new Map<string, number>();
+        const productMap = new Map<string, number>();
         if (descriptions.length > 0) {
           const { data: products } = await supabaseAdmin
             .from('products')
@@ -155,22 +164,46 @@ export async function POST(req: NextRequest) {
         }
 
         const detailsToInsert = (items as QuoteItemRow[])
-          .map((it) => {
+          .map(async (it) => {
             const key = String(it.description || '').trim().toLowerCase();
-            const productId = key ? productMap.get(key) : undefined;
+            const directProductId = Number(it.product_id);
+            const productId = Number.isFinite(directProductId) && directProductId > 0
+              ? directProductId
+              : key ? productMap.get(key) : undefined;
             if (!productId) return null;
+
+            const existingSnapshot = Array.isArray(it.bom_snapshot) && it.bom_snapshot.length > 0
+              ? it.bom_snapshot
+              : null;
+            const bomSnapshot = existingSnapshot ?? await buildBomSnapshot(productId, auth.orgId);
+            const cutlistSwapEffects = deriveCutlistSwapEffectsFromBomSnapshot(bomSnapshot);
+            const { snapshot: cutlistSnapshot } = await buildCutlistSnapshot(
+              productId,
+              auth.orgId,
+              cutlistSwapEffects.materialOverrides,
+              cutlistSwapEffects.removedMaterialIds
+            );
+
+            const storedSurchargeTotal = Number(it.surcharge_total ?? 0);
+
             return {
               order_id: order.order_id,
               org_id: auth.orgId,
               product_id: productId,
               quantity: Number(it.qty || 1),
               unit_price: Number(it.unit_price || 0),
+              bom_snapshot: Array.isArray(bomSnapshot) && bomSnapshot.length > 0 ? bomSnapshot : null,
+              cutlist_snapshot: cutlistSnapshot,
+              surcharge_total: Number.isFinite(storedSurchargeTotal) && storedSurchargeTotal !== 0
+                ? storedSurchargeTotal
+                : calculateBomSnapshotSurchargeTotal(bomSnapshot),
             };
-          })
+          });
+        const resolvedDetails = (await Promise.all(detailsToInsert))
           .filter((row): row is NonNullable<typeof row> => Boolean(row));
 
-        if (detailsToInsert.length > 0) {
-          await supabaseAdmin.from('order_details').insert(detailsToInsert);
+        if (resolvedDetails.length > 0) {
+          await supabaseAdmin.from('order_details').insert(resolvedDetails);
         }
       }
     } catch (copyErr) {

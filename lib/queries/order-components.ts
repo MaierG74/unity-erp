@@ -84,6 +84,36 @@ export class SupplierOrderCreationError extends Error {
   }
 }
 
+export function bomRowsFromSnapshot(snapshot: unknown): Array<{
+  component_id: number;
+  quantity_required: number;
+  component: { component_id: number; internal_code: string; description: string | null };
+}> {
+  if (!Array.isArray(snapshot) || snapshot.length === 0) return [];
+
+  return snapshot
+    .map((entry: any) => {
+      const componentId = Number(entry.effective_component_id ?? entry.component_id);
+      const quantityRequired = Number(entry.effective_quantity_required ?? entry.quantity_required ?? 0);
+      if (entry.is_removed === true || quantityRequired <= 0) return null;
+
+      return {
+        component_id: componentId,
+        quantity_required: quantityRequired,
+        component: {
+          component_id: componentId,
+          internal_code: entry.effective_component_code ?? entry.component_code,
+          description: entry.component_description ?? null,
+        },
+      };
+    })
+    .filter((row): row is {
+      component_id: number;
+      quantity_required: number;
+      component: { component_id: number; internal_code: string; description: string | null };
+    } => Boolean(row));
+}
+
 // ---------------------------------------------------------------------------
 // Functions
 // ---------------------------------------------------------------------------
@@ -189,17 +219,7 @@ export async function fetchOrderComponentRequirements(orderId: number): Promise<
         ? (detail as any).bom_snapshot
         : null;
 
-      const bomRows = snapshot
-        ? snapshot.map((entry: any) => ({
-            component_id: entry.component_id,
-            quantity_required: entry.quantity_required,
-            component: {
-              component_id: entry.component_id,
-              internal_code: entry.component_code,
-              description: entry.component_description,
-            },
-          }))
-        : bomByProduct.get(detail.product_id) ?? [];
+      const bomRows = snapshot ? bomRowsFromSnapshot(snapshot) : bomByProduct.get(detail.product_id) ?? [];
 
       const components = bomRows
         .map((bomRow: any) => {

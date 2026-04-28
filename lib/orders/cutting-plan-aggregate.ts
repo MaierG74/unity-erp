@@ -105,6 +105,8 @@ export function resolveAggregatedGroups(
           : group.backer_material_name;
 
       for (const part of group.parts) {
+        if (part.quantity <= 0) continue;
+
         const fp = roleFingerprint(
           detail.order_detail_id,
           group.board_type,
