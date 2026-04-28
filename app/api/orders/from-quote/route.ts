@@ -4,10 +4,7 @@ import { requireModuleAccess } from '@/lib/api/module-access';
 import { MODULE_KEYS } from '@/lib/modules/keys';
 import { buildBomSnapshot } from '@/lib/orders/build-bom-snapshot';
 import { buildCutlistSnapshot } from '@/lib/orders/build-cutlist-snapshot';
-import {
-  calculateBomSnapshotSurchargeTotal,
-  deriveCutlistSwapEffectsFromBomSnapshot,
-} from '@/lib/orders/snapshot-utils';
+import { deriveCutlistSwapEffectsFromBomSnapshot } from '@/lib/orders/snapshot-utils';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
 type QuoteItemRow = {
@@ -194,9 +191,7 @@ export async function POST(req: NextRequest) {
               unit_price: Number(it.unit_price || 0),
               bom_snapshot: Array.isArray(bomSnapshot) && bomSnapshot.length > 0 ? bomSnapshot : null,
               cutlist_snapshot: cutlistSnapshot,
-              surcharge_total: Number.isFinite(storedSurchargeTotal) && storedSurchargeTotal !== 0
-                ? storedSurchargeTotal
-                : calculateBomSnapshotSurchargeTotal(bomSnapshot),
+              surcharge_total: Number.isFinite(storedSurchargeTotal) ? storedSurchargeTotal : 0,
             };
           });
         const resolvedDetails = (await Promise.all(detailsToInsert))

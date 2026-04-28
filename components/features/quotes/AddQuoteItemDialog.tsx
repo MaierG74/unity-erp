@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Package, Search } from 'lucide-react';
-import { fetchProducts, type Product, type QuoteItemType, type QuoteItemTextAlign } from '@/lib/db/quotes';
+import { fetchEffectiveBOM, fetchProducts, type Product, type QuoteItemType, type QuoteItemTextAlign } from '@/lib/db/quotes';
 import { AlignLeft, AlignCenter, AlignRight } from 'lucide-react';
 import {
   fetchProductOptionGroups,
@@ -56,10 +56,11 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
   const [optionGroups, setOptionGroups] = React.useState<ProductOptionGroup[]>([]);
   const [selectedOptions, setSelectedOptions] = React.useState<ProductOptionSelection>({});
   // Quantity input removed — items import as 1 by default; user sets final line qty later
-  const [explode, setExplode] = React.useState(true);
+  const [explode, setExplode] = React.useState(false);
   const [includeLabor, setIncludeLabor] = React.useState(true);
   const [includeOverhead, setIncludeOverhead] = React.useState(true);
   const [attachImage, setAttachImage] = React.useState(true);
+  const [productBomState, setProductBomState] = React.useState<'idle' | 'loading' | 'has-bom' | 'no-bom'>('idle');
   const [productsLoading, setProductsLoading] = React.useState(false);
   const [optionsLoading, setOptionsLoading] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
@@ -138,6 +139,30 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
     };
   }, [selectedProduct?.product_id]);
 
+  React.useEffect(() => {
+    if (!selectedProduct) {
+      setProductBomState('idle');
+      return;
+    }
+
+    let cancelled = false;
+    setProductBomState('loading');
+
+    (async () => {
+      const bom = await fetchEffectiveBOM(selectedProduct.product_id, selectedOptions);
+      if (!cancelled) {
+        setProductBomState(bom.length > 0 ? 'has-bom' : 'no-bom');
+      }
+    })().catch((error) => {
+      console.warn('Failed to inspect product BOM:', error);
+      if (!cancelled) setProductBomState('no-bom');
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProduct, selectedOptions]);
+
   const resetForm = React.useCallback(() => {
     setTab('manual');
     setDescription('');
@@ -149,7 +174,7 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
     setSelectedProduct(null);
     setOptionGroups([]);
     setSelectedOptions({});
-    setExplode(true);
+    setExplode(false);
     setAttachImage(true);
     setIncludeLabor(true);
     setIncludeOverhead(true);
@@ -343,7 +368,14 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
                               )}
                             </td>
                             <td className="p-2 text-right">
-                              <Button size="sm" className="h-7 text-xs px-2" onClick={() => setSelectedProduct(p)}>
+                              <Button
+                                size="sm"
+                                className="h-7 text-xs px-2"
+                                onClick={() => {
+                                  setSelectedProduct(p);
+                                  setExplode(false);
+                                }}
+                              >
                                 Select
                               </Button>
                             </td>
@@ -412,6 +444,28 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
                   </div>
                 ) : (
                   <div className="text-xs text-muted-foreground mt-2">No configurable options for this product.</div>
+                )}
+                {productBomState === 'loading' && (
+                  <div className="text-xs text-muted-foreground mt-2">Checking BOM…</div>
+                )}
+                {productBomState === 'no-bom' && (
+                  <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    <span>No BOM found. Add this product as a manual priced line.</span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 shrink-0 bg-background text-xs"
+                      onClick={() => {
+                        setDescription(selectedProduct.name);
+                        setQty('1');
+                        setUnitPrice('0');
+                        setTab('manual');
+                      }}
+                    >
+                      Manual Pricing
+                    </Button>
+                  </div>
                 )}
               </div>
             )}
@@ -510,7 +564,7 @@ export default function AddQuoteItemDialog({ open, onClose, onCreateManual, onCr
             disabled={
               submitting ||
               (tab === 'manual' && !description.trim()) ||
-              (tab === 'product' && !selectedProduct) ||
+              (tab === 'product' && (!selectedProduct || productBomState === 'loading' || productBomState === 'no-bom')) ||
               (tab === 'text' && (!textContent.trim() || !onCreateText))
             }
           >

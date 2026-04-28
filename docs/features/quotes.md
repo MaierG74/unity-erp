@@ -21,7 +21,11 @@ Legacy statuses such as `in_progress`, `won`, `lost`, `accepted`, `rejected`, an
 
 Snapshot-based quote product rows can carry a frozen `bom_snapshot` and `surcharge_total` on `quote_items`. A quote-side swap is independent from any related order: converting a quote copies the current snapshot and surcharge total once into `order_details`, and later quote or order edits do not sync back and forth.
 
-The quote line's base price remains under estimator control. A swap may add zero, positive, or negative commercial surcharge rows in later UI phases, but the operational component change and commercial surcharge are stored separately in the snapshot so costing and customer-facing display can evolve independently.
+The Add Item Product tab now creates snapshot-based quote product rows by default when the selected product has a BOM. The `Explode BOM into Costing Cluster` checkbox remains as an opt-in legacy path for estimator costing clusters. Products without a BOM should be added through the Manual tab so the estimator can enter the line price directly.
+
+The quote line's base price remains under estimator control. Snapshot-based product rows expose a per-BOM-row swap action that can choose an alternative same-category component or remove the component, with a zero, positive, or negative commercial surcharge. Applying a swap updates `quote_items.bom_snapshot` and `quote_items.surcharge_total` together; the database quote totals trigger then recomputes subtotal and grand total from the base item total plus surcharge.
+
+Customer-facing quote views render the parent product line at its base price, then one indented child row per non-zero swap surcharge. Quote PDF preview/download and quote email attachments use the same parent-plus-child rendering. Legacy exploded costing cluster lines continue to render flat and keep their existing inline cluster editing behavior.
 
 ## Goals
 - Keep the default item behavior as a priced line item.

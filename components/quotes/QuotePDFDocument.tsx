@@ -1,6 +1,8 @@
 import React from 'react';
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer';
 import { Quote, QuoteItem, QuoteAttachment, QuoteItemType, QuoteItemTextAlign } from '@/lib/db/quotes';
+import { calculateBomSnapshotLineSurchargeTotal } from '@/lib/orders/snapshot-utils';
+import type { BomSnapshotEntry } from '@/lib/orders/snapshot-types';
 
 // PDF Styles
 const styles = StyleSheet.create({
@@ -91,6 +93,17 @@ const styles = StyleSheet.create({
     borderBottomColor: '#CCCCCC',
     paddingTop: 0,
     paddingBottom: 2,
+  },
+  surchargeRow: {
+    borderBottom: 1,
+    borderBottomColor: '#CCCCCC',
+    paddingTop: 0,
+    paddingBottom: 2,
+  },
+  surchargeText: {
+    fontSize: 8,
+    color: '#333333',
+    paddingLeft: 12,
   },
   descriptionCol: {
     flex: 3,
@@ -264,10 +277,36 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
     return explicit > 0 ? explicit : fallback;
   };
 
+  const surchargeTotal = (item: QuoteItem) => {
+    if (item.item_type && item.item_type !== 'priced') return 0;
+    const stored = Number(item.surcharge_total ?? NaN);
+    return Number.isFinite(stored) && (stored !== 0 || !Array.isArray(item.bom_snapshot))
+      ? stored
+      : calculateBomSnapshotLineSurchargeTotal(item.bom_snapshot, Number(item.qty ?? 0));
+  };
+
+  const surchargeRows = (item: QuoteItem) => {
+    const quantity = Number(item.qty ?? 0);
+    if (!Array.isArray(item.bom_snapshot)) return [];
+
+    return (item.bom_snapshot as BomSnapshotEntry[])
+      .filter((entry) => entry.swap_kind !== 'default' && Number(entry.surcharge_amount ?? 0) !== 0)
+      .map((entry) => {
+        const amount = Number(entry.surcharge_amount ?? 0);
+        const removed = entry.swap_kind === 'removed' || entry.is_removed;
+        return {
+          key: `${item.id}-${entry.source_bom_id}`,
+          prefix: removed ? '-' : '+',
+          label: entry.surcharge_label || entry.effective_component_code || entry.component_code || 'Swap surcharge',
+          lineAmount: Math.round(amount * quantity * 100) / 100,
+        };
+      });
+  };
+
   // Only sum priced items
   const subtotal = quote.items
     .filter(item => !item.item_type || item.item_type === 'priced')
-    .reduce((sum, item) => sum + lineTotal(item), 0);
+    .reduce((sum, item) => sum + lineTotal(item) + surchargeTotal(item), 0);
   const vatRate = typeof (quote as any).vat_rate === 'number' ? (quote as any).vat_rate : 15; // default 15%
   const vatAmount = subtotal * (vatRate / 100);
   const total = subtotal + vatAmount;
@@ -418,6 +457,7 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
             // Render priced items - full row with qty/price/total columns
             const rowBase = index % 2 === 0 ? styles.tableRow : styles.tableRowAlt;
             const headerRowStyle = hasDetails ? [rowBase, styles.tableRowHead] : rowBase;
+            const itemSurchargeRows = surchargeRows(item);
 
             return (
               <View key={item.id} wrap={false}>
@@ -429,6 +469,16 @@ const QuotePDFDocument: React.FC<QuotePDFProps> = ({ quote, companyInfo, default
                   <Text style={styles.priceCol}>{formatCurrency(Number(item.unit_price || 0))}</Text>
                   <Text style={styles.totalCol}>{formatCurrency(lineTotal(item))}</Text>
                 </View>
+                {itemSurchargeRows.map((row) => (
+                  <View key={`pdf-surcharge-${row.key}`} style={[rowBase, styles.surchargeRow]}>
+                    <View style={styles.descriptionCol}>
+                      <Text style={styles.surchargeText}>{row.prefix} {row.label}</Text>
+                    </View>
+                    <Text style={styles.qtyCol}> </Text>
+                    <Text style={styles.priceCol}> </Text>
+                    <Text style={styles.totalCol}>{formatCurrency(row.lineAmount)}</Text>
+                  </View>
+                ))}
                 {hasDetails && (
                   <View style={[rowBase, styles.tableRowDetail]}>
                     <View style={styles.descriptionCol}>
