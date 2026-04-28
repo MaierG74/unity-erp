@@ -1,14 +1,10 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { supabase } from '@/lib/supabase';
-import {
-  productCutlistDataKey,
-  useProductCutlistData,
-} from '@/hooks/useProductCutlistData';
+import { useProductCutlistData } from '@/hooks/useProductCutlistData';
 import { useProductCutlistSnapshot } from '@/hooks/useProductCutlistSnapshot';
 import {
   Card,
@@ -31,20 +27,6 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command';
-import { useToast } from '@/components/ui/use-toast';
-import {
   cloneCutlistDimensions,
   summariseCutlistDimensions,
   CutlistDimensions,
@@ -55,18 +37,7 @@ import type {
   CutlistDataSource,
   EffectiveBomItem,
 } from '@/lib/cutlist/productCutlistLoader';
-import { cn } from '@/lib/utils';
-import { Calculator, Loader2, Palette, RefreshCw, Trash2 } from 'lucide-react';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+import { Calculator, Loader2, RefreshCw } from 'lucide-react';
 
 interface ProductCutlistTabProps {
   productId: number;
@@ -83,12 +54,9 @@ interface ComponentRecord {
 
 interface CutlistRow {
   key: string;
-  bomId: number | null;
-  componentId: number;
   componentCode: string;
   componentDescription: string | null;
   source: EffectiveBomItem['_source'];
-  isEditable: boolean;
   category: string | null;
   dimensions: CutlistDimensions | null;
   quantityRequired: number;
@@ -116,12 +84,8 @@ function snapshotEdgingMeters(
 
 export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
   const [showLinked, setShowLinked] = useState(false);
-  const [activePickerKey, setActivePickerKey] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
-  const [deleteDialogRow, setDeleteDialogRow] = useState<CutlistRow | null>(null);
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
   const router = useRouter();
 
   const {
@@ -209,12 +173,9 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
           const totalParts = quantityRequired * quantityPer;
           return {
             key: item.bom_id ? `bom:${item.bom_id}` : `computed:${item.component_id}:${index}`,
-            bomId: item.bom_id ?? null,
-            componentId: item.component_id,
             componentCode: component?.internal_code ?? `Component #${item.component_id}`,
             componentDescription: item.component_description ?? component?.description ?? null,
             source: item._source ?? 'direct',
-            isEditable: Boolean(item._editable) && Boolean(item.bom_id),
             category: item.cutlist_category ?? null,
             dimensions,
             quantityRequired,
@@ -278,117 +239,11 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
     [displayRows]
   );
 
-  const updateMaterialMutation = useMutation({
-    mutationFn: async ({
-      row,
-      component,
-    }: {
-      row: CutlistRow;
-      component: ComponentRecord | null;
-    }) => {
-      if (!row.bomId) {
-        throw new Error('Only direct BOM rows can be updated from here.');
-      }
-
-      const current = row.dimensions ? cloneCutlistDimensions(row.dimensions) ?? {} : {};
-      const next: CutlistDimensions = { ...current };
-
-      if (component) {
-        const code = component.internal_code?.trim();
-        const label = component.description?.trim() || code || `Component #${component.component_id}`;
-        if (code) {
-          next.material_code = code;
-        } else {
-          delete next.material_code;
-        }
-        next.material_label = label;
-        if (label) {
-          next.colour_family = next.colour_family ?? label;
-        }
-      } else {
-        delete (next as any).material_code;
-        delete (next as any).material_label;
-        delete (next as any).colour_family;
-      }
-
-      const hasKeys = Object.keys(next).length > 0;
-
-      const response = await authorizedFetch(`/api/products/${productId}/bom/${row.bomId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          cutlist_dimensions: hasKeys ? next : null,
-        }),
-      });
-      const json = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(json?.error || 'Failed to update cutlist material');
-      }
-      return { rowKey: row.key, nextDimensions: hasKeys ? next : null };
-    },
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] });
-      queryClient.invalidateQueries({ queryKey: productCutlistDataKey(productId) });
-      queryClient.invalidateQueries({ queryKey: ['productBOM', productId] });
-      queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
-      setActivePickerKey(null);
-      toast({
-        title: 'Cutlist updated',
-        description: variables.component
-          ? `Material set to ${variables.component.description ?? variables.component.internal_code}.`
-          : 'Cutlist material cleared.',
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: 'Unable to update',
-        description: error?.message ?? 'Failed to update cutlist material.',
-        variant: 'destructive',
-      });
-    },
-  });
-
-  // Delete row mutation - removes entire BOM entry
-  const deleteRowMutation = useMutation({
-    mutationFn: async ({ row }: { row: CutlistRow }) => {
-      if (!row.bomId) {
-        throw new Error('Only direct BOM rows can be deleted from here.');
-      }
-
-      const response = await authorizedFetch(`/api/products/${productId}/bom/${row.bomId}`, {
-        method: 'DELETE',
-      });
-      const json = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(json?.error || 'Failed to delete cutlist row');
-      }
-      return { rowKey: row.key };
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['cutlist-effective-bom', productId] });
-      queryClient.invalidateQueries({ queryKey: productCutlistDataKey(productId) });
-      queryClient.invalidateQueries({ queryKey: ['productBOM', productId] });
-      queryClient.invalidateQueries({ queryKey: ['effectiveBOM', productId] });
-      toast({
-        title: 'Cutlist row deleted',
-        description: 'The cutlist item has been removed from the BOM.',
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: 'Unable to delete',
-        description: error?.message ?? 'Failed to delete cutlist row.',
-        variant: 'destructive',
-      });
-    },
-  });
-
   const isBusy =
     cutlistLoading ||
     componentsLoading ||
     cutlistRefetching ||
-    componentsRefetching ||
-    updateMaterialMutation.isPending ||
-    deleteRowMutation.isPending;
+    componentsRefetching;
 
   return (
     <div className="space-y-4">
@@ -396,8 +251,8 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
         <CardHeader>
           <CardTitle>Cutlist Overview</CardTitle>
           <CardDescription>
-            Review the cutlist-ready components captured on this product. Assign melamine boards and
-            decide whether to include linked sub-product parts in the view.
+            Review the cutlist-ready components captured on this product and decide whether to
+            include linked sub-product parts in the view.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -543,8 +398,8 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
         <CardHeader>
           <CardTitle>Parts by material</CardTitle>
           <CardDescription>
-            Use the palette picker to split parts across melamine colours. Updates apply to the
-            underlying BOM row.
+            Review parts grouped by their assigned material. Edit dimensions or materials in the
+            Cutlist Builder.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -590,8 +445,6 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
                     <TableHead className="w-[140px]">Category</TableHead>
                     <TableHead className="w-[110px] text-right">Parts</TableHead>
                     <TableHead className="w-[150px]">Material</TableHead>
-                    <TableHead className="w-[130px]">Source</TableHead>
-                    <TableHead className="w-[160px] text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -601,8 +454,6 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
                       row.dimensions?.material_label ??
                       row.dimensions?.material_code ??
                       'Unassigned';
-                    const isLinked = row.source === 'link';
-                    const pickerOpen = activePickerKey === row.key;
                     return (
                       <TableRow key={row.key}>
                         <TableCell>
@@ -644,99 +495,6 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
                         </TableCell>
                         <TableCell>
                           <div className="text-sm text-foreground">{materialLabel}</div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Badge variant={isLinked ? 'outline' : 'secondary'}>
-                              {isLinked ? 'Linked' : 'Direct'}
-                            </Badge>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
-                            <Popover
-                              open={pickerOpen}
-                              onOpenChange={(open) =>
-                                setActivePickerKey(open ? row.key : null)
-                              }
-                            >
-                              <PopoverTrigger asChild>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={!row.isEditable || melamineComponents.length === 0}
-                                  className={cn(
-                                    'flex items-center gap-1',
-                                    pickerOpen ? 'ring-2 ring-primary/40' : undefined
-                                  )}
-                                >
-                                  <Palette className="h-3.5 w-3.5" />
-                                  Assign
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-[280px] p-2">
-                                <Command>
-                                  <CommandInput placeholder="Search melamine…" />
-                                  <CommandList>
-                                    <CommandEmpty>No melamine boards found.</CommandEmpty>
-                                    <CommandGroup heading="Melamine">
-                                      {melamineComponents.map((component) => (
-                                        <CommandItem
-                                          key={component.component_id}
-                                          value={`${component.internal_code ?? ''} ${component.description ?? ''}`}
-                                          onSelect={() => {
-                                            updateMaterialMutation.mutate({
-                                              row,
-                                              component,
-                                            });
-                                            setActivePickerKey(null);
-                                          }}
-                                          className="cursor-pointer"
-                                        >
-                                          <div
-                                            className="flex flex-col w-full"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              updateMaterialMutation.mutate({
-                                                row,
-                                                component,
-                                              });
-                                              setActivePickerKey(null);
-                                            }}
-                                          >
-                                            <span className="text-sm font-medium text-foreground">
-                                              {component.internal_code ?? `Component #${component.component_id}`}
-                                            </span>
-                                            <span className="text-xs text-muted-foreground">
-                                              {component.description ?? 'No description'}
-                                            </span>
-                                          </div>
-                                        </CommandItem>
-                                      ))}
-                                    </CommandGroup>
-                                  </CommandList>
-                                </Command>
-                              </PopoverContent>
-                            </Popover>
-                            {row.isEditable ? (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                title="Delete cutlist row"
-                                onClick={() => setDeleteDialogRow(row)}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                                <span className="sr-only">Delete row</span>
-                              </Button>
-                            ) : null}
-                          </div>
-                          {!row.isEditable && dataSource !== 'groups' ? (
-                            <div className="mt-2 text-[11px] text-muted-foreground">
-                              Linked BOM rows are read-only here. Edit the source product instead.
-                            </div>
-                          ) : null}
                         </TableCell>
                       </TableRow>
                     );
@@ -814,37 +572,6 @@ export function ProductCutlistTab({ productId }: ProductCutlistTabProps) {
           </CardContent>
         ) : null}
       </Card>
-      {/* Delete Confirmation Dialog */}
-      <AlertDialog open={!!deleteDialogRow} onOpenChange={(open) => !open && setDeleteDialogRow(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete cutlist row?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently remove this cutlist item from the Bill of Materials.
-              {deleteDialogRow?.dimensions?.notes && (
-                <span className="block mt-2 font-medium text-foreground">
-                  Part: {deleteDialogRow.dimensions.notes}
-                </span>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setDeleteDialogRow(null)}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                if (deleteDialogRow) {
-                  deleteRowMutation.mutate({ row: deleteDialogRow });
-                }
-                setDeleteDialogRow(null);
-              }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
     </div>
   );
 }
