@@ -6,6 +6,7 @@ import { round2 } from './cutting-plan-utils';
 export type BomSnapshotEntry = {
   is_cutlist_item?: boolean;
   line_total?: number;
+  effective_line_total?: number;
   component_id?: number | null;
 };
 
@@ -28,7 +29,7 @@ export type PaddedLineCost = {
  * Compute the padded material cost for ONE order_details row.
  * Cutlist portion: sheets (with per-sheet billing overrides) + edging (with pct/meters overrides)
  *   × quantity, sourced from product_cutlist_costing_snapshots.
- * Non-cutlist portion: sum of bom_snapshot.line_total where is_cutlist_item=false, × quantity.
+ * Non-cutlist portion: sum of effective non-cutlist BOM totals × quantity.
  */
 export function computePaddedLineCost(input: PaddedLineCostInput): PaddedLineCost {
   const qty = Math.max(0, input.quantity || 0);
@@ -38,7 +39,7 @@ export function computePaddedLineCost(input: PaddedLineCostInput): PaddedLineCos
 
   const nonCutlistPerUnit = (input.bom_snapshot ?? [])
     .filter((e) => !e.is_cutlist_item)
-    .reduce((s, e) => s + (e.line_total ?? 0), 0);
+    .reduce((s, e) => s + (e.effective_line_total ?? e.line_total ?? 0), 0);
   const non_cutlist_portion = round2(nonCutlistPerUnit * qty);
 
   return {

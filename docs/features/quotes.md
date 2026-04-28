@@ -17,6 +17,12 @@ Current behavior:
 
 Legacy statuses such as `in_progress`, `won`, `lost`, `accepted`, `rejected`, and `expired` are no longer part of the supported quote workflow.
 
+## Swap and Surcharge
+
+Snapshot-based quote product rows can carry a frozen `bom_snapshot` and `surcharge_total` on `quote_items`. A quote-side swap is independent from any related order: converting a quote copies the current snapshot and surcharge total once into `order_details`, and later quote or order edits do not sync back and forth.
+
+The quote line's base price remains under estimator control. A swap may add zero, positive, or negative commercial surcharge rows in later UI phases, but the operational component change and commercial surcharge are stored separately in the snapshot so costing and customer-facing display can evolve independently.
+
 ## Goals
 - Keep the default item behavior as a priced line item.
 - Allow switching an item to a non-priced type (heading or note).

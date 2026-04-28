@@ -22,6 +22,9 @@ export interface QuoteItem {
   qty: number;
   unit_price: number;
   total: number;
+  product_id?: number | null;
+  bom_snapshot?: unknown;
+  surcharge_total?: number;
   item_type: QuoteItemType;
   text_align: QuoteItemTextAlign;
   position: number;

@@ -4,7 +4,8 @@ import { CutlistSnapshotGroup } from './snapshot-types';
 export async function buildCutlistSnapshot(
   productId: number,
   orgId: string,
-  materialOverrides: Map<number, { component_id: number; name: string }> = new Map()
+  materialOverrides: Map<number, { component_id: number; name: string }> = new Map(),
+  removedMaterialIds: Set<number> = new Set()
 ): Promise<{ snapshot: CutlistSnapshotGroup[] | null; groupMap: Map<number, number> }> {
   const { data: groups, error } = await supabaseAdmin
     .from('product_cutlist_groups')
@@ -39,6 +40,10 @@ export async function buildCutlistSnapshot(
       primaryMaterialName = override.name;
     }
 
+    const groupHasRemovedMaterial =
+      (group.primary_material_id != null && removedMaterialIds.has(group.primary_material_id)) ||
+      (group.backer_material_id != null && removedMaterialIds.has(group.backer_material_id));
+
     return {
       source_group_id: group.id,
       name: group.name,
@@ -47,7 +52,9 @@ export async function buildCutlistSnapshot(
       primary_material_name: primaryMaterialName,
       backer_material_id: group.backer_material_id ?? null,
       backer_material_name: group.backer_material_name ?? null,
-      parts: group.parts ?? [],
+      parts: groupHasRemovedMaterial
+        ? (group.parts ?? []).map((part: any) => ({ ...part, quantity: 0 }))
+        : group.parts ?? [],
     };
   });
 

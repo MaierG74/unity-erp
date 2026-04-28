@@ -1,0 +1,55 @@
+import assert from 'node:assert/strict';
+
+import { resolveAggregatedGroups, type AggregateDetail } from './cutting-plan-aggregate';
+
+declare const test: (name: string, fn: () => void) => void;
+
+test('resolveAggregatedGroups excludes quantity-0 parts from material groups', () => {
+  const details: AggregateDetail[] = [
+    {
+      order_detail_id: 1,
+      quantity: 1,
+      product_name: 'Desk',
+      cutlist_snapshot: [
+        {
+          source_group_id: 1,
+          name: 'Group',
+          board_type: '16mm',
+          primary_material_id: 10,
+          primary_material_name: 'White',
+          backer_material_id: null,
+          backer_material_name: null,
+          parts: [
+            {
+              id: 'removed',
+              name: 'Removed',
+              grain: 'none',
+              quantity: 0,
+              width_mm: 300,
+              length_mm: 400,
+              band_edges: {},
+              lamination_type: 'none',
+            },
+            {
+              id: 'kept',
+              name: 'Kept',
+              grain: 'none',
+              quantity: 1,
+              width_mm: 300,
+              length_mm: 400,
+              band_edges: {},
+              lamination_type: 'none',
+            },
+          ],
+        },
+      ],
+    },
+  ];
+
+  const result = resolveAggregatedGroups(details, null);
+
+  assert.equal(result.material_groups.length, 1);
+  assert.equal(result.material_groups[0].parts.length, 1);
+  assert.equal(result.material_groups[0].parts[0].name, 'Kept');
+  assert.equal(result.total_parts, 1);
+});
