@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { ChevronRight, ChevronDown, Edit, Trash, Check, X, Loader2 } from 'lucide-react';
+import { ChevronRight, ChevronDown, Edit, Trash, Check, X, Loader2, Replace } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,6 +14,7 @@ import { formatCurrency, formatQuantity } from '@/lib/format-utils';
 import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { LineMaterialCostBadge } from './LineMaterialCostBadge';
 import type { LineMaterialCost } from '@/lib/orders/line-material-cost';
+import type { BomSnapshotEntry } from '@/lib/orders/snapshot-types';
 
 interface ProductsTableRowProps {
   orderId: number;
@@ -31,6 +32,7 @@ interface ProductsTableRowProps {
   onSaveEdit: () => void;
   onCancelEdit: () => void;
   onDelete: () => void;
+  onSwapBomEntry: (entry: BomSnapshotEntry) => void;
   onQuantityChange: (value: string) => void;
   onUnitPriceChange: (value: string) => void;
   updatePending: boolean;
@@ -54,6 +56,7 @@ export function ProductsTableRow({
   onSaveEdit,
   onCancelEdit,
   onDelete,
+  onSwapBomEntry,
   onQuantityChange,
   onUnitPriceChange,
   updatePending,
@@ -79,8 +82,22 @@ export function ProductsTableRow({
     staleTime: 30_000,
   });
   const bomGridClass = showGlobalContext
-    ? 'grid grid-cols-[minmax(180px,1fr)_65px_65px_65px_65px_65px_65px_65px] items-center gap-x-4'
-    : 'grid grid-cols-[minmax(180px,1fr)_65px_65px_65px_65px_65px_65px] items-center gap-x-4';
+    ? 'grid grid-cols-[minmax(180px,1fr)_65px_65px_65px_65px_65px_65px_65px_44px] items-center gap-x-4'
+    : 'grid grid-cols-[minmax(180px,1fr)_65px_65px_65px_65px_65px_65px_44px] items-center gap-x-4';
+  const snapshotEntries = Array.isArray(detail.bom_snapshot)
+    ? (detail.bom_snapshot as BomSnapshotEntry[])
+    : [];
+  const surchargeRows = snapshotEntries.filter((entry) =>
+    entry.swap_kind !== 'default' && Number(entry.surcharge_amount ?? 0) !== 0
+  );
+  const findSnapshotEntry = (component: any) => {
+    const componentId = Number(component.component_id);
+    return snapshotEntries.find((entry) =>
+      Number(entry.effective_component_id) === componentId ||
+      Number(entry.component_id) === componentId ||
+      Number(entry.default_component_id) === componentId
+    ) ?? null;
+  };
 
   return (
     <>
@@ -220,6 +237,30 @@ export function ProductsTableRow({
         </TableCell>
       </TableRow>
 
+      {surchargeRows.map((entry) => {
+        const amount = Number(entry.surcharge_amount ?? 0);
+        const lineAmount = amount * Number(detail.quantity ?? 0);
+        const removed = entry.swap_kind === 'removed' || entry.is_removed;
+        const prefix = removed ? '-' : '+';
+        const label = entry.surcharge_label || entry.effective_component_code || entry.component_code || 'Swap surcharge';
+
+        return (
+          <TableRow
+            key={`swap-${detail.order_detail_id}-${entry.source_bom_id}`}
+            className="bg-background hover:bg-muted/20"
+          >
+            <TableCell className="py-1 pl-16 text-sm text-muted-foreground" colSpan={6}>
+              <span className="mr-2 font-medium text-foreground">{prefix}</span>
+              {label}
+            </TableCell>
+            <TableCell className="py-1 text-right text-sm tabular-nums">
+              {formatCurrency(lineAmount)}
+            </TableCell>
+            <TableCell />
+          </TableRow>
+        );
+      })}
+
       {/* Expanded BOM rows */}
       {isExpanded && bomComponents.length > 0 && (
         <>
@@ -237,6 +278,7 @@ export function ProductsTableRow({
                 {showGlobalContext && (
                   <span className="block text-right tabular-nums">Global</span>
                 )}
+                <span className="sr-only">Swap</span>
               </div>
             </TableCell>
           </TableRow>
@@ -245,6 +287,7 @@ export function ProductsTableRow({
           {bomComponents.map((component: any, idx: number) => {
             const metrics = computeComponentMetrics(component, detail.product_id);
             const globalShortfall = Number(component.global_real_shortfall ?? 0);
+            const snapshotEntry = findSnapshotEntry(component);
 
             return (
               <TableRow
@@ -327,6 +370,20 @@ export function ProductsTableRow({
                         {formatQuantity(globalShortfall)}
                       </span>
                     )}
+                    <div className="flex justify-end">
+                      {snapshotEntry ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-8 px-0"
+                          onClick={() => onSwapBomEntry(snapshotEntry)}
+                          title="Swap component"
+                        >
+                          <Replace className="h-3.5 w-3.5" />
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>
                 </TableCell>
               </TableRow>

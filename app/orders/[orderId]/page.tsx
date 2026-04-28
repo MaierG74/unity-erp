@@ -47,6 +47,8 @@ import { SmartButtonsRow } from '@/components/features/orders/SmartButtonsRow';
 import { ProductsTableRow } from '@/components/features/orders/ProductsTableRow';
 import { OrderSlideOutPanel } from '@/components/features/orders/OrderSlideOutPanel';
 import { OrderSidebar } from '@/components/features/orders/OrderSidebar';
+import { SwapComponentDialog, type SwapComponentDialogValue } from '@/components/features/shared/SwapComponentDialog';
+import type { BomSnapshotEntry } from '@/lib/orders/snapshot-types';
 
 type OrderDetailPageProps = {
   params: Promise<{
@@ -107,6 +109,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
   const [editingDetailId, setEditingDetailId] = useState<number | null>(null);
   const [editQuantity, setEditQuantity] = useState<string>('');
   const [editUnitPrice, setEditUnitPrice] = useState<string>('');
+  const [swapTarget, setSwapTarget] = useState<{ detail: any; entry: BomSnapshotEntry } | null>(null);
 
   // Delete confirmation dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -319,11 +322,23 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
 
   // Mutation for updating order detail
   const updateDetailMutation = useMutation({
-    mutationFn: async ({ detailId, quantity, unit_price }: { detailId: number; quantity?: number; unit_price?: number }) => {
+    mutationFn: async ({
+      detailId,
+      quantity,
+      unit_price,
+      bom_snapshot,
+      surcharge_total,
+    }: {
+      detailId: number;
+      quantity?: number;
+      unit_price?: number;
+      bom_snapshot?: BomSnapshotEntry[];
+      surcharge_total?: number;
+    }) => {
       const response = await fetch(`/api/order-details/${detailId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quantity, unit_price }),
+        body: JSON.stringify({ quantity, unit_price, bom_snapshot, surcharge_total }),
       });
       if (!response.ok) {
         const error = await response.json();
@@ -342,6 +357,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
       queryClient.invalidateQueries({ queryKey: ['order-line-material-cost', orderId] });
       toast.success('Product updated successfully');
       setEditingDetailId(null);
+      setSwapTarget(null);
     },
     onError: (error: Error) => {
       toast.error(`Failed to update product: ${error.message}`);
@@ -403,6 +419,28 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
     setEditingDetailId(null);
     setEditQuantity('');
     setEditUnitPrice('');
+  };
+
+  const handleApplySwap = (value: SwapComponentDialogValue) => {
+    if (!swapTarget?.detail || !Array.isArray(swapTarget.detail.bom_snapshot)) {
+      toast.error('This order line has no BOM snapshot to update');
+      return;
+    }
+
+    const nextSnapshot = (swapTarget.detail.bom_snapshot as BomSnapshotEntry[]).map((entry) =>
+      Number(entry.source_bom_id) === Number(value.entry.source_bom_id) ? value.entry : entry
+    );
+    const lineQuantity = Number(swapTarget.detail.quantity ?? 0);
+    const surchargeTotal = nextSnapshot.reduce((sum, entry) => {
+      const amount = Number(entry.surcharge_amount ?? 0);
+      return Number.isFinite(amount) ? sum + amount * lineQuantity : sum;
+    }, 0);
+
+    updateDetailMutation.mutate({
+      detailId: swapTarget.detail.order_detail_id,
+      bom_snapshot: nextSnapshot,
+      surcharge_total: Math.round(surchargeTotal * 100) / 100,
+    });
   };
 
   const handleDeleteDetail = (detailId: number, productName: string) => {
@@ -1012,6 +1050,7 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
                             onSaveEdit={() => handleSaveDetail(detail.order_detail_id)}
                             onCancelEdit={handleCancelDetailEdit}
                             onDelete={() => handleDeleteDetail(detail.order_detail_id, detail.product?.name || 'this product')}
+                            onSwapBomEntry={(entry) => setSwapTarget({ detail, entry })}
                             onQuantityChange={setEditQuantity}
                             onUnitPriceChange={setEditUnitPrice}
                             updatePending={updateDetailMutation.isPending}
@@ -1459,6 +1498,15 @@ export default function OrderDetailPage({ params }: OrderDetailPageProps) {
         coverage={slideOutProduct ? coverageByProduct.get(slideOutProduct.product_id) ?? null : null}
         computeComponentMetrics={computeComponentMetrics}
         showGlobalContext={showGlobalContext}
+      />
+      <SwapComponentDialog
+        open={Boolean(swapTarget)}
+        entry={swapTarget?.entry ?? null}
+        onOpenChange={(open) => {
+          if (!open) setSwapTarget(null);
+        }}
+        onApply={handleApplySwap}
+        applying={updateDetailMutation.isPending}
       />
 
       {/* ── Order Components Dialog ── */}
