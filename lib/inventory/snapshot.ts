@@ -1,5 +1,7 @@
 export const INVENTORY_LEDGER_HARDENED_FROM = '2026-04-09';
 
+export type InventoryCostSource = 'wac' | 'list_price' | 'none';
+
 export type InventorySnapshotRow = {
   component_id: number;
   internal_code: string;
@@ -10,6 +12,8 @@ export type InventorySnapshotRow = {
   current_quantity: number;
   future_transaction_delta: number;
   snapshot_quantity: number;
+  unit_cost: number | null;
+  cost_source: InventoryCostSource;
   estimated_unit_cost_current: number | null;
   estimated_value_current_cost: number | null;
 };
@@ -21,7 +25,7 @@ export type InventorySnapshotResponse = {
   best_effort_reason: string | null;
   hardening_reference_date: string;
   includes_estimated_values: boolean;
-  estimated_value_basis: 'current_lowest_supplier_price' | 'none';
+  estimated_value_basis: 'weighted_average_cost_with_list_price_fallback' | 'none';
   estimated_value_disclaimer: string | null;
   summary: {
     total_components: number;
@@ -31,6 +35,77 @@ export type InventorySnapshotResponse = {
   };
   rows: InventorySnapshotRow[];
 };
+
+type RelationRecordValue<T> = T | T[] | null | undefined;
+
+type InventoryCostRelation = RelationRecordValue<{
+  average_cost?: number | string | null;
+}>;
+
+type SupplierComponentCostRow = {
+  price?: number | string | null;
+};
+
+export function getRelationRecord<T>(value: RelationRecordValue<T>): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
+export function toFiniteNumberOrNull(value: number | string | null | undefined) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+export function minListPrice(suppliercomponents: SupplierComponentCostRow[] | null | undefined) {
+  const prices = (suppliercomponents ?? [])
+    .map((entry) => toFiniteNumberOrNull(entry.price))
+    .filter((price): price is number => price != null && price > 0);
+
+  if (prices.length === 0) return null;
+  return Math.min(...prices);
+}
+
+export function getInventorySnapshotUnitCost(input: {
+  inventory: InventoryCostRelation;
+  suppliercomponents?: SupplierComponentCostRow[] | null;
+}): { value: number | null; source: InventoryCostSource } {
+  const inventory = getRelationRecord(input.inventory);
+  const wac = toFiniteNumberOrNull(inventory?.average_cost);
+  if (wac != null && wac > 0) {
+    return { value: wac, source: 'wac' };
+  }
+
+  const list = minListPrice(input.suppliercomponents);
+  if (list != null) {
+    return { value: list, source: 'list_price' };
+  }
+
+  return { value: null, source: 'none' };
+}
+
+export function computeNewAverageCost(
+  oldQuantity: number,
+  oldAverageCost: number | null,
+  receivedQuantity: number,
+  receivedCost: number | null
+) {
+  if (receivedCost == null || receivedCost <= 0 || receivedQuantity <= 0) {
+    return oldAverageCost;
+  }
+
+  const safeOldQuantity = Math.max(oldQuantity, 0);
+  if (safeOldQuantity <= 0 || oldAverageCost == null) {
+    return receivedCost;
+  }
+
+  return (
+    safeOldQuantity * oldAverageCost + receivedQuantity * receivedCost
+  ) / (safeOldQuantity + receivedQuantity);
+}
 
 function csvEscape(value: string | number | null | undefined) {
   if (value == null) return '';
@@ -65,7 +140,7 @@ export function buildInventorySnapshotCsv(
   ];
 
   if (includeEstimatedValues) {
-    header.push('Estimated Unit Cost (Current)', 'Estimated Value (Current Cost)');
+    header.push('unit_cost', 'cost_source', 'Estimated Value (Current Cost)');
   }
 
   const csvRows = rows.map((row) => {
@@ -82,7 +157,7 @@ export function buildInventorySnapshotCsv(
     ];
 
     if (includeEstimatedValues) {
-      columns.push(row.estimated_unit_cost_current, row.estimated_value_current_cost);
+      columns.push(row.unit_cost, row.cost_source, row.estimated_value_current_cost);
     }
 
     return columns;

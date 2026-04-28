@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/components/common/auth-provider';
 import { RefreshCw, Loader2, FileDown, Search, AlertTriangle } from 'lucide-react';
@@ -23,8 +23,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useToast } from '@/components/ui/use-toast';
+import { authorizedFetch } from '@/lib/client/auth-fetch';
 import { buildInventorySnapshotCsv, type InventorySnapshotResponse } from '@/lib/inventory/snapshot';
 import { fetchInventorySnapshot } from '@/lib/client/inventory';
+import { supabase } from '@/lib/supabase';
 
 function downloadSnapshotCsv(snapshot: InventorySnapshotResponse, includeEstimatedValues: boolean) {
   const csv = buildInventorySnapshotCsv(snapshot, { includeEstimatedValues });
@@ -50,10 +53,14 @@ function formatCurrency(value: number) {
 
 export function ReportsSnapshotTab() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [snapshotDate, setSnapshotDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [showEstimatedValue, setShowEstimatedValue] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isRecomputing, setIsRecomputing] = useState(false);
+  const userRole = (user as any)?.app_metadata?.role || (user as any)?.user_metadata?.role;
 
   const {
     data: snapshot,
@@ -71,6 +78,95 @@ export function ReportsSnapshotTab() {
     staleTime: 0,
     refetchOnWindowFocus: false,
   });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function resolveAdmin() {
+      if (!user) {
+        if (!cancelled) setIsAdmin(false);
+        return;
+      }
+
+      if (userRole === 'owner' || userRole === 'admin') {
+        if (!cancelled) setIsAdmin(true);
+        return;
+      }
+
+      try {
+        const [
+          { data: membershipData, error: membershipError },
+          { data: platformData, error: platformError },
+        ] = await Promise.all([
+          supabase
+            .from('organization_members')
+            .select('role')
+            .eq('user_id', user.id)
+            .limit(1)
+            .maybeSingle(),
+          supabase
+            .from('platform_admins')
+            .select('user_id')
+            .eq('user_id', user.id)
+            .eq('is_active', true)
+            .limit(1)
+            .maybeSingle(),
+        ]);
+
+        if (cancelled) return;
+        if (membershipError && platformError) {
+          setIsAdmin(false);
+          return;
+        }
+        setIsAdmin(
+          membershipData?.role === 'owner' ||
+            membershipData?.role === 'admin' ||
+            Boolean(platformData?.user_id)
+        );
+      } catch (_error) {
+        if (!cancelled) setIsAdmin(false);
+      }
+    }
+
+    resolveAdmin();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, userRole]);
+
+  async function handleRecomputeAverageCost() {
+    const confirmed = window.confirm(
+      'Recompute weighted average cost from inventory transaction history for this organization?'
+    );
+    if (!confirmed) return;
+
+    setIsRecomputing(true);
+    try {
+      const res = await authorizedFetch('/api/admin/inventory/recompute-wac', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload?.error ?? `Request failed (${res.status})`);
+      }
+
+      toast({
+        title: 'Average cost recomputed',
+        description: `${Number(payload?.updated ?? 0).toLocaleString()} components updated.`,
+      });
+      refetchSnapshot();
+    } catch (error) {
+      toast({
+        title: 'Failed to recompute average cost',
+        description: error instanceof Error ? error.message : 'Unexpected error',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsRecomputing(false);
+    }
+  }
 
   const snapshotRows = useMemo(
     () => (snapshot?.rows ?? []).filter((row) => row.snapshot_quantity !== 0),
@@ -124,10 +220,10 @@ export function ReportsSnapshotTab() {
           <div className="flex items-center gap-3 rounded-lg border px-3 py-2">
             <div className="space-y-0.5">
               <label htmlFor="snapshot-estimate-toggle" className="text-sm font-medium">
-                Show estimated value
+                Show inventory value
               </label>
               <p className="text-xs text-muted-foreground">
-                Current lowest supplier price.
+                Weighted average cost with list-price fallback.
               </p>
             </div>
             <Switch
@@ -137,6 +233,20 @@ export function ReportsSnapshotTab() {
             />
           </div>
           <div className="flex gap-2">
+            {isAdmin ? (
+              <Button
+                variant="outline"
+                onClick={handleRecomputeAverageCost}
+                disabled={isRecomputing}
+              >
+                {isRecomputing ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                )}
+                Recompute average cost
+              </Button>
+            ) : null}
             <Button
               variant="outline"
               onClick={() => refetchSnapshot()}
@@ -179,29 +289,25 @@ export function ReportsSnapshotTab() {
                 <div>
                   <span className="font-medium">Approximate quantities before {snapshot.hardening_reference_date}.</span>
                   {' '}Some historical edits were not ledger-tracked.
-                  {showEstimatedValue && ' Values use current supplier prices, not historical cost.'}
+                  {showEstimatedValue && ' Values use WAC where available; est. rows use current supplier prices.'}
                 </div>
               </div>
             ) : showEstimatedValue ? (
               <div className="flex items-start gap-2 rounded-lg border border-blue-500/30 bg-blue-500/5 p-3 text-sm text-blue-200">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-blue-400" />
-                <span>Estimated values use current supplier prices, not historical cost at the selected date.</span>
+                <span>Values use WAC where available; est. rows use current supplier prices.</span>
               </div>
             ) : null}
 
             {/* Summary metrics */}
-            <div className={`grid grid-cols-1 gap-4 ${showEstimatedValue ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
+            <div className={`grid grid-cols-1 gap-4 ${showEstimatedValue ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
               <div className="rounded-xl border bg-card p-4 shadow-xs">
                 <p className="text-sm font-medium text-muted-foreground">Stocked Components</p>
                 <p className="mt-2 text-2xl font-bold">{snapshot.summary.stocked_components}</p>
               </div>
-              <div className="rounded-xl border bg-card p-4 shadow-xs">
-                <p className="text-sm font-medium text-muted-foreground">Total Quantity</p>
-                <p className="mt-2 text-2xl font-bold">{snapshot.summary.total_quantity.toLocaleString()}</p>
-              </div>
               {showEstimatedValue ? (
                 <div className="rounded-xl border bg-card p-4 shadow-xs">
-                  <p className="text-sm font-medium text-muted-foreground">Estimated Value</p>
+                  <p className="text-sm font-medium text-muted-foreground">Inventory Value</p>
                   <p className="mt-2 text-2xl font-bold">
                     {formatCurrency(snapshot.summary.estimated_total_value_current_cost ?? 0)}
                   </p>
@@ -303,9 +409,18 @@ export function ReportsSnapshotTab() {
                         {showEstimatedValue ? (
                           <>
                             <TableCell className="text-right">
-                              {row.estimated_unit_cost_current == null
-                                ? '—'
-                                : formatCurrency(row.estimated_unit_cost_current)}
+                              {row.unit_cost == null ? (
+                                '—'
+                              ) : (
+                                <span className="inline-flex items-center justify-end gap-1.5">
+                                  {formatCurrency(row.unit_cost)}
+                                  {row.cost_source === 'list_price' ? (
+                                    <span className="rounded border px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                                      est.
+                                    </span>
+                                  ) : null}
+                                </span>
+                              )}
                             </TableCell>
                             <TableCell className="text-right">
                               {row.estimated_value_current_cost == null

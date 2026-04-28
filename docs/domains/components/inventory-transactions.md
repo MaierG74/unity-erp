@@ -8,9 +8,12 @@ Canonical specification for `inventory_transactions` and how movements affect on
   - `transaction_id` SERIAL PK
   - `component_id` INT FK → `components.component_id`
   - `quantity` NUMERIC — positive for IN, negative for OUT; for ADJUST store signed delta
+  - `unit_cost` NUMERIC(18,6) NULL — receipt-time unit cost for Piece A WAC; populated only on priced `PURCHASE` rows, null for issue/adjustment/transfer/return rows
   - `transaction_type` TEXT — 'IN' | 'OUT' | 'ADJUST'
   - `transaction_date` TIMESTAMPTZ DEFAULT now()
   - References (nullable, as applicable): `order_id`, `supplier_order_id`, `purchase_order_id`, `user_id`, `reason`
+- `inventory`
+  - `average_cost` NUMERIC(18,6) NULL — component-level weighted average cost updated only by supplier receipts or the admin recompute RPC
 
 ## Types & Sources
 - IN
@@ -31,12 +34,29 @@ Canonical specification for `inventory_transactions` and how movements affect on
 - ADJUST requires a `reason` and `user_id` for audit.
 
 ## Receiving Contract (Server)
-- Input: `supplier_order_id`, `component_id`, `quantity_received`
+- RPC: `process_supplier_order_receipt(p_order_id, p_quantity, p_receipt_date, p_notes, p_allocation_receipts, p_rejected_quantity, p_rejection_reason, p_attachment_path, p_attachment_name)`
+- Input: supplier order id, received quantity, optional allocation/rejection metadata.
 - Behavior:
-  - Insert IN transaction
-  - Insert receipt row
+  - Insert `PURCHASE` transaction with explicit `org_id` from the supplier order
+  - Populate `inventory_transactions.unit_cost` from `suppliercomponents.price` when the accepted quantity is positive and the price is positive
+  - Insert receipt row with the original received quantity
+  - For rejections, insert the existing negative `RETURN` transaction with explicit `org_id`; `unit_cost` stays null
   - Recompute supplier order `total_received` and status
-  - Increment `inventory.quantity_on_hand`
+  - Increment `inventory.quantity_on_hand` by `v_good_quantity = p_quantity - p_rejected_quantity`
+  - Update `inventory.average_cost` with weighted-average-cost math:
+    - no cost change when receipt price is null/zero
+    - first receipt, depleted stock, or null existing average sets the average to the receipt cost
+    - otherwise `(old_qty * old_avg + received_qty * receipt_cost) / (old_qty + received_qty)`
+  - Full rejections (`v_good_quantity = 0`) do not insert or update the `inventory` row; the zero-quantity `PURCHASE` transaction has `unit_cost = NULL`
+- Manual client-side receiving fallback has been removed; the RPC is the canonical write path so receipts cannot bypass org scoping, status updates, allocation/rejection logic, or WAC writes.
+
+## Weighted Average Cost
+- `inventory.average_cost` is component-level, not location-level.
+- Only `PURCHASE` receipt rows move WAC in Piece A. Adjustments, issues, returns, and transfers leave the average unchanged.
+- `recompute_inventory_average_cost_from_history(p_org_id, p_component_id default null)` replays signed `inventory_transactions.quantity` by organization to rebuild `average_cost` from receipt history.
+- The recompute walk skips `PURCHASE` rows where `quantity <= 0`, even if a stale `unit_cost` is present, so zero-quantity rejection rows cannot seed a false cost.
+- EXECUTE on the recompute RPC is restricted to `service_role`; user-facing recomputes must go through `POST /api/admin/inventory/recompute-wac`, which verifies the caller is owner/admin in the resolved target organization before invoking the RPC with the service-role client.
+- The Inventory Snapshot value column uses `inventory.average_cost` where available and falls back to current lowest supplier list price with `cost_source = list_price`; rows with no usable cost report `cost_source = none`.
 
 ## Stock Issuance Contract (Server)
 - RPC: `process_stock_issuance(p_order_id, p_component_id, p_quantity, p_purchase_order_id, p_notes, p_issuance_date)`

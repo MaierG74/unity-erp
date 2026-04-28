@@ -28,12 +28,18 @@ Source of truth for what is actually applied is still Supabase migration history
 ## Production
 - Environment: Production project
 - Project ref: ttlyfhkrsjjrzxiagzpb
-- Latest applied migration version: 20260428145105
-- Latest applied migration name: swap_surcharge_view_drift
-- Applied at (UTC): 2026-04-28 14:51 UTC
-- Applied by: Codex via Supabase MCP namespace `supabase_kinetic` (POL-72; default `mcp__supabase__` namespace was unauthorized)
+- Latest applied migration version: 20260428163007
+- Latest applied migration name: inventory_average_cost_recompute_rpc
+- Applied at (UTC): 2026-04-28 16:30 UTC
+- Applied by: Codex via Supabase MCP namespace `supabase_kinetic` (POL-69; primary `supabase` namespace returned unauthorized)
 - Verification notes:
-  - Current batch (2026-04-28, Codex / POL-72 Phase A1):
+  - Current batch (2026-04-28, Codex / POL-69 — Inventory Weighted Average Cost Piece A):
+    1. `inventory_average_cost_columns` (20260428162848 via Supabase MCP; local file `20260428162300_inventory_average_cost_columns.sql`): added nullable `public.inventory_transactions.unit_cost numeric(18,6)` and `public.inventory.average_cost numeric(18,6)`, refreshed `inventory_transactions_enriched`, `v_inventory_with_components`, and `v_inventory_shortages` so the new columns are not hidden by view drift.
+    2. `inventory_average_cost_receipt_rpc` (20260428162943 via Supabase MCP; local file `20260428162400_inventory_average_cost_receipt_rpc.sql`): replaced the live nine-parameter `process_supplier_order_receipt` with the WAC-aware version, preserving the signature, stamping `org_id` explicitly on receipt/return transaction writes, writing `unit_cost` only for positive priced purchase quantities, and updating `inventory.average_cost` through a single `INSERT ... ON CONFLICT (component_id) DO UPDATE`.
+    3. `inventory_average_cost_recompute_rpc` (20260428163007 via Supabase MCP; local file `20260428162500_inventory_average_cost_recompute_rpc.sql`): added `recompute_inventory_average_cost_from_history(p_org_id uuid, p_component_id int default null)` with `set search_path = public` and atomically restricted EXECUTE to `service_role` by revoking from `public`, `anon`, and `authenticated` in the same migration file.
+    4. Reconciliation: MCP `list_migrations` was run after each apply; production history now reports all three POL-69 migrations. The grant check after A3 showed `authenticated_has_execute=false`, `anon_has_execute=false`, and non-owner EXECUTE grantees `{service_role}`; PostgreSQL also reports owner `postgres`, which is expected owner privilege and not a client-callable grant.
+    5. Guardrail: the seed script was added but not run against production in this apply batch; Greg approval is required before running `npx tsx scripts/seed-inventory-average-cost.ts` or the safer scoped form `npx tsx scripts/seed-inventory-average-cost.ts --org-id <QButton-org-id>`.
+  - Previous batch (2026-04-28, Codex / POL-72 Phase A1 — Swap & Surcharge):
     1. `swap_surcharge_snapshot_schema` (20260428144905; local file `20260428143000_swap_surcharge_snapshot_schema.sql`): added `quote_items.product_id`, `quote_items.bom_snapshot`, `quote_items.surcharge_total`, `order_details.surcharge_total`, `products(product_id, org_id)` unique constraint, and the `quote_items(product_id, org_id)` composite FK; backfilled existing `order_details.bom_snapshot` rows with explicit swap/effective/surcharge fields.
     2. `bom_swap_exceptions` (20260428144937; local file `20260428143100_bom_swap_exceptions.sql`): added org-scoped `bom_swap_exceptions`, `bom_swap_exception_activity`, queue/open indexes, RLS policies, updated-at trigger, and `upsert_bom_swap_exception(...)`.
     3. `snapshot_effective_field_rpcs` (20260428145035; local file `20260428143200_snapshot_effective_field_rpcs.sql`): superseded `get_detailed_component_status(p_order_id)` and `reserve_order_components(p_order_id, p_org_id)` so BOM snapshot demand uses `effective_component_id` / `effective_quantity_required` with legacy field fallback and drops zero-demand removed rows.

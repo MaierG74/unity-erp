@@ -4,7 +4,10 @@ import { requireModuleAccess } from '@/lib/api/module-access';
 import { MODULE_KEYS } from '@/lib/modules/keys';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import {
+  getInventorySnapshotUnitCost,
+  getRelationRecord,
   INVENTORY_LEDGER_HARDENED_FROM,
+  toFiniteNumberOrNull,
   type InventorySnapshotResponse,
   type InventorySnapshotRow,
 } from '@/lib/inventory/snapshot';
@@ -19,11 +22,13 @@ type ComponentSnapshotRow = {
         quantity_on_hand?: number | string | null;
         reorder_level?: number | string | null;
         location?: string | null;
+        average_cost?: number | string | null;
       }
     | Array<{
         quantity_on_hand?: number | string | null;
         reorder_level?: number | string | null;
         location?: string | null;
+        average_cost?: number | string | null;
       }>
     | null;
   suppliercomponents?: Array<{ price?: number | string | null }> | null;
@@ -74,18 +79,8 @@ function parseExclusiveAfter(asOfDate: string, rawValue: string | null) {
   return nextDay.toISOString();
 }
 
-function getRelationRecord<T>(value: T | T[] | null | undefined): T | null {
-  if (Array.isArray(value)) return value[0] ?? null;
-  return value ?? null;
-}
-
 function toNumber(value: number | string | null | undefined) {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
-  if (typeof value === 'string') {
-    const parsed = Number.parseFloat(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
+  return toFiniteNumberOrNull(value) ?? 0;
 }
 
 function normalizeInternalCode(componentId: number, value: string | null) {
@@ -95,15 +90,6 @@ function normalizeInternalCode(componentId: number, value: string | null) {
 
 function includeEstimatedValues(rawValue: string | null) {
   return rawValue === 'true' || rawValue === '1';
-}
-
-function getEstimatedUnitCostCurrent(row: ComponentSnapshotRow) {
-  const prices = (row.suppliercomponents ?? [])
-    .map((entry) => toNumber(entry.price))
-    .filter((price) => Number.isFinite(price) && price > 0);
-
-  if (prices.length === 0) return null;
-  return Math.min(...prices);
 }
 
 export async function GET(request: NextRequest) {
@@ -135,7 +121,8 @@ export async function GET(request: NextRequest) {
             inventory:inventory (
               quantity_on_hand,
               reorder_level,
-              location
+              location,
+              average_cost
             ),
             suppliercomponents (
               price
@@ -174,9 +161,14 @@ export async function GET(request: NextRequest) {
       const currentQuantity = toNumber(inventory?.quantity_on_hand);
       const futureTransactionDelta = futureDeltaByComponent.get(component.component_id) ?? 0;
       const snapshotQuantity = currentQuantity - futureTransactionDelta;
-      const estimatedUnitCostCurrent = includeEstimates ? getEstimatedUnitCostCurrent(component) : null;
+      const unitCost = includeEstimates
+        ? getInventorySnapshotUnitCost({
+            inventory: component.inventory,
+            suppliercomponents: component.suppliercomponents,
+          })
+        : { value: null, source: 'none' as const };
       const estimatedValueCurrentCost =
-        estimatedUnitCostCurrent == null ? null : snapshotQuantity * estimatedUnitCostCurrent;
+        unitCost.value == null ? null : snapshotQuantity * unitCost.value;
 
       return {
         component_id: component.component_id,
@@ -189,7 +181,9 @@ export async function GET(request: NextRequest) {
         current_quantity: currentQuantity,
         future_transaction_delta: futureTransactionDelta,
         snapshot_quantity: snapshotQuantity,
-        estimated_unit_cost_current: estimatedUnitCostCurrent,
+        unit_cost: unitCost.value,
+        cost_source: unitCost.source,
+        estimated_unit_cost_current: unitCost.value,
         estimated_value_current_cost: estimatedValueCurrentCost,
       };
     });
@@ -230,9 +224,9 @@ export async function GET(request: NextRequest) {
         : null,
       hardening_reference_date: INVENTORY_LEDGER_HARDENED_FROM,
       includes_estimated_values: includeEstimates,
-      estimated_value_basis: includeEstimates ? 'current_lowest_supplier_price' : 'none',
+      estimated_value_basis: includeEstimates ? 'weighted_average_cost_with_list_price_fallback' : 'none',
       estimated_value_disclaimer: includeEstimates
-        ? 'Estimated using the current lowest supplier price per component, not historical cost at the selected date.'
+        ? 'Values use current weighted average cost where available, with current lowest supplier list price as a fallback.'
         : null,
       summary,
       rows,
