@@ -16,6 +16,7 @@ revision_history:
   - 2026-04-28 v2 — Codex review pass; repointed to current receipt RPC, fixed recompute walk, removed manual fallback from scope, tightened tenancy guards, hardened search_path, expanded test plan.
   - 2026-04-28 v3 — Codex round 2; switched inventory write to INSERT ... ON CONFLICT DO UPDATE (race-free missing-row), stamped org_id on every receipt insert/upsert, added v_good_quantity = 0 short-circuit, fixed snapshot helper to use getRelationRecord, admin route now combines requireAdmin + resolveUserOrgContext, dropped seed/recompute parity claim.
   - 2026-04-28 v4 — Codex round 3; admin route now asserts owner/admin role in the *target* org (not just any org), receipt RPC writes unit_cost NULL when v_good_quantity <= 0, recompute walk skips PURCHASE rows with quantity <= 0 (defense-in-depth against the same poisoning), separate-read fallback for v_qty_on_hand under full rejection, documented full-rejection RETURN-ledger asymmetry as known pre-existing snapshot-quantity issue.
+  - 2026-04-28 v5 — Codex round 4; closed direct-RPC privilege escalation by restricting EXECUTE on recompute_inventory_average_cost_from_history to service_role only (REVOKE FROM authenticated/anon). Route invokes via supabaseAdmin client. Internal is_org_member guard kept as defense-in-depth. Test 12 expanded with EXECUTE-level denial assertion as the load-bearing case.
 ---
 
 # Inventory Weighted Average Cost — Piece A
@@ -201,7 +202,22 @@ as $function$
 $function$;
 ```
 
-**Authorization guard at function entry:**
+**Privilege boundary — service_role only.**
+
+The recompute RPC is **not** a regular user-callable function. EXECUTE is granted only to `service_role`; `authenticated` and `anon` are explicitly denied. The route is the sole entry point and calls the RPC via the service-role client (`supabaseAdmin` from [lib/supabase-admin.ts](../../../lib/supabase-admin.ts)) — *not* the user's session client. This is the canonical Supabase pattern for SECURITY DEFINER admin RPCs and matches what `lib/api/admin.ts` already imports for other admin-only writes.
+
+```sql
+-- After the function definition, replace the default authenticated grant:
+revoke execute on function public.recompute_inventory_average_cost_from_history(uuid, int)
+  from public, anon, authenticated;
+
+grant execute on function public.recompute_inventory_average_cost_from_history(uuid, int)
+  to service_role;
+```
+
+This closes the direct-RPC privilege escalation: a plain organization member who is not an admin cannot call `supabase.rpc('recompute_inventory_average_cost_from_history', ...)` from their session client at all — they get a permission-denied error from the EXECUTE check, before the function body even runs. The role-in-target-org check enforced at the route layer becomes the *only* path to admin-gated invocation.
+
+**Authorization guard at function entry (defense-in-depth):**
 
 ```sql
 if auth.role() <> 'service_role' and not is_org_member(p_org_id) then
@@ -209,7 +225,7 @@ if auth.role() <> 'service_role' and not is_org_member(p_org_id) then
 end if;
 ```
 
-This blocks cross-tenant recomputes even if the API gate is misconfigured. The pattern matches the receipt RPC's existing org guard ([line 168](../../../supabase/migrations/20260311141133_fractional_purchase_receipts.sql#L168)).
+With EXECUTE restricted to `service_role`, the `auth.role() <> 'service_role'` branch is effectively unreachable in production — the EXECUTE grant gates it first. The check is kept as defense-in-depth in case a future migration accidentally grants EXECUTE back to `authenticated`. The pattern matches the receipt RPC's existing org guard ([line 168](../../../supabase/migrations/20260311141133_fractional_purchase_receipts.sql#L168)) but the EXECUTE grant is the load-bearing privilege boundary.
 
 **Replay algorithm (per component):**
 
@@ -240,7 +256,13 @@ Returns the count of components whose `average_cost` was updated.
 
 3. **Assert role-in-target-org**: `if (orgContext.role !== 'owner' && orgContext.role !== 'admin') return 403`. This is the load-bearing check. Without it, a user who is admin in `org_a` but only a member (not admin) in `org_b` could trigger a recompute against `org_b` because step 1 passed (admin somewhere) and step 2 passed (member of org_b). The role check closes that hole at the API layer.
 
-The route then calls the RPC with `p_org_id = orgContext.orgId` and the optional `component_id`. The RPC's own `is_org_member(p_org_id)` guard at function entry provides defense-in-depth — but note the RPC guard checks *membership*, not admin role. The owner/admin requirement is enforced at the route, not in the function. (A future refactor could move the role check into the RPC via a `is_org_admin` helper, but that introduces a new SQL helper for one caller; out of scope.)
+The route then calls the RPC **via the service-role client** (`supabaseAdmin.rpc('recompute_inventory_average_cost_from_history', { p_org_id: orgContext.orgId, p_component_id: body.component_id ?? null })`) — *not* via the user's session client (`ctx.supabase`). This matches the EXECUTE grant: the user's JWT cannot run the function, only the service role can.
+
+Two layers gate access:
+- **Route layer** (the only path to invocation): `requireAdmin` + `resolveUserOrgContext` + `orgContext.role in ('owner','admin')` together ensure the caller is an admin/owner of the resolved target org.
+- **Database layer** (privilege boundary): `EXECUTE` is granted only to `service_role`, so a direct `supabase.rpc(...)` call from a user's session client returns a permission-denied error regardless of the user's org role.
+
+The RPC's internal `is_org_member` check is defense-in-depth in case the EXECUTE grant is later restored to `authenticated`. With the EXECUTE restriction in place, the only realistic invocation paths are (a) the admin route running `supabaseAdmin.rpc(...)` (where `auth.role() = 'service_role'`, so the OR-clause short-circuits) or (b) a future SQL migration / manual psql session connecting as the service role.
 
 Returns `{ updated: number, org_id: string }`. Including `org_id` in the response makes the scope of the operation auditable.
 
@@ -322,11 +344,12 @@ Fourteen tests, no infrastructure changes (matches existing Vitest setup):
 11. **Recompute replay correctness** — same scenario as Test 3, but call recompute after to rebuild from history. Assert recompute produces the same `average_cost` as live receipts did. Includes a multi-purchase-and-issuance sequence to exercise the running_qty bookkeeping. **Note: this test does NOT compare recompute output to seed output**; the two use different algorithms (recompute = full historical replay; seed = latest catalog price). They are not expected to agree on a freshly-seeded component.
 
 12. **Admin route org resolution + tenant security**:
-    - **Non-admin** caller: route returns 403 (from `requireAdmin`).
+    - **Non-admin** caller hitting the route: returns 403 (from `requireAdmin`).
     - **Admin in org A, no orgId resolvable** for the request: route returns 400.
     - **Admin in org A** with orgId resolved to org A: route succeeds, RPC operates on org A only, response includes `org_id: A`. Spot-check that no rows in org B were touched.
-    - **Admin in org A but only a non-admin member of org B**, with `orgId` resolved to org B: route returns 403 (from the role-in-target-org check). This is the case `requireAdmin + resolveUserOrgContext` alone would miss.
-    - **Direct RPC call** (bypassing the route) to `recompute_inventory_average_cost_from_history(other_org_id, ...)` as a user that is a member of `org_a` but not `other_org_id`: assert the function raises `access denied`.
+    - **Admin in org A but only a non-admin member of org B**, with `orgId` resolved to org B: route returns 403 (from the role-in-target-org check).
+    - **Direct RPC call from a user session client** (bypassing the route) — even an admin in their own org calling `supabase.rpc('recompute_inventory_average_cost_from_history', { p_org_id: own_org, ... })` from the regular `authenticated` JWT: assert the call returns a permission-denied / function-does-not-exist style error (the EXECUTE grant denies it; the function body never runs). This is the load-bearing privilege check.
+    - **Direct RPC call from a non-member, non-service-role context** (synthetic for the test, e.g., manually granting EXECUTE temporarily then revoking, or simulating a misconfigured grant): the function-body `is_org_member(p_org_id)` guard raises `access denied`. This is the defense-in-depth check.
     - **Seed script** with `--org-id <other_org>` run by a service-role-less context: refuses or only operates on the specified org's rows.
 
 13. **Recompute skips zero-quantity PURCHASE rows** — pre-seed `inventory_transactions` with a zero-qty PURCHASE row that has a stale non-null `unit_cost = 99` (simulating either pre-Piece-A data or a future bug bypassing the receipt RPC). Then add a normal 100@R5 receipt. Run recompute and assert final `average_cost = 5`, not 99 — the walk must skip the zero-qty row even though its `unit_cost` is not null.
@@ -385,7 +408,9 @@ npx vitest run tests/inventory-wac.test.ts
 | `unit_cost` on zero-quantity PURCHASE rows | NULL — the receipt RPC suppresses `unit_cost` when `v_good_quantity <= 0` to avoid poisoning recompute. Recompute also skips PURCHASE rows where `quantity <= 0` for defense-in-depth. |
 | `v_qty_on_hand` after full-rejection receipt | Read-only fallback: `select coalesce((select quantity_on_hand from inventory where component_id = v_comp_id), 0)`. No no-op upsert. |
 | Full-rejection RETURN-ledger asymmetry | Pre-existing snapshot-quantity bug; documented in Known Limitations; out of scope for Piece A; track separately. |
-| Tenancy guard inside SECURITY DEFINER recompute | `auth.role() = 'service_role' OR is_org_member(p_org_id)` |
+| Tenancy guard inside SECURITY DEFINER recompute | `auth.role() = 'service_role' OR is_org_member(p_org_id)` (defense-in-depth only; primary boundary is the EXECUTE grant) |
+| EXECUTE permission on `recompute_inventory_average_cost_from_history` | `service_role` only; explicitly REVOKE from `public, anon, authenticated`. Closes the direct-RPC privilege escalation path. |
+| Recompute invocation from the route | `supabaseAdmin.rpc(...)` (service-role client), not the user's session client |
 | `search_path` on new + replaced functions | Explicitly `set search_path = public` |
 | Snapshot helper relation access | `getRelationRecord(row.inventory)?.average_cost`, not `row.inventory[0]?.average_cost` (the relation may be a single object) |
 | Recompute vs seed parity | Recompute and seed use different algorithms; outputs are NOT expected to match for freshly-seeded components |
@@ -406,7 +431,9 @@ npx vitest run tests/inventory-wac.test.ts
 - [ ] Snapshot UI shows WAC values; rows with no WAC show list price with `est.` badge; rows with neither show `—`. Verified end-to-end with the `inventory` relation returned as a single object (the current Supabase shape).
 - [ ] Adjustment / issue / transfer leave `average_cost` unchanged.
 - [ ] Recompute admin function: replay matches live receipts for the depletion-then-receive scenario. (Recompute is NOT expected to match the seed for freshly-seeded components — they use different algorithms; this is documented as an accepted divergence.)
-- [ ] Recompute function rejects calls from non-org-members with `access denied`, even if the route layer is bypassed.
+- [ ] EXECUTE on `recompute_inventory_average_cost_from_history` is restricted to `service_role` only; `authenticated` and `anon` cannot call it directly via `supabase.rpc(...)` even for their own org. Verified in tests by a direct-RPC attempt from a user session client returning permission-denied without the function body running.
+- [ ] Recompute function's internal `is_org_member` guard still raises `access denied` if EXECUTE were ever (mis)granted to authenticated — i.e., defense-in-depth holds.
+- [ ] Admin route invokes the recompute RPC via the service-role client (`supabaseAdmin`), not the user's session client.
 - [ ] Admin route returns 403 for non-admin callers and 400 for admin callers with no resolvable orgId; on success the response includes `org_id` for auditability.
 - [ ] Manual fallback in `order-detail.tsx` removed; RPC failure surfaces a clean error toast.
 - [ ] CSV export includes `unit_cost` and `cost_source`.
